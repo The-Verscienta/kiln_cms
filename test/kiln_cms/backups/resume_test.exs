@@ -15,7 +15,7 @@ defmodule KilnCMS.Backups.ResumeTest do
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Checksum, DirId, Manifest, Worker, WorkState}
-  alias KilnCMS.Test.BackupChain
+  alias KilnCMS.Test.{BackupChain, BackupCluster}
 
   @moduletag :capture_log
 
@@ -930,11 +930,13 @@ defmodule KilnCMS.Backups.ResumeTest do
       end)
     end
 
-    # B3: local files win over the recorded id, and the resume rebinds it.
-    test "a directory with a new id that still has the files resumes there", %{
-      base: base,
-      dir: dir
-    } do
+    # B3: local files win over the recorded id when no live node reports it
+    # (#2817: no heartbeat runs here), and the resume rebinds it.
+    test "a directory with a new id that still has the files resumes there when no live node reports the old id",
+         %{
+           base: base,
+           dir: dir
+         } do
       tools = stub_tools(base)
       %{run: failed, stamp: stamp} = fail_at_part_3(dir, tools)
       assert {:ok, old} = DirId.current(dir)
@@ -1031,6 +1033,120 @@ defmodule KilnCMS.Backups.ResumeTest do
       # The queued request was promoted and ran.
       assert [%{trigger: "schedule", status: :succeeded}] =
                Enum.reject(runs(), &(&1.id == failed.id))
+    end
+  end
+
+  # -- #2817: a copy of the files on another node ------------------------------
+
+  describe "a resume with a copy of its files on another node (#2817)" do
+    @describetag :pg_tools
+
+    # Node B: a copy of A's backup directory with a `.kiln-dir-id` of its own
+    # (`rsync --exclude .kiln-dir-id`). Both nodes beat.
+    defp copy_to_b!(base, dir) do
+      b = Path.join(base, "backups-b")
+      File.cp_r!(dir, b)
+      File.rm!(DirId.path(b))
+      {:ok, b_id} = DirId.local(b)
+
+      BackupCluster.tick_as(dir, "a@host")
+      BackupCluster.tick_as(b, "b@host")
+      {b, b_id}
+    end
+
+    defp start_job!(chain) do
+      KilnCMS.Repo.one!(
+        from(j in Oban.Job,
+          where: fragment("?->>'chain' = ?", j.args, ^chain) and j.args["step"] == "start"
+        )
+      )
+    end
+
+    test "while the source host beats, the copy's node waits and the source resumes it", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{stamp: stamp} = fail_at_part_3(dir, tools)
+      {:ok, a_id} = DirId.current(dir)
+      {b, _b_id} = copy_to_b!(base, dir)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: chain}} =
+          Backups.request([resume: stamp], Backups.system())
+
+        # B fetches the start first: it snoozes, spending no attempt.
+        assert %{snoozed: 1} =
+                 BackupCluster.as_node(b, fn -> BackupChain.drain(with_scheduled: false) end)
+
+        assert %{state: "scheduled", attempt: 0, meta: %{"snoozed" => 1}} = start_job!(chain)
+
+        # A, whose directory the run records, resumes it.
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(chain)
+      end)
+
+      assert [%{status: :succeeded, dir_id: ^a_id}] = runs()
+      assert dump_count(tools) == 1
+    end
+
+    test "once the source host's beat is 181 s old, the copy resumes and the run is rebound", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{stamp: stamp} = fail_at_part_3(dir, tools)
+      {b, b_id} = copy_to_b!(base, dir)
+      BackupCluster.backdate_beat!("a@host", 181)
+
+      BackupCluster.as_node(b, fn ->
+        BackupChain.listen(fn ->
+          {:ok, %{status: :started, chain: chain}} =
+            Backups.request([resume: stamp], Backups.system())
+
+          BackupChain.drain()
+          assert :ok = BackupChain.settled(chain)
+        end)
+      end)
+
+      assert [%{status: :succeeded, dir_id: ^b_id}] = runs()
+      assert dump_count(tools) == 1
+    end
+
+    # The source host is alive but its `.work` is gone: it takes the start
+    # and refuses visibly, rather than the copy resuming.
+    test "a live source host without the files refuses the resume, visibly", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{run: failed, stamp: stamp, work: work} = fail_at_part_3(dir, tools)
+      {b, _b_id} = copy_to_b!(base, dir)
+      File.rm_rf!(work)
+
+      outcome =
+        BackupChain.listen(fn ->
+          {:ok, %{status: :started, chain: chain}} =
+            BackupCluster.as_node(b, fn -> Backups.request([resume: stamp], Backups.system()) end)
+
+          assert %{snoozed: 1} =
+                   BackupCluster.as_node(b, fn -> BackupChain.drain(with_scheduled: false) end)
+
+          BackupChain.drain()
+          BackupChain.settled(chain)
+        end)
+
+      assert {:error, :no_state} = outcome
+
+      run = Backups.get_run!(failed.id, actor: Backups.system())
+      assert run.status == :failed
+
+      assert run.error ==
+               "Resume refused: its work files (.work/#{stamp}/state.json) are not on the " <>
+                 "server that picked it up\n" <> failed.error
+
+      assert Backups.in_flight() == nil
+      assert Backups.run_resumable?(run)
     end
   end
 

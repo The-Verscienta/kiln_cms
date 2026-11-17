@@ -8,6 +8,7 @@ defmodule KilnCMS.Backups.StepWorkerTest do
   use Oban.Testing, repo: KilnCMS.Repo
 
   import Ecto.Query
+  import ExUnit.CaptureLog
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{DirId, StepWorker, WorkState}
@@ -149,7 +150,7 @@ defmodule KilnCMS.Backups.StepWorkerTest do
       assert {:snooze, 30} = perform_job(StepWorker, start_args(run.stamp))
     end
 
-    test "with its files here it runs, whatever id the run records", %{dir: dir} do
+    test "with its files here it runs when no live node reports the recorded id", %{dir: dir} do
       run = run!(Ash.UUID.generate())
       state!(dir, run.stamp)
       # Past the affinity check; not the lock's job, so superseded.
@@ -221,6 +222,120 @@ defmodule KilnCMS.Backups.StepWorkerTest do
 
       assert {:cancel, :superseded} = StepWorker.perform(job)
       assert %{error: "tar exited 2"} = Backups.get_run!(run.id, actor: Backups.system())
+    end
+  end
+
+  describe "a resume's start with a copy of the files here (#2817)" do
+    alias KilnCMS.Test.BackupCluster
+
+    # The source host: a live node whose beat reports `dir_id`.
+    defp source_beat!(dir_id) do
+      Backups.beat_node!(%{node: "a@host", boot_id: Ash.UUID.generate(), dir_id: dir_id},
+        actor: Backups.system()
+      )
+
+      "a@host"
+    end
+
+    defp put_beats_reader(reader) do
+      env = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(env, :live_beats_reader, reader)
+      )
+    end
+
+    test "an orphan copy waits while the source host's beat reports the run's id", %{dir: dir} do
+      source = Ash.UUID.generate()
+      source_beat!(source)
+      run = run!(source)
+      state!(dir, run.stamp)
+
+      assert {:snooze, 30} = perform_job(StepWorker, start_args(run.stamp))
+    end
+
+    test "a source beat 181 s old is not live: the copy resumes here", %{dir: dir} do
+      source = Ash.UUID.generate()
+      BackupCluster.backdate_beat!(source_beat!(source), 181)
+      run = run!(source)
+      state!(dir, run.stamp)
+
+      # Past the affinity check; not the lock's job, so superseded.
+      assert {:cancel, :superseded} = perform_job(StepWorker, start_args(run.stamp))
+    end
+
+    test "a source beat 179 s old is live: the copy waits", %{dir: dir} do
+      source = Ash.UUID.generate()
+      BackupCluster.backdate_beat!(source_beat!(source), 179)
+      run = run!(source)
+      state!(dir, run.stamp)
+
+      assert {:snooze, 30} = perform_job(StepWorker, start_args(run.stamp))
+    end
+
+    test "a state.json that can't be parsed is no copy: the start waits", %{dir: dir} do
+      for content <- ["{}", "not json"] do
+        run = run!(Ash.UUID.generate())
+        work = state!(dir, run.stamp)
+        File.write!(WorkState.file(work), content)
+
+        # The file is there (the Resume button and the request still see it),
+        # but it is nothing to resume from.
+        assert Backups.work_state?(run.stamp)
+        refute Backups.local_resume_state?(run.stamp)
+        assert {:snooze, 30} = perform_job(StepWorker, start_args(run.stamp))
+      end
+    end
+
+    test "heartbeats that can't be read count as a live source: the copy waits, and says so",
+         %{dir: dir} do
+      put_beats_reader(fn _within_s -> {:error, :connection_refused} end)
+      source = Ash.UUID.generate()
+      run = run!(source)
+      state!(dir, run.stamp)
+
+      log =
+        capture_log([level: :warning], fn ->
+          assert {:snooze, 30} = perform_job(StepWorker, start_args(run.stamp))
+        end)
+
+      assert log =~
+               "Backup resume of #{run.stamp}: couldn't read the node heartbeats " <>
+                 "(:connection_refused); waiting for the server with its backup directory " <>
+                 "(id #{source}) rather than resuming from the files here"
+    end
+
+    test "the heartbeats are read only when there are files here to win with", %{local: local} do
+      test = self()
+
+      put_beats_reader(fn within_s ->
+        send(test, {:beats_read, within_s})
+        {:ok, []}
+      end)
+
+      # No files here: pinned without a read.
+      assert {:snooze, 30} = perform_job(StepWorker, start_args(run!(Ash.UUID.generate()).stamp))
+      # The run's own directory: runs without a read.
+      assert {:cancel, :superseded} = perform_job(StepWorker, start_args(run!(local).stamp))
+      refute_received {:beats_read, _}
+    end
+
+    test "the read asks for the lock's stale threshold", %{dir: dir} do
+      test = self()
+
+      put_beats_reader(fn within_s ->
+        send(test, {:beats_read, within_s})
+        {:ok, []}
+      end)
+
+      run = run!(Ash.UUID.generate())
+      state!(dir, run.stamp)
+
+      assert {:cancel, :superseded} = perform_job(StepWorker, start_args(run.stamp))
+      assert_received {:beats_read, 180}
+      assert KilnCMS.Backups.Chain.stale_after_s() == 180
     end
   end
 end

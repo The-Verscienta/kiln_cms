@@ -30,17 +30,27 @@ defmodule KilnCMS.Backups.StepWorker do
   directory its `start` wrote `state.json` to only when it hands over
   (`Chain.begin_step/1`).
 
-  A resume's `start` runs where the run's files are (#2539): on a node that
-  has `.work/<stamp>/state.json` itself, or whose directory id is the one the
-  run records (`KilnCMS.Backups.Run`'s `dir_id`; the start step then refuses
-  visibly when the files are gone). Anywhere else it snoozes with the same
-  budget as the other steps. When the last attempt has used its budget too,
-  the resume is given up (`Chain.abandon_start/2`): the lock is released, the
-  waiting request promoted, and the run's row says why. A run with no
-  directory id (imported, from before #2539) runs anywhere, as does a start
-  whose run can't be read. Local files win over the recorded id, so a backup
-  directory that was copied or rebuilt with a new `.kiln-dir-id` still
-  resumes where its files are.
+  A resume's `start` runs where the run's files are (#2539, #2817), in this
+  order:
+
+  1. On the node whose directory id is the one the run records
+     (`KilnCMS.Backups.Run`'s `dir_id`), files or not: the start step there
+     refuses visibly when `.work/<stamp>/state.json` is gone (`:no_state`).
+  2. On a node with a readable `.work/<stamp>/state.json` of its own, only
+     when no live node reports the recorded id: none has beaten within
+     `Chain.stale_after_s/0` (180 s, the lock's own stale threshold) with that
+     id. A copied or rebuilt backup directory (a new `.kiln-dir-id`) resumes
+     once the source host has stopped, not while it runs. A `state.json` that
+     can't be parsed is no match, and heartbeats that can't be read count as
+     a live source: the start waits, with a warning in the log.
+  3. Anywhere else it snoozes with the same budget as the other steps.
+
+  When the last attempt has used its budget too, the resume is given up
+  (`Chain.abandon_start/2`): the lock is released, the waiting request
+  promoted, and the run's row says why. A run with no directory id
+  (imported, from before #2539) runs anywhere, as does a start whose run
+  can't be read. The 180 s window is the lock's, not the last-good marker
+  sync's 600 s routing window (`KilnCMS.Backups.MarkerSyncWorker`).
 
   Oban counts a job's snoozes in `meta["snoozed"]` across all its attempts. The
   per-attempt count is the snoozes since `meta["affinity_base"]`, which is
@@ -135,32 +145,20 @@ defmodule KilnCMS.Backups.StepWorker do
       Steps.crashed(lease, job, {:crashed, Exception.message(error)})
   end
 
-  # A resume's start (#2539): local files first, then the run's directory id.
-  # A legacy `Worker` job's snoozes (`Steps`) also count in `meta["snoozed"]`,
-  # so they can spend this budget: that needs a node from before #2218 still
-  # running next to a run pinned by #2539, and the outcome is a visible
-  # refusal.
+  # A resume's start (#2539, #2817): the node whose directory the run records,
+  # then local files that no live node's directory id claims. A run with no
+  # id, or one that can't be read, isn't pinned. A legacy `Worker` job's
+  # snoozes (`Steps`) also count in `meta["snoozed"]`, so they can spend this
+  # budget: that needs a node from before #2218 still running next to a run
+  # pinned by #2539, and the outcome is a visible refusal.
   defp affinity(%Oban.Job{args: %{"step" => "start", "resume" => stamp}} = job)
        when is_binary(stamp) do
-    if Backups.work_state?(stamp),
-      do: rebase_snoozes(job),
-      else: run_dir(job, stamp)
-  end
-
-  defp affinity(%Oban.Job{args: %{"step" => "start"}}), do: :ok
-
-  defp affinity(%Oban.Job{args: %{"dir" => dir_id}} = job),
-    do: pinned(job, dir_id, fn -> {:error, :backup_dir_elsewhere} end)
-
-  # No files here: the node whose directory the run records. A run with none,
-  # or one that can't be read, isn't pinned.
-  defp run_dir(job, stamp) do
     case Backups.resume_dir_id(stamp) do
       {:ok, nil} ->
         :ok
 
       {:ok, dir_id} ->
-        pinned(job, dir_id, fn -> Chain.abandon_start(job, {:backup_dir_elsewhere, dir_id}) end)
+        resume_dir(job, stamp, dir_id)
 
       {:error, error} ->
         Logger.warning(
@@ -171,6 +169,47 @@ defmodule KilnCMS.Backups.StepWorker do
         :ok
     end
   end
+
+  defp affinity(%Oban.Job{args: %{"step" => "start"}}), do: :ok
+
+  defp affinity(%Oban.Job{args: %{"dir" => dir_id}} = job),
+    do: pinned(job, dir_id, fn -> {:error, :backup_dir_elsewhere} end)
+
+  # The heartbeats are read only when there are files here to win with.
+  defp resume_dir(job, stamp, dir_id) do
+    cond do
+      DirId.current() == {:ok, dir_id} ->
+        rebase_snoozes(job)
+
+      Backups.local_resume_state?(stamp) and not source_live?(stamp, dir_id) ->
+        rebase_snoozes(job)
+
+      true ->
+        pinned(job, dir_id, fn -> Chain.abandon_start(job, {:backup_dir_elsewhere, dir_id}) end)
+    end
+  end
+
+  # Whether a node that beat within the lock's stale threshold reports the
+  # run's directory. Fails closed: heartbeats that can't be read count as a
+  # live source, so the start waits (and the budget bounds the wait).
+  defp source_live?(stamp, dir_id) do
+    case Backups.dir_id_live?(dir_id, Chain.stale_after_s()) do
+      {:ok, live?} ->
+        live?
+
+      {:error, error} ->
+        Logger.warning(
+          "Backup resume of #{stamp}: couldn't read the node heartbeats " <>
+            "(#{describe(error)}); waiting for the server with its backup directory " <>
+            "(id #{dir_id}) rather than resuming from the files here"
+        )
+
+        true
+    end
+  end
+
+  defp describe(error) when is_exception(error), do: Exception.message(error)
+  defp describe(error), do: inspect(error, limit: 5)
 
   # Runs here, snoozes, or (budget spent) fails the attempt. A resume's start
   # gives up on its last attempt (`give_up`); every other step's last attempt
