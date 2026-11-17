@@ -7,6 +7,14 @@ tagged `client-js-vX.Y.Z` in the
 
 ## Unreleased
 
+- **Fix: `kiln-types` can no longer be made to emit code by the schema it
+  reads.** The `x-kiln.artifact_format_version` went into a `//` comment
+  unescaped, and `$defs` names into type names, so a line break or a `;` from
+  the server (or from anyone on the path to an `http://` one) could put code
+  into the generated `.ts` file. Line breaks in the comment now become spaces,
+  and type names keep only identifier characters (CodeQL
+  `js/http-to-file-access`).
+
 - **Fix: trimming trailing slashes off `baseUrl` takes linear time.** The
   constructor used `/\/+$/`, which takes quadratic time on a long run of `/`
   (CodeQL `js/polynomial-redos`). `baseUrl` is the integrator's own config,

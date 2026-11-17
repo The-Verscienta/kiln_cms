@@ -29,25 +29,24 @@
     return url.slice(0, end);
   }
 
-  // The CMS base URL, or null when `data-kiln-origin` isn't an http(s) URL —
-  // anything else (`javascript:`, `data:`) must never become the iframe's src.
-  function originOf(script) {
-    var explicit = script.getAttribute("data-kiln-origin");
-    if (explicit) {
-      try {
-        var protocol = new URL(explicit, window.location.href).protocol;
-        if (protocol !== "https:" && protocol !== "http:") return null;
-      } catch (e) {
-        return null;
-      }
-      return trimSlashes(explicit);
-    }
-
+  // Where the CMS lives: `base` (its URL, which the iframe src is built from)
+  // and `origin` (what a resize message must come from). Null when
+  // `data-kiln-origin` isn't an http(s) URL — anything else (`javascript:`,
+  // `data:`) must never become the iframe's src. Both are taken from the parsed
+  // URL, never the raw attribute, so what was checked is what gets used.
+  function cmsOf(script) {
+    var url;
     try {
-      return new URL(script.src, window.location.href).origin;
+      url = new URL(script.getAttribute("data-kiln-origin") || script.src, window.location.href);
     } catch (e) {
-      return "";
+      return null;
     }
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+
+    var base = script.getAttribute("data-kiln-origin")
+      ? url.origin + trimSlashes(url.pathname)
+      : url.origin;
+    return { base: base, origin: url.origin };
   }
 
   function mount(script) {
@@ -55,11 +54,11 @@
     if (!slug || script.getAttribute("data-kiln-mounted")) return;
     script.setAttribute("data-kiln-mounted", "1");
 
-    var origin = originOf(script);
-    if (origin === null) return;
+    var cms = cmsOf(script);
+    if (cms === null) return;
     var iframe = document.createElement("iframe");
 
-    iframe.src = origin + "/forms/" + encodeURIComponent(slug) + "/embed";
+    iframe.src = cms.base + "/forms/" + encodeURIComponent(slug) + "/embed";
     iframe.title = script.getAttribute("data-kiln-title") || "Form";
     iframe.loading = "lazy";
     iframe.setAttribute("scrolling", "no");
@@ -69,7 +68,7 @@
     iframe.style.height = (script.getAttribute("data-kiln-height") || "480") + "px";
 
     script.parentNode.insertBefore(iframe, script.nextSibling);
-    mounted.push({ iframe: iframe, origin: origin });
+    mounted.push({ iframe: iframe, origin: cms.origin });
   }
 
   window.addEventListener("message", function (event) {
