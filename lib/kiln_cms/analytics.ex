@@ -220,14 +220,22 @@ defmodule KilnCMS.Analytics do
   **When the split is still unique, the whole breakdown goes.** Some
   breakdowns have nowhere to hide — `direct: 3` with four genuine zeros is
   three views total, and no choice of partner makes three ambiguous. Those are
-  published as five `"hidden"` values against a view total that can be split
-  #{"C(T+4, 4)"} ways, and they are exactly the breakdowns with nothing worth
-  reading in them anyway.
+  published as five `"hidden"` values, and they are exactly the breakdowns with
+  nothing worth reading in them anyway.
 
   `ambiguous?/3` decides which case this is by counting the assignments a
   reader who knows this algorithm could construct. Knowing the rule gains them
-  nothing: a partial publication is only emitted when that count is at least
-  two.
+  nothing about a *partial* publication: one is only emitted when that count is
+  at least two (#2752 found a gap in that count, closed below).
+
+  > #### An all-hidden breakdown is not yet covered {: .warning}
+  >
+  > Five `"hidden"` values do not, on their own, leave the view total
+  > splittable every way it could be. A reader who knows this algorithm can
+  > discard every split it would have published partially, and for some small
+  > totals only one split is left — at a threshold of 5, a total of 5 is
+  > all-hidden only as five 1s. That is tracked separately (#2981); nothing
+  > here claims otherwise.
 
   > #### What this still does not do {: .neutral}
   >
@@ -306,6 +314,10 @@ defmodule KilnCMS.Analytics do
     * the `"hidden"` partner is the largest of the categories that are not
       naturally low, so it is at least every published exact, and being not
       naturally low it is `0` or at least the threshold
+    * ties go to the **first** largest in `referrer_sources/0` order, so the
+      partner is strictly greater than every published exact listed before it
+    * so the partner can be `0` only when every published exact is `0` *and*
+      none is listed before it — a published `5` beside it rules out `0` (#2752)
 
   Counted rather than reasoned about: the naturally-low categories range over
   a small interval each, so their sum is enumerable, and the partner is then
@@ -314,19 +326,16 @@ defmodule KilnCMS.Analytics do
   @spec ambiguous?([{atom(), non_neg_integer()}], [atom()], pos_integer()) :: boolean()
   def ambiguous?(raw, suppressed, threshold) do
     hidden = for {source, hits} <- raw, source in suppressed, do: hits
-    published = for {source, hits} <- raw, source not in suppressed, do: hits
     residual = Enum.sum(hidden)
 
     low_count = Enum.count(hidden, &(&1 > 0 and &1 < threshold))
-    floor = Enum.max([threshold | published])
-
-    partner? = length(hidden) > low_count
+    fits = partner_bounds(raw, suppressed, threshold)
 
     low_count
     |> sums(threshold - 1)
     |> Enum.reduce_while(0, fn {sum, ways}, total ->
       cond do
-        not partner_fits?(partner?, residual - sum, floor) -> {:cont, total}
+        not partner_fits?(fits, residual - sum) -> {:cont, total}
         total + ways >= 2 -> {:halt, 2}
         true -> {:cont, total + ways}
       end
@@ -334,11 +343,37 @@ defmodule KilnCMS.Analytics do
     |> Kernel.>=(2)
   end
 
+  # What the partner may hold, as `partner/2` would have chosen it. `:none`
+  # when nothing suppressed is the partner (every suppressed category is
+  # naturally low); otherwise `{zero?, floor}`: whether `0` is possible, and
+  # the least positive value. A published exact before the partner in source
+  # order lost the `max_by` tie-break, so the partner is strictly above it; one
+  # after it may equal it. `0` needs every published exact to be `0` and none
+  # before it — a published zero ahead of it would have won the tie (#2752).
+  defp partner_bounds(raw, suppressed, threshold) do
+    partner_at =
+      Enum.find_index(raw, fn {source, hits} ->
+        source in suppressed and not (hits > 0 and hits < threshold)
+      end)
+
+    if partner_at do
+      {before, [_partner | rest]} = Enum.split(raw, partner_at)
+      before = for {source, hits} <- before, source not in suppressed, do: hits
+      rest = for {source, hits} <- rest, source not in suppressed, do: hits
+
+      zero? = before == [] and Enum.all?(rest, &(&1 == 0))
+      floor = Enum.max([threshold | rest ++ Enum.map(before, &(&1 + 1))])
+      {zero?, floor}
+    else
+      :none
+    end
+  end
+
   # With no partner in the suppressed set the naturally-low values must sum to
   # the residual exactly; with one, it takes up the slack and must itself be a
   # value the algorithm could have produced.
-  defp partner_fits?(false, slack, _floor), do: slack == 0
-  defp partner_fits?(true, slack, floor), do: slack == 0 or slack >= floor
+  defp partner_fits?(:none, slack), do: slack == 0
+  defp partner_fits?({zero?, floor}, slack), do: (zero? and slack == 0) or slack >= floor
 
   # `{sum, ways}` for `count` parts each in `1..max`, by the obvious DP.
   # Bounded by `count <= length(referrer_sources())` and `max = threshold - 1`,
