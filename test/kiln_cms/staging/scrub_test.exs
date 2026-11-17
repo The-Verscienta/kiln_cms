@@ -6,6 +6,8 @@ defmodule KilnCMS.Staging.ScrubTest do
   """
   use KilnCMS.DataCase, async: true
 
+  import Swoosh.TestAssertions
+
   alias KilnCMS.Accounts
   alias KilnCMS.CMS
   alias KilnCMS.Repo
@@ -40,6 +42,22 @@ defmodule KilnCMS.Staging.ScrubTest do
       count: 1,
       last_searched_at: DateTime.utc_now()
     })
+  end
+
+  defp org_id, do: Accounts.default_org_id()
+
+  defp count(resource), do: Repo.aggregate(resource, :count)
+
+  # Rows the way a production clone holds them. Seeded rather than created
+  # through their actions: the actions mail, federate, or validate outward
+  # (DNS, SSRF), and the scrub only ever sees the rows.
+  defp seed!(resource, attrs), do: Ash.Seed.seed!(resource, attrs)
+
+  defp seed_job!(state) do
+    %{"to" => "reader-#{uniq()}@example.com"}
+    |> Oban.Job.new(worker: "KilnCMS.Mail.DeliveryWorker", queue: :mail)
+    |> Ecto.Changeset.put_change(:state, state)
+    |> Repo.insert!()
   end
 
   describe "Scrub.run/1" do
@@ -214,6 +232,299 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert Repo.aggregate(KilnCMS.Accounts.Invitation, :count) == 0
     end
 
+    test "purges newsletter subscribers and their segment memberships" do
+      subscriber =
+        seed!(KilnCMS.Newsletter.Subscriber, %{
+          org_id: org_id(),
+          email: "reader-#{uniq()}@example.com",
+          name: "A Reader",
+          confirm_token: "confirm-#{uniq()}",
+          unsubscribe_token: "unsub-#{uniq()}"
+        })
+
+      segment =
+        seed!(KilnCMS.Newsletter.Segment, %{
+          org_id: org_id(),
+          name: "Weekly",
+          slug: "weekly-#{uniq()}"
+        })
+
+      seed!(KilnCMS.Newsletter.SegmentMembership, %{
+        org_id: org_id(),
+        segment_id: segment.id,
+        subscriber_id: subscriber.id
+      })
+
+      summary = Scrub.run([])
+
+      assert summary.newsletter_segment_memberships_purged == 1
+      assert summary.newsletter_subscribers_purged == 1
+      assert count(KilnCMS.Newsletter.Subscriber) == 0
+      assert count(KilnCMS.Newsletter.SegmentMembership) == 0
+      # The segment itself is site configuration and stays.
+      assert count(KilnCMS.Newsletter.Segment) == 1
+    end
+
+    test "purges form submissions and clears each form's notify_email, keeping the form" do
+      form = KilnCMS.FormFixtures.form!(%{notify_email: "inbox@example.com"})
+      quiet = KilnCMS.FormFixtures.form!()
+
+      seed!(KilnCMS.CMS.FormSubmission, %{
+        org_id: org_id(),
+        form_id: form.id,
+        data: %{"email" => "visitor@example.com", "message" => "call me"}
+      })
+
+      summary = Scrub.run([])
+
+      assert summary.form_submissions_purged == 1
+      assert summary.form_notify_emails_cleared == 1
+      assert count(KilnCMS.CMS.FormSubmission) == 0
+
+      assert %{notify_email: nil} = CMS.get_form!(form.id, authorize?: false)
+      assert %{notify_email: nil} = CMS.get_form!(quiet.id, authorize?: false)
+    end
+
+    test "purges both suppression lists" do
+      seed!(KilnCMS.Mail.SuppressedRecipient, %{email: "bounced-#{uniq()}@example.com"})
+
+      seed!(KilnCMS.Mail.SiteSuppressedRecipient, %{
+        org_id: org_id(),
+        email: "site-bounced-#{uniq()}@example.com"
+      })
+
+      summary = Scrub.run([])
+
+      assert summary.suppressed_recipients_purged == 1
+      assert summary.site_suppressed_recipients_purged == 1
+      assert count(KilnCMS.Mail.SuppressedRecipient) == 0
+      assert count(KilnCMS.Mail.SiteSuppressedRecipient) == 0
+    end
+
+    test "purges federation followers, pending deliveries and the site's actor key" do
+      KilnCMS.FederationFixtures.enable_site!(org_id())
+
+      follower =
+        seed!(KilnCMS.Federation.Follower, %{
+          org_id: org_id(),
+          actor_uri: "https://remote.example/users/someone",
+          inbox_uri: "https://remote.example/users/someone/inbox"
+        })
+
+      seed!(KilnCMS.Federation.Delivery, %{
+        org_id: org_id(),
+        follower_id: follower.id,
+        inbox_uri: follower.inbox_uri,
+        activity_type: :create,
+        activity: %{"type" => "Create"}
+      })
+
+      summary = Scrub.run([])
+
+      assert summary.federation_deliveries_purged == 1
+      assert summary.federation_followers_purged == 1
+      assert summary.federation_sites_purged == 1
+      assert count(KilnCMS.Federation.Delivery) == 0
+      assert count(KilnCMS.Federation.Follower) == 0
+      assert count(KilnCMS.Federation.SiteFederation) == 0
+    end
+
+    test "purges push subscriptions and the site's VAPID keys" do
+      user = admin()
+
+      # The account is anonymized first, which removes its subscriptions, so
+      # this one is the backstop's: owned by an account already a tombstone.
+      Accounts.anonymize_user!(user,
+        authorize?: false,
+        context: KilnCMS.Accounts.Validations.NotLastAdmin.exempt()
+      )
+
+      seed!(KilnCMS.Accounts.PushSubscription, %{
+        org_id: org_id(),
+        user_id: user.id,
+        endpoint: "https://push.example/#{uniq()}",
+        p256dh: "p256dh",
+        auth: "auth"
+      })
+
+      seed!(KilnCMS.CMS.SiteVapidKey, %{org_id: org_id(), public_key: "public"})
+
+      summary = Scrub.run([])
+
+      assert summary.push_subscriptions_purged == 1
+      assert summary.vapid_keys_purged == 1
+      assert count(KilnCMS.Accounts.PushSubscription) == 0
+      assert count(KilnCMS.CMS.SiteVapidKey) == 0
+    end
+
+    test "deactivates social accounts and drops their credentials, keeping the post history" do
+      account =
+        seed!(KilnCMS.Social.Account, %{
+          org_id: org_id(),
+          provider: :mastodon,
+          credential_encrypted: "ciphertext",
+          enabled: true
+        })
+
+      seed!(KilnCMS.Social.Post, %{
+        org_id: org_id(),
+        account_id: account.id,
+        provider: :mastodon,
+        content_type: "post",
+        content_id: Ecto.UUID.generate(),
+        content_published_at: DateTime.utc_now()
+      })
+
+      summary = Scrub.run([])
+
+      assert summary.social_accounts_deactivated == 1
+
+      assert [%{enabled: false, credential_encrypted: nil}] =
+               Repo.all(KilnCMS.Social.Account)
+
+      assert count(KilnCMS.Social.Post) == 1
+    end
+
+    test "disables automation rules and drops a send_email rule's recipient" do
+      mail =
+        seed!(KilnCMS.Automation.Rule, %{
+          org_id: org_id(),
+          name: "Tell the editor",
+          trigger_event: :published,
+          action: :send_email,
+          config: %{"to" => "editor@example.com", "subject" => "Published"}
+        })
+
+      other =
+        seed!(KilnCMS.Automation.Rule, %{
+          org_id: org_id(),
+          name: "Reindex",
+          trigger_event: :published,
+          action: :reindex,
+          config: %{"to" => "not-a-recipient"}
+        })
+
+      summary = Scrub.run([])
+
+      assert summary.automation_rules_disabled == 2
+
+      assert %{enabled: false, config: %{"subject" => "Published"} = config} =
+               Repo.get!(KilnCMS.Automation.Rule, mail.id)
+
+      refute Map.has_key?(config, "to")
+
+      # Only a send_email rule's "to" is a recipient; another action's config
+      # is left as it was.
+      assert %{enabled: false, config: %{"to" => "not-a-recipient"}} =
+               Repo.get!(KilnCMS.Automation.Rule, other.id)
+    end
+
+    test "purges the webhook delivery log (payloads carry form submissions)" do
+      seed!(KilnCMS.CMS.WebhookDelivery, %{
+        org_id: org_id(),
+        event: "form.submitted",
+        payload: %{"data" => %{"email" => "visitor@example.com"}}
+      })
+
+      summary = Scrub.run([])
+
+      assert summary.webhook_deliveries_purged == 1
+      assert count(KilnCMS.CMS.WebhookDelivery) == 0
+    end
+
+    test "purges per-site mail relay, SSO, AI and search integrations" do
+      seed!(KilnCMS.CMS.SiteMailRelay, %{org_id: org_id(), host: "smtp.prod.example"})
+      seed!(KilnCMS.CMS.SiteSsoProvider, %{org_id: org_id()})
+      seed!(KilnCMS.CMS.SiteAiProvider, %{org_id: org_id()})
+      seed!(KilnCMS.CMS.SiteMeilisearch, %{org_id: org_id(), url: "https://search.prod.example"})
+
+      summary = Scrub.run([])
+
+      assert summary.mail_relays_purged == 1
+      assert summary.sso_providers_purged == 1
+      assert summary.ai_providers_purged == 1
+      assert summary.meilisearch_sites_purged == 1
+
+      for resource <- [
+            KilnCMS.CMS.SiteMailRelay,
+            KilnCMS.CMS.SiteSsoProvider,
+            KilnCMS.CMS.SiteAiProvider,
+            KilnCMS.CMS.SiteMeilisearch
+          ] do
+        assert count(resource) == 0, inspect(resource)
+      end
+    end
+
+    test "purges rate-limit counters and cached idempotent responses" do
+      seed!(KilnCMS.Accounts.ThrottleCounter, %{
+        bucket: "sign_in",
+        key_hash: :crypto.hash(:sha256, "203.0.113.5"),
+        window_index: 1,
+        count: 3,
+        expires_at: DateTime.add(DateTime.utc_now(), 60, :second)
+      })
+
+      seed!(KilnCMS.Accounts.IdempotentRequest, %{
+        org_id: org_id(),
+        scope: "api",
+        key: "key-#{uniq()}",
+        fingerprint: "fingerprint"
+      })
+
+      summary = Scrub.run([])
+
+      assert summary.throttle_counters_purged == 1
+      assert summary.idempotent_requests_purged == 1
+      assert count(KilnCMS.Accounts.ThrottleCounter) == 0
+      assert count(KilnCMS.Accounts.IdempotentRequest) == 0
+    end
+
+    test "purges the backup lock and production's node heartbeats" do
+      seed!(KilnCMS.Backups.Lock, %{name: "backups"})
+
+      seed!(KilnCMS.Backups.NodeBeat, %{
+        node: "prod-node-#{uniq()}",
+        boot_id: Ecto.UUID.generate(),
+        beat_at: DateTime.utc_now()
+      })
+
+      summary = Scrub.run([])
+
+      assert summary.backup_locks_purged == 1
+      assert summary.backup_node_beats_purged == 1
+      assert count(KilnCMS.Backups.Lock) == 0
+      assert count(KilnCMS.Backups.NodeBeat) == 0
+    end
+
+    test "purges queued jobs in every state (their args carry recipients)" do
+      states = ~w(available scheduled executing retryable completed discarded cancelled)
+      Enum.each(states, &seed_job!/1)
+
+      summary = Scrub.run([])
+
+      assert summary.oban_jobs_purged == length(states)
+      assert count(Oban.Job) == 0
+    end
+
+    test "a mail queued on production is not delivered from the clone" do
+      :ok =
+        Swoosh.Email.new(
+          to: "reader-#{uniq()}@example.com",
+          from: {"KilnCMS", "cms@example.com"},
+          subject: "Your receipt",
+          text_body: "Thanks",
+          html_body: "<p>Thanks</p>"
+        )
+        |> KilnCMS.Mail.enqueue!()
+
+      assert count(Oban.Job) == 1
+
+      Scrub.run([])
+      drain_oban()
+
+      assert_no_email_sent()
+    end
+
     test "provisions one usable pre-confirmed admin when credentials are given" do
       _real = admin()
 
@@ -235,13 +546,34 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert summary.admin_provisioned == nil
     end
 
-    test "is idempotent — a second run re-anonymizes nothing" do
+    test "is idempotent — a second run finds nothing left to do" do
       admin()
+      KilnCMS.FormFixtures.form!(%{notify_email: "inbox@example.com"})
+
+      seed!(KilnCMS.Social.Account, %{
+        org_id: org_id(),
+        provider: :bluesky,
+        credential_encrypted: "ciphertext"
+      })
+
+      seed!(KilnCMS.Automation.Rule, %{
+        org_id: org_id(),
+        name: "Tell the editor",
+        trigger_event: :published,
+        action: :send_email,
+        config: %{"to" => "editor@example.com"}
+      })
+
       first = Scrub.run([])
       assert first.users_anonymized >= 1
+      assert first.form_notify_emails_cleared == 1
+      assert first.social_accounts_deactivated == 1
+      assert first.automation_rules_disabled == 1
 
       second = Scrub.run([])
-      assert second.users_anonymized == 0
+      counts = Map.delete(second, :admin_provisioned)
+
+      assert Enum.reject(counts, fn {_key, n} -> n == 0 end) == []
     end
   end
 
@@ -308,6 +640,55 @@ defmodule KilnCMS.Staging.ScrubTest do
       end
     end
 
+    test "refuses a node whose Oban queues are live, and changes nothing" do
+      user = admin()
+
+      assert_raise RuntimeError, ~r/Oban queues are running/, fn ->
+        Staging.scrub!(confirm?: true, force?: true, oban_live?: true, shell: fn _ -> :ok end)
+      end
+
+      assert %{anonymized_at: nil} = Accounts.get_user!(user.id, authorize?: false)
+    end
+
+    test "with allow_live?, pauses the queues, says to restart, and scrubs" do
+      user = admin()
+      test = self()
+
+      summary =
+        Staging.scrub!(
+          confirm?: true,
+          force?: true,
+          oban_live?: true,
+          allow_live?: true,
+          shell: &send(test, {:shell, &1})
+        )
+
+      assert summary.users_anonymized >= 1
+      assert %{anonymized_at: %DateTime{}} = Accounts.get_user!(user.id, authorize?: false)
+      assert_received {:shell, "Oban is live on this node: every queue is now paused." <> rest}
+      assert rest =~ "Restart the application"
+    end
+
+    test "the test build's Oban is not live (it executes no jobs)" do
+      refute Staging.oban_live?()
+      refute Staging.oban_live?(:"oban-#{uniq()}-not-started")
+    end
+
+    test "reports every count in the summary" do
+      test = self()
+      summary = Staging.scrub!(confirm?: true, force?: true, shell: &send(test, {:shell, &1}))
+
+      assert_received {:shell, "Scrub complete:\n" <> report}
+
+      for {key, _count} <- Map.delete(summary, :admin_provisioned) do
+        label = key |> Atom.to_string() |> String.replace("_", " ")
+        assert report =~ ~r/^  #{label}: +\d+$/m, "no line for #{key}"
+      end
+
+      assert_received {:shell, "  staging admin:" <> admin_line}
+      assert admin_line =~ "NONE"
+    end
+
     test "runs once confirmed and forced past the name check" do
       user = admin()
 
@@ -316,6 +697,30 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert summary.users_anonymized >= 1
       reloaded = Accounts.get_user!(user.id, authorize?: false)
       assert reloaded.anonymized_at != nil
+    end
+  end
+
+  describe "mix kiln.staging.scrub boots Oban inert" do
+    test "it requires only the config, starting the application itself" do
+      requirements = Mix.Task.requirements(Mix.Tasks.Kiln.Staging.Scrub)
+
+      assert "app.config" in requirements
+      refute "app.start" in requirements
+    end
+
+    test "the inert Oban config executes no jobs and keeps everything else" do
+      config = [queues: [mail: 5], plugins: [{Oban.Plugins.Cron, []}], testing: :disabled]
+
+      assert Staging.inert_oban_config(config) == [
+               testing: :manual,
+               queues: [mail: 5],
+               plugins: [{Oban.Plugins.Cron, []}]
+             ]
+    end
+
+    test "the backup heartbeat is off" do
+      assert Staging.inert_backups_config(heartbeat?: true, other: 1) ==
+               [heartbeat?: false, other: 1]
     end
   end
 end
