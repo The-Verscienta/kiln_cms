@@ -76,6 +76,20 @@ defmodule KilnCMS.Accounts.ApiKeyTest do
       assert owner.valid_api_keys == []
     end
 
+    test "an erased account's unrevoked key is not valid" do
+      admin = user(:admin)
+      owner = user(:viewer)
+      key = mint(owner, admin)
+      live = mint(user(:viewer), admin)
+
+      # Erased with the key left unrevoked, as erasure did before it revoked keys.
+      Ash.Seed.update!(owner, %{anonymized_at: DateTime.utc_now()})
+
+      assert Ash.load!(key, [:valid], actor: admin).valid == false
+      assert Ash.load!(live, [:valid], actor: admin).valid
+      assert is_nil(Accounts.get_api_key!(key.id, actor: admin).revoked_at)
+    end
+
     test "revoking makes a key invalid immediately" do
       admin = user(:admin)
       owner = user(:viewer)

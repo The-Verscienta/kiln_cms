@@ -33,10 +33,12 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
     * **API keys.** Erasure did not always revoke the account's API keys,
       so an account erased before it did can still hold unrevoked ones.
       Every unrevoked key of an erased account is revoked with
-      `ApiKey.:revoke`, as erasure does, in one statement across every site
-      (keys are not tenant-scoped). Such a key is refused at sign-in either
-      way (`User.valid_api_keys` leaves erased owners out); revoking it
-      also shows it as revoked to an admin and records it in the audit log.
+      `ApiKey.:revoke`, as erasure does, across every site in one pass (keys
+      are not tenant-scoped). Such a key is refused at sign-in either way
+      (`User.valid_api_keys` leaves erased owners out) and shows as invalid
+      (`ApiKey.valid`); revoking it makes that permanent, whatever later
+      changes the owner's row. It runs first, so a step above that fails
+      cannot keep it from running.
 
   ## When it runs
 
@@ -88,7 +90,8 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
   how many erased accounts had their newsletter rows deleted and how many
   rows that was; how many erased accounts had their audiences cleared; how
   many push subscriptions, private saved views and notifications were
-  deleted; how many API keys were revoked; and how many failures there were (an account counts once for
+  deleted; how many API keys were revoked (counted from what the revoke
+  wrote, not from what the read found); and how many failures there were (an account counts once for
   each step that failed for it).
   """
   @type result :: %{
@@ -138,6 +141,10 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
       failed: 0
     }
 
+    # First: a live credential is the most urgent leftover, and the steps
+    # below read without a rescue, so one that raises would skip it.
+    empty = revoke_api_keys(empty)
+
     demoted =
       granting_memberships()
       |> Enum.group_by(& &1.user_id, & &1.id)
@@ -153,7 +160,6 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
     |> remove_push_subscriptions(repo)
     |> forget_per_org(erased_with_rows(repo, :saved_views), :saved_views)
     |> forget_per_org(erased_with_rows(repo, :notifications), :notifications)
-    |> revoke_api_keys()
   end
 
   # The memberships of erased accounts that still grant something. Global
@@ -325,8 +331,10 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
       %{acc | failed: acc.failed + accounts}
   end
 
-  # Every unrevoked API key of an erased account, in one statement: keys are
-  # not tenant-scoped.
+  # Every unrevoked API key of an erased account, across every site in one
+  # bulk: keys are not tenant-scoped. `:revoke` is not atomic (it evicts the
+  # owner's sockets after commit), so the bulk streams the keys found rather
+  # than updating them in one statement.
   defp revoke_api_keys(acc) do
     query =
       ApiKey
@@ -352,12 +360,11 @@ defmodule KilnCMS.Accounts.ErasureBackfill do
       authorize?: false,
       bulk_options: [
         strategy: [:atomic, :atomic_batches, :stream],
-        return_records?: false,
+        return_records?: true,
         return_errors?: true
       ]
     )
-
-    %{acc | api_keys: acc.api_keys + length(ids)}
+    |> then(&%{acc | api_keys: acc.api_keys + length(&1.records)})
   rescue
     error ->
       accounts = keys |> Enum.uniq_by(& &1.user_id) |> length()
