@@ -115,7 +115,9 @@ top-of-stack clause that IS right is `bypass
 AshOban.Checks.AshObanInteraction` on `publish_scheduled`: there the caller
 genuinely *is* the AshOban scheduler and Ash itself vouches for it from the
 trigger metadata on the changeset, rather than from an actor the caller chose.
-Prefer that check wherever the caller is the scheduler.)
+Prefer that check wherever the caller is the scheduler. `ContentRelease` has
+the same bypass, and its `start_scheduled`, the `:go_live` trigger's claim, has
+no other policy, so no person may run it, admin included.)
 
 Ash **ANDs** policies, so on a resource with a broad `action_type(:update)`
 policy written for people, a second policy admitting system code changes
@@ -300,7 +302,10 @@ three, and to any content type a downstream project defines.
 `publish_scheduled`, `unpublish_scheduled` and `archive_scheduled` are run by
 the **system** AshOban scheduler, allowed via
 `bypass AshOban.Checks.AshObanInteraction`; no person is checked when they
-fire.
+fire. Each writes only while the record still matches its trigger's condition
+(#2746), so a person who acts on the record as the job fires is not
+overwritten; see
+[Content lifecycles](content-lifecycles.md#expiry-one-timestamp-three-outcomes).
 
 ⚙️ **Editors can publish, per site.** `SiteEditorialSettings.editors_can_publish`
 (`Checks.EditorMayPublish`) lets an org's editors publish directly. `/setup`

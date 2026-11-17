@@ -14,7 +14,7 @@ defmodule KilnCMS.CMS.Validations.ReleaseOpenForEdit do
   inside the item write's own transaction, `FOR SHARE`. That lock is what makes
   the check hold until the item commits rather than only at the moment it was
   read. It conflicts with the row lock any UPDATE of the release takes, the
-  go-live claim (`ContentRelease`'s `:start`) among them, and not with another
+  go-live claim (`ContentRelease`'s `:start` or `:start_scheduled`) among them, and not with another
   `FOR SHARE`, so concurrent adds do not wait on each other. An item write and
   the claim serialize:
 

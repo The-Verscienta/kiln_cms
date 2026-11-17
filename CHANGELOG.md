@@ -116,6 +116,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Field sync import refuses a non-default `"sections"` entry no field carries (a hand-edited file that imported before now fails, nothing written). An entry at the default deletes the stored layout, and a section the import empties loses its layout, without `--prune`.**
   ([long form](docs/changelog/unreleased.md#field-sync-section-entries-stricter))
 
+- **Calling `:publish_scheduled`, `:unpublish_scheduled` or `:archive_scheduled` directly (`CMS.publish_scheduled_page!` and the like) on a record whose date hasn't passed now returns a `StaleRecord` and changes nothing: make the date due first, or call `:publish`, `:unpublish` or `:archive`.**
+  ([long form](docs/changelog/unreleased.md#scheduled-content-actions-due-only))
+
 ### Known issues
 
 - **Two referrer breakdowns of overlapping traffic (dashboard span vs. the export's days, site chart vs. item bars, 7 vs. 30 days, today read twice) can be differenced to recover a suppressed count. No workaround short of turning off `KILN_ANALYTICS_REFERRERS`.**
@@ -298,6 +301,15 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A deferred A/V strip retries a passing read failure (a timeout, a `5xx`) instead of leaving the upload for the quarantine reaper, which now deletes a file only after purging its row. The 1.10.0 known issue #2835 could not occur; nothing to repair.**
   ([long form](docs/changelog/unreleased.md#av-strip-transient-read-retries))
+
+- **A release page or calendar held open while the release moved can no longer reschedule, unschedule, archive, reopen or delete it over the newer state (rescheduling a published release shipped it twice); the page reloads and says so. The cron no longer ships a release unscheduled or moved as it fired.**
+  ([long form](docs/changelog/unreleased.md#release-transitions-on-the-row))
+
+- **An item added to a release as its go-live started is refused, instead of being left pending on the published release, where it blocked its content from every other release.**
+  ([long form](docs/changelog/unreleased.md#release-items-during-go-live))
+
+- **A scheduled publish, unpublish or archive does nothing when the record was archived, published, rescheduled or given a new expiry action as the job fired; it used to overwrite that change.**
+  ([long form](docs/changelog/unreleased.md#scheduled-content-on-the-row))
 
 ### Security
 

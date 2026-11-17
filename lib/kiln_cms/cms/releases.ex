@@ -174,8 +174,12 @@ defmodule KilnCMS.CMS.Releases do
   Returns `{:ok, release}` with the release marked `:published`, or
   `{:error, reason}` with it marked `:failed` and nothing changed on the site.
   Expects the release to have been claimed already (state `:publishing` — see
-  `ContentRelease`'s `:start`), which is what stops the minute cron from starting
-  the same release twice.
+  `ContentRelease`'s `:start` and `:start_scheduled`), which is what stops the
+  minute cron from starting the same release twice.
+
+  Inside its transaction, before marking the release published, it re-lists
+  the `:pending` items (#2740). One it never read fails the release, with
+  nothing changed, rather than shipping without it.
   """
   @spec publish(struct()) :: {:ok, struct()} | {:error, term()}
   def publish(%{state: :publishing} = release) do

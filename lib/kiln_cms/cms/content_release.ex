@@ -40,13 +40,24 @@ defmodule KilnCMS.CMS.ContentRelease do
   `:publishing` and `:rolling_back` are **claim** states, not cosmetics: the
   minute-cron scheduler and the "Publish now" button both transition into them
   before any work starts, so a go-live that outlives its minute can't be picked
-  up twice.
+  up twice. "Publish now" claims through `:start`, which also takes an `:open`
+  release; the `:go_live` trigger claims through `:start_scheduled`, which lands
+  only on a release that is still `:scheduled` and due, so an unschedule or a
+  later date set while the cron was reading the release wins.
+
+  Every transition is a compare-and-swap (#2745): besides the state machine's
+  check of the struct, each action filters its `UPDATE` on its from-states, so
+  a caller holding a stale struct gets an `Ash.Error.Changes.StaleRecord` rather
+  than writing over a release that has moved. `KilnCMS.CMS.Releases.stale?/1`
+  recognizes that refusal.
 
   ## Who may do what
 
   Publishing content is an admin approval step (see `KilnCMS.CMS.Content`'s
   `:publish` policy), so the release actions that *cause* a publish —
-  `:schedule`, `:start`, `:start_rollback` — are admin-only here. Otherwise an
+  `:schedule`, `:start`, `:start_rollback` — are admin-only here.
+  `:start_scheduled` admits no person at all, admins included: only the AshOban
+  scheduler runs it. Otherwise an
   editor could publish content they aren't allowed to publish simply by putting
   it in a release: the worker necessarily runs `authorize?: false`, since it
   publishes on behalf of the release across types the acting user may not
@@ -124,7 +135,8 @@ defmodule KilnCMS.CMS.ContentRelease do
     transitions do
       transition :schedule, from: [:open, :scheduled], to: :scheduled
       transition :unschedule, from: :scheduled, to: :open
-      # The claim: both the minute cron and "Publish now" land here first.
+      # The claim: "Publish now" lands here (`:start`); the minute cron uses
+      # `:start_scheduled`, which also requires the release to still be due.
       transition :start, from: [:open, :scheduled], to: :publishing
       # The minute cron's claim: only a release that is still due.
       transition :start_scheduled, from: :scheduled, to: :publishing
