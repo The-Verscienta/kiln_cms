@@ -262,6 +262,54 @@ defmodule KilnCMS.Backups.SchedulePoliciesTest do
     end
   end
 
+  describe "sub-daily schedules (#2219)" do
+    # Lifting the sub-daily refusal opens nothing to anyone else: a valid
+    # sub-daily schedule (with its keep_days) is still a platform admin's.
+    test "an editor and an org admin who is not a platform admin can't create or switch to one" do
+      s = schedule!()
+
+      for actor <- [user(:editor), site_admin()] do
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Backups.create_backup_schedule(
+                   %{
+                     components: [:db],
+                     interval: :every_2h,
+                     time_of_day: ~T[03:00:00],
+                     starts_on: ~D[2026-01-01],
+                     keep_days: 3
+                   },
+                   actor: actor
+                 )
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Backups.update_backup_schedule(s, %{interval: :every_2h, keep_days: 3},
+                   actor: actor
+                 )
+      end
+
+      assert [%{interval: :daily, keep_days: nil}] =
+               Backups.list_backup_schedules!(actor: Backups.system())
+
+      assert events(:backup_schedule_created) |> length() == 1
+    end
+
+    test "a platform admin can" do
+      admin = platform_admin()
+
+      assert {:ok, %{interval: :every_4h, keep_days: 3}} =
+               Backups.create_backup_schedule(
+                 %{
+                   components: [:db],
+                   interval: :every_4h,
+                   time_of_day: ~T[03:00:00],
+                   starts_on: ~D[2026-01-01],
+                   keep_days: 3
+                 },
+                 actor: admin
+               )
+    end
+  end
+
   describe "the :backups system actor" do
     test "can read, claim, refuse and note-deferred" do
       system = Backups.system()

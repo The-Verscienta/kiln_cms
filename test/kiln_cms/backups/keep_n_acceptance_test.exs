@@ -195,6 +195,56 @@ defmodule KilnCMS.Backups.KeepNAcceptanceTest do
     end
   end
 
+  # A sub-daily schedule must set keep_days (#2219): two-hourly, kept a day,
+  # its backups over three days. "Older than 1 day" is `-mtime +1`, two whole
+  # days, so the odd-hour ages keep clear of the boundary.
+  test "a two-hourly schedule keeping 1 day: its younger backups held, the older ones deleted",
+       %{dir: dir, now: now} do
+    s = schedule!(%{components: [:db], interval: :every_2h, keep_days: 1})
+
+    made =
+      for hours <- 1..71//2 do
+        st = (now - hours * 3600) |> DateTime.from_unix!() |> Calendar.strftime("%Y%m%d-%H%M%S")
+
+        names =
+          for name <- ["kiln-db-#{st}.dump", Artifact.sidecar_name(:db, st)] do
+            path = Path.join([dir, "db", name])
+            File.write!(path, "x")
+            File.touch!(path, now - hours * 3600)
+            name
+          end
+
+        app_run!(:db, st, "schedule", [s.id])
+        {hours, st, names}
+      end
+
+    {young, old} = Enum.split_with(made, fn {hours, _st, _names} -> hours < 48 end)
+    assert length(young) == 24 and length(old) == 12
+
+    assert {:ok, %{deleted: deleted, stopped: nil}} = Retention.run(dir)
+    assert Enum.sort(deleted) == old |> Enum.flat_map(&elem(&1, 2)) |> Enum.sort()
+
+    # Held, the newest included: 1 day isn't BACKUP_KEEP_DAYS (14), so cron
+    # needs the markers to know them.
+    assert holds(dir, "db") == young |> Enum.map(&elem(&1, 1)) |> Enum.sort()
+
+    for {_hours, st, _names} <- old, do: assert(local_status(st) == "pruned")
+    {_, newest, _} = hd(made)
+    assert local_status(newest) == "ok"
+
+    if System.find_executable("bash") do
+      before = listing(dir)
+
+      assert {_out, 0} =
+               System.cmd("bash", [@script, "prune"],
+                 env: [{"BACKUP_DIR", dir}, {"BACKUP_KEEP_DAYS", "14"}],
+                 stderr_to_stdout: true
+               )
+
+      assert listing(dir) == before
+    end
+  end
+
   @tag :pg_tools
   test "through the chain: N kept, plus the run that is pruning", %{dir: dir, now: now} do
     s =

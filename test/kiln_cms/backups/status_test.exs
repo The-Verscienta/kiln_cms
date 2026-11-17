@@ -356,6 +356,19 @@ defmodule KilnCMS.Backups.StatusTest do
                Backups.status().components.db
     end
 
+    test "a two-hourly db schedule: not stale at 7 h, stale at 9 h, stale_source {:schedule, id} (#2219)" do
+      s = scheduled!(%{components: [:db], interval: :every_2h, keep_days: 3})
+      manual_run!([:db], 7)
+
+      db = Backups.status().components.db
+      assert %{stale?: false, stale_after_hours: 8, stale_source: {:schedule, id}} = db
+      assert id == s.id
+
+      KilnCMS.Repo.delete_all("backup_runs")
+      manual_run!([:db], 9)
+      assert %{stale?: true, stale_after_hours: 8} = Backups.status().components.db
+    end
+
     test "W-i: with a cron import in the last 8 days, the threshold is min(env, schedule) and the source names the winner" do
       weekly = scheduled!(%{components: [:media], interval: :weekly})
       daily = scheduled!(%{components: [:db]})

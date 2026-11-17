@@ -53,12 +53,15 @@ defmodule KilnCMS.Backups.Schedule do
 
   ## Intervals
 
-  Every 2, 4, 8 or 12 hours, daily, weekly, fortnightly or monthly.
-  Sub-daily intervals are still refused when a schedule is created or its
-  interval changed (`Validations.IntervalAvailable`): every run is a full
-  set, so a two-hourly schedule kept by age alone would keep about
-  `12 × BACKUP_KEEP_DAYS` sets of each component. Whether they open once a
-  schedule's own `keep_days` bounds them is still to be decided (#2219).
+  Every 2, 4, 8 or 12 hours, daily, weekly, fortnightly or monthly. A
+  sub-daily schedule must set its own `keep_days`
+  (`Validations.SubDailyKeepsDays`, #2219): every run is a full set, so a
+  two-hourly schedule kept by age alone would keep about
+  `12 × BACKUP_KEEP_DAYS` sets of each component. Required on a create, a
+  switch to a sub-daily interval and any edit of a sub-daily row; never for
+  a pause, a resume or a destroy. A sub-daily row without it (written from a
+  console, or by a release that allowed it) keeps firing, its backups kept
+  for `BACKUP_KEEP_DAYS`, until someone sets it.
 
   ## Keep fields
 
@@ -69,7 +72,8 @@ defmodule KilnCMS.Backups.Schedule do
   a platform admin's to set; `KilnCMS.Backups.Retention.Policy` turns them
   into retention's keep rules, paused schedules included. A `keep_days`
   shorter than the interval needs a `keep_count`
-  (`Validations.KeepCoversInterval`). Changing them never rebaselines the
+  (`Validations.KeepCoversInterval`), and a sub-daily schedule needs a
+  `keep_days` (see "Intervals"). Changing them never rebaselines the
   schedule; every create, update and destroy queues a marker sync
   (`Changes.SyncHolds`) so `scripts/backup.sh prune` learns the new holds.
   """
@@ -121,7 +125,7 @@ defmodule KilnCMS.Backups.Schedule do
       change Changes.Normalize
       change Changes.SetBaseline
       validate Validations.KnownZone
-      validate Validations.IntervalAvailable
+      validate Validations.SubDailyKeepsDays
       validate Validations.MediaAvailable
       validate Validations.KeepCoversInterval
       change Changes.SyncHolds
@@ -144,7 +148,7 @@ defmodule KilnCMS.Backups.Schedule do
       change Changes.Normalize
       change Changes.Rebaseline
       validate Validations.KnownZone
-      validate Validations.IntervalAvailable
+      validate Validations.SubDailyKeepsDays
       validate Validations.MediaAvailable
       validate Validations.KeepCoversInterval
       change Changes.SyncHolds
@@ -356,7 +360,7 @@ defmodule KilnCMS.Backups.Schedule do
   @spec intervals() :: [atom()]
   def intervals, do: @intervals
 
-  @doc "The sub-daily intervals, refused for now (`Validations.IntervalAvailable`, #2219)."
+  @doc "The sub-daily intervals, which need their own `keep_days` (`Validations.SubDailyKeepsDays`)."
   @spec sub_daily_intervals() :: [atom()]
   def sub_daily_intervals, do: @sub_daily
 

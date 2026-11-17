@@ -4,7 +4,9 @@ defmodule KilnCMS.Backups.Schedule.Validations.KeepCoversInterval do
   of backups to keep must keep them at least one interval long (#2219): a
   weekly schedule keeping 3 days would keep nothing of its own but the newest
   backup, which retention keeps anyway. Days per interval: 1 for daily and
-  shorter, 7 weekly, 14 fortnightly, 31 monthly.
+  shorter, 7 weekly, 14 fortnightly, 31 monthly. Any `keep_days` covers a
+  sub-daily interval; whether a sub-daily schedule must set one at all is
+  `Validations.SubDailyKeepsDays`'s rule.
 
   Checked when the interval or either keep field is set or changed, so a
   schedule saved before this rule (or by a newer release, with an interval

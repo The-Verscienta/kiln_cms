@@ -47,15 +47,21 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   deletes what the schedule holds. Deleting a schedule says that its backups
   then age out under `BACKUP_KEEP_DAYS`, never sooner.
 
+  A schedule that runs more often than daily must set `keep_days`
+  (`Schedule.Validations.SubDailyKeepsDays`): the form marks the field
+  required and shows the resource's error under it. A sub-daily schedule
+  stored without one (written from a console) stays editable: its card says
+  it needs Keep for (days) (`data-role="needs-keep-days"`), it can be paused,
+  resumed or deleted as it is, and the form opens with the field empty, so
+  saving it means setting one.
+
   ## What the form can't offer, it doesn't edit
 
-  The form offers daily, weekly, fortnightly and monthly (sub-daily intervals
-  are still refused, pending an owner decision on #2219), the database, and
-  the media when this deployment archives any. A schedule whose stored values fall
-  outside that (an interval or component a newer release wrote, which loads
-  as `KilnCMS.Types.UnknownAtom`; a sub-daily interval written from a
-  console; media on a deployment that no longer has a media directory) is
-  shown read-only with a note: it can be paused, resumed or deleted, never
+  The form offers every interval (`Schedule.intervals/0`), the database, and
+  the media when this deployment archives any. A schedule whose stored values
+  fall outside that (an interval or component a newer release wrote, which
+  loads as `KilnCMS.Types.UnknownAtom`; media on a deployment that no longer
+  has a media directory) is shown read-only with a note: it can be paused, resumed or deleted, never
   re-submitted through a form that would have to change what it can't show.
 
   ## What the list shows
@@ -75,16 +81,11 @@ defmodule KilnCMSWeb.BackupScheduleLive do
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.Schedule
-  alias KilnCMS.Backups.Schedule.Validations.KeepCoversInterval
   alias KilnCMS.Backups.Schedule.Window
   alias KilnCMS.Backups.Scheduler
   alias KilnCMS.Types.UnknownAtom
 
   @refresh_ms 60_000
-
-  # The intervals the form offers: daily or longer. Sub-daily waits for an
-  # owner decision on #2219 (`Schedule.Validations.IntervalAvailable`).
-  @offered_intervals [:daily, :weekly, :fortnightly, :monthly]
 
   # The least an enabled schedule may wait for the scheduler's first tick, and
   # how old the last tick may be, before the page says it hasn't run; a
@@ -452,15 +453,12 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   # moduledoc). Public for the tests.
   @spec editable?(Schedule.t()) :: boolean()
   def editable?(%Schedule{interval: interval, components: components}) do
-    interval in @offered_intervals and is_list(components) and
+    interval in Schedule.intervals() and is_list(components) and
       Enum.all?(components, &(&1 in [:db, :media])) and
       (:media not in components or Backups.media_dir() != nil)
   end
 
   defp locked_reason(%Schedule{interval: %UnknownAtom{}}), do: :unknown
-
-  defp locked_reason(%Schedule{interval: interval}) when interval not in @offered_intervals,
-    do: :sub_daily
 
   defp locked_reason(%Schedule{components: components}) do
     if Enum.any?(components, &match?(%UnknownAtom{}, &1)), do: :unknown, else: :media
@@ -470,12 +468,6 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     do:
       gettext(
         "A newer release saved this schedule with a value this release doesn't know, so it can't be edited here. You can pause, resume or delete it."
-      )
-
-  defp locked_note(:sub_daily),
-    do:
-      gettext(
-        "Schedules more often than daily can't be edited here yet. You can pause, resume or delete it."
       )
 
   defp locked_note(:media),
@@ -499,7 +491,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
 
     with %Time{} <- timing.time_of_day,
          %Date{} <- timing.starts_on,
-         true <- timing.interval in @offered_intervals,
+         true <- timing.interval in Schedule.intervals(),
          true <- KilnCMS.Events.known_time_zone?(timing.time_zone),
          {:ok, %DateTime{} = first} <- Window.next(Map.put(timing, :baseline_at, now), now) do
       %{
@@ -545,21 +537,27 @@ defmodule KilnCMSWeb.BackupScheduleLive do
 
   @doc false
   # About how many backups of each component a schedule keeps at a time: the
-  # ones younger than `days` (one every interval) or its newest `count`,
+  # ones younger than `days` (one every interval, counted in hours, so a
+  # two-hourly schedule keeping 7 days keeps about 85) or its newest `count`,
   # whichever is more, plus the one being made, since the prune runs while
   # it is still in flight (so N + 1); never under two, as the newest finished
-  # backup is always kept beside it. Public for the tests.
-  @spec estimate(atom(), pos_integer() | nil, pos_integer()) :: pos_integer()
+  # backup is always kept beside it. An interval this release doesn't know
+  # counts as daily. Public for the tests.
+  @spec estimate(term(), pos_integer() | nil, pos_integer()) :: pos_integer()
   def estimate(interval, count, days) do
-    every = KeepCoversInterval.interval_days(interval) || 1
-    Enum.max([div(days, every) + 1, (count || 0) + 1, 2])
+    hours = Window.interval_hours(interval) || 24
+    Enum.max([div(days * 24, hours) + 1, (count || 0) + 1, 2])
   end
 
-  # Whether some of what the schedule keeps is older than BACKUP_KEEP_DAYS:
-  # a longer `keep_days`, or a newest N reaching further back.
-  defp beyond_default?(interval, count, days, default) do
-    every = KeepCoversInterval.interval_days(interval) || 1
-    (days != nil and days > default) or (count != nil and count * every > default)
+  @doc false
+  # Whether some of what the schedule keeps is older than BACKUP_KEEP_DAYS
+  # (`default`): a longer `keep_days`, or a newest N reaching further back
+  # (N intervals, in hours). Public for the tests.
+  @spec beyond_default?(term(), pos_integer() | nil, pos_integer() | nil, pos_integer()) ::
+          boolean()
+  def beyond_default?(interval, count, days, default) do
+    hours = Window.interval_hours(interval) || 24
+    (days != nil and days > default) or (count != nil and count * hours > default * 24)
   end
 
   # Everything shown but the form: the schedules with their next window (one
@@ -631,13 +629,31 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     end
   end
 
+  # Shortest first, as `Schedule.intervals/0`.
   defp interval_options do
     [
+      {gettext("Every 2 hours"), "every_2h"},
+      {gettext("Every 4 hours"), "every_4h"},
+      {gettext("Every 8 hours"), "every_8h"},
+      {gettext("Every 12 hours"), "every_12h"},
       {gettext("Every day"), "daily"},
       {gettext("Every week"), "weekly"},
       {gettext("Every 2 weeks"), "fortnightly"},
       {gettext("Every month"), "monthly"}
     ]
+  end
+
+  # A sub-daily schedule must set `keep_days` (`Schedule.Validations.SubDailyKeepsDays`).
+  defp needs_keep_days?(%Schedule{interval: interval, keep_days: days}),
+    do: interval in Schedule.sub_daily_intervals() and is_nil(days)
+
+  # The hours between a sub-daily interval's slots, or nil for daily and
+  # longer. The form's value is the stored atom or the submitted string.
+  defp sub_daily_hours(value) do
+    interval =
+      Enum.find(Schedule.sub_daily_intervals(), &(&1 == value or Atom.to_string(&1) == value))
+
+    interval && Window.interval_hours(interval)
   end
 
   # `type="time"` takes HH:MM; the field holds a `Time` or what was typed.
@@ -1001,6 +1017,16 @@ defmodule KilnCMSWeb.BackupScheduleLive do
         {locked_note(locked_reason(@schedule))}
       </p>
 
+      <p
+        :if={editable?(@schedule) and needs_keep_days?(@schedule)}
+        data-role="needs-keep-days"
+        class="text-xs text-warning-ink"
+      >
+        {gettext(
+          "This schedule runs more often than daily without Keep for (days), so its backups are kept for BACKUP_KEEP_DAYS. Set Keep for (days) to edit it; you can still pause, resume or delete it."
+        )}
+      </p>
+
       <div class="flex flex-wrap gap-2">
         <button
           :if={editable?(@schedule) and not @form_open?}
@@ -1050,6 +1076,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     assigns =
       assigns
       |> assign(:checked, checked_components(assigns.form))
+      |> assign(:sub_daily_hours, sub_daily_hours(assigns.form[:interval].value))
       |> assign(
         :component_errors,
         if(Phoenix.Component.used_input?(field),
@@ -1165,6 +1192,12 @@ defmodule KilnCMSWeb.BackupScheduleLive do
           type="time"
           label={gettext("At")}
           value={hhmm(@form[:time_of_day].value)}
+          hint={
+            @sub_daily_hours &&
+              gettext("The first backup of the day; the others follow every %{hours} hours.",
+                hours: @sub_daily_hours
+              )
+          }
         />
         <.input field={@form[:starts_on]} type="date" label={gettext("Starting on")} />
         <.input
@@ -1205,12 +1238,16 @@ defmodule KilnCMSWeb.BackupScheduleLive do
             max="3650"
             step="1"
             label={gettext("Keep for (days)")}
+            required={@sub_daily_hours != nil}
             hint={
-              ngettext(
-                "Empty keeps them for BACKUP_KEEP_DAYS, %{count} day on this deployment.",
-                "Empty keeps them for BACKUP_KEEP_DAYS, %{count} days on this deployment.",
-                Backups.keep_days()
-              )
+              if @sub_daily_hours,
+                do: gettext("Required for a schedule that runs more often than daily."),
+                else:
+                  ngettext(
+                    "Empty keeps them for BACKUP_KEEP_DAYS, %{count} day on this deployment.",
+                    "Empty keeps them for BACKUP_KEEP_DAYS, %{count} days on this deployment.",
+                    Backups.keep_days()
+                  )
             }
           />
         </fieldset>

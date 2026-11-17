@@ -245,6 +245,22 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       assert length(all_schedules()) == 1
     end
 
+    test "a sub-daily save with its keep days creates nothing (#2219)", %{sockets: sockets} do
+      form =
+        KilnCMS.Backups.Schedule
+        |> AshPhoenix.Form.for_create(:create, actor: platform_admin(), as: "schedule")
+        |> Phoenix.Component.to_form()
+
+      params = %{"schedule" => form_params(%{"interval" => "every_2h", "keep_days" => "3"})}
+
+      for socket <- sockets do
+        socket = %{socket | assigns: %{socket.assigns | form: form, editing: :new}}
+        assert_denied(BackupScheduleLive.handle_event("save", params, socket))
+      end
+
+      assert [%{interval: :daily}] = all_schedules()
+    end
+
     test "toggle, delete and edit leave the schedule as it was", %{
       schedule: s,
       sockets: sockets
@@ -917,28 +933,6 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       assert %KilnCMS.Types.UnknownAtom{value: "every_90m"} = stored(s).interval
     end
 
-    test "a sub-daily interval, which loads as a valid atom", %{conn: conn} do
-      admin = platform_admin()
-      s = force!(schedule!(%{}, admin), interval: "every_2h")
-      before = stored(s)
-      lv = mount(conn, admin)
-
-      assert_locked(lv, s)
-
-      assert has_element?(
-               lv,
-               "#backup-schedule-#{s.id} [data-role=locked]",
-               "more often than daily"
-             )
-
-      # Pausing writes `enabled` alone.
-      lv |> element("#backup-schedule-#{s.id} [data-role=toggle]") |> render_click()
-      after_pause = stored(s)
-      refute after_pause.enabled
-      assert after_pause.interval == :every_2h
-      assert after_pause.components == before.components
-    end
-
     test "media on a deployment that no longer archives it", %{conn: conn} do
       admin = platform_admin()
       put_backups(:media_dir, System.tmp_dir!())
@@ -958,7 +952,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       lv = mount(conn, admin)
 
       lv |> element("#backup-schedule-#{s.id} [data-role=edit]") |> render_click()
-      force!(s, interval: "every_4h")
+      force!(s, interval: "every_90m")
       before = stored(s)
 
       html = lv |> form("#schedule-form", schedule: form_params(%{})) |> render_submit()
@@ -966,6 +960,196 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       assert html =~ "can only be paused, resumed or deleted"
       refute has_element?(lv, "#schedule-form")
       assert stored(s) == before
+    end
+  end
+
+  describe "sub-daily schedules (#2219)" do
+    test "the form offers them, shortest first", %{conn: conn} do
+      lv = mount(conn, platform_admin())
+      lv |> element("#schedule-new") |> render_click()
+
+      options =
+        lv
+        |> render()
+        |> Floki.parse_document!()
+        |> Floki.find("#schedule-form select[name='schedule[interval]'] option")
+        |> Floki.attribute("value")
+
+      assert options ==
+               ~w(every_2h every_4h every_8h every_12h daily weekly fortnightly monthly)
+    end
+
+    test "Keep for (days) is required, with hints, only while the interval is sub-daily",
+         %{conn: conn} do
+      lv = mount(conn, platform_admin())
+      lv |> element("#schedule-new") |> render_click()
+
+      refute has_element?(lv, "#schedule-keep input[name='schedule[keep_days]'][required]")
+      assert has_element?(lv, "#schedule-keep", "Empty keeps them for BACKUP_KEEP_DAYS")
+      refute has_element?(lv, "#schedule-form", "the others follow every")
+
+      preview_of(lv, %{"interval" => "every_4h"})
+
+      assert has_element?(lv, "#schedule-keep input[name='schedule[keep_days]'][required]")
+
+      assert has_element?(
+               lv,
+               "#schedule-keep",
+               "Required for a schedule that runs more often than daily."
+             )
+
+      refute has_element?(lv, "#schedule-keep", "Empty keeps them for BACKUP_KEEP_DAYS")
+
+      assert has_element?(
+               lv,
+               "#schedule-form",
+               "The first backup of the day; the others follow every 4 hours."
+             )
+
+      preview_of(lv, %{"interval" => "weekly"})
+      refute has_element?(lv, "#schedule-keep input[name='schedule[keep_days]'][required]")
+    end
+
+    test "adding one without Keep for (days) shows the error and saves nothing; with it, saves",
+         %{conn: conn} do
+      lv = mount(conn, platform_admin())
+      lv |> element("#schedule-new") |> render_click()
+
+      params = %{"interval" => "every_2h", "time_of_day" => "03:00", "keep_days" => ""}
+      lv |> form("#schedule-form", schedule: form_params(params)) |> render_submit()
+
+      assert has_element?(
+               lv,
+               "#schedule-form #schedule_keep_days-error",
+               "is required for a schedule that runs more often than daily"
+             )
+
+      assert all_schedules() == []
+
+      lv
+      |> form("#schedule-form", schedule: form_params(%{params | "keep_days" => "2"}))
+      |> render_submit()
+
+      assert render(lv) =~ "Schedule saved."
+      assert [%{interval: :every_2h, keep_days: 2} = s] = all_schedules()
+
+      assert has_element?(
+               lv,
+               "#backup-schedule-#{s.id} [data-role=cadence]",
+               "Every 2 hours from 03:00 (Etc/UTC)"
+             )
+
+      refute has_element?(lv, "#backup-schedule-#{s.id} [data-role=locked]")
+      refute has_element?(lv, "#backup-schedule-#{s.id} [data-role=needs-keep-days]")
+    end
+
+    test "one with Keep for (days) is edited and saved like any other", %{conn: conn} do
+      admin = platform_admin()
+      s = schedule!(%{interval: :every_8h, keep_days: 3}, admin)
+      lv = mount(conn, admin)
+
+      lv |> element("#backup-schedule-#{s.id} [data-role=edit]") |> render_click()
+
+      lv
+      |> form("#schedule-form",
+        schedule: form_params(%{"interval" => "every_12h", "keep_days" => "3"})
+      )
+      |> render_submit()
+
+      assert render(lv) =~ "Schedule saved."
+      assert %{interval: :every_12h, keep_days: 3} = stored(s)
+    end
+
+    # Written from a console, or by a release that allowed it: it keeps
+    # firing on BACKUP_KEEP_DAYS, and must stay pausable and deletable.
+    test "one stored without Keep for (days): not locked, says so, pauses, and saves only with it",
+         %{conn: conn} do
+      admin = platform_admin()
+      s = force!(schedule!(%{}, admin), interval: "every_2h")
+      before = stored(s)
+      lv = mount(conn, admin)
+
+      refute has_element?(lv, "#backup-schedule-#{s.id} [data-role=locked]")
+
+      assert has_element?(
+               lv,
+               "#backup-schedule-#{s.id} [data-role=needs-keep-days]",
+               "Set Keep for (days) to edit it"
+             )
+
+      # Pausing writes `enabled` alone.
+      lv |> element("#backup-schedule-#{s.id} [data-role=toggle]") |> render_click()
+      paused = stored(s)
+      refute paused.enabled
+
+      assert Map.drop(paused, [:enabled, :updated_at]) ==
+               Map.drop(before, [:enabled, :updated_at])
+
+      lv |> element("#backup-schedule-#{s.id} [data-role=toggle]") |> render_click()
+      assert stored(s).enabled
+
+      lv |> element("#backup-schedule-#{s.id} [data-role=edit]") |> render_click()
+      assert has_element?(lv, "#schedule-form")
+      refute has_element?(lv, "#schedule-keep input[name='schedule[keep_days]'][value]")
+      assert has_element?(lv, "#schedule-keep input[name='schedule[keep_days]'][required]")
+
+      params = %{"interval" => "every_2h", "time_of_day" => "05:00", "keep_days" => ""}
+      lv |> form("#schedule-form", schedule: form_params(params)) |> render_submit()
+
+      assert has_element?(lv, "#schedule-form #schedule_keep_days-error", "is required")
+      assert %{keep_days: nil} = unsaved = stored(s)
+      assert Time.compare(unsaved.time_of_day, ~T[03:00:00]) == :eq
+
+      lv
+      |> form("#schedule-form", schedule: form_params(%{params | "keep_days" => "3"}))
+      |> render_submit()
+
+      assert render(lv) =~ "Schedule saved."
+      assert %{interval: :every_2h, keep_days: 3} = stored(s)
+      refute has_element?(lv, "#backup-schedule-#{s.id} [data-role=needs-keep-days]")
+
+      s = force!(s, keep_days: nil)
+      lv |> element("#backup-schedule-#{s.id} [data-role=delete]") |> render_click()
+      assert all_schedules() == []
+    end
+
+    test "the preview counts the backups kept in hours: two-hourly for 7 days is about 85",
+         %{conn: conn} do
+      lv = mount(conn, platform_admin())
+      lv |> element("#schedule-new") |> render_click()
+
+      preview_of(lv, %{"interval" => "every_2h", "keep_days" => "7"})
+
+      assert has_element?(
+               lv,
+               "#schedule-preview [data-role=cadence]",
+               "Every 2 hours from 04:15 (Etc/UTC)"
+             )
+
+      assert has_element?(lv, "#schedule-preview [data-role=estimate]", "about 85 backups")
+    end
+
+    test "estimate/3 in hours; daily and longer unchanged" do
+      assert BackupScheduleLive.estimate(:every_2h, nil, 7) == 85
+      assert BackupScheduleLive.estimate(:every_4h, nil, 7) == 43
+      assert BackupScheduleLive.estimate(:every_8h, nil, 1) == 4
+      assert BackupScheduleLive.estimate(:every_12h, 30, 1) == 31
+      assert BackupScheduleLive.estimate(:daily, nil, 14) == 15
+      assert BackupScheduleLive.estimate(:weekly, nil, 28) == 5
+      assert BackupScheduleLive.estimate(:monthly, nil, 62) == 3
+      assert BackupScheduleLive.estimate(%KilnCMS.Types.UnknownAtom{value: "x"}, nil, 14) == 15
+    end
+
+    test "beyond_default?/4 measures a keep count in hours" do
+      # 100 two-hourly backups reach back 200 hours: under 14 days.
+      refute BackupScheduleLive.beyond_default?(:every_2h, 100, nil, 14)
+      # 200 reach back 400 hours: past 14 days.
+      assert BackupScheduleLive.beyond_default?(:every_2h, 200, nil, 14)
+      refute BackupScheduleLive.beyond_default?(:daily, 14, 14, 14)
+      assert BackupScheduleLive.beyond_default?(:daily, 15, nil, 14)
+      assert BackupScheduleLive.beyond_default?(:weekly, 3, nil, 14)
+      assert BackupScheduleLive.beyond_default?(:every_2h, nil, 15, 14)
+      refute BackupScheduleLive.beyond_default?(:every_2h, nil, nil, 14)
     end
   end
 
