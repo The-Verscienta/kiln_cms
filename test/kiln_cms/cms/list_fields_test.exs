@@ -57,7 +57,7 @@ defmodule KilnCMS.CMS.ListFieldsTest do
 
     refute ListFields.pickable?(def_("x", :json))
 
-    for type <- [:range, :key_value, :link],
+    for type <- [:range, :key_value, :link, :address],
         do: refute(ListFields.pickable?(def_("x", type)))
   end
 

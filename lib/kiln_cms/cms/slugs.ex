@@ -383,15 +383,27 @@ defmodule KilnCMS.CMS.Slugs do
     with definition_id when not is_nil(definition_id) <-
            changeset_attribute(changeset, :type_definition_id),
          {:ok, definition} <-
-           definition_id
-           |> KilnCMS.CMS.get_type_definition(registry_opts(changeset.tenant))
-           |> raise_if_forbidden() do
+           cached_or_read_definition(changeset, definition_id) do
       case kind do
         :slug -> definition.slug_pattern
         :alias -> definition.alias_pattern
       end
     else
       _ -> nil
+    end
+  end
+
+  # `Changes.DeriveTitle` reads the definition first and stashes it in the
+  # changeset context (#2287); one write then reads it once, not once per change.
+  defp cached_or_read_definition(changeset, definition_id) do
+    case changeset.context do
+      %{kiln_type_definition: %{id: ^definition_id} = definition} ->
+        {:ok, definition}
+
+      _ ->
+        definition_id
+        |> KilnCMS.CMS.get_type_definition(registry_opts(changeset.tenant))
+        |> raise_if_forbidden()
     end
   end
 
@@ -506,6 +518,52 @@ defmodule KilnCMS.CMS.Slugs do
     case KilnCMS.Slug.Pattern.field_names(pattern) do
       [] -> raw
       _referenced -> merge_computed_fields(changeset, raw)
+    end
+  end
+
+  @doc """
+  The custom-field values a write is about to store, as a formula over the
+  record should see them before `Changes.ApplyCustomFields` has run (#2287):
+  the stored map with the payload merged over it (a partial update keeps the
+  keys it does not mention; a blank payload value clears one), minus the
+  type's private fields, plus every computed field derived fresh when
+  `computed?` is true.
+
+  Values are the raw payload, not yet coerced — the same trade
+  `changeset_custom_fields/2` makes for `[field:…]` slug tokens.
+  """
+  @spec effective_custom_fields(Ash.Changeset.t(), boolean()) :: map()
+  def effective_custom_fields(changeset, computed? \\ true),
+    do: public_custom_fields(changeset, payload_over_stored(changeset), computed?)
+
+  @doc """
+  `effective_custom_fields/2` over a map the caller already holds (the working
+  copy's held `custom_fields`): private fields dropped, computed ones derived.
+  """
+  @spec public_custom_fields(Ash.Changeset.t(), map() | nil, boolean()) :: map()
+  def public_custom_fields(changeset, values, computed? \\ true) do
+    raw =
+      values
+      |> stringify_keys()
+      |> KilnCMS.CMS.PrivateFields.drop_for(changeset_document(changeset), changeset.to_tenant)
+
+    if computed?, do: merge_computed_fields(changeset, raw), else: raw
+  end
+
+  defp payload_over_stored(changeset) do
+    payload = stringify_keys(changeset_attribute(changeset, :custom_fields))
+
+    if changeset.action_type == :create or
+         not Ash.Changeset.changing_attribute?(changeset, :custom_fields) do
+      payload
+    else
+      blank = for {key, value} <- payload, value in [nil, ""], do: key
+
+      changeset.data
+      |> Map.get(:custom_fields)
+      |> stringify_keys()
+      |> Map.merge(payload)
+      |> Map.drop(blank)
     end
   end
 

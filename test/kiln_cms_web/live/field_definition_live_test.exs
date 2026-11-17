@@ -2178,6 +2178,69 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       assert field.validation == %{"unique" => true}
     end
 
+    test "a color field takes a palette and a JSON field a schema (#2434)", %{conn: conn} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      type_change(lv, "color")
+      assert has_element?(lv, validation_input("palette"))
+      refute has_element?(lv, validation_input("pattern"))
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{
+          scopes: ["page"],
+          name: "accent",
+          label: "Accent",
+          field_type: "color",
+          validation: %{palette: "#FFF, #2563eb\n#f59e0b"}
+        }
+      )
+      |> render_submit()
+
+      color =
+        :page
+        |> CMS.field_definitions_for!(authorize?: false)
+        |> Enum.find(&(&1.name == "accent"))
+
+      assert color.validation == %{"palette" => ["#FFF", "#2563eb", "#f59e0b"]}
+      assert lv |> element("#field-#{color.id}-validation") |> render() =~ "Limited to 3 colors."
+
+      type_change(lv, "json")
+      assert has_element?(lv, validation_input("json_schema"))
+
+      # Text that is not JSON is refused beside the input, not stored.
+      lv
+      |> form("#new-field-form",
+        field_definition: %{
+          scopes: ["page"],
+          name: "spec",
+          label: "Spec",
+          field_type: "json",
+          validation: %{json_schema: "{not json"}
+        }
+      )
+      |> render_submit()
+
+      assert render(lv) =~ "json_schema is not valid"
+
+      lv
+      |> form("#new-field-form",
+        field_definition: %{
+          scopes: ["page"],
+          name: "spec",
+          label: "Spec",
+          field_type: "json",
+          validation: %{json_schema: ~s({"type": "object", "required": ["id"]})}
+        }
+      )
+      |> render_submit()
+
+      spec =
+        :page |> CMS.field_definitions_for!(authorize?: false) |> Enum.find(&(&1.name == "spec"))
+
+      assert spec.validation == %{"json_schema" => %{"type" => "object", "required" => ["id"]}}
+    end
+
     test "numeric bounds are stored as numbers", %{conn: conn} do
       {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
       type_change(lv, "integer")

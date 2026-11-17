@@ -13,6 +13,11 @@ msgstr ""
 
 #: lib/kiln_cms/cms/field_constraints.ex
 #, elixir-autogen, elixir-format
+msgid "%{field} doesn't match its JSON Schema: %{reasons}"
+msgstr "%{field} no coincide con su esquema JSON: %{reasons}"
+
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
 msgid "%{field} doesn't match the required format"
 msgstr "%{field} no coincide con el formato requerido"
 
@@ -54,6 +59,11 @@ msgstr[1] "%{field} debe tener como máximo %{count} caracteres"
 #, elixir-autogen, elixir-format
 msgid "%{field} must be at most %{max}"
 msgstr "%{field} debe ser como máximo %{max}"
+
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
+msgid "%{field} must be one of the palette colors"
+msgstr "%{field} debe ser uno de los colores de la paleta"
 
 #: lib/kiln_cms/cms/field_constraints.ex
 #, elixir-autogen, elixir-format

@@ -139,7 +139,7 @@ defmodule Kiln.FieldType do
 
   `:geolocation`, `:computed`, `:datetime_range`, `:recurrence` and the format
   types `:email`, `:telephone`, `:color`, `:slug`, `:time`, `:json`, `:range`,
-  `:key_value` and `:link` ship
+  `:key_value`, `:link` and `:address` ship
   in-tree and are implemented against this very contract rather than
   special-cased in the host — they're the reference implementations, and they
   register through
