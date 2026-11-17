@@ -10,7 +10,6 @@ defmodule KilnCMS.Scripts.ShellPortabilityTest do
   """
   use ExUnit.Case, async: true
 
-  alias KilnCMS.Test.ShellTools
 
   @moduletag :shell_portability
 
@@ -27,7 +26,9 @@ defmodule KilnCMS.Scripts.ShellPortabilityTest do
     bash32 = System.get_env("KILN_BASH32", "")
 
     if bash32 != "" do
-      assert bash32 == ShellTools.bash32()
+      assert System.find_executable("bash") |> Path.expand() |> resolve() == Path.expand(bash32),
+             "the bash on PATH is not KILN_BASH32"
+
       {version32, 0} = System.cmd(bash32, ["-c", "echo $BASH_VERSION"])
       assert version32 == version, "KILN_BASH32 is not the bash on PATH"
     end
@@ -40,5 +41,13 @@ defmodule KilnCMS.Scripts.ShellPortabilityTest do
     expect = System.get_env("KILN_EXPECT_TAR")
     {out, 0} = System.cmd("tar", ["--version"], stderr_to_stdout: true)
     assert out =~ expect, "tar --version on PATH says: #{out}"
+  end
+
+  # Follows a symlink chain (the CI shim links `bash` to KILN_BASH32).
+  defp resolve(path) do
+    case File.read_link(path) do
+      {:ok, target} -> resolve(Path.expand(target, Path.dirname(path)))
+      {:error, _} -> path
+    end
   end
 end

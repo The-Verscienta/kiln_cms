@@ -2043,10 +2043,12 @@ jobs:
         id: bash32-key
         run: echo "os=${ImageOS:-unknown}" >> "$GITHUB_OUTPUT"
 
+      # Restore and save are split so a build that passed its version check is
+      # kept even while the job is red.
       - name: Restore the bash 3.2 build
         if: matrix.bash32
         id: bash32-cache
-        uses: actions/cache@v5
+        uses: actions/cache/restore@v5
         with:
           path: ~/.cache/kiln-bash32
           key: bash-3.2.57-${{ steps.bash32-key.outputs.os }}-${{ hashFiles('scripts/ci/build_bash32.sh') }}
@@ -2111,5 +2113,11 @@ jobs:
       # `--exclude test`, so it would also force-include a test in those
       # modules carrying a tag test_helper.exs excludes (`:backup_scale`,
       # `:pg_tools`, …); none does today. `@tag :skip` still skips.
+      - name: Save the bash 3.2 build
+        if: matrix.bash32 && steps.bash32-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/.cache/kiln-bash32
+          key: ${{ steps.bash32-cache.outputs.cache-primary-key }}
       - name: Run the script tests under this leg's tools
         run: PATH="$SHIM:$PATH" mix test test/scripts --only shell_portability

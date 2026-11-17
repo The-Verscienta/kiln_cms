@@ -73,7 +73,7 @@ sha256_of() {
 
 fetched=false
 for url in "${urls[@]}"; do
-  if curl -fsSL --retry 3 --connect-timeout 20 --max-time 180 -o "$work/$tarball" "$url"; then
+  if curl -fsSL --retry 2 --connect-timeout 20 --max-time 60 -o "$work/$tarball" "$url"; then
     actual="$(sha256_of "$work/$tarball")"
     if [ "$actual" = "$sha256" ]; then
       fetched=true
@@ -94,11 +94,20 @@ fi
 tar -xzf "$work/$tarball" -C "$work"
 cd "$work/bash-${version}"
 
+# A failed configure or make prints the tail of config.log before the EXIT
+# trap removes the work directory, so CI has something to go on.
+show_config_log() {
+  echo "::error::building bash ${version} failed; last lines of config.log:" >&2
+  tail -n 50 config.log >&2 2>/dev/null || true
+  exit 1
+}
+
 CFLAGS="-O2 -std=gnu89 -fcommon -Wno-implicit-function-declaration -Wno-implicit-int -Wno-int-conversion -Wno-incompatible-pointer-types" \
-  ./configure --prefix="$prefix" --without-bash-malloc --disable-nls --disable-readline >/dev/null
+  ./configure --prefix="$prefix" --without-bash-malloc --disable-nls --disable-readline >/dev/null ||
+  show_config_log
 # The binary alone: `make install` would also build the Info manual, which
 # needs makeinfo, and the tests need nothing but `bash`.
-make bash >/dev/null
+make bash >/dev/null || show_config_log
 mkdir -p "$prefix/bin"
 install -m 0755 bash "$prefix/bin/bash"
 

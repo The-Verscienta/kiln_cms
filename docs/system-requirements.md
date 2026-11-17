@@ -125,7 +125,7 @@ image. That machine needs:
 |---|---|---|
 | bash 3.2 or later | Both scripts | |
 | `pg_dump`, `pg_restore`, `psql`, `createdb`, `dropdb` (the Postgres client package) | `db`, `all`, `restore.sh db` and `drill` | **Same major version as the server**, as in the image |
-| GNU tar or bsdtar | Media parts | busybox tar is refused before anything is written: it cannot read the NUL-separated file list each part is built from |
+| GNU tar or bsdtar | Media parts | busybox tar is refused before any media part is written: it cannot read the NUL-separated file list each part is built from. In `backup.sh all` the database dump runs first, so it is kept and verified, and `manifest.json` records the refusal |
 | `gzip`, `stat` (GNU or BSD), `xargs`, `mktemp`, `head` | Media parts | Standard on Debian, Ubuntu and macOS |
 | `sha256sum`, or `shasum` on macOS | Checksum sidecars, `verify`, `restore.sh media` | |
 | `rclone` | Off-site copy | Only with `BACKUP_RCLONE_REMOTE` set |
@@ -133,6 +133,22 @@ image. That machine needs:
 
 Disk: room in `BACKUP_DIR` for the retained backups, plus the file lists the
 media phase builds in `TMPDIR` (default `/tmp`).
+
+What CI tests. `scripts/backup.sh`, `restore.sh` and `staging.sh` are tested
+under three combinations of bash and tar:
+
+| bash | tar | Where |
+|---|---|---|
+| 5 (the runner's) | GNU tar | The `test` shards, a required check |
+| 3.2.57, built from the pinned GNU tarball by `scripts/ci/build_bash32.sh` | GNU tar | The `backup_scripts_portability` job, not a required check yet |
+| 5 | bsdtar (libarchive) | The `backup_scripts_portability` job, not a required check yet |
+
+Both `backup_scripts_portability` legs also check that busybox tar is refused.
+BSD `stat -f %z`, BSD `xargs` and macOS bsdtar's AppleDouble (`._`) members
+are checked only when a developer runs the tests on a Mac: there is no macOS
+leg, because setup-beam has no macOS builds.
+[Contributing](../CONTRIBUTING.md#run-the-backup-script-tests-under-every-shell-and-tar)
+says how to run the other legs locally.
 
 ## Developing on it
 

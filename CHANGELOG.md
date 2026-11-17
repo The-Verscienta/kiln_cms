@@ -145,6 +145,8 @@ Every summary line below that was shortened links to its own entry there.
   ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#list-sort-reference-media))
 - **Telemetry: `[:kiln_cms, :backups, :retention, :skipped | :stopped]` now also fire for destinations (`scope: :destination`); local events carry `scope: :local`. Match on `scope` to count local only.**
   ([long form](docs/changelog/unreleased.md#backup-retention-telemetry-scope))
+- **Contributors: the backup script tests also run in CI under bash 3.2.57 and under bsdtar, and check that busybox tar is refused. The docs now say `backup.sh all` keeps its verified database dump when it refuses a tar.**
+  ([long form](docs/changelog/unreleased.md#backup-scripts-portability-ci))
 
 ### Fixed
 
