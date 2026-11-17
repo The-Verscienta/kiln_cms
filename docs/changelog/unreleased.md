@@ -659,6 +659,16 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="staging-up-stops-on-a-failed-copy"></a>
+
+- **`scripts/staging.sh up` stops when `pg_dump` or `psql` fails, under bash 3.2 on Linux too.**
+  The copy is a pipeline of two subshells. bash 3.2 as built on Linux does
+  not apply `set -e` to a pipeline that ends in a subshell, so a failed dump
+  went on to migrate and scrub an empty staging database and reported
+  success. The script now checks the pipeline's status itself and exits with
+  "copying production into <db> failed; nothing was migrated or scrubbed".
+  Found by the new bash 3.2 CI leg. ([#3020](https://github.com/The-Verscienta/kiln_cms/pull/3020))
+
 <a id="staging-scrub-personal-data"></a>
 
 - **The staging scrub now removes newsletter subscribers, form submissions, mail suppression lists, federation followers and keys, per-site integrations and every queued job from a production clone, and nothing cloned from production can run before it does.**

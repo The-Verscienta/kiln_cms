@@ -150,6 +150,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **`scripts/staging.sh up` stops when `pg_dump` or `psql` fails, under bash 3.2 on Linux too; it used to migrate and scrub an empty clone.**
+  ([#3020](https://github.com/The-Verscienta/kiln_cms/pull/3020) · [long form](docs/changelog/unreleased.md#staging-up-stops-on-a-failed-copy))
+
 - **The staging scrub now removes newsletter subscribers, form submissions, suppression lists, federation followers and keys, per-site integrations and every queued job, and no cloned job can run first. Re-scrub any clone you share.**
   ([long form](docs/changelog/unreleased.md#staging-scrub-personal-data))
 

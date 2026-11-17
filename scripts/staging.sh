@@ -216,7 +216,10 @@ cmd_up() {
   staging_url="$PG_CONN_URL" staging_pw="$PG_CONN_PASSWORD" staging_has="$PG_CONN_HAS_PASSWORD"
 
   echo "==> pg_dump PROD → psql STAGING"
-  (
+  # Checked explicitly: bash 3.2 (Linux builds) does not apply `set -e` to a
+  # pipeline that ends in a subshell, so a failed pg_dump went on to migrate
+  # and scrub an empty clone. `pipefail` still makes the status non-zero.
+  if ! (
     # shellcheck disable=SC2030,SC2031 # PGPASSWORD is meant for this subshell only
     if [ "$prod_has" = 1 ]; then export PGPASSWORD="$prod_pw"; fi
     # Production's queued jobs carry recipients and payloads (#2721): copy the
@@ -227,7 +230,10 @@ cmd_up() {
     # shellcheck disable=SC2030,SC2031 # PGPASSWORD is meant for this subshell only
     if [ "$staging_has" = 1 ]; then export PGPASSWORD="$staging_pw"; fi
     psql --quiet --set ON_ERROR_STOP=1 "$staging_url"
-  )
+  ); then
+    echo "staging: copying production into ${name} failed; nothing was migrated or scrubbed" >&2
+    exit 1
+  fi
 
   echo "==> Migrating staging to the current schema"
   run_migrate
