@@ -502,6 +502,22 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert count(KilnCMS.Backups.NodeBeat) == 0
     end
 
+    test "purges production's backup notices" do
+      seed!(KilnCMS.Backups.Notice, %{
+        kind: :retention,
+        scope: "dest:#{Ecto.UUID.generate()}",
+        label: "production bucket",
+        outcome: :skipped,
+        reason: "couldn't read the backup history",
+        at: DateTime.utc_now()
+      })
+
+      summary = Scrub.run([])
+
+      assert summary.backup_notices_purged == 1
+      assert count(KilnCMS.Backups.Notice) == 0
+    end
+
     test "purges queued jobs in every state (their args carry recipients)" do
       states = ~w(available scheduled executing retryable completed discarded cancelled)
       Enum.each(states, &seed_job!/1)

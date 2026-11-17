@@ -75,6 +75,77 @@ defmodule KilnCMSWeb.BackupComponents do
   def offsite_headline(_offsite), do: nil
 
   @doc """
+  The alarm lines for retention that was skipped or stopped part-way (#2487),
+  one per place in `Backups.status/0`'s `retention`, as `%{id: id, text: text}`:
+  `id` is `"local"` for the backup directory and `"dest-<id>"` for a
+  destination. Each names the backup whose prune it was by its date. The
+  reason stays English, as the run log says it. The Backups page and the home
+  strip both say them.
+  """
+  @spec retention_lines(map()) :: [%{id: String.t(), text: String.t()}]
+  def retention_lines(%{retention: notices}) when is_list(notices),
+    do: Enum.map(notices, &retention_line/1)
+
+  def retention_lines(_status), do: []
+
+  defp retention_line(%{scope: :local} = n) do
+    %{id: "local", text: retention_text(n, nil)}
+  end
+
+  defp retention_line(%{scope: {:destination, "dest:" <> id}} = n) do
+    %{id: "dest-" <> id, text: retention_text(n, n.label)}
+  end
+
+  defp retention_line(%{scope: {:destination, key}} = n) do
+    %{id: "dest-" <> key, text: retention_text(n, n.label)}
+  end
+
+  defp retention_text(%{outcome: :skipped} = n, nil),
+    do:
+      gettext(
+        "Retention was skipped on the backup of %{date}: %{reason}. Nothing was deleted, so local backups will build up until this is fixed.",
+        date: retention_date(n),
+        reason: n.reason || "—"
+      )
+
+  defp retention_text(%{outcome: :stopped} = n, nil),
+    do:
+      gettext(
+        "Retention stopped part-way on the backup of %{date}: %{reason}. What it hadn't reached stays until this is fixed.",
+        date: retention_date(n),
+        reason: n.reason || "—"
+      )
+
+  defp retention_text(%{outcome: :skipped} = n, name),
+    do:
+      gettext(
+        "Retention on %{name} was skipped on the backup of %{date}: %{reason}. Nothing was deleted there, so backups will build up there until this is fixed.",
+        name: name,
+        date: retention_date(n),
+        reason: n.reason || "—"
+      )
+
+  defp retention_text(%{outcome: :stopped} = n, name),
+    do:
+      gettext(
+        "Retention on %{name} stopped part-way on the backup of %{date}: %{reason}. What it hadn't reached stays until this is fixed.",
+        name: name,
+        date: retention_date(n),
+        reason: n.reason || "—"
+      )
+
+  # The backup's own time (its stamp), or when the notice was written.
+  defp retention_date(%{stamp: stamp, at: at}) do
+    when_at =
+      case is_binary(stamp) && KilnCMS.Backups.Artifact.parse_stamp(stamp) do
+        {:ok, %DateTime{} = started} -> started
+        _none -> at
+      end
+
+    Calendar.strftime(when_at, "%Y-%m-%d %H:%M UTC")
+  end
+
+  @doc """
   What a run's off-site destination is called: the label the run recorded,
   or, for the entry a run records when the stored destinations couldn't be
   read (`KilnCMS.Backups.RunDestination.unreadable_key/0`), a sentence.

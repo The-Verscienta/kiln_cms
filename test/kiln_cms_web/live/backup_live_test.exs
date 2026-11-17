@@ -3001,4 +3001,156 @@ defmodule KilnCMSWeb.BackupLiveTest do
       refute html =~ "off-site destinations"
     end
   end
+
+  # #2487: retention that was skipped or stopped is a dated alarm line on the
+  # Backups page and on Home, until a clean pass clears it.
+  describe "retention notices (#2487)" do
+    alias KilnCMS.Backups.DestinationConfig
+
+    @stamp "20261116-020000"
+
+    # A good database backup an hour ago, so the only alarm is the notice's.
+    defp good_backup! do
+      offsite_run!(%{"local" => %{"status" => "ok"}}, [], nil)
+    end
+
+    defp notice!(attrs) do
+      Backups.report_backup_notice!(
+        Map.merge(
+          %{
+            kind: :retention,
+            scope: "local",
+            outcome: :skipped,
+            reason: "couldn't read the backup history",
+            stamp: @stamp,
+            at: DateTime.utc_now()
+          },
+          attrs
+        ),
+        actor: Backups.system()
+      )
+    end
+
+    test "a skip is a dated line in the alarm tone, with the guide", %{conn: conn} do
+      good_backup!()
+      notice!(%{})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-headline-retention-local[data-role=retention-notice]",
+               "Retention was skipped on the backup of 2026-11-16 02:00 UTC: " <>
+                 "couldn't read the backup history. Nothing was deleted, so local backups " <>
+                 "will build up until this is fixed."
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#backup-retention-docs[href$="backups.md#when-retention-is-skipped-or-stops"]|
+             )
+
+      assert has_element?(lv, "section.border-error\\/30")
+      assert has_element?(lv, "#backup-headline-db", "Backed up")
+    end
+
+    test "a stop says what it hadn't reached stays", %{conn: conn} do
+      good_backup!()
+      notice!(%{outcome: :stopped, deleted: 2, reason: "it crashed (RuntimeError)"})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-headline-retention-local",
+               "Retention stopped part-way on the backup of 2026-11-16 02:00 UTC: it crashed " <>
+                 "(RuntimeError). What it hadn't reached stays until this is fixed."
+             )
+    end
+
+    test "a destination's line names it; one no longer pruned shows nothing", %{conn: conn} do
+      good_backup!()
+
+      pruned =
+        Ash.Seed.seed!(DestinationConfig, %{
+          name: "Offsite NAS",
+          kind: "local",
+          settings: %{},
+          enabled: true,
+          prune: true
+        })
+
+      off =
+        Ash.Seed.seed!(DestinationConfig, %{
+          name: "Archive",
+          kind: "local",
+          settings: %{},
+          enabled: true,
+          prune: false
+        })
+
+      notice!(%{
+        scope: DestinationConfig.key(pruned),
+        label: "NAS",
+        reason: "it overlaps BACKUP_RCLONE_REMOTE"
+      })
+
+      notice!(%{scope: DestinationConfig.key(off), label: "Archive"})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-headline-retention-dest-#{pruned.id}",
+               "Retention on Offsite NAS was skipped on the backup of 2026-11-16 02:00 UTC: " <>
+                 "it overlaps BACKUP_RCLONE_REMOTE. Nothing was deleted there"
+             )
+
+      refute has_element?(lv, "#backup-headline-retention-dest-#{off.id}")
+      refute has_element?(lv, "#backup-headline-retention-local")
+    end
+
+    test "a clean run: no line, no alarm", %{conn: conn} do
+      good_backup!()
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      refute has_element?(lv, "[data-role=retention-notice]")
+      refute has_element?(lv, "#backup-retention-docs")
+      refute has_element?(lv, "section.border-error\\/30")
+    end
+
+    test "Home's alarm strip shows a platform admin the line", %{conn: conn} do
+      good_backup!()
+      notice!(%{})
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(
+               lv,
+               "#overview-backup-warning [data-role=backup-headline]",
+               "Retention was skipped on the backup of 2026-11-16 02:00 UTC"
+             )
+    end
+
+    test "Home: no strip for a clean run", %{conn: conn} do
+      good_backup!()
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      refute html =~ "overview-backup-warning"
+    end
+
+    test "Home: an org admin who is not a platform admin sees nothing", %{conn: conn} do
+      good_backup!()
+      notice!(%{})
+
+      for user <- [org_admin(), authed_user(:editor)] do
+        {:ok, _lv, html} = conn |> log_in(user) |> live(~p"/editor/overview")
+
+        refute html =~ "overview-backup-warning"
+        refute html =~ "Retention was skipped"
+      end
+    end
+  end
 end

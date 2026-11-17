@@ -112,6 +112,14 @@ defmodule KilnCMSWeb.BackupLive do
   destinations themselves are the Destinations tab
   (`KilnCMSWeb.BackupDestinationsLive`).
 
+  ## Retention notices (#2487)
+
+  Retention that was skipped or stopped part-way, locally or on a
+  destination, deleted nothing (or not all it should have), so backups pile
+  up while every run reads **Succeeded**. Each place with such a notice
+  (`Backups.status/0`'s `retention`) adds a dated headline line in the alarm
+  tone, with a link to the guide, until a clean pass there clears it.
+
   ## Tabs (part of #2219)
 
   This is the Backups tab; the in-app schedules and their forms are the
@@ -137,6 +145,7 @@ defmodule KilnCMSWeb.BackupLive do
       tabs: 1,
       component_label: 1,
       offsite_headline: 1,
+      retention_lines: 1,
       run_destination_label: 2,
       run_status_label: 1,
       threshold_label: 1,
@@ -845,6 +854,28 @@ defmodule KilnCMSWeb.BackupLive do
                 class="font-medium"
               >
                 {offsite_headline(@status.offsite)}
+              </p>
+              <%!-- Retention skipped or stopped part-way (#2487): the backup
+                    succeeded, but old backups are piling up. --%>
+              <p
+                :for={line <- retention_lines(@status)}
+                id={"backup-headline-retention-#{line.id}"}
+                data-role="retention-notice"
+                class="font-medium"
+              >
+                {line.text}
+              </p>
+              <p :if={@status.retention != []} class="mt-1 text-sm">
+                <a
+                  id="backup-retention-docs"
+                  href={docs_url("backups.md#when-retention-is-skipped-or-stops")}
+                  target="_blank"
+                  rel="noopener"
+                  class="link inline-flex items-center gap-1 text-primary-ink"
+                >
+                  {gettext("Why retention skips")}
+                  <.icon name="hero-arrow-top-right-on-square" class="size-3" />
+                </a>
               </p>
               <p
                 :if={@status.manifest && @status.manifest.artifacts != []}
@@ -1769,8 +1800,12 @@ defmodule KilnCMSWeb.BackupLive do
   # (#2219): a fresh database backup doesn't make stale media fine.
   # Partly off-site (#2220) too: a good local backup that some destination
   # doesn't have is not a deployment that is fine.
+  # Retention skipped or stopped (#2487) too: the backup is fine today, and
+  # the disk fills up behind it.
   defp alarming?(status),
-    do: status.stale? or status.failed? or match?(%{offsite: %{state: :partial}}, status)
+    do:
+      status.stale? or status.failed? or match?(%{offsite: %{state: :partial}}, status) or
+        status.retention != []
 
   # One component's line (#2219).
   defp headline(%{failed?: true}), do: gettext("The last backup failed")

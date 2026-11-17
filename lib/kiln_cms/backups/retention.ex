@@ -319,7 +319,10 @@ defmodule KilnCMS.Backups.Retention do
   defp skipped(reason) do
     Logger.error("Backup retention skipped: #{describe(reason)}; nothing was deleted")
 
-    :telemetry.execute([:kiln_cms, :backups, :retention, :skipped], %{count: 1}, %{reason: reason})
+    :telemetry.execute([:kiln_cms, :backups, :retention, :skipped], %{count: 1}, %{
+      scope: :local,
+      reason: reason
+    })
 
     {:error, reason}
   end
@@ -332,7 +335,7 @@ defmodule KilnCMS.Backups.Retention do
     :telemetry.execute(
       [:kiln_cms, :backups, :retention, :stopped],
       %{count: 1, deleted: length(deleted)},
-      %{reason: reason}
+      %{scope: :local, reason: reason}
     )
   end
 

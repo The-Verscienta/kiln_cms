@@ -86,6 +86,7 @@ defmodule KilnCMS.Staging.Scrub do
           idempotent_requests_purged: non_neg_integer(),
           backup_locks_purged: non_neg_integer(),
           backup_node_beats_purged: non_neg_integer(),
+          backup_notices_purged: non_neg_integer(),
           oban_jobs_purged: non_neg_integer(),
           admin_provisioned: String.t() | nil
         }
@@ -130,6 +131,10 @@ defmodule KilnCMS.Staging.Scrub do
     # the step jobs this scrub deletes. An empty lock table is a free lock.
     {:backup_locks_purged, KilnCMS.Backups.Lock},
     {:backup_node_beats_purged, KilnCMS.Backups.NodeBeat},
+    # Backup notices (#2487) name production's backup directories and
+    # destinations, with their errors; the staging host's own backups report
+    # their own.
+    {:backup_notices_purged, KilnCMS.Backups.Notice},
     # The security audit log (#2241) holds raw IPs, user agents and email
     # snapshots of the production sign-ins: personal data a clone must not carry.
     {:security_events_purged, KilnCMS.Security.Event},

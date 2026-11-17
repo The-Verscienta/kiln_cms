@@ -565,7 +565,10 @@ defmodule KilnCMS.Backups.RetentionRunTest do
         end)
 
       assert log =~ "Backup retention skipped: couldn't read the backup schedules"
-      assert_received {[:kiln_cms, :backups, :retention, :skipped], _, %{reason: {:policy, _}}}
+
+      assert_received {[:kiln_cms, :backups, :retention, :skipped], _,
+                       %{scope: :local, reason: {:policy, _}}}
+
       assert Enum.sort(left(dir)) == before
       assert holds(dir) == ["db/kiln-#{@older}.hold"]
     end
@@ -788,7 +791,9 @@ defmodule KilnCMS.Backups.RetentionRunTest do
 
       assert log =~ "Backup retention removed 1 file(s), then stopped: it crashed"
       refute log =~ "nothing was deleted"
-      assert_received {:stopped, %{deleted: 1}, %{reason: {:crashed, RuntimeError}}}
+
+      assert_received {:stopped, %{deleted: 1},
+                       %{scope: :local, reason: {:crashed, RuntimeError}}}
 
       assert [%{destinations: %{"local" => %{"status" => "pruned"}}}] =
                stored("20180101-000000").artifacts
