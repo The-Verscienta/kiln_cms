@@ -4,8 +4,14 @@ defmodule KilnCMS.ReleaseIpBlocksTest do
   admin blocks their own network. Lists, or removes one rule or all, as the
   `:operator` system actor through the resource's code interface, and busts the
   site's cache.
+
+  `async: false`: the cache is one named Cachex instance per node (#2839). An
+  async test's request for the default org fills its key from that test's own
+  sandbox, where this module's rules do not exist, so `blocked?/2` can read
+  that `[]` instead of the rule just added. The `IpBlocklist.clear/0` in setup
+  also empties every org's entry on the node under every other test.
   """
-  use KilnCMS.DataCase, async: true
+  use KilnCMS.DataCase, async: false
 
   import ExUnit.CaptureIO
 

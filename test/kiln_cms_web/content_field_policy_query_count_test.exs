@@ -189,7 +189,7 @@ defmodule KilnCMSWeb.ContentFieldPolicyQueryCountTest do
 
     reads = reads(ctx, one.id, root.id)
     # Warm the per-VM caches (default org, key lookups) so neither run pays them.
-    Enum.each(reads, fn {_, read} -> read.() end)
+    QueryCounting.warm_up(fn -> Enum.each(reads, fn {_, read} -> read.() end) end)
     small = Map.new(reads, fn {name, read} -> {name, queries(read)} end)
 
     seed_posts(19, ctx.owner, ctx.dw_key_id)
@@ -208,7 +208,7 @@ defmodule KilnCMSWeb.ContentFieldPolicyQueryCountTest do
     seed_children(root, 20)
 
     reads = reads(ctx, one.id, root.id)
-    Enum.each(reads, fn {_, read} -> read.() end)
+    QueryCounting.warm_up(fn -> Enum.each(reads, fn {_, read} -> read.() end) end)
 
     tier = %{"org_memberships" => 2}
     key = %{"api_keys" => 1, "users" => 1}
