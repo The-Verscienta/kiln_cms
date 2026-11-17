@@ -182,6 +182,14 @@ platform admin is refused here, for the reason in
    time in **Or until (UTC)**, and click **Grant**. The page says, for
    example, "Admin until 2026-11-21 17:00 UTC." **End it now** ends it early.
 
+**An erased account can't be given a platform role** (#3010). On an erased
+account's page, **Save access** and **Grant** fail with "belongs to an
+account that was erased", and nothing changes: a tier or audiences on a
+tombstone would put it back on the rosters erasure took it off. Ending a
+temporary role is refused the same way. Erasure clears the temporary role
+itself, so **End it now** normally isn't shown, and one left on the row
+another way still expires on its own.
+
 A platform admin is an administrator on every site. So when the change makes
 the account a platform admin and it has no second factor, the confirmation
 goes on to say which sites
@@ -1690,6 +1698,12 @@ is "belongs to an account that was erased":
   (`Accounts.grant_membership_temporary_role/3`);
 - saving **Audiences** on its `/editor/accounts/:id` page, which shows that
   message as the error. The panel is still on the page;
+- changing its platform role (**Save access**, `Accounts.manage_user_access/3`,
+  role or audiences), or granting or ending a temporary platform role
+  (**Grant**, **End it now**, `Accounts.grant_user_temporary_role/3`), #3010.
+  Demoting an admin takes the bootstrap lock and then the account's row, the
+  order erasing an admin takes them in, so a demotion racing that admin's
+  erasure waits rather than deadlocking;
 - adding it to a site, as before.
 
 Removing the membership is not refused.

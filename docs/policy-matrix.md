@@ -640,7 +640,13 @@ expires — re-checked at authorization, so a long-lived LiveView or GraphQL
 socket's actor stops authorizing the moment its grant runs out.
 `:manage_access` and `:grant_temporary_role` additionally carry
 `Validations.StandingAdminOnly`: a *temporary* admin passes the policy but cannot
-confer or extend a tier.
+confer or extend a tier. Both also refuse an **erased** account with
+`Errors.AccountErased` (#3010), granting or revoking alike, so a platform admin
+passes the policy and is still refused. `Changes.LockAccount` takes the
+account's row `FOR KEY SHARE`; it is declared resource-wide so it runs after
+`Changes.GuardLastAdmin` on `:manage_access`, which keeps a demotion of an
+admin to the order erasing an admin takes: bootstrap lock, then users row. The `:legacy_audience_accounts` read leaves erased accounts
+out.
 
 Field policy: the `role` field is visible only to **admins or the user
 themselves**; other readers see the record without `role`. `granted_role` and

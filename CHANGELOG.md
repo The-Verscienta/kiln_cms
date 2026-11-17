@@ -81,6 +81,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The boot-time erasure backfill now also demotes the site memberships of accounts erased before this release (its result gains `memberships`). No migration; rolling back is safe.**
   ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#erasure-backfill-memberships-upgrade))
 
+- **The boot-time erasure backfill now also clears what accounts erased before #2514 kept: audiences, push subscriptions, private saved views and notifications (its result gains those four keys). No migration; rolling back is safe.**
+  ([long form](docs/changelog/unreleased.md#erasure-backfill-2514-steps-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -188,6 +191,12 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A payment webhook for an erased member is acknowledged and changes nothing, instead of reviving the canceled membership, and no longer deadlocks with that member's erasure.**
   ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#billing-webhook-erased-account))
+
+- **An erased account can no longer be given a platform role, temporary role or audiences, and `mix kiln.deprecations` and its boot job leave erased accounts out.**
+  ([long form](docs/changelog/unreleased.md#erasure-refuses-platform-role))
+
+- **Export my data now lists the account's site memberships, in any status, with what each grants.**
+  ([long form](docs/changelog/unreleased.md#export-lists-site-memberships))
 
 ### Security
 

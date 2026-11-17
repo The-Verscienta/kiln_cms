@@ -412,13 +412,26 @@ so changing it needs a rebuild. The staging scrub purges the table.
 Any signed-in user can self-export their own data from **`/editor/settings` →
 "Export my data"** — and a member from **`/account` → "Export my data"** — which
 downloads `kiln-account-export.json` (profile, notification preferences, paid
-memberships, and the newsletter subscriptions linked to the account on every
-site, with their status, dates and segment names; no secrets, and none of the
-subscriptions' confirm or unsubscribe tokens). The export is deliberately **cross-organization**: it
+memberships, the newsletter subscriptions linked to the account on every
+site, with their status, dates and segment names, and its site memberships;
+no secrets, and none of the subscriptions' confirm or unsubscribe tokens).
+The export is deliberately **cross-organization**: it
 answers "what do you hold about me" for the whole instance, not just the site the
 request arrived on. Programmatically this is
 `KilnCMS.Accounts.export_user_data/1`, served by
 `KilnCMSWeb.AccountController.export/2` (scoped to `current_user`).
+
+`site_memberships` (#3010) lists the account's membership on each site, in
+any status (`active`, `pending` or `rejected`): a registration waiting for
+approval, or a rejected one that was kept, is data about the person too. Each
+entry has `org_id`, `site` (the site's name), `status`, `role`,
+`granted_role`, `granted_role_expires_at`, `audiences`, `editable_types`,
+`readable_types`, `field_grants`, `field_read_grants`, `inserted_at` and
+`decided_at`, oldest first. A membership's custom role is not in the export
+yet. The memberships are read as the account itself, since its own rows are
+the only ones it may read; if that read fails, the section is `[]` and the
+failure is logged as an error. If the site names can't be read, the rows
+still go out with `site` set to `null`.
 
 ### Erasure (GDPR Art. 17) — anonymization
 
@@ -506,8 +519,10 @@ it as assignee (one assigned before the erasure) still fires its
 `task.assigned` webhook, which is the task's event, not the person's. No
 one can give it a tier back: editing its membership, granting it a temporary
 tier or setting its audiences is refused
-(`KilnCMS.Accounts.Errors.AccountErased`); removing the membership still
-works. A document whose `:user` custom field names the erased person is
+(`KilnCMS.Accounts.Errors.AccountErased`), and so is changing its platform
+role or audiences (`User.:manage_access`) or granting or ending a temporary
+platform role (`User.:grant_temporary_role`, #3010); removing the membership
+still works. A document whose `:user` custom field names the erased person is
 refused with "must be a person on this site" on its next save that changes
 its custom fields, as for someone removed from the site; pick another person
 or clear the field.
@@ -527,12 +542,18 @@ address instead would delete a stranger's row wherever the address was
 reused. To remove such a row, a site admin deletes it on **Newsletter**
 (`/editor/newsletter`) on that site.
 
-Accounts erased by a release before step 14 or step 15 existed still have
-their linked rows, and memberships that still grant a tier, a temporary tier
-or audiences. A background job, `KilnCMS.Accounts.ErasureBackfill`, deletes
-the rows and demotes the memberships the way erasure now does, about 10
-minutes after the first boot of the release that added each step; see
-[Newsletter](newsletter.md#accounts-erased-before-this-release).
+Accounts erased by a release before a step existed still hold what that
+step removes: before #2514, their Web Push subscriptions, their private saved
+views and the notifications addressed to them (steps 11 to 13), and possibly
+audiences on their own row, which step 7 could miss until then; before step 14, their linked newsletter
+rows; before step 15, memberships that still grant a tier, a temporary tier
+or audiences. A background job, `KilnCMS.Accounts.ErasureBackfill`, finishes
+each of those steps the way erasure now does, about 10 minutes after the
+first boot of the release that added it; see
+[Newsletter](newsletter.md#accounts-erased-before-this-release). An erased
+account is also left out of the legacy-audiences report
+(`mix kiln.deprecations`) and its boot job, `LegacyAudiencesWorker`: it is on
+no fallback, and moving it would give it a membership, which is refused.
 
 The account **row is retained** (with no personal data) so authorship links and
 referential integrity in content/version history are preserved. Paid

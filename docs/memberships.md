@@ -398,6 +398,8 @@ fail-closed, never wider. It is the same step the first paid membership and the
 console's audience checkboxes take (below), and `mix kiln.deprecations
 --migrate-audiences` runs it by hand; run that on 0.12 before upgrading and
 there is no gap at all. `mix kiln.deprecations` lists any account left.
+An erased account is neither listed nor moved, whatever its row still holds
+(#3010): it reads nothing gated, and a membership for it would be refused.
 
 The column itself is kept. No access decision reads it, but it is the only
 record of what a legacy account held, and billing still writes the
