@@ -33,7 +33,7 @@ defmodule KilnCMS.Backups.Destination do
 
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, DestinationConfig, RcloneRemote, Redact}
+  alias KilnCMS.Backups.{Artifact, DestinationConfig, RcloneRemote, Redact, RunDestination}
   alias KilnCMS.Backups.Destination.{Local, Rclone, S3}
 
   require Logger
@@ -203,20 +203,9 @@ defmodule KilnCMS.Backups.Destination do
   """
   @spec active() :: {:ok, [entry()]} | {:error, :unreadable}
   def active do
-    with {:ok, stored} <- stored_destinations() do
-      {:ok, List.wrap(env_destination()) ++ stored}
-    end
-  end
-
-  # The enabled rows, by position, read as the backups system actor.
-  # `authorize_with: :error`, so a lost grant is an error, not "no rows".
-  defp stored_destinations do
-    case Backups.list_enabled_backup_destinations(
-           actor: Backups.system(),
-           authorize_with: :error
-         ) do
-      {:ok, rows} ->
-        {:ok, Enum.map(rows, &stored_entry/1)}
+    case configured() do
+      {:ok, entries} ->
+        {:ok, entries}
 
       {:error, error} ->
         # The error's module only: its message inspects the query and the
@@ -228,6 +217,41 @@ defmodule KilnCMS.Backups.Destination do
 
         {:error, :unreadable}
     end
+  end
+
+  @doc """
+  The destinations configured now, as `active/0` lists them, but quiet: a
+  read that fails is `{:error, error}` with the read's own error and nothing
+  is logged, so a caller that asks often (`KilnCMS.Backups.status/0`, #2951)
+  decides how loudly to say it. The stored rows are read as the `:backups`
+  system actor with `authorize_with: :error`, so a lost grant is an error,
+  not "no rows".
+  """
+  @spec configured() :: {:ok, [entry()]} | {:error, term()}
+  def configured do
+    case Backups.list_enabled_backup_destinations(
+           actor: Backups.system(),
+           authorize_with: :error
+         ) do
+      {:ok, rows} -> {:ok, List.wrap(env_destination()) ++ Enum.map(rows, &stored_entry/1)}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  @doc """
+  The keys a run's destination entries are matched against to tell whether
+  that destination is still configured (#2951): every key in `entries`
+  (`configured/0`'s), plus `KilnCMS.Backups.RunDestination.unreadable_key/0`
+  while any of them is a stored destination, since the "unreadable" entry
+  stands for the stored destinations.
+  """
+  @spec configured_keys([entry()]) :: MapSet.t(String.t())
+  def configured_keys(entries) when is_list(entries) do
+    keys = MapSet.new(entries, & &1["key"])
+
+    if Enum.any?(entries, &(&1["source"] == "db")),
+      do: MapSet.put(keys, RunDestination.unreadable_key()),
+      else: keys
   end
 
   defp short_error(%{__struct__: module}), do: module

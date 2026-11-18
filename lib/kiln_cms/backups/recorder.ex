@@ -568,7 +568,9 @@ defmodule KilnCMS.Backups.Recorder do
     * `:none` - no destination (entries marked `skipped` don't count);
     * `:complete` - every destination is `ok`;
     * `:failed` - no destination is `ok` and every one that could be read
-      `failed`;
+      `failed`, or the only entry is the `RunDestination.unreadable_key/0`
+      one (the stored destinations couldn't be read and there was no
+      `BACKUP_RCLONE_REMOTE`: nothing was copied off-site, #2951);
     * `:unknown` - every destination is still `pending`: nothing was
       settled. A running backup's off-site step hasn't reached them yet; a
       finished run like that was closed by a release from before #2220,
@@ -577,8 +579,9 @@ defmodule KilnCMS.Backups.Recorder do
       a Run's `offsite_status`: `finish/1` and `fail/2` leave it nil;
     * `:partial` - anything else: some `ok` and some not, a destination still
       `pending` (or in a status this release doesn't know) beside a settled
-      one, or the `RunDestination.unreadable_key/0` entry, which never counts
-      as complete: the destinations it stands for may not have been sent to.
+      one, or the `RunDestination.unreadable_key/0` entry beside a
+      destination that was reached, which never counts as complete: the
+      destinations it stands for may not have been sent to.
   """
   @spec offsite_outcome([run_destination() | RunDestination.t()]) :: offsite_outcome()
   def offsite_outcome(destinations) when is_list(destinations) do
@@ -589,10 +592,27 @@ defmodule KilnCMS.Backups.Recorder do
 
     cond do
       counted == [] -> :none
+      real == [] -> :failed
       fenced == [] and Enum.all?(statuses, &(&1 == :pending)) -> :unknown
       fenced == [] and Enum.all?(statuses, &(&1 == :ok)) -> :complete
-      real != [] and Enum.all?(statuses, &(&1 == :failed)) -> :failed
+      Enum.all?(statuses, &(&1 == :failed)) -> :failed
       true -> :partial
+    end
+  end
+
+  @doc """
+  Whether the only destination entry that counts (skipped ones left out) is
+  the `RunDestination.unreadable_key/0` one (#2951): the stored destinations
+  couldn't be read and there was no `BACKUP_RCLONE_REMOTE`, so nothing was
+  sent anywhere.
+  """
+  @spec unreadable_only?([run_destination() | RunDestination.t()]) :: boolean()
+  def unreadable_only?(destinations) when is_list(destinations) do
+    unreadable = RunDestination.unreadable_key()
+
+    case Enum.reject(destinations, &(&1.status == :skipped)) do
+      [_ | _] = counted -> Enum.all?(counted, &(&1.key == unreadable))
+      [] -> false
     end
   end
 
@@ -648,15 +668,17 @@ defmodule KilnCMS.Backups.Recorder do
   `offsite_status` is recorded only when it is settled: `:failed` when every
   destination failed, `:none` when there is none. A run that failed before
   its destinations were all tried leaves it nil: there is nothing to say
-  about an off-site copy that never ran to the end.
+  about an off-site copy that never ran to the end. Nor does a run whose
+  only entry is the `RunDestination.unreadable_key/0` one (#2951): that
+  entry is recorded at the start, before anything was tried.
   """
   @spec fail(t(), String.t()) :: t()
   def fail(%__MODULE__{run: nil} = rec, _error), do: rec
 
   def fail(%__MODULE__{} = rec, error) do
     offsite =
-      case offsite_outcome(rec.destinations) do
-        settled when settled in [:failed, :none] -> settled
+      case {unreadable_only?(rec.destinations), offsite_outcome(rec.destinations)} do
+        {false, settled} when settled in [:failed, :none] -> settled
         _unsettled -> nil
       end
 

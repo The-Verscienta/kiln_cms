@@ -1111,6 +1111,11 @@ msgstr ""
 msgid "%{name} declares a kiln_plugin requirement that can't be read: %{requirement}."
 msgstr ""
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} failed"
+msgstr ""
+
 #: lib/kiln_cms/security/posture/checks/plugin_health.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} has had no release on Hex since %{date}."
@@ -14982,6 +14987,11 @@ msgstr ""
 msgid "No minimum"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "No off-site destination is configured now: new backups stay in BACKUP_DIR only."
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_destinations_live.ex
 #, elixir-autogen, elixir-format
 msgid "No off-site destination: backups stay on this server only. A copy somewhere else is what lets you recover when this server is lost."
@@ -15479,6 +15489,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not now"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not off-site"
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
@@ -23777,6 +23792,11 @@ msgstr ""
 msgid "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed"
 msgstr ""
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "The last backup was not copied off-site: %{reasons}"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
 msgid "The last save was at %{time}."
@@ -24563,6 +24583,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "This backup recorded no outcome for its off-site destinations."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "This backup succeeded but was copied to no off-site destination."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/block_ops.ex
@@ -28881,6 +28906,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "couldn't have its metadata removed, so it wasn't stored"
+msgstr ""
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "couldn't read the backup destinations, and BACKUP_RCLONE_REMOTE was not set"
 msgstr ""
 
 #: lib/kiln_cms_web/live/site_storage_live.ex

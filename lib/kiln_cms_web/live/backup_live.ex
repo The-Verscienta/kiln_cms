@@ -114,10 +114,15 @@ defmodule KilnCMSWeb.BackupLive do
   recorded for it (so it outlives the destination; one the run has no
   record of reads "Removed destination"), with its error as the chip's
   tooltip (and, for one failed at once by an error no retry fixes, that it
-  was, #3084), and the row is badged "Partly off-site", or "Off-site unknown"
-  when a succeeded run recorded no outcome for its destinations. The
-  destinations themselves are the Destinations tab
-  (`KilnCMSWeb.BackupDestinationsLive`).
+  was, #3084), and the row is badged "Partly off-site", "Not off-site" when a
+  succeeded run reached no destination (#2951), or "Off-site unknown" when a
+  succeeded run recorded no outcome for its destinations. The destinations
+  themselves are the Destinations tab (`KilnCMSWeb.BackupDestinationsLive`).
+
+  A failed destination that is no longer configured doesn't hold the alarm
+  up (#2951, `Backups.status/0`): once none of the last backup's failed
+  destinations remains, the off-site line goes, and with no destination
+  configured at all a neutral line says new backups stay in `BACKUP_DIR`.
 
   ## Retention notices (#2487)
 
@@ -978,6 +983,18 @@ defmodule KilnCMSWeb.BackupLive do
               >
                 {offsite_headline(@status.offsite)}
               </p>
+              <%!-- #2951: the last backup's failed destinations are all gone,
+                    and nothing is configured in their place. Not an alarm:
+                    the admin chose it, but new backups stay on this disk. --%>
+              <p
+                :if={@status.offsite.configured? == false}
+                id="backup-offsite-unconfigured"
+                class="mt-1 text-sm text-base-content/70"
+              >
+                {gettext(
+                  "No off-site destination is configured now: new backups stay in BACKUP_DIR only."
+                )}
+              </p>
               <%!-- Retention skipped or stopped part-way (#2487): the backup
                     succeeded, but old backups are piling up. --%>
               <p
@@ -1607,6 +1624,14 @@ defmodule KilnCMSWeb.BackupLive do
               {gettext("Partly off-site")}
             </span>
             <span
+              :if={run_offsite(run) == :failed}
+              data-role="offsite-failed"
+              title={gettext("This backup succeeded but was copied to no off-site destination.")}
+              class="rounded bg-error/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-error-ink"
+            >
+              {gettext("Not off-site")}
+            </span>
+            <span
               :if={run_offsite(run) == :unknown}
               data-role="offsite-unknown"
               title={gettext("This backup recorded no outcome for its off-site destinations.")}
@@ -1966,17 +1991,18 @@ defmodule KilnCMSWeb.BackupLive do
 
   defp destination_label(other, _run), do: run_destination_label(other, nil)
 
-  # The run's off-site outcome as History badges it (#2220): `:partial`, or
-  # `:unknown` for a succeeded run that had destinations and recorded no
-  # outcome it knows; anything else gets no badge.
-  defp run_offsite(%{offsite_status: :partial}), do: :partial
-
-  defp run_offsite(%{status: :succeeded, destinations: [_ | _] = destinations} = run) do
-    counted? = Enum.any?(destinations, &(&1.status != :skipped))
-
-    if counted? and run.offsite_status not in [:none, :complete, :failed],
-      do: :unknown,
-      else: nil
+  # The run's off-site outcome as History badges it (#2220), derived from its
+  # destinations (`Backups.run_offsite_state/1`, #2951): `:partial`; `:failed`
+  # for a succeeded run that reached no destination; or `:unknown` for a
+  # succeeded run that had destinations and recorded no outcome it knows;
+  # anything else gets no badge.
+  defp run_offsite(%{destinations: [_ | _]} = run) do
+    case {Backups.run_offsite_state(run), run.status} do
+      {:partial, _status} -> :partial
+      {:failed, :succeeded} -> :failed
+      {:unknown, :succeeded} -> :unknown
+      _other -> nil
+    end
   end
 
   defp run_offsite(_run), do: nil
@@ -2018,9 +2044,11 @@ defmodule KilnCMSWeb.BackupLive do
   # doesn't have is not a deployment that is fine.
   # Retention skipped or stopped (#2487) too: the backup is fine today, and
   # the disk fills up behind it.
+  # The off-site alarm is exactly when there is an off-site line (#2951): a
+  # failed destination removed since doesn't hold it up.
   defp alarming?(status),
     do:
-      status.stale? or status.failed? or match?(%{offsite: %{state: :partial}}, status) or
+      status.stale? or status.failed? or offsite_headline(status.offsite) != nil or
         status.retention != []
 
   # One component's line (#2219).

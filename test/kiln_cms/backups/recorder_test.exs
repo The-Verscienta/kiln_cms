@@ -27,6 +27,9 @@ defmodule KilnCMS.Backups.RecorderTest do
 
   defp entry(key, status), do: %{key: key, status: status}
 
+  defp unreadable_entry,
+    do: %{key: RunDestination.unreadable_key(), status: :failed, error: "couldn't read"}
+
   describe "put_run_destination/3" do
     test "appends a new key as pending, and upserts an existing one" do
       rec = %Recorder{}
@@ -106,9 +109,22 @@ defmodule KilnCMS.Backups.RecorderTest do
       unreadable = entry(RunDestination.unreadable_key(), :failed)
 
       assert Recorder.offsite_outcome([entry("a", :ok), unreadable]) == :partial
-      assert Recorder.offsite_outcome([unreadable]) == :partial
       # Every destination that could be read failed: nothing was reached.
       assert Recorder.offsite_outcome([entry("a", :failed), unreadable]) == :failed
+    end
+
+    # #2951: no `BACKUP_RCLONE_REMOTE` and an unreadable table reached
+    # nothing at all; it is never "reached 0 of 1".
+    test "the unreadable entry alone is failed, skipped entries beside it or not" do
+      unreadable = entry(RunDestination.unreadable_key(), :failed)
+
+      assert Recorder.offsite_outcome([unreadable]) == :failed
+      assert Recorder.offsite_outcome([unreadable, entry("a", :skipped)]) == :failed
+      assert Recorder.unreadable_only?([unreadable])
+      assert Recorder.unreadable_only?([unreadable, entry("a", :skipped)])
+      refute Recorder.unreadable_only?([unreadable, entry("a", :failed)])
+      refute Recorder.unreadable_only?([entry("a", :skipped)])
+      refute Recorder.unreadable_only?([])
     end
 
     test "takes the loaded embedded structs too" do
@@ -209,6 +225,18 @@ defmodule KilnCMS.Backups.RecorderTest do
         |> Recorder.fail("off-site copy failed")
 
       assert %{status: :failed, offsite_status: :failed} = rec.run
+    end
+
+    test "finish with only the unreadable entry is failed, and still succeeds (#2951)" do
+      {rec, _stamp, _chain} = open!([unreadable_entry()])
+      assert %{status: :succeeded, offsite_status: :failed} = Recorder.finish(rec).run
+    end
+
+    # The unreadable entry is recorded at the start, before anything was
+    # tried: a run that failed with only it says nothing about off-site.
+    test "fail with only the unreadable entry leaves it nil (#2951)" do
+      {rec, _stamp, _chain} = open!([unreadable_entry()])
+      assert %{status: :failed, offsite_status: nil} = Recorder.fail(rec, "dump failed").run
     end
 
     test "fail before the destinations settled leaves it nil" do

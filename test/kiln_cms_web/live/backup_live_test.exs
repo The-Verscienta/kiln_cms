@@ -3081,8 +3081,10 @@ defmodule KilnCMSWeb.BackupLiveTest do
   # backup reached only some of them, and the alarm says so on both panels.
   describe "off-site destinations (#2220)" do
     @env_key "rclone:offsite:kiln"
-    @nas "dest:6c1f6a52-6a44-4d3e-9b39-0b1f8c1a7e11"
-    @bucket "dest:0b6d9f0e-2f43-4c1a-8f5e-3f6b6e0d9a22"
+    @nas_id "6c1f6a52-6a44-4d3e-9b39-0b1f8c1a7e11"
+    @bucket_id "0b6d9f0e-2f43-4c1a-8f5e-3f6b6e0d9a22"
+    @nas "dest:" <> @nas_id
+    @bucket "dest:" <> @bucket_id
     @gone "dest:9a1e2c3d-4b5f-4a6b-8c7d-0e1f2a3b4c5d"
 
     # An in-app run finished `hours` ago: its artifact's per-destination
@@ -3116,7 +3118,44 @@ defmodule KilnCMSWeb.BackupLiveTest do
       )
     end
 
+    # The destinations `partial_run!/0` names, configured now (#2951: a
+    # failed destination that is no longer configured raises no alarm):
+    # `BACKUP_RCLONE_REMOTE` and the stored NAS and Bucket.
+    defp configure_destinations! do
+      Application.put_env(
+        :kiln_cms,
+        Backups,
+        Keyword.put(Application.get_env(:kiln_cms, Backups), :rclone_remote, "offsite:kiln")
+      )
+
+      for {id, name, position} <- [{@nas_id, "NAS", 1}, {@bucket_id, "Bucket", 2}], into: %{} do
+        row =
+          Ash.Seed.seed!(Backups.DestinationConfig, %{
+            id: id,
+            name: name,
+            kind: "local",
+            settings: %{},
+            enabled: true,
+            position: position
+          })
+
+        {name, row}
+      end
+    end
+
+    defp unset_remote! do
+      Application.put_env(
+        :kiln_cms,
+        Backups,
+        Keyword.put(Application.get_env(:kiln_cms, Backups), :rclone_remote, nil)
+      )
+    end
+
+    defp remove_destination!(row), do: Ash.Seed.update!(row, %{enabled: false})
+
     defp partial_run! do
+      configure_destinations!()
+
       offsite_run!(
         %{
           "local" => %{"status" => "ok"},
@@ -3345,6 +3384,137 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       refute html =~ "overview-backup-warning"
       refute html =~ "off-site destinations"
+    end
+  end
+
+  # #2951: the off-site alarm says what can still be fixed, on both panels.
+  # A failed destination removed since raises nothing; a backup that reached
+  # no destination at all (the table unreadable, no env remote) says so.
+  describe "off-site status edge cases (#2951)" do
+    @not_copied "The last backup was not copied off-site: couldn't read the backup " <>
+                  "destinations, and BACKUP_RCLONE_REMOTE was not set"
+
+    defp unreadable_run!(stored) do
+      offsite_run!(
+        %{"local" => %{"status" => "ok"}},
+        [
+          %{
+            key: Backups.RunDestination.unreadable_key(),
+            label: "Stored destinations",
+            status: :failed,
+            error: "couldn't read the backup destinations; this backup was not sent to them"
+          }
+        ],
+        stored
+      )
+    end
+
+    defp overview(conn),
+      do: conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview") |> elem(1)
+
+    test "the failed destination still configured keeps the alarm on both panels", %{
+      conn: conn
+    } do
+      partial_run!()
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "section.border-error\\/30 #backup-headline-offsite",
+               "Bucket failed"
+             )
+
+      refute has_element?(lv, "#backup-offsite-unconfigured")
+
+      assert has_element?(
+               overview(build_conn()),
+               "#overview-backup-warning [data-role=backup-headline]",
+               "Bucket failed"
+             )
+    end
+
+    test "the failed destination removed while the reached ones remain: no alarm", %{
+      conn: conn
+    } do
+      run = partial_run!()
+      remove_destination!(Backups.get_backup_destination!(@bucket_id, actor: Backups.system()))
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      refute has_element?(lv, "#backup-headline-offsite")
+      refute has_element?(lv, "section.border-error\\/30")
+      refute has_element?(lv, "#backup-offsite-unconfigured")
+      # History still tells the run as it was.
+      assert has_element?(lv, "#backup-run-#{run.id} [data-role=offsite-partial]")
+
+      refute has_element?(overview(build_conn()), "#overview-backup-warning")
+    end
+
+    test "every destination removed: no alarm, and a neutral line says so", %{conn: conn} do
+      partial_run!()
+
+      for id <- [@nas_id, @bucket_id],
+          do: remove_destination!(Backups.get_backup_destination!(id, actor: Backups.system()))
+
+      unset_remote!()
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      refute has_element?(lv, "#backup-headline-offsite")
+      refute has_element?(lv, "section.border-error\\/30")
+
+      assert has_element?(
+               lv,
+               "#backup-offsite-unconfigured",
+               "No off-site destination is configured now: new backups stay in BACKUP_DIR only."
+             )
+
+      refute has_element?(overview(build_conn()), "#overview-backup-warning")
+    end
+
+    test "unreadable with no env remote: succeeded, not off-site, in the alarm tone", %{
+      conn: conn
+    } do
+      configure_destinations!()
+      unset_remote!()
+      run = unreadable_run!(:failed)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(lv, "section.border-error\\/30 #backup-headline-offsite", @not_copied)
+      refute render(lv) =~ "reached 0 of 1"
+
+      row = "#backup-run-#{run.id}"
+      assert has_element?(lv, "#{row} [data-role=offsite-failed]", "Not off-site")
+      refute has_element?(lv, "#{row} [data-role=offsite-partial]")
+
+      assert has_element?(
+               overview(build_conn()),
+               "#overview-backup-warning [data-role=backup-headline]",
+               @not_copied
+             )
+    end
+
+    # Critic change 11: a release before #2951 stored this run as partial.
+    # It reads as failed off-site without being rewritten.
+    test "an old run stored partial with only the unreadable entry reads not off-site", %{
+      conn: conn
+    } do
+      configure_destinations!()
+      unset_remote!()
+      run = unreadable_run!(:partial)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(lv, "#backup-headline-offsite", @not_copied)
+      refute render(lv) =~ "reached 0 of 1"
+      assert has_element?(lv, "#backup-run-#{run.id} [data-role=offsite-failed]", "Not off-site")
+      refute has_element?(lv, "#backup-run-#{run.id} [data-role=offsite-partial]")
+
+      overview = overview(build_conn())
+      assert has_element?(overview, "#overview-backup-warning", @not_copied)
+      refute render(overview) =~ "reached 0 of 1"
     end
   end
 

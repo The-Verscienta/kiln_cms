@@ -4086,6 +4086,18 @@ destination (its error and its **Test** button say what is wrong), then
 **Back up now** or wait for the next backup, which tries every destination
 again. The alarm clears when an in-app backup reaches all its destinations.
 
+It also clears once none of the failed destinations is configured any more:
+a destination you removed or disabled since, or a `BACKUP_RCLONE_REMOTE`
+you unset, is one nobody can fix, so it no longer holds the alarm up
+(History still shows the run as it was). Another failed destination that
+is still configured keeps it. With no off-site destination configured at
+all, the Backups page says instead, without the alarm, "No off-site
+destination is configured now: new backups stay in BACKUP_DIR only." When
+the destinations can't be read for this check, the alarm stays as it is,
+and Kiln emits `[:kiln_cms, :backups, :status, :destinations_unreadable]`
+(metadata `error`, the error's module), with a warning logged at most once
+every 15 minutes.
+
 A backup that reached **none** of its destinations fails, as a failed
 `BACKUP_RCLONE_REMOTE` copy always did, with "Off-site copy FAILED to every
 destination (2): NAS: …; offsite-b2: …" naming each one, and it can be
@@ -4101,6 +4113,19 @@ Two other badges and states:
   `BACKUP_RCLONE_REMOTE` alone, if it is set, and records "Couldn't read the
   backup destinations; this backup is sent only to BACKUP_RCLONE_REMOTE".
   It reads partly off-site, never complete, whatever the env remote did.
+  With no `BACKUP_RCLONE_REMOTE`, nothing was copied off-site: the backup
+  still **succeeds**, since its local files are good, but its off-site
+  outcome is failed. History badges it **Not off-site**; the Backups page
+  and the Home strip say "The last backup was not copied off-site:
+  couldn't read the backup destinations, and BACKUP_RCLONE_REMOTE was not
+  set" in the alarm's red; and the run's log says "Not copied off-site:
+  couldn't read the backup destinations, and BACKUP_RCLONE_REMOTE is not
+  set; this backup is only in BACKUP_DIR", also logged as an error on the
+  server, with the `[:kiln_cms, :backups, :offsite, :failed]` telemetry
+  event (metadata `stamp`, `chain`, `reason: :destinations_unreadable`).
+  A run an earlier release recorded as partly off-site this way ("reached 0
+  of 1") reads the same. The alarm counts while any stored destination is
+  enabled.
 
 ### Retention on a destination
 

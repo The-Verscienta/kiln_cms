@@ -20,11 +20,14 @@ defmodule KilnCMS.Backups.Steps do
   unverified" below for what each copy checks). A destination that fails on
   the step's last attempt, or in a way no retry fixes, is recorded failed and
   the chain moves on. Only when the last one fails and none was reached does
-  the backup fail. `finish` closes the run with the `offsite_status` the
-  destinations add up to (`KilnCMS.Backups.Recorder.offsite_outcome/1`); a
-  backup that reached some but not all succeeds, **partly off-site**, with an
-  error line on the run and a `[:kiln_cms, :backups, :offsite, :partial]`
-  telemetry event. With the env destination alone every command, log line,
+  the backup fail. A backup with no destination but the failed "unreadable"
+  entry (no `BACKUP_RCLONE_REMOTE`) succeeds with `offsite_status: :failed`,
+  an error line saying it is only in `BACKUP_DIR` and a
+  `[:kiln_cms, :backups, :offsite, :failed]` telemetry event (#2951).
+  `finish` closes the run with the `offsite_status` the destinations add up
+  to (`KilnCMS.Backups.Recorder.offsite_outcome/1`); a backup that reached
+  some but not all succeeds, **partly off-site**, with an error line on the
+  run and a `[:kiln_cms, :backups, :offsite, :partial]` telemetry event. With the env destination alone every command, log line,
   key and error reads as it did before destinations existed.
 
   ## Which components (#2219)
@@ -958,6 +961,7 @@ defmodule KilnCMS.Backups.Steps do
     rec
     |> settle_unsent(Enum.map(rec.destinations, & &1.key))
     |> note_partial(stamp, chain)
+    |> note_not_offsite(stamp, chain)
     |> Recorder.log(:info, "done", "Backup complete (finished after an interruption)")
     |> Recorder.finish()
   end
@@ -2826,7 +2830,7 @@ defmodule KilnCMS.Backups.Steps do
     # The env remote, redacted, only when it was reached (`destination_ok/4`);
     # a raw remote only from a chain an older release ran this far.
     offsite = state["offsite"]
-    rec = note_partial(rec, ctx.stamp, lease.chain)
+    rec = rec |> note_partial(ctx.stamp, lease.chain) |> note_not_offsite(ctx.stamp, lease.chain)
 
     # The manifest FIRST: it has no database dependency, and cron-era
     # consumers read it. The run is closed after. On a resume this
@@ -2929,6 +2933,30 @@ defmodule KilnCMS.Backups.Steps do
         [:kiln_cms, :backups, :offsite, :partial],
         %{count: 1, reached: length(reached), total: length(counted)},
         %{stamp: stamp, chain: chain, missed: Enum.map(counted -- reached, & &1.key)}
+      )
+
+      Recorder.log(rec, :error, "offsite", message)
+    else
+      rec
+    end
+  end
+
+  # Not copied off-site at all (#2951): the stored destinations couldn't be
+  # read and `BACKUP_RCLONE_REMOTE` is unset, so the run's only entry is the
+  # unreadable one. The backup succeeded, off-site failed, and every surface
+  # says so (never "reached 0 of 1").
+  defp note_not_offsite(rec, stamp, chain) do
+    if Recorder.unreadable_only?(rec.destinations) do
+      message =
+        "Not copied off-site: couldn't read the backup destinations, and " <>
+          "BACKUP_RCLONE_REMOTE is not set; this backup is only in BACKUP_DIR"
+
+      Logger.error("Backup #{stamp} " <> message)
+
+      :telemetry.execute(
+        [:kiln_cms, :backups, :offsite, :failed],
+        %{count: 1},
+        %{stamp: stamp, chain: chain, reason: :destinations_unreadable}
       )
 
       Recorder.log(rec, :error, "offsite", message)

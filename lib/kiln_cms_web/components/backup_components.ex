@@ -58,11 +58,27 @@ defmodule KilnCMSWeb.BackupComponents do
     }
 
   @doc """
-  The alarm line for a backup that reached only some of its off-site
-  destinations (#2220): `Backups.status/0`'s `offsite` when its state is
-  `:partial`, else nil. The Backups page and the home strip both say it.
+  The off-site alarm line for `Backups.status/0`'s `offsite`, or nil when
+  there is no alarm. The Backups page and the home strip both say it.
+
+    * a backup that reached only some of its off-site destinations (#2220):
+      how many, and which failed;
+    * a backup that succeeded but was copied to no destination at all (the
+      stored destinations couldn't be read and `BACKUP_RCLONE_REMOTE` was
+      unset, #2951): why.
+
+  Only the failed destinations still configured count (`failed`, #2951):
+  once none is left, there is no line.
   """
   @spec offsite_headline(map() | nil) :: String.t() | nil
+  def offsite_headline(%{failed: []}), do: nil
+
+  def offsite_headline(%{state: :failed, succeeded?: true, failed: failed}) do
+    gettext("The last backup was not copied off-site: %{reasons}",
+      reasons: Enum.map_join(failed, "; ", &not_copied_reason/1)
+    )
+  end
+
   def offsite_headline(%{state: :partial, ok: ok, total: total, failed: failed}) do
     gettext(
       "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed",
@@ -73,6 +89,12 @@ defmodule KilnCMSWeb.BackupComponents do
   end
 
   def offsite_headline(_offsite), do: nil
+
+  defp not_copied_reason(%{key: key, label: label}) do
+    if key == KilnCMS.Backups.RunDestination.unreadable_key(),
+      do: gettext("couldn't read the backup destinations, and BACKUP_RCLONE_REMOTE was not set"),
+      else: gettext("%{name} failed", name: label || key)
+  end
 
   @doc """
   The alarm lines for retention that was skipped or stopped part-way (#2487),
