@@ -646,6 +646,48 @@ defmodule KilnCMS.Backups.Recorder do
     do: write(rec, "progress", &Backups.record_run_progress/3, %{dir_id: rec.dir_id})
 
   @doc """
+  The recorder a re-send (#2949) works with, seeded from `run` as its
+  `:begin_resend` returned it (already on the re-send's chain).
+  """
+  @spec from_begun(KilnCMS.Backups.Run.t()) :: t()
+  def from_begun(%KilnCMS.Backups.Run{chain_id: chain_id} = run), do: seeded(run, chain_id)
+
+  @doc """
+  Persist what a re-send (#2949) has done so far, through the run's
+  `:record_resend` action: the artifacts' per-file outcomes, the log, the
+  destination entries and the `offsite_status` they now add up to
+  (`offsite_outcome/1`; the stored one is kept while that is `:unknown`).
+  Never the status: the run stays `succeeded`.
+  """
+  @spec resend_progress(t()) :: t()
+  def resend_progress(%__MODULE__{run: nil} = rec), do: rec
+
+  def resend_progress(%__MODULE__{} = rec) do
+    params = %{artifacts: rec.artifacts, log: rec.log, destinations: rec.destinations}
+
+    params =
+      case offsite_outcome(rec.destinations) do
+        :unknown -> params
+        settled -> Map.put(params, :offsite_status, settled)
+      end
+
+    case safely("resend", fn ->
+           Backups.record_run_resend(rec.run, params, actor: Backups.system())
+         end) do
+      {:ok, run} -> %{rec | run: run}
+      _ -> rec
+    end
+  end
+
+  @doc """
+  Drop the Run-level entry `key` (#2949): the `"unreadable"` entry a re-send
+  replaces with the stored destinations it stood for (owner decision O3).
+  """
+  @spec drop_run_destination(t(), String.t()) :: t()
+  def drop_run_destination(%__MODULE__{} = rec, key) when is_binary(key),
+    do: %{rec | destinations: Enum.reject(rec.destinations, &(&1.key == key))}
+
+  @doc """
   Close the run as succeeded, with the `offsite_status` its destinations add
   up to (`offsite_outcome/1`; nil while it is `:unknown`).
   """

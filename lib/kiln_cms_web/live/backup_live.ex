@@ -119,6 +119,15 @@ defmodule KilnCMSWeb.BackupLive do
   succeeded run recorded no outcome for its destinations. The destinations
   themselves are the Destinations tab (`KilnCMSWeb.BackupDestinationsLive`).
 
+  A partly off-site (or not off-site) run whose files are on this server's
+  disk, with a destination it missed still configured, gets a **Re-send**
+  button (#2949): `Backups.resend_offsite/2` with that run's stamp, read
+  from the server's record of the run as Resume does. Its confirmation
+  names the destinations, and says when retention there may remove an old
+  run again. While it runs the row is badged "Re-sending…" and the strip
+  says which destination it is on, with its own **Cancel**
+  (`Backups.cancel_run_resend/2`); both handlers re-check `platform_admin?`.
+
   A failed destination that is no longer configured doesn't hold the alarm
   up (#2951, `Backups.status/0`): once none of the last backup's failed
   destinations remains, the off-site line goes, and with no destination
@@ -157,8 +166,8 @@ defmodule KilnCMSWeb.BackupLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{DiskView, Importer, Manifest, Markers}
-  alias KilnCMS.Backups.Run.Changes.CancelResume
+  alias KilnCMS.Backups.{Destination, DiskView, Importer, Manifest, Markers, Resend}
+  alias KilnCMS.Backups.Run.Changes.{CancelResend, CancelResume}
   alias KilnCMSWeb.Params
 
   import KilnCMSWeb.BackupComponents,
@@ -199,6 +208,7 @@ defmodule KilnCMSWeb.BackupLive do
        |> assign(:markers, Markers.empty())
        |> assign(:presence, %{})
        |> assign(:resumable, %{})
+       |> assign(:resend_offers, %{})
        |> assign(:disk, @idle_disk)
        |> assign(:status, nil)
        |> assign(:status_loading?, false)
@@ -331,6 +341,31 @@ defmodule KilnCMSWeb.BackupLive do
 
   def handle_event("cancel_resume", _params, socket), do: {:noreply, socket}
 
+  # Re-send a partly off-site backup to the destinations it missed (#2949):
+  # as Resume, by id, and the stamp is the server's own record of that run.
+  # `Backups.resend_offsite/2`'s policy and checks decide.
+  def handle_event("resend_run", %{"id" => id}, socket) when is_binary(id) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      resend_backup(socket, id)
+    else
+      deny(socket)
+    end
+  end
+
+  def handle_event("resend_run", _params, socket), do: {:noreply, socket}
+
+  # Cancel a running re-send (#2949): by id, and `Backups.cancel_run_resend/2`'s
+  # policy and guard decide.
+  def handle_event("cancel_resend", %{"id" => id}, socket) when is_binary(id) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      cancel_resend(socket, id)
+    else
+      deny(socket)
+    end
+  end
+
+  def handle_event("cancel_resend", _params, socket), do: {:noreply, socket}
+
   # Through the lock (#2218), as the admin, so the policy decides too: a
   # backup while one runs queues behind it, or folds into a queued fresh one;
   # a queued resume refuses it (#2540).
@@ -453,6 +488,110 @@ defmodule KilnCMSWeb.BackupLive do
       _ -> false
     end
   end
+
+  defp resend_backup(socket, id) do
+    user = socket.assigns.current_user
+
+    with {:ok, %{stamp: stamp}} <- Backups.get_run(id, actor: user),
+         {:ok, %{status: :started} = started} <- Backups.resend_offsite(stamp, user) do
+      {:noreply, watch(socket, resend_started_message(started))}
+    else
+      {:error, reason} ->
+        {:noreply, socket |> put_flash(:error, resend_message(reason)) |> refresh()}
+    end
+  end
+
+  defp resend_started_message(%{skipped: [_ | _] = skipped}),
+    do:
+      gettext(
+        "Re-send started — this page updates when it finishes. Skipped, because they were removed or disabled since: %{names}.",
+        names: Enum.join(skipped, ", ")
+      )
+
+  defp resend_started_message(_started),
+    do: gettext("Re-send started — this page updates when it finishes.")
+
+  @doc false
+  # Public for the tests of refusals a LiveView test can't easily stage.
+  def resend_message(:busy),
+    do:
+      gettext(
+        "A backup or another re-send is running. Re-send this backup once it finishes: a re-send is never queued."
+      )
+
+  def resend_message(:in_flight), do: gettext("This backup is being re-sent right now.")
+
+  def resend_message(reason) when reason in [:pruned, :unverified, :local_files_missing],
+    do:
+      gettext(
+        "That backup can't be re-sent: its files in the backup directory are gone, pruned or no longer verified."
+      )
+
+  def resend_message(:nothing_to_send),
+    do:
+      gettext(
+        "Every destination this backup missed was removed or disabled since, so there is nowhere to re-send it."
+      )
+
+  def resend_message({:canceled_recently, seconds}),
+    do:
+      ngettext(
+        "This backup's re-send was canceled moments ago. Re-send it again in %{count} second: a step on a server that lost contact with the database may still be stopping.",
+        "This backup's re-send was canceled moments ago. Re-send it again in %{count} seconds: a step on a server that lost contact with the database may still be stopping.",
+        seconds
+      )
+
+  def resend_message(:forbidden), do: gettext("Only a platform admin can re-send a backup.")
+
+  def resend_message(:destinations_unreadable),
+    do: gettext("Couldn't read the backup destinations. Try again in a moment.")
+
+  def resend_message(:disabled), do: unavailable_message(:disabled)
+
+  def resend_message(_reason), do: gettext("That backup can't be re-sent.")
+
+  defp cancel_resend(socket, id) do
+    user = socket.assigns.current_user
+
+    with {:ok, run} <- Backups.get_run(id, actor: user),
+         {:ok, _canceled} <-
+           Backups.cancel_run_resend(run,
+             actor: user,
+             # The client the `backup_canceled` event is logged with (#2241).
+             context: socket.assigns[:security_context] || %{}
+           ) do
+      {:noreply,
+       socket
+       |> put_flash(:info, gettext("Re-send canceled. What it already sent stays recorded."))
+       |> refresh()}
+    else
+      {:error, error} ->
+        {:noreply, socket |> put_flash(:error, cancel_resend_message(error)) |> refresh()}
+    end
+  end
+
+  @doc false
+  # Public for the test of a late Cancel, which a LiveView test can't time.
+  def cancel_resend_message(%Ash.Error.Forbidden{}),
+    do: gettext("Only a platform admin can cancel a backup.")
+
+  def cancel_resend_message(%Ash.Error.Invalid{errors: errors}) do
+    cond do
+      Enum.any?(errors, &(Exception.message(&1) =~ CancelResend.finishing())) ->
+        gettext("Too late to cancel: the re-send is finishing.")
+
+      Enum.any?(errors, &(Exception.message(&1) =~ CancelResend.not_resending())) ->
+        gettext("That backup isn't being re-sent any more.")
+
+      Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1)) ->
+        gettext("The re-send changed meanwhile. Try again.")
+
+      true ->
+        gettext("That re-send can't be canceled.")
+    end
+  end
+
+  def cancel_resend_message(_error), do: gettext("That re-send can't be canceled.")
 
   defp resume_backup(socket, id) do
     with {:ok, %{stamp: stamp}} <- Backups.get_run(id, actor: socket.assigns.current_user),
@@ -721,6 +860,7 @@ defmodule KilnCMSWeb.BackupLive do
     socket
     |> assign(:in_flight, in_flight && Map.put(in_flight, :resume_waiting?, waiting?))
     |> assign(:in_flight_run_id, if(not waiting? and running?(run), do: run.id))
+    |> assign(:in_flight_resend_run_id, resend_cancel_id(in_flight, run, user))
     |> assign(
       :in_flight_resume_run_id,
       if(waiting? and Backups.can_cancel_run_resume?(user, run), do: run.id)
@@ -729,6 +869,18 @@ defmodule KilnCMSWeb.BackupLive do
 
   defp running?(%{status: :running}), do: true
   defp running?(_run), do: false
+
+  # A re-send of `run` holds the lock (#2949): its own Cancel, until it is
+  # finishing, when the policy agrees.
+  defp resend_cancel_id(%{step: :resend, stamp: stamp, phase: phase}, %{stamp: stamp} = run, user)
+       when phase != :finishing do
+    if Backups.can_cancel_run_resend?(user, run), do: run.id
+  end
+
+  defp resend_cancel_id(_in_flight, _run, _user), do: nil
+
+  defp resending?(%{step: :resend, stamp: stamp}, %{stamp: stamp}), do: true
+  defp resending?(_in_flight, _run), do: false
 
   # The lock holds a resume of `run` at its start step, under a chain the run
   # hasn't moved to yet: it hasn't re-opened the run (#2816).
@@ -758,6 +910,7 @@ defmodule KilnCMSWeb.BackupLive do
         socket
         |> assign(:runs, Enum.map(result.results, &{&1, cancelable?(&1, user)}))
         |> assign(:run_count, result.count || 0)
+        |> assign(:resend_offers, resend_offers(result.results, user))
         |> check_disk()
 
       {:error, _error} ->
@@ -799,6 +952,30 @@ defmodule KilnCMSWeb.BackupLive do
   defp disk_view, do: Keyword.get(live_config(), :disk_view, DiskView)
   defp status_reader, do: Keyword.get(live_config(), :status_reader, &Backups.status/0)
   defp live_config, do: Application.get_env(:kiln_cms, __MODULE__, [])
+
+  # Which rows of the page offer Re-send (#2949), and to where: a run
+  # `Resend.offered/1` accepts, that the policy lets this admin re-send, with
+  # at least one destination it missed still configured. The destinations
+  # are read once per page, as the `:backups` system actor as
+  # `Backups.status/0` reads them, and only when some row needs them. A
+  # read that fails offers none. Whether its files are on this server's disk
+  # is the disk read's to say (`resendable?/4`).
+  defp resend_offers(runs, user) do
+    with [_ | _] = offered <- Enum.filter(runs, &(Resend.offered(&1) == :ok)),
+         {:ok, configured} <- Destination.configured() do
+      for run <- offered,
+          %{targets: [_ | _] = targets} <- [Resend.targets(run, configured)],
+          Backups.can_request_backup_resend?(user, run.stamp),
+          into: %{},
+          do: {run.id, resend_offer(run, targets)}
+    else
+      _none_or_unreadable -> %{}
+    end
+  end
+
+  defp resend_offer(run, targets) do
+    %{targets: Enum.map(targets, & &1["label"]), pruned_soon: Resend.pruned_soon(run, targets)}
+  end
 
   # A running in-app run, and the policy agrees. Whether it is past the point
   # of no return is the action's to say when clicked.
@@ -929,6 +1106,7 @@ defmodule KilnCMSWeb.BackupLive do
           in_flight={@in_flight}
           run_id={@in_flight_run_id}
           resume_run_id={@in_flight_resume_run_id}
+          resend_run_id={@in_flight_resend_run_id}
         />
 
         <%!-- Until `Backups.status/0` answers (#2417). Neutral: nothing is
@@ -1185,6 +1363,7 @@ defmodule KilnCMSWeb.BackupLive do
           markers={@markers}
           presence={@presence}
           resumable={@resumable}
+          resend_offers={@resend_offers}
           disk={@disk}
           expected={if @status, do: @status.expected, else: Backups.expected_components()}
         />
@@ -1260,6 +1439,7 @@ defmodule KilnCMSWeb.BackupLive do
   attr :in_flight, :map, required: true
   attr :run_id, :string, default: nil
   attr :resume_run_id, :string, default: nil, doc: "the run of a resume waiting to start (#2816)"
+  attr :resend_run_id, :string, default: nil, doc: "the run being re-sent off-site (#2949)"
 
   # The running backup: its step, the part of how many, the queued request.
   defp in_flight(assigns) do
@@ -1305,6 +1485,19 @@ defmodule KilnCMSWeb.BackupLive do
         phx-disable-with={gettext("Canceling…")}
         data-role="cancel"
         data-confirm={cancel_confirm(@in_flight)}
+        class="btn btn-sm btn-danger"
+      >
+        <.icon name="hero-stop-circle" class="mr-1 size-4" />
+        {gettext("Cancel")}
+      </button>
+      <button
+        :if={@resend_run_id}
+        type="button"
+        phx-click="cancel_resend"
+        phx-value-id={@resend_run_id}
+        phx-disable-with={gettext("Canceling…")}
+        data-role="cancel-resend"
+        data-confirm={cancel_resend_confirm(@in_flight)}
         class="btn btn-sm btn-danger"
       >
         <.icon name="hero-stop-circle" class="mr-1 size-4" />
@@ -1358,6 +1551,23 @@ defmodule KilnCMSWeb.BackupLive do
            name: name
          )
 
+  # A re-send of a partly off-site backup (#2949), and to which destination.
+  defp step_label(%{
+         step: :resend,
+         part: part,
+         destinations_total: total,
+         destination_label: name
+       })
+       when is_integer(part) and is_integer(total) and is_binary(name),
+       do:
+         gettext("Re-sending off-site (%{index} of %{total}: %{name})",
+           index: part,
+           total: total,
+           name: name
+         )
+
+  defp step_label(%{step: :resend}), do: gettext("Re-sending off-site")
+
   defp step_label(%{step: step}) do
     case step do
       :dump -> gettext("Dumping the database")
@@ -1405,6 +1615,15 @@ defmodule KilnCMSWeb.BackupLive do
         "Cancel this backup? Its files are kept, so it can be resumed later. A queued backup will start next."
       )
 
+  defp cancel_resend_confirm(%{waiting: nil}),
+    do: gettext("Stop this re-send? What was already sent stays recorded.")
+
+  defp cancel_resend_confirm(_in_flight),
+    do:
+      gettext(
+        "Stop this re-send? What was already sent stays recorded. A queued backup will start next."
+      )
+
   defp cancel_resume_confirm(%{waiting: nil}),
     do: gettext("Cancel this resume? The backup stays as it was, so it can be resumed later.")
 
@@ -1422,6 +1641,11 @@ defmodule KilnCMSWeb.BackupLive do
   attr :markers, :map, required: true
   attr :presence, :map, required: true, doc: "run id => `Backups.Presence.t()`"
   attr :resumable, :map, required: true, doc: "run id => whether Resume is offered"
+
+  attr :resend_offers, :map,
+    default: %{},
+    doc: "run id => `%{targets, pruned_soon}` where Re-send is offered (#2949)"
+
   attr :disk, :map, required: true, doc: "the disk read's state (#2417)"
   attr :expected, :list, required: true
 
@@ -1678,6 +1902,45 @@ defmodule KilnCMSWeb.BackupLive do
               <.icon name="hero-arrow-path" class="mr-1 size-4" />
               {gettext("Resume")}
             </button>
+            <%!-- #2949: a partly off-site backup whose files are here, sent
+                  again to the destinations it missed. Hidden while it is
+                  being re-sent; the strip says so and has its Cancel. --%>
+            <span
+              :if={resending?(@in_flight, run)}
+              data-role="resending"
+              class="rounded bg-info/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-info-ink"
+            >
+              {gettext("Re-sending…")}
+            </span>
+            <button
+              :if={
+                resendable?(@disk, @presence, @resend_offers, run) and not resending?(@in_flight, run)
+              }
+              type="button"
+              phx-click="resend_run"
+              phx-value-id={run.id}
+              phx-disable-with={gettext("Requesting…")}
+              data-role="resend"
+              data-confirm={resend_confirm(@resend_offers[run.id])}
+              title={gettext("Send this backup again to the off-site destinations it missed.")}
+              class="btn btn-sm btn-default ml-auto"
+            >
+              <.icon name="hero-cloud-arrow-up" class="mr-1 size-4" />
+              {gettext("Re-send")}
+            </button>
+            <.help_tip
+              :if={
+                resendable?(@disk, @presence, @resend_offers, run) and not resending?(@in_flight, run)
+              }
+              id={"resend-help-#{run.id}"}
+              label={gettext("About Re-send")}
+              title={gettext("Re-send")}
+              learn_more={docs_url("backups.md#re-send-a-partly-off-site-backup")}
+            >
+              {gettext(
+                "Sends this backup's files, as they are in the backup directory, to the destinations it missed. Each file is checked against its recorded checksum before each copy; a file that changed is not sent and the backup is marked unverified. The backup's status doesn't change."
+              )}
+            </.help_tip>
             <.help_tip
               :if={resumable?(@disk, @resumable, run)}
               id={"resume-help-#{run.id}"}
@@ -1846,6 +2109,32 @@ defmodule KilnCMSWeb.BackupLive do
     do: not Enum.all?(artifacts, & &1.verified)
 
   defp unverified_import?(_run), do: false
+
+  # Re-send (#2949) needs the run's files on this server's disk, which only a
+  # disk read that answered can vouch for (#2417), and a destination to send
+  # to (`resend_offers/2`).
+  defp resendable?(%{state: :ready}, presence, offers, run),
+    do: Map.has_key?(offers, run.id) and match?(%{state: :present}, Map.get(presence, run.id))
+
+  defp resendable?(_disk, _presence, _offers, _run), do: false
+
+  defp resend_confirm(%{targets: targets, pruned_soon: []}),
+    do:
+      gettext(
+        "Re-send this backup to %{names}? Each file is checked against its recorded checksum before it is copied.",
+        names: Enum.join(targets, ", ")
+      )
+
+  defp resend_confirm(%{targets: targets, pruned_soon: pruned}),
+    do:
+      gettext(
+        "Re-send this backup to %{names}? Each file is checked against its recorded checksum before it is copied. It is older than %{days} days, so retention on %{pruned} may remove it there again after the next backup.",
+        names: Enum.join(targets, ", "),
+        days: Backups.keep_days(),
+        pruned: Enum.join(pruned, ", ")
+      )
+
+  defp resend_confirm(_none), do: nil
 
   # Resume needs the run's `.work/<stamp>/state.json`, which only a disk read
   # that answered can vouch for (#2417).

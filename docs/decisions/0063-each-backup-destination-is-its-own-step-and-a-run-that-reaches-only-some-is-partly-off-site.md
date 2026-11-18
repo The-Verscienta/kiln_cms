@@ -11,6 +11,10 @@
   no `BACKUP_RCLONE_REMOTE` was set succeeds with `offsite_status: failed`
   (it read "reached 0 of 1" before), and the alarm counts only failed
   destinations that are still configured.
+  Amended 2026-11-18 by [ADR 0071](0071-a-partly-off-site-backup-is-completed-by-a-re-send-that-holds-the-backup-lock-and-never-changes-the-runs-status.md)
+  ([#2949](https://github.com/The-Verscienta/kiln_cms/issues/2949)): a
+  partly off-site (or not off-site) run can be re-sent to the destinations
+  it missed, under the backup lock, without changing its status.
 - **References** — [#2220](https://github.com/The-Verscienta/kiln_cms/issues/2220)
   and the owner's approval of its decisions E1, E2 and E3 "all as proposed"
   (2026-11-15); [#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218)
@@ -77,6 +81,7 @@ BACKUP_RCLONE_REMOTE — change it in the server's environment".
 | None, with at least one configured | `failed` | `failed` | yes, as any failed backup |
 | No destination configured | `succeeded` | `none` | no |
 | None: the stored destinations couldn't be read and `BACKUP_RCLONE_REMOTE` is unset (#2951) | `succeeded` | `failed` | yes: "The last backup was not copied off-site: …" on the Backups page and the home strip, "Not off-site" in History, an error line on the run, `Logger.error`, and `[:kiln_cms, :backups, :offsite, :failed]` |
+| Some or none, then re-sent to the ones it missed (#2949, [ADR 0071](0071-a-partly-off-site-backup-is-completed-by-a-re-send-that-holds-the-backup-lock-and-never-changes-the-runs-status.md)) | `succeeded`, unchanged | what the destinations then add up to | as that outcome says: none once every destination is reached |
 
 A refused file is still fatal to the whole backup, whichever destination
 refused it (ADR 0043 is unchanged there). A destination that fails on its
@@ -97,7 +102,8 @@ off-site while it succeeds (#2951; the table's last row).
 
 **A partial run is not resumable.** It succeeded, so its work directory is
 removed as any succeeded backup's is. The next backup tries every
-destination again. A run that reached no destination failed and keeps its
+destination again, and since #2949 the run itself can be **re-sent** to the
+destinations it missed ([ADR 0071](0071-a-partly-off-site-backup-is-completed-by-a-re-send-that-holds-the-backup-lock-and-never-changes-the-runs-status.md)). A run that reached no destination failed and keeps its
 work directory, and Resume sends it again; a stored destination skips a
 file it was already sent with the same SHA-256, while the env remote copies
 every file, as before.

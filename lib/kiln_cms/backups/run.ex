@@ -12,9 +12,10 @@ defmodule KilnCMS.Backups.Run do
   The backup directory belongs to the instance, so there is no `multitenancy`
   block and the read gate is `KilnCMS.Accounts.Checks.PlatformAdmin` — never
   `OrgAdmin`, which would resolve a tenant-less subject to the default org (the
-  hazard `KilnCMS.Mail.Settings` documents). **No person writes a Run**, with two
-  exceptions: a platform admin may `:cancel` a running backup (#2218), or
-  `:cancel_resume` a resume of it that has not started yet (#2816). The
+  hazard `KilnCMS.Mail.Settings` documents). **No person writes a Run**, with three
+  exceptions: a platform admin may `:cancel` a running backup (#2218),
+  `:cancel_resume` a resume of it that has not started yet (#2816), or
+  `:cancel_resend` a re-send of it to the destinations it missed (#2949). The
   worker, the importer, retention and the stale-run sweep write as
   `KilnCMS.Backups.system/0` (subsystem `:backups`), through exactly the actions
   named in the write policy. There is no `destroy`: retention (#2219) deletes
@@ -34,6 +35,24 @@ defmodule KilnCMS.Backups.Run do
 
   `dir_id` (#2539) names the backup directory the run's files are in, so a
   resume's start runs on a node that has them (`KilnCMS.Backups.StepWorker`).
+
+  ## A re-send (#2949)
+
+  A succeeded run that is partly off-site (or not off-site at all) may be
+  re-sent to the destinations it missed (`KilnCMS.Backups.Resend`). Its
+  writes never change `status`, `finished_at` or `error`:
+
+    * `:begin_resend` moves the run to the re-send's chain (`chain_id`), so
+      the re-send's own writes are fenced like a backup step's
+      (`Changes.OwnChain`). Its UPDATE is pinned to the run as the re-send
+      read it (`Changes.BeginResend`);
+    * `:record_resend` writes what the re-send changed: the target
+      destinations' entries, the per-file outcomes on the artifacts, the
+      log, and the `offsite_status` they now add up to. Only on a run that
+      is still `succeeded`, under the re-send's chain;
+    * `:cancel_resend` is a platform admin's Cancel of a running re-send
+      (`Changes.CancelResend`): its chain is cleared from the run, so a
+      step that outlives the Cancel can't write.
   """
   use Ash.Resource,
     domain: KilnCMS.Backups,
@@ -41,7 +60,9 @@ defmodule KilnCMS.Backups.Run do
     authorizers: [Ash.Policy.Authorizer]
 
   alias KilnCMS.Backups.Run.Changes.{
+    BeginResend,
     Cancel,
+    CancelResend,
     CancelResume,
     Normalize,
     OwnChain,
@@ -261,6 +282,52 @@ defmodule KilnCMS.Backups.Run do
               end}
     end
 
+    # A re-send of this succeeded, partly off-site run begins (#2949): the
+    # run moves to the re-send's chain. The guard, the log line and the
+    # WHERE pinned to the run as the re-send read it are `BeginResend`.
+    update :begin_resend do
+      accept [:chain_id]
+      require_atomic? false
+      change BeginResend
+      change Normalize
+    end
+
+    # What a re-send changed (#2949): only the target destinations' entries,
+    # the per-file outcomes, the log and the off-site outcome they add up
+    # to. Never the status: a run that is no longer `succeeded`, or no
+    # longer the re-send's (`OwnChain`), gets a `StaleRecord` error.
+    update :record_resend do
+      accept [:artifacts, :log, :destinations, :offsite_status]
+      require_atomic? false
+      change filter(expr(status == :succeeded))
+      change OwnChain
+      change Normalize
+    end
+
+    # A platform admin stops a running re-send (#2949). The guard, the
+    # job/lock side effects and the WHERE are the `CancelResend` change; the
+    # run keeps its status and loses the re-send's chain. Audited in the same
+    # transaction as the Cancel it is, with `"resend" => true`.
+    update :cancel_resend do
+      accept []
+      require_atomic? false
+      change CancelResend
+      change Normalize
+
+      change {KilnCMS.Security.Changes.Record,
+              type: :backup_canceled,
+              scope: :instance,
+              mode: :in_transaction,
+              target: fn record, _changeset -> {"backup_run", record.id} end,
+              metadata: fn record, changeset ->
+                %{
+                  "stamp" => record.stamp,
+                  "step" => changeset.context[:backup_step],
+                  "resend" => true
+                }
+              end}
+    end
+
     # A cron-made backup becomes a row, once. `upsert_fields []` makes a
     # conflict on the stamp do nothing, so an existing run — the app's own,
     # still `running`, or a previous import — is never touched.
@@ -313,6 +380,8 @@ defmodule KilnCMS.Backups.Run do
              :fail,
              :resume,
              :note_resume_refused,
+             :begin_resend,
+             :record_resend,
              :import,
              :mark_pruned
            ]) do
@@ -328,6 +397,12 @@ defmodule KilnCMS.Backups.Run do
     # The same Cancel for a resume that has not started yet (#2816): the
     # platform admin's alone, as `:cancel`.
     policy action(:cancel_resume) do
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
+    end
+
+    # The Cancel of a running re-send (#2949): the platform admin's alone, as
+    # `:cancel`. Not the system actor: nothing in the pipeline cancels one.
+    policy action(:cancel_resend) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
 

@@ -1824,6 +1824,11 @@ msgstr "Hay una copia de seguridad en curso y otra ya en cola; la copia en cola 
 msgid "A backup is running; this one starts when it finishes."
 msgstr "Hay una copia de seguridad en curso; esta empezará cuando termine."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup or another re-send is running. Re-send this backup once it finishes: a re-send is never queued."
+msgstr "Hay una copia de seguridad u otro reenvío en curso. Reenvía esta copia de seguridad cuando termine: un reenvío nunca se pone en cola."
+
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "A bearer token widens reads and search to include drafts. Delivery sites attaching a service key should use the published-only routes (the /published twins) so drafts can never leak."
@@ -2625,6 +2630,11 @@ msgstr "Las API añaden el formato como datos estructurados en custom_fields_por
 #, elixir-autogen, elixir-format
 msgid "About %{percentage}% of sentences look passive (guideline: %{max}%). This is an estimate — passive voice is often the right choice."
 msgstr "Alrededor del %{percentage}% de las frases parecen pasivas (recomendación: %{max}%). Es una estimación: la voz pasiva suele ser la opción correcta."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "About Re-send"
+msgstr "Acerca de Reenviar"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -7098,6 +7108,11 @@ msgstr "No se pudo leer %{name}: %{reason}."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "Couldn't read the backup destinations. Try again in a moment."
+msgstr "No se pudieron leer los destinos de las copias de seguridad. Inténtalo de nuevo en un momento."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "Couldn't read this server's backup status. Reload the page to try again."
 msgstr "No se pudo leer el estado de las copias de seguridad de este servidor. Recarga la página para intentarlo de nuevo."
 
@@ -9825,6 +9840,11 @@ msgstr "Todos los días a las %{time} (%{zone})"
 #, elixir-autogen, elixir-format
 msgid "Every delivery attempt is recorded; failures retry with backoff, and %{count} exhausted deliveries in a row disable an endpoint. History is kept for %{days} days."
 msgstr "Se registra cada intento de entrega; los fallos se reintentan con espera progresiva y %{count} entregas agotadas seguidas desactivan un endpoint. El historial se conserva %{days} días."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every destination this backup missed was removed or disabled since, so there is nowhere to re-send it."
+msgstr "Todos los destinos que esta copia de seguridad no alcanzó se han eliminado o desactivado desde entonces, así que no hay adónde reenviarla."
 
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
@@ -16239,6 +16259,11 @@ msgstr "Solo un administrador de la plataforma puede cambiar los destinos de cop
 msgid "Only a platform admin can change backup schedules."
 msgstr "Solo un administrador de la plataforma puede cambiar las programaciones de copias de seguridad."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only a platform admin can re-send a backup."
+msgstr "Solo un administrador de la plataforma puede reenviar una copia de seguridad."
+
 #: lib/kiln_cms_web/controllers/page_html.ex
 #, elixir-autogen, elixir-format
 msgid "Only admins of this site can open it. Your account has a different role."
@@ -18025,6 +18050,51 @@ msgstr "¿Cambiar la clave de este actor? El identificador no cambia, pero su cl
 #, elixir-autogen, elixir-format
 msgid "Re-keyed. Followers are being sent the new key; some servers may keep the old one until they re-fetch this actor."
 msgstr "Clave cambiada. Se está enviando la nueva clave a los seguidores; algunos servidores pueden conservar la anterior hasta que vuelvan a obtener este actor."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-send"
+msgstr "Reenviar"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-send canceled. What it already sent stays recorded."
+msgstr "Reenvío cancelado. Lo que ya se envió queda registrado."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-send started — this page updates when it finishes."
+msgstr "Reenvío iniciado: esta página se actualiza cuando termina."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-send started — this page updates when it finishes. Skipped, because they were removed or disabled since: %{names}."
+msgstr "Reenvío iniciado: esta página se actualiza cuando termina. Omitidos, porque se eliminaron o desactivaron desde entonces: %{names}."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-send this backup to %{names}? Each file is checked against its recorded checksum before it is copied."
+msgstr "¿Reenviar esta copia de seguridad a %{names}? Cada archivo se comprueba con su suma de verificación registrada antes de copiarlo."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-send this backup to %{names}? Each file is checked against its recorded checksum before it is copied. It is older than %{days} days, so retention on %{pruned} may remove it there again after the next backup."
+msgstr "¿Reenviar esta copia de seguridad a %{names}? Cada archivo se comprueba con su suma de verificación registrada antes de copiarlo. Tiene más de %{days} días, así que la retención en %{pruned} puede volver a eliminarla allí después de la próxima copia de seguridad."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-sending off-site"
+msgstr "Reenviando fuera del sitio"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-sending off-site (%{index} of %{total}: %{name})"
+msgstr "Reenviando fuera del sitio (%{index} de %{total}: %{name})"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-sending…"
+msgstr "Reenviando…"
 
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
@@ -20771,6 +20841,11 @@ msgstr "Enviar prueba"
 msgid "Send the newsletter"
 msgstr "Enviar el boletín"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Send this backup again to the off-site destinations it missed."
+msgstr "Vuelve a enviar esta copia de seguridad a los destinos fuera del sitio que no alcanzó."
+
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Send this site's mail through this relay"
@@ -20786,6 +20861,11 @@ msgstr "Enviar a"
 #, elixir-autogen, elixir-format
 msgid "Sending…"
 msgstr "Enviando…"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sends this backup's files, as they are in the backup directory, to the destinations it missed. Each file is checked against its recorded checksum before each copy; a file that changed is not sent and the backup is marked unverified. The backup's status doesn't change."
+msgstr "Envía los archivos de esta copia de seguridad, tal como están en el directorio de copias, a los destinos que no alcanzó. Cada archivo se comprueba con su suma de verificación registrada antes de cada copia; un archivo que cambió no se envía y la copia de seguridad se marca como no verificada. El estado de la copia de seguridad no cambia."
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #, elixir-autogen, elixir-format
@@ -22147,6 +22227,16 @@ msgstr "¿Dejar de enviar boletines a %{email}?"
 msgid "Stop sending notifications to this device?"
 msgstr "¿Dejar de enviar notificaciones a este dispositivo?"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Stop this re-send? What was already sent stays recorded."
+msgstr "¿Detener este reenvío? Lo que ya se envió queda registrado."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Stop this re-send? What was already sent stays recorded. A queued backup will start next."
+msgstr "¿Detener este reenvío? Lo que ya se envió queda registrado. A continuación empezará una copia de seguridad en cola."
+
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Stop using this bucket for new uploads? Files already in it stay there and are still read from it."
@@ -22905,6 +22995,16 @@ msgstr "Esa copia de seguridad no se puede cancelar."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "That backup can't be re-sent."
+msgstr "Esa copia de seguridad no se puede reenviar."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That backup can't be re-sent: its files in the backup directory are gone, pruned or no longer verified."
+msgstr "Esa copia de seguridad no se puede reenviar: sus archivos en el directorio de copias han desaparecido, se depuraron o ya no están verificados."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "That backup can't be resumed."
 msgstr "Esa copia no se puede reanudar."
 
@@ -22922,6 +23022,11 @@ msgstr "Esa copia no se puede reanudar: los archivos que había escrito ya no es
 #, elixir-autogen, elixir-format
 msgid "That backup is running right now."
 msgstr "Esa copia de seguridad está en curso ahora mismo."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That backup isn't being re-sent any more."
+msgstr "Esa copia de seguridad ya no se está reenviando."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -23201,6 +23306,11 @@ msgstr "Ese rango ya está bloqueado."
 #, elixir-autogen, elixir-format
 msgid "That range is too broad: use at least /8 for IPv4 or /16 for IPv6."
 msgstr "Ese rango es demasiado amplio: use al menos /8 para IPv4 o /16 para IPv6."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That re-send can't be canceled."
+msgstr "Ese reenvío no se puede cancelar."
 
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
@@ -23976,6 +24086,11 @@ msgstr "No se pudo guardar la clave push."
 msgid "The range %{cidr} includes your own address, %{ip}. Confirm to add it anyway."
 msgstr "El rango %{cidr} incluye tu propia dirección, %{ip}. Confirma para añadirlo de todos modos."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The re-send changed meanwhile. Try again."
+msgstr "El reenvío cambió mientras tanto. Inténtalo de nuevo."
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "The receiving mail server refused %{to}. Check the address."
@@ -24589,6 +24704,11 @@ msgstr "Este servicio no puede comprobar su conexión."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "This backup is being re-sent right now."
+msgstr "Esta copia de seguridad se está reenviando ahora mismo."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "This backup recorded no outcome for its off-site destinations."
 msgstr "Esta copia de seguridad no registró ningún resultado para sus destinos fuera del servidor."
 
@@ -24596,6 +24716,13 @@ msgstr "Esta copia de seguridad no registró ningún resultado para sus destinos
 #, elixir-autogen, elixir-format
 msgid "This backup succeeded but was copied to no off-site destination."
 msgstr "Esta copia de seguridad se completó, pero no se copió a ningún destino fuera del servidor."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "This backup's re-send was canceled moments ago. Re-send it again in %{count} second: a step on a server that lost contact with the database may still be stopping."
+msgid_plural "This backup's re-send was canceled moments ago. Re-send it again in %{count} seconds: a step on a server that lost contact with the database may still be stopping."
+msgstr[0] "El reenvío de esta copia de seguridad se canceló hace un momento. Vuelve a reenviarla dentro de %{count} segundo: un paso en un servidor que perdió el contacto con la base de datos puede seguir deteniéndose."
+msgstr[1] "El reenvío de esta copia de seguridad se canceló hace un momento. Vuelve a reenviarla dentro de %{count} segundos: un paso en un servidor que perdió el contacto con la base de datos puede seguir deteniéndose."
 
 #: lib/kiln_cms_web/live/content_editor/block_ops.ex
 #, elixir-autogen, elixir-format
@@ -25653,6 +25780,11 @@ msgstr "Demasiado grande para proponer en bloque (%{count} embeddings). Ábralo 
 #, elixir-autogen, elixir-format
 msgid "Too late to cancel: the backup is finishing."
 msgstr "Demasiado tarde para cancelar: la copia de seguridad está terminando."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Too late to cancel: the re-send is finishing."
+msgstr "Demasiado tarde para cancelar: el reenvío está terminando."
 
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format

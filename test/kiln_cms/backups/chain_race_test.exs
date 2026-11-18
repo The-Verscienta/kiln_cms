@@ -103,6 +103,57 @@ defmodule KilnCMS.Backups.ChainRaceTest do
              Enum.sort_by(results, &match?({:ok, _}, &1))
   end
 
+  # #2949, O1: two clicks on Re-send at once, on two connections. The lock's
+  # advisory transaction takes them one after the other: one starts the
+  # re-send, the other finds it in flight. One step job.
+  test "two concurrent re-sends of one run: one starts, one is already in flight" do
+    original = Application.get_env(:kiln_cms, KilnCMS.Backups)
+
+    Application.put_env(
+      :kiln_cms,
+      KilnCMS.Backups,
+      Keyword.put(original, :rclone_remote, "r2:kiln")
+    )
+
+    stamp = "20261118-040506"
+
+    unboxed(fn ->
+      %{stamp: stamp, trigger: "test", dir_id: Ash.UUID.generate()}
+      |> Backups.start_run!(actor: Backups.system())
+      |> Backups.finish_run!(
+        %{
+          artifacts: [
+            %{
+              kind: :db,
+              name: "kiln-db-#{stamp}.dump",
+              bytes: 10,
+              sha256: String.duplicate("b", 64),
+              verified: true,
+              destinations: %{"local" => %{"status" => "ok"}}
+            }
+          ],
+          destinations: [
+            %{key: "dest:" <> Ash.UUID.generate(), label: "A", status: :ok},
+            %{key: "rclone:r2:kiln", label: "r2:kiln", status: :failed}
+          ],
+          offsite_status: :partial
+        },
+        actor: Backups.system()
+      )
+    end)
+
+    resend = fn -> Backups.resend_offsite(stamp, Backups.system()) end
+    results = race(resend, resend)
+
+    assert [{:error, :in_flight}, {:ok, %{status: :started, chain: chain}}] =
+             Enum.sort_by(results, &match?({:ok, _}, &1))
+
+    unboxed(fn ->
+      assert %{chain: ^chain, step: :resend, part: 1, stamp: ^stamp} = Backups.in_flight()
+      assert [%{args: %{"chain" => ^chain, "step" => "resend"}}] = BackupChain.step_jobs()
+    end)
+  end
+
   # A committed in-app run of `stamp` that failed, and (with `state?: true`)
   # the `state.json` a resume builds on.
   defp failed_run!(stamp, opts \\ []) do

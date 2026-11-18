@@ -50,6 +50,37 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
     )
   end
 
+  # A succeeded, partly off-site run a re-send may begin (#2949): verified
+  # artifacts with a digest, a backup directory, one destination reached and
+  # one not.
+  defp partial_run!(attrs \\ %{}) do
+    stamp = stamp()
+
+    %{stamp: stamp, trigger: "test", dir_id: Ash.UUID.generate()}
+    |> Map.merge(attrs)
+    |> Backups.start_run!(actor: Backups.system())
+    |> Backups.finish_run!(
+      %{
+        artifacts: [
+          %{
+            kind: :db,
+            name: "kiln-db-#{stamp}.dump",
+            bytes: 10,
+            sha256: String.duplicate("a", 64),
+            verified: true,
+            destinations: %{"local" => %{"status" => "ok"}}
+          }
+        ],
+        destinations: [
+          %{key: "dest:" <> Ash.UUID.generate(), label: "A", status: :ok},
+          %{key: "dest:" <> Ash.UUID.generate(), label: "B", status: :failed}
+        ],
+        offsite_status: :partial
+      },
+      actor: Backups.system()
+    )
+  end
+
   # {name, fun(actor) -> result} for every write action of the pipeline.
   # `record_progress`, `finish` and `fail` get a fresh running run per call:
   # they land only on a `running` run (#2218), and a refusal by that filter
@@ -79,6 +110,14 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
       end,
       import: fn actor ->
         Backups.import_run(%{stamp: stamp(), trigger: "cron", status: :succeeded}, actor: actor)
+      end,
+      # A fresh partly off-site run per call (#2949): the guard refuses
+      # anything else.
+      begin_resend: fn actor ->
+        Backups.begin_run_resend(partial_run!(), %{chain_id: Ash.UUID.generate()}, actor: actor)
+      end,
+      record_resend: fn actor ->
+        Backups.record_run_resend(partial_run!(), %{offsite_status: :partial}, actor: actor)
       end
     ]
   end
@@ -145,6 +184,87 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
 
       refute Backups.can_cancel_run?(Backups.system(), run)
       assert {:error, %Ash.Error.Forbidden{}} = Backups.cancel_run(run, actor: Backups.system())
+    end
+  end
+
+  # #2949: the Cancel of a running re-send is the platform admin's alone.
+  describe "cancel_resend" do
+    test "a platform admin may cancel a re-send" do
+      assert Backups.can_cancel_run_resend?(user(:admin), partial_run!())
+    end
+
+    test "editor, viewer, org admin, anonymous and the system actors are refused" do
+      run = partial_run!()
+
+      for actor <- [
+            user(:editor),
+            user(:viewer),
+            org_admin(),
+            nil,
+            Backups.system(),
+            SystemActor.new(:billing)
+          ] do
+        refute Backups.can_cancel_run_resend?(actor, run),
+               "cancel_resend must refuse #{inspect(actor)}"
+
+        assert {:error, %Ash.Error.Forbidden{}} = Backups.cancel_run_resend(run, actor: actor)
+      end
+    end
+  end
+
+  describe "a re-send's writes (#2949)" do
+    test "begin_resend moves the run to the re-send's chain and never changes its status" do
+      run = partial_run!()
+      chain = Ash.UUID.generate()
+
+      assert {:ok, begun} =
+               Backups.begin_run_resend(run, %{chain_id: chain}, actor: Backups.system())
+
+      assert %{status: :succeeded, chain_id: ^chain, finished_at: %DateTime{}} = begun
+      assert List.last(begun.log).step == "resend"
+    end
+
+    test "begin_resend refuses a run that isn't partly off-site, and one written since it was read" do
+      run = partial_run!()
+
+      complete =
+        Backups.record_run_resend!(
+          partial_run!(),
+          %{destinations: [%{key: "dest:x", status: :ok}], offsite_status: :complete},
+          actor: Backups.system()
+        )
+
+      assert {:error, %Ash.Error.Invalid{}} =
+               Backups.begin_run_resend(complete, %{chain_id: Ash.UUID.generate()},
+                 actor: Backups.system()
+               )
+
+      # Something else writes the run after it was read.
+      _written =
+        Backups.record_run_resend!(
+          run,
+          %{log: [%{at: DateTime.utc_now(), level: :info, step: "x", message: "written"}]},
+          actor: Backups.system()
+        )
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               Backups.begin_run_resend(run, %{chain_id: Ash.UUID.generate()},
+                 actor: Backups.system()
+               )
+    end
+
+    test "record_resend refuses a run that is not succeeded, or another chain's" do
+      running = run!()
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               Backups.record_run_resend(running, %{log: []}, actor: Backups.system())
+
+      run = partial_run!()
+
+      Backups.begin_run_resend!(run, %{chain_id: Ash.UUID.generate()}, actor: Backups.system())
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               Backups.record_run_resend(run, %{log: []}, actor: Backups.system())
     end
   end
 

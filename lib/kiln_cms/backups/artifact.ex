@@ -400,6 +400,61 @@ defmodule KilnCMS.Backups.Artifact do
   def files(%{name: name}), do: [name]
 
   @doc """
+  A run's artifacts as the flat file entries a backup step hands to the
+  off-site copy (`state.json`'s `"outputs"`, the manifest's `artifacts`), in
+  order (#2949): `%{kind, path, bytes, verified, sha256}` per single file,
+  and one per part of a media set, with `part` and `parts_total`, the part's
+  own size and sha256, and the set's `verified`. `path` is relative to the
+  backup directory. A part without a name is left out.
+  """
+  @spec output_entries([map()]) :: [map()]
+  def output_entries(artifacts) when is_list(artifacts) do
+    Enum.flat_map(artifacts, fn artifact ->
+      kind = artifact.kind |> to_string() |> kind()
+
+      case {kind, Map.get(artifact, :parts, [])} do
+        {{:ok, kind}, [_ | _] = parts} -> part_entries(kind, artifact, parts)
+        {{:ok, kind}, _single} -> [single_entry(kind, artifact)]
+        {:error, _parts} -> []
+      end
+    end)
+  end
+
+  defp single_entry(kind, artifact) do
+    %{
+      kind: Atom.to_string(kind),
+      path: Path.join(subdir(kind), artifact.name),
+      bytes: artifact.bytes,
+      verified: artifact.verified == true,
+      sha256: artifact.sha256
+    }
+  end
+
+  defp part_entries(kind, artifact, parts) do
+    total = length(parts)
+
+    for {part, index} <- Enum.with_index(parts, 1),
+        name = part["name"] || part[:name],
+        is_binary(name) do
+      number =
+        case parse_file(name) do
+          {:ok, %{part: n}} when is_integer(n) -> n
+          _ -> index
+        end
+
+      %{
+        kind: Atom.to_string(kind),
+        path: Path.join(subdir(kind), name),
+        bytes: part["bytes"] || part[:bytes],
+        verified: artifact.verified == true,
+        sha256: part["sha256"] || part[:sha256],
+        part: number,
+        parts_total: total
+      }
+    end
+  end
+
+  @doc """
   Fold flat per-file attribute maps (what `from_manifest/2` returns, one per
   manifest entry) into artifact attribute maps.
 

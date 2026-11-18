@@ -130,7 +130,12 @@ defmodule KilnCMS.Test.BackupDestinations do
         same stamp's media part 2 next to it gets a byte appended, as
         something writing to the backup directory would;
       * `"pid_file"` — a path the calling process's pid is written to
-        (`:erlang.pid_to_list/1`) before the mode runs.
+        (`:erlang.pid_to_list/1`) before the mode runs;
+      * `"append_after"` — after a file whose name contains it is put, that
+        same file gets a byte appended, so the next destination finds it
+        changed (#2949);
+      * `"remove_after"` — after a file whose name contains it is put, that
+        same file is deleted, so the next destination finds it gone (#2949).
 
     Every call sends `{:fake_destination, fun, args, self()}` to the
     `"notify"` pid first (`args` without the config), so a test sees what
@@ -158,6 +163,8 @@ defmodule KilnCMS.Test.BackupDestinations do
         %{name: "fail_names", type: :string, required?: false, help: nil},
         %{name: "log", type: :string, required?: false, help: nil},
         %{name: "tamper_after", type: :string, required?: false, help: nil},
+        %{name: "append_after", type: :string, required?: false, help: nil},
+        %{name: "remove_after", type: :string, required?: false, help: nil},
         %{name: "pid_file", type: :string, required?: false, help: nil},
         %{name: "token", type: :secret, required?: false, help: nil}
       ]
@@ -190,6 +197,8 @@ defmodule KilnCMS.Test.BackupDestinations do
 
       with :ok <- act(config, :put, [file, opts]) do
         tamper(settings["tamper_after"], file)
+        after_put(settings["append_after"], file, &File.write!(&1, "x", [:append]))
+        after_put(settings["remove_after"], file, &File.rm!/1)
         :ok
       end
     end
@@ -284,6 +293,13 @@ defmodule KilnCMS.Test.BackupDestinations do
     end
 
     defp tamper(_part, _file), do: :ok
+
+    defp after_put(part, %{name: name, path: path}, fun) when is_binary(part) do
+      if String.contains?(name, part), do: fun.(path)
+      :ok
+    end
+
+    defp after_put(_part, _file, _fun), do: :ok
   end
 
   defmodule ResumableFake do

@@ -30,6 +30,15 @@ defmodule KilnCMS.Backups.Steps do
   run and a `[:kiln_cms, :backups, :offsite, :partial]` telemetry event. With the env destination alone every command, log line,
   key and error reads as it did before destinations existed.
 
+  ## Re-sending a partly off-site run (#2949)
+
+  A `resend` step, part k per target destination, runs the same off-site
+  copy for a run that already succeeded (`KilnCMS.Backups.Resend`), with
+  `ctx.resend?` set: a removed destination is skipped, a refused file stops
+  it and marks the artifact unverified, and its ends (`resend_done/5`,
+  `resend_stopped/5`, `resend_interrupted/5`) never write a failure
+  manifest or change the run's status. See the "resend" section below.
+
   ## Which components (#2219)
 
   The start step settles what the backup covers: the components its job's
@@ -157,6 +166,7 @@ defmodule KilnCMS.Backups.Steps do
     RcloneRemote,
     Recorder,
     Redact,
+    Resend,
     Retention,
     RunDestination,
     StepWorker,
@@ -179,6 +189,7 @@ defmodule KilnCMS.Backups.Steps do
   @spec perform(Chain.lease(), Oban.Job.t()) ::
           :ok | {:error, term()} | {:cancel, term()} | {:snooze, pos_integer()}
   def perform(%{step: "start"} = lease, job), do: start(lease, job)
+  def perform(%{step: "resend"} = lease, job), do: resend(lease, job)
 
   def perform(lease, job) do
     work_dir = WorkState.path(Backups.dir(), lease.stamp)
@@ -202,6 +213,11 @@ defmodule KilnCMS.Backups.Steps do
   attempt. Called by `StepWorker` with what it could rescue.
   """
   @spec crashed(Chain.lease(), Oban.Job.t(), term()) :: {:error, term()} | {:cancel, term()}
+  def crashed(%{step: "resend"} = lease, job, reason) do
+    {state, rec} = resend_state(lease)
+    retry_or_fail(context(lease, state), lease, job, state, rec, reason)
+  end
+
   def crashed(lease, job, reason) do
     work_dir = lease.stamp && WorkState.path(Backups.dir(), lease.stamp)
 
@@ -241,7 +257,10 @@ defmodule KilnCMS.Backups.Steps do
       media_dir: Backups.media_dir(),
       trigger: state["trigger"] || lease.trigger || "manual",
       started_at: parse_time(state["started_at"]),
-      resume?: state["resume"] == true
+      resume?: state["resume"] == true,
+      # A re-send of a partly off-site run (#2949): never a failure manifest,
+      # never a Run status change.
+      resend?: lease.step == "resend"
     }
   end
 
@@ -980,7 +999,7 @@ defmodule KilnCMS.Backups.Steps do
   # writes no marker, releases nothing and settles nothing: the step that
   # took over does. A lock write that fails is retried. `done` is the log
   # line, the one thing that tells the two callers apart.
-  defp finish_tail(lease, done) do
+  defp finish_tail(lease, done, outcome \\ :ok) do
     dir = Backups.dir()
     import_best_effort(dir, "Backup import before the marker sync")
 
@@ -992,7 +1011,7 @@ defmodule KilnCMS.Backups.Steps do
     with {:ok, _sync} <- synced,
          {:ok, _promoted} <- Chain.release(lease) do
       Logger.info(done)
-      settled(lease, :ok)
+      settled(lease, outcome)
       :ok
     else
       {:error, :superseded} -> {:cancel, :superseded}
@@ -1013,7 +1032,7 @@ defmodule KilnCMS.Backups.Steps do
       :ok ->
         # Best-effort, and outside the lock: a failed Run write costs history,
         # never the backup.
-        _ = Recorder.progress(rec)
+        _ = record_progress(ctx, rec)
 
         case Chain.advance(lease, step, part) do
           :ok -> :ok
@@ -1037,6 +1056,15 @@ defmodule KilnCMS.Backups.Steps do
 
   defp conclude(_ctx, _lease, _job, {:result, result}), do: result
 
+  defp conclude(ctx, lease, _job, {:resend_done, outcome, state, rec}),
+    do: resend_done(ctx, lease, state, rec, outcome)
+
+  # A re-send's Run writes go through its own action (#2949, critic change
+  # 5): `record_progress` is filtered to `running` runs, and a re-sent run
+  # stays `succeeded`.
+  defp record_progress(%{resend?: true}, rec), do: Recorder.resend_progress(rec)
+  defp record_progress(_ctx, rec), do: Recorder.progress(rec)
+
   # Oban's attempt counter decides: the last attempt (`attempt >= max_attempts`,
   # which also covers a reclaimed step's reduced budget) fails the backup.
   defp retry_or_fail(ctx, lease, job, state, rec, reason) do
@@ -1055,7 +1083,7 @@ defmodule KilnCMS.Backups.Steps do
           {:cancel, :superseded}
 
         _written_or_not ->
-          _ = Recorder.progress(rec)
+          _ = record_progress(ctx, rec)
           {:error, reason}
       end
     end
@@ -1067,6 +1095,10 @@ defmodule KilnCMS.Backups.Steps do
         WorkState.write(ctx.work_dir, Map.put(state, "rec", Recorder.to_state(rec)), fence(lease)),
       else: :ok
   end
+
+  # A re-send that can go no further (#2949): stopped, never failed.
+  defp fail(%{resend?: true} = ctx, lease, state, rec, reason),
+    do: resend_stopped(ctx, lease, state, rec, reason)
 
   # The backup is over. A failure manifest only when the state is there to say
   # what landed; the Run closed BEFORE the lock is released, so a Resume can
@@ -1127,6 +1159,11 @@ defmodule KilnCMS.Backups.Steps do
   ended without finishing): fail its Run with `message` and, when this node
   has the chain's backup directory and its state, write the failure manifest.
   Best-effort throughout.
+
+  A re-send's state (#2949) holds its chain under `"resend_chain"`, never
+  `"chain"`, so it never matches here: no node, of this release or an older
+  one, writes a failure manifest for a re-send. `Chain` routes a re-send to
+  `resend_interrupted/5` instead.
   """
   @spec interrupt(String.t(), String.t(), String.t() | nil, String.t()) :: :ok
   def interrupt(stamp, chain, dir_id, message) do
@@ -1957,15 +1994,22 @@ defmodule KilnCMS.Backups.Steps do
           entry: entry,
           index: k,
           total: length(list),
-          solo?: solo_env?(list),
+          # A re-send always names its destinations (#2949).
+          solo?: not ctx.resend? and solo_env?(list),
           last_attempt?: job.attempt >= job.max_attempts,
           deadline: call_deadline(job),
           # Whether its uploads are recorded, so one cut short resumes
           # mid-file; set once its config resolves (`copy_to/5`).
-          resumable?: false
+          resumable?: false,
+          resend?: ctx.resend?,
+          stamp: ctx.stamp,
+          chain: ctx.chain
         }
 
         send_to(ctx, dest, state, rec)
+
+      nil when ctx.resend? ->
+        {:resend_done, :done, state, rec}
 
       nil ->
         {:next, "finish", nil, state, rec}
@@ -2001,6 +2045,11 @@ defmodule KilnCMS.Backups.Steps do
     case resolve_destination(dest.entry) do
       {:ok, config} ->
         copy_to(ctx, dest, config, state, rec)
+
+      # Removed or disabled since the backup (#2949, O5): skipped, and its
+      # entry stays as it was.
+      {:error, :removed} when dest.resend? ->
+        resend_skipped(dest, state, rec)
 
       {:error, :unreadable} when not dest.last_attempt? ->
         {:retry, {:offsite, :unreadable}, state,
@@ -2057,7 +2106,10 @@ defmodule KilnCMS.Backups.Steps do
   # lost its lease (#3041) never gets here: it records nothing.
   defp copied(ctx, dest, {config, sent_key, files}, {results, sent, resumed}, state, rec) do
     key = dest.entry["key"]
-    {kept, not_kept} = keep_refused(ctx, results)
+
+    # A re-send leaves a refused file where it is (#2949, O4): it is the
+    # run's own verified file, and nothing will rebuild it.
+    {kept, not_kept} = if ctx.resend?, do: {%{}, []}, else: keep_refused(ctx, results)
 
     state =
       if sent_key,
@@ -2067,7 +2119,11 @@ defmodule KilnCMS.Backups.Steps do
     problems = offsite_problems(results)
     # How a file's failure is said: whether an attempt follows, and whether
     # it resumes there or is sent again (#3082).
-    reason_opts = [next_attempt?: retry_destination?(dest, problems), resumable?: dest.resumable?]
+    reason_opts = [
+      next_attempt?: retry_destination?(dest, problems),
+      resumable?: dest.resumable?,
+      resend?: ctx.resend?
+    ]
 
     rec = Enum.reduce(resumed, rec, &log_resumed(&2, &1, label_for(dest)))
     rec = Enum.reduce(results, rec, &record_put(&1, &2, key, label_for(dest), reason_opts))
@@ -2078,6 +2134,9 @@ defmodule KilnCMS.Backups.Steps do
     case problems do
       %{refused: [], failed: []} ->
         destination_ok(ctx, dest, config, counts, state, rec)
+
+      %{refused: [_ | _]} = problems when ctx.resend? ->
+        resend_refused(ctx, dest, counts, problems, state, rec)
 
       %{refused: [_ | _]} = problems ->
         problems = Map.put(problems, :kept, kept)
@@ -2483,6 +2542,7 @@ defmodule KilnCMS.Backups.Steps do
         do: Map.put(state, "offsite", dest.entry["label"]),
         else: state
 
+    resend_event(dest, rec, :ok)
     next_destination(dest, state, rec)
   end
 
@@ -2659,7 +2719,10 @@ defmodule KilnCMS.Backups.Steps do
       |> log_destination_failure(dest, reason, error)
       |> Recorder.put_run_destination(key, Map.merge(counts, failed))
 
-    if dest.index >= dest.total and not reached_any?(rec, dest) do
+    resend_event(dest, rec, :failed)
+
+    # A re-send never fails the run, whatever it reached (#2949).
+    if not dest.resend? and dest.index >= dest.total and not reached_any?(rec, dest) do
       {:fatal, all_failed(dest, reason, rec, state), state, rec}
     else
       next_destination(dest, state, rec)
@@ -2711,6 +2774,11 @@ defmodule KilnCMS.Backups.Steps do
 
     {:offsite, {:destinations, failures}}
   end
+
+  defp next_destination(%{resend?: true, index: k, total: total}, state, rec) when k < total,
+    do: {:next, "resend", k + 1, state, rec}
+
+  defp next_destination(%{resend?: true}, state, rec), do: {:resend_done, :done, state, rec}
 
   defp next_destination(%{index: k, total: total}, state, rec) when k < total,
     do: {:next, "offsite", k + 1, state, rec}
@@ -2791,22 +2859,604 @@ defmodule KilnCMS.Backups.Steps do
     Recorder.log(rec, :error, "offsite", "Copy of #{name} to #{label} failed: #{error}")
   end
 
-  defp record_put({file, {:refused, reason}}, rec, key, label, _reason_opts) do
+  defp record_put({file, {:refused, reason}}, rec, key, label, reason_opts) do
     name = Path.basename(file.path)
     why = describe_refusal(reason)
     message = "Copy of #{name} to #{label} REFUSED: #{why}; it was not uploaded"
     Logger.error(message)
 
+    # A re-send's file that is gone is "local files missing", not a file
+    # that changed (#2949, critic change 6): it says nothing of whether the
+    # backup verified.
+    unverify? = not (reason_opts[:resend?] == true and missing_file?(reason))
+
     rec =
-      if file[:sidecar?],
-        do: rec,
-        else:
+      cond do
+        file[:sidecar?] ->
+          rec
+
+        unverify? ->
           rec
           |> Recorder.put_destination(name, key, {:error, "Refused: " <> why})
           |> Recorder.put_unverified(name)
 
+        true ->
+          Recorder.put_destination(rec, name, key, {:error, "Not sent: " <> why})
+      end
+
     Recorder.log(rec, :error, "offsite", message)
   end
+
+  ## resend (#2949)
+
+  # A re-send of a partly off-site run to the destinations it missed
+  # (`KilnCMS.Backups.Resend`): one `resend` step job per target, part k
+  # for the k-th, each running `offsite_part/5` with `ctx.resend?` set. What
+  # differs from a backup's off-site step:
+  #
+  #   * part 1 sets it up (`resend_setup/3`); there is no start step;
+  #   * a destination removed or disabled since the run is skipped, its
+  #     entry left as it was (O5);
+  #   * a refused file stops the re-send (`resend_refused/6`): the
+  #     destination is recorded failed, the artifact unverified on the run
+  #     and in `manifest.json` (O4), and the file stays where it is;
+  #   * no destination failing fails anything: the run stays `succeeded`;
+  #   * it ends in `resend_done/5` (the work directory removed, then the
+  #     marker sync and release a finish runs) or `resend_stopped/5`;
+  #     neither writes a failure manifest or closes the run, and the stop
+  #     doesn't run the Importer.
+  #
+  # Its `state.json` (`"kind" => "resend"`) names its chain under
+  # `"resend_chain"`, never `"chain"` (critic change 3): every match on
+  # `WorkState.chain/1` or `%{"chain" => ^chain}`, here and in an older
+  # release, fails for it, so nothing can take it for a backup's state and
+  # write a failure manifest from it.
+
+  defp resend(lease, job) do
+    work_dir = WorkState.path(Backups.dir(), lease.stamp)
+
+    case WorkState.read(work_dir) do
+      {:ok, %{"kind" => "resend", "resend_chain" => chain} = state} when chain == lease.chain ->
+        ctx = context(lease, state)
+        rec = Recorder.load(lease.stamp, lease.chain, state["rec"])
+        conclude(ctx, lease, job, offsite_part(ctx, job, lease.part, state, rec))
+
+      _none_or_foreign when lease.part == 1 ->
+        resend_setup(lease, job, work_dir)
+
+      _none_or_foreign ->
+        resend_lost(lease)
+    end
+  end
+
+  # This chain's own re-send state, and the recorder it saved; or none, and
+  # the recorder of the run (only while the run is on this chain).
+  defp resend_state(lease) do
+    with stamp when is_binary(stamp) <- lease.stamp,
+         {:ok, %{"kind" => "resend", "resend_chain" => chain} = state} when chain == lease.chain <-
+           WorkState.read(WorkState.path(Backups.dir(), stamp)) do
+      {state, Recorder.load(stamp, lease.chain, state["rec"])}
+    else
+      _ -> {nil, Recorder.from_run(lease.stamp, lease.chain)}
+    end
+  end
+
+  # Part 1, before anything is sent. In this order:
+  #
+  #   1. `.work/<stamp>` is made first (critic change 6): `Retention` and
+  #      `backup.sh prune` treat a stamp with one as in flight, so nothing
+  #      deletes the run's files from here on;
+  #   2. whatever an earlier re-send left in it is moved into the trash
+  #      under the lease and deleted after (`discard/4`, ADR 0067);
+  #   3. the destinations configured now are read;
+  #   4. the run is read, the lease checked, and the run begun at once from
+  #      that read (critic change 1): `:begin_resend` is pinned to it, so a
+  #      Cancel that commits after the check makes it match nothing, and
+  #      one that commits before stops this at the check;
+  #   5. every file is `lstat`ed: one that is gone stops the re-send as
+  #      "local files missing", said on the run;
+  #   6. `state.json` is written, and part 1 runs in this same job.
+  defp resend_setup(lease, job, work_dir) do
+    dir = Backups.dir()
+
+    with :ok <- claim_work_dir(work_dir),
+         :ok <- discard_foreign(lease, dir, work_dir),
+         {:ok, configured} <- resend_configured(),
+         {:ok, run} <- resend_run(lease.stamp),
+         :ok <- Chain.check_lease(lease),
+         :ok <- Resend.eligible(run),
+         {:ok, plan} <- resend_plan(run, configured),
+         {:ok, run} <- begin_resend(lease, run) do
+      resend_begun(lease, job, run, plan)
+    else
+      {:error, :superseded} ->
+        {:cancel, :superseded}
+
+      {:error, {:retry, reason}} ->
+        retry_or_fail(context(lease, nil), lease, job, nil, %Recorder{}, reason)
+
+      {:error, reason} ->
+        resend_refused_at_setup(lease, work_dir, reason)
+    end
+  end
+
+  defp claim_work_dir(work_dir) do
+    with :ok <- mkdir_private(Path.dirname(work_dir)),
+         :ok <- mkdir_private(work_dir) do
+      :ok
+    else
+      {:error, reason} -> {:error, {:retry, {:work_dir, reason}}}
+    end
+  end
+
+  # What an earlier re-send of this stamp left (it was canceled, or its node
+  # stopped): never this chain's, which `resend/2` has ruled out.
+  defp discard_foreign(lease, dir, work_dir) do
+    case discard(lease, dir, "work", work_dir_contents(work_dir)) do
+      :ok -> :ok
+      {:error, :superseded} = superseded -> superseded
+      {:error, reason} -> {:error, {:retry, {:discard, reason}}}
+    end
+  end
+
+  # A read that fails is retried; a run that is gone or not a stamp's, not.
+  defp resend_run(stamp) do
+    case Resend.fetch_run(stamp) do
+      {:ok, run} -> {:ok, run}
+      {:error, reason} when is_atom(reason) -> {:error, reason}
+      {:error, error} -> {:error, {:retry, {:run_read, error.__struct__}}}
+    end
+  end
+
+  defp resend_configured do
+    case Destination.configured() do
+      {:ok, configured} -> {:ok, configured}
+      {:error, _error} -> {:error, {:retry, :destinations_unreadable}}
+    end
+  end
+
+  defp resend_plan(run, configured) do
+    case Resend.targets(run, configured) do
+      %{targets: []} -> {:error, :nothing_to_send}
+      plan -> {:ok, plan}
+    end
+  end
+
+  # A refusal with the lease still held is the run's own; a lost lease is a
+  # Cancel's, which said so on the run.
+  defp begin_resend(lease, run) do
+    case Backups.begin_run_resend(run, %{chain_id: lease.chain}, actor: Backups.system()) do
+      {:ok, run} ->
+        {:ok, run}
+
+      {:error, error} ->
+        with :ok <- Chain.check_lease(lease), do: {:error, {:retry, {:begin, error.__struct__}}}
+    end
+  end
+
+  # Nothing was sent and the run was not begun: no Run write, the claim
+  # removed, the lock released.
+  defp resend_refused_at_setup(lease, work_dir, reason) do
+    Logger.warning("Backup re-send of #{lease.stamp} refused: #{inspect(reason)}")
+
+    with :ok <- discard(lease, Backups.dir(), "work", [work_dir]),
+         {:ok, _promoted} <- Chain.release(lease) do
+      resend_stop_event(lease, :refused, nil, 0, 0)
+      settled(lease, {:error, reason})
+      {:cancel, reason}
+    else
+      {:error, :superseded} -> {:cancel, :superseded}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  defp resend_begun(lease, job, run, plan) do
+    rec =
+      run
+      |> Recorder.from_begun()
+      |> replace_unreadable(plan)
+      |> log_resend_plan(plan)
+
+    state =
+      WorkState.new(lease.stamp, %{
+        "kind" => "resend",
+        "resend_chain" => lease.chain,
+        "trigger" => run.trigger,
+        "started_at" => DateTime.to_iso8601(run.started_at),
+        "dir_id" => lease.dir_id,
+        "components" => component_names(run.components),
+        "outputs" => Resend.outputs(run),
+        "destinations" => plan.targets,
+        "sent" => %{}
+      })
+
+    ctx = context(lease, state)
+
+    case missing_files(ctx.dir, outputs(state)) do
+      [] -> resend_write_and_run(ctx, lease, job, state, rec)
+      missing -> resend_done(ctx, lease, state, log_missing(rec, missing), :local_files_missing)
+    end
+  end
+
+  defp resend_write_and_run(ctx, lease, job, state, rec) do
+    case WorkState.write(
+           ctx.work_dir,
+           Map.put(state, "rec", Recorder.to_state(rec)),
+           fence(lease)
+         ) do
+      :ok ->
+        conclude(ctx, lease, job, offsite_part(ctx, job, 1, state, rec))
+
+      {:error, :superseded} ->
+        {:cancel, :superseded}
+
+      {:error, reason} ->
+        retry_or_fail(ctx, lease, job, state, rec, {:state_write, reason})
+    end
+  end
+
+  # O3: the "unreadable" entry gives way to the stored destinations it stood
+  # for, each failed until this re-send reaches it.
+  defp replace_unreadable(rec, %{unreadable?: false}), do: rec
+
+  defp replace_unreadable(rec, %{targets: targets}) do
+    known = MapSet.new(rec.destinations, & &1.key)
+    rec = Recorder.drop_run_destination(rec, RunDestination.unreadable_key())
+
+    for %{"source" => "db"} = entry <- targets,
+        not MapSet.member?(known, entry["key"]),
+        reduce: rec do
+      rec ->
+        Recorder.put_run_destination(rec, entry["key"], %{
+          kind: entry["kind"],
+          label: entry["label"],
+          status: :failed,
+          error: "couldn't be read when this backup ran; not sent yet",
+          permanent: false
+        })
+    end
+  end
+
+  defp log_resend_plan(rec, %{targets: targets, skipped: skipped}) do
+    rec =
+      Recorder.log(
+        rec,
+        :info,
+        "resend",
+        "Re-sending to #{length(targets)} destination(s): " <>
+          Enum.map_join(targets, ", ", & &1["label"])
+      )
+
+    Enum.reduce(skipped, rec, fn entry, rec ->
+      Recorder.log(
+        rec,
+        :warn,
+        "resend",
+        "Skipped #{entry.label || entry.key}: removed or disabled since this backup; " <>
+          "its outcome stays failed"
+      )
+    end)
+  end
+
+  # Every file and checksum sidecar a re-send copies, `lstat`ed: the names
+  # of those that are not regular files any more.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp missing_files(dir, artifacts) do
+    for file <- artifacts ++ expected_sidecars(artifacts),
+        not match?({:ok, %{type: :regular}}, File.lstat(Path.join(dir, file.path))),
+        do: Path.basename(file.path)
+  end
+
+  defp log_missing(rec, [name | _] = missing) do
+    message =
+      "Re-send refused: #{name} is no longer in BACKUP_DIR" <>
+        if(length(missing) > 1, do: " (and #{length(missing) - 1} more file(s))", else: "") <>
+        "; nothing was sent"
+
+    Logger.warning("Backup " <> message)
+    Recorder.log(rec, :error, "resend", message)
+  end
+
+  defp missing_file?(reason), do: reason in [:enoent, :not_regular]
+
+  # A destination removed or disabled since the run (O5).
+  defp resend_skipped(dest, state, rec) do
+    label = dest.entry["label"]
+
+    message =
+      "Skipped #{label}: removed or disabled since this backup; its outcome stays failed"
+
+    Logger.warning("Backup re-send: " <> message)
+    resend_event(dest, rec, :skipped)
+    next_destination(dest, state, Recorder.log(rec, :warn, "resend", message))
+  end
+
+  # A file refused on its way to this destination. One that is gone (or no
+  # longer a regular file) stops the re-send as local files missing (critic
+  # change 6). One that changed (O4): this destination failed "REFUSED",
+  # the artifact unverified on the run (`record_put/5` did that) and in
+  # `manifest.json` when that is still this run's (critic change 4, as
+  # `backup.sh`'s `refuse_offsite` does), and the file left where it is.
+  # Either way the re-send stops here.
+  defp resend_refused(ctx, dest, counts, problems, state, rec) do
+    {missing, changed} = Enum.split_with(problems.refused, fn {_name, r} -> missing_file?(r) end)
+
+    # A file that changed is unverified in the manifest too, whatever else
+    # was refused beside it (`record_put/5` did the run).
+    case unverify_manifest(ctx, Enum.map(changed, &elem(&1, 0))) do
+      :ok when missing != [] -> resend_missing(dest, counts, missing, state, rec)
+      :ok -> resend_changed(dest, counts, problems, changed, state, rec)
+      {:error, :superseded} -> {:result, {:cancel, :superseded}}
+    end
+  end
+
+  defp resend_missing(dest, counts, missing, state, rec) do
+    names = Enum.map(missing, &elem(&1, 0))
+
+    rec =
+      rec
+      |> Recorder.put_run_destination(
+        dest.entry["key"],
+        Map.merge(counts, %{
+          status: :failed,
+          error: "not sent: #{Enum.join(names, ", ")} no longer in BACKUP_DIR",
+          permanent: false
+        })
+      )
+      |> log_missing(names)
+
+    resend_event(dest, rec, :missing)
+    {:resend_done, :local_files_missing, state, rec}
+  end
+
+  defp resend_changed(dest, counts, problems, changed, state, rec) do
+    rec =
+      Recorder.put_run_destination(
+        rec,
+        dest.entry["key"],
+        Map.merge(counts, %{
+          status: :failed,
+          error: destination_error({:offsite, problems}, dest.resumable?),
+          permanent: false
+        })
+      )
+
+    message =
+      "Re-send stopped: #{count_files(changed)} changed on disk after this backup " <>
+        "verified it: " <>
+        named(changed, &short_refusal/1) <>
+        ". Marked unverified and left where it is; something other than this backup " <>
+        "wrote to BACKUP_DIR"
+
+    Logger.error("Backup " <> message)
+    resend_event(dest, rec, :refused)
+    {:resend_done, :refused, state, Recorder.log(rec, :error, "resend", message)}
+  end
+
+  # `manifest.json`'s entries of `names` say `verified: false`, when the
+  # manifest is still this run's: written outside the lock, renamed into
+  # place under the lease, as every manifest write of a step. A newer
+  # backup's manifest is left alone.
+  defp unverify_manifest(ctx, names) do
+    case Manifest.read(ctx.dir) do
+      %Manifest{stamp: stamp, artifacts: artifacts} = manifest when stamp == ctx.stamp ->
+        updated = Enum.map(artifacts, &unverify_named(&1, names))
+
+        if updated == artifacts,
+          do: :ok,
+          else: write_manifest(ctx.dir, %{manifest | artifacts: updated}, fence(ctx.lease))
+
+      _another_or_none ->
+        :ok
+    end
+  end
+
+  defp unverify_named(artifact, names) do
+    if Path.basename(artifact.path) in names,
+      do: %{artifact | verified: false},
+      else: artifact
+  end
+
+  # The re-send is over: done, stopped by a refused file, or stopped by
+  # files that are gone. Past the point of no return first (critic change
+  # 10), so a Cancel is refused from here, then the last Run write, the work
+  # directory removed, and the markers synced under the lease and the lock
+  # released (`finish_tail/3`), which also re-syncs the markers of an
+  # artifact a refusal just marked unverified.
+  defp resend_done(ctx, lease, _state, rec, outcome) do
+    case Chain.mark_finishing(lease) do
+      :ok ->
+        rec
+        |> log_resend_done(ctx.stamp, outcome)
+        |> Recorder.resend_progress()
+        |> resend_close(ctx, lease, outcome)
+
+      {:error, :superseded} ->
+        {:cancel, :superseded}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # The work directory moved aside under the lease (a re-send that lost its
+  # lease leaves it to the Cancel's), then the marker sync and the release.
+  defp resend_close(rec, ctx, lease, outcome) do
+    case discard(lease, ctx.dir, "work", [ctx.work_dir]) do
+      {:error, :superseded} ->
+        {:cancel, :superseded}
+
+      _discarded ->
+        {reached, total} = resend_counts(rec)
+        result = finish_tail(lease, resend_done_line(ctx.stamp, outcome), settle(outcome))
+
+        _ =
+          if result == :ok, do: resend_stop_event(lease, outcome, offsite_of(rec), reached, total)
+
+        result
+    end
+  end
+
+  defp settle(:done), do: :ok
+  defp settle(outcome), do: {:error, outcome}
+
+  defp log_resend_done(rec, stamp, outcome) do
+    {reached, total} = resend_counts(rec)
+    offsite = offsite_of(rec)
+
+    why =
+      case outcome do
+        :done -> "done"
+        :refused -> "stopped (a file was refused)"
+        :local_files_missing -> "stopped (local files missing)"
+      end
+
+    level = if outcome == :done and offsite == :complete, do: :info, else: :warn
+
+    Recorder.log(
+      rec,
+      level,
+      "resend",
+      "Re-send of #{stamp} #{why}: reached #{reached} of #{total} destination(s); " <>
+        "off-site now #{offsite}"
+    )
+  end
+
+  defp resend_done_line(stamp, :done), do: "Backup re-send of #{stamp} done"
+  defp resend_done_line(stamp, outcome), do: "Backup re-send of #{stamp} stopped (#{outcome})"
+
+  defp resend_counts(rec) do
+    counted = Enum.reject(rec.destinations, &(&1.status == :skipped))
+    {Enum.count(counted, &(&1.status == :ok)), length(counted)}
+  end
+
+  defp offsite_of(rec), do: Recorder.offsite_outcome(rec.destinations)
+
+  # The re-send can go no further (its last attempt failed, its state can't
+  # be written, a step crashed): what was sent stays recorded, the run says
+  # why, and the lock is released. No failure manifest, no `Recorder.fail/2`,
+  # no Importer: the run succeeded and stays so.
+  defp resend_stopped(ctx, lease, _state, rec, reason) do
+    message = "Re-send stopped: #{describe(reason)}"
+    Logger.error("Backup #{ctx.stamp} " <> message)
+
+    rec = rec |> Recorder.log(:error, "resend", message) |> Recorder.resend_progress()
+
+    with result when result != {:error, :superseded} <-
+           discard(lease, ctx.dir, "work", [ctx.work_dir]),
+         {:ok, _promoted} <- Chain.release(lease) do
+      {reached, total} = resend_counts(rec)
+      resend_stop_event(lease, :stopped, offsite_of(rec), reached, total)
+      settled(lease, {:error, reason})
+      {:cancel, reason}
+    else
+      {:error, :superseded} -> {:cancel, :superseded}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  # A part after the first with no state of its own (deleted, or another
+  # chain's): nothing to send from. Stopped, never failed.
+  defp resend_lost(lease) do
+    message =
+      "Re-send stopped: its work state (.work/#{lease.stamp}/state.json) is missing or " <>
+        "belongs to another chain"
+
+    Logger.error("Backup #{lease.stamp} " <> message)
+
+    lease.stamp
+    |> Recorder.from_run(lease.chain)
+    |> Recorder.log(:error, "resend", message)
+    |> Recorder.resend_progress()
+
+    _ = Chain.release(lease)
+    resend_stop_event(lease, :stopped, nil, 0, 0)
+    settled(lease, {:error, :no_state})
+    {:cancel, :no_state}
+  end
+
+  @doc false
+  # A re-send interrupted from outside (#2949): its node stopped, its job
+  # ended without finishing, or no node with its backup directory picked it
+  # up (`Chain`'s reclaim, reap and stranded sweep, once the lock is
+  # released). Stopped, never failed: the run says so, keeps its status and
+  # what was sent, and gets no failure manifest. The work directory goes
+  # when this node has it.
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec resend_interrupted(
+          String.t(),
+          String.t(),
+          String.t() | nil,
+          pos_integer() | nil,
+          String.t()
+        ) ::
+          :ok
+  def resend_interrupted(stamp, chain, dir_id, part, message) do
+    Logger.warning("Backup re-send of #{stamp} stopped at part #{part}: #{message}")
+
+    rec =
+      stamp
+      |> Recorder.from_run(chain)
+      |> Recorder.log(:error, "resend", "Re-send stopped: #{message}")
+      |> Recorder.resend_progress()
+
+    dir = Backups.dir()
+    work_dir = WorkState.path(dir, stamp)
+
+    if dir_id != nil and DirId.current(dir) == {:ok, dir_id} and
+         match?({:ok, %{"kind" => "resend", "resend_chain" => ^chain}}, WorkState.read(work_dir)),
+       do: File.rm_rf(work_dir)
+
+    {reached, total} = resend_counts(rec)
+
+    resend_stop_event(
+      %{chain: chain, stamp: stamp},
+      :interrupted,
+      offsite_of(rec),
+      reached,
+      total
+    )
+
+    settled(%{chain: chain, stamp: stamp}, {:error, :interrupted})
+    :ok
+  end
+
+  @doc false
+  # The `[:kiln_cms, :backups, :resend, :stop]` event of a re-send its
+  # Cancel stopped (`Run.Changes.CancelResend`), from the run as canceled.
+  @spec resend_stopped_event(map(), atom(), KilnCMS.Backups.Run.t()) :: :ok
+  def resend_stopped_event(lease, outcome, run) do
+    counted = Enum.reject(run.destinations, &(&1.status == :skipped))
+
+    resend_stop_event(
+      lease,
+      outcome,
+      Recorder.offsite_outcome(run.destinations),
+      Enum.count(counted, &(&1.status == :ok)),
+      length(counted)
+    )
+  end
+
+  defp resend_stop_event(lease, outcome, offsite, reached, total) do
+    :telemetry.execute(
+      [:kiln_cms, :backups, :resend, :stop],
+      %{count: 1, reached: reached, total: total},
+      %{stamp: lease.stamp, chain: lease.chain, outcome: outcome, offsite_status: offsite}
+    )
+  end
+
+  # One per target destination as it settles.
+  defp resend_event(%{resend?: true} = dest, rec, status) do
+    entry = Enum.find(rec.destinations, %{}, &(&1.key == dest.entry["key"]))
+
+    :telemetry.execute(
+      [:kiln_cms, :backups, :resend, :destination],
+      %{count: 1, files_ok: entry[:files_ok] || 0, files_total: entry[:files_total] || 0},
+      %{stamp: dest.stamp, chain: dest.chain, destination: dest.entry["key"], status: status}
+    )
+  end
+
+  defp resend_event(_dest, _rec, _status), do: :ok
 
   ## finish
 

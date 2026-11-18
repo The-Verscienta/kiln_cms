@@ -30,6 +30,10 @@ defmodule KilnCMS.Backups do
   into that one (a different kind is refused: `KilnCMS.Backups.Chain.request/1`).
   `scripts/backup.sh` runs outside the application and does not take the lock.
 
+  A partly off-site run is sent again to the destinations it missed with
+  `resend_offsite/2` (#2949; `KilnCMS.Backups.Resend`), which takes the same
+  lock and is refused while it is held.
+
   A request may cover only some components (#2219):
   `request([components: [:db]], actor)` backs up the database alone. A
   request folding into a queued one widens it to both requests' components.
@@ -108,6 +112,9 @@ defmodule KilnCMS.Backups do
       define :mark_run_pruned, action: :mark_pruned
       define :cancel_run, action: :cancel
       define :cancel_run_resume, action: :cancel_resume
+      define :begin_run_resend, action: :begin_resend
+      define :record_run_resend, action: :record_resend
+      define :cancel_run_resend, action: :cancel_resend
     end
 
     resource KilnCMS.Backups.Lock do
@@ -116,9 +123,11 @@ defmodule KilnCMS.Backups do
       # are the step chain's, as `system/0`, inside the lock transaction.
       define :request_backup, action: :request
       define :request_scheduled_backup, action: :request_scheduled
+      define :request_backup_resend, action: :request_resend, args: [:stamp]
       define :backup_lock, action: :read, get?: true, not_found_error?: false
       define :ensure_backup_lock, action: :ensure
       define :hold_backup_lock, action: :hold
+      define :hold_backup_lock_for_resend, action: :hold_resend
       define :move_backup_lock, action: :move
       define :mark_backup_lock_executing, action: :mark_executing
       define :mark_backup_lock_finishing, action: :finishing
@@ -759,6 +768,14 @@ defmodule KilnCMS.Backups do
   """
   @spec keep_days() :: pos_integer()
   def keep_days, do: config(:keep_days, 14)
+
+  @doc """
+  Whether in-app backups are on (`BACKUP_ENABLED`, default true): the first
+  thing `availability/0` checks. A re-send (#2949) is gated on this alone,
+  since it runs neither `pg_dump` nor `pg_restore`.
+  """
+  @spec enabled?() :: boolean()
+  def enabled?, do: config(:enabled, true) not in [false, nil]
 
   @doc """
   How old the newest backup may be before the console calls it stale.
@@ -1744,6 +1761,40 @@ defmodule KilnCMS.Backups do
         {:ok, result} -> {:ok, result}
         {:error, error} -> {:error, refusal(error)}
       end
+    end
+  end
+
+  @doc """
+  Re-send the partly off-site run of `stamp` to the destinations it missed,
+  as `actor` (#2949; `KilnCMS.Backups.Resend`). A platform admin (the
+  Backups page's "Re-send") or `system/0` (a release console) may ask:
+
+      KilnCMS.Backups.resend_offsite("20261118-031700", KilnCMS.Backups.system())
+
+  `{:ok, %{status: :started, chain: chain, targets: labels, skipped:
+  labels}}`: the re-send holds the backup lock and sends to `targets`, in
+  order; `skipped` are the destinations the run missed that are removed or
+  disabled now. `KilnCMS.Backups.await/2` doesn't follow a re-send (it never
+  changes the run's status); its chain settles with
+  `[:kiln_cms, :backups, :chain, :settled]` like a backup's.
+
+  `{:error, reason}`: `:disabled` (`BACKUP_ENABLED=false`), `:invalid_stamp`,
+  `:no_such_run`, a `KilnCMS.Backups.Resend.eligible/2` refusal
+  (`:not_partial`, `:no_dir_id`, `:unverified`, `:pruned`,
+  `{:canceled_recently, seconds}`), `:destinations_unreadable`,
+  `:nothing_to_send` (every destination the run missed is gone), `:in_flight`
+  (this run is being re-sent), `:busy` (a backup or another re-send holds the
+  lock; a re-send is never queued), or `:forbidden`.
+  """
+  @spec resend_offsite(String.t(), term()) :: {:ok, map()} | {:error, term()}
+  def resend_offsite(stamp, actor) do
+    if WorkState.valid_stamp?(stamp) do
+      case request_backup_resend(stamp, actor: actor) do
+        {:ok, result} -> {:ok, result}
+        {:error, error} -> {:error, refusal(error)}
+      end
+    else
+      {:error, :invalid_stamp}
     end
   end
 

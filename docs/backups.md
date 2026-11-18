@@ -1531,6 +1531,9 @@ as before.
 | `[:kiln_cms, :backups, :marker_sync, :timeout]` | `phase` (`:dir_id` or `:sync`); measurements also `waited_ms` | A last-good marker sync job stopped waiting on the backup directory's id read or sync and gave up for the slot ([below](#the-marker-sync-on-a-hung-backup-directory-3079)). |
 | `[:kiln_cms, :backups, :offsite, :failed]` | `stamp`, `chain`, `reason` (`:destinations_unreadable`) | A backup finished without reaching any destination because the destinations table couldn't be read and `BACKUP_RCLONE_REMOTE` is not set: it stays Succeeded, marked not copied off-site (#2951). |
 | `[:kiln_cms, :backups, :status, :destinations_unreadable]` | `error` (the error's module) | The Backups or Home page couldn't read which destinations are configured, so the partly off-site alarm was left as recorded (logged at most every 15 minutes) (#2951). |
+| `[:kiln_cms, :backups, :resend, :requested]` | `stamp`, `chain`; measurements also `targets` and `skipped` (how many destinations) | A re-send of a partly off-site backup took the lock ([Re-send a partly off-site backup](#re-send-a-partly-off-site-backup)). |
+| `[:kiln_cms, :backups, :resend, :destination]` | `stamp`, `chain`, `destination` (its key), `status` (`:ok`, `:failed`, `:skipped`, `:refused` or `:missing`); measurements also `files_ok` and `files_total` | One destination of a re-send settled. |
+| `[:kiln_cms, :backups, :resend, :stop]` | `stamp`, `chain`, `outcome` (`:done`, `:refused`, `:local_files_missing`, `:stopped`, `:interrupted` or `:canceled`), `offsite_status` (what the run's destinations now add up to, nil when unknown); measurements also `reached` and `total` | A re-send ended. |
 
 The in-app schedules emit their own events,
 `[:kiln_cms, :backups, :schedule, …]` and
@@ -1647,6 +1650,10 @@ What can go wrong:
 | "Only a platform admin can cancel a backup." | Your account is no longer a platform admin. |
 | "That backup can't be canceled." | Anything else, for example a run that is not an in-app backup. |
 
+A **re-send** of a partly off-site backup has its own **Cancel**, on the
+strip only; the run's plain Cancel is refused while one runs
+([Re-send a partly off-site backup](#re-send-a-partly-off-site-backup)).
+
 **Resume waits about two and a half minutes after a Cancel (#2538).** A node
 that lost the database misses the Cancel, and stops its step only once it
 has gone 90 seconds without a successful heartbeat. A resume that started sooner could run
@@ -1754,6 +1761,16 @@ with no **Cancel**: it has no History row yet. Let the old job finish.
 The lock is held by a step job on some node. If that node stops, its step must
 not hold every later backup for ever, and two nodes must never write the same
 backup's files at once. Three things keep both true. The reasoning is in [ADR 0039](decisions/0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md).
+
+A **re-send** of a partly off-site backup
+([above](#re-send-a-partly-off-site-backup)) holds the same lock with steps
+of its own (`resend`, one per destination), and everything below applies to
+it as to a backup's steps, with one difference: a re-send taken back with no
+attempts left, or whose job ended, **stops** ("Re-send stopped: …" in the
+run's log) rather than failing the backup. Its run stays `Succeeded`, and no
+failure manifest is written for it, by a node of this release or of an
+older one: its `.work/<stamp>/state.json` names its chain in a key no
+backup step reads.
 
 **A heartbeat on every node.** Every 30 seconds each node writes a beat to
 `backup_node_beats`, timed by the database's clock, never the node's. It also
@@ -1975,9 +1992,9 @@ down.
 
 ### Which node runs a step
 
-A backup step after `start`, a resume's `start` and the last-good marker
-sync's per-directory job must each run on a node that has the backup
-directory. Each backup directory has an Oban queue of its own,
+A backup step after `start`, a resume's `start`, a re-send's steps (#2949)
+and the last-good marker sync's per-directory job must each run on a node
+that has the backup directory. Each backup directory has an Oban queue of its own,
 `backup_dir_<id>`, named for its [`.kiln-dir-id`](#several-nodes-and-the-backup-lock),
 and only the nodes that read that id run it (#2845):
 
@@ -4082,11 +4099,14 @@ Where it shows:
   reached: NAS", also logged as an error on the server, with the
   `[:kiln_cms, :backups, :offsite, :partial]` telemetry event.
 
-**It can't be resumed.** It succeeded, so its work directory is gone, and
-**Resume** is only on failed, interrupted and canceled runs. Fix the
+**Re-send it, or take a new backup.** It succeeded, so **Resume** isn't
+offered: that is for failed, interrupted and canceled runs. Fix the
 destination (its error and its **Test** button say what is wrong), then
-**Back up now** or wait for the next backup, which tries every destination
-again. The alarm clears when an in-app backup reaches all its destinations.
+either click **Re-send** on its History row, which sends this backup's files
+to the destinations it missed ([below](#re-send-a-partly-off-site-backup)),
+or **Back up now** or wait for the next backup, which tries every
+destination again. The alarm clears when an in-app backup reaches all its
+destinations, a re-send included.
 
 It also clears once none of the failed destinations is configured any more:
 a destination you removed or disabled since, or a `BACKUP_RCLONE_REMOTE`
@@ -4132,7 +4152,128 @@ Two other badges and states:
   event (metadata `stamp`, `chain`, `reason: :destinations_unreadable`).
   A run an earlier release recorded as partly off-site this way ("reached 0
   of 1") reads the same. The alarm counts while any stored destination is
-  enabled.
+  enabled. **Re-send** sends such a backup to the stored destinations that
+  are enabled now and that it has no entry for; they replace its
+  "Stored destinations" entry ([below](#re-send-a-partly-off-site-backup)).
+
+### Re-send a partly off-site backup
+
+A backup that is **Partly off-site** or **Not off-site** can be sent again to
+the destinations it missed, once you have fixed them (#2949). The files sent
+are the backup's own, as they are in `BACKUP_DIR`: nothing is dumped or
+archived again, and the run stays `Succeeded`. The reasoning is in
+[ADR 0071](decisions/0071-a-partly-off-site-backup-is-completed-by-a-re-send-that-holds-the-backup-lock-and-never-changes-the-runs-status.md).
+
+1. Open **Backups** (`/editor/backups`) as a platform admin.
+2. In **History**, click **Re-send** on the backup's row. The button shows
+   when the row is badged Partly off-site or Not off-site, its files are on
+   this server's disk ("on disk"), every artifact verified, and at least one
+   destination it missed is still configured.
+3. Confirm "Re-send this backup to `<destinations>`? Each file is checked
+   against its recorded checksum before it is copied." When the backup is
+   older than `BACKUP_KEEP_DAYS` and a destination it goes to prunes, the
+   question adds "It is older than 14 days, so retention on `<destination>`
+   may remove it there again after the next backup": retention there treats
+   it like any other backup of its age.
+4. The page says "Re-send started — this page updates when it finishes."
+   (naming any destination it skips, below). The strip says "Re-sending
+   off-site (1 of 2: NAS)", and the row is badged **Re-sending…** until it
+   is done.
+
+Where it goes: every destination whose entry on the run is failed (or
+pending), in the run's order, that is configured now. A stored destination
+you deleted or disabled since, or a `BACKUP_RCLONE_REMOTE` you changed or
+unset, is **skipped**: the run's log says "Skipped NAS: removed or disabled
+since this backup; its outcome stays failed", and its entry keeps the
+failure. A "Stored destinations" entry (the destinations couldn't be read
+when the backup ran) stands for the stored destinations enabled now that
+the run has no entry for.
+
+What it does for each destination, one step job after another under the
+backup lock:
+
+- Reads each file again and compares it with the sha256 recorded when the
+  backup verified it, immediately before each copy (ADR 0043), then copies
+  it. A stored destination that took a file in an earlier attempt of the
+  same re-send is not sent it again.
+- Records the destination's outcome on the run, and the outcome of each
+  file, as the backup would have; then runs that destination's retention,
+  as after a backup.
+- When it is done, writes the off-site outcome the destinations now add up
+  to (**Complete** when every one is reached), says "Re-send of `<stamp>`
+  done: reached 2 of 2 destination(s); off-site now complete" in the run's
+  log, and releases the lock.
+
+What it never does: change the run's status, error or finish time; write
+`manifest.json` (with the one exception below); rebuild a file. The run's
+error, if any, stays as it was.
+
+**A file that changed on disk is refused.** The re-send stops there: that
+destination is recorded failed ("REFUSED for 1 file: …"), the artifact is
+marked **unverified** on the run, and in `manifest.json` too when the
+manifest is still this backup's (as `scripts/backup.sh` does when it
+refuses a copy). The file is left where it is, under its own name: it is
+the backup's only copy, and nothing will rebuild it. The last-good markers
+are synced again, so an unverified backup stops counting as the last good
+one. Something other than the backup wrote to `BACKUP_DIR`: find out what
+before you trust this backup.
+
+**A file that is gone** stops the re-send as "Re-send refused:
+`<name>` is no longer in BACKUP_DIR; nothing was sent" (before the first
+copy) or records the destination as "not sent: `<name>` no longer in
+BACKUP_DIR" (during one). The backup is not marked unverified: a missing
+file says nothing about whether it verified. Take a new backup.
+
+While it runs:
+
+- It holds the backup lock. **Back up now**, or a scheduled backup, queues
+  behind it as behind any backup. Another **Re-send** is refused: a re-send
+  is never queued.
+- **Cancel** on the strip stops it. Confirm "Stop this re-send? What was
+  already sent stays recorded." The page says "Re-send canceled. What it
+  already sent stays recorded." The run's log says "Re-send canceled by a
+  platform admin" (who is in the instance security log's **Backup
+  canceled** event, with `resend: true`); a destination it reached stays
+  reached. **Re-send** on the same row is refused for about two and a half
+  minutes after a Cancel, as **Resume** is
+  ([Cancel a running backup](#cancel-a-running-backup)). The plain
+  **Cancel** of the run is refused while a re-send runs ("cancel the
+  re-send instead"). Once the re-send has started its last write, its
+  Cancel is refused with "Too late to cancel: the re-send is finishing."
+
+What the page can say when you click **Re-send**:
+
+| Message | Meaning |
+|---|---|
+| "A backup or another re-send is running. Re-send this backup once it finishes: a re-send is never queued." | The backup lock is held. |
+| "This backup is being re-sent right now." | A re-send of it holds the lock (a second click). |
+| "That backup can't be re-sent: its files in the backup directory are gone, pruned or no longer verified." | Retention pruned its local files, or an artifact is not verified. |
+| "Every destination this backup missed was removed or disabled since, so there is nowhere to re-send it." | Nothing it missed is configured now. |
+| "This backup's re-send was canceled moments ago. Re-send it again in N seconds: …" | Its re-send was canceled less than two and a half minutes ago. |
+| "Couldn't read the backup destinations. Try again in a moment." | The destinations table couldn't be read. |
+| "In-app backups are turned off (BACKUP_ENABLED)." | `BACKUP_ENABLED=false`: a re-send is refused then. |
+| "That backup can't be re-sent." | Anything else: it isn't partly off-site, it has no backup directory id (a run from before #2539), or it no longer exists. |
+
+From a release console, as the backup system actor:
+
+```elixir
+KilnCMS.Backups.resend_offsite("20261118-031700", KilnCMS.Backups.system())
+# {:ok, %{status: :started, chain: "5f0c…", targets: ["NAS"], skipped: []}}
+```
+
+It returns `{:error, reason}` for the refusals above (`:busy`,
+`:in_flight`, `:pruned`, `:unverified`, `:nothing_to_send`,
+`{:canceled_recently, seconds}`, `:destinations_unreadable`, `:disabled`,
+`:not_partial`, `:no_dir_id`, `:no_such_run`, `:invalid_stamp`).
+`KilnCMS.Backups.await/2` doesn't follow a re-send: its run is never
+`running`. Watch `[:kiln_cms, :backups, :resend, :stop]` or the run's log.
+
+The re-send's steps run on a node with the backup's directory, as a
+backup's steps do ([Which node runs a step](#which-node-runs-a-step)). A
+node that stops while it runs is handled like any step's: its step is
+taken back and requeued, and with no attempts left the re-send stops with
+"Re-send stopped: Interrupted: …" in the run's log. Nothing else changes:
+no failure manifest is written for a re-send, by any node.
 
 ### Retention on a destination
 
