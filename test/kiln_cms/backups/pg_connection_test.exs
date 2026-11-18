@@ -84,6 +84,11 @@ defmodule KilnCMS.Backups.PgConnectionTest do
     test "refuses a key=value string with a password" do
       assert Backups.pg_connection("host=db password=hunter2") == {:error, :refused_conninfo}
     end
+
+    test "refuses a URL carrying sslpassword, which libpq reads only from argv (#3049)" do
+      assert Backups.pg_connection("ecto://kiln:pw@db/kiln?sslpassword=hunter2") ==
+               {:error, :refused_sslpassword}
+    end
   end
 
   describe "an in-app backup's pg_dump" do
@@ -162,6 +167,18 @@ defmodule KilnCMS.Backups.PgConnectionTest do
       assert [%Backups.Run{status: :failed, error: error}] = runs()
       assert error =~ "is not a postgres:// URL"
       assert error =~ "postgres:///database?host=/socket/dir"
+      refute error =~ "hunter2"
+    end
+
+    test "a URL carrying sslpassword fails the run at once, saying why (#3049)", ctx do
+      set_config(database_url: "postgres://kiln:pw@db/kiln?sslkey=/k.key&sslpassword=hunter2")
+
+      assert {:error, :refused_sslpassword} = BackupChain.run()
+      refute File.exists?(ctx.log <> ".args")
+
+      assert [%Backups.Run{status: :failed, error: error}] = runs()
+      assert error =~ "carries sslpassword"
+      assert error =~ "chmod 0600"
       refute error =~ "hunter2"
     end
 

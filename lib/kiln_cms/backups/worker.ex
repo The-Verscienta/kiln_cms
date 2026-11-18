@@ -118,13 +118,13 @@ defmodule KilnCMS.Backups.Worker do
   the shape the release console has always called it with.
 
   Raises `ArgumentError` for a string `KilnCMS.Backups.PgUrl.split/1`
-  refuses (#2831); the message says why and never holds the string.
+  refuses (#2831, #3049); the message says why and never holds the string.
   """
   @spec split_credentials(String.t() | nil) :: {String.t() | nil, [{String.t(), String.t()}]}
   def split_credentials(url) do
     case Steps.split_credentials(url) do
       {:ok, split} -> split
-      {:error, :refused_conninfo} -> raise ArgumentError, Backups.describe_refused_conninfo()
+      {:error, refusal} -> raise ArgumentError, Backups.describe_refusal(refusal)
     end
   end
 end

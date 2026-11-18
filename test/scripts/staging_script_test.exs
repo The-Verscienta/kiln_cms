@@ -147,6 +147,24 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
     end
   end
 
+  test "a URL carrying sslpassword is refused before anything is created (#3049)", ctx do
+    for {prod, staging, var} <- [
+          {"ecto://prod@prod-db/kiln_prod?sslpassword=prod-pw",
+           "ecto://stage@stage-db/kiln_staging", "PROD_DATABASE_URL"},
+          {"ecto://prod@prod-db/kiln_prod",
+           "postgres://stage@stage-db/kiln_staging?sslpass%77ord=stage-pw",
+           "STAGING_DATABASE_URL"}
+        ] do
+      assert {out, status} = up(ctx, prod: prod, staging: staging)
+
+      assert status != 0
+      assert out =~ "#{var} carries sslpassword"
+      refute out =~ "prod-pw"
+      refute out =~ "stage-pw"
+      refute File.exists?(ctx.log), "a tool ran for #{var}"
+    end
+  end
+
   test "libpq gets Ecto's ssl=false as sslmode=disable; the printed DATABASE_URL keeps it as written (#2833)",
        ctx do
     assert {out, 0} =

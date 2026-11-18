@@ -118,6 +118,22 @@ defmodule KilnCMS.Scripts.RestoreDbTest do
     end
   end
 
+  test "a URL carrying sslpassword is refused before any tool runs (#3049)", ctx do
+    for command <- ["db", "drill"] do
+      assert {out, status} =
+               restore(
+                 ctx,
+                 [command, ctx.dump],
+                 "postgres://kiln@db/kiln_drill?sslkey=/k.key&sslpassword=hunter2"
+               )
+
+      assert status != 0, command
+      assert out =~ "RESTORE_DATABASE_URL carries sslpassword", command
+      refute out =~ "hunter2", command
+      refute File.exists?(ctx.log), command
+    end
+  end
+
   test "libpq gets Ecto's ssl=false as sslmode=disable; the printed hint keeps the URL as written (#2833)",
        ctx do
     url = "ecto://kiln:hunter2@db/kiln_drill?ssl=false&pool_size=5"

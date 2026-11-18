@@ -5,13 +5,17 @@ defmodule KilnCMS.Test.PgUrlCases do
   so the app and cron read a `DATABASE_URL` the same way.
 
   Each case is `{label, input, url, password}`: the URL to give libpq and the
-  `PGPASSWORD` to give it (`nil` for none), or `url: :refused` for a string
-  that is refused (#2831). `test/kiln_cms/backups/pg_url_libpq_test.exs`
+  `PGPASSWORD` to give it (`nil` for none), or, for a string that is refused,
+  the refusal in place of the URL: `:refused_conninfo` (#2831) or
+  `:refused_sslpassword` (#3049). `test/kiln_cms/backups/pg_url_libpq_test.exs`
   checks the table against libpq's own parser.
   """
 
+  @typedoc "Why a case is refused (`KilnCMS.Backups.PgUrl.refusal/0`)."
+  @type refusal :: :refused_conninfo | :refused_sslpassword
+
   @doc "The shared cases."
-  @spec cases() :: [{String.t(), String.t(), String.t() | :refused, String.t() | nil}]
+  @spec cases() :: [{String.t(), String.t(), String.t() | refusal(), String.t() | nil}]
   def cases do
     [
       {"postgres:// with a password", "postgres://kiln:hunter2@db:5432/kiln",
@@ -96,20 +100,23 @@ defmodule KilnCMS.Test.PgUrlCases do
        "hunter2"},
       {"PostgreSQL:// in mixed case", "PostgreSQL://kiln:hunter2@db/kiln",
        "postgresql://kiln@db/kiln", "hunter2"},
-      {"another scheme is refused", "mysql://u:pw@h/db", :refused, nil},
-      {"a leading space is not a URI, and is refused", " postgres://u:pw@h/db", :refused, nil},
+      {"another scheme is refused", "mysql://u:pw@h/db", :refused_conninfo, nil},
+      {"a leading space is not a URI, and is refused", " postgres://u:pw@h/db", :refused_conninfo,
+       nil},
       # key=value strings (#2831): refused when a keyword is `password` or
       # `sslpassword`, or they hold a URL; libpq keywords are case-sensitive
       # and cannot be quoted.
-      {"a conninfo string with a password is refused", "host=db password=x dbname=kiln", :refused,
-       nil},
+      {"a conninfo string with a password is refused", "host=db password=x dbname=kiln",
+       :refused_conninfo, nil},
       {"a quoted conninfo password is refused", "host=db password='a b\\'c' dbname=kiln",
-       :refused, nil},
-      {"a conninfo sslpassword is refused", "host=db sslpassword=x dbname=kiln", :refused, nil},
-      {"a conninfo password alone is refused", "password=x", :refused, nil},
-      {"spaces around `=` still make a password keyword", "host=db password = x", :refused, nil},
+       :refused_conninfo, nil},
+      {"a conninfo sslpassword is refused", "host=db sslpassword=x dbname=kiln",
+       :refused_conninfo, nil},
+      {"a conninfo password alone is refused", "password=x", :refused_conninfo, nil},
+      {"spaces around `=` still make a password keyword", "host=db password = x",
+       :refused_conninfo, nil},
       {"a keyword straight after a closing quote is refused", "host='x'password=y dbname=kiln",
-       :refused, nil},
+       :refused_conninfo, nil},
       # Not a libpq keyword (they are case-sensitive): libpq refuses the
       # string by naming `PASSWORD`, without echoing its value
       # (pg_url_libpq_test.exs), so it is passed through.
@@ -120,7 +127,7 @@ defmodule KilnCMS.Test.PgUrlCases do
       {"`password` at the start of a value is not a keyword", "host=db user=passwordless",
        "host=db user=passwordless", nil},
       {"a dbname that libpq would expand into a URI is refused", "dbname='postgres://u:s@h/db'",
-       :refused, nil},
+       :refused_conninfo, nil},
       {"a passwordless conninfo string is kept", "host=/run/postgresql dbname=kiln_prod",
        "host=/run/postgresql dbname=kiln_prod", nil},
       {"a bare database name is kept", "kiln_prod", "kiln_prod", nil},
@@ -157,7 +164,39 @@ defmodule KilnCMS.Test.PgUrlCases do
        "postgres://kiln@db/kiln", "pw"},
       {"socket_dir is kept: it changes which server is reached",
        "ecto://kiln:pw@localhost/kiln?socket_dir=/run/postgresql",
-       "postgres://kiln@localhost/kiln?socket_dir=/run/postgresql", "pw"}
+       "postgres://kiln@localhost/kiln?socket_dir=/run/postgresql", "pw"},
+      # A client key's passphrase in a URI's query (#3049): libpq has no
+      # environment variable for it, so it is refused rather than moved. The
+      # key is matched decoded and case-sensitively, as libpq matches it.
+      {"a query sslpassword is refused",
+       "postgres://kiln:pw@db/kiln?sslmode=verify-full&sslkey=/k.key&sslpassword=hunter2",
+       :refused_sslpassword, nil},
+      {"a query sslpassword alone is refused", "postgres://kiln@db/kiln?sslpassword=hunter2",
+       :refused_sslpassword, nil},
+      {"a query sslpassword beside a query password is refused",
+       "postgres://u@h/db?password=pw&sslpassword=hunter2", :refused_sslpassword, nil},
+      {"an encoded sslpassword value is refused", "postgres://u@h/db?sslpassword=hun%40ter2",
+       :refused_sslpassword, nil},
+      {"a percent-encoded sslpassword key is refused, as libpq decodes it",
+       "postgres://u@h/db?%73slpass%77ord=hunter2", :refused_sslpassword, nil},
+      {"an empty sslpassword is refused", "postgres://u@h/db?sslpassword=", :refused_sslpassword,
+       nil},
+      {"POSTGRESQL:// with an sslpassword is refused", "POSTGRESQL://u@h/db?sslpassword=hunter2",
+       :refused_sslpassword, nil},
+      {"ecto:// with an sslpassword is refused", "ecto://kiln@db/kiln?sslpassword=hunter2",
+       :refused_sslpassword, nil},
+      # Not a libpq URI parameter (keys are case-sensitive): libpq refuses the
+      # URL by naming the key, without echoing its value
+      # (pg_url_libpq_test.exs), so it is passed through.
+      {"SSLPASSWORD in capitals is libpq's to refuse", "postgres://u@h/db?SSLPASSWORD=hunter2",
+       "postgres://u@h/db?SSLPASSWORD=hunter2", nil},
+      {"an sslpassword key that decodes to something else is kept",
+       "postgres://u@h/db?sslpass%2577ord=x", "postgres://u@h/db?sslpass%2577ord=x", nil},
+      {"`sslpassword=` inside a value is not a key",
+       "postgres://u@h/db?application_name=sslpassword%3Dx",
+       "postgres://u@h/db?application_name=sslpassword%3Dx", nil},
+      {"a bare sslpassword with no `=` is libpq's to refuse", "postgres://u@h/db?sslpassword",
+       "postgres://u@h/db?sslpassword", nil}
     ]
   end
 

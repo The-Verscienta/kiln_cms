@@ -1319,9 +1319,9 @@ defmodule KilnCMS.Backups.Steps do
       {:error, :superseded} ->
         {:result, {:cancel, :superseded}}
 
-      # The connection string itself is refused (#2831): no retry can
-      # change that, so the run fails now with the reason.
-      {:error, :refused_conninfo = reason} ->
+      # The connection string itself is refused (#2831, #3049): no retry
+      # can change that, so the run fails now with the reason.
+      {:error, reason} when reason in [:refused_conninfo, :refused_sslpassword] ->
         {:fatal, reason, state, Recorder.log(rec, :error, "dump", describe(reason))}
 
       {:error, reason} ->
@@ -3399,7 +3399,8 @@ defmodule KilnCMS.Backups.Steps do
 
   @doc """
   Splits a connection URL into a password-free URL plus a `PGPASSWORD`
-  environment entry, or refuses it (`{:error, :refused_conninfo}`, #2831).
+  environment entry, or refuses it (`{:error, :refused_conninfo}`, #2831;
+  `{:error, :refused_sslpassword}`, #3049).
 
   The password must not be an **argv** element. There is no injection risk
   (no shell) — but argv is not private: `/proc/<pid>/cmdline` is
@@ -3434,7 +3435,8 @@ defmodule KilnCMS.Backups.Steps do
   # this is the only shape the `else` can see.
   defp fail_tuple({:error, reason}), do: {:error, reason}
 
-  defp describe(:refused_conninfo), do: Backups.describe_refused_conninfo()
+  defp describe(reason) when reason in [:refused_conninfo, :refused_sslpassword],
+    do: Backups.describe_refusal(reason)
 
   defp describe({:exit_status, "pg_dump", _status, output} = reason) do
     if Backups.lock_timeout?(output),

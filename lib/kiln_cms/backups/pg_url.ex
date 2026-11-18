@@ -46,6 +46,12 @@ defmodule KilnCMS.Backups.PgUrl do
       query parameters and their order) is kept byte for byte. There is no
       `URI.parse`/`URI.to_string` round trip, which re-encodes.
 
+  A URI whose query carries `sslpassword` (the passphrase of an encrypted
+  client key; the key is matched decoded and case-sensitive, as libpq matches
+  it, so `%73slpassword=` counts and `SSLPASSWORD=` is libpq's to refuse by
+  name) is refused (#3049): libpq has no environment variable for it, so
+  unlike the password it cannot be moved out of argv.
+
   A string that is not a `postgres://` or `postgresql://` URI after
   `normalize/1` is refused (#2831) when one of its `key=value` keywords is
   `password` or `sslpassword`, or it holds `://` (another scheme, or a
@@ -79,10 +85,12 @@ defmodule KilnCMS.Backups.PgUrl do
   @type env :: [{String.t(), String.t()}]
 
   @typedoc """
-  Why `split/1` refused a string: it is not a URI libpq reads as one, and it
-  carries a password or another URL. The string itself is never in the reason.
+  Why `split/1` refused a string: `:refused_conninfo` when it is not a URI
+  libpq reads as one and carries a password or another URL,
+  `:refused_sslpassword` when it is a URI whose query carries `sslpassword`.
+  The string itself is never in the reason.
   """
-  @type refusal :: :refused_conninfo
+  @type refusal :: :refused_conninfo | :refused_sslpassword
 
   # Ecto's own integer options (`@integer_url_query_params` in
   # Ecto.Repo.Supervisor). libpq refuses each by name; none changes which
@@ -160,8 +168,9 @@ defmodule KilnCMS.Backups.PgUrl do
   `{:ok, {url, env}}`: the normalized URL with no password in it, and the
   `[{"PGPASSWORD", password}]` entry to run the child with (`[]` when the URL
   has no password to move, so the operator's own `PGPASSWORD` or `.pgpass`
-  still applies). `{:error, :refused_conninfo}` for a string whose secret
-  would stay in argv (see the moduledoc).
+  still applies). `{:error, :refused_conninfo}` or
+  `{:error, :refused_sslpassword}` for a string whose secret would stay in
+  argv (see the moduledoc).
   """
   @spec split(String.t() | nil) :: {:ok, {String.t() | nil, env()}} | {:error, refusal()}
   def split(nil), do: {:ok, {nil, []}}
@@ -170,10 +179,21 @@ defmodule KilnCMS.Backups.PgUrl do
     url = normalize(url)
 
     case parse(url) do
-      {:ok, parts} -> {:ok, rebuild(url, parts)}
-      :not_a_uri -> if refused?(url), do: {:error, :refused_conninfo}, else: {:ok, {url, []}}
+      {:ok, parts} ->
+        if sslpassword?(parts.query),
+          do: {:error, :refused_sslpassword},
+          else: {:ok, rebuild(url, parts)}
+
+      :not_a_uri ->
+        if refused?(url), do: {:error, :refused_conninfo}, else: {:ok, {url, []}}
     end
   end
+
+  # A query `sslpassword=` (#3049), its key decoded as libpq decodes it.
+  defp sslpassword?(nil), do: false
+
+  defp sslpassword?(query),
+    do: query |> String.split("&") |> Enum.any?(&(param_key(&1) == "sslpassword"))
 
   defp refused?(string) do
     String.contains?(string, "://") or

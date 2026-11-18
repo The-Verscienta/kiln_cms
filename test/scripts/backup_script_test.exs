@@ -2558,6 +2558,22 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       end
     end
 
+    test "a URL carrying sslpassword is refused before pg_dump runs (#3049)", ctx do
+      url = "ecto://kiln:pw@db/kiln_prod?sslmode=verify-full&sslpassword=hunter2"
+
+      assert {out, status} = backup(ctx, "all", [{"DATABASE_URL", url}, {"PGPASSWORD", nil}])
+
+      assert status != 0
+      refute File.exists?(ctx.log <> ".args"), "pg_dump ran"
+      assert out =~ "DATABASE_URL carries sslpassword"
+      refute out =~ "hunter2"
+
+      manifest = manifest!(ctx)
+      refute manifest["ok"]
+      assert manifest["error"] =~ "DATABASE_URL carries sslpassword"
+      refute manifest["error"] =~ "hunter2"
+    end
+
     test "a passwordless key=value string still reaches pg_dump unchanged", ctx do
       url = "host=/run/postgresql dbname=kiln_prod"
 

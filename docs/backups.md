@@ -1205,6 +1205,33 @@ Rewrite the string as a URL, password included:
 BACKUP_DATABASE_URL=postgres://kiln:hunter2@/kiln_prod?host=/run/postgresql
 ```
 
+**A URL with `sslpassword` is refused (#3049).** `sslpassword` is the
+passphrase of an encrypted client key (`sslkey`). Unlike the password, libpq
+has no environment variable for it, so the only way to hand it to `pg_dump`,
+`pg_restore` or `psql` is the command line, where every process on the host
+can read it. A `postgres://`, `postgresql://` or `ecto://` URL whose query
+carries `sslpassword=` (also when the name is escaped, `sslpass%77ord=`, and
+also when it is empty) is refused before any tool runs, on every path above,
+with:
+
+```text
+BACKUP_DATABASE_URL (or DATABASE_URL) carries sslpassword, the passphrase of an encrypted client key, which would sit in the command line of pg_dump, pg_restore and psql for every process on the host to read (libpq has no environment variable for it). Use a client key file that is not encrypted, readable only by its owner (chmod 0600), or decrypt the one you have (openssl pkey -in client.key -out client.key.plain), and drop sslpassword from the URL.
+```
+
+The scripts print it after their own variable's name, as above. To fix it,
+point `sslkey` at a key that is not encrypted and readable only by the user
+the tools run as:
+
+```bash
+openssl pkey -in client.key -out client.key.plain   # asks for the passphrase once
+chmod 0600 client.key.plain
+# was: postgres://kiln@db/kiln_prod?sslmode=verify-full&sslkey=/etc/kiln/client.key&sslpassword=…
+BACKUP_DATABASE_URL=postgres://kiln@db/kiln_prod?sslmode=verify-full&sslkey=/etc/kiln/client.key.plain
+```
+
+Names are case-sensitive here too: `SSLPASSWORD=` is not libpq's parameter,
+and libpq refuses the URL by naming it, without printing the value.
+
 ### The database password stays out of the pg_dump command line (#2726)
 
 A process's arguments are readable by every user on the host, through
@@ -1222,6 +1249,7 @@ gives it to the one `pg_dump`, `pg_restore` or `psql` that needs it as
 | `postgres://kiln:a@db/kiln?password=b` | `postgres://kiln@db/kiln` | `b` |
 | `postgres://kiln@db/kiln` | `postgres://kiln@db/kiln` | not set: yours, or `~/.pgpass`, applies |
 | `host=db password=hunter2 dbname=kiln` | refused, nothing runs ([above](#which-database-url-the-backup-tools-accept-2719)) | |
+| `postgres://kiln@db/kiln?sslkey=/k.key&sslpassword=…` | refused, nothing runs ([above](#which-database-url-the-backup-tools-accept-2719)) | |
 
 The URL is split where libpq splits it:
 
@@ -1238,6 +1266,8 @@ The URL is split where libpq splits it:
   so your own `PGPASSWORD` or `~/.pgpass` decides.
 - **A `key=value` string with a password is refused** (#2831), and one
   without is passed as it is. Use a URL.
+- **A URL with `sslpassword` is refused** (#3049): libpq can't read a client
+  key's passphrase from the environment. Use a key that is not encrypted.
 
 The scripts don't print it either. `restore.sh drill` suggests a
 `STAGING_DATABASE_URL=… ./scripts/staging.sh scrub` line with the password
@@ -5111,7 +5141,7 @@ The app reads them in production only.
 
 | Variable | Script | Meaning |
 |---|---|---|
-| `DATABASE_URL` | backup | source DB (read-only): `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_dump` as `PGPASSWORD` only, and a `key=value` string with a password is refused ([connection URLs](#which-database-url-the-backup-tools-accept-2719)). The app's `DATABASE_SSL` doesn't reach the script: put `sslmode=` in this URL to require TLS ([TLS](#how-the-backup-tools-choose-tls-2830)) |
+| `DATABASE_URL` | backup | source DB (read-only): `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_dump` as `PGPASSWORD` only, and a `key=value` string with a password, or a URL with `sslpassword`, is refused ([connection URLs](#which-database-url-the-backup-tools-accept-2719)). The app's `DATABASE_SSL` doesn't reach the script: put `sslmode=` in this URL to require TLS ([TLS](#how-the-backup-tools-choose-tls-2830)) |
 | `BACKUP_DIR` | backup + app | local backup root (default `/var/backups/kiln`) |
 | `MEDIA_DIR` | backup + app | uploads root (Local adapter only; omit on S3). Defaults to `KILN_MEDIA_ROOT` when that is set and `S3_BUCKET` is not |
 | `BACKUP_KEEP_DAYS` | backup + app | local retention, 1 to 2147483647 days (default 14; anything else keeps 14 and warns): the age at which a backup may be deleted ([keep rules](#what-retention-deletes-and-what-it-keeps)); an in-app schedule may keep its own backups longer or shorter ([per schedule](#set-how-long-a-schedule-keeps-its-backups)) |
@@ -5129,7 +5159,7 @@ The app reads them in production only.
 | `BACKUP_PING_URL` | backup | dead-man's-switch ping on success |
 | `BACKUP_DATABASE_URL` | app | connection string the in-app backup dumps, for a connection the app cannot derive from `DATABASE_URL` or the Repo config (a unix-socket repo). Unset, it uses `DATABASE_URL` when that names the connected database, else a URL rebuilt from the Repo. Any of them may be `ecto://`; `ssl=false` becomes `sslmode=disable` and Ecto's pool options are dropped ([connection URLs](#which-database-url-the-backup-tools-accept-2719)). The tools' TLS follows the app's unless this URL sets `sslmode` ([TLS](#how-the-backup-tools-choose-tls-2830)) |
 | `RCLONE_CONFIG`, `RCLONE_CONFIG_<NAME>_*`, `RCLONE_RETRIES` | rclone | read by `rclone` itself, which inherits the environment of whichever path runs it: the named remote's configuration file or settings, and rclone's retry count (default 3). Kiln does not read them. `kiln_offsite` is reserved ([above](#off-site-credentials-stay-out-of-the-rclone-command-line-2690)) |
-| `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill`: `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_restore`/`psql` as `PGPASSWORD` only, and a `key=value` string with a password is refused. Put `sslmode=` in it to require TLS |
+| `RESTORE_DATABASE_URL` | restore | target DB for `db`/`drill`: `postgres://`, `postgresql://` or `ecto://`; the password reaches `pg_restore`/`psql` as `PGPASSWORD` only, and a `key=value` string with a password, or a URL with `sslpassword`, is refused. Put `sslmode=` in it to require TLS |
 | `RESTORE_MEDIA_DIR` | restore | target uploads root for `media` |
 | `RESTORE_CONFIRM=yes` | restore | skip the interactive confirmation |
 | `RESTORE_REQUIRE_CHECKSUM=1` | restore | `db`, `drill` and `media`: abort when there is no checksum sidecar (default: warn and continue for a dump, or a legacy single archive, with none). `db` and `drill` read it since #2877 ([details](#what-can-go-wrong-when-restoring-a-dump)) |

@@ -93,6 +93,21 @@ defmodule KilnCMS.Demo.RestoreConnectionTest do
     refute File.exists?(ctx.log)
   end
 
+  test "a URL carrying sslpassword is refused before either tool runs (#3049)", ctx do
+    url = "postgres://kiln@db/kiln_demo?sslpassword=hunter2"
+    work = %{dir: ctx.tmp, wipe: "w.sql", restore: "r.sql"}
+
+    assert {:error, {:dump_failed, dump_error}} = Restore.dump(url, Path.join(ctx.tmp, "g.dump"))
+    assert {:error, {:restore_failed, run_error}} = Restore.run(work, url)
+
+    for error <- [dump_error, run_error] do
+      assert error =~ "carries sslpassword"
+      refute error =~ "hunter2"
+    end
+
+    refute File.exists?(ctx.log)
+  end
+
   test "a golden capture stuck behind a lock says so", ctx do
     stub!(ctx.bin, "pg_dump", """
     echo "pg_dump: error: query failed: ERROR:  canceling statement due to statement timeout" >&2

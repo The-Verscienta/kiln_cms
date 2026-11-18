@@ -3,7 +3,7 @@ defmodule KilnCMS.Scripts.PgConnSplitTest do
   `pg_conn_split` (with its helper `pg_conn_decode`), the shell copy of
   `KilnCMS.Backups.PgUrl.split/1` that
   `scripts/backup.sh`, `scripts/restore.sh` and `scripts/staging.sh` each
-  carry (#2719, #2726, #2831, #2833).
+  carry (#2719, #2726, #2831, #2833, #3049).
 
   Each script has to run alone (hosts copy `backup.sh` by itself), so the
   function is copied rather than sourced. This holds the copies byte for byte
@@ -13,6 +13,7 @@ defmodule KilnCMS.Scripts.PgConnSplitTest do
   """
   use ExUnit.Case, async: true
 
+  alias KilnCMS.Backups
   alias KilnCMS.Backups.PgUrl
   alias KilnCMS.Test.ShellTools
 
@@ -62,8 +63,12 @@ defmodule KilnCMS.Scripts.PgConnSplitTest do
           # password gone, the query as written (#2833).
           assert shell.display == Map.get(display_urls, input, url), label
 
-        {:error, :refused_conninfo} ->
-          assert shell.error =~ "is not a postgres:// URL", label
+        # The same sentence as the app's, after the script's own variable.
+        {:error, reason} ->
+          assert Backups.describe_refusal(reason) ==
+                   "BACKUP_DATABASE_URL (or DATABASE_URL) " <> shell.error,
+                 label
+
           assert {shell.url, shell.display, shell.password} == {"", "", nil}, label
       end
     end

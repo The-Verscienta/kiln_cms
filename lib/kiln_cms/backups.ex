@@ -746,7 +746,9 @@ defmodule KilnCMS.Backups do
   operator's `PGSSLMODE`/`PGSSLROOTCERT` already decides.
 
   `{:error, :refused_conninfo}` when the string is not a URL libpq reads as
-  one and would leave a password in argv (#2831).
+  one and would leave a password in argv (#2831), and
+  `{:error, :refused_sslpassword}` when the URL carries `sslpassword`, which
+  libpq can only read from argv (#3049).
   """
   @spec pg_connection(String.t() | nil) ::
           {:ok, {String.t() | nil, [{String.t(), String.t()}]}} | {:error, PgUrl.refusal()}
@@ -758,7 +760,24 @@ defmodule KilnCMS.Backups do
     end
   end
 
-  @doc "What to tell an operator when `pg_connection/1` refused the string."
+  @doc """
+  What to tell an operator when `pg_connection/1` refused the string, for
+  either refusal. The scripts print the same sentence after their own
+  variable's name (`pg_conn_split`).
+  """
+  @spec describe_refusal(PgUrl.refusal()) :: String.t()
+  def describe_refusal(:refused_conninfo), do: describe_refused_conninfo()
+
+  def describe_refusal(:refused_sslpassword) do
+    "BACKUP_DATABASE_URL (or DATABASE_URL) carries sslpassword, the passphrase of an " <>
+      "encrypted client key, which would sit in the command line of pg_dump, pg_restore and " <>
+      "psql for every process on the host to read (libpq has no environment variable for " <>
+      "it). Use a client key file that is not encrypted, readable only by its owner " <>
+      "(chmod 0600), or decrypt the one you have (openssl pkey -in client.key -out " <>
+      "client.key.plain), and drop sslpassword from the URL."
+  end
+
+  @doc "What to tell an operator when `pg_connection/1` refused a `key=value` string."
   @spec describe_refused_conninfo() :: String.t()
   def describe_refused_conninfo do
     "BACKUP_DATABASE_URL (or DATABASE_URL) is not a postgres:// URL and holds a password " <>

@@ -338,10 +338,14 @@ pg_conn_decode() {
 # `://`: PG_CONN_ERROR says why, PG_CONN_URL is empty, and the caller dies
 # with it. A passwordless `key=value` conninfo or a bare database name is
 # left unchanged.
+# A URI whose query carries `sslpassword` (the key decoded and compared
+# case-sensitively, as libpq does) is refused the same way (#3049): libpq has
+# no environment variable for a client key's passphrase, so it cannot be
+# moved out of argv like the password.
 pg_conn_split() {
   local url="$1" rest userinfo="" has_userinfo=0 host user="" pw="" has_pw=0
   local query="" has_query=0 q seg key val kept="" sep="" shown="" ssep=""
-  local qpw="" has_qpw=0
+  local qpw="" has_qpw=0 has_sslpw=0
   # In a variable: bash 3.2 reads a quoted right-hand side of `=~` literally.
   local secret_kw="(^|[[:space:]'])(ssl)?password[[:space:]]*="
   PG_CONN_URL="$url"
@@ -407,7 +411,9 @@ pg_conn_split() {
           val="$PG_CONN_DECODED"
           ;;
       esac
-      if [ "$key" = "password" ]; then
+      if [ "$key" = "sslpassword" ]; then
+        has_sslpw=1
+      elif [ "$key" = "password" ]; then
         qpw="${seg#*=}"
         has_qpw=1
       else
@@ -432,6 +438,12 @@ pg_conn_split() {
       [ "$seg" = "$q" ] && break
       q="${q#*&}"
     done
+  fi
+  if [ "$has_sslpw" = 1 ]; then
+    PG_CONN_URL=""
+    PG_CONN_DISPLAY_URL=""
+    PG_CONN_ERROR="carries sslpassword, the passphrase of an encrypted client key, which would sit in the command line of pg_dump, pg_restore and psql for every process on the host to read (libpq has no environment variable for it). Use a client key file that is not encrypted, readable only by its owner (chmod 0600), or decrypt the one you have (openssl pkey -in client.key -out client.key.plain), and drop sslpassword from the URL."
+    return 0
   fi
 
   if [ "$has_qpw" = 0 ] && { [ "$has_pw" = 0 ] || [ -z "$pw" ]; }; then
