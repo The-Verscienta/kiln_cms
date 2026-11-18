@@ -30146,6 +30146,13 @@ msgstr "huérfano"
 msgid "other"
 msgstr "otro"
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "over %{count} hour"
+msgid_plural "over %{count} hours"
+msgstr[0] "más de %{count} hora"
+msgstr[1] "más de %{count} horas"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "partly pruned (retention)"

@@ -785,10 +785,19 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   end
 
   # The scheduler's longest gap, as the warning says it.
+  # Whole days or hours as they are; a weekday cron's odd gap (Friday 23:55
+  # to Monday 00:00) as the whole hours it is more than.
+  defp tick_gap_text(minutes) when rem(minutes, 1440) == 0,
+    do: ngettext("%{count} day", "%{count} days", div(minutes, 1440))
+
   defp tick_gap_text(minutes) when rem(minutes, 60) == 0,
     do: ngettext("%{count} hour", "%{count} hours", div(minutes, 60))
 
-  defp tick_gap_text(minutes), do: ngettext("%{count} minute", "%{count} minutes", minutes)
+  defp tick_gap_text(minutes) when minutes < 60,
+    do: ngettext("%{count} minute", "%{count} minutes", minutes)
+
+  defp tick_gap_text(minutes),
+    do: ngettext("over %{count} hour", "over %{count} hours", div(minutes, 60))
 
   # A sub-daily schedule must set `keep_days` (`Schedule.Validations.SubDailyKeepsDays`).
   defp needs_keep_days?(%Schedule{interval: interval, keep_days: days}),

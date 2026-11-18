@@ -624,8 +624,12 @@ Things to know:
 - **A schedule change made while an in-app backup runs** reaches the holds
   when that backup releases the backup lock, whether it succeeded or failed
   (#2985). The sync the change queued finds the lock taken, writes nothing,
-  and tries again every minute until the backup is done. The 15-minute
-  marker sync doesn't wait: while a backup runs it skips the slot, since the
+  and tries again every two minutes until the backup is done, and so do the
+  syncs it queues for other hosts' backup directories. It gives up after
+  three hours with a warning in the log; the next 15-minute slot then syncs
+  the markers. While it waits it stands in for the 15-minute slots, which
+  queue nothing of their own. A 15-minute sync that was not queued by a
+  change doesn't wait: while a backup runs it skips the slot, since the
   backup syncs the markers itself when it succeeds.
 - **History shows them**: a row whose backup a `.hold` names has a **Kept by
   a schedule: Database** or **Kept by a schedule: Media** badge
@@ -3142,10 +3146,11 @@ since only the latest due one fires
 Schedule tab warns about it on the schedule's card and in the form's
 preview: "The scheduler (KILN_BACKUP_SCHEDULER_CRON) can go 6 hours between
 runs, …" for `0 */6 * * *` and an every-2-hours schedule. The gap is worked
-out from the expression's minute and hour fields. One that also restricts
-the day of the month, the month or the weekday (such as `* * * * 1-5`) has
-longer gaps than that, so it counts as at least a day: every sub-daily
-schedule is warned about, a daily or longer one never. The default
+out from the expression's minute, hour and weekday fields: `* * * * 1-5`
+waits from Friday 23:59 to Monday 00:00 ("over 48 hours"), so it warns on a
+daily schedule, and `0 3 * * 0` waits a week. One that restricts the day of
+the month or the month has gaps that depend on the calendar, so it counts
+as at least a day: every sub-daily schedule is warned about. The default
 `* * * * *` never warns. Every minute leaves about 10 000 completed job rows a week, which
 Oban prunes after 7 days. `false` (also `off`, `no`, `0` or blank) turns every
 schedule off, and the Backups page says so; an unparseable value does the same

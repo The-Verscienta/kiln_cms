@@ -30146,6 +30146,13 @@ msgstr ""
 msgid "other"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "over %{count} hour"
+msgid_plural "over %{count} hours"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "partly pruned (retention)"

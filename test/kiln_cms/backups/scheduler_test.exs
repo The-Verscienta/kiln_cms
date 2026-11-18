@@ -482,13 +482,25 @@ defmodule KilnCMS.Backups.SchedulerTest do
       assert Scheduler.max_tick_gap_minutes("* * * * 0-6") == 1
     end
 
-    test "max_tick_gap_minutes/1: a day, month or weekday restriction counts as a day at least" do
-      for cron <- ["* * * * 1-5", "* * 1 * *", "* * * 1-6 *", "0 */6 * * 1"] do
+    test "max_tick_gap_minutes/1: a weekday restriction waits for the next weekday it names" do
+      # Friday 23:59 to Monday 00:00.
+      assert Scheduler.max_tick_gap_minutes("* * * * 1-5") == 2 * 24 * 60 + 1
+      assert Scheduler.max_tick_gap_minutes("*/5 * * * 1-5") == 2 * 24 * 60 + 5
+      # Sunday 03:00 to the next Sunday 03:00.
+      assert Scheduler.max_tick_gap_minutes("0 3 * * 0") == 7 * 24 * 60
+      # Monday 18:00 to the next Monday 00:00.
+      assert Scheduler.max_tick_gap_minutes("0 */6 * * 1") == 7 * 24 * 60 - 18 * 60
+      # Every other day: two days apart, the wrap from Saturday to Monday too.
+      assert Scheduler.max_tick_gap_minutes("0 0 * * 1,3,5") == 3 * 24 * 60
+    end
+
+    test "max_tick_gap_minutes/1: a day-of-month or month restriction counts as a day at least" do
+      for cron <- ["* * 1 * *", "* * * 1-6 *", "*/5 * 1-15 * *"] do
         assert Scheduler.max_tick_gap_minutes(cron) == 24 * 60, cron
       end
 
-      # Already longer within the day: kept.
-      assert Scheduler.max_tick_gap_minutes("0 0 1 * *") == 24 * 60
+      # Longer from a weekday restriction as well: kept.
+      assert Scheduler.max_tick_gap_minutes("0 3 1 * 0") == 7 * 24 * 60
     end
 
     test "max_tick_gap_minutes/1: nil when it doesn't tick on a schedule" do

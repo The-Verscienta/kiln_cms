@@ -451,7 +451,7 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
                KilnCMS.Repo.get!(Oban.Job, job.id)
 
       # Still busy: it snoozes again, for as long as the chain holds the lock.
-      assert {:snooze, 60} = perform_job(MarkerSyncWorker, job.args, meta: job.meta)
+      assert {:snooze, 120} = perform_job(MarkerSyncWorker, job.args, meta: job.meta)
 
       chain_fails_and_releases!()
 
@@ -478,7 +478,7 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
       beat!(other)
       held_lock!()
 
-      assert {:snooze, 60} = perform_job(MarkerSyncWorker, job.args, meta: job.meta)
+      assert {:snooze, 120} = perform_job(MarkerSyncWorker, job.args, meta: job.meta)
       refute Enum.any?(all_enqueued(worker: MarkerSyncWorker), &(&1.args["dir"] == other))
 
       chain_fails_and_releases!()
@@ -494,6 +494,149 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
       assert :ok = perform_job(MarkerSyncWorker, %{})
       assert :ok = perform_job(MarkerSyncWorker, %{"dir" => local})
       assert holds(dir) == []
+    end
+  end
+
+  # The review's follow-ups to #2985: every way the flagged job could still
+  # drop the change while a chain holds the lock.
+  describe "a schedule change's job: what it waits on (#2985)" do
+    @flag %{"schedule_change" => true}
+
+    setup %{dir: dir} do
+      cron_backup!(dir, @cron)
+      cron_backup!(dir, @old)
+      age!(dir, @cron, 1)
+      age!(dir, @old, 20)
+      BackupSchedules.schedule!(%{keep_days: 30})
+      assert [job] = all_enqueued(worker: MarkerSyncWorker)
+      %{job: job}
+    end
+
+    defp release_lock! do
+      {:ok, _promoted} = Chain.with_lock(&Chain.release_in_txn/1)
+      :ok
+    end
+
+    defp dir_jobs(dir_id),
+      do: for(j <- all_enqueued(worker: MarkerSyncWorker), j.args["dir"] == dir_id, do: j)
+
+    test "its own directory not answering: it snoozes and queues no other directory's job",
+         %{job: job} do
+      other = Ash.UUID.generate()
+      beat!(other)
+      put_backups_env(marker_sync_dir_reader: fn _dir -> {:error, :backup_dir_unresponsive} end)
+
+      assert {:snooze, 120} = perform_job(MarkerSyncWorker, job.args, meta: job.meta)
+      assert dir_jobs(other) == []
+    end
+
+    test "the directory jobs it queues carry the flag", %{job: job} do
+      other = Ash.UUID.generate()
+      beat!(other)
+
+      assert :ok = perform_job(MarkerSyncWorker, job.args, meta: job.meta)
+      assert [%{meta: @flag}] = dir_jobs(other)
+    end
+
+    test "it flags a directory's unflagged job that is already waiting or snoozing", %{job: job} do
+      other = Ash.UUID.generate()
+      beat!(other)
+
+      {:ok, snoozing} =
+        Oban.insert(MarkerSyncWorker.new(%{"dir" => other}, schedule_in: 30))
+
+      assert :ok = perform_job(MarkerSyncWorker, job.args, meta: job.meta)
+      assert [%{id: id, meta: @flag}] = dir_jobs(other)
+      assert id == snoozing.id
+    end
+
+    test "a flagged directory job snoozes on :busy and writes the holds once the chain lets go",
+         %{dir: dir} do
+      {:ok, local} = DirId.local(dir)
+      held_lock!()
+
+      assert {:snooze, 120} = perform_job(MarkerSyncWorker, %{"dir" => local}, meta: @flag)
+      assert holds(dir) == []
+
+      release_lock!()
+      assert :ok = perform_job(MarkerSyncWorker, %{"dir" => local}, meta: @flag)
+      assert holds(dir) == ["db/kiln-#{@old}.hold", "db/kiln-#{@cron}.hold"]
+    end
+
+    test "a chain that starts before another host's job runs: that job snoozes, not drops",
+         %{job: job} do
+      a = host!("a", "20260801-031700")
+      b = host!("b", "20260801-041700")
+      tick_as(a, "a@host")
+      tick_as(b, "b@host")
+      {:ok, id_b} = DirId.current(b)
+
+      assert :ok = as_node(a, fn -> perform_job(MarkerSyncWorker, job.args, meta: job.meta) end)
+      assert [%{meta: @flag} = routed] = dir_jobs(id_b)
+
+      held_lock!()
+
+      assert {:snooze, 120} =
+               as_node(b, fn -> perform_job(MarkerSyncWorker, routed.args, meta: routed.meta) end)
+
+      assert goods(b) == ["db/kiln-#{@old}.good"]
+
+      release_lock!()
+
+      assert :ok =
+               as_node(b, fn -> perform_job(MarkerSyncWorker, routed.args, meta: routed.meta) end)
+
+      assert goods(b) == synced("20260801-041700")
+    end
+
+    test "on a node with no backup directory it waits while a chain holds the lock",
+         %{dir: dir, job: job} do
+      File.rm_rf!(dir)
+      held_lock!()
+
+      assert {:snooze, 120} = perform_job(MarkerSyncWorker, job.args, meta: job.meta)
+
+      # Unflagged, the same node has nothing to do.
+      assert :ok = perform_job(MarkerSyncWorker, %{})
+
+      release_lock!()
+      assert :ok = perform_job(MarkerSyncWorker, job.args, meta: job.meta)
+    end
+
+    test "it gives up after three hours of waiting, with a warning", %{job: job} do
+      held_lock!()
+      # As Oban hands a fetched job to the worker.
+      stored = %{
+        KilnCMS.Repo.get!(Oban.Job, job.id)
+        | attempt: 1,
+          attempted_at: DateTime.utc_now()
+      }
+
+      waited = %{stored | inserted_at: DateTime.add(DateTime.utc_now(), -3 * 3600 - 1)}
+
+      log =
+        capture_log([level: :warning], fn ->
+          assert {:cancel, :backup_lock_held} = perform_job(waited)
+        end)
+
+      assert log =~ "gave up: an in-app backup held the backup lock for 3 hours"
+
+      fresh = %{stored | inserted_at: DateTime.add(DateTime.utc_now(), -2 * 3600)}
+      assert {:snooze, 120} = perform_job(fresh)
+    end
+
+    test "flagged_waiting?/0: only a flagged job without a directory, still waiting",
+         %{job: job} do
+      assert MarkerSyncWorker.flagged_waiting?()
+
+      executing!(job)
+      refute MarkerSyncWorker.flagged_waiting?()
+
+      Oban.insert!(MarkerSyncWorker.new(%{"dir" => Ash.UUID.generate()}, meta: @flag))
+      refute MarkerSyncWorker.flagged_waiting?()
+
+      Oban.insert!(MarkerSyncWorker.new(%{}))
+      refute MarkerSyncWorker.flagged_waiting?()
     end
   end
 

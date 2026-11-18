@@ -72,9 +72,14 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
 
   # `Backups.status/0` is read in the background (#2986), on mount and after
   # each write: wait for the read to land.
+  # A read that lands after a reload was asked for starts one more from
+  # `handle_async/3`, so this waits until no read is running.
   defp settle(lv) do
     render_async(lv, 2_000)
-    lv
+
+    if :sys.get_state(lv.pid).socket.assigns.status_running?,
+      do: settle(lv),
+      else: lv
   end
 
   defp put_backups(key, value) do
@@ -1708,6 +1713,22 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
 
       preview_of(lv, %{"interval" => "every_8h", "keep_days" => "3"})
       refute has_element?(lv, ~s|#schedule-preview [data-role="tick-coarse"]|)
+    end
+
+    test "a weekday-only scheduler cron warns on a daily schedule", %{conn: conn, admin: admin} do
+      daily = schedule!(%{}, admin)
+
+      for {cron, gap} <- [{"*/5 * * * 1-5", "over 48 hours"}, {"0 3 * * 0", "7 days"}] do
+        put_cron(cron)
+        lv = mount(conn, admin)
+
+        assert has_element?(
+                 lv,
+                 ~s|#backup-schedule-#{daily.id} [data-role="tick-coarse"]|,
+                 "can go #{gap} between runs"
+               ),
+               cron
+      end
     end
 
     test "the default, every minute, never warns", %{conn: conn, admin: admin, s: s} do
