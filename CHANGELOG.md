@@ -335,6 +335,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A resume no longer runs from a copy of the backup's files on another host while the host that holds its directory is alive; the copy resumes once that host has stopped beating for 180 s.**
   ([#3090](https://github.com/The-Verscienta/kiln_cms/pull/3090) · [long form](docs/changelog/unreleased.md#backup-resume-source-host-first))
 
+- **A last-good marker sync job on a node whose `BACKUP_DIR` hangs gives up after 5 s (id read) or 120 s (sync) instead of holding an Oban worker for as long as the mount hangs.**
+  ([#3093](https://github.com/The-Verscienta/kiln_cms/pull/3093) · [long form](docs/changelog/unreleased.md#backup-marker-sync-hung-dir))
+
 ### Security
 
 - **An in-app backup's `.work/<stamp>/state.json` no longer holds the raw `BACKUP_RCLONE_REMOTE`, connection-string credentials included.**

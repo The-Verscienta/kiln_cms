@@ -2409,6 +2409,45 @@ carries the reasoning.
   [ADR 0040](../decisions/0040-a-backup-chain-runs-where-its-backup-directory-is-routed-by-kiln-dir-id-with-a-bounded-snooze.md).
   ([#2817](https://github.com/The-Verscienta/kiln_cms/issues/2817))
 
+<a id="backup-marker-sync-hung-dir"></a>
+
+- **A last-good marker sync job on a node whose `BACKUP_DIR` hangs gives up after a bounded wait instead of holding an Oban worker for as long as the mount hangs.**
+  The job reads the directory's id, then syncs its markers. On a
+  hard-mounted NFS export that stopped answering, the read blocked the job,
+  and with it one of the `default` queue's workers (10 by default), with no
+  job timeout. #2848 stopped routing new jobs to such a node, but jobs
+  already routed there, and the node's own scheduled job, still blocked.
+
+  Now each piece of the job's directory I/O runs in a supervised task
+  (`KilnCMS.Backups.MarkerSyncIO`) that the job waits on: up to 5 seconds
+  for the id read (`dir_id_timeout_ms`, the heartbeat's setting) and up to
+  120 seconds for the sync (the new `marker_sync_io_timeout_ms`), both under
+  `config :kiln_cms, KilnCMS.Backups`. On a timeout the job logs a warning,
+  emits `[:kiln_cms, :backups, :marker_sync, :timeout]` (measurements
+  `count`, `waited_ms`; metadata `phase`, `:dir_id` or `:sync`) and fails
+  with `{:error, :backup_dir_unresponsive}`. The task is left running, since
+  a process blocked on a hung mount can't be killed, and if it finishes
+  later a line at info says how long it took.
+
+  - **A routed job whose id read times out snoozes**, as it does for any id
+    that isn't its directory's, so another node with that directory can
+    still take it.
+  - **A scheduled job whose own id read times out** still queues the other
+    directories' jobs, then fails without syncing its own.
+  - **At most two abandoned tasks.** While two tasks a job gave up on are
+    still running, a job starts no more directory I/O and fails with
+    `{:error, :backup_dir_io_busy}`, so a mount that stays hung can't use
+    up the VM's dirty I/O schedulers. Tasks a job is still waiting on never
+    count.
+  - **The job's timeout** is both waits plus 60 seconds (185 seconds by
+    default).
+
+  Known limit: a sync that blocks inside the backup lock's transaction keeps
+  holding the cluster-wide lock and its database connection until the
+  directory answers. No migration; rolling back is safe. See
+  [The marker sync on a hung backup directory](../backups.md#the-marker-sync-on-a-hung-backup-directory-3079).
+  ([#3079](https://github.com/The-Verscienta/kiln_cms/issues/3079))
+
 ## Security
 
 <a id="backup-state-json-remote"></a>
