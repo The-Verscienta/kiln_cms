@@ -132,6 +132,9 @@ defmodule KilnCMS.CMS.FlexibleAuditTest do
 
     test "PrivateFields lists no item-type row, even a seeded private one", ctx do
       %{flexible: flexible} = ctx
+      org_id = KilnCMS.Accounts.default_org_id()
+      # What a project overlay or plugin may already have provisioned.
+      before = PrivateFields.all(org_id)
 
       Ash.Seed.seed!(FieldDefinition, %{
         name: "ghost_secret",
@@ -139,14 +142,13 @@ defmodule KilnCMS.CMS.FlexibleAuditTest do
         field_type: :string,
         private: true,
         flex_of_id: flexible.id,
-        org_id: KilnCMS.Accounts.default_org_id()
+        org_id: org_id
       })
 
       # Filed under no owner at all if it slipped through, so look at every key.
-      assert PrivateFields.all(KilnCMS.Accounts.default_org_id())
-             |> Map.values()
-             |> List.flatten() ==
-               []
+      after_seed = PrivateFields.all(org_id)
+      assert after_seed == before
+      refute "ghost_secret" in (after_seed |> Map.values() |> List.flatten())
     end
 
     test "FieldSync exports a flexible field with its item types and their sub-fields", ctx do

@@ -72,11 +72,19 @@ defmodule KilnCMS.CMS.CustomSortTargetKeyCapTest do
       [field]
     )
 
-    lower_cap(2)
-    assert {:error, error} = sort(field, admin)
-    assert Exception.message(error) =~ "targets 3 content types"
+    # Every content resource the build registers: three on a default build,
+    # more under an overlay or a plugin that adds content types.
+    count =
+      KilnCMS.CMS.ContentTypes.blocks_resources()
+      |> Enum.map(&elem(&1, 1))
+      |> Enum.uniq()
+      |> length()
 
-    lower_cap(3)
+    lower_cap(count - 1)
+    assert {:error, error} = sort(field, admin)
+    assert Exception.message(error) =~ "targets #{count} content types"
+
+    lower_cap(count)
     assert {:ok, _} = sort(field, admin)
   end
 end
