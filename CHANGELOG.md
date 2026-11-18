@@ -63,7 +63,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **Backups History: the "couldn't check" chips explain themselves, a media set whose missing parts were copied off-site says which ones, and Home's red backup strip shows the schedule and cron lines only when a backup is actually overdue.**
-  ([long form](docs/changelog/unreleased.md#backup-history-home-polish))
+  ([#3114](https://github.com/The-Verscienta/kiln_cms/pull/3114) · [long form](docs/changelog/unreleased.md#backup-history-home-polish))
 
 - **Backups → Schedule: a warning when `KILN_BACKUP_SCHEDULER_CRON` ticks less often than a schedule runs; the tab no longer freezes on a hung backup directory; and a keep-days change made while a backup runs reaches the `.hold` markers when it ends, even if it failed.**
   ([#3112](https://github.com/The-Verscienta/kiln_cms/pull/3112) · [long form](docs/changelog/unreleased.md#backup-schedule-tab-followups))
