@@ -1540,6 +1540,34 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert has_element?(lv, ~s|#{row} [data-role="status"]|, "Failed")
     end
 
+    # #3028: a page loaded before the resume took the lock still sends the
+    # plain Cancel; it is refused, and the resume keeps the lock.
+    @tag :pg_tools
+    test "the plain Cancel of a stale running run whose resume waits is refused and says so",
+         %{dir: dir} do
+      quiet = DateTime.add(DateTime.utc_now(), -5 * 3600, :second)
+
+      %{run: run, chain: chain} =
+        waiting_resume!(dir, "20261103-121213",
+          fields: [
+            status: "running",
+            finished_at: nil,
+            error: nil,
+            started_at: quiet,
+            updated_at: quiet
+          ]
+        )
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      html = render_hook(lv, "cancel_run", %{"id" => run.id})
+
+      assert html =~ "A resume of this backup is waiting to start. Cancel the resume instead."
+      assert %{chain: ^chain, step: :start} = Backups.in_flight()
+      assert %{status: :running} = Backups.get_run!(run.id, actor: Backups.system())
+      assert has_element?(lv, @strip_cancel_resume)
+    end
+
     @tag :pg_tools
     test "a resume that started meanwhile: the click says so, and the plain Cancel is offered",
          %{dir: dir} do

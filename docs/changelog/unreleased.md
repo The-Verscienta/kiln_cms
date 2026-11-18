@@ -2762,8 +2762,8 @@ carries the reasoning.
 
 - **Two backup Cancel fixes (#3028, #3029).**
   Canceling a running backup wrote "Canceled by <email>" into the run's
-  log, its error and the server log; `backup_runs` isn't reached by account
-  erasure. All three now say "Canceled by a platform admin", and who
+  log and the server log line; `backup_runs` isn't reached by account
+  erasure. Both now say "Canceled by a platform admin", and who
   canceled is kept in the audited `backup_canceled` security event only.
   Runs canceled before this release still name the admin and are not
   rewritten. And `Backups.cancel_run/2` from a release console on a stale
