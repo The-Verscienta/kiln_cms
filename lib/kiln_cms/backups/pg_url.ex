@@ -47,20 +47,29 @@ defmodule KilnCMS.Backups.PgUrl do
       `URI.parse`/`URI.to_string` round trip, which re-encodes.
 
   A URI whose query carries `sslpassword` (the passphrase of an encrypted
-  client key; the key is matched decoded and case-sensitive, as libpq matches
-  it, so `%73slpassword=` counts and `SSLPASSWORD=` is libpq's to refuse by
-  name) is refused (#3049): libpq has no environment variable for it, so
-  unlike the password it cannot be moved out of argv.
+  client key) is refused (#3049): libpq has no environment variable for it,
+  so unlike the password it cannot be moved out of argv. The key is matched
+  percent-decoded, as libpq decodes it (`%73slpassword=` counts), and in any
+  case: libpq reads only the lower-case one and refuses the rest by name, but
+  only after exec, and execve auditing, process accounting and EDR agents
+  record argv at exec. Refusing them breaks no URL that works.
+
+  For the same reason a query key that lower-cases to `password` but is not
+  `password` (`PASSWORD=`, `Password=`, `%50assword=`) is refused too
+  (`:refused_password_case`): libpq would not read it as the password, so
+  moving it would make a URL work that libpq rejects, and leaving it puts the
+  value in argv.
 
   A string that is not a `postgres://` or `postgresql://` URI after
   `normalize/1` is refused (#2831) when one of its `key=value` keywords is
   `password` or `sslpassword`, or it holds `://` (another scheme, or a
   `dbname=` that libpq would expand into a URI): its secret would sit in argv
   for the whole dump, and libpq echoes an unreadable one back in its errors.
-  libpq keywords are case-sensitive and cannot be quoted, so no
-  secret-bearing `key=value` string passes; `PASSWORD=` is not a keyword, and
-  libpq refuses the string by naming it, never echoing its value. A
-  passwordless one (`host=/run/postgresql dbname=password_reset_svc`) and a
+  libpq keywords cannot be quoted, so no secret-bearing `key=value` string
+  passes. They are case-sensitive, but `PASSWORD=` and `SslPassword=` are
+  refused too, for the same reason as an upper-case `SSLPASSWORD` query key:
+  libpq would refuse them anyway, after their value had already been in argv.
+  A passwordless one (`host=/run/postgresql dbname=password_reset_svc`) and a
   bare database name pass through unchanged.
 
       iex> KilnCMS.Backups.PgUrl.split("ecto://kiln:hunter2@db/kiln_prod?sslmode=require")
@@ -87,10 +96,11 @@ defmodule KilnCMS.Backups.PgUrl do
   @typedoc """
   Why `split/1` refused a string: `:refused_conninfo` when it is not a URI
   libpq reads as one and carries a password or another URL,
-  `:refused_sslpassword` when it is a URI whose query carries `sslpassword`.
-  The string itself is never in the reason.
+  `:refused_sslpassword` when it is a URI whose query carries `sslpassword`,
+  `:refused_password_case` when a URI's query carries another spelling of
+  `password`. The string itself is never in the reason.
   """
-  @type refusal :: :refused_conninfo | :refused_sslpassword
+  @type refusal :: :refused_conninfo | :refused_sslpassword | :refused_password_case
 
   # Ecto's own integer options (`@integer_url_query_params` in
   # Ecto.Repo.Supervisor). libpq refuses each by name; none changes which
@@ -102,7 +112,7 @@ defmodule KilnCMS.Backups.PgUrl do
   # whether to encrypt, and alone leaves libpq on `prefer` (see `tls_env/3`).
   @tls_keys ~w(sslmode requiressl)
 
-  # conninfo keywords whose value is a secret (#2831).
+  # conninfo keywords whose value is a secret (#2831), compared lower-cased.
   @secret_keywords ~w(password sslpassword)
 
   @doc """
@@ -168,9 +178,8 @@ defmodule KilnCMS.Backups.PgUrl do
   `{:ok, {url, env}}`: the normalized URL with no password in it, and the
   `[{"PGPASSWORD", password}]` entry to run the child with (`[]` when the URL
   has no password to move, so the operator's own `PGPASSWORD` or `.pgpass`
-  still applies). `{:error, :refused_conninfo}` or
-  `{:error, :refused_sslpassword}` for a string whose secret would stay in
-  argv (see the moduledoc).
+  still applies). `{:error, refusal}` (`t:refusal/0`) for a string whose
+  secret would stay in argv (see the moduledoc).
   """
   @spec split(String.t() | nil) :: {:ok, {String.t() | nil, env()}} | {:error, refusal()}
   def split(nil), do: {:ok, {nil, []}}
@@ -180,24 +189,46 @@ defmodule KilnCMS.Backups.PgUrl do
 
     case parse(url) do
       {:ok, parts} ->
-        if sslpassword?(parts.query),
-          do: {:error, :refused_sslpassword},
-          else: {:ok, rebuild(url, parts)}
+        cond do
+          sslpassword?(parts.query) -> {:error, :refused_sslpassword}
+          password_case?(parts.query) -> {:error, :refused_password_case}
+          true -> {:ok, rebuild(url, parts)}
+        end
 
       :not_a_uri ->
         if refused?(url), do: {:error, :refused_conninfo}, else: {:ok, {url, []}}
     end
   end
 
-  # A query `sslpassword=` (#3049), its key decoded as libpq decodes it.
+  # A query `sslpassword=` (#3049), its key decoded as libpq decodes it, in
+  # any case (see the moduledoc).
   defp sslpassword?(nil), do: false
 
-  defp sslpassword?(query),
-    do: query |> String.split("&") |> Enum.any?(&(param_key(&1) == "sslpassword"))
+  defp sslpassword?(query), do: query |> String.split("&") |> Enum.any?(&sslpassword_param?/1)
+
+  # A query key that lower-cases to `password` but is not `password`, which
+  # libpq does not read and `rebuild/2` would leave in argv (#3049).
+  defp password_case?(nil), do: false
+
+  defp password_case?(query) do
+    query
+    |> String.split("&")
+    |> Enum.any?(fn param ->
+      key = param_key(param)
+      is_binary(key) and key != "password" and String.downcase(key, :ascii) == "password"
+    end)
+  end
+
+  defp sslpassword_param?(param) do
+    case param_key(param) do
+      nil -> false
+      key -> String.downcase(key, :ascii) == "sslpassword"
+    end
+  end
 
   defp refused?(string) do
     String.contains?(string, "://") or
-      Enum.any?(conninfo_keys(string), &(&1 in @secret_keywords))
+      Enum.any?(conninfo_keys(string), &(String.downcase(&1, :ascii) in @secret_keywords))
   end
 
   defp parse(url) do

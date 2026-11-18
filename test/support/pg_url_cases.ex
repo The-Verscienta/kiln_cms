@@ -117,11 +117,16 @@ defmodule KilnCMS.Test.PgUrlCases do
        :refused_conninfo, nil},
       {"a keyword straight after a closing quote is refused", "host='x'password=y dbname=kiln",
        :refused_conninfo, nil},
-      # Not a libpq keyword (they are case-sensitive): libpq refuses the
-      # string by naming `PASSWORD`, without echoing its value
-      # (pg_url_libpq_test.exs), so it is passed through.
-      {"PASSWORD in capitals is libpq's to refuse", "host=db PASSWORD=hunter2 dbname=kiln",
-       "host=db PASSWORD=hunter2 dbname=kiln", nil},
+      # Another case is not a libpq keyword (they are case-sensitive), and
+      # libpq refuses the string by naming it, but only once its value is
+      # already in argv, where exec-time auditing records it: refused here
+      # first (#3049).
+      {"PASSWORD in capitals is refused too", "host=db PASSWORD=hunter2 dbname=kiln",
+       :refused_conninfo, nil},
+      {"Password in mixed case is refused too", "host=db Password=hunter2 dbname=kiln",
+       :refused_conninfo, nil},
+      {"a conninfo SSLPASSWORD in capitals is refused too",
+       "host=db SSLPASSWORD=hunter2 dbname=kiln", :refused_conninfo, nil},
       {"`password` inside a value is not a keyword", "host=db dbname=password_reset_svc",
        "host=db dbname=password_reset_svc", nil},
       {"`password` at the start of a value is not a keyword", "host=db user=passwordless",
@@ -185,11 +190,26 @@ defmodule KilnCMS.Test.PgUrlCases do
        :refused_sslpassword, nil},
       {"ecto:// with an sslpassword is refused", "ecto://kiln@db/kiln?sslpassword=hunter2",
        :refused_sslpassword, nil},
-      # Not a libpq URI parameter (keys are case-sensitive): libpq refuses the
-      # URL by naming the key, without echoing its value
-      # (pg_url_libpq_test.exs), so it is passed through.
-      {"SSLPASSWORD in capitals is libpq's to refuse", "postgres://u@h/db?SSLPASSWORD=hunter2",
-       "postgres://u@h/db?SSLPASSWORD=hunter2", nil},
+      # Another case is not a libpq URI parameter, and libpq refuses the URL
+      # by naming the key, but only once the value is already in argv:
+      # refused here first.
+      {"SSLPASSWORD in capitals is refused too", "postgres://u@h/db?SSLPASSWORD=hunter2",
+       :refused_sslpassword, nil},
+      {"SslPassword in mixed case is refused too", "postgres://u@h/db?SslPassword=hunter2",
+       :refused_sslpassword, nil},
+      {"an encoded mixed-case sslpassword key is refused too",
+       "postgres://u@h/db?%53slPass%77ord=hunter2", :refused_sslpassword, nil},
+      # Another spelling of `password` in a query: libpq doesn't read it as
+      # the password, so it can't be moved to PGPASSWORD, and left alone its
+      # value would sit in argv (#3049). Only lower-case `password` is moved.
+      {"a query PASSWORD in capitals is refused", "postgres://kiln@db/kiln?PASSWORD=hunter2",
+       :refused_password_case, nil},
+      {"a query Password in mixed case is refused", "ecto://kiln@db/kiln?Password=hunter2",
+       :refused_password_case, nil},
+      {"an encoded mixed-case query password key is refused",
+       "postgres://u@h/db?%50ass%77ord=hunter2", :refused_password_case, nil},
+      {"a query PASSWORD beside a lower-case password is refused",
+       "postgres://u@h/db?password=pw&PASSWORD=hunter2", :refused_password_case, nil},
       {"an sslpassword key that decodes to something else is kept",
        "postgres://u@h/db?sslpass%2577ord=x", "postgres://u@h/db?sslpass%2577ord=x", nil},
       {"`sslpassword=` inside a value is not a key",

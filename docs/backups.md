@@ -1180,15 +1180,18 @@ refused before any tool runs when it does:
 | `kiln_prod` (a bare database name) | passed through as written |
 | `host=db password=hunter2 dbname=kiln` | refused |
 | `host=db sslpassword=… dbname=kiln` | refused |
+| `host=db PASSWORD=hunter2 dbname=kiln` (any case) | refused |
 | `dbname='postgres://kiln:hunter2@db/kiln'` | refused (libpq would expand it into that URL) |
 | `mysql://u:pw@h/db`, or a URL with a leading space | refused (contains `://` but is not a URL libpq reads) |
 
 The reason: libpq's `key=value` syntax (quoting, backslash escapes, a
 `dbname` that is itself a URL) can't be rewritten safely, so a password in
 it would sit in the tool's command line for the whole dump, and libpq
-echoes an unreadable string back in its errors. Keywords are case-sensitive:
-`PASSWORD=hunter2` is not a password keyword, and libpq refuses it by
-naming it, without printing the value. A refused string fails with:
+echoes an unreadable string back in its errors. `password` and `sslpassword`
+are refused in any case (`PASSWORD=`, `Password=`). libpq reads only the
+lower-case keywords and would refuse another case itself, but only after the
+tool had started with the value in its command line, where execve auditing,
+process accounting and EDR agents record it. A refused string fails with:
 
 ```text
 BACKUP_DATABASE_URL (or DATABASE_URL) is not a postgres:// URL and holds a password or another URL, which would sit in the command line of pg_dump, pg_restore and psql for every process on the host to read. Write it as a postgres:// URL, password included (postgres:///database?host=/socket/dir for a Unix socket), or put the password in PGPASSWORD or ~/.pgpass.
@@ -1229,8 +1232,11 @@ chmod 0600 client.key.plain
 BACKUP_DATABASE_URL=postgres://kiln@db/kiln_prod?sslmode=verify-full&sslkey=/etc/kiln/client.key.plain
 ```
 
-Names are case-sensitive here too: `SSLPASSWORD=` is not libpq's parameter,
-and libpq refuses the URL by naming it, without printing the value.
+Every spelling is refused: `SSLPASSWORD=`, `SslPassword=` and an escaped
+`%53slPassword=` as well. libpq reads only `sslpassword` and would refuse the
+others by name, but only after the tool had started with the value in its
+command line, where execve auditing, process accounting and EDR agents
+record it. No URL that works is refused.
 
 ### The database password stays out of the pg_dump command line (#2726)
 
@@ -1250,6 +1256,7 @@ gives it to the one `pg_dump`, `pg_restore` or `psql` that needs it as
 | `postgres://kiln@db/kiln` | `postgres://kiln@db/kiln` | not set: yours, or `~/.pgpass`, applies |
 | `host=db password=hunter2 dbname=kiln` | refused, nothing runs ([above](#which-database-url-the-backup-tools-accept-2719)) | |
 | `postgres://kiln@db/kiln?sslkey=/k.key&sslpassword=…` | refused, nothing runs ([above](#which-database-url-the-backup-tools-accept-2719)) | |
+| `postgres://kiln@db/kiln?PASSWORD=hunter2` (any spelling but `password`) | refused, nothing runs: libpq doesn't read it, so it can't be moved; write `password` | |
 
 The URL is split where libpq splits it:
 
@@ -1260,7 +1267,8 @@ The URL is split where libpq splits it:
   `+` stays a `+`, and a malformed escape such as `%zz` stays as written.
 - **A `password=` query parameter is moved too**, also when its name is
   escaped (`pass%77ord=`). With a password in both places, the query one
-  wins, as in libpq.
+  wins, as in libpq. Only the lower-case name is: libpq reads no other, so
+  `PASSWORD=` or `Password=` is refused (#3049).
 - **A URL without a password** (or with an empty one, `kiln:@db`) keeps its
   user part as written (only the scheme and Ecto's query parameters change),
   so your own `PGPASSWORD` or `~/.pgpass` decides.

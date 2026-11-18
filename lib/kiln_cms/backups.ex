@@ -748,7 +748,8 @@ defmodule KilnCMS.Backups do
   `{:error, :refused_conninfo}` when the string is not a URL libpq reads as
   one and would leave a password in argv (#2831), and
   `{:error, :refused_sslpassword}` when the URL carries `sslpassword`, which
-  libpq can only read from argv (#3049).
+  libpq can only read from argv, or `{:error, :refused_password_case}` when
+  its query spells `password` in another case (#3049).
   """
   @spec pg_connection(String.t() | nil) ::
           {:ok, {String.t() | nil, [{String.t(), String.t()}]}} | {:error, PgUrl.refusal()}
@@ -767,6 +768,13 @@ defmodule KilnCMS.Backups do
   """
   @spec describe_refusal(PgUrl.refusal()) :: String.t()
   def describe_refusal(:refused_conninfo), do: describe_refused_conninfo()
+
+  def describe_refusal(:refused_password_case) do
+    "BACKUP_DATABASE_URL (or DATABASE_URL) carries PASSWORD (or another spelling of " <>
+      "password) in its query, which libpq does not read and which would sit in the tools' " <>
+      "command line; write it as lower-case password, which Kiln moves out of the command " <>
+      "line, or drop it."
+  end
 
   def describe_refusal(:refused_sslpassword) do
     "BACKUP_DATABASE_URL (or DATABASE_URL) carries sslpassword, the passphrase of an " <>

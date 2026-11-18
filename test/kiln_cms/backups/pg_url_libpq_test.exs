@@ -43,6 +43,23 @@ defmodule KilnCMS.Backups.PgUrlLibpqTest do
     "ecto://kiln@db/kiln?sslpassword=hunter2" => {"sslpassword", "hunter2"}
   }
 
+  # Refused cases libpq reads no secret from: another case of `password` or
+  # `sslpassword`, which libpq refuses by naming the key it doesn't know,
+  # never echoing its value. Refused before exec anyway, since argv is
+  # recorded there (#3049).
+  @refused_by_libpq_too %{
+    "host=db PASSWORD=hunter2 dbname=kiln" => "PASSWORD",
+    "host=db Password=hunter2 dbname=kiln" => "Password",
+    "host=db SSLPASSWORD=hunter2 dbname=kiln" => "SSLPASSWORD",
+    "postgres://u@h/db?SSLPASSWORD=hunter2" => "SSLPASSWORD",
+    "postgres://u@h/db?SslPassword=hunter2" => "SslPassword",
+    "postgres://u@h/db?%53slPass%77ord=hunter2" => "SslPassword",
+    "postgres://kiln@db/kiln?PASSWORD=hunter2" => "PASSWORD",
+    "ecto://kiln@db/kiln?Password=hunter2" => "Password",
+    "postgres://u@h/db?%50ass%77ord=hunter2" => "Password",
+    "postgres://u@h/db?password=pw&PASSWORD=hunter2" => "PASSWORD"
+  }
+
   test "the harness is libpq: it refuses an Ecto option by name" do
     assert [{:error, message}, {:ok, %{"sslmode" => "require", "password" => "pw"}}] =
              Libpq.parse!(["postgres://u@h/db?pool_size=1", "postgres://u:pw@h/db?ssl=true"])
@@ -96,16 +113,21 @@ defmodule KilnCMS.Backups.PgUrlLibpqTest do
     end
   end
 
-  test "an unknown keyword (PASSWORD) is refused by libpq, naming it, never its value" do
-    assert [{:error, message}] = Libpq.parse!(["host=db PASSWORD=hunter2 dbname=kiln"])
-    assert message =~ "PASSWORD"
-    refute message =~ "hunter2"
+  test "another case of a secret keyword is refused by libpq, naming it, never its value" do
+    inputs = Map.keys(@refused_by_libpq_too)
+
+    # Each with its scheme as the tools would be given it, had it not been
+    # refused.
+    for {input, result} <- Enum.zip(inputs, Libpq.parse!(Enum.map(inputs, &scheme/1))) do
+      assert {:error, message} = result, input
+      assert message =~ Map.fetch!(@refused_by_libpq_too, input), input
+      refute message =~ "hunter2", input
+    end
   end
 
-  test "an unknown URI parameter (SSLPASSWORD) is refused by libpq, naming it, never its value" do
-    assert [{:error, message}] = Libpq.parse!(["postgres://u@h/db?SSLPASSWORD=hunter2"])
-    assert message =~ "SSLPASSWORD"
-    refute message =~ "hunter2"
+  test "the cases libpq reads no secret from are all refused cases" do
+    refused = for {_label, input, url, _} <- PgUrlCases.cases(), is_atom(url), do: input
+    assert Map.keys(@refused_by_libpq_too) -- refused == []
   end
 
   test "an accepted URI mentioning `sslpassword` reads no sslpassword in libpq" do
@@ -134,7 +156,12 @@ defmodule KilnCMS.Backups.PgUrlLibpqTest do
   end
 
   test "every refused case would have put its secret where libpq reads it" do
-    refused = for {_label, input, url, _} <- PgUrlCases.cases(), is_atom(url), do: input
+    refused =
+      for {_label, input, url, _} <- PgUrlCases.cases(),
+          is_atom(url),
+          not Map.has_key?(@refused_by_libpq_too, input),
+          do: input
+
     assert Enum.sort(refused) == Enum.sort(Map.keys(@refused))
 
     # Each with its scheme as the tools would be given it (`ecto://` as

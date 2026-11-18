@@ -120,6 +120,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Backups now check free space before the database dump and before the media parts, and refuse at once when the disk is short (cron too). The new `BACKUP_FREE_SPACE_CHECK=false` turns the check off, for example when media compresses well and the estimate is too high.**
   ([#3097](https://github.com/The-Verscienta/kiln_cms/pull/3097) · [long form](docs/changelog/unreleased.md#backup-free-space-preflight-upgrade))
 
+- **A backup, restore, staging or demo database URL with `sslpassword` in its query is now refused before pg_dump, pg_restore or psql runs. Decrypt the client key (`openssl pkey -in client.key -out client.key.plain`), `chmod 0600` it, point `sslkey=` at it and drop `sslpassword`.**
+  ([long form](docs/changelog/unreleased.md#backup-url-sslpassword-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -360,6 +363,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3098](https://github.com/The-Verscienta/kiln_cms/pull/3098) · [long form](docs/changelog/unreleased.md#backup-scheduler-cron-states))
 
 ### Security
+
+- **A database URL's `?sslpassword=` (an encrypted client key's passphrase) no longer reaches the command line of pg_dump, pg_restore or psql, where every process on the host could read it: the URL is refused instead.**
+  ([long form](docs/changelog/unreleased.md#backup-url-sslpassword))
 
 - **An in-app backup's `.work/<stamp>/state.json` no longer holds the raw `BACKUP_RCLONE_REMOTE`, connection-string credentials included.**
   ([long form](docs/changelog/unreleased.md#backup-state-json-remote))

@@ -88,6 +88,12 @@ defmodule KilnCMS.Backups.PgConnectionTest do
     test "refuses a URL carrying sslpassword, which libpq reads only from argv (#3049)" do
       assert Backups.pg_connection("ecto://kiln:pw@db/kiln?sslpassword=hunter2") ==
                {:error, :refused_sslpassword}
+
+      assert Backups.pg_connection("ecto://kiln:pw@db/kiln?SSLPASSWORD=hunter2") ==
+               {:error, :refused_sslpassword}
+
+      assert Backups.pg_connection("ecto://kiln@db/kiln?PASSWORD=hunter2") ==
+               {:error, :refused_password_case}
     end
   end
 
