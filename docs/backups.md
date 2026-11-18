@@ -3652,8 +3652,8 @@ the backup verified, and only then renamed, under the backup lock and only
 while that step still holds it, so a file that doesn't match
 never appears under its real name, and a step that outlived its Cancel never
 replaces the resumed backup's copy (#3041). A temporary file left by a node
-that stopped mid-copy is removed by the next copy of that file once it is an
-hour old. A file already in place with the same
+that stopped mid-copy is removed by the next copy to that destination, of any
+file, once it is an hour old. A file already in place with the same
 size and SHA-256 is not copied again: the size is compared first, and only
 a file of the right size is read whole to hash it, so a resend reads a
 large media part back from the mount once instead of writing it

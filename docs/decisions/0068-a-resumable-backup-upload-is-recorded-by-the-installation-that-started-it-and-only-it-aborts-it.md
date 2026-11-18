@@ -71,8 +71,10 @@ followed by a write. `save_checkpoint`, `note_error` and `complete` write
 only for the exact owner while the row is open; `abandon` and
 `mark_aborted` only from the status and owner the caller read. A write that
 matches no row is a `StaleRecord`, which `KilnCMS.Backups.Uploads` returns
-to the adapter's `save` as `{:error, :superseded}`. The adapter stops, and
-aborts a store upload it created in that same call. Oban job ids grow, and a
+to the adapter's `save` as `{:error, :superseded}`. The adapter stops. It
+aborts a store upload only when nothing recorded it (its first `save`
+failed); one already recorded is left for its newer owner, who may resume
+it, or for the sweep (#3041). Oban job ids grow, and a
 job's attempts grow, so a retry, a Lifeline rescue and a reclaim's new job
 each outrank the step they replace, and the replaced step can never write
 again.

@@ -2648,6 +2648,27 @@ carries the reasoning.
   not rename.
   ([#2484](https://github.com/The-Verscienta/kiln_cms/issues/2484))
 
+<a id="backup-fence-attempts-prune-offsite"></a>
+
+- **A backup step that outlived its Cancel, or an earlier attempt of the same step, can no longer touch the resumed backup (#3040, #3041).**
+  Since #2818/#2819 a step that outlived its Cancel could no longer write
+  or rename the backup's own files, but three gaps remained. An attempt
+  that Oban's Lifeline rescued (or a retry after a timed-out write) shared
+  the earlier attempt's lease, so both attempts' renames were admitted; the
+  lease now also checks the attempt, and an earlier attempt can't claim
+  the lock back. The prune step now runs under the backup's lease and moves
+  each unit into the trash under it, so a stale prune stops before deleting
+  anything after the backup was canceled and resumed. Off-site uploads
+  check the lease before each file; the Local destination copies to a
+  per-attempt temporary name and renames it under the lease (a leftover
+  temporary file is removed by the next copy to that destination once it is
+  an hour old), and S3 checks the lease before it completes a multipart
+  upload, leaving an upload a newer attempt took over to that attempt. An upload already in flight to
+  rclone, a single-request S3 upload or a plugin destination can still
+  land, so the 150-second wait before a resume after a Cancel stays. See
+  ADR 0067's amendment.
+  ([#3040](https://github.com/The-Verscienta/kiln_cms/issues/3040), [#3041](https://github.com/The-Verscienta/kiln_cms/issues/3041))
+
 ## Security
 
 <a id="backup-url-sslpassword"></a>

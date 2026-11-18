@@ -365,6 +365,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A backup file refused off-site because its content changed is now kept beside the original as `<name>.refused-<UTC stamp>`, so a Resume no longer destroys the evidence; the run error names the path, and retention removes it after `BACKUP_KEEP_DAYS`.**
   ([#3100](https://github.com/The-Verscienta/kiln_cms/pull/3100) · [long form](docs/changelog/unreleased.md#backup-keep-refused-file))
 
+- **A backup step that outlived its Cancel, or an earlier attempt of the same step, can no longer prune the resumed backup's units or overwrite its local off-site copies: the lease is now per attempt, and the prune step and uploads are fenced.**
+  ([long form](docs/changelog/unreleased.md#backup-fence-attempts-prune-offsite))
+
 ### Security
 
 - **A database URL's `?sslpassword=` (an encrypted client key's passphrase) no longer reaches the command line of pg_dump, pg_restore or psql, where every process on the host could read it: the URL is refused instead.**

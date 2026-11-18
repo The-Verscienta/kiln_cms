@@ -1826,19 +1826,25 @@ defmodule KilnCMS.Backups.Steps do
   # that outlived its Cancel deletes nothing of the resumed chain's, writes
   # no marker, notice or log line, and cancels itself.
   defp prune_step(ctx, state, rec) do
-    lease = ctx.lease
-
-    result =
-      Retention.run(ctx.dir,
-        under_lease: fn fun ->
-          AfterCommit.deferring(fn -> Chain.while_holding(lease, fun) end)
-        end,
-        discard: &discard(lease, ctx.dir, "prune", &1)
-      )
+    result = Retention.run(ctx.dir, prune_opts(ctx.lease, ctx.dir))
 
     if superseded?(result),
       do: {:result, {:cancel, :superseded}},
       else: pruned(ctx, state, rec, result)
+  end
+
+  @doc false
+  # What the prune step fences `Retention.run/2` with (#3041): the marker
+  # sync under the lease, and each unit moved into the trash under it
+  # (`discard/4`). Public for the tests.
+  @spec prune_opts(Chain.lease(), Path.t()) :: keyword()
+  def prune_opts(lease, dir) do
+    [
+      under_lease: fn fun ->
+        AfterCommit.deferring(fn -> Chain.while_holding(lease, fun) end)
+      end,
+      discard: &discard(lease, dir, "prune", &1)
+    ]
   end
 
   defp superseded?({:error, :superseded}), do: true
@@ -2372,8 +2378,11 @@ defmodule KilnCMS.Backups.Steps do
   # stages under the step's own temporary name (`:tag`) and renames into
   # place under the lease (`:rename`), and `Destination.S3` checks it before
   # it completes a multipart upload (`:holds`). A plugin's adapter is never
-  # given them; it gets the check between files (`put_file/3`).
-  defp core_opts(opts, %{kind: kind}, lease) do
+  # given them; it gets the check between files (`put_file/3`). Public for
+  # the tests.
+  @doc false
+  @spec core_opts(keyword(), map(), Chain.lease()) :: keyword()
+  def core_opts(opts, %{kind: kind}, lease) do
     if kind in Destination.core_kinds() do
       Keyword.merge(opts, fence(lease) ++ [holds: fn -> Chain.check_lease(lease) end])
     else

@@ -715,6 +715,80 @@ defmodule KilnCMS.Backups.CancelTest do
     end
   end
 
+  # #3041: the zombie is held inside `Destination.Local.put/3`, its copy
+  # made and verified under its own tagged name, before its rename. The
+  # resumed chain lands every file meanwhile; the zombie's rename, fenced,
+  # is refused.
+  describe "#3041: a Local upload that outlives its Cancel" do
+    @tag :tmp_dir
+    test "is refused at its rename, leaving the resumed chain's file in place", %{
+      base: base,
+      admin: admin,
+      tmp_dir: tmp_dir
+    } do
+      put_backups_env(:local_destination_roots, [tmp_dir])
+      path = Path.join(tmp_dir, "site")
+      File.mkdir_p!(path)
+
+      Backups.create_backup_destination!(
+        %{name: "Disk", kind: "local", position: 1, settings: %{"path" => path}},
+        actor: admin
+      )
+
+      {:ok, %{status: :started}} = request()
+      job = %{step_until("offsite", 1) | attempt: 1}
+      %{stamp: stamp} = lock()
+      gate = Path.join(base, "local.gate")
+      on_exit(fn -> File.write(gate, "") end)
+      tag = "#{job.id}-1"
+
+      original = Application.get_env(:kiln_cms, KilnCMS.Backups.Destination.Local, [])
+
+      on_exit(fn ->
+        Application.put_env(:kiln_cms, KilnCMS.Backups.Destination.Local, original)
+      end)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups.Destination.Local,
+        Keyword.put(original, :before_rename, fn partial ->
+          if String.ends_with?(partial, ".#{tag}.partial") do
+            File.write!(gate <> ".started", partial)
+            wait_open(gate, base)
+          end
+        end)
+      )
+
+      zombie = Task.async(fn -> StepWorker.perform(job) end)
+      wait_for!(gate <> ".started")
+      # The step's own tag reached the adapter (`Steps.core_opts/3`).
+      held = File.read!(gate <> ".started")
+      assert String.starts_with?(held, path)
+      assert File.exists?(held)
+
+      assert {:ok, %{status: :canceled}} = Backups.cancel_run(run_of(stamp), actor: admin)
+      backdate_finished!(stamp)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: resumed}} = request(resume: stamp)
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(resumed)
+      end)
+
+      assert %{status: :succeeded, offsite_status: :complete} = run_of(stamp)
+      final = String.replace_suffix(held, ".#{tag}.partial", "")
+      assert File.regular?(final)
+      landed = local_files(path) |> Enum.reject(&String.ends_with?(elem(&1, 0), ".partial"))
+
+      File.write!(gate, "")
+      assert {:cancel, :superseded} = Task.await(zombie, 15_000)
+
+      # Every file as the resumed chain left it, and the zombie's copy gone.
+      assert local_files(path) == landed
+      refute File.exists?(held)
+    end
+  end
+
   describe "cancel during the second destination (#2220)" do
     test "the destination's call dies with its step; a Resume sends to both", %{
       base: base,
@@ -804,6 +878,16 @@ defmodule KilnCMS.Backups.CancelTest do
         File.regular?(file),
         stat = File.stat!(file, time: :posix),
         do: {Path.relative_to(file, path), stat.inode, stat.mtime, stat.size}
+  end
+
+  # Until `gate` exists, or the test's `base` is gone.
+  defp wait_open(gate, base) do
+    if File.exists?(gate) or not File.dir?(base) do
+      :ok
+    else
+      Process.sleep(50)
+      wait_open(gate, base)
+    end
   end
 
   defp wait_for!(path, tries \\ 200) do

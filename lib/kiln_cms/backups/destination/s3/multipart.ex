@@ -45,9 +45,10 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
       retry margin plus one and a half times the last part's duration; the
       answer is then `{:error, :deadline}`, with the progress saved.
 
-  A `save` answering `{:error, :superseded}` ends the put; an upload created
-  in this call is aborted first. Any failure of the first `save` after the
-  upload is created aborts it too, since nothing would know of it. Without a
+  A `save` or `holds` answering `{:error, :superseded}` ends the put and
+  leaves the upload alone: the step that took over may already be resuming
+  it (#3041). Any failure of the first `save` after the upload is created
+  aborts it, since nothing would know of it. Without a
   `Resume` (a put Kiln doesn't record) every failure aborts the upload this
   call started.
   """
@@ -382,8 +383,7 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
         etags: %{},
         md5?: true,
         bytes_done: 0,
-        last_ms: 0,
-        created?: true
+        last_ms: 0
       }
 
       # Recorded before any data is sent; unrecorded, it is aborted here.
@@ -449,8 +449,7 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
          etags: %{},
          md5?: checkpoint["md5_etags"] == true,
          bytes_done: min(done * size, ctx.file.bytes),
-         last_ms: 0,
-         created?: false
+         last_ms: 0
        }}
     else
       _unusable -> unusable(checkpoint)
@@ -535,13 +534,14 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
 
   # On the way out with an error: a superseded put aborts an upload it
   # created itself; a put nothing records aborts whatever it started.
-  defp give_up(ctx, state, {:error, reason} = error) do
-    cond do
-      reason == :superseded and state.created? -> abort(ctx.client, ctx.key, state.upload_id)
-      ctx.resume == nil -> abort(ctx.client, ctx.key, state.upload_id)
-      true -> :ok
-    end
-
+  # A recorded upload is never aborted here, least of all on `:superseded`
+  # (a refused `save` or `holds`): the step that took over may have adopted
+  # it from the checkpoint and be resuming it, and the newer owner or the
+  # uploads sweep settles it (#3041). Only an upload nothing records (no
+  # `Resume`) is aborted on a failure. An upload whose first `save` failed is
+  # aborted where it was created (`create/1`).
+  defp give_up(ctx, state, {:error, _reason} = error) do
+    if ctx.resume == nil, do: abort(ctx.client, ctx.key, state.upload_id)
     error
   end
 
