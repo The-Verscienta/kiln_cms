@@ -81,6 +81,18 @@ defmodule KilnCMS.Backups.DirQueuesTest do
 
   defp job(id), do: Repo.get!(Oban.Job, id)
 
+  # Drain `queue` with only job `id` available in it: the others there are
+  # scheduled into the future meanwhile.
+  defp drain_one(queue, id) do
+    Repo.query!(
+      "UPDATE oban_jobs SET scheduled_at = now() + interval '1 hour', state = 'scheduled' " <>
+        "WHERE queue = $1 AND id <> $2 AND state IN ('available', 'scheduled')",
+      [queue, id]
+    )
+
+    Oban.drain_queue(queue: queue, with_recursion: false, with_scheduled: false)
+  end
+
   # Put job `id` in `queue`, waiting since `waited_s` seconds ago by the
   # database's clock.
   defp park!(id, queue, waited_s, state \\ "available") do
@@ -283,12 +295,81 @@ defmodule KilnCMS.Backups.DirQueuesTest do
       assert state.dir_queues.absent_since == nil
     end
 
-    test "a queue is paused, never stopped, whatever runs in it", %{dir: dir} do
+    test "a queue paused by something else is neither resumed nor advertised", %{
+      dir: dir,
+      a_id: id,
+      qa: qa
+    } do
+      state = advertise!(dir, "a@host")
+      assert DirQueues.routable?(id)
+
+      # An operator, or the demo reset's `Oban.pause_all_queues/1`.
+      DirQueueControl.put_status(qa, :paused)
+      state = BackupCluster.tick_as(dir, state)
+      assert state.dir_queues.advertised == nil
+      assert state.dir_queues.queues == %{qa => :held}
+
+      BackupCluster.tick_as(dir, state)
+      assert DirQueueControl.calls() == [{:start, qa}]
+      assert DirQueueControl.status(qa) == :paused
+      refute DirQueues.routable?(id)
+    end
+
+    test "a queue it paused for another id is resumed when that id comes back", %{
+      dir: dir,
+      a_id: id,
+      qa: qa
+    } do
+      state = advertise!(dir, "a@host")
+      other = Ash.UUID.generate()
+      File.write!(DirId.path(dir), other <> "\n")
+      state = BackupCluster.tick_as(dir, state)
+      assert DirQueueControl.status(qa) == :paused
+
+      File.write!(DirId.path(dir), id <> "\n")
+      state = BackupCluster.tick_as(dir, state)
+      qo = DirQueues.name(other)
+
+      assert DirQueueControl.calls() == [
+               {:start, qa},
+               {:pause, qa},
+               {:start, qo},
+               {:pause, qo},
+               {:resume, qa}
+             ]
+
+      assert state.dir_queues.advertised == id
+      assert state.dir_queues.queues == %{qa => :active, qo => :paused}
+    end
+
+    test "a pause that didn't take is sent again on the next tick", %{dir: dir, qa: qa} do
+      state = advertise!(dir, "a@host")
+      DirQueueControl.drop_pauses(true)
+      File.write!(DirId.path(dir), Ash.UUID.generate() <> "\n")
+      state = BackupCluster.tick_as(dir, state)
+      assert DirQueueControl.status(qa) == :running
+
+      DirQueueControl.drop_pauses(false)
+      state = BackupCluster.tick_as(dir, state)
+      assert DirQueueControl.status(qa) == :paused
+      assert Enum.count(DirQueueControl.calls(), &(&1 == {:pause, qa})) == 2
+
+      # Paused for good: nothing more is sent.
+      BackupCluster.tick_as(dir, state)
+      assert Enum.count(DirQueueControl.calls(), &(&1 == {:pause, qa})) == 2
+    end
+
+    test "a queue it paused that something resumed is paused again", %{dir: dir, qa: qa} do
       state = advertise!(dir, "a@host")
       File.write!(DirId.path(dir), Ash.UUID.generate() <> "\n")
+      state = BackupCluster.tick_as(dir, state)
+
+      # `Oban.resume_all_queues/1`, say.
+      DirQueueControl.put_status(qa, :running)
       BackupCluster.tick_as(dir, state)
 
-      assert Enum.all?(DirQueueControl.calls(), fn {call, _} -> call in [:start, :pause] end)
+      assert DirQueueControl.status(qa) == :paused
+      assert Enum.count(DirQueueControl.calls(), &(&1 == {:pause, qa})) == 2
     end
 
     test "a failed beat changes nothing", %{dir: dir} do
@@ -358,7 +439,31 @@ defmodule KilnCMS.Backups.DirQueuesTest do
       DirQueueControl.put_status(qa, :paused)
       DirQueueControl.put_status("default", :running)
 
-      assert DirQueues.seeded_state().queues == %{qa => :paused}
+      # Paused by something else, as far as this heartbeat knows.
+      assert DirQueues.seeded_state().queues == %{qa => :held}
+    end
+  end
+
+  # -- the real control -------------------------------------------------------
+
+  describe "ObanControl" do
+    alias KilnCMS.Backups.DirQueues.ObanControl
+
+    # The test build runs no queue producers (`testing: :manual`); `start/1`
+    # would start a real one, so it isn't called here.
+    test "a queue that doesn't run here is stopped" do
+      assert ObanControl.check(DirQueues.name(Ash.UUID.generate())) == :stopped
+    end
+
+    test "pausing or resuming a queue that doesn't run here does nothing" do
+      queue = DirQueues.name(Ash.UUID.generate())
+
+      assert ObanControl.pause(queue) == :ok
+      assert ObanControl.resume(queue) == :ok
+    end
+
+    test "it lists no directory queue when none runs here" do
+      refute Enum.any?(ObanControl.running(), fn {queue, _} -> DirQueues.dir_queue?(queue) end)
     end
   end
 
@@ -457,17 +562,19 @@ defmodule KilnCMS.Backups.DirQueuesTest do
       a_id: id,
       qa: qa
     } do
+      # The queue is routable, so only being in it keeps the job from moving.
       advertise!(dir, "a@host")
+      {:ok, waiting} = Oban.insert(StepWorker.new(dump_args(id), queue: qa))
 
-      assert {:snooze, 30} =
-               BackupCluster.as_node(b, fn ->
-                 perform_job(StepWorker, dump_args(id), queue: qa)
-               end)
+      assert [%{snoozed: 1}] = BackupCluster.drain_as(b, [qa])
+      assert %{queue: ^qa, state: "scheduled", meta: %{"snoozed" => 1}} = job(waiting.id)
 
-      assert {:error, :backup_dir_elsewhere} =
-               BackupCluster.as_node(b, fn ->
-                 perform_job(StepWorker, dump_args(id), queue: qa, meta: %{"snoozed" => 20})
-               end)
+      {:ok, spent} =
+        Oban.insert(StepWorker.new(dump_args(id), queue: qa, meta: %{"snoozed" => 20}))
+
+      assert [%{failure: 1}] = BackupCluster.as_node(b, fn -> [drain_one(qa, spent.id)] end)
+      assert %{queue: ^qa, state: "retryable", errors: [%{"error" => error}]} = job(spent.id)
+      assert error =~ "backup_dir_elsewhere"
     end
 
     test "a per-directory marker sync is moved to its directory's queue", %{
@@ -490,19 +597,19 @@ defmodule KilnCMS.Backups.DirQueuesTest do
       qa: qa
     } do
       advertise!(dir, "a@host")
+      {:ok, waiting} = Oban.insert(MarkerSyncWorker.new(%{"dir" => id}, queue: qa))
 
-      assert {:snooze, 30} =
-               BackupCluster.as_node(b, fn ->
-                 perform_job(MarkerSyncWorker, %{"dir" => id}, queue: qa)
-               end)
+      assert [%{snoozed: 1}] = BackupCluster.drain_as(b, [qa])
+      assert %{queue: ^qa, state: "scheduled", meta: %{"snoozed" => 1}} = job(waiting.id)
 
-      assert {:cancel, :backup_dir_elsewhere} =
-               BackupCluster.as_node(b, fn ->
-                 perform_job(MarkerSyncWorker, %{"dir" => id},
-                   queue: qa,
-                   meta: %{"snoozed" => 20}
-                 )
-               end)
+      # One waiting job per directory: the spent one replaces it.
+      Repo.delete_all(from(j in Oban.Job, where: j.id == ^waiting.id))
+
+      {:ok, spent} =
+        Oban.insert(MarkerSyncWorker.new(%{"dir" => id}, queue: qa, meta: %{"snoozed" => 20}))
+
+      assert [%{cancelled: 1}] = BackupCluster.drain_as(b, [qa])
+      assert %{queue: ^qa, state: "cancelled"} = job(spent.id)
     end
 
     test "the marker sync fan-out queues into the queues advertised, else into default", %{

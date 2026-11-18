@@ -24,6 +24,13 @@ defmodule KilnCMS.Test.DirQueueControl do
   @spec refuse_starts(boolean()) :: :ok
   def refuse_starts(refuse?), do: update(owner(), &%{&1 | refuse_starts?: refuse?})
 
+  @doc """
+  From now on in this test, a pause is recorded but the queue keeps running
+  (the signal was lost: Oban's notifier was down).
+  """
+  @spec drop_pauses(boolean()) :: :ok
+  def drop_pauses(drop?), do: update(owner(), &Map.put(&1, :drop_pauses?, drop?))
+
   @doc "Set `queue`'s status for this test, as if Oban had changed it."
   @spec put_status(String.t(), :running | :paused | :stopped) :: :ok
   def put_status(queue, status) do
@@ -48,7 +55,7 @@ defmodule KilnCMS.Test.DirQueueControl do
     update(owner(), fn state ->
       state = record(state, {:pause, queue})
 
-      if Map.has_key?(state.queues, queue),
+      if Map.has_key?(state.queues, queue) and not Map.get(state, :drop_pauses?, false),
         do: put_in(state.queues[queue], :paused),
         else: state
     end)

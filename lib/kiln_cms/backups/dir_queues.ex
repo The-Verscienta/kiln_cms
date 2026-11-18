@@ -22,7 +22,13 @@ defmodule KilnCMS.Backups.DirQueues do
     * after 180 s of reads that give no id (`Chain.stale_after_s/0`): a hung
       or missing directory;
 
-  and resumed when the id comes back. A paused queue costs nothing.
+  and resumed when the id comes back. A paused queue costs nothing. Each
+  tick checks the queues it paused and pauses again one that runs (a pause
+  signal lost while Oban's notifier was down, or a later
+  `Oban.resume_all_queues/1`). The heartbeat resumes only a queue it paused
+  itself: one paused by anything else (an operator, the demo reset's
+  `Oban.pause_all_queues/1`) is left paused and not advertised, so its jobs
+  keep the snooze in `backup_steps` until it runs again.
 
   ## Who may route a job there (the capability)
 
@@ -85,11 +91,16 @@ defmodule KilnCMS.Backups.DirQueues do
   @stranded_after_s 1_800
   @waiting_states ["available", "scheduled", "retryable"]
 
-  @typedoc "What the heartbeat remembers about this node's directory queues."
+  @typedoc """
+  What the heartbeat remembers about this node's directory queues. `queues`:
+  `:active` (running, as far as it knows), `:paused` (paused by this
+  heartbeat, so it may resume it) or `:held` (found paused by something
+  else, which it never resumes).
+  """
   @type state :: %{
           advertised: String.t() | nil,
           absent_since: integer() | nil,
-          queues: %{String.t() => :active | :paused},
+          queues: %{String.t() => :active | :paused | :held},
           pending: %{String.t() => pos_integer()},
           start_failed: MapSet.t()
         }
@@ -292,13 +303,14 @@ defmodule KilnCMS.Backups.DirQueues do
   @doc """
   `new_state/0` with the directory queues already running on this node (a
   heartbeat restarted while Oban kept running), so their pausing is still
-  this heartbeat's to do. Never raises.
+  this heartbeat's to do. One found paused is `:held`: nothing says this
+  heartbeat paused it, so it is not resumed. Never raises.
   """
   @spec seeded_state() :: state()
   def seeded_state do
     queues =
       for {queue, status} <- control().running(), dir_queue?(queue), into: %{} do
-        {queue, if(status == :paused, do: :paused, else: :active)}
+        {queue, if(status == :paused, do: :held, else: :active)}
       end
 
     %{new_state() | queues: queues}
@@ -308,9 +320,11 @@ defmodule KilnCMS.Backups.DirQueues do
 
   @doc """
   One heartbeat's turn, after a successful beat that reported `dir_id` (nil
-  when the read gave none): start or resume that directory's queue, pause any
-  other (at once for another id, after 180 s without one), and work out what
-  the next beat advertises. `now_ms` is monotonic. Returns the new state.
+  when the read gave none): start that directory's queue (or resume it, when
+  this heartbeat paused it), pause any other (at once for another id, after
+  180 s without one, and again whenever one it paused runs), and work out
+  what the next beat advertises. `now_ms` is monotonic. Returns the new
+  state.
   """
   @spec reconcile(state(), String.t() | nil, integer(), String.t()) :: state()
   def reconcile(state, dir_id, now_ms, node) do
@@ -321,48 +335,51 @@ defmodule KilnCMS.Backups.DirQueues do
   end
 
   defp present(state, dir_id, queue, node) do
-    state =
-      state.queues
-      |> Enum.filter(fn {other, status} -> other != queue and status == :active end)
-      |> Enum.reduce(%{state | absent_since: nil}, fn {other, _}, acc ->
-        pause(acc, other, node, :changed)
-      end)
+    others = state.queues |> Map.keys() |> List.delete(queue)
+    state = pause_running(%{state | absent_since: nil}, others, node, :changed)
 
-    {state, status} = ensure_running(state, queue, node)
+    {state, record, running?} = ensure_running(state, queue, node)
 
     %{
       state
-      | advertised: if(status == :running, do: dir_id),
-        queues: Map.put(state.queues, queue, if(status == :paused, do: :paused, else: :active))
+      | advertised: if(running?, do: dir_id),
+        queues: Map.put(state.queues, queue, record)
     }
   end
 
+  # The current queue: what `queues` records for it, and whether it runs
+  # (only then is it advertised).
   defp ensure_running(state, queue, node) do
     control = control()
 
-    case control.check(queue) do
-      :running ->
-        {started(state, queue, node), :running}
+    case {control.check(queue), Map.get(state.queues, queue)} do
+      {:running, _record} ->
+        {started(state, queue, node), :active, true}
 
-      :paused ->
+      {:paused, :paused} ->
         :ok = control.resume(queue)
         emit(:resumed, queue, node)
         Logger.info("Backup directory queue #{queue}: resumed on this node")
-        recheck(state, queue, node)
+        recheck(state, queue, node, :paused)
 
-      :stopped ->
+      {:paused, _record} ->
+        {state, :held, false}
+
+      {:stopped, _record} ->
         :ok = control.start(queue)
         state = %{state | pending: Map.update(state.pending, queue, 1, &(&1 + 1))}
-        recheck(state, queue, node)
+        recheck(state, queue, node, :active)
     end
   end
 
   # Oban starts, pauses and resumes a queue through its notifier, so the
   # answer may only show on the next tick; the advertisement waits for it.
-  defp recheck(state, queue, node) do
+  # `waiting` is what to record until it does: a resume not taken yet is
+  # still this heartbeat's pause.
+  defp recheck(state, queue, node, waiting) do
     case control().check(queue) do
-      :running -> {started(state, queue, node), :running}
-      other -> {start_not_taken(state, queue, node), other}
+      :running -> {started(state, queue, node), :active, true}
+      _other -> {start_not_taken(state, queue, node), waiting, false}
     end
   end
 
@@ -398,17 +415,32 @@ defmodule KilnCMS.Backups.DirQueues do
     end
   end
 
+  # No id: inside the window only the queues this heartbeat already paused
+  # are checked (and paused again if they run); past it, every one.
   defp absent(state, now_ms, node) do
     since = state.absent_since || now_ms
     state = %{state | absent_since: since, advertised: nil}
 
-    if now_ms - since >= Chain.stale_after_s() * 1000 do
-      state.queues
-      |> Enum.filter(fn {_queue, status} -> status == :active end)
-      |> Enum.reduce(state, fn {queue, _}, acc -> pause(acc, queue, node, :gone) end)
-    else
-      state
-    end
+    queues =
+      if now_ms - since >= Chain.stale_after_s() * 1000,
+        do: Map.keys(state.queues),
+        else: for({queue, :paused} <- state.queues, do: queue)
+
+    pause_running(state, queues, node, :gone)
+  end
+
+  # Each of `queues` that runs is paused, whatever was recorded: a pause
+  # that didn't take, or a queue resumed by something else since. One paused
+  # by something else is `:held`; one that no longer runs here is forgotten.
+  defp pause_running(state, queues, node, reason) do
+    Enum.reduce(queues, state, fn queue, acc ->
+      case {control().check(queue), Map.get(acc.queues, queue)} do
+        {:running, _record} -> pause(acc, queue, node, reason)
+        {:paused, :paused} -> acc
+        {:paused, _record} -> %{acc | queues: Map.put(acc.queues, queue, :held)}
+        {:stopped, _record} -> %{acc | queues: Map.delete(acc.queues, queue)}
+      end
+    end)
   end
 
   defp pause(state, queue, node, reason) do

@@ -84,8 +84,10 @@ defmodule KilnCMS.Backups.Heartbeat do
   advertise: the next beat writes it as `dir_queue` (with this boot's id),
   so a job is routed to the queue only once a node runs it. A queue for
   another id is paused at once when the read gives that other id, and after
-  180 s when reads give none; it is resumed when its id comes back, and
-  never stopped, so a running job is never orphaned. A brand-new directory's
+  180 s when reads give none, and paused again on a later tick if it runs;
+  it is resumed when its id comes back, and never stopped, so a running job
+  is never orphaned. A queue paused by anything else (an operator, the demo
+  reset) is never resumed here, nor advertised while paused. A brand-new directory's
   queue is advertised one or two ticks after its first id read. A start that
   hasn't taken after three ticks logs a warning and emits
   `[:kiln_cms, :backups, :dir_queue, :start_failed]`; until it takes, that
