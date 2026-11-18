@@ -366,7 +366,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#3100](https://github.com/The-Verscienta/kiln_cms/pull/3100) · [long form](docs/changelog/unreleased.md#backup-keep-refused-file))
 
 - **A backup step that outlived its Cancel, or an earlier attempt of the same step, can no longer prune the resumed backup's units or overwrite its local off-site copies: the lease is now per attempt, and the prune step and uploads are fenced.**
-  ([long form](docs/changelog/unreleased.md#backup-fence-attempts-prune-offsite))
+  ([#3101](https://github.com/The-Verscienta/kiln_cms/pull/3101) · [long form](docs/changelog/unreleased.md#backup-fence-attempts-prune-offsite))
 
 ### Security
 
