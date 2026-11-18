@@ -1066,6 +1066,102 @@ defmodule KilnCMS.Backups.ChainTest do
       assert error =~ "BACKUP_MEDIA_EXCLUDE"
     end
 
+    # The `:free_space` seam stands in for `df` (#2423).
+    test "too little free space for the dump fails the backup at once, before pg_dump runs",
+         %{dir: dir} do
+      set_config(free_space: fn _path -> {:ok, 1_048_576} end)
+
+      {:ok, %{status: :started, chain: chain}} = request()
+      job = step_until("dump")
+
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+
+        assert {:error, {:insufficient_space, %{component: :db, free: 1_048_576}}} =
+                 BackupChain.settled(chain)
+      end)
+
+      # Not retried, and nothing was dumped.
+      assert %{state: "cancelled", attempt: 1} = Repo.get!(Oban.Job, job.id)
+      assert Path.wildcard(Path.join([dir, "db", "kiln-db-*"])) == []
+      assert [%{status: :failed, error: error}] = runs()
+      assert error =~ "Not enough free space for the database dump in #{dir}"
+      assert error =~ "1 MB free, about 256 MB needed"
+      assert error =~ "Free up space there, or point BACKUP_DIR at a larger disk"
+      refute Manifest.read(dir).ok
+    end
+
+    test "too little free space for the media fails the plan step at once, before any part",
+         %{dir: dir} do
+      # Room for the dump (no earlier one, so only the margin), not for the
+      # six 300-byte files plus 10%.
+      set_config(free_space_margin_bytes: 0, free_space: fn _path -> {:ok, 1000} end)
+
+      {:ok, %{status: :started, chain: chain}} = request()
+      job = step_until("plan")
+      %{stamp: stamp} = lock()
+      assert File.regular?(Path.join([dir, "db", "kiln-db-#{stamp}.dump"]))
+
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+
+        assert {:error, {:insufficient_space, %{component: :media, needed: 1980}}} =
+                 BackupChain.settled(chain)
+      end)
+
+      assert %{state: "cancelled", attempt: 1} = Repo.get!(Oban.Job, job.id)
+      assert Path.wildcard(Path.join([dir, "media", "kiln-media-*"])) == []
+      assert [%{status: :failed, error: error}] = runs()
+      assert error =~ "Not enough free space for the media archive in "
+      assert error =~ "0 MB free, about 0 MB needed"
+    end
+
+    test "free space that can't be read is noted on the run, and the backup goes ahead" do
+      set_config(free_space: fn _path -> :error end)
+
+      assert :ok = BackupChain.run()
+      assert [%{status: :succeeded, log: log}] = runs()
+
+      warnings =
+        for %{level: :warn, message: "Could not read the free space" <> _} = entry <- log,
+            do: entry.step
+
+      assert Enum.sort(warnings) == ["dump", "media"]
+    end
+
+    # A delayed write that fails is reported by the list's close (#2423); the
+    # `:media_list_close` seam makes it fail on any OS (macOS has no
+    # /dev/full). A full disk may clear, so the step is retried, and the run
+    # fails with a sentence, not a crash.
+    test "a media list that can't be written fails the plan step with a clear error", %{dir: dir} do
+      set_config(
+        media_list_close: fn io ->
+          :ok = :file.close(io)
+          {:error, :enospc}
+        end
+      )
+
+      {:ok, %{status: :started, chain: chain}} = request()
+      step_until("plan")
+      %{stamp: stamp} = lock()
+
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+        assert {:error, {:write_list, :enospc}} = BackupChain.settled(chain)
+      end)
+
+      assert [%Oban.Job{state: "cancelled", attempt: 4}] =
+               BackupChain.step_jobs(chain: chain, step: "plan")
+
+      assert [%{status: :failed, error: error}] = runs()
+      assert error == "Could not write the media archive's file lists (no space left on device)"
+
+      # Every attempt removed the lists it wrote; no plan was committed.
+      work = WorkState.path(dir, stamp)
+      assert Path.wildcard(Path.join(work, "part*")) == []
+      refute File.exists?(Path.join(work, "plan.json"))
+    end
+
     test "the last attempt's failure is terminal: the job is canceled and the lock released" do
       set_config(database_url: "postgres://nobody:nope@127.0.0.1:1/nope")
 

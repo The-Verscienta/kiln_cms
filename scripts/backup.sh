@@ -1053,12 +1053,70 @@ start_heartbeat() {
   disown "$HEARTBEAT_PID" 2>/dev/null || true
 }
 
+# --- free space (mirror KilnCMS.Backups.Preflight, #2423) ------------------
+
+# Added to every estimate, after 10% of it: the app's default
+# `free_space_margin_bytes` (256 MB).
+FREE_SPACE_MARGIN_BYTES=$((256 * 1048576))
+
+# $1 = bytes, printed as Preflight.human/1 prints them: whole MB below 1 GB,
+# GB to a tenth (rounded down) from there.
+human_bytes() {
+  local b="$1" tenths
+  if [ "$b" -lt 1073741824 ]; then
+    printf '%s MB' "$((b / 1048576))"
+  else
+    tenths=$((b * 10 / 1073741824))
+    printf '%s.%s GB' "$((tenths / 10))" "$((tenths % 10))"
+  fi
+}
+
+# $1 = what is about to be written ("database dump", "media archive"),
+# $2 = the directory it goes to, $3 = its estimated size in bytes. Fails the
+# run, before anything is written, when the free space there is below the
+# estimate plus 10% plus the margin, in the app's words. A `df` that fails or
+# prints something unexpected is warned about and the run goes ahead, as the
+# app does: an unknown is not a reason to stop every backup.
+check_free_space() {
+  local what="$1" dir="$2" estimate="$3" needed avail
+  needed=$((estimate * 11 / 10 + FREE_SPACE_MARGIN_BYTES))
+  # POSIX output (-P): one line per file system, available KB in the 4th field
+  # on GNU and BSD df alike.
+  avail="$(df -Pk "$dir" 2>/dev/null | awk 'NR == 2 { print $4 }')" || avail=""
+  case "$avail" in
+    '' | *[!0-9]*)
+      warn "could not read the free space in ${dir}; going ahead without the free-space check"
+      return 0
+      ;;
+  esac
+  avail=$((10#$avail * 1024))
+  if [ "$avail" -lt "$needed" ]; then
+    die "Not enough free space for the ${what} in ${dir}: $(human_bytes "$avail") free, about $(human_bytes "$needed") needed. Free up space there, or point BACKUP_DIR at a larger disk"
+  fi
+}
+
+# The size of the newest earlier dump in $BACKUP_DIR/db (regular files only,
+# not this run's): the dump estimate, as Preflight.dump_estimate/2. Stamps
+# sort by time, and so does the glob. 0 when there is none.
+dump_estimate() {
+  local f newest="" own="kiln-db-${STAMP}.dump"
+  for f in "$BACKUP_DIR"/db/kiln-db-*.dump; do
+    if [ -f "$f" ] && [ ! -L "$f" ] && [ "${f##*/}" != "$own" ]; then newest="$f"; fi
+  done
+  if [ -n "$newest" ]; then
+    wc -c < "$newest" | tr -d ' '
+  else
+    echo 0
+  fi
+}
+
 cmd_db() {
   require DATABASE_URL
   pg_conn_split "$DATABASE_URL"
   [ -z "$PG_CONN_ERROR" ] || die "DATABASE_URL $PG_CONN_ERROR"
   read_lock_wait
   mkdir -p "$BACKUP_DIR/db"
+  check_free_space "database dump" "$BACKUP_DIR/db" "$(dump_estimate)"
   local out="$BACKUP_DIR/db/kiln-db-${STAMP}.dump" status=0 errors
 
   track_partial "${out}.partial"
@@ -1698,6 +1756,9 @@ cmd_media() {
   if [ "$PLAN_OVERSIZE" -gt 0 ]; then
     warn "${PLAN_OVERSIZE} file(s) larger than the part size were archived as parts of their own"
   fi
+  # Every part is still to be written: cron has no resume.
+  check_free_space "media archive" "$dir" \
+    "$(awk '{ s += $1 } END { printf "%.0f\n", s }' "$WORK_DIR/walk.sizes")"
 
   local total="$PLAN_PARTS" i name final sha
   local -a names shas

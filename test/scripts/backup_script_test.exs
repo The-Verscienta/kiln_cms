@@ -23,7 +23,7 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
   """
   use ExUnit.Case, async: false
 
-  alias KilnCMS.Backups.{Artifact, Checksum, MediaArchive, Retention}
+  alias KilnCMS.Backups.{Artifact, Checksum, MediaArchive, Preflight, Retention}
   alias KilnCMS.Backups.Retention.Policy
   alias KilnCMS.Test.ShellTools
 
@@ -1987,6 +1987,81 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert out =~ "1 excluded by BACKUP_MEDIA_EXCLUDE"
       assert manifest!(ctx)["ok"]
       refute "./locked/inside.bin" in List.flatten(cron_lists(ctx))
+    end
+  end
+
+  # A stub `df` on PATH stands in for the disk (#2423). The script's margin is
+  # the app's default; the refusal is the app's sentence (`Preflight`).
+  describe "the free-space check" do
+    defp stub_df!(ctx, available_kb) do
+      stub!(ctx.bin, "df", """
+      #!/bin/sh
+      echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'
+      echo '/dev/stub 999999999 0 #{available_kb} 1% /'
+      """)
+    end
+
+    defp shortfall(component, path, free, needed) do
+      Preflight.describe(
+        {:insufficient_space, %{component: component, path: path, free: free, needed: needed}}
+      )
+    end
+
+    test "refuses the dump before pg_dump runs when there is too little room", ctx do
+      stub_df!(ctx, 1024)
+      # The newest earlier dump is the estimate: 100 MB, plus 10%, plus 256 MB.
+      earlier = dump!(ctx, "20260101-030000")
+      {:ok, io} = :file.open(earlier, [:read, :write, :binary])
+      {:ok, _} = :file.position(io, 100 * @mb)
+      :ok = :file.truncate(io)
+      :ok = :file.close(io)
+
+      db = Path.join(ctx.backups, "db")
+      message = shortfall(:db, db, @mb, div(100 * @mb * 11, 10) + 256 * @mb)
+      assert message =~ "1 MB free, about 366 MB needed"
+
+      assert {out, status} = backup(ctx, "all")
+      assert status != 0
+      assert out =~ "error: " <> message
+      refute out =~ "pg_dump →"
+      assert Path.wildcard(Path.join(db, "kiln-db-*.dump")) == [earlier]
+      refute manifest!(ctx)["ok"]
+      assert manifest!(ctx)["error"] == message
+    end
+
+    test "refuses the media after the dump when only the dump fits", ctx do
+      # The margin and 999 bytes: room for the dump (no earlier one), not for
+      # six 300-byte files plus 10%.
+      free = 256 * @mb + 1024
+      stub_df!(ctx, div(free, 1024))
+      media = Path.join(ctx.backups, "media")
+
+      assert {out, status} = backup(ctx, "all")
+      assert status != 0
+      assert out =~ "pg_dump →"
+      assert out =~ "error: " <> shortfall(:media, media, free, 1980 + 256 * @mb)
+      refute out =~ "Archiving media part"
+      assert media_dir_listing(ctx) == []
+    end
+
+    test "warns and goes ahead when free space can't be read", ctx do
+      stub!(ctx.bin, "df", "#!/bin/sh\necho 'df: nope' >&2\nexit 1\n")
+
+      assert {out, 0} = backup(ctx, "all")
+
+      assert out =~
+               "warning: could not read the free space in #{ctx.backups}/db; " <>
+                 "going ahead without the free-space check"
+
+      assert out =~ "warning: could not read the free space in #{ctx.backups}/media"
+      assert manifest!(ctx)["ok"]
+    end
+
+    test "passes with room to spare", ctx do
+      stub_df!(ctx, 999_999_999)
+      assert {out, 0} = backup(ctx, "all")
+      refute out =~ "free space"
+      assert manifest!(ctx)["ok"]
     end
   end
 

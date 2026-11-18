@@ -711,6 +711,56 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
       assert loaded.parts == theirs.parts
     end
 
+    # A delayed write that fails (ENOSPC) is reported by close (#2423). macOS
+    # has no /dev/full, so the `:close` seam stands in for the disk: the list
+    # is really closed, and the close says it could not be flushed.
+    test "a list whose close fails ends the plan with an error, removing its lists", ctx do
+      for n <- 1..3, do: put(ctx.media, "f#{n}", String.duplicate("q", 400))
+      parent = self()
+
+      close = fn io ->
+        :ok = :file.close(io)
+        send(parent, :closed)
+        {:error, :enospc}
+      end
+
+      assert {:error, {:write_list, :enospc}} =
+               MediaArchive.plan(ctx.media, ctx.work,
+                 stamp: @stamp,
+                 part_bytes: 500,
+                 exclude: [],
+                 tag: "5-1",
+                 rename: &File.rename/2,
+                 close: close
+               )
+
+      # The first part's close failed, and the walk stopped there.
+      assert_received :closed
+      refute_received :closed
+      assert Path.wildcard(Path.join(ctx.work, "*.5-1.*")) == []
+      refute File.exists?(Path.join(ctx.work, "plan.json"))
+      assert {:error, :no_plan} = MediaArchive.load_plan(ctx.media, ctx.work)
+    end
+
+    test "a failed close of the last list fails the plan too", ctx do
+      put(ctx.media, "only", "1")
+
+      assert {:error, {:write_list, :eio}} =
+               MediaArchive.plan(ctx.media, ctx.work,
+                 stamp: @stamp,
+                 exclude: [],
+                 tag: "6-1",
+                 rename: &File.rename/2,
+                 close: fn io ->
+                   :file.close(io)
+                   {:error, :eio}
+                 end
+               )
+
+      assert Path.wildcard(Path.join(ctx.work, "*.6-1.*")) == []
+      refute File.exists?(Path.join(ctx.work, "plan.json"))
+    end
+
     test "load_plan/2 joins only list names it could have written", ctx do
       put(ctx.media, "f", "1")
       plan!(ctx, tag: "3-1")

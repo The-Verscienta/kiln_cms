@@ -147,6 +147,13 @@ defmodule KilnCMS.Backups.MediaArchive do
   quietly. `:list_dir` and `:lstat` (functions with the `:file` signatures)
   exist so a test can stand in for a filesystem that refuses such names.
 
+  The lists are written with `:delayed_write`, so a write that fails for want
+  of space (`ENOSPC`) or an I/O error is reported when a list is closed. The
+  plan then fails with `{:error, {:write_list, reason}}` and, with a `:tag`,
+  removes the lists it wrote; `plan.json` is not written. `:close` (default
+  `:file.close/1`, or `config :kiln_cms, KilnCMS.Backups, media_list_close:`,
+  set in tests only) lets a test make that close fail on any OS (#2423).
+
   A folder that can be listed but not entered (read permission without
   execute) fails the plan with `{:error, {:not_enterable, rel}}`, `rel` its
   path relative to `media_dir` (`""` for `media_dir` itself), as
@@ -164,7 +171,8 @@ defmodule KilnCMS.Backups.MediaArchive do
 
     fs = %{
       list_dir: opts[:list_dir] || (&:file.list_dir_all/1),
-      lstat: opts[:lstat] || (&File.lstat/1)
+      lstat: opts[:lstat] || (&File.lstat/1),
+      close: opts[:close] || list_close()
     }
 
     tag = opts[:tag]
@@ -539,7 +547,7 @@ defmodule KilnCMS.Backups.MediaArchive do
 
   defp close_part(state) do
     # A delayed_write handle reports a failed flush (ENOSPC, EIO) on close.
-    case :file.close(state.io) do
+    case state.fs.close.(state.io) do
       :ok -> :ok
       {:error, reason} -> throw({:walk_error, {:write_list, reason}})
     end
@@ -553,6 +561,13 @@ defmodule KilnCMS.Backups.MediaArchive do
     }
 
     %{state | io: nil, parts: [part | state.parts], count: 0, bytes: 0, oversize: false}
+  end
+
+  defp list_close do
+    case Keyword.get(Application.get_env(:kiln_cms, Backups, []), :media_list_close) do
+      fun when is_function(fun, 1) -> fun
+      nil -> &:file.close/1
+    end
   end
 
   defp close_io(%{io: nil}), do: :ok
