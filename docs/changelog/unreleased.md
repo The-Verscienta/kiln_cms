@@ -7,6 +7,27 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="backup-heartbeat-lock-gaps"></a>
+
+- **Heartbeat and lock gaps (#3078, #3091, #3095).**
+  - **Recording an interrupted backup runs in the background.** When the
+    heartbeat (or a backup request) took over a stopped node's backup, it
+    recorded the failure and cleaned its work files in the heartbeat
+    process; on a hung `BACKUP_DIR` that stopped this node beating. The
+    lock is still released and the waiting request promoted at once; the
+    run's record follows in a background task, one at a time, and the run
+    reads Running until it lands.
+  - **A restarted node keeps its last backup-directory id** from its own
+    beat for up to 180 seconds, so a node holding a copy of a backup's
+    files no longer resumes it beside a source host whose first read after
+    a restart hangs.
+  - **A resume waiting because its backup record can't be read** shows
+    "Waiting: this backup's record couldn't be read" on the Backups page.
+  - **A queue the heartbeat paused stays its own** across a heartbeat
+    restart, so it is resumed when its directory id returns; and log lines
+    about a resume's start name the backup being resumed.
+  ([#3078](https://github.com/The-Verscienta/kiln_cms/issues/3078), [#3091](https://github.com/The-Verscienta/kiln_cms/issues/3091), [#3095](https://github.com/The-Verscienta/kiln_cms/issues/3095))
+
 <a id="backup-history-home-polish"></a>
 
 - **History and Home wording (#2940, #2942, #3005).**

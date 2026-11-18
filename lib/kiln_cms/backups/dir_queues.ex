@@ -28,7 +28,10 @@ defmodule KilnCMS.Backups.DirQueues do
   `Oban.resume_all_queues(Oban)`). The heartbeat resumes only a queue it paused
   itself: one paused by anything else (an operator, the demo reset's
   `Oban.pause_all_queues(Oban)`) is left paused and not advertised, so its jobs
-  keep the snooze in `backup_steps` until it runs again.
+  keep the snooze in `backup_steps` until it runs again. Which queues it
+  paused is kept in `KilnCMS.Backups.DirQueues.Paused`, a node-local table
+  apart from the heartbeat process, so a heartbeat that restarts (and Oban
+  doesn't) still resumes its own pause (#3095).
 
   ## Who may route a job there (the capability)
 
@@ -81,6 +84,7 @@ defmodule KilnCMS.Backups.DirQueues do
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Chain, DirId}
+  alias KilnCMS.Backups.DirQueues.Paused
   alias KilnCMS.Repo
 
   require Logger
@@ -303,20 +307,25 @@ defmodule KilnCMS.Backups.DirQueues do
   @doc """
   `new_state/0` with the directory queues already running on this node (a
   heartbeat restarted while Oban kept running), so their pausing is still
-  this heartbeat's to do. One found paused is `:held`: nothing says this
-  heartbeat paused it, so it is not resumed. Never raises.
+  this heartbeat's to do. One found paused is `:paused` when an earlier
+  heartbeat on this node paused it (`KilnCMS.Backups.DirQueues.Paused`,
+  #3095), so it is resumed when its id comes back; any other is `:held`,
+  and never resumed. Never raises.
   """
   @spec seeded_state() :: state()
   def seeded_state do
     queues =
       for {queue, status} <- control().running(), dir_queue?(queue), into: %{} do
-        {queue, if(status == :paused, do: :held, else: :active)}
+        {queue, seeded(queue, status)}
       end
 
     %{new_state() | queues: queues}
   catch
     _kind, _reason -> new_state()
   end
+
+  defp seeded(queue, :paused), do: if(Paused.member?(queue), do: :paused, else: :held)
+  defp seeded(_queue, _running), do: :active
 
   @doc """
   One heartbeat's turn, after a successful beat that reported `dir_id` (nil
@@ -328,10 +337,25 @@ defmodule KilnCMS.Backups.DirQueues do
   """
   @spec reconcile(state(), String.t() | nil, integer(), String.t()) :: state()
   def reconcile(state, dir_id, now_ms, node) do
-    case name(dir_id) do
-      nil -> absent(state, now_ms, node)
-      queue -> present(state, dir_id, queue, node)
+    reconciled =
+      case name(dir_id) do
+        nil -> absent(state, now_ms, node)
+        queue -> present(state, dir_id, queue, node)
+      end
+
+    remember_pauses(state.queues, reconciled.queues)
+    reconciled
+  end
+
+  # `Paused` holds exactly the queues recorded as this heartbeat's pause:
+  # one resumed, found running, held or gone is forgotten. `pause/4` also
+  # adds one before it pauses, in case this process dies in between.
+  defp remember_pauses(before, now) do
+    for queue <- Enum.uniq(Map.keys(before) ++ Map.keys(now)) do
+      if Map.get(now, queue) == :paused, do: Paused.put(queue), else: Paused.delete(queue)
     end
+
+    :ok
   end
 
   defp present(state, dir_id, queue, node) do
@@ -444,6 +468,7 @@ defmodule KilnCMS.Backups.DirQueues do
   end
 
   defp pause(state, queue, node, reason) do
+    :ok = Paused.put(queue)
     :ok = control().pause(queue)
     emit(:paused, queue, node, %{reason: reason})
 

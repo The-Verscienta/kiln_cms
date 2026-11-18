@@ -29,7 +29,11 @@ defmodule KilnCMS.Backups.Heartbeat do
        which also sweeps the backup steps stranded in a directory queue
        (`KilnCMS.Backups.Chain.sweep_stranded/0`); the marker syncs stranded
        there are swept after it
-       (`KilnCMS.Backups.MarkerSyncWorker.sweep_stranded/0`).
+       (`KilnCMS.Backups.MarkerSyncWorker.sweep_stranded/0`). What a
+       backup interrupted there needs after the commit (its run failed, its
+       failure manifest, a finish completed) touches `BACKUP_DIR`, so it
+       runs in a task of `KilnCMS.Backups.Interrupts`, which the tick never
+       waits on (#3078).
     5. Hourly, prune the beats of nodes gone for a day.
 
   ## Self-fence
@@ -68,8 +72,15 @@ defmodule KilnCMS.Backups.Heartbeat do
   read gave, kept while a read is held up, crashes or can't start. A resume's
   start counts it as this node reporting its directory, so a copy elsewhere
   doesn't resume from a live node whose read is stuck. The marker sync never
-  routes by it. A read that finds no id file clears it, and a restarted
-  heartbeat has none until its first read answers.
+  routes by it. A read that finds no id file clears it.
+
+  A restarted heartbeat starts from the `last_dir_id` (or, from a release
+  before #2817, the `dir_id`) its node's own beat row holds, when that row
+  beat within `KilnCMS.Backups.Chain.stale_after_s/0` (180 s) by the
+  database's clock (`restore_last_dir_id/1`, #3091): a source host that
+  restarts and whose first read hangs still reports its directory, so a copy
+  elsewhere doesn't resume beside it. A row older than that, or none, gives
+  none until the first read answers.
 
   The supervisor runs at most four reads at a time, so heartbeats restarted
   on a hung mount can't pile up blocked readers; a tick that finds it full
@@ -134,7 +145,7 @@ defmodule KilnCMS.Backups.Heartbeat do
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{DirId, DirQueues, Fence, MarkerSyncWorker}
+  alias KilnCMS.Backups.{Chain, DirId, DirQueues, Fence, MarkerSyncWorker}
 
   require Logger
 
@@ -193,13 +204,17 @@ defmodule KilnCMS.Backups.Heartbeat do
   @impl GenServer
   def init(opts) do
     # The directory queues already running here (this heartbeat restarted,
-    # Oban didn't): pausing them stays this heartbeat's job.
+    # Oban didn't): pausing them stays this heartbeat's job, and so does
+    # resuming the ones an earlier heartbeat here paused (#3095).
     state = %{new_state(opts) | dir_queues: DirQueues.seeded_state()}
     {:ok, state, {:continue, :tick}}
   end
 
+  # The beat row is read here, not in `init/1`, so a database that doesn't
+  # answer doesn't hold up the supervisor.
   @impl GenServer
-  def handle_continue(:tick, state), do: {:noreply, tick_and_schedule(state)}
+  def handle_continue(:tick, state),
+    do: {:noreply, state |> restore_last_dir_id() |> tick_and_schedule()}
 
   @impl GenServer
   def handle_info(:tick, state), do: {:noreply, tick_and_schedule(state)}
@@ -248,6 +263,43 @@ defmodule KilnCMS.Backups.Heartbeat do
       dir_id: nil,
       dir_queues: DirQueues.new_state()
     }
+  end
+
+  @doc """
+  `state` with the last backup-directory id its node's beat row holds
+  (`last_dir_id`, else `dir_id`), when that row beat within
+  `KilnCMS.Backups.Chain.stale_after_s/0` by the database's clock (#3091).
+  What a restarted heartbeat reports as its last id until its first read
+  answers. A state that already has one, a row that is older or has none,
+  and beats that can't be read leave it. Never raises.
+  """
+  @spec restore_last_dir_id(state()) :: state()
+  def restore_last_dir_id(%{last_dir_id: nil} = state) do
+    case Backups.live_beats(Chain.stale_after_s()) do
+      {:ok, beats} ->
+        case Enum.find(beats, &(&1.node == state.node)) do
+          %{} = row -> %{state | last_dir_id: row.last_dir_id || row.dir_id}
+          nil -> state
+        end
+
+      {:error, error} ->
+        log_restore_error(error)
+        state
+    end
+  rescue
+    error ->
+      log_restore_error(error)
+      state
+  end
+
+  def restore_last_dir_id(state), do: state
+
+  defp log_restore_error(error) do
+    Logger.warning(
+      "Backup heartbeat couldn't read its last beat, so it reports no last backup-directory " <>
+        "id until its first read answers: " <>
+        if(is_exception(error), do: Exception.message(error), else: inspect(error, limit: 5))
+    )
   end
 
   @doc """

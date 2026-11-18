@@ -192,10 +192,15 @@ the queues off; it defaults to the heartbeat's switch.
   through Oban's Postgres notifier (`LISTEN`/`NOTIFY`). Where it doesn't
   work, nothing is advertised and every job keeps the snooze, with one
   warning per queue.
-- **A lost pause.** A heartbeat that crashed after pausing a queue finds it
-  paused on restart and counts it as someone else's pause, so that queue
-  stays paused until Oban restarts on that node. Its jobs are moved back
-  after 5 minutes and run from `backup_steps`.
+- **A heartbeat restart keeps its pauses (#3095).** The queues a heartbeat
+  paused are recorded in a node-local ETS table owned by
+  `KilnCMS.Backups.DirQueues.Paused`, a process started before the
+  heartbeat. A restarted heartbeat counts a paused queue in that table as
+  its own, so it resumes it when the id comes back; any other paused queue
+  is still someone else's. The table goes when the node restarts, as Oban's
+  runtime queues do. (Before #3095 such a queue stayed paused until Oban
+  restarted on that node, and its jobs ran from `backup_steps` after the
+  5-minute move-back.)
 - **Pool size.** Each node runs one more queue at limit 1 (its paused queues
   fetch nothing).
 - **Shared limit.** `StepWorker` and `MarkerSyncWorker` share a directory's

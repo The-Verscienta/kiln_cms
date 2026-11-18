@@ -442,6 +442,46 @@ defmodule KilnCMS.Backups.DirQueuesTest do
       # Paused by something else, as far as this heartbeat knows.
       assert DirQueues.seeded_state().queues == %{qa => :held}
     end
+
+    # #3095: which queues it paused outlives the heartbeat process.
+    test "a restarted heartbeat resumes the queue it paused when the id comes back", %{
+      dir: dir,
+      a_id: id,
+      qa: qa
+    } do
+      state = advertise!(dir, "a@host")
+      File.write!(DirId.path(dir), Ash.UUID.generate() <> "\n")
+      BackupCluster.tick_as(dir, state)
+      assert DirQueueControl.status(qa) == :paused
+      assert DirQueues.Paused.member?(qa)
+
+      # The heartbeat crashed and restarted; Oban kept running.
+      restarted = %{
+        Heartbeat.new_state(node: "a@host", boot_id: Ash.UUID.generate())
+        | dir_queues: DirQueues.seeded_state()
+      }
+
+      assert restarted.dir_queues.queues[qa] == :paused
+
+      File.write!(DirId.path(dir), id <> "\n")
+      restarted = BackupCluster.tick_as(dir, restarted)
+
+      assert List.last(DirQueueControl.calls()) == {:resume, qa}
+      assert DirQueueControl.status(qa) == :running
+      assert restarted.dir_queues.advertised == id
+      assert restarted.dir_queues.queues[qa] == :active
+      refute DirQueues.Paused.member?(qa)
+    end
+
+    test "a queue held for someone else is not remembered as its own", %{dir: dir, qa: qa} do
+      state = advertise!(dir, "a@host")
+      DirQueueControl.put_status(qa, :paused)
+      state = BackupCluster.tick_as(dir, state)
+
+      assert state.dir_queues.queues == %{qa => :held}
+      refute DirQueues.Paused.member?(qa)
+      assert DirQueues.seeded_state().queues == %{qa => :held}
+    end
   end
 
   # -- the real control -------------------------------------------------------
@@ -881,6 +921,25 @@ defmodule KilnCMS.Backups.DirQueuesTest do
       park!(start_id, q, 0)
 
       assert %{waiting_for: :files_server} = Backups.in_flight(details: true)
+    end
+
+    # #3095: the lock has no stamp of its own until a resume's start runs.
+    test "a resume's start moved back is named by the stamp it resumes", %{q: q} do
+      {:ok, _} = Chain.with_lock(&Chain.release_in_txn/1)
+      {:ok, %{status: :started}} = request()
+      %{step_job_id: start_id, stamp: nil} = lock()
+      Repo.query!("UPDATE backup_locks SET resume_stamp = '20260101-000000'")
+      park!(start_id, q, 1_801)
+
+      log =
+        capture_log([level: :warning], fn ->
+          assert {:ok, {:returned, _}} = Chain.sweep_stranded()
+        end)
+
+      assert log =~
+               "Backup step start of the resume of 20260101-000000 moved back to backup_steps"
+
+      refute log =~ "a starting backup"
     end
   end
 

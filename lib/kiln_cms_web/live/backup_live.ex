@@ -1549,6 +1549,9 @@ defmodule KilnCMSWeb.BackupLive do
   defp step_label(%{resume_waiting?: true, waiting_for: :files_server}),
     do: gettext("Waiting for the server that has this backup's files")
 
+  defp step_label(%{resume_waiting?: true, waiting_for: :run_unreadable}),
+    do: gettext("Waiting: this backup's record couldn't be read")
+
   defp step_label(%{resume_waiting?: true, waiting_for: :cancel_settle}),
     do: gettext("Waiting for the canceled backup's step to stop")
 

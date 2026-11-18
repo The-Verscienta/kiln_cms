@@ -112,6 +112,17 @@ defmodule KilnCMS.Backups.Chain do
   and routed like any step, but an interrupted one is routed to
   `Steps.resend_interrupted/5`: it stops, and never fails the run or writes
   a failure manifest.
+
+  ## Recording an interrupted backup (#3078)
+
+  `reclaim_stale/0` with no attempts left, `reap/0` and `sweep_stranded/0`
+  release the lock in their transaction and return. What follows the commit
+  (the run failed and its failure manifest written, a finish that had
+  finished completed, a re-send's tail) reads and writes `BACKUP_DIR`, so it
+  is handed to `KilnCMS.Backups.Interrupts` and runs in a task of its own:
+  on a hung mount it waits there, never in the heartbeat's tick or in the
+  request that swept first. So does the "the backup failed" log line, which
+  depends on what it found.
   """
   import Ecto.Query
 
@@ -125,6 +136,7 @@ defmodule KilnCMS.Backups.Chain do
     DirQueues,
     Heartbeat,
     Importer,
+    Interrupts,
     Lock,
     Markers,
     Recorder,
@@ -1218,7 +1230,7 @@ defmodule KilnCMS.Backups.Chain do
 
   defp after_reclaim({:ok, {:requeued, info}} = result) do
     Logger.warning(
-      "Backup step #{info.step} of #{info.stamp || "a starting backup"} was on node " <>
+      "Backup step #{info.step} of #{subject(info)} was on node " <>
         "#{info.node}, which stopped responding: requeued (job #{info.job_id})"
     )
 
@@ -1227,15 +1239,12 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   defp after_reclaim({:ok, {:interrupted, info}} = result) do
-    if interrupt(info, "Interrupted: node #{info.node} stopped responding") not in [
-         :finished,
-         :resend
-       ] do
-      Logger.error(
-        "Backup step #{info.step} of #{info.stamp || "a starting backup"} was on node " <>
-          "#{info.node}, which stopped responding, and has no attempts left: the backup failed"
-      )
-    end
+    interrupt_later(
+      info,
+      "Interrupted: node #{info.node} stopped responding",
+      "Backup step #{info.step} of #{subject(info)} was on node #{info.node}, which " <>
+        "stopped responding, and has no attempts left: the backup failed"
+    )
 
     reclaimed_event(info, :interrupted)
     result
@@ -1269,12 +1278,12 @@ defmodule KilnCMS.Backups.Chain do
           else: {:ok, :none}
       end)
 
-    with {:ok, {:orphaned, info}} <- result,
-         outcome when outcome not in [:finished, :resend] <-
-           interrupt(info, "Interrupted: the backup's step job ended without finishing its step") do
-      Logger.error(
-        "Backup step #{info.step} of #{info.stamp || "a starting backup"} ended without " <>
-          "finishing its step: the backup failed and the lock was released"
+    with {:ok, {:orphaned, info}} <- result do
+      interrupt_later(
+        info,
+        "Interrupted: the backup's step job ended without finishing its step",
+        "Backup step #{info.step} of #{subject(info)} ended without finishing its step: " <>
+          "the backup failed and the lock was released"
       )
     end
 
@@ -1418,14 +1427,14 @@ defmodule KilnCMS.Backups.Chain do
       "Interrupted: no server with its backup directory (id #{dir}) picked up the " <>
         "#{info.step} step for #{div(DirQueues.stranded_after_s(), 60)} minutes"
 
-    if interrupt(info, message) not in [:finished, :resend] do
-      Logger.error(
-        "Backup step #{info.step} of #{info.stamp || "a starting backup"} waited " <>
-          "#{div(DirQueues.stranded_after_s(), 60)} minutes for a server with its backup " <>
-          "directory (id #{dir}), and none is running: the backup failed and the lock was " <>
-          "released"
-      )
-    end
+    interrupt_later(
+      info,
+      message,
+      "Backup step #{info.step} of #{subject(info)} waited " <>
+        "#{div(DirQueues.stranded_after_s(), 60)} minutes for a server with its backup " <>
+        "directory (id #{dir}), and none is running: the backup failed and the lock was " <>
+        "released"
+    )
 
     stranded_event(info, :interrupted)
     result
@@ -1440,7 +1449,7 @@ defmodule KilnCMS.Backups.Chain do
         else: "the servers with its backup directory (id #{dir}) don't run its queue"
 
     Logger.warning(
-      "Backup step #{info.step} of #{info.stamp || "a starting backup"} moved back to " <>
+      "Backup step #{info.step} of #{subject(info)} moved back to " <>
         "backup_steps: #{why}"
     )
 
@@ -1478,6 +1487,20 @@ defmodule KilnCMS.Backups.Chain do
       nil -> true
       state -> state in ["completed", "discarded", "cancelled"]
     end
+  end
+
+  # What the log calls the backup: its stamp; a resume's start, which has no
+  # stamp on the lock until it runs, by the stamp it resumes (#3095).
+  defp subject(%{stamp: stamp}) when is_binary(stamp), do: stamp
+  defp subject(%{resume: stamp}) when is_binary(stamp), do: "the resume of #{stamp}"
+  defp subject(_info), do: "a starting backup"
+
+  # `interrupt/2` after the commit, in a task of `Interrupts` (#3078), and
+  # `failed` logged when it failed the backup.
+  defp interrupt_later(info, message, failed) do
+    Interrupts.run(subject(info), fn ->
+      if interrupt(info, message) not in [:finished, :resend], do: Logger.error(failed)
+    end)
   end
 
   # After the commit: the Run, and the failure manifest when the files are here.
@@ -1594,9 +1617,10 @@ defmodule KilnCMS.Backups.Chain do
   # from its job: `:files_server` while it snoozes for the server that has the
   # run's files (`StepWorker`'s pinned affinity; a retryable attempt only
   # when that is what failed it) or waits in that directory's queue (#2845),
-  # `:cancel_settle` while it runs inside the settle window of the run's
-  # Cancel (`Steps`), else nil. Only for the
-  # Backups page (`in_flight/1`'s `details: true`): two more reads, which the
+  # `:run_unreadable` while it waits because its node couldn't read the run
+  # (#3091), `:cancel_settle` while it runs inside the settle window of the
+  # run's Cancel (`Steps`), else nil. Only for the Backups page
+  # (`in_flight/1`'s `details: true`): more reads, which the
   # `Backups.await/2` poll doesn't need.
   defp waiting_for(%{step: :start, resume_stamp: stamp, step_job_id: id})
        when is_binary(stamp) and is_integer(id) do
@@ -1605,9 +1629,7 @@ defmodule KilnCMS.Backups.Chain do
 
     case Repo.one(query) do
       %{state: state} = job when state in ["available", "scheduled", "retryable"] ->
-        # Parked in its directory's queue (#2845), it waits for a server with
-        # the files by being there.
-        if DirQueues.dir_queue?(job.queue) or snoozed_for_files?(job), do: :files_server
+        waiting_job(job, stamp)
 
       %{state: "executing"} ->
         if canceled_recently?(stamp), do: :cancel_settle
@@ -1619,19 +1641,47 @@ defmodule KilnCMS.Backups.Chain do
 
   defp waiting_for(_row), do: nil
 
-  # `meta["snoozed"]` counts across all attempts; this attempt's snoozes are
-  # those since `meta["affinity_base"]` (`StepWorker.snoozes_this_attempt/1`).
-  # An attempt that failed with `:backup_dir_elsewhere` was rebased before it
-  # failed, so its retry (retryable, then available) says so through its last
-  # error instead. Snoozes of an earlier attempt that got past the check, then
-  # failed or was retried for another reason, count for nothing.
-  defp snoozed_for_files?(%{meta: meta, errors: errors}) do
-    (meta["snoozed"] || 0) - (meta["affinity_base"] || 0) > 0 or last_error_elsewhere?(errors)
+  # A start waiting in its directory's queue (#2845) waits for a server with
+  # the files by being there. One that snoozes this attempt waits either for
+  # that server or, on a node with a copy, for its run to be read: a snooze
+  # leaves no reason on the job (Oban's snooze ack rewrites `meta` from the
+  # fetched job), so the run is read here, and one that can't be read, or
+  # records no directory (a start that can read it then doesn't wait), is
+  # the latter. An attempt that used up its snoozes was rebased before it
+  # failed, so its retry (retryable, then available) says which through its
+  # last error.
+  defp waiting_job(job, stamp) do
+    cond do
+      DirQueues.dir_queue?(job.queue) ->
+        :files_server
+
+      snoozed_this_attempt?(job) ->
+        if run_dir_known?(stamp), do: :files_server, else: :run_unreadable
+
+      last_error?(job.errors, "backup_dir_elsewhere") ->
+        :files_server
+
+      last_error?(job.errors, "run_unreadable") ->
+        :run_unreadable
+
+      true ->
+        nil
+    end
   end
 
-  defp last_error_elsewhere?(errors) do
+  # `meta["snoozed"]` counts across all attempts; this attempt's snoozes are
+  # those since `meta["affinity_base"]` (`StepWorker.snoozes_this_attempt/1`).
+  # Snoozes of an earlier attempt that got past the check, then failed or was
+  # retried for another reason, count for nothing.
+  defp snoozed_this_attempt?(%{meta: meta}),
+    do: (meta["snoozed"] || 0) - (meta["affinity_base"] || 0) > 0
+
+  defp run_dir_known?(stamp),
+    do: match?({:ok, id} when is_binary(id), Backups.resume_dir_id(stamp))
+
+  defp last_error?(errors, reason) do
     case List.last(errors || []) do
-      %{"error" => error} when is_binary(error) -> error =~ "backup_dir_elsewhere"
+      %{"error" => error} when is_binary(error) -> error =~ reason
       _ -> false
     end
   end

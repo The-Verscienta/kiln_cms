@@ -27105,6 +27105,11 @@ msgstr "En espera: hay en cola una copia de otro tipo; esta empieza cuando la co
 msgid "Waiting: the server that checked can't run backups (%{reason}); another server can take it."
 msgstr "En espera: el servidor que lo comprobó no puede hacer copias de seguridad (%{reason}); otro servidor puede encargarse."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting: this backup's record couldn't be read"
+msgstr "En espera: no se pudo leer el registro de esta copia de seguridad"
+
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
 msgid "Waiting: this window is asked for again each minute."

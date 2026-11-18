@@ -210,7 +210,19 @@ nodes could then write the same backup.
   its directory resume elsewhere
   ([ADR 0040](0040-a-backup-chain-runs-where-its-backup-directory-is-routed-by-kiln-dir-id-with-a-bounded-snooze.md),
   "Amendment (2026-11-17, #2817)"). The marker sync still routes by `dir_id`
-  only.
+  only. A restarted heartbeat takes `last_dir_id` from its own beat row when
+  that row beat within 180 seconds (#3091).
+- **The sweep's cleanup can no longer block the beat (#3078).** What a
+  reclaim with no attempts left, a reap or the stranded-step sweep does
+  after its commit (fail the run, write the failure manifest, complete a
+  finish that had finished, a re-send's tail) runs in a task under
+  `KilnCMS.Backups.InterruptTasks`, handed over by a cast to
+  `KilnCMS.Backups.Interrupts` that the tick never waits on. The same holds
+  for a backup request, which sweeps first. One task runs at a time, so a
+  hung directory holds one blocked process; up to 20 more wait in order, and
+  one past that is dropped with an error, its run left `Running` for
+  **Resume**. The lock's release, the requeue and the promotion stay in the
+  tick's transaction.
 
 The thresholds (90 and 180 seconds) and the reclaim are unchanged. Every
 other rule above is unchanged.

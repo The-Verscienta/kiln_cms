@@ -27105,6 +27105,11 @@ msgstr "En attente : une sauvegarde d'un autre type est en file ; celle-ci déma
 msgid "Waiting: the server that checked can't run backups (%{reason}); another server can take it."
 msgstr "En attente : le serveur qui a vérifié ne peut pas faire de sauvegardes (%{reason}) ; un autre serveur peut s’en charger."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting: this backup's record couldn't be read"
+msgstr "En attente : l'enregistrement de cette sauvegarde n'a pas pu être lu"
+
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
 msgid "Waiting: this window is asked for again each minute."
