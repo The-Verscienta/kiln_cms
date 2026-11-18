@@ -107,7 +107,7 @@ msgstr ""
 msgid "are still associated with this entry"
 msgstr ""
 
-#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#: lib/kiln_cms/backups/destination_config/changes/enabled_cap.ex
 #, elixir-autogen, elixir-format
 msgid "at most %{max} destinations can be enabled"
 msgstr ""
@@ -256,6 +256,7 @@ msgid_plural "should have at most %{count} item(s)"
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms/backups/destination_config/changes/enabled_cap.ex
 #: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
 #, elixir-autogen, elixir-format
 msgid "the other backup destinations couldn't be read; try again"

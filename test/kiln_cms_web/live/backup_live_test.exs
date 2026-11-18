@@ -1419,6 +1419,11 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
     @strip_cancel_resume ~s|#backup-in-flight button[data-role="cancel-resume"]|
 
+    # #3030: beside each waiting-resume label, a link to the guide's section.
+    @strip_why ~s|#backup-in-flight a[data-role="resume-why"]| <>
+                 ~s|[href$="backups.md#cancel-a-resume-that-is-waiting-to-start"]| <>
+                 ~s|[target="_blank"]|
+
     @tag :pg_tools
     test "a resume waiting for the server with its files says so; its Cancel frees the lock, " <>
            "and the row keeps its status (#2816)",
@@ -1433,6 +1438,8 @@ defmodule KilnCMSWeb.BackupLiveTest do
                ~s|#backup-in-flight [data-role="step"]|,
                "Waiting for the server that has this backup"
              )
+
+      assert has_element?(lv, @strip_why, "Why?")
 
       assert has_element?(
                lv,
@@ -1451,6 +1458,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert %{trigger: "schedule", resume: nil} = Backups.in_flight()
       assert has_element?(lv, ~s|#backup-in-flight [data-role="step"]|, "Starting a backup")
       refute has_element?(lv, @strip_cancel_resume)
+      refute has_element?(lv, @strip_why)
       assert has_element?(lv, ~s|#{row} [data-role="status"]|, "Failed")
 
       assert %{error: "Resume canceled by a platform admin before it started\ntar exited 2"} =
@@ -1465,6 +1473,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       # Its start hasn't run yet.
       assert has_element?(lv, ~s|#backup-in-flight [data-role="step"]|, "Starting a resume")
+      assert has_element?(lv, @strip_why, "Why?")
 
       assert has_element?(
                lv,
@@ -1489,6 +1498,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
                "Waiting for the canceled backup"
              )
 
+      assert has_element?(lv, @strip_why, "Why?")
       assert has_element?(lv, @strip_cancel_resume)
       assert %{chain: ^chain} = Backups.in_flight()
     end
@@ -3193,6 +3203,53 @@ defmodule KilnCMSWeb.BackupLiveTest do
                lv,
                ~s|#backup-run-#{run.id} [data-role=destination][data-status=failed][title="not installed"]|,
                "NAS · failed"
+             )
+    end
+
+    # #3084: the tooltip of a destination failed at once says no retry would
+    # have helped; a failure that ran out of attempts doesn't.
+    test "History: a destination failed by a permanent error says so in its tooltip", %{
+      conn: conn
+    } do
+      run =
+        offsite_run!(
+          %{"local" => %{"status" => "ok"}, @nas => %{"status" => "failed"}},
+          [
+            %{
+              key: @nas,
+              kind: "s3",
+              label: "NAS",
+              status: :failed,
+              error: "FAILED for 1: kiln-db.dump (access denied)",
+              permanent: true
+            },
+            %{
+              key: @bucket,
+              kind: "rclone",
+              label: "Bucket",
+              status: :failed,
+              error: "rclone exited 1: timeout"
+            }
+          ],
+          :partial
+        )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      row = "#backup-run-#{run.id}"
+
+      assert has_element?(
+               lv,
+               ~s|#{row} [data-role=destination][data-status=failed]| <>
+                 ~s|[title^="FAILED for 1: kiln-db.dump (access denied)"]| <>
+                 ~s|[title$="Failed at once: the destination said no retry fixes this."]|,
+               "NAS · failed"
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#{row} [data-role=destination][data-status=failed][title="rclone exited 1: timeout"]|,
+               "Bucket · failed"
              )
     end
 

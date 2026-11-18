@@ -15,7 +15,8 @@ defmodule KilnCMS.Backups.DestinationConfig.Validations.AdapterSettings do
     5. the stored secrets can be decrypted, unless new ones replace them;
     6. every required field is there, secrets included;
     7. at most `DestinationConfig.max_enabled/0` destinations are enabled
-       (decision E8);
+       (decision E8), counted again under a lock inside the transaction
+       (`Changes.EnabledCap`, #2952);
     8. on create, it neither is, contains nor sits inside the env remote or
        another destination (`Destination.overlap?/2`);
     9. the adapter's own `validate/1` accepts it, run through
@@ -42,7 +43,7 @@ defmodule KilnCMS.Backups.DestinationConfig.Validations.AdapterSettings do
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Destination, DestinationConfig}
   alias KilnCMS.Backups.Destination.S3
-  alias KilnCMS.Backups.DestinationConfig.Changes.StoreSecrets
+  alias KilnCMS.Backups.DestinationConfig.Changes.{EnabledCap, StoreSecrets}
   alias KilnCMS.Backups.DestinationConfig.Fields
 
   # A Save waits for the adapter's `validate/1` this long at most.
@@ -63,10 +64,7 @@ defmodule KilnCMS.Backups.DestinationConfig.Validations.AdapterSettings do
       StoreSecrets.given(changeset) != %{} or enabling?(changeset)
   end
 
-  defp enabling?(changeset) do
-    Ash.Changeset.get_attribute(changeset, :enabled) == true and
-      (changeset.action_type == :create or changeset.data.enabled != true)
-  end
+  defp enabling?(changeset), do: EnabledCap.enabling?(changeset)
 
   defp check(changeset) do
     kind = Ash.Changeset.get_attribute(changeset, :kind)
@@ -234,30 +232,9 @@ defmodule KilnCMS.Backups.DestinationConfig.Validations.AdapterSettings do
 
   defp blank?(value), do: value in [nil, ""]
 
-  defp cap(changeset) do
-    if enabling?(changeset) do
-      case Backups.list_enabled_backup_destinations(
-             actor: Backups.system(),
-             authorize_with: :error
-           ) do
-        {:ok, enabled} -> room(Enum.reject(enabled, &(&1.id == changeset.data.id)))
-        {:error, _error} -> unreadable()
-      end
-    else
-      :ok
-    end
-  end
-
-  defp room(others) do
-    if length(others) < DestinationConfig.max_enabled(),
-      do: :ok,
-      else:
-        error(
-          :enabled,
-          dgettext_noop("errors", "at most %{max} destinations can be enabled"),
-          max: DestinationConfig.max_enabled()
-        )
-  end
+  # Counted again inside the transaction, under a lock (`Changes.EnabledCap`):
+  # this early count spares an over-the-cap save the adapter's `validate/1`.
+  defp cap(changeset), do: EnabledCap.check(changeset)
 
   defp no_overlap(%{action_type: :create}, config) do
     case Destination.location(config) do

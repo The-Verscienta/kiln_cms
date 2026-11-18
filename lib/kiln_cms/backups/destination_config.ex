@@ -46,7 +46,17 @@ defmodule KilnCMS.Backups.DestinationConfig do
   ## At most eight enabled
 
   The step chain holds the cluster's backup lock through every destination,
-  one after another (decision E8).
+  one after another (decision E8). A save that enables one counts the
+  others under a transaction-scoped advisory lock (`Changes.EnabledCap`), so
+  two at once can't both take the last place (#2952).
+
+  ## A stale save is refused
+
+  `:update` writes only while the row's `updated_at` is the one the caller
+  read (`Changes.UnchangedSinceRead`, #2952): an edit form opened before
+  another save fails with `Ash.Error.Changes.StaleRecord`. Neither a Test's
+  result nor a reorder (`:reorder`, `position` only) moves `updated_at`, so
+  neither makes an open form stale.
   """
   use Ash.Resource,
     domain: KilnCMS.Backups,
@@ -85,6 +95,7 @@ defmodule KilnCMS.Backups.DestinationConfig do
       change Changes.Normalize
       change Changes.StoreSecrets
       validate Validations.AdapterSettings
+      change Changes.EnabledCap
 
       change {KilnCMS.Security.Changes.Record,
               type: :backup_destination_created,
@@ -102,9 +113,31 @@ defmodule KilnCMS.Backups.DestinationConfig do
 
       argument :secrets, :map, sensitive?: true, default: %{}
 
+      # A stale record (a form opened before someone else's save) is
+      # refused, never written over (#2952).
+      change Changes.UnchangedSinceRead
       change Changes.Normalize
       change Changes.StoreSecrets
       validate Validations.AdapterSettings
+      change Changes.EnabledCap
+
+      change {KilnCMS.Security.Changes.Record,
+              type: :backup_destination_changed,
+              scope: :instance,
+              mode: :in_transaction,
+              target: &Audit.target/2,
+              metadata: &Audit.changed/2,
+              when: &Audit.changed?/2}
+    end
+
+    # The arrows' renumbering (#2952): `position` only, with no stale check
+    # and `updated_at` left where it was, so moving rows doesn't make an edit
+    # form open on one of them stale. Audited as a change, as before.
+    update :reorder do
+      accept [:position]
+      require_atomic? false
+
+      change Changes.KeepUpdatedAt
 
       change {KilnCMS.Security.Changes.Record,
               type: :backup_destination_changed,
@@ -141,6 +174,7 @@ defmodule KilnCMS.Backups.DestinationConfig do
       argument :node, :string
 
       change Changes.SetTestResult
+      change Changes.KeepUpdatedAt
 
       change {KilnCMS.Security.Changes.Record,
               type: :backup_destination_tested,
@@ -164,7 +198,7 @@ defmodule KilnCMS.Backups.DestinationConfig do
     end
 
     # A platform admin manages destinations; the pipeline never does.
-    policy action([:create, :update, :destroy]) do
+    policy action([:create, :update, :reorder, :destroy]) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
 

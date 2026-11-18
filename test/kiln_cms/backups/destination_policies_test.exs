@@ -53,6 +53,10 @@ defmodule KilnCMS.Backups.DestinationPoliciesTest do
                "update must refuse #{label(actor)}"
 
         assert {:error, %Ash.Error.Forbidden{}} =
+                 Backups.reorder_backup_destination(d, %{position: 3}, actor: actor),
+               "reorder must refuse #{label(actor)}"
+
+        assert {:error, %Ash.Error.Forbidden{}} =
                  Backups.destroy_backup_destination(d, actor: actor),
                "destroy must refuse #{label(actor)}"
 
@@ -61,7 +65,7 @@ defmodule KilnCMS.Backups.DestinationPoliciesTest do
                "record_test_result must refuse #{label(actor)}"
       end
 
-      assert [%{enabled: true, last_tested_at: nil}] =
+      assert [%{enabled: true, last_tested_at: nil, position: 0}] =
                Backups.list_backup_destinations!(actor: Backups.system())
     end
 
@@ -116,6 +120,9 @@ defmodule KilnCMS.Backups.DestinationPoliciesTest do
                Backups.update_backup_destination(d, %{enabled: false}, actor: system)
 
       assert {:error, %Ash.Error.Forbidden{}} =
+               Backups.reorder_backup_destination(d, %{position: 3}, actor: system)
+
+      assert {:error, %Ash.Error.Forbidden{}} =
                Backups.destroy_backup_destination(d, actor: system)
     end
   end
@@ -127,8 +134,14 @@ defmodule KilnCMS.Backups.DestinationPoliciesTest do
 
       assert {:ok, [_]} = Backups.list_backup_destinations(actor: admin, authorize_with: :error)
 
-      assert {:ok, %{enabled: false}} =
+      assert {:ok, %{enabled: false} = d} =
                Backups.update_backup_destination(d, %{enabled: false}, actor: admin)
+
+      # A reorder writes only the position, and leaves `updated_at` (#2952).
+      assert {:ok, %{position: 3, enabled: false} = moved} =
+               Backups.reorder_backup_destination(d, %{position: 3}, actor: admin)
+
+      assert moved.updated_at == d.updated_at
 
       assert :ok = Backups.destroy_backup_destination(d, actor: admin)
     end

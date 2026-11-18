@@ -16,6 +16,7 @@ defmodule KilnCMS.Backups.FanoutTest do
   """
   use KilnCMS.DataCase, async: false
 
+  import Ecto.Query, only: [from: 2]
   import ExUnit.CaptureLog
   import KilnCMS.Test.BackupDestinations, only: [destination!: 3]
 
@@ -441,6 +442,45 @@ defmodule KilnCMS.Backups.FanoutTest do
     end
   end
 
+  # #3084: `permanent` says "Failed at once" in History; a refusal written
+  # over an entry an earlier write marked permanent must clear it.
+  test "a refusal clears a permanent mark an earlier write left on the entry", %{base: base} do
+    fake!("A", 1, %{"log" => Path.join(base, "a.log"), "tamper_after" => ".sha256"})
+    b = fake!("B", 2, %{"log" => Path.join(base, "b.log")})
+    bkey = "dest:" <> b.id
+
+    BackupChain.listen(fn ->
+      {:ok, %{status: :started, chain: chain}} = Backups.request([], Backups.system())
+      step_until("offsite", 2)
+      %{stamp: stamp} = lock()
+
+      {1, _} =
+        Repo.update_all(
+          from(r in "backup_runs",
+            where: r.stamp == ^stamp,
+            update: [
+              set: [
+                destinations:
+                  fragment(
+                    "ARRAY(SELECT CASE WHEN d->>'key' = ? THEN d || '{\"permanent\": true}'::jsonb ELSE d END FROM unnest(?) d)",
+                    ^bkey,
+                    r.destinations
+                  )
+              ]
+            ]
+          ),
+          []
+        )
+
+      assert %{permanent: true} = entry(run!(), bkey)
+
+      BackupChain.drain()
+      BackupChain.settled(chain)
+    end)
+
+    assert %{status: :failed, error: "REFUSED" <> _, permanent: false} = entry(run!(), bkey)
+  end
+
   # -- adapters that misbehave -----------------------------------------------
 
   describe "a destination whose adapter misbehaves" do
@@ -474,10 +514,11 @@ defmodule KilnCMS.Backups.FanoutTest do
       assert %{attempt: 1, state: "completed"} = offsite_job(1)
 
       assert run.offsite_status == :partial
-      assert %{status: :failed, error: error} = entry(run, "dest:" <> b.id)
+      # History's chip says it failed at once (#3084).
+      assert %{status: :failed, error: error, permanent: true} = entry(run, "dest:" <> b.id)
       assert error =~ "the bucket is gone"
       refute error =~ @secret
-      assert %{status: :ok} = entry(run, "dest:" <> c.id)
+      assert %{status: :ok, permanent: false} = entry(run, "dest:" <> c.id)
     end
 
     test "a file the destination already holds is recorded as sent, not a crash (#2223)" do
@@ -508,7 +549,7 @@ defmodule KilnCMS.Backups.FanoutTest do
       run = run!()
 
       assert run.offsite_status == :partial
-      assert %{status: :failed, error: error} = entry(run, "dest:" <> b.id)
+      assert %{status: :failed, error: error, permanent: false} = entry(run, "dest:" <> b.id)
       assert error =~ "returned an unexpected value"
       assert %{status: :ok} = entry(run, "dest:" <> c.id)
     end

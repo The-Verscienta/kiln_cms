@@ -50,6 +50,44 @@ defmodule KilnCMS.Test.BackupDestinations do
     )
   end
 
+  @doc """
+  Puts a stub `rclone` first on `PATH` (#2952), in `dir`, for the env
+  destination's Test: `copyto`, `cat` and `deletefile` act on a store
+  directory by basename. With `fail?: true` every call exits 1 and prints
+  its `RCLONE_CONFIG_*` environment (a connection-string remote's
+  credentials) to stderr, as a careless tool might.
+
+  `PATH` is VM-global: only for an `async: false` module, which restores it
+  (`on_exit`).
+  """
+  @spec fake_rclone!(Path.t(), keyword()) :: Path.t()
+  def fake_rclone!(dir, opts \\ []) do
+    bin = Path.join(dir, "bin")
+    store = Path.join(dir, "store")
+    File.mkdir_p!(bin)
+    File.mkdir_p!(store)
+
+    fail =
+      if Keyword.get(opts, :fail?, false),
+        do: ~s|env \| grep '^RCLONE_CONFIG_' >&2; echo "$1 refused" >&2; exit 1|,
+        else: ""
+
+    File.write!(Path.join(bin, "rclone"), """
+    #!/bin/sh
+    #{fail}
+    case "$1" in
+      copyto) cp "$2" "#{store}/$(basename "$3")" ;;
+      cat) cat "#{store}/$(basename "$2")" ;;
+      deletefile) rm -f "#{store}/$(basename "$2")" ;;
+    esac
+    exit 0
+    """)
+
+    File.chmod!(Path.join(bin, "rclone"), 0o755)
+    System.put_env("PATH", bin <> ":" <> System.get_env("PATH"))
+    store
+  end
+
   defmodule Fake do
     @moduledoc """
     A destination that does what its `"mode"` setting says:

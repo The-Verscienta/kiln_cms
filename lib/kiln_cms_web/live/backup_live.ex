@@ -113,7 +113,8 @@ defmodule KilnCMSWeb.BackupLive do
   backup. In History, each destination is a chip under the name the run
   recorded for it (so it outlives the destination; one the run has no
   record of reads "Removed destination"), with its error as the chip's
-  tooltip, and the row is badged "Partly off-site", or "Off-site unknown"
+  tooltip (and, for one failed at once by an error no retry fixes, that it
+  was, #3084), and the row is badged "Partly off-site", or "Off-site unknown"
   when a succeeded run recorded no outcome for its destinations. The
   destinations themselves are the Destinations tab
   (`KilnCMSWeb.BackupDestinationsLive`).
@@ -1252,7 +1253,23 @@ defmodule KilnCMSWeb.BackupLive do
     >
       <.icon name="hero-arrow-path" class="size-5 shrink-0 text-info motion-safe:animate-spin" />
       <div class="min-w-0 flex-1 space-y-0.5">
-        <p class="font-medium" data-role="step">{step_label(@in_flight)}</p>
+        <p class="font-medium">
+          <span data-role="step">{step_label(@in_flight)}</span>
+          <%!-- #3030: a resume waiting to start holds the lock; the guide
+                says what for, and when to cancel it. --%>
+          <a
+            :if={@in_flight[:resume_waiting?] == true}
+            href={docs_url("backups.md#cancel-a-resume-that-is-waiting-to-start")}
+            target="_blank"
+            rel="noopener"
+            data-role="resume-why"
+            class="link ml-1 inline-flex items-center gap-1 text-xs font-normal text-primary-ink"
+          >
+            {gettext("Why?")}
+            <.icon name="hero-arrow-top-right-on-square" class="size-3" />
+            <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+          </a>
+        </p>
         <p :if={@in_flight.stamp} class="font-mono text-xs text-base-content/70">
           {@in_flight.stamp}
         </p>
@@ -1919,9 +1936,20 @@ defmodule KilnCMSWeb.BackupLive do
     |> Enum.sort_by(fn {key, _} -> {key != "local", key} end)
     |> Enum.map(fn {key, statuses} ->
       entry = Map.get(recorded, key)
-      {destination_label(key, run), worst(statuses), entry && entry.error}
+      status = worst(statuses)
+      {destination_label(key, run), status, chip_title(entry, status)}
     end)
   end
+
+  # The entry's error, and for a destination that failed at once on an error
+  # its adapter says no retry fixes, that it did (#3084).
+  defp chip_title(%{permanent: true, error: error}, "failed") do
+    at_once = gettext("Failed at once: the destination said no retry fixes this.")
+    if is_binary(error) and error != "", do: error <> "\n" <> at_once, else: at_once
+  end
+
+  defp chip_title(%{error: error}, _status), do: error
+  defp chip_title(nil, _status), do: nil
 
   defp destination_label("local", _run), do: gettext("Local")
   defp destination_label("rclone:" <> remote, _run), do: remote
