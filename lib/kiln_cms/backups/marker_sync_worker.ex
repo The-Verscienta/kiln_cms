@@ -39,6 +39,15 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
       20 times (about ten minutes), then gives up for that slot as
       `StepWorker` does.
 
+  A per-directory job goes to the directory's own queue, `backup_dir_<id>`,
+  when a live node advertises it (`KilnCMS.Backups.DirQueues`, #2845), so
+  only a node with that directory fetches it; a node without the directory
+  that fetches one from `default` moves it there (same job,
+  `{:snooze, 0}`). With no such queue it snoozes in `default` as above. One
+  left waiting in a directory queue that no live node advertises for five
+  minutes, or whose directory no live node reports for thirty, is canceled
+  with the give-up line (`sweep_stranded/0`, from each heartbeat tick).
+
   On a shared volume every node reports the same id, so no job is queued and
   the in-place sync covers it. With a directory per host, each host is synced
   every slot its node fetches one of the ~21 releases of its routed job: the
@@ -96,8 +105,8 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
   ## Uniqueness
 
   Every insert (the cron slot, `SyncHolds` and the per-directory jobs) is
-  unique per directory while a job is waiting: `:available`, `:scheduled`
-  (a snoozing job) or `:retryable`. A waiting job reads the schedules when it
+  unique per directory, in any queue, while a job is waiting: `:available`,
+  `:scheduled` (a snoozing job) or `:retryable`. A waiting job reads the schedules when it
   runs, so a second one would sync nothing new, and a slow or snoozing job
   never stacks up behind the next slot's.
 
@@ -120,6 +129,9 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
     queue: :default,
     max_attempts: 1,
     unique: [
+      # Not `:queue`: a per-directory job may be in `default` or its
+      # directory's queue (#2845).
+      fields: [:args, :worker],
       keys: [:dir],
       period: :infinity,
       # No :executing: a running job may have read the schedules before a
@@ -128,7 +140,9 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
     ]
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, DirId, MarkerSyncAbandoned}
+  alias KilnCMS.Backups.{Chain, DirId, DirQueues, MarkerSyncAbandoned}
+
+  import Ecto.Query, only: [from: 2]
 
   require Logger
 
@@ -156,15 +170,17 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
       read_dir_id(dir) == {:ok, dir_id} ->
         sync_here(dir)
 
+      DirQueues.route?(job, dir_id) ->
+        case DirQueues.move(job, DirQueues.name(dir_id)) do
+          :ok -> {:snooze, 0}
+          :gone -> {:cancel, :superseded}
+        end
+
       (job.meta["snoozed"] || 0) < @affinity_max_snoozes ->
         {:snooze, @affinity_snooze_s}
 
       true ->
-        Logger.warning(
-          "Backup last-good marker sync for backup directory #{dir_id} gave up: " <>
-            "no node with that directory picked it up"
-        )
-
+        give_up_line(dir_id)
         {:cancel, :backup_dir_elsewhere}
     end
   end
@@ -180,7 +196,9 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
           {:error, _} -> nil
         end
 
-      ids |> Enum.reject(&(&1 == own)) |> Enum.each(&enqueue/1)
+      others = Enum.reject(ids, &(&1 == own))
+      routable = routable_ids(others)
+      Enum.each(others, &enqueue(&1, routable))
 
       # A directory that didn't answer for its id gets no sync this slot
       # (#3079): it would only hold up a second task.
@@ -222,9 +240,25 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
     end
   end
 
+  # The directories among `ids` whose queue a live node advertises (#2845),
+  # from one read of the beats. None when routing is off, there are none,
+  # or the beats can't be read (the jobs then snooze in `default`).
+  defp routable_ids([]), do: MapSet.new()
+
+  defp routable_ids(ids) do
+    with true <- DirQueues.enabled?(),
+         {:ok, statuses} <- DirQueues.statuses(ids) do
+      for {id, :advertised} <- statuses, into: MapSet.new(), do: id
+    else
+      _ -> MapSet.new()
+    end
+  end
+
   # A conflict is a job for that directory still waiting from an earlier slot.
-  defp enqueue(dir_id) do
-    case %{"dir" => dir_id} |> new() |> Oban.insert() do
+  defp enqueue(dir_id, routable) do
+    opts = if MapSet.member?(routable, dir_id), do: [queue: DirQueues.name(dir_id)], else: []
+
+    case %{"dir" => dir_id} |> new(opts) |> Oban.insert() do
       {:ok, _job} ->
         :ok
 
@@ -234,6 +268,51 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
             "(#{inspect(reason)})"
         )
     end
+  end
+
+  defp give_up_line(dir_id) do
+    Logger.warning(
+      "Backup last-good marker sync for backup directory #{dir_id} gave up: " <>
+        "no node with that directory picked it up"
+    )
+  end
+
+  @doc """
+  Cancel the per-directory jobs left waiting in a directory queue no node
+  runs (#2845): one whose directory a live node (180 s) reports but none
+  advertises its queue, after five minutes, and one whose directory no live
+  node reports, after thirty. Each logs the give-up line once per directory.
+  Beats that can't be read cancel nothing. The heartbeat's sweep runs it.
+  Returns how many it canceled.
+  """
+  @spec sweep_stranded() :: non_neg_integer()
+  def sweep_stranded do
+    with [_ | _] = waiting <- DirQueues.waiting(inspect(__MODULE__)),
+         {:ok, statuses} <-
+           waiting |> Enum.map(& &1.dir_id) |> Enum.uniq() |> DirQueues.statuses() do
+      stranded =
+        Enum.filter(waiting, &(DirQueues.verdict(statuses[&1.dir_id], &1.waited_s) != :leave))
+
+      cancel_stranded(stranded)
+    else
+      _ -> 0
+    end
+  end
+
+  defp cancel_stranded([]), do: 0
+
+  defp cancel_stranded(stranded) do
+    ids = Enum.map(stranded, & &1.id)
+
+    {:ok, canceled} =
+      Oban.cancel_all_jobs(
+        from(j in Oban.Job,
+          where: j.id in ^ids and j.state in ["available", "scheduled", "retryable"]
+        )
+      )
+
+    stranded |> Enum.map(& &1.dir_id) |> Enum.uniq() |> Enum.each(&give_up_line/1)
+    canceled
   end
 
   defp read_dir_id(dir) do

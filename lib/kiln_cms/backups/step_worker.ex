@@ -12,6 +12,13 @@ defmodule KilnCMS.Backups.StepWorker do
   that node runs would fail there with Oban's default backoff. Concurrency one
   per node; the lock makes it one per cluster.
 
+  A step pinned to a backup directory runs from that directory's own queue,
+  `backup_dir_<id>`, when a node with the directory advertises it
+  (`KilnCMS.Backups.DirQueues`, #2845): `Chain.advance/3` inserts it there,
+  and a node without the directory that fetches it from `backup_steps` moves
+  it there (same job, no attempt spent: `{:snooze, 0}`). Every `start`, and a
+  step taken back from a stopped node, is inserted into `backup_steps`.
+
   ## Attempts
 
   Four, with a fixed 1/5/15-minute backoff between them (D3). A step that was
@@ -22,9 +29,12 @@ defmodule KilnCMS.Backups.StepWorker do
 
   ## Which node
 
-  Every step after `start` must run where the chain's files are: a node whose
+  Every step after `start` must run where the chain's files are. A node whose
   `<BACKUP_DIR>/.kiln-dir-id` (`KilnCMS.Backups.DirId`) is not the chain's
-  snoozes (30 s, which costs no attempt) up to 20 times per attempt, about ten
+  moves a job it fetched from `backup_steps` to the directory's queue when
+  that queue is routable (above). Otherwise (no node advertises the queue, or
+  the job is already in it and this node's id has just changed) it snoozes
+  (30 s, which costs no attempt) up to 20 times per attempt, about ten
   minutes, then fails the attempt so the backoff and the attempt budget take
   over. A fresh backup's `start` runs anywhere: the chain is bound to the
   directory its `start` wrote `state.json` to only when it hands over
@@ -43,7 +53,11 @@ defmodule KilnCMS.Backups.StepWorker do
      once the source host has stopped, not while it runs. A `state.json` that
      can't be parsed is no match, and heartbeats that can't be read count as
      a live source: the start waits, with a warning in the log.
-  3. Anywhere else it snoozes with the same budget as the other steps.
+  3. Anywhere else it moves to the directory's queue when that is routable,
+     and otherwise snoozes with the same budget as the other steps: a run
+     whose directory no live node reports keeps this bounded snooze in
+     `backup_steps` (the lost-directory fallback), so a copy of the
+     directory can still resume it once the source host has stopped.
 
   When the last attempt has used its budget too, the resume is given up
   (`Chain.abandon_start/2`): the lock is released, the waiting request
@@ -66,7 +80,8 @@ defmodule KilnCMS.Backups.StepWorker do
 
   ## Uniqueness
 
-  One job per chain, step and part in any live or completed state; a canceled
+  One job per chain, step and part in any live or completed state, whatever
+  its queue (a job moved to its directory's queue still counts); a canceled
   or discarded one does not count, so a reclaimed step's replacement can be
   inserted.
   """
@@ -74,6 +89,9 @@ defmodule KilnCMS.Backups.StepWorker do
     queue: :backup_steps,
     max_attempts: 4,
     unique: [
+      # Not `:queue` (Oban's default includes it): a step may be in
+      # `backup_steps` or its directory's queue (#2845).
+      fields: [:args, :worker],
       keys: [:chain, :step, :part],
       period: :infinity,
       states: [:available, :scheduled, :executing, :retryable, :completed, :suspended]
@@ -82,7 +100,7 @@ defmodule KilnCMS.Backups.StepWorker do
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, DirId, Steps}
+  alias KilnCMS.Backups.{Chain, DirId, DirQueues, Steps}
 
   require Logger
 
@@ -230,13 +248,27 @@ defmodule KilnCMS.Backups.StepWorker do
   defp describe(error) when is_exception(error), do: Exception.message(error)
   defp describe(error), do: inspect(error, limit: 5)
 
-  # Runs here, snoozes, or (budget spent) fails the attempt. A resume's start
-  # gives up on its last attempt (`give_up`); every other step's last attempt
-  # fails like any other, and the reaper closes the chain.
+  # Runs here, moves to the directory's queue (#2845), snoozes, or (budget
+  # spent) fails the attempt. A resume's start gives up on its last attempt
+  # (`give_up`); every other step's last attempt fails like any other, and
+  # the reaper closes the chain. A job already in a directory queue on a node
+  # whose id is not that directory's (it changed since the node started the
+  # queue) waits with the same budget.
   defp pinned(job, dir_id, give_up) do
-    if DirId.current() == {:ok, dir_id},
-      do: rebase_snoozes(job),
-      else: wait(job, :backup_dir_elsewhere, give_up)
+    cond do
+      DirId.current() == {:ok, dir_id} -> rebase_snoozes(job)
+      DirQueues.route?(job, dir_id) -> route(job, dir_id)
+      true -> wait(job, :backup_dir_elsewhere, give_up)
+    end
+  end
+
+  # The same job, in its directory's queue, due at once. `:gone`: this
+  # execution is no longer the row's (canceled meanwhile).
+  defp route(job, dir_id) do
+    case DirQueues.move(job, DirQueues.name(dir_id)) do
+      :ok -> {:snooze, 0}
+      :gone -> {:cancel, :superseded}
+    end
   end
 
   # Snoozes, or (budget spent) fails the attempt with `reason`, or on the

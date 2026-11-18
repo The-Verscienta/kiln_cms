@@ -11,7 +11,7 @@ defmodule KilnCMS.Test.BackupCluster do
   when it is killed outright.
   """
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Heartbeat, Manifest}
+  alias KilnCMS.Backups.{Artifact, DirId, DirQueues, Heartbeat, Manifest}
 
   @doc "Run `fun` with `KilnCMS.Backups.dir/0` answering `dir`."
   @spec as_node(Path.t(), (-> result)) :: result when result: term()
@@ -37,6 +37,26 @@ defmodule KilnCMS.Test.BackupCluster do
   end
 
   def tick_as(dir, %{} = state), do: as_node(dir, fn -> Heartbeat.tick(state) end)
+
+  @doc "The queue of the backup directory `dir` (#2845), from its id file."
+  @spec dir_queue(Path.t()) :: String.t()
+  def dir_queue(dir) do
+    {:ok, id} = DirId.current(dir)
+    DirQueues.name(id)
+  end
+
+  @doc """
+  Drain each of `queues`, in order and once (no recursion, scheduled jobs
+  included), as the node with backup directory `dir`: that node fetches
+  first. Returns each queue's result, in order.
+  """
+  @spec drain_as(Path.t(), [String.t() | atom()]) :: [map()]
+  def drain_as(dir, queues) do
+    as_node(dir, fn ->
+      for queue <- queues,
+          do: Oban.drain_queue(queue: queue, with_recursion: false, with_scheduled: true)
+    end)
+  end
 
   @doc "Age `node`'s beat to `seconds` before the database's `now()`."
   @spec backdate_beat!(String.t(), non_neg_integer()) :: :ok

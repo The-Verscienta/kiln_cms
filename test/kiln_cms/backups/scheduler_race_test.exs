@@ -16,6 +16,7 @@ defmodule KilnCMS.Backups.SchedulerRaceTest do
   alias KilnCMS.Backups
   alias KilnCMS.Backups.Schedule
   alias KilnCMS.Repo
+  alias KilnCMS.Test.BackupChain
 
   @moduletag :pg_tools
   @moduletag :capture_log
@@ -37,7 +38,7 @@ defmodule KilnCMS.Backups.SchedulerRaceTest do
 
     on_exit(fn ->
       unboxed(fn ->
-        Repo.delete_all(from(j in "oban_jobs", where: j.queue == "backup_steps"))
+        Repo.delete_all(from(j in "oban_jobs", where: j.worker == "KilnCMS.Backups.StepWorker"))
         Repo.delete_all(from(l in "backup_locks"))
         Repo.delete_all(from(r in "backup_runs"))
         Repo.delete_all(from(s in "backup_schedules"))
@@ -120,11 +121,7 @@ defmodule KilnCMS.Backups.SchedulerRaceTest do
 
   defp start_jobs do
     unboxed(fn ->
-      Repo.all(
-        from(j in Oban.Job,
-          where: j.queue == "backup_steps" and fragment("?->>'step' = 'start'", j.args)
-        )
-      )
+      BackupChain.step_jobs(step: "start")
     end)
   end
 
@@ -290,7 +287,7 @@ defmodule KilnCMS.Backups.SchedulerRaceTest do
       end
 
       unboxed(fn ->
-        Repo.delete_all(from(j in "oban_jobs", where: j.queue == "backup_steps"))
+        Repo.delete_all(from(j in "oban_jobs", where: j.worker == "KilnCMS.Backups.StepWorker"))
         Repo.delete_all(from(l in "backup_locks"))
       end)
     end

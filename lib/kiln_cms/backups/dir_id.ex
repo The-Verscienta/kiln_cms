@@ -28,6 +28,15 @@ defmodule KilnCMS.Backups.DirId do
   @file_name ".kiln-dir-id"
   @uuid ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/
 
+  @doc """
+  Whether `id` is a backup-directory id: a lowercase UUID, as `local/1` writes
+  it. What anything built from an id (a directory queue's name, #2845) checks
+  first.
+  """
+  @spec valid?(term()) :: boolean()
+  def valid?(id) when is_binary(id), do: Regex.match?(@uuid, id)
+  def valid?(_id), do: false
+
   @doc "The id file of the backup directory `dir`."
   @spec path(Path.t()) :: Path.t()
   def path(dir \\ Backups.dir()), do: Path.join(dir, @file_name)
@@ -57,7 +66,7 @@ defmodule KilnCMS.Backups.DirId do
   def current(dir \\ Backups.dir()) do
     with {:ok, text} <- File.read(path(dir)) do
       id = String.trim(text)
-      if Regex.match?(@uuid, id), do: {:ok, id}, else: {:error, :malformed_dir_id}
+      if valid?(id), do: {:ok, id}, else: {:error, :malformed_dir_id}
     end
   end
 

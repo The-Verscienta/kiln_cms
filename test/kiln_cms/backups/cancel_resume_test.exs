@@ -94,14 +94,8 @@ defmodule KilnCMS.Backups.CancelResumeTest do
 
   defp current_job, do: Repo.get!(Oban.Job, lock().step_job_id)
 
-  defp step_jobs(chain) do
-    Repo.all(
-      from(j in Oban.Job,
-        where: j.queue == "backup_steps" and fragment("?->>'chain' = ?", j.args, ^chain),
-        order_by: j.id
-      )
-    )
-  end
+  # In whichever queue (#2845).
+  defp step_jobs(chain), do: BackupChain.step_jobs(chain: chain)
 
   defp canceled_events(admin) do
     Security.list_instance_events!(actor: admin, page: [limit: 100])

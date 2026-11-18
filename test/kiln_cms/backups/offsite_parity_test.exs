@@ -25,11 +25,8 @@ defmodule KilnCMS.Backups.OffsiteParityTest do
   """
   use KilnCMS.DataCase, async: false
 
-  import Ecto.Query
-
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Manifest}
-  alias KilnCMS.Repo
   alias KilnCMS.Test.BackupChain
 
   @moduletag :capture_log
@@ -130,12 +127,7 @@ defmodule KilnCMS.Backups.OffsiteParityTest do
   defp run!, do: hd(Backups.list_runs!(actor: Backups.system()))
 
   defp offsite_job do
-    [job] =
-      Repo.all(
-        from(j in Oban.Job,
-          where: j.queue == "backup_steps" and fragment("?->>'step' = 'offsite'", j.args)
-        )
-      )
+    [job] = BackupChain.step_jobs(step: "offsite")
 
     job
   end

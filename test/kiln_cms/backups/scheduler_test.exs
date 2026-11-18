@@ -13,14 +13,12 @@ defmodule KilnCMS.Backups.SchedulerTest do
   """
   use KilnCMS.DataCase, async: false
 
-  import Ecto.Query
   import ExUnit.CaptureIO
   import ExUnit.CaptureLog
   import KilnCMS.Test.BackupSchedules
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Scheduler, WorkState}
-  alias KilnCMS.Repo
   alias KilnCMS.Test.BackupChain
 
   @moduletag :capture_log
@@ -63,13 +61,7 @@ defmodule KilnCMS.Backups.SchedulerTest do
 
   defp reload(s), do: Backups.get_backup_schedule!(s.id, actor: Backups.system())
 
-  defp start_jobs do
-    Repo.all(
-      from(j in Oban.Job,
-        where: j.queue == "backup_steps" and fragment("?->>'step' = 'start'", j.args)
-      )
-    )
-  end
+  defp start_jobs, do: BackupChain.step_jobs(step: "start")
 
   defp runs, do: Backups.list_runs!(actor: Backups.system())
 
