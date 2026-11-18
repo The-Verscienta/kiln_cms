@@ -47,6 +47,38 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
   only in the slots its own node fetches the cron job. A node whose heartbeat
   stopped (the node is down) gets no job until it beats again.
 
+  ## A backup directory that hangs (#3079)
+
+  Every file operation on the backup directory (reading its id, and the
+  sync itself) runs in a task under `KilnCMS.Backups.MarkerSyncIO`, which the
+  job waits on: at most `dir_id_timeout_ms` (5 s by default, the heartbeat's
+  setting) for the id, and `marker_sync_io_timeout_ms` (120 s by default) for
+  the sync, both under `config :kiln_cms, KilnCMS.Backups`. A process blocked
+  in a file operation on a hung mount can't be killed, so a task that takes
+  longer is left running: the job logs a warning, emits
+  `[:kiln_cms, :backups, :marker_sync, :timeout]` and gives up for the slot
+  with `{:error, :backup_dir_unresponsive}`, so the Oban slot is free again.
+  The job's own `timeout/1` (5 minutes) is longer than both waits, and well
+  inside the Lifeline's rescue window.
+
+  The supervisor runs at most two tasks, so a mount that stays hung can't
+  pile up blocked tasks (each holds one of the VM's dirty I/O schedulers,
+  which the heartbeat's id reads share). While two are still blocked, a job
+  starts none and fails with `{:error, :backup_dir_io_busy}`.
+
+  A cron job whose own id read gives up still queues the jobs for the other
+  directories, then fails without syncing its own. A per-directory job whose
+  id read gives up (or can't start) treats its directory as not this node's
+  and snoozes, as it does for any other id error, so another node with that
+  directory can still pick it up.
+
+  One known limit: the sync runs under the backup lock (`Chain.with_lock/1`,
+  a cluster-wide advisory lock in a transaction). A task blocked on the
+  directory inside that transaction keeps holding the lock, and the
+  connection, until the file operation returns. In the meantime every
+  other sync returns `:busy` or waits, and the heartbeat's lock sweep waits
+  its query timeout each tick.
+
   ## Failures
 
   A failed import, an unreadable directory or history, or a lock that can't
@@ -96,12 +128,23 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
   @beat_window_s 600
   @affinity_snooze_s 30
   @affinity_max_snoozes 20
+  @io KilnCMS.Backups.MarkerSyncIO
+  @dir_id_timeout_ms 5_000
+  @sync_timeout_ms 120_000
+
+  # Longer than both I/O waits (#3079), so a hung directory fails the job
+  # through `run_io/3`, with a reason, rather than through Oban's timeout.
+  @impl Oban.Worker
+  def timeout(_job), do: :timer.minutes(5)
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"dir" => dir_id}} = job) when is_binary(dir_id) do
+    # Read in the job's process and handed to the tasks.
+    dir = Backups.dir()
+
     cond do
-      DirId.current() == {:ok, dir_id} ->
-        sync_here()
+      read_dir_id(dir) == {:ok, dir_id} ->
+        sync_here(dir)
 
       (job.meta["snoozed"] || 0) < @affinity_max_snoozes ->
         {:snooze, @affinity_snooze_s}
@@ -118,14 +161,26 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
 
   def perform(%Oban.Job{}) do
     with {:ok, ids} <- reported_dir_ids() do
+      dir = Backups.dir()
+      own_read = read_dir_id(dir)
+
       own =
-        case DirId.current() do
+        case own_read do
           {:ok, id} -> id
           {:error, _} -> nil
         end
 
       ids |> Enum.reject(&(&1 == own)) |> Enum.each(&enqueue/1)
-      sync_here()
+
+      # A directory that didn't answer for its id gets no sync this slot
+      # (#3079): it would only hold up a second task.
+      case own_read do
+        {:error, reason} when reason in [:backup_dir_unresponsive, :backup_dir_io_busy] ->
+          {:error, reason}
+
+        _read ->
+          sync_here(dir)
+      end
     end
   end
 
@@ -171,9 +226,15 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
     end
   end
 
-  defp sync_here do
-    dir = Backups.dir()
+  defp read_dir_id(dir) do
+    reader = Keyword.get(backups_env(), :marker_sync_dir_reader, &DirId.current/1)
 
+    run_io(:dir_id, dir, dir_id_timeout_ms(), fn -> reader.(dir) end)
+  end
+
+  defp sync_here(dir), do: run_io(:sync, dir, sync_timeout_ms(), fn -> sync(dir) end)
+
+  defp sync(dir) do
     if File.dir?(dir) do
       case Chain.sync_last_good(dir) do
         {:ok, _last_good} -> :ok
@@ -184,4 +245,63 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
       :ok
     end
   end
+
+  # `fun` in a task under `KilnCMS.Backups.MarkerSyncIO`, waited on for
+  # `timeout` ms (see "A backup directory that hangs"). The task carries this
+  # process in `$callers`. One that takes longer is left running: it can't
+  # be killed while blocked in a file operation.
+  defp run_io(phase, dir, timeout, fun) do
+    task = Task.Supervisor.async_nolink(@io, fun)
+
+    case Task.yield(task, timeout) || Task.ignore(task) do
+      {:ok, result} -> result
+      {:exit, reason} -> {:error, {:crashed, reason}}
+      nil -> unresponsive(phase, dir, timeout)
+    end
+  rescue
+    # `async_nolink/2` raises when the supervisor already runs `max_children`
+    # tasks: earlier ones are still blocked on the directory.
+    error in RuntimeError ->
+      Logger.warning(
+        "Backup last-good marker sync couldn't start the #{describe(phase)} of #{dir}: " <>
+          Exception.message(error) <> " (earlier ones are still hung?)"
+      )
+
+      {:error, :backup_dir_io_busy}
+  end
+
+  defp unresponsive(phase, dir, timeout) do
+    :telemetry.execute(
+      [:kiln_cms, :backups, :marker_sync, :timeout],
+      %{count: 1, waited_ms: timeout},
+      %{phase: phase}
+    )
+
+    Logger.warning(
+      "Backup last-good marker sync: the #{describe(phase)} of the backup directory #{dir} " <>
+        "took more than #{timeout} ms (a hung mount?). Giving up for this slot; the " <>
+        "#{describe(phase)} is left running."
+    )
+
+    {:error, :backup_dir_unresponsive}
+  end
+
+  defp describe(:dir_id), do: "id read"
+  defp describe(:sync), do: "marker sync"
+
+  @doc false
+  # The longest the job waits on the backup directory: the id read, then the
+  # sync. `timeout/1` must be longer.
+  @spec io_wait_ms() :: pos_integer()
+  def io_wait_ms, do: dir_id_timeout_ms() + sync_timeout_ms()
+
+  # `config :kiln_cms, KilnCMS.Backups`: `dir_id_timeout_ms:` (shared with the
+  # heartbeat's id read), `marker_sync_io_timeout_ms:`, and
+  # `marker_sync_dir_reader:` (a one-argument function, tests only).
+  defp dir_id_timeout_ms, do: Keyword.get(backups_env(), :dir_id_timeout_ms, @dir_id_timeout_ms)
+
+  defp sync_timeout_ms,
+    do: Keyword.get(backups_env(), :marker_sync_io_timeout_ms, @sync_timeout_ms)
+
+  defp backups_env, do: Application.get_env(:kiln_cms, KilnCMS.Backups, [])
 end

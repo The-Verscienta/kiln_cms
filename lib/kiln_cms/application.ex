@@ -152,6 +152,10 @@ defmodule KilnCMS.Application do
       # (each holds a dirty I/O scheduler, of which the VM has ten). Before
       # the heartbeat.
       {Task.Supervisor, name: KilnCMS.Backups.DirIdReaders, max_children: 4},
+      # The last-good marker sync's backup-directory I/O (#3079), in tasks so
+      # a hung BACKUP_DIR can't hold an Oban slot. At most two, so the dirty
+      # I/O schedulers keep headroom beside the id reads above. Before Oban.
+      {Task.Supervisor, name: KilnCMS.Backups.MarkerSyncIO, max_children: 2},
       # The self-fence's watchdog (#2848): kills this node's steps when the
       # heartbeat has not beaten for 90 s, even while a tick is stuck.
       backup_fence(),

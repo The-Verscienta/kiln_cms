@@ -832,6 +832,156 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
   # #2931's acceptance: a backup a schedule keeps, deleted by a host prune
   # that ignores `.hold` (a `backup.sh` older than the hold markers), is
   # logged and reported at the next sync, and both Backups pages warn.
+  # #3079: the job's backup-directory I/O runs in tasks it waits on for a
+  # bounded time, so a hung BACKUP_DIR can't hold an Oban slot.
+  describe "a backup directory that hangs (#3079)" do
+    # Every id read announces itself and blocks until released with its
+    # answer, as a read on a hung mount would.
+    defp blocking_reader!(timeout_ms \\ 50) do
+      parent = self()
+
+      reader = fn _dir ->
+        send(parent, {:reader, self()})
+
+        receive do
+          {:release, result} -> result
+        end
+      end
+
+      # A blocked task is left running on purpose; a test must not leave it
+      # to the next one, nor to the sandbox's check-in.
+      on_exit(&kill_io_tasks/0)
+      put_backups_env(marker_sync_dir_reader: reader, dir_id_timeout_ms: timeout_ms)
+    end
+
+    defp kill_io_tasks do
+      for pid <- io_tasks() do
+        ref = Process.monitor(pid)
+        Process.exit(pid, :kill)
+        assert_receive {:DOWN, ^ref, :process, ^pid, _}
+      end
+    end
+
+    defp io_tasks, do: Task.Supervisor.children(KilnCMS.Backups.MarkerSyncIO)
+
+    defp put_backups_env(opts) do
+      env = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+      Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.merge(env, opts))
+    end
+
+    test "an id read that hangs gives up promptly: an event, a warning, no marker, and the " <>
+           "read is left running",
+         %{dir: dir} do
+      cron_backup!(dir, @cron)
+      blocking_reader!()
+      ref = attach([[:kiln_cms, :backups, :marker_sync, :timeout]])
+
+      {{micros, result}, log} =
+        with_log([level: :warning], fn ->
+          :timer.tc(fn -> perform_job(MarkerSyncWorker, %{}) end)
+        end)
+
+      assert result == {:error, :backup_dir_unresponsive}
+      assert micros < 1_000_000
+
+      assert_received {[:kiln_cms, :backups, :marker_sync, :timeout], ^ref,
+                       %{count: 1, waited_ms: 50}, %{phase: :dir_id}}
+
+      assert log =~ "the id read of the backup directory #{dir} took more than 50 ms"
+      assert goods(dir) == []
+
+      assert_received {:reader, reader}
+      assert Process.alive?(reader)
+      assert io_tasks() == [reader]
+    end
+
+    test "through Oban, the job fails promptly", %{dir: dir} do
+      cron_backup!(dir, @cron)
+      blocking_reader!()
+      {:ok, job} = Oban.insert(MarkerSyncWorker.new(%{}))
+
+      {micros, result} = :timer.tc(fn -> Oban.drain_queue(queue: :default) end)
+
+      assert %{discard: 1, success: 0} = result
+      assert micros < 1_000_000
+
+      assert %{state: "discarded", errors: [%{"error" => error}]} =
+               KilnCMS.Repo.get!(Oban.Job, job.id)
+
+      assert error =~ "backup_dir_unresponsive"
+      assert goods(dir) == []
+    end
+
+    test "the cron job still queues the other directories' jobs" do
+      blocking_reader!()
+      other = Ash.UUID.generate()
+      beat!(other)
+
+      assert {:error, :backup_dir_unresponsive} = perform_job(MarkerSyncWorker, %{})
+      assert [%{args: %{"dir" => ^other}}] = all_enqueued(worker: MarkerSyncWorker)
+    end
+
+    test "a per-directory job whose id read hangs snoozes, so another node can take it",
+         %{dir: dir} do
+      cron_backup!(dir, @cron)
+      blocking_reader!()
+      ref = attach([[:kiln_cms, :backups, :marker_sync, :timeout]])
+
+      assert {:snooze, 30} = perform_job(MarkerSyncWorker, %{"dir" => Ash.UUID.generate()})
+      assert_received {[:kiln_cms, :backups, :marker_sync, :timeout], ^ref, _, %{phase: :dir_id}}
+      assert goods(dir) == []
+    end
+
+    test "with two tasks still blocked, the next job starts none and fails as busy",
+         %{dir: dir} do
+      cron_backup!(dir, @cron)
+      blocking_reader!()
+
+      for _ <- 1..2 do
+        assert {:error, :backup_dir_unresponsive} = perform_job(MarkerSyncWorker, %{})
+        assert_received {:reader, _reader}
+      end
+
+      assert length(io_tasks()) == 2
+
+      {result, log} = with_log([level: :warning], fn -> perform_job(MarkerSyncWorker, %{}) end)
+
+      assert result == {:error, :backup_dir_io_busy}
+      refute_received {:reader, _}
+      assert log =~ "couldn't start the id read of #{dir}"
+      assert log =~ "maximum number of tasks"
+      assert goods(dir) == []
+    end
+
+    test "an id read that crashes is no id: the cron job syncs in place", %{dir: dir} do
+      cron_backup!(dir, @cron)
+      on_exit(&kill_io_tasks/0)
+      put_backups_env(marker_sync_dir_reader: fn _dir -> raise "boom" end)
+
+      assert :ok = perform_job(MarkerSyncWorker, %{})
+      assert goods(dir) == ["db/kiln-#{@cron}.good", "media/kiln-#{@cron}.good"]
+    end
+
+    test "an id read that answers in time is used as before", %{dir: dir} do
+      cron_backup!(dir, @cron)
+      {:ok, local} = DirId.local(dir)
+      on_exit(&kill_io_tasks/0)
+      put_backups_env(dir_id_timeout_ms: 1_000)
+
+      assert :ok = perform_job(MarkerSyncWorker, %{"dir" => local})
+      assert goods(dir) == ["db/kiln-#{@cron}.good", "media/kiln-#{@cron}.good"]
+      assert io_tasks() == []
+    end
+
+    test "the job's timeout outlasts both waits and sits well inside the rescue window" do
+      timeout = MarkerSyncWorker.timeout(%Oban.Job{args: %{}})
+
+      assert MarkerSyncWorker.io_wait_ms() == 125_000
+      assert timeout > MarkerSyncWorker.io_wait_ms()
+      assert timeout + :timer.minutes(30) < KilnCMS.Application.oban_rescue_after()
+    end
+  end
+
   describe "a held backup deleted outside the app (#2931)" do
     @endpoint KilnCMSWeb.Endpoint
 
