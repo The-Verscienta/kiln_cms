@@ -375,7 +375,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#3103](https://github.com/The-Verscienta/kiln_cms/pull/3103) · [long form](docs/changelog/unreleased.md#backup-destinations-tab-polish))
 
 - **A backup that couldn't read its destinations and has no `BACKUP_RCLONE_REMOTE` now reads "not copied off-site" instead of "reached 0 of 1", and the partly off-site alarm clears once the destinations that failed are no longer configured.**
-  ([long form](docs/changelog/unreleased.md#backup-partial-offsite-status))
+  ([#3104](https://github.com/The-Verscienta/kiln_cms/pull/3104) · [long form](docs/changelog/unreleased.md#backup-partial-offsite-status))
 
 ### Security
 
