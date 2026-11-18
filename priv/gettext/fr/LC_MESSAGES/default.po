@@ -23526,8 +23526,8 @@ msgstr "La liste des réseaux autorisés n’a pas pu être enregistrée."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "The app couldn't read this server's backup directory, or one of these files in it (permissions, an I/O error or a hung mount), or its read of the directory failed outright, so it claims nothing about these files."
-msgstr "L’application n’a pas pu lire le répertoire de sauvegarde de ce serveur, ou l’un de ces fichiers qu’il contient (permissions, erreur d’E/S ou montage bloqué), ou sa lecture du répertoire a complètement échoué : elle n’affirme donc rien sur ces fichiers."
+msgid "The app couldn't read this server's backup directory, or one of these files in it (permissions, an I/O error or a stale network mount), or its read of the directory failed outright, so it claims nothing about these files."
+msgstr "L’application n’a pas pu lire le répertoire de sauvegarde de ce serveur, ou l’un de ces fichiers qu’il contient (permissions, erreur d’E/S ou montage réseau périmé), ou sa lecture du répertoire a complètement échoué : elle n’affirme donc rien sur ces fichiers."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format

@@ -2631,6 +2631,37 @@ defmodule KilnCMSWeb.BackupLiveTest do
              )
     end
 
+    # An unreadable directory changes how the rest is judged, so its tip
+    # comes ahead of missing's.
+    test "a row with one artifact unchecked and one missing explains couldn't check",
+         %{conn: conn, dir: dir} do
+      stamp = "20260105-030000"
+      [single] = Backups.Artifact.set_names(stamp, 1)
+      run = media_run!(dir, stamp, [], [single], %{"local" => %{"status" => "ok"}})
+      File.rm_rf!(Path.join(dir, "db"))
+      File.write!(Path.join(dir, "db"), "")
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      row = "#backup-run-#{run.id}"
+
+      assert has_element?(
+               lv,
+               ~s|#{row} [data-role="artifact-presence"][data-kind="db"][data-presence="unknown"]|,
+               "Database: couldn't check"
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#{row} [data-role="artifact-presence"][data-kind="media"][data-presence="missing"]|,
+               "Media: missing"
+             )
+
+      assert has_element?(lv, "#presence-help-#{run.id}-title", "couldn't check")
+      assert has_element?(lv, "#presence-help-#{run.id}", "a stale network mount")
+      refute has_element?(lv, "#presence-help-#{run.id}", "nothing recorded why")
+    end
+
     test "a disk read that crashed explains couldn't check on every row", %{
       conn: conn,
       dir: dir

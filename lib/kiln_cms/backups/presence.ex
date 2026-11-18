@@ -53,7 +53,7 @@ defmodule KilnCMS.Backups.Presence do
       newer complete unit of the same kind in the listing it is `:missing`;
     * otherwise its age (`finished_at`, else `started_at`) against cron's
       `BACKUP_KEEP_DAYS`, which `backup.sh` writes into `manifest.json`
-      (`cron_keep_days`): older than that plus a day is `:expired`, younger is
+      (`keep_days`): older than that plus a day is `:expired`, younger is
       `:missing`. When no manifest of cron's says, the app's `keep_days`
       stands in, and an older unit is only `:probably_expired`.
 

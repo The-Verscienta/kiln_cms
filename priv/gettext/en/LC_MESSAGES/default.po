@@ -23526,7 +23526,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "The app couldn't read this server's backup directory, or one of these files in it (permissions, an I/O error or a hung mount), or its read of the directory failed outright, so it claims nothing about these files."
+msgid "The app couldn't read this server's backup directory, or one of these files in it (permissions, an I/O error or a stale network mount), or its read of the directory failed outright, so it claims nothing about these files."
 msgstr ""
 
 #: lib/kiln_cms_web/live/branding_live.ex

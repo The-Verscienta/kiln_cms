@@ -99,16 +99,18 @@ network mount that hung froze the page, its buttons and its poll.
   `KilnCMS.Backups.DiskView.read/3` in `start_async/3`, one read at a time
   per page: a refresh while one is out marks the page dirty, and the read
   that lands starts one more. A read lists `db/` and `media/` once each,
-  reads `manifest.json` once, `lstat`s only listed names, and does no
-  database reads. Its result fills only the rows on the page when it lands.
+  reads `manifest.json` once, `lstat`s only listed names, checks
+  `.work/<stamp>/state.json` only for a row whose status could be resumed
+  (whether **Resume** is offered), and does no database reads. Its result fills only the rows on the page when it lands.
   Until the first one lands the rows say `checking…`. One that hasn't landed
   within `disk_timeout_ms` (default 5 s) turns the rows to `couldn't check
   in time`, and the answer is still applied when it comes. A read that
   crashes turns every row to `couldn't check`, the same label as an
   `:unknown` file, and nothing is retried until the next refresh.
-- **Every state that needs explaining has a `?` tip on the row**: `missing`,
-  `couldn't check` (an unreadable directory or file, or a crashed read),
-  `couldn't check in time`, `probably expired` and `expired` (#2940). The
+- **The row's `?` tip explains its most telling state** (#2940), from
+  `couldn't check` (an unreadable directory or file, or a crashed read; it
+  comes first, since it changes how the rest is judged), `missing`,
+  `probably expired` and `expired`, or `couldn't check in time`. The
   gone parts of a set say whether each has an off-site copy: "1 part
   missing: 04" beside "2 parts missing here, copied off-site: 02, 03" (#2942).
 

@@ -2131,11 +2131,13 @@ defmodule KilnCMSWeb.BackupLive do
     """
   end
 
-  # The state a row's ? tip explains: the worst of its artifacts' that needs
-  # explaining, or nil.
+  # The state a row's ? tip explains: the most telling of its artifacts', or
+  # nil. Couldn't-check comes first: an unreadable directory changes how the
+  # rest is judged (no file is called expired while a marker can't be ruled
+  # out).
   defp presence_help(%{artifacts: artifacts}) do
     states = Enum.map(artifacts, & &1.state)
-    Enum.find([:missing, :unknown, :probably_expired, :expired], &(&1 in states))
+    Enum.find([:unknown, :missing, :probably_expired, :expired], &(&1 in states))
   end
 
   # The disk read crashed (`@disk.state == :failed`) or a directory or file
@@ -2143,7 +2145,7 @@ defmodule KilnCMSWeb.BackupLive do
   defp presence_help_text(:unknown),
     do:
       gettext(
-        "The app couldn't read this server's backup directory, or one of these files in it (permissions, an I/O error or a hung mount), or its read of the directory failed outright, so it claims nothing about these files."
+        "The app couldn't read this server's backup directory, or one of these files in it (permissions, an I/O error or a stale network mount), or its read of the directory failed outright, so it claims nothing about these files."
       )
 
   defp presence_help_text(:missing),
