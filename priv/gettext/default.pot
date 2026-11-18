@@ -12050,6 +12050,16 @@ msgstr ""
 msgid "In-app schedules are turned off (KILN_BACKUP_SCHEDULER_CRON)."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "In-app schedules don't run: KILN_BACKUP_SCHEDULER_CRON isn't a valid cron expression."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "In-app schedules never run: KILN_BACKUP_SCHEDULER_CRON only matches a date that doesn't exist, such as 31 February."
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "In:"

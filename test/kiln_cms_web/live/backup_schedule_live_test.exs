@@ -1461,6 +1461,34 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       refute has_element?(lv, "#schedule-stale-tick")
     end
 
+    # Only an Oban that parses a cron naming no real date gets here (2.24
+    # doesn't), so the warnings are rendered with that status.
+    test "a scheduler cron that never matches says so" do
+      status = %{
+        scheduler_enabled?: false,
+        scheduler_cron: :never_matches,
+        available?: true,
+        reason: nil,
+        held_deleted: []
+      }
+
+      html =
+        render_component(&BackupScheduleLive.warnings/1,
+          status: status,
+          entries: [],
+          stale_tick: nil,
+          media_dir?: true
+        )
+
+      assert html =~ ~s(id="schedule-scheduler-never")
+
+      assert html =~
+               "KILN_BACKUP_SCHEDULER_CRON only matches a date that doesn&#39;t exist, such as 31 February, so these schedules never run."
+
+      refute html =~ "schedule-scheduler-off"
+      refute html =~ "schedule-scheduler-invalid"
+    end
+
     test "a scheduler cron that isn't one", %{conn: conn} do
       put_cron("not a cron")
       lv = mount(conn, platform_admin())

@@ -2594,6 +2594,22 @@ carries the reasoning.
   and the step is retried.
   ([#2423](https://github.com/The-Verscienta/kiln_cms/issues/2423))
 
+<a id="backup-scheduler-cron-states"></a>
+
+- **The Backups and Schedule pages tell an invalid or never-matching `KILN_BACKUP_SCHEDULER_CRON` apart from `false` (#2935).**
+  Both pages said "The scheduler is turned off" for any value that didn't
+  give a working scheduler. They now show one of three warnings: turned
+  off (`false`), not a valid cron expression (the value doesn't parse;
+  the scheduler is off, and boot still warns on stderr), or only matches a
+  date that doesn't exist, such as 31 February (the schedules never run).
+  An expression that parses but can never match could make the Schedule
+  tab's tick check search forever on an Oban release that accepted it;
+  Kiln now checks that such an expression names a real date before it
+  searches. Oban 2.24 already refuses `0 0 31 2 *` when it parses it, so
+  on the current release that value shows the "not a valid cron
+  expression" warning.
+  ([#2935](https://github.com/The-Verscienta/kiln_cms/issues/2935))
+
 ## Security
 
 <a id="backup-state-json-remote"></a>

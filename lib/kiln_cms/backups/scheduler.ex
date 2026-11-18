@@ -68,7 +68,7 @@ defmodule KilnCMS.Backups.Scheduler do
 
   @doc """
   What `KILN_BACKUP_SCHEDULER_CRON` (`value`, the configured value by
-  default) makes of the scheduler: `:on`; `:off` (`false`, blank or unset);
+  default, or an expression already parsed) makes of the scheduler: `:on`; `:off` (`false`, blank or unset);
   `:invalid` when it isn't a cron expression Oban parses; or
   `:never_matches` when it parses but names no date that exists, such as
   `0 0 31 2 *` (31 February) on an Oban that accepts it (#2935). Only `:on`
@@ -99,14 +99,18 @@ defmodule KilnCMS.Backups.Scheduler do
       end)
   end
 
-  # The parsed `KILN_BACKUP_SCHEDULER_CRON`, or what `cron_state/1` says
-  # instead.
+  # The parsed `KILN_BACKUP_SCHEDULER_CRON` (or `value` itself when it is
+  # already parsed), or what `cron_state/1` says instead.
+  defp expression(%Oban.Cron.Expression{} = expression) do
+    if expression.reboot? or matches_some_date?(expression),
+      do: {:ok, expression},
+      else: :never_matches
+  end
+
   defp expression(value) do
     with {:ok, cron} <- invalid_or_off(KilnCMS.Application.cron_setting(value)),
          {:ok, expression} <- Oban.Cron.Expression.parse(cron) do
-      if expression.reboot? or matches_some_date?(expression),
-        do: {:ok, expression},
-        else: :never_matches
+      expression(expression)
     else
       {:error, _reason} -> :invalid
       state -> state
@@ -165,7 +169,21 @@ defmodule KilnCMS.Backups.Scheduler do
   """
   @spec expected_tick_at(DateTime.t(), non_neg_integer()) :: DateTime.t() | nil
   def expected_tick_at(%DateTime{} = now, slack_s) when is_integer(slack_s) and slack_s >= 0 do
-    case expression(Application.get_env(:kiln_cms, :backup_scheduler_cron, false)) do
+    expected_tick_at_for(
+      Application.get_env(:kiln_cms, :backup_scheduler_cron, false),
+      now,
+      slack_s
+    )
+  end
+
+  @doc false
+  # `expected_tick_at/2` for the cron `value`: a configured value or a parsed
+  # expression. Public for the tests, which hand it an expression that never
+  # matches: Oban 2.24 won't parse one (#2935).
+  @spec expected_tick_at_for(term(), DateTime.t(), non_neg_integer()) :: DateTime.t() | nil
+  def expected_tick_at_for(value, %DateTime{} = now, slack_s)
+      when is_integer(slack_s) and slack_s >= 0 do
+    case expression(value) do
       {:ok, %{reboot?: false} = expression} ->
         # `last_at/2` answers the newest slot at or before the minute *before*
         # the time it is given; a minute later makes that `now - slack_s`.

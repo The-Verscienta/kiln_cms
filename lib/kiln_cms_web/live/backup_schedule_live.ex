@@ -922,7 +922,10 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   attr :stale_tick, :any, required: true
   attr :media_dir?, :boolean, required: true
 
-  defp warnings(assigns) do
+  # Public for its test: `scheduler_cron: :never_matches` comes only from an
+  # Oban that parses a cron naming no real date, which 2.24 doesn't (#2935).
+  @doc false
+  def warnings(assigns) do
     assigns =
       assign(
         assigns,

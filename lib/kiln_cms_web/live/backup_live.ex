@@ -1190,11 +1190,29 @@ defmodule KilnCMSWeb.BackupLive do
       </h2>
 
       <p
-        :if={is_list(@status.schedules) and not @status.scheduler_enabled?}
+        :if={is_list(@status.schedules) and @status.scheduler_cron == :off}
         id="backup-schedules-off"
         class="mt-2 text-xs text-warning-ink"
       >
         {gettext("In-app schedules are turned off (KILN_BACKUP_SCHEDULER_CRON).")}
+      </p>
+      <p
+        :if={is_list(@status.schedules) and @status.scheduler_cron == :invalid}
+        id="backup-schedules-invalid"
+        class="mt-2 text-xs text-warning-ink"
+      >
+        {gettext(
+          "In-app schedules don't run: KILN_BACKUP_SCHEDULER_CRON isn't a valid cron expression."
+        )}
+      </p>
+      <p
+        :if={is_list(@status.schedules) and @status.scheduler_cron == :never_matches}
+        id="backup-schedules-never"
+        class="mt-2 text-xs text-warning-ink"
+      >
+        {gettext(
+          "In-app schedules never run: KILN_BACKUP_SCHEDULER_CRON only matches a date that doesn't exist, such as 31 February."
+        )}
       </p>
       <p
         :if={is_list(@status.schedules) and @status.scheduler_enabled? and not @status.available?}

@@ -426,6 +426,29 @@ defmodule KilnCMS.Backups.SchedulerTest do
       assert Scheduler.expected_tick_at(~U[2026-03-01 10:03:30Z], 60) == nil
     end
 
+    # The path the Schedule tab takes, with an expression that never matches,
+    # built by hand since Oban 2.24 won't parse one. Without the
+    # `matches_some_date?/1` guard `last_at/2` searches back forever; the
+    # timeout turns that into a failure.
+    @tag timeout: 10_000
+    test "expected_tick_at_for/3: nil at once for an expression that never matches" do
+      feb31 = %{
+        Oban.Cron.Expression.parse!("0 0 1 1 *")
+        | days: MapSet.new([31]),
+          months: MapSet.new([2])
+      }
+
+      assert Scheduler.expected_tick_at_for(feb31, ~U[2026-03-01 10:03:30Z], 60) == nil
+      assert Scheduler.cron_state(feb31) == :never_matches
+
+      # A parsed expression that matches is read like the configured one.
+      assert Scheduler.expected_tick_at_for(
+               Oban.Cron.Expression.parse!("0 0 1 * *"),
+               ~U[2026-03-15 12:00:00Z],
+               60
+             ) == ~U[2026-03-01 00:00:00Z]
+    end
+
     # The bound itself, on expressions built by hand: Oban 2.24 won't parse one
     # that never matches, an older or later release may.
     test "matches_some_date?/1: a day that exists in a month named" do

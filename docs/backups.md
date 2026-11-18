@@ -2674,7 +2674,11 @@ reads all of this again every minute, and leaves an open form as it is.
   (BACKUP_STALE_AFTER_HOURS; host cron backs it up too)"
   ([below](#how-a-schedule-sets-the-alarm-threshold)). When schedules exist,
   it warns "In-app schedules are turned off (KILN_BACKUP_SCHEDULER_CRON)."
-  or "Scheduled backups can't run here: `<reason>`".
+  (`false`), "In-app schedules don't run: KILN_BACKUP_SCHEDULER_CRON isn't a
+  valid cron expression.", "In-app schedules never run:
+  KILN_BACKUP_SCHEDULER_CRON only matches a date that doesn't exist, such as
+  31 February." ([The scheduler job](#the-scheduler-job)), or "Scheduled
+  backups can't run here: `<reason>`".
 
 **On the Overview page**, once an enabled schedule exists, the platform
 admins' backup strips (the neutral "Backups aren't set up yet" one and the red

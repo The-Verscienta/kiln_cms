@@ -2809,6 +2809,27 @@ defmodule KilnCMSWeb.BackupLiveTest do
                "In-app schedules are turned off (KILN_BACKUP_SCHEDULER_CRON)."
              )
 
+      refute has_element?(lv, "#backup-schedules-invalid")
+
+      refute has_element?(lv, "#backup-next-scheduled")
+    end
+
+    # #2935: an unparseable value (31 February is one on Oban 2.24) is not
+    # "turned off".
+    test "with a scheduler cron that isn't valid, it says so, not that it is off", %{conn: conn} do
+      admin = authed_user(:admin)
+      force!(schedule!(%{}, admin), baseline_at: @baseline)
+      put_cron("0 0 31 2 *")
+
+      lv = mount_backups(conn, admin)
+
+      assert has_element?(
+               lv,
+               "#backup-schedules-invalid",
+               "In-app schedules don't run: KILN_BACKUP_SCHEDULER_CRON isn't a valid cron expression."
+             )
+
+      refute has_element?(lv, "#backup-schedules-off")
       refute has_element?(lv, "#backup-next-scheduled")
     end
 
