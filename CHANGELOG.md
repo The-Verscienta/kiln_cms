@@ -357,7 +357,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#3097](https://github.com/The-Verscienta/kiln_cms/pull/3097) · [long form](docs/changelog/unreleased.md#backup-media-list-close))
 
 - **The Backups and Schedule pages now say when `KILN_BACKUP_SCHEDULER_CRON` isn't a valid cron expression, or can only match a date that doesn't exist, instead of calling it "turned off"; a never-matching expression can no longer hang the Schedule tab.**
-  ([long form](docs/changelog/unreleased.md#backup-scheduler-cron-states))
+  ([#3098](https://github.com/The-Verscienta/kiln_cms/pull/3098) · [long form](docs/changelog/unreleased.md#backup-scheduler-cron-states))
 
 ### Security
 
