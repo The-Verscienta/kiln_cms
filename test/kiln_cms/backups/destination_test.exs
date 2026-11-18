@@ -349,6 +349,14 @@ defmodule KilnCMS.Backups.DestinationTest do
                "stopped before the step's time ran out; it resumes when the backup is " <>
                  "resumed or runs again"
 
+      # The env destination, or an adapter that can't resume: sent again whole.
+      assert Destination.format_reason(:deadline, resumable?: false) ==
+               "stopped before the step's time ran out; it is sent again on the next attempt"
+
+      assert Destination.format_reason(:deadline, resumable?: false, next_attempt?: false) ==
+               "stopped before the step's time ran out; it is sent again when the backup is " <>
+                 "resumed or runs again"
+
       assert Destination.format_reason(:deadline, []) == Destination.format_reason(:deadline)
 
       # Any other reason reads as format_reason/1 has it.

@@ -531,20 +531,28 @@ defmodule KilnCMS.Backups.Destination do
   def format_reason(reason), do: inspect(reason)
 
   @doc """
-  `format_reason/1`, said for whether the step tries this destination again
-  (`next_attempt?:`, default `true`). Only `:deadline` reads differently: an
-  upload stopped at the step's deadline resumes on the next attempt when
-  there is one, and otherwise (the step's last attempt, or a destination it
-  failed now) when the backup is resumed or runs again.
+  `format_reason/1`, said for what follows. Only `:deadline` reads
+  differently, by two options:
+
+    * `:next_attempt?` (default `true`) - whether an attempt of the step
+      follows that tries the file again; without one (the step's last
+      attempt, or a destination it failed now), the backup's Resume or its
+      next run does;
+    * `:resumable?` (default `true`) - whether the upload is recorded, so it
+      resumes mid-file; otherwise (the env destination, an adapter that
+      can't resume) the file is sent again whole.
   """
   @spec format_reason(term(), keyword()) :: String.t()
   def format_reason(:deadline, opts) do
-    resumes =
-      if Keyword.get(opts, :next_attempt?, true),
-        do: "the upload resumes on the next attempt",
-        else: "it resumes when the backup is resumed or runs again"
+    after_this =
+      case {Keyword.get(opts, :resumable?, true), Keyword.get(opts, :next_attempt?, true)} do
+        {true, true} -> "the upload resumes on the next attempt"
+        {true, false} -> "it resumes when the backup is resumed or runs again"
+        {false, true} -> "it is sent again on the next attempt"
+        {false, false} -> "it is sent again when the backup is resumed or runs again"
+      end
 
-    "stopped before the step's time ran out; " <> resumes
+    "stopped before the step's time ran out; " <> after_this
   end
 
   def format_reason(reason, _opts), do: format_reason(reason)

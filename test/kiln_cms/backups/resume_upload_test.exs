@@ -154,6 +154,31 @@ defmodule KilnCMS.Backups.ResumeUploadTest do
     assert_received {:resumable_fake, :abort, %{upload_id: "stale"}, _pid}
   end
 
+  test "an upload stopped at the deadline resumes on the next attempt, until the last one " <>
+         "(#3082)",
+       %{store: store} do
+    dest = resumable!(store, %{"put_return" => "deadline"})
+
+    assert {:error, _} = BackupChain.run()
+    run = run!()
+
+    failed = for entry <- run.log, entry.message =~ "to Resumable failed: ", do: entry.message
+    assert [_, _ | _] = failed
+    {earlier, [last]} = Enum.split(failed, -1)
+
+    for message <- earlier do
+      assert message =~
+               "stopped before the step's time ran out; the upload resumes on the next attempt"
+    end
+
+    assert last =~ "it resumes when the backup is resumed or runs again"
+
+    assert %{status: :failed, error: error} = dest_entry(run, dest)
+    assert error =~ "it resumes when the backup is resumed or runs again"
+
+    for text <- [last, error], do: refute(text =~ "next attempt" or text =~ "sent again")
+  end
+
   test "a file already on the destination counts as sent, and the run completes", %{
     store: store
   } do

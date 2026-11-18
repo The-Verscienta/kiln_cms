@@ -513,8 +513,8 @@ defmodule KilnCMS.Backups.FanoutTest do
       assert %{status: :ok} = entry(run, "dest:" <> c.id)
     end
 
-    test "an upload stopped at the deadline resumes on the next attempt, until the last " <>
-           "one (#3082)",
+    test "a file stopped at the deadline by an adapter that can't resume is sent again: on " <>
+           "the next attempt, until the last one (#3082)",
          %{base: base} do
       log = Path.join(base, "b.log")
       b = fake!("Slow", 1, %{"put_mode" => "deadline", "log" => log})
@@ -536,16 +536,15 @@ defmodule KilnCMS.Backups.FanoutTest do
 
       for message <- earlier do
         assert message =~
-                 "stopped before the step's time ran out; the upload resumes on the " <>
-                   "next attempt"
+                 "stopped before the step's time ran out; it is sent again on the next attempt"
       end
 
-      assert last =~ "it resumes when the backup is resumed or runs again"
-      refute last =~ "next attempt"
+      assert last =~ "it is sent again when the backup is resumed or runs again"
 
       assert %{status: :failed, error: error} = entry(run, "dest:" <> b.id)
-      assert error =~ "it resumes when the backup is resumed or runs again"
-      refute error =~ "next attempt"
+      assert error =~ "it is sent again when the backup is resumed or runs again"
+
+      for text <- [last, error], do: refute(text =~ "resumes on the next")
       assert %{status: :ok} = entry(run, "dest:" <> c.id)
     end
 

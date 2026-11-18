@@ -277,6 +277,8 @@ defmodule KilnCMS.Test.BackupDestinations do
         (or to be killed);
       * `"abort_mode"` — `"fail"`: `abort_upload/3` refuses;
       * `"put_return"` — `"weird_ok"`: `put/3` answers `{:ok, :weird}`;
+        `"deadline"`: `{:error, :deadline}`, as one that stopped at the
+        step's deadline does (#3082);
       * `"notify"` — a pid, or one as `:erlang.pid_to_list/1` text (a stored
         destination's settings can't hold a pid), told
         `{:resumable_fake, event, data, self()}` of `:put`, `:saved`,
@@ -325,6 +327,9 @@ defmodule KilnCMS.Test.BackupDestinations do
       case settings do
         %{"put_return" => "weird_ok"} ->
           {:ok, :weird}
+
+        %{"put_return" => "deadline"} ->
+          {:error, :deadline}
 
         %{"present" => "true"} ->
           {:ok, :already_present}
