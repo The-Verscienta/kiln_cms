@@ -1113,7 +1113,62 @@ defmodule KilnCMS.Backups.ChainTest do
       assert Path.wildcard(Path.join([dir, "media", "kiln-media-*"])) == []
       assert [%{status: :failed, error: error}] = runs()
       assert error =~ "Not enough free space for the media archive in "
-      assert error =~ "0 MB free, about 0 MB needed"
+      assert error =~ "0 KB free, about 2 KB needed"
+    end
+
+    # The filtered copy of a part's list fails its close at archive time
+    # (#2423): the part fails, is not recorded, and the parts before it are.
+    # A Resume then needs room only for the parts still to archive.
+    test "a part whose filtered list can't be written fails, unrecorded; a Resume's estimate " <>
+           "leaves out the parts already done",
+         %{dir: dir} do
+      # Three plan lists and part 1's filtered list close; then every close
+      # fails, so part 2 fails on each attempt.
+      closes = :counters.new(1, [])
+
+      set_config(
+        media_list_close: fn io ->
+          :ok = :file.close(io)
+          :counters.add(closes, 1, 1)
+          if :counters.get(closes, 1) > 4, do: {:error, :enospc}, else: :ok
+        end
+      )
+
+      {:ok, %{status: :started, chain: chain}} = request()
+      step_until("archive", 2)
+      %{stamp: stamp} = lock()
+
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+        assert {:error, {:write_list, :enospc}} = BackupChain.settled(chain)
+      end)
+
+      assert [%{status: :failed, error: error}] = runs()
+      assert error == "Could not write the media archive's file lists (no space left on device)"
+      {:ok, state} = WorkState.read(WorkState.path(dir, stamp))
+      assert WorkState.part(state, 1)
+      refute WorkState.part(state, 2)
+      [p1, p2] = Enum.map(1..2, &Path.join([dir, "media", Artifact.part_name(stamp, &1)]))
+      assert File.regular?(p1)
+      refute File.exists?(p2)
+
+      # Room for parts 2 and 3 (1200 bytes + 10% = 1320), not for all three
+      # (1980): the resume goes ahead only if part 1 is left out.
+      set_config(
+        media_list_close: nil,
+        free_space_margin_bytes: 0,
+        free_space: fn _path -> {:ok, 1500} end
+      )
+
+      assert :ok = BackupChain.resume(stamp)
+      assert [%{status: :succeeded}] = runs()
+    end
+
+    test "with the check off, a disk that reads as full refuses nothing" do
+      set_config(free_space_check: false, free_space: fn _path -> {:ok, 0} end)
+
+      assert :ok = BackupChain.run()
+      assert [%{status: :succeeded}] = runs()
     end
 
     test "free space that can't be read is noted on the run, and the backup goes ahead" do
@@ -1126,7 +1181,8 @@ defmodule KilnCMS.Backups.ChainTest do
         for %{level: :warn, message: "Could not read the free space" <> _} = entry <- log,
             do: entry.step
 
-      assert Enum.sort(warnings) == ["dump", "media"]
+      # The dump, the media and the media's lists in `.work`.
+      assert Enum.sort(warnings) == ["dump", "media", "media"]
     end
 
     # A delayed write that fails is reported by the list's close (#2423); the

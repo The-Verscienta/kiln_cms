@@ -5,6 +5,11 @@ config :kiln_cms, Oban, testing: :manual
 # timer against the sandbox. Tests drive `KilnCMS.Backups.Heartbeat.tick/1`.
 config :kiln_cms, KilnCMS.Backups, heartbeat?: false
 
+# The free-space check (#2423) reads a fixed 1 PB, not the runner's disk, so
+# the backup tests pass on a nearly full CI runner. Tests that check the
+# check set their own reading; one reads the real `df`.
+config :kiln_cms, KilnCMS.Backups, free_space: fn _path -> {:ok, 1_125_899_906_842_624} end
+
 # Directory queues (#2845) on, as in production, but driven through a recorder:
 # under `testing: :manual` Oban's notifier still runs, so a real
 # `Oban.start_queue/1` would start a producer fetching from the sandbox.

@@ -1429,7 +1429,8 @@ defmodule KilnCMS.Backups.Steps do
 
     result =
       with {:ok, plan, state, rec} <- result,
-           {:ok, rec} <- preflight(rec, :media, target_dir, unarchived_bytes(plan, state)) do
+           {:ok, rec} <- preflight(rec, :media, target_dir, unarchived_bytes(plan, state)),
+           {:ok, rec} <- preflight(rec, :lists, ctx.work_dir, lists_bytes(plan)) do
         {:ok, plan, state, rec}
       end
 
@@ -1451,7 +1452,8 @@ defmodule KilnCMS.Backups.Steps do
       {:error, {:not_enterable, _rel} = reason} ->
         {:fatal, reason, state, Recorder.log(rec, :error, "media", describe(reason))}
 
-      # Too little free space for the parts (#2423), logged by `preflight/4`.
+      # Too little free space for the parts or their lists (#2423), logged by
+      # `preflight/4`.
       {:error, {:insufficient_space, _} = reason, rec} ->
         {:fatal, reason, state, rec}
 
@@ -1468,6 +1470,11 @@ defmodule KilnCMS.Backups.Steps do
     |> Enum.map(& &1.bytes)
     |> Enum.sum()
   end
+
+  # What a part's filtered copy of its list can take in the work directory,
+  # which may be on a disk of its own.
+  defp lists_bytes(plan),
+    do: Preflight.lists_estimate(Enum.map(plan.parts, &Path.join(plan.work_dir, &1.list)))
 
   # An earlier set's files under this stamp, moved aside under the lease and
   # deleted outside it (`discard/4`).

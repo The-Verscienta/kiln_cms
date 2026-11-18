@@ -156,4 +156,11 @@ backup_opts =
       end
   end
 
+# The free-space check before a backup writes its dump or its media (#2423).
+# On by default; off for a library the estimate refuses although it fits
+# (its input size is an upper bound). `scripts/backup.sh` reads the same
+# variable. An unrecognized value keeps it on and warns.
+backup_opts =
+  Keyword.put(backup_opts, :free_space_check, Env.flag("BACKUP_FREE_SPACE_CHECK", true))
+
 config :kiln_cms, KilnCMS.Backups, backup_opts

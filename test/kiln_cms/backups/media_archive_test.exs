@@ -761,6 +761,46 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
       refute File.exists?(Path.join(ctx.work, "plan.json"))
     end
 
+    # The part's filtered copy of its list is a delayed write too (#2423): a
+    # failed flush must not hand tar a list cut short, which would give a part
+    # that lists cleanly with files missing.
+    test "a filtered list whose close fails fails the part; nothing is renamed into place",
+         ctx do
+      for n <- 1..2, do: put(ctx.media, "f#{n}", String.duplicate("q", 400))
+      plan = plan!(ctx, part_bytes: 500)
+      parent = self()
+
+      close = fn io ->
+        :ok = :file.close(io)
+        send(parent, :closed)
+        {:error, :enospc}
+      end
+
+      rename = fn from, to ->
+        send(parent, {:rename, from, to})
+        File.rename(from, to)
+      end
+
+      log =
+        capture_log(fn ->
+          assert {:error, {:write_list, :enospc}} =
+                   MediaArchive.archive_part(plan, 1, ctx.out,
+                     tag: "8-1",
+                     rename: rename,
+                     close: close
+                   )
+        end)
+
+      # Tried twice, as any failed part is; tar never ran on the short list.
+      assert_received :closed
+      assert_received :closed
+      assert log =~ "retrying once"
+      refute_received {:rename, _, _}
+      refute File.exists?(Path.join(ctx.out, Artifact.part_name(@stamp, 1)))
+      assert partials(ctx.tmp) == []
+      assert Path.wildcard(Path.join(ctx.work, "*.run.list")) == []
+    end
+
     test "load_plan/2 joins only list names it could have written", ctx do
       put(ctx.media, "f", "1")
       plan!(ctx, tag: "3-1")

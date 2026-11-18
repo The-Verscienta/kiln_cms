@@ -180,6 +180,11 @@ config :kiln_cms, KilnCMS.Backups,
   # globs (#2218). Overridden by BACKUP_MEDIA_PART_MB / BACKUP_MEDIA_EXCLUDE.
   media_part_bytes: 400 * 1_048_576,
   media_exclude: [],
+  # The free-space check before the dump and the media (#2423,
+  # `KilnCMS.Backups.Preflight`): on, with a 256 MB margin on top of each
+  # estimate plus 10%. Overridden by BACKUP_FREE_SPACE_CHECK.
+  free_space_check: true,
+  free_space_margin_bytes: 256 * 1_048_576,
   # Each node's backup heartbeat (#2218, `KilnCMS.Backups.Heartbeat`): beats
   # every 30 s, frees the backup lock from a node that stopped. Off in test.
   heartbeat?: true

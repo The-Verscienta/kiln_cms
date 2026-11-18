@@ -152,7 +152,8 @@ defmodule KilnCMS.Backups.MediaArchive do
   plan then fails with `{:error, {:write_list, reason}}` and, with a `:tag`,
   removes the lists it wrote; `plan.json` is not written. `:close` (default
   `:file.close/1`, or `config :kiln_cms, KilnCMS.Backups, media_list_close:`,
-  set in tests only) lets a test make that close fail on any OS (#2423).
+  set in tests only) lets a test make that close fail on any OS (#2423); it
+  also closes the filtered copy `archive_part/4` writes of each list.
 
   A folder that can be listed but not entered (read permission without
   execute) fails the plan with `{:error, {:not_enterable, rel}}`, `rel` its
@@ -672,7 +673,10 @@ defmodule KilnCMS.Backups.MediaArchive do
 
   Options: `:tar` (executable; default the `tar` on `PATH`), `:tag` and
   `:rename` (see "Archiving"; `KilnCMS.Backups.WorkState.write/3` documents
-  the two).
+  the two), and `:close`, as for `plan/3`: the part's filtered list is also
+  written with `:delayed_write`, and a close that fails (a failed flush) fails
+  the attempt with `{:error, {:write_list, reason}}` rather than handing tar a
+  list cut short.
 
   The result carries the final `name` (from `Artifact.set_names/2`), its `bytes`
   and `sha256` as measured on disk before the rename, `dropped` (list entries
@@ -717,7 +721,7 @@ defmodule KilnCMS.Backups.MediaArchive do
     filtered = Path.join(plan.work_dir, run_list_name(part.index, tag))
 
     result =
-      with {:ok, kept, dropped} <- filter_list(plan, part, filtered),
+      with {:ok, kept, dropped} <- filter_list(plan, part, filtered, opts[:close] || list_close()),
            :ok <- run_archive(tar, plan.media_dir, filtered, partial, kept),
            :ok <- run_tar(tar, ["-tzf", partial]),
            :ok <- File.chmod(partial, 0o600),
@@ -775,39 +779,51 @@ defmodule KilnCMS.Backups.MediaArchive do
   # Copy the part's list to `filtered`, dropping entries that no longer exist
   # (lstat, so a dangling symlink is still a file to keep).
   # sobelow_skip ["Traversal.FileModule"]
-  defp filter_list(plan, part, filtered) do
+  defp filter_list(plan, part, filtered, close) do
     source = Path.join(plan.work_dir, part.list)
 
     with {:ok, out} <- :file.open(filtered, [:write, :raw, :binary, :delayed_write]) do
       File.chmod(filtered, 0o600)
 
-      try do
-        case each_entry(source, {0, 0, :ok}, fn entry, {kept, dropped, status} ->
-               if status == :ok and present?(plan.media_dir, entry) do
-                 {kept + 1, dropped, :file.write(out, [entry, 0])}
-               else
-                 {kept, dropped + 1, status}
-               end
-             end) do
-          {:error, _} = error ->
-            error
+      copied = each_entry(source, {0, 0, :ok}, &copy_present(&1, &2, plan.media_dir, out))
 
-          {kept, dropped, :ok} ->
-            if dropped > 0 do
-              Logger.warning(
-                "Media archive part #{part.index}: #{dropped} listed file(s) vanished since planning and were left out"
-              )
-            end
+      # Closed whatever happened, and its result kept (#2423): a delayed
+      # write reports a failed flush (ENOSPC, EIO) here, and a list cut short
+      # would hand tar fewer files, giving a part that lists cleanly with
+      # files missing. (A raise above ends the step's process, which closes
+      # the file.)
+      closed = close.(out)
 
-            {:ok, kept, dropped}
+      case {copied, closed} do
+        {{:error, _} = error, _closed} ->
+          error
 
-          {_kept, _dropped, {:error, _} = error} ->
-            error
-        end
-      after
-        :file.close(out)
+        {{_kept, _dropped, {:error, _} = error}, _closed} ->
+          error
+
+        {{_kept, _dropped, :ok}, {:error, reason}} ->
+          {:error, {:write_list, reason}}
+
+        {{kept, dropped, :ok}, :ok} ->
+          note_dropped(part, dropped)
+          {:ok, kept, dropped}
       end
     end
+  end
+
+  # Keep `entry` if it is still there, until a write fails.
+  defp copy_present(entry, {kept, dropped, status}, media_dir, out) do
+    if status == :ok and present?(media_dir, entry),
+      do: {kept + 1, dropped, :file.write(out, [entry, 0])},
+      else: {kept, dropped + 1, status}
+  end
+
+  defp note_dropped(_part, 0), do: :ok
+
+  defp note_dropped(part, dropped) do
+    Logger.warning(
+      "Media archive part #{part.index}: #{dropped} listed file(s) vanished since planning and were left out"
+    )
   end
 
   defp present?(media_dir, <<"./", rel::binary>>),

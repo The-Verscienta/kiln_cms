@@ -1461,7 +1461,7 @@ attempts:
 |---|---|---|
 | A media part changed on disk between being archived and being checksummed | "Media part(s) changed on disk between being archived and being checksummed: `<names>`. Something other than this backup wrote to the backup directory; Resume rebuilds the changed part(s)." | Find what writes to `BACKUP_DIR`, then **Resume**: it rebuilds only the parts whose hash no longer matches. |
 | A file refused before its off-site copy, at any destination | "Off-site copy REFUSED for …" | [When an off-site copy is refused](#when-an-off-site-copy-is-refused). |
-| Too little free space for the dump or the media (#2423) | "Not enough free space for the database dump in `<dir>`: 1.1 GB free, about 3.4 GB needed. Free up space there, or point BACKUP_DIR at a larger disk" (or "the media archive") | Free space on that disk, or move `BACKUP_DIR`, then take a new backup or **Resume**. See **Disk space** in [Media backups in parts](#media-backups-in-parts-2218). |
+| Too little free space for the dump or the media (#2423) | "Not enough free space for the database dump in `<dir>`: 1.1 GB free, about 3.4 GB needed. Free up space there, or point BACKUP_DIR at a larger disk (BACKUP_FREE_SPACE_CHECK=false skips this check)" (or "the media archive", "the media file lists") | Free space on that disk, or move `BACKUP_DIR`, then take a new backup or **Resume**. If the media would fit after compression, set `BACKUP_FREE_SPACE_CHECK=false`. See **Disk space** in [Media backups in parts](#media-backups-in-parts-2218). |
 | The work state is gone, or belongs to another backup (except at a finish that had already closed the run, [above](#how-an-in-app-backup-runs-2218)) | "The backup's work state (.work/`<stamp>`/state.json) is missing or belongs to another backup; nothing more can be done for this one" | Take a new backup. No failure manifest is written, so the panel keeps showing the previous backup. |
 
 **When a backup fails**, it writes a failure manifest (when its `state.json`
@@ -3195,14 +3195,22 @@ the fallback. The reasoning is in [ADR 0037](decisions/0037-a-resume-reuses-a-fi
 media parts, plus one part being written, plus the file lists. Before the
 dump, and again before the first media part, the app and `backup.sh` check
 the free space where they are about to write (`df -Pk` on `BACKUP_DIR/db` or
-`BACKUP_DIR/media`) against an estimate plus 10% plus a 256 MB margin. The
-dump's estimate is the size of the newest earlier dump (0 for a first backup);
-the media's is the input size of the parts still to archive. Too little room
-fails the run at once, with no retries, naming the free space and what was
-needed: free up space, or point `BACKUP_DIR` at a larger disk. If `df` can't be
-read, the run warns and goes ahead. In the app, `config :kiln_cms,
-KilnCMS.Backups, free_space_margin_bytes:` changes the margin; `backup.sh`
-always uses 256 MB.
+`BACKUP_DIR/media`; the app also checks `.work/`, where its lists are)
+against an estimate plus 10% plus a 256 MB margin. The dump's estimate is the
+size of the newest earlier dump (0 for a first backup); the media's is the
+uncompressed input size of the parts still to archive. Too little room fails
+the run at once, with no retries, naming the free space and what was needed:
+free up space, or point `BACKUP_DIR` at a larger disk. If `df` can't be read,
+the run warns and goes ahead.
+
+The media estimate is an upper bound. Photos and video are compressed already,
+so their parts come out about that size, but TIFF, BMP, SVG, uncompressed
+audio and sparse files shrink, and a file linked under two names counts twice.
+If a library like that is refused although it fits, or `df` misreports the
+disk (some network and FUSE file systems), set `BACKUP_FREE_SPACE_CHECK=false`
+for the app and the cron line; a disk that then fills fails the step as
+before. In the app, `config :kiln_cms, KilnCMS.Backups,
+free_space_margin_bytes:` changes the margin; `backup.sh` always uses 256 MB.
 
 **Retention and off-site.** Retention deletes a media set whole (every part,
 then the sidecar), aged by its newest file, so a sweep can never leave half a

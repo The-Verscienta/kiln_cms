@@ -29,6 +29,10 @@
 #                        600 and warns on stderr) — the same variable the app
 #                        reads
 #   BACKUP_DIR           where backups land (default: /var/backups/kiln)
+#   BACKUP_FREE_SPACE_CHECK refuse a dump or media archive that would not fit
+#                        (default on; false/0/no/off skips the check; anything
+#                        else keeps it on and warns) — the same variable the
+#                        app reads; see check_free_space
 #   MEDIA_DIR            uploads root when using the Local storage adapter.
 #                        Leave unset on S3/R2 deployments (back up the bucket
 #                        provider-side instead — see docs/backups.md).
@@ -1058,15 +1062,43 @@ start_heartbeat() {
 # Added to every estimate, after 10% of it: the app's default
 # `free_space_margin_bytes` (256 MB).
 FREE_SPACE_MARGIN_BYTES=$((256 * 1048576))
+# Set once by read_free_space_check, so `all` warns about a bad value once.
+FREE_SPACE_CHECK=""
 
-# $1 = bytes, printed as Preflight.human/1 prints them: whole MB below 1 GB,
-# GB to a tenth (rounded down) from there.
+# FREE_SPACE_CHECK (1 or 0) from BACKUP_FREE_SPACE_CHECK, read like the app's
+# Env.flag/2: blank is on; true/1/yes/on and false/0/no/off in any case;
+# anything else keeps the check on and warns.
+read_free_space_check() {
+  [ -z "$FREE_SPACE_CHECK" ] || return 0
+  local raw="${BACKUP_FREE_SPACE_CHECK:-}" t
+  t="$(trim_ws "$raw" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+  case "$t" in
+    '' | true | 1 | yes | on) FREE_SPACE_CHECK=1 ;;
+    false | 0 | no | off) FREE_SPACE_CHECK=0 ;;
+    *)
+      warn "BACKUP_FREE_SPACE_CHECK=${raw} is not true or false; keeping the free-space check on"
+      FREE_SPACE_CHECK=1
+      ;;
+  esac
+}
+
+# $1 = bytes, $2 = down or up. Prints them as Preflight.human/2 does: KB
+# below 1 MB, whole MB below 1 GB, GB to a tenth from there, rounded down
+# (what is free) or up (what is needed).
 human_bytes() {
-  local b="$1" tenths
-  if [ "$b" -lt 1073741824 ]; then
-    printf '%s MB' "$((b / 1048576))"
+  local b="$1" add=0 unit
+  if [ "$b" -lt 1048576 ]; then
+    unit=1024
+    [ "$2" = down ] || add=$((unit - 1))
+    printf '%s KB' "$(((b + add) / unit))"
+  elif [ "$b" -lt 1073741824 ]; then
+    unit=1048576
+    [ "$2" = down ] || add=$((unit - 1))
+    printf '%s MB' "$(((b + add) / unit))"
   else
-    tenths=$((b * 10 / 1073741824))
+    local tenths
+    [ "$2" = down ] || add=$((1073741824 - 1))
+    tenths=$(((b * 10 + add) / 1073741824))
     printf '%s.%s GB' "$((tenths / 10))" "$((tenths % 10))"
   fi
 }
@@ -1077,31 +1109,61 @@ human_bytes() {
 # estimate plus 10% plus the margin, in the app's words. A `df` that fails or
 # prints something unexpected is warned about and the run goes ahead, as the
 # app does: an unknown is not a reason to stop every backup.
+#
+# Compared in KB, as df reports it: a file system that says it has 16 EiB
+# free (s3fs) overflows bash's 64-bit arithmetic in bytes.
 check_free_space() {
-  local what="$1" dir="$2" estimate="$3" needed avail
+  local what="$1" dir="$2" estimate="$3" needed needed_kb avail
+  read_free_space_check
+  [ "$FREE_SPACE_CHECK" = 1 ] || return 0
   needed=$((estimate * 11 / 10 + FREE_SPACE_MARGIN_BYTES))
-  # POSIX output (-P): one line per file system, available KB in the 4th field
-  # on GNU and BSD df alike.
-  avail="$(df -Pk "$dir" 2>/dev/null | awk 'NR == 2 { print $4 }')" || avail=""
+  needed_kb=$(((needed + 1023) / 1024))
+  # POSIX output (-P), one line per file system. Available is the field two
+  # before the capacity (`NN%`) that follows three whole numbers, not the 4th
+  # field: a file system name may hold a space (`//host/Share Name`). A
+  # negative available (BSD's reserve, overdrawn) reads as none.
+  avail="$(df -Pk "$dir" 2>/dev/null | awk '
+    NR == 2 {
+      for (i = 4; i <= NF; i++) {
+        if ($i ~ /^[0-9]+%$/ && $(i-3) ~ /^[0-9]+$/ && $(i-2) ~ /^[0-9]+$/ && $(i-1) ~ /^-?[0-9]+$/) {
+          print $(i-1)
+          exit
+        }
+      }
+    }')" || avail=""
   case "$avail" in
+    -[0-9]*) avail=0 ;;
     '' | *[!0-9]*)
       warn "could not read the free space in ${dir}; going ahead without the free-space check"
       return 0
       ;;
   esac
-  avail=$((10#$avail * 1024))
-  if [ "$avail" -lt "$needed" ]; then
-    die "Not enough free space for the ${what} in ${dir}: $(human_bytes "$avail") free, about $(human_bytes "$needed") needed. Free up space there, or point BACKUP_DIR at a larger disk"
+  # Strip leading zeros so the number is not read as octal; 0 stays 0.
+  avail="${avail#"${avail%%[!0]*}"}"
+  avail="${avail:-0}"
+  if [ "$avail" -lt "$needed_kb" ]; then
+    die "Not enough free space for the ${what} in ${dir}: $(human_bytes "$((avail * 1024))" down) free, about $(human_bytes "$needed" up) needed. Free up space there, or point BACKUP_DIR at a larger disk (BACKUP_FREE_SPACE_CHECK=false skips this check)"
   fi
 }
 
-# The size of the newest earlier dump in $BACKUP_DIR/db (regular files only,
-# not this run's): the dump estimate, as Preflight.dump_estimate/2. Stamps
-# sort by time, and so does the glob. 0 when there is none.
+# The dump estimate, as Preflight.dump_estimate/2: the size of the regular
+# file kiln-db-<YYYYMMDD-HHMMSS>.dump in $BACKUP_DIR/db with the newest stamp
+# earlier than this run's. A name without a stamp (kiln-db-manual.dump) or
+# stamped later is passed over. Stamps sort by time, and so does the glob.
+# 0 when there is none.
 dump_estimate() {
-  local f newest="" own="kiln-db-${STAMP}.dump"
+  local f name stamp newest=""
+  local d='[0-9]'
   for f in "$BACKUP_DIR"/db/kiln-db-*.dump; do
-    if [ -f "$f" ] && [ ! -L "$f" ] && [ "${f##*/}" != "$own" ]; then newest="$f"; fi
+    name="${f##*/}"
+    # shellcheck disable=SC2254 # the pattern is meant to glob
+    case "$name" in
+      kiln-db-$d$d$d$d$d$d$d$d-$d$d$d$d$d$d.dump) ;;
+      *) continue ;;
+    esac
+    stamp="${name#kiln-db-}"
+    stamp="${stamp%.dump}"
+    if [[ "$stamp" < "$STAMP" ]] && [ -f "$f" ] && [ ! -L "$f" ]; then newest="$f"; fi
   done
   if [ -n "$newest" ]; then
     wc -c < "$newest" | tr -d ' '
@@ -1756,7 +1818,8 @@ cmd_media() {
   if [ "$PLAN_OVERSIZE" -gt 0 ]; then
     warn "${PLAN_OVERSIZE} file(s) larger than the part size were archived as parts of their own"
   fi
-  # Every part is still to be written: cron has no resume.
+  # Every part is still to be written: cron has no resume. Its lists are in
+  # TMPDIR, often a small tmpfs the margin alone would refuse: not checked.
   check_free_space "media archive" "$dir" \
     "$(awk '{ s += $1 } END { printf "%.0f\n", s }' "$WORK_DIR/walk.sizes")"
 
