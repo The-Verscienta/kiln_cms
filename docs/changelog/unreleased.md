@@ -455,6 +455,25 @@ carries the reasoning.
   [Cron backups in parts](../backups.md#cron-backups-in-parts).
   ([#2477](https://github.com/The-Verscienta/kiln_cms/issues/2477))
 
+<a id="backup-free-space-preflight-upgrade"></a>
+
+- **Backups check free space before they write, and refuse at once when the disk is short (#2423). New `BACKUP_FREE_SPACE_CHECK` (default on).**
+  Before the database dump, a backup checks the free space where the dump
+  goes against the newest earlier dump's size plus 10% plus a margin
+  (`free_space_margin_bytes`, 256 MB by default). Before the media parts,
+  it checks the media directory against the input size of the parts still
+  to archive, and the work directory against the largest file list. A
+  shortfall fails the run at once, without retries:
+  `Not enough free space for the database dump in <dir>: <X> free, about <Y> needed. Free up space there, or point BACKUP_DIR at a larger disk (BACKUP_FREE_SPACE_CHECK=false skips this check)`.
+  When the free space can't be read, the run warns and goes ahead.
+  `scripts/backup.sh` makes the same dump and media checks. The media
+  estimate is the uncompressed input, an upper bound: media that compresses
+  well (TIFF, BMP, raw audio), sparse files or hard links can make it too
+  high, and a host that fit before can now be refused. Free up space, or
+  set `BACKUP_FREE_SPACE_CHECK=false`. No migration; rolling back is safe.
+  See **Disk space** in [Media backups in parts](../backups.md#media-backups-in-parts-2218).
+  ([#2423](https://github.com/The-Verscienta/kiln_cms/issues/2423))
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -2563,6 +2582,17 @@ carries the reasoning.
   Also tested now on the cron side: a failed off-site copy of a part set's
   checksum sidecar fails the run, as it already did in the app.
   ([#2477](https://github.com/The-Verscienta/kiln_cms/issues/2477))
+
+<a id="backup-media-list-close"></a>
+
+- **A media part whose file list couldn't be fully written now fails, instead of archiving fewer files (#2423).**
+  The media step writes each part's list of files with buffered writes, and
+  ignored the result of closing it. When the last write failed at close
+  (for example the disk filled up), tar archived the shorter list, the part
+  verified, and it was recorded with files it didn't hold. A failed close
+  now fails the part with `Could not write the media archive's file lists (<reason>)`,
+  and the step is retried.
+  ([#2423](https://github.com/The-Verscienta/kiln_cms/issues/2423))
 
 ## Security
 

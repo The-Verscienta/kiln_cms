@@ -23,7 +23,7 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
   """
   use ExUnit.Case, async: false
 
-  alias KilnCMS.Backups.{Artifact, Checksum, MediaArchive, Retention}
+  alias KilnCMS.Backups.{Artifact, Checksum, MediaArchive, Preflight, Retention}
   alias KilnCMS.Backups.Retention.Policy
   alias KilnCMS.Test.ShellTools
 
@@ -76,6 +76,11 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     """)
 
     stub!(bin, "pg_restore", "#!/bin/sh\nexit 0\n")
+
+    # A disk with 1 PB free (#2423), so no test depends on the runner's own
+    # free space; "the free-space check" stubs its own, and one reads the
+    # real `df`.
+    stub_df!(%{bin: bin}, 1_099_511_627_776)
 
     %{tmp: tmp, media: media, backups: backups, bin: bin, scratch: scratch}
   end
@@ -1987,6 +1992,184 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert out =~ "1 excluded by BACKUP_MEDIA_EXCLUDE"
       assert manifest!(ctx)["ok"]
       refute "./locked/inside.bin" in List.flatten(cron_lists(ctx))
+    end
+  end
+
+  # A stub `df` on PATH stands in for the disk (#2423). The script's margin is
+  # the app's default; the refusal is the app's sentence (`Preflight`).
+  describe "the free-space check" do
+    defp stub_df!(ctx, available_kb) do
+      stub!(ctx.bin, "df", """
+      #!/bin/sh
+      echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'
+      echo '/dev/stub 999999999 0 #{available_kb} 1% /'
+      """)
+    end
+
+    defp shortfall(component, path, free, needed) do
+      Preflight.describe(
+        {:insufficient_space, %{component: component, path: path, free: free, needed: needed}}
+      )
+    end
+
+    test "refuses the dump before pg_dump runs when there is too little room", ctx do
+      stub_df!(ctx, 1024)
+      # The newest earlier dump is the estimate: 100 MB, plus 10%, plus 256 MB.
+      earlier = dump!(ctx, "20260101-030000")
+      {:ok, io} = :file.open(earlier, [:read, :write, :binary])
+      {:ok, _} = :file.position(io, 100 * @mb)
+      :ok = :file.truncate(io)
+      :ok = :file.close(io)
+
+      db = Path.join(ctx.backups, "db")
+      message = shortfall(:db, db, @mb, div(100 * @mb * 11, 10) + 256 * @mb)
+      assert message =~ "1 MB free, about 366 MB needed"
+
+      assert {out, status} = backup(ctx, "all")
+      assert status != 0
+      assert out =~ "error: " <> message
+      refute out =~ "pg_dump →"
+      assert Path.wildcard(Path.join(db, "kiln-db-*.dump")) == [earlier]
+      refute manifest!(ctx)["ok"]
+      assert manifest!(ctx)["error"] == message
+    end
+
+    test "refuses the media after the dump when only the dump fits", ctx do
+      # The margin and 999 bytes: room for the dump (no earlier one), not for
+      # six 300-byte files plus 10%.
+      free = 256 * @mb + 1024
+      stub_df!(ctx, div(free, 1024))
+      media = Path.join(ctx.backups, "media")
+
+      assert {out, status} = backup(ctx, "all")
+      assert status != 0
+      assert out =~ "pg_dump →"
+      assert out =~ "error: " <> shortfall(:media, media, free, 1980 + 256 * @mb)
+      refute out =~ "Archiving media part"
+      assert media_dir_listing(ctx) == []
+    end
+
+    test "warns and goes ahead when free space can't be read", ctx do
+      stub!(ctx.bin, "df", "#!/bin/sh\necho 'df: nope' >&2\nexit 1\n")
+
+      assert {out, 0} = backup(ctx, "all")
+
+      assert out =~
+               "warning: could not read the free space in #{ctx.backups}/db; " <>
+                 "going ahead without the free-space check"
+
+      assert out =~ "warning: could not read the free space in #{ctx.backups}/media"
+      assert manifest!(ctx)["ok"]
+    end
+
+    test "passes with room to spare, read from the real df", ctx do
+      File.rm!(Path.join(ctx.bin, "df"))
+      assert {out, 0} = backup(ctx, "all")
+      refute out =~ "free space"
+      assert manifest!(ctx)["ok"]
+    end
+
+    # 16 EiB in KB is 2^54: in bytes it would overflow bash's arithmetic.
+    test "a file system reporting 16 EiB free (s3fs) passes", ctx do
+      stub_df!(ctx, 18_014_398_509_481_984)
+      assert {out, 0} = backup(ctx, "all")
+      refute out =~ "free space"
+      assert manifest!(ctx)["ok"]
+    end
+
+    test "reads Available on a file system whose name has a space", ctx do
+      stub!(ctx.bin, "df", """
+      #!/bin/sh
+      echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'
+      echo '//host/Share Name 1000 999 1 100% /mnt/share'
+      """)
+
+      db = Path.join(ctx.backups, "db")
+      message = shortfall(:db, db, 1024, 256 * @mb)
+      assert message =~ "1 KB free, about 256 MB needed"
+
+      assert {out, status} = backup(ctx, "db")
+      assert status != 0
+      assert out =~ "error: " <> message
+    end
+
+    test "the dump estimate follows only stamped dumps from before this run", ctx do
+      db = Path.join(ctx.backups, "db")
+      File.write!(Path.join(db, "kiln-db-20260101-030000.dump"), String.duplicate("d", 1024))
+
+      # An operator's copy and a dump stamped in the future: 100 MB each,
+      # sparse. Counted, either would refuse a disk with the margin + 10 KB.
+      for name <- ["kiln-db-manual.dump", "kiln-db-29991231-235959.dump"],
+          do: sparse!(Path.join(db, name), 100 * @mb)
+
+      stub_df!(ctx, 256 * 1024 + 10)
+      assert {out, 0} = backup(ctx, "db")
+      refute out =~ "free space"
+
+      # The earlier dump at 100 MB is followed, and refuses (the dump just
+      # written, newer still, is removed first).
+      keep = ~w(kiln-db-20260101-030000.dump kiln-db-manual.dump kiln-db-29991231-235959.dump)
+
+      for path <- Path.wildcard(Path.join(db, "kiln-db-*.dump")),
+          Path.basename(path) not in keep,
+          do: File.rm!(path)
+
+      sparse!(Path.join(db, "kiln-db-20260101-030000.dump"), 100 * @mb)
+      assert {out, status} = backup(ctx, "db")
+      assert status != 0
+      assert out =~ "Not enough free space for the database dump"
+    end
+
+    test "BACKUP_FREE_SPACE_CHECK=false skips the check; an unknown value keeps it, warning",
+         ctx do
+      stub_df!(ctx, 1)
+
+      for off <- ["false", "0", " OFF ", "No"] do
+        assert {out, 0} = backup(ctx, "all", [{"BACKUP_FREE_SPACE_CHECK", off}]), off
+        refute out =~ "free space", off
+      end
+
+      assert {out, status} = backup(ctx, "all", [{"BACKUP_FREE_SPACE_CHECK", "maybe"}])
+      assert status != 0
+
+      assert [_once] =
+               Regex.scan(
+                 ~r/warning: BACKUP_FREE_SPACE_CHECK=maybe is not true or false; keeping the free-space check on/,
+                 out
+               )
+
+      assert out =~ "error: Not enough free space for the database dump"
+    end
+
+    # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
+    unless ShellTools.bash32(),
+      do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
+
+    test "the refusal, 16 EiB, a spaced name and the switch also work under bash 3.2", ctx do
+      bash = ShellTools.bash32()
+      db = Path.join(ctx.backups, "db")
+
+      stub_df!(ctx, 1024)
+      assert {out, status} = backup(ctx, "all", [], bash)
+      assert status != 0
+      assert out =~ "error: " <> shortfall(:db, db, @mb, 256 * @mb)
+      assert manifest!(ctx)["error"] == shortfall(:db, db, @mb, 256 * @mb)
+
+      assert {_out, 0} = backup(ctx, "all", [{"BACKUP_FREE_SPACE_CHECK", "FALSE"}], bash)
+
+      stub_df!(ctx, 18_014_398_509_481_984)
+      assert {_out, 0} = backup(ctx, "all", [], bash)
+
+      stub!(ctx.bin, "df", """
+      #!/bin/sh
+      echo 'Filesystem 1024-blocks Used Available Capacity Mounted on'
+      echo '//host/Share Name 1000 999 1 100% /mnt/share'
+      """)
+
+      # The runs above left dumps, so the estimate is now theirs plus the margin.
+      assert {out, status} = backup(ctx, "db", [], bash)
+      assert status != 0
+      assert out =~ "error: Not enough free space for the database dump in #{db}: 1 KB free"
     end
   end
 

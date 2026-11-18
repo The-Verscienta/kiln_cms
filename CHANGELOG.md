@@ -117,6 +117,9 @@ Every summary line below that was shortened links to its own entry there.
 - **An in-app media backup that skipped a folder it could list but not enter (for example mode 0644) now fails, naming the folder, as cron already did. Fix the folder's permissions or add it to `BACKUP_MEDIA_EXCLUDE`. Cron now also resets an existing `$BACKUP_DIR/media` to 0700 on every run and fails if it can't.**
   ([#3096](https://github.com/The-Verscienta/kiln_cms/pull/3096) · [long form](docs/changelog/unreleased.md#backup-cron-app-parity-upgrade))
 
+- **Backups now check free space before the database dump and before the media parts, and refuse at once when the disk is short (cron too). The new `BACKUP_FREE_SPACE_CHECK=false` turns the check off, for example when media compresses well and the estimate is too high.**
+  ([#3097](https://github.com/The-Verscienta/kiln_cms/pull/3097) · [long form](docs/changelog/unreleased.md#backup-free-space-preflight-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -349,6 +352,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Cron and in-app backups that start in the same second no longer share a stamp: each side steps to a free one, so a failed cron run's cleanup can't remove the app's files.**
   ([#3096](https://github.com/The-Verscienta/kiln_cms/pull/3096) · [long form](docs/changelog/unreleased.md#backup-cron-app-parity))
+
+- **A media part whose file list couldn't be fully written (for example a full disk) now fails, instead of archiving fewer files and passing verification.**
+  ([#3097](https://github.com/The-Verscienta/kiln_cms/pull/3097) · [long form](docs/changelog/unreleased.md#backup-media-list-close))
 
 ### Security
 

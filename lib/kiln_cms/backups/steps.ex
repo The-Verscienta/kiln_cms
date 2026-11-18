@@ -80,7 +80,8 @@ defmodule KilnCMS.Backups.Steps do
   A step that fails is retried (`StepWorker`'s four attempts, 1/5/15 minutes
   apart) unless the failure is one a retry cannot fix: a part that changed
   between archive and checksum (D7), a file refused before its off-site copy
-  (#2481), lost state. On the last attempt, or a failure of that kind, the
+  (#2481), lost state, too little free space for the dump or the media
+  (`KilnCMS.Backups.Preflight`, #2423). On the last attempt, or a failure of that kind, the
   backup fails: a failure manifest (when the state is there), the Run closed
   as failed, the lock released (promoting a queued request), and the job
   canceled with the reason.
@@ -140,6 +141,7 @@ defmodule KilnCMS.Backups.Steps do
     MediaArchive,
     Notices,
     PgUrl,
+    Preflight,
     RcloneRemote,
     Recorder,
     Redact,
@@ -1285,36 +1287,69 @@ defmodule KilnCMS.Backups.Steps do
         {:result, {:cancel, :superseded}}
 
       :build ->
-        case dump_database(ctx.dir, ctx.stamp, ctx.lease) do
-          {:ok, db} ->
-            state =
-              state
-              |> WorkState.put_dump(%{
-                name: Path.basename(db.path),
-                bytes: db.bytes,
-                sha256: db.sha256
-              })
-              |> WorkState.complete("dump")
-              |> put_outputs([db])
+        db_dir = Path.join(ctx.dir, "db")
 
-            rec =
-              rec
-              |> Recorder.add_artifact(db)
-              |> Recorder.log(:info, "dump", "Database dump verified (#{db.bytes} bytes)")
-
-            {:next, next, nil, state, rec}
-
-          {:error, :superseded} ->
-            {:result, {:cancel, :superseded}}
-
-          # The connection string itself is refused (#2831): no retry can
-          # change that, so the run fails now with the reason.
-          {:error, :refused_conninfo = reason} ->
-            {:fatal, reason, state, Recorder.log(rec, :error, "dump", describe(reason))}
-
-          {:error, reason} ->
-            {:retry, reason, state, Recorder.log(rec, :error, "dump", describe(reason))}
+        case preflight(rec, :db, db_dir, Preflight.dump_estimate(db_dir, ctx.stamp)) do
+          {:ok, rec} -> build_dump(ctx, state, rec, next)
+          {:error, reason, rec} -> {:fatal, reason, state, rec}
         end
+    end
+  end
+
+  defp build_dump(ctx, state, rec, next) do
+    case dump_database(ctx.dir, ctx.stamp, ctx.lease) do
+      {:ok, db} ->
+        state =
+          state
+          |> WorkState.put_dump(%{
+            name: Path.basename(db.path),
+            bytes: db.bytes,
+            sha256: db.sha256
+          })
+          |> WorkState.complete("dump")
+          |> put_outputs([db])
+
+        rec =
+          rec
+          |> Recorder.add_artifact(db)
+          |> Recorder.log(:info, "dump", "Database dump verified (#{db.bytes} bytes)")
+
+        {:next, next, nil, state, rec}
+
+      {:error, :superseded} ->
+        {:result, {:cancel, :superseded}}
+
+      # The connection string itself is refused (#2831): no retry can
+      # change that, so the run fails now with the reason.
+      {:error, :refused_conninfo = reason} ->
+        {:fatal, reason, state, Recorder.log(rec, :error, "dump", describe(reason))}
+
+      {:error, reason} ->
+        {:retry, reason, state, Recorder.log(rec, :error, "dump", describe(reason))}
+    end
+  end
+
+  # The free-space check before a component writes (#2423): a shortfall is
+  # fatal (a retry finds the same disk), and a reading that failed is noted on
+  # the run and let through (`Preflight`).
+  defp preflight(rec, component, path, estimate) do
+    label = if component == :db, do: "dump", else: "media"
+
+    case Preflight.check(component, path, estimate) do
+      :ok ->
+        {:ok, rec}
+
+      :unknown ->
+        {:ok,
+         Recorder.log(
+           rec,
+           :warn,
+           label,
+           "Could not read the free space in #{path}; going ahead without the free-space check"
+         )}
+
+      {:error, reason} ->
+        {:error, reason, Recorder.log(rec, :error, label, describe(reason))}
     end
   end
 
@@ -1392,6 +1427,13 @@ defmodule KilnCMS.Backups.Steps do
           end
       end
 
+    result =
+      with {:ok, plan, state, rec} <- result,
+           {:ok, rec} <- preflight(rec, :media, target_dir, unarchived_bytes(plan, state)),
+           {:ok, rec} <- preflight(rec, :lists, ctx.work_dir, lists_bytes(plan)) do
+        {:ok, plan, state, rec}
+      end
+
     case result do
       {:ok, plan, state, rec} ->
         state =
@@ -1410,10 +1452,29 @@ defmodule KilnCMS.Backups.Steps do
       {:error, {:not_enterable, _rel} = reason} ->
         {:fatal, reason, state, Recorder.log(rec, :error, "media", describe(reason))}
 
+      # Too little free space for the parts or their lists (#2423), logged by
+      # `preflight/4`.
+      {:error, {:insufficient_space, _} = reason, rec} ->
+        {:fatal, reason, state, rec}
+
       {:error, reason} ->
         {:retry, reason, state, Recorder.log(rec, :error, "media", describe(reason))}
     end
   end
+
+  # What the archive step still has to write: the input bytes of every part
+  # without a recorded digest (a resume reuses the ones it has).
+  defp unarchived_bytes(plan, state) do
+    plan.parts
+    |> Enum.reject(&WorkState.part(state, &1.index))
+    |> Enum.map(& &1.bytes)
+    |> Enum.sum()
+  end
+
+  # What a part's filtered copy of its list can take in the work directory,
+  # which may be on a disk of its own.
+  defp lists_bytes(plan),
+    do: Preflight.lists_estimate(Enum.map(plan.parts, &Path.join(plan.work_dir, &1.list)))
 
   # An earlier set's files under this stamp, moved aside under the lease and
   # deleted outside it (`discard/4`).
@@ -3383,7 +3444,19 @@ defmodule KilnCMS.Backups.Steps do
 
   defp describe({:exit_status, _executable, _status, _output} = reason), do: describe_exit(reason)
   defp describe({:not_enterable, rel}), do: MediaArchive.describe_not_enterable(rel)
+  defp describe({:insufficient_space, _} = reason), do: Preflight.describe(reason)
+
+  # A media list the planner could not write (#2423): its `close/1` reports a
+  # failed delayed write, ENOSPC most often.
+  defp describe({:write_list, reason}), do: describe_write_list(reason)
+  defp describe({:write_list, _path, reason}), do: describe_write_list(reason)
   defp describe(reason), do: inspect(reason)
+
+  defp describe_write_list(reason) when is_atom(reason),
+    do: "Could not write the media archive's file lists (#{:file.format_error(reason)})"
+
+  defp describe_write_list(reason),
+    do: "Could not write the media archive's file lists (#{inspect(reason)})"
 
   defp describe_exit({:exit_status, executable, status, output}),
     do: "#{executable} exited #{status}: #{output}"
