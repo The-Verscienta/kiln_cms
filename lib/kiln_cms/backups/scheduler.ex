@@ -99,6 +99,59 @@ defmodule KilnCMS.Backups.Scheduler do
       end)
   end
 
+  @minutes_per_day 24 * 60
+  @all_days MapSet.new(1..31)
+  @all_months MapSet.new(1..12)
+  @all_weekdays MapSet.new(0..6)
+
+  @doc """
+  The longest the scheduler can go between two ticks, in minutes, read from
+  `KILN_BACKUP_SCHEDULER_CRON` (`value`, the configured value by default, or
+  an expression already parsed); nil when it doesn't tick on a schedule
+  (`cron_state/1` is not `:on`, or `@reboot`). A schedule whose interval is
+  shorter skips windows: only the latest due one fires. What the Schedule
+  tab's "the scheduler runs less often than this schedule" warning reads
+  (#2983).
+
+  Worked out from the expression's minute and hour fields alone: the longest
+  wait between the day's ticks, the one from the last tick to the next day's
+  first included. An expression that also restricts the day of the month,
+  the month or the weekday leaves longer gaps (a weekday-only one skips the
+  weekend), which this doesn't measure: it counts such an expression's gap
+  as at least a day. So it warns about every sub-daily schedule then, and
+  never about a daily or longer one. Nothing walks the slots, so it is cheap
+  enough for a page to ask on every render. `* * * * *` gives 1.
+  """
+  @spec max_tick_gap_minutes(term()) :: pos_integer() | nil
+  def max_tick_gap_minutes(value \\ Application.get_env(:kiln_cms, :backup_scheduler_cron, false)) do
+    case expression(value) do
+      {:ok, %{reboot?: false} = expression} -> max_gap(expression)
+      _off_reboot_or_never -> nil
+    end
+  end
+
+  defp max_gap(%Oban.Cron.Expression{} = expression) do
+    slots =
+      for hour <- Enum.sort(expression.hours),
+          minute <- Enum.sort(expression.minutes),
+          do: hour * 60 + minute
+
+    # The wrap from the day's last tick to the next day's first.
+    wrap = hd(slots) + @minutes_per_day - List.last(slots)
+
+    gap =
+      slots
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.reduce(wrap, fn [a, b], longest -> max(b - a, longest) end)
+
+    if restricts_days?(expression), do: max(gap, @minutes_per_day), else: gap
+  end
+
+  defp restricts_days?(%Oban.Cron.Expression{days: days, months: months, weekdays: weekdays}) do
+    not (MapSet.subset?(@all_days, days) and MapSet.subset?(@all_months, months) and
+           MapSet.subset?(@all_weekdays, weekdays))
+  end
+
   # The parsed `KILN_BACKUP_SCHEDULER_CRON` (or `value` itself when it is
   # already parsed), or what `cron_state/1` says instead.
   defp expression(%Oban.Cron.Expression{} = expression) do

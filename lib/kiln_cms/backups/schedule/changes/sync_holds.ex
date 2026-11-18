@@ -12,8 +12,8 @@ defmodule KilnCMS.Backups.Schedule.Changes.SyncHolds do
   does not stop the insert (#2932): it may have read the schedules before
   this change, so the new job queues behind it, waits for the backup lock it
   holds, and reads the committed change. If an in-app backup holds the lock
-  instead, the sync is `:busy` and the backup's finish step syncs the markers
-  with the new rules if it succeeds (otherwise the next slot does). A
+  instead, the job snoozes until the backup releases it, then syncs, however
+  the backup ended (#2985, `MarkerSyncWorker.schedule_change_job/0`). A
   failed insert is logged and never fails the action: the next slot or
   backup syncs the markers anyway.
   """
@@ -40,7 +40,7 @@ defmodule KilnCMS.Backups.Schedule.Changes.SyncHolds do
 
   defp enqueue do
     if MarkerSyncWorker.enabled?() do
-      case %{} |> MarkerSyncWorker.new() |> Oban.insert() do
+      case Oban.insert(MarkerSyncWorker.schedule_change_job()) do
         {:ok, _job} -> :ok
         {:error, reason} -> not_queued(reason)
       end

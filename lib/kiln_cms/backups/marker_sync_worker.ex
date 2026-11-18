@@ -119,11 +119,34 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
   fan-out inserts can briefly leave two waiting, which costs one redundant
   sync).
 
-  While an in-app backup holds the lock, a sync returns `:busy` and writes
-  nothing; the backup's finish step syncs the markers itself with the
-  schedules as they are then. So a change made during a running in-app
-  backup reaches the `.hold` markers when that backup succeeds (a failed one
-  leaves it to the next slot).
+  ## While an in-app backup holds the lock (#2985)
+
+  While an in-app backup chain holds the lock, a sync returns `:busy` and
+  writes nothing: the lock is what keeps a sync and a backup from moving the
+  markers at the same time (`Chain.sync_last_good/2`). What the job does then
+  depends on why it was queued:
+
+    * **A schedule change's job** (`schedule_change_job/0`, `SyncHolds`)
+      snoozes for 60 s and tries again, for as long as the chain holds the
+      lock, so the new keep rules reach the `.hold` markers once the chain
+      releases it, whether the backup succeeded or failed. A snooze uses no
+      attempt (Oban gives it back), and a snoozing job is `:scheduled`, so it
+      still counts as the waiting job: a later schedule change or cron slot
+      queues nothing more, and the snoozing job reads the schedules afresh
+      each time it runs. It syncs its own directory before it queues the
+      other directories' jobs, and queues them only once the lock is free,
+      so they don't find it busy too.
+    * **The cron slot's job, and a per-directory job,** treat `:busy` as
+      done: the backup's finish step syncs the markers itself when it
+      succeeds, and the next slot does otherwise. They stay that way so a
+      long backup isn't met by a job per directory every minute.
+
+  The job says which it is in its `meta` (`"schedule_change"`). A schedule
+  change queued while a cron slot's job is still waiting turns that job into
+  a schedule change's (Oban's `replace` of its `meta`, which drops the cron
+  plugin's informational keys), so the change is not left to a job that
+  gives up on `:busy`. A node from before #2985 ignores the flag and runs
+  the job as a cron slot's.
   """
   use Oban.Worker,
     queue: :default,
@@ -148,6 +171,7 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
 
   @beat_window_s 600
   @affinity_snooze_s 30
+  @busy_snooze_s 60
   @affinity_max_snoozes 20
   @io KilnCMS.Backups.MarkerSyncIO
   @dir_id_timeout_ms 5_000
@@ -168,7 +192,7 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
 
     cond do
       read_dir_id(dir) == {:ok, dir_id} ->
-        sync_here(dir)
+        dir |> sync_here() |> busy_is_done()
 
       DirQueues.route?(job, dir_id) ->
         case DirQueues.move(job, DirQueues.name(dir_id)) do
@@ -185,7 +209,7 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
     end
   end
 
-  def perform(%Oban.Job{}) do
+  def perform(%Oban.Job{} = job) do
     with {:ok, ids} <- reported_dir_ids() do
       dir = Backups.dir()
       own_read = read_dir_id(dir)
@@ -197,19 +221,57 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
         end
 
       others = Enum.reject(ids, &(&1 == own))
-      routable = routable_ids(others)
-      Enum.each(others, &enqueue(&1, routable))
-
-      # A directory that didn't answer for its id gets no sync this slot
-      # (#3079): it would only hold up a second task.
-      case own_read do
-        {:error, reason} when reason in [:backup_dir_unresponsive, :backup_dir_io_busy] ->
-          {:error, reason}
-
-        _read ->
-          sync_here(dir)
-      end
+      sync_all(job.meta["schedule_change"] == true, own_read, dir, others)
     end
+  end
+
+  # A schedule change's job syncs its own directory first: while a chain
+  # holds the lock the other directories would find it busy too (#2985).
+  defp sync_all(true = _schedule_change?, own_read, dir, others) do
+    case sync_own(own_read, dir) do
+      :busy ->
+        {:snooze, @busy_snooze_s}
+
+      result ->
+        enqueue_all(others)
+        result
+    end
+  end
+
+  defp sync_all(false, own_read, dir, others) do
+    enqueue_all(others)
+    own_read |> sync_own(dir) |> busy_is_done()
+  end
+
+  @doc """
+  The job a schedule's create, update or destroy queues
+  (`KilnCMS.Backups.Schedule.Changes.SyncHolds`): one that snoozes while an
+  in-app backup holds the lock (#2985, "While an in-app backup holds the
+  lock"). A cron slot's job still waiting is turned into one.
+  """
+  @spec schedule_change_job() :: Oban.Job.changeset()
+  def schedule_change_job do
+    # In `meta`, not `args`: a job without a `"dir"` is unique only on args
+    # that are exactly `%{}` (Oban compares the whole map when the key is
+    # absent), so a flag in the args would never conflict with a cron slot's.
+    new(%{}, meta: %{"schedule_change" => true}, replace: [available: [:meta]])
+  end
+
+  # A directory that didn't answer for its id gets no sync this slot
+  # (#3079): it would only hold up a second task.
+  defp sync_own({:error, reason}, _dir)
+       when reason in [:backup_dir_unresponsive, :backup_dir_io_busy],
+       do: {:error, reason}
+
+  defp sync_own(_read, dir), do: sync_here(dir)
+
+  # The chain syncs the markers when it succeeds; the next slot otherwise.
+  defp busy_is_done(:busy), do: :ok
+  defp busy_is_done(result), do: result
+
+  defp enqueue_all(others) do
+    routable = routable_ids(others)
+    Enum.each(others, &enqueue(&1, routable))
   end
 
   @doc """
@@ -331,7 +393,7 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
     if File.dir?(dir) do
       case Chain.sync_last_good(dir) do
         {:ok, _last_good} -> :ok
-        :busy -> :ok
+        :busy -> :busy
         {:error, reason} -> {:error, reason}
       end
     else

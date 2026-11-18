@@ -265,6 +265,7 @@ msgstr[1] "%{count} archivos mostrados"
 
 #: lib/kiln_cms_web/components/backup_components.ex
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -363,6 +364,7 @@ msgstr[1] "%{count} min de lectura"
 
 #: lib/kiln_cms_web/components/backup_components.ex
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -2665,6 +2667,11 @@ msgstr "Acerca de las copias importadas"
 #, elixir-autogen, elixir-format
 msgid "About lanes"
 msgstr "Acerca de los carriles"
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "About sub-daily schedules"
+msgstr "Acerca de las programaciones de más de una vez al día"
 
 #: lib/kiln_cms_web/live/task_live.ex
 #, elixir-autogen, elixir-format
@@ -6894,6 +6901,16 @@ msgstr "No se pudo comprobar el directorio de copias de seguridad de este servid
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
+msgid "Couldn't check this server's backup status in time, so the schedules can't be shown. Reload the page to try again."
+msgstr "No se pudo comprobar a tiempo el estado de las copias de seguridad de este servidor, así que no se pueden mostrar las programaciones. Recarga la página para intentarlo de nuevo."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't check this server's backup status in time, so this list may be out of date."
+msgstr "No se pudo comprobar a tiempo el estado de las copias de seguridad de este servidor, así que esta lista puede no estar actualizada."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
 msgid "Couldn't check when the scheduler last ran."
 msgstr "No se pudo comprobar cuándo se ejecutó el planificador por última vez."
 
@@ -7117,6 +7134,7 @@ msgid "Couldn't read the backup destinations. Try again in a moment."
 msgstr "No se pudieron leer los destinos de las copias de seguridad. Inténtalo de nuevo en un momento."
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't read this server's backup status. Reload the page to try again."
 msgstr "No se pudo leer el estado de las copias de seguridad de este servidor. Recarga la página para intentarlo de nuevo."
@@ -18146,6 +18164,11 @@ msgstr "La legibilidad es de %{score}/100 — ayudarían palabras y frases más 
 msgid "Reading the library…"
 msgstr "Leyendo la biblioteca…"
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reading the schedules…"
+msgstr "Leyendo las programaciones…"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reading this server's backup status…"
@@ -24171,6 +24194,11 @@ msgstr "No se puede leer la clave privada guardada. Rótela."
 #, elixir-autogen, elixir-format
 msgid "The saved secret access key can't be read. Re-enter it."
 msgstr "No se puede leer la clave de acceso secreta guardada. Vuelve a introducirla."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "The scheduler (KILN_BACKUP_SCHEDULER_CRON) can go %{gap} between runs, longer than this schedule's interval, so some of its backups are skipped: only the latest one due runs."
+msgstr "El planificador (KILN_BACKUP_SCHEDULER_CRON) puede pasar %{gap} entre ejecuciones, más que el intervalo de esta programación, así que se omiten algunas de sus copias de seguridad: solo se ejecuta la última pendiente."
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format

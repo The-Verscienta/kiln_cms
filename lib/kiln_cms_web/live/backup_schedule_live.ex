@@ -79,6 +79,28 @@ defmodule KilnCMSWeb.BackupScheduleLive do
 
   While connected, the page re-reads all of that every minute. An open form
   is left as it is.
+
+  ## The status is read off the LiveView process (#2986)
+
+  `Backups.status/0` reads `manifest.json` from the backup directory, which
+  may be a network mount that hangs, so it runs in `start_async/3`, as on
+  `KilnCMSWeb.BackupLive` (#2417): only while connected, **one at a time**
+  (a reload asked for while one runs, after a save say, marks it dirty and
+  the read that lands starts one more), with a timeout (`status_timeout_ms`,
+  5 s by default). Until the first read lands the list says it is reading;
+  one that doesn't land in time says it couldn't check in time, and with an
+  earlier status on the page, that the list may be out of date. The read
+  that hung is left to finish, and no other starts while it runs. The
+  status `handle_async/3` and timeout clauses ask `platform_admin?` again
+  first, as the event handlers do.
+
+  ## A scheduler that ticks less often than a schedule (#2983)
+
+  When `KILN_BACKUP_SCHEDULER_CRON` can go longer between ticks than a
+  schedule's interval (`Scheduler.max_tick_gap_minutes/1`, from the
+  expression's minute and hour fields), the schedule's card and the form's
+  preview say that some of its windows are skipped
+  (`data-role="tick-coarse"`). The default, every minute, never does.
   """
   use KilnCMSWeb, :live_view
 
@@ -91,6 +113,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   alias KilnCMS.Types.UnknownAtom
 
   @refresh_ms 60_000
+  @status_timeout_ms 5_000
 
   # The least an enabled schedule may wait for the scheduler's first tick, and
   # how old the last tick may be, before the page says it hasn't run; a
@@ -110,6 +133,14 @@ defmodule KilnCMSWeb.BackupScheduleLive do
        |> assign(:refused_values, nil)
        |> assign(:cron_components, [])
        |> assign(:preview, nil)
+       |> assign(:status, nil)
+       |> assign(:status_state, :loading)
+       |> assign(:status_ref, nil)
+       |> assign(:status_running?, false)
+       |> assign(:status_dirty?, false)
+       |> assign(:entries, [])
+       |> assign(:runs, %{})
+       |> assign(:stale_tick, nil)
        |> load()
        |> schedule_refresh()}
     else
@@ -243,6 +274,57 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket),
       do: {:noreply, socket |> load() |> schedule_refresh()},
       else: deny(socket)
+  end
+
+  # A status read that hasn't answered in time (#2986): the page says so and
+  # keeps what it had. The read is left to finish; no other starts while it
+  # runs. A timer of an earlier read is ignored.
+  def handle_info({:status_timeout, ref}, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      case socket.assigns do
+        %{status_ref: ^ref, status_running?: true} ->
+          {:noreply, assign(socket, :status_state, :timed_out)}
+
+        _settled ->
+          {:noreply, socket}
+      end
+    else
+      deny(socket)
+    end
+  end
+
+  # `Backups.status/0` answered: the list, the runs and the scheduler's last
+  # tick follow from it. A reload asked for while it ran starts one more.
+  @impl true
+  def handle_async(:status, {:ok, status}, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      {:noreply,
+       socket
+       |> apply_status(status)
+       |> status_settled(:ready)}
+    else
+      deny(socket)
+    end
+  end
+
+  # The read crashed: the last status, if any, stays. Only a reload asked for
+  # meanwhile starts another, so a read that always crashes can't loop.
+  def handle_async(:status, {:exit, _reason}, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket),
+      do: {:noreply, status_settled(socket, :failed)},
+      else: deny(socket)
+  end
+
+  defp status_settled(socket, state) do
+    dirty? = socket.assigns.status_dirty?
+
+    socket =
+      socket
+      |> assign(:status_state, state)
+      |> assign(:status_running?, false)
+      |> assign(:status_dirty?, false)
+
+    if dirty?, do: start_status_read(socket), else: socket
   end
 
   defp schedule_refresh(socket) do
@@ -501,6 +583,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
          {:ok, %DateTime{} = first} <- Window.next(Map.put(timing, :baseline_at, now), now) do
       %{
         cadence: cadence(timing),
+        interval: timing.interval,
         first: first,
         zone: timing.time_zone,
         enabled?: Ash.Changeset.get_attribute(changeset, :enabled) != false
@@ -566,22 +649,55 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   end
 
   # Everything shown but the form: the schedules with their next window (one
-  # source with the thresholds, `Backups.status/0`), what each one's newest
-  # run did, and the scheduler's last tick when it matters.
+  # source with the thresholds, `Backups.status/0`, read in the background:
+  # `apply_status/2` takes it from there), what each one's newest run did,
+  # and the scheduler's last tick when it matters.
   defp load(socket) do
-    status = Backups.status()
+    socket
+    |> assign(:media_dir?, Backups.media_dir() != nil)
+    |> assign(:tick_gap, Scheduler.max_tick_gap_minutes())
+    |> load_status()
+  end
+
+  defp apply_status(socket, status) do
     entries = if is_list(status.schedules), do: status.schedules, else: []
     ids = Enum.map(entries, & &1.schedule.id)
-
-    runs = last_runs(ids, socket.assigns.current_user)
 
     socket
     |> assign(:status, status)
     |> assign(:entries, entries)
-    |> assign(:runs, runs)
-    |> assign(:media_dir?, Backups.media_dir() != nil)
+    |> assign(:runs, last_runs(ids, socket.assigns.current_user))
     |> assign(:stale_tick, stale_tick(status, entries, DateTime.utc_now()))
   end
+
+  # Connected only (the disconnected render would read it a second time), and
+  # one at a time: see the moduledoc.
+  defp load_status(socket) do
+    cond do
+      not connected?(socket) -> socket
+      socket.assigns.status_running? -> assign(socket, :status_dirty?, true)
+      true -> start_status_read(socket)
+    end
+  end
+
+  defp start_status_read(socket) do
+    ref = make_ref()
+    Process.send_after(self(), {:status_timeout, ref}, status_timeout_ms())
+
+    socket
+    |> assign(:status_ref, ref)
+    |> assign(:status_running?, true)
+    |> assign(:status_state, if(socket.assigns.status, do: :ready, else: :loading))
+    |> start_async(:status, status_reader())
+  end
+
+  # `config :kiln_cms, KilnCMSWeb.BackupScheduleLive, status_timeout_ms: ...,
+  # status_reader: ...`; the reader is a seam for the tests.
+  defp status_timeout_ms,
+    do: Keyword.get(live_config(), :status_timeout_ms, @status_timeout_ms)
+
+  defp status_reader, do: Keyword.get(live_config(), :status_reader, &Backups.status/0)
+  defp live_config, do: Application.get_env(:kiln_cms, __MODULE__, [])
 
   @doc false
   # `{:stale, last_tick_at | nil}` when the scheduler should have ticked and
@@ -647,6 +763,32 @@ defmodule KilnCMSWeb.BackupScheduleLive do
       {gettext("Every month"), "monthly"}
     ]
   end
+
+  # Whether the scheduler can go longer between ticks than `interval`
+  # (#2983): `tick_gap` is `Scheduler.max_tick_gap_minutes/1`, nil when it
+  # doesn't tick on a schedule. An interval this release doesn't know is
+  # never coarse.
+  defp tick_coarse?(tick_gap, interval) when is_integer(tick_gap) do
+    case Window.interval_hours(interval) do
+      hours when is_integer(hours) -> tick_gap > hours * 60
+      nil -> false
+    end
+  end
+
+  defp tick_coarse?(_tick_gap, _interval), do: false
+
+  defp tick_coarse_text(tick_gap) do
+    gettext(
+      "The scheduler (KILN_BACKUP_SCHEDULER_CRON) can go %{gap} between runs, longer than this schedule's interval, so some of its backups are skipped: only the latest one due runs.",
+      gap: tick_gap_text(tick_gap)
+    )
+  end
+
+  # The scheduler's longest gap, as the warning says it.
+  defp tick_gap_text(minutes) when rem(minutes, 60) == 0,
+    do: ngettext("%{count} hour", "%{count} hours", div(minutes, 60))
+
+  defp tick_gap_text(minutes), do: ngettext("%{count} minute", "%{count} minutes", minutes)
 
   # A sub-daily schedule must set `keep_days` (`Schedule.Validations.SubDailyKeepsDays`).
   defp needs_keep_days?(%Schedule{interval: interval, keep_days: days}),
@@ -855,6 +997,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
         </div>
 
         <.warnings
+          :if={@status}
           status={@status}
           entries={@entries}
           stale_tick={@stale_tick}
@@ -868,7 +1011,8 @@ defmodule KilnCMSWeb.BackupScheduleLive do
           preview={@preview}
           refused_values={@refused_values}
           media_dir?={@media_dir?}
-          runs_here?={@status.scheduler_enabled? and @status.available?}
+          runs_here?={@status && (@status.scheduler_enabled? and @status.available?)}
+          tick_gap={@tick_gap}
         />
 
         <section id="backup-schedules" class="rounded-lg border border-base-content/10 p-4 text-sm">
@@ -876,12 +1020,44 @@ defmodule KilnCMSWeb.BackupScheduleLive do
             {gettext("Schedules")}
           </h2>
 
-          <p :if={@status.schedules == :none} class="mt-2 text-base-content/70">
+          <%!-- Until `Backups.status/0` answers (#2986). Neutral: nothing is
+                known yet. --%>
+          <p
+            :if={is_nil(@status) and @status_state == :loading}
+            id="schedule-status-pending"
+            class="mt-2 text-base-content/70"
+          >
+            {gettext("Reading the schedules…")}
+          </p>
+          <p
+            :if={@status_state == :timed_out}
+            id="schedule-status-timeout"
+            class="mt-2 text-warning-ink"
+          >
+            {if @status,
+              do:
+                gettext(
+                  "Couldn't check this server's backup status in time, so this list may be out of date."
+                ),
+              else:
+                gettext(
+                  "Couldn't check this server's backup status in time, so the schedules can't be shown. Reload the page to try again."
+                )}
+          </p>
+          <p
+            :if={is_nil(@status) and @status_state == :failed}
+            id="schedule-status-failed"
+            class="mt-2 text-warning-ink"
+          >
+            {gettext("Couldn't read this server's backup status. Reload the page to try again.")}
+          </p>
+
+          <p :if={@status && @status.schedules == :none} class="mt-2 text-base-content/70">
             {gettext(
               "No schedules yet. Backups run when you click Back up now, or from the host's cron job."
             )}
           </p>
-          <p :if={@status.schedules == :unreadable} class="mt-2 text-warning-ink">
+          <p :if={@status && @status.schedules == :unreadable} class="mt-2 text-warning-ink">
             {gettext("Couldn't load the backup schedules.")}
           </p>
 
@@ -900,6 +1076,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
               run={if @runs == :unreadable, do: :unreadable, else: @runs[entry.schedule.id]}
               editing?={@editing == entry.schedule.id}
               form_open?={@form != nil}
+              tick_gap={@tick_gap}
             />
           </ul>
 
@@ -991,6 +1168,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   attr :run, :any, required: true, doc: "the newest run, nil, or :unreadable"
   attr :editing?, :boolean, required: true
   attr :form_open?, :boolean, required: true
+  attr :tick_gap, :any, required: true, doc: "`Scheduler.max_tick_gap_minutes/1`"
 
   defp schedule_card(assigns) do
     assigns = assign(assigns, :schedule, assigns.entry.schedule)
@@ -1052,6 +1230,14 @@ defmodule KilnCMSWeb.BackupScheduleLive do
         )}
       </p>
 
+      <p
+        :if={tick_coarse?(@tick_gap, @schedule.interval)}
+        data-role="tick-coarse"
+        class="text-xs text-warning-ink"
+      >
+        {tick_coarse_text(@tick_gap)}
+      </p>
+
       <div class="flex flex-wrap gap-2">
         <button
           :if={editable?(@schedule) and not @form_open?}
@@ -1093,7 +1279,8 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   attr :preview, :any, required: true
   attr :refused_values, :any, required: true, doc: "`refused_rows/2`, or nil"
   attr :media_dir?, :boolean, required: true
-  attr :runs_here?, :boolean, required: true
+  attr :runs_here?, :any, required: true, doc: "nil until the status is read"
+  attr :tick_gap, :any, required: true, doc: "`Scheduler.max_tick_gap_minutes/1`"
 
   defp schedule_form(assigns) do
     field = assigns.form[:components]
@@ -1266,9 +1453,8 @@ defmodule KilnCMSWeb.BackupScheduleLive do
             label={gettext("Keep for (days)")}
             required={@sub_daily_hours != nil}
             hint={
-              if @sub_daily_hours,
-                do: gettext("Required for a schedule that runs more often than daily."),
-                else:
+              if !@sub_daily_hours,
+                do:
                   ngettext(
                     "Empty keeps them for BACKUP_KEEP_DAYS, %{count} day on this deployment.",
                     "Empty keeps them for BACKUP_KEEP_DAYS, %{count} days on this deployment.",
@@ -1276,6 +1462,23 @@ defmodule KilnCMSWeb.BackupScheduleLive do
                   )
             }
           />
+          <%!-- The field's own hint is text only; this one links (#2983). --%>
+          <p
+            :if={@sub_daily_hours}
+            id="schedule-keep-days-hint"
+            class="-mt-1 text-xs text-base-content/70"
+          >
+            {gettext("Required for a schedule that runs more often than daily.")}
+            <a
+              href={docs_url("backups.md#back-up-more-often-than-daily")}
+              target="_blank"
+              rel="noopener"
+              class="link inline-flex items-center gap-1 text-primary-ink"
+            >
+              {gettext("About sub-daily schedules")}
+              <.icon name="hero-arrow-top-right-on-square" class="size-3" />
+            </a>
+          </p>
           <%!-- Always shown (#2931): the keep rules reach host cron only
                 through the hold markers, which an older script ignores. --%>
           <p id="schedule-keep-host-hint" class="text-xs text-base-content/70">
@@ -1301,7 +1504,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
         >
           <p class="font-medium" data-role="cadence">{@preview.cadence}</p>
           <p
-            :if={@preview.enabled? and @runs_here?}
+            :if={@preview.enabled? and @runs_here? == true}
             class="text-base-content/70"
             data-role="first"
           >
@@ -1314,11 +1517,18 @@ defmodule KilnCMSWeb.BackupScheduleLive do
             {gettext("It won't run while it's paused.")}
           </p>
           <p
-            :if={@preview.enabled? and not @runs_here?}
+            :if={@preview.enabled? and @runs_here? == false}
             class="text-base-content/70"
             data-role="wont-run"
           >
             {gettext("It won't run on this deployment until the warning above is resolved.")}
+          </p>
+          <p
+            :if={tick_coarse?(@tick_gap, @preview.interval)}
+            class="text-warning-ink"
+            data-role="tick-coarse"
+          >
+            {tick_coarse_text(@tick_gap)}
           </p>
           <p :if={@preview.components != []} class="text-base-content/70" data-role="estimate">
             {ngettext(

@@ -469,6 +469,42 @@ defmodule KilnCMS.Backups.SchedulerTest do
       assert Scheduler.matches_some_date?(Oban.Cron.Expression.parse!("0 0 29 2 1"))
     end
 
+    # #2983: what the Schedule tab compares with a schedule's interval.
+    test "max_tick_gap_minutes/1: the longest wait between ticks, from minutes and hours" do
+      assert Scheduler.max_tick_gap_minutes("* * * * *") == 1
+      assert Scheduler.max_tick_gap_minutes("*/5 * * * *") == 5
+      assert Scheduler.max_tick_gap_minutes("0 */6 * * *") == 360
+      assert Scheduler.max_tick_gap_minutes("0 0 * * *") == 24 * 60
+      # The wrap from the day's last tick to the next day's first counts.
+      assert Scheduler.max_tick_gap_minutes("30 1,2 * * *") == 23 * 60
+      assert Scheduler.max_tick_gap_minutes("0 9-17 * * *") == 16 * 60
+      # A weekday-only cron spelled out in full restricts nothing.
+      assert Scheduler.max_tick_gap_minutes("* * * * 0-6") == 1
+    end
+
+    test "max_tick_gap_minutes/1: a day, month or weekday restriction counts as a day at least" do
+      for cron <- ["* * * * 1-5", "* * 1 * *", "* * * 1-6 *", "0 */6 * * 1"] do
+        assert Scheduler.max_tick_gap_minutes(cron) == 24 * 60, cron
+      end
+
+      # Already longer within the day: kept.
+      assert Scheduler.max_tick_gap_minutes("0 0 1 * *") == 24 * 60
+    end
+
+    test "max_tick_gap_minutes/1: nil when it doesn't tick on a schedule" do
+      for value <- [false, "", "false", "not a cron", "@reboot"] do
+        assert Scheduler.max_tick_gap_minutes(value) == nil, inspect(value)
+      end
+
+      feb31 = %{
+        Oban.Cron.Expression.parse!("0 0 1 1 *")
+        | days: MapSet.new([31]),
+          months: MapSet.new([2])
+      }
+
+      assert Scheduler.max_tick_gap_minutes(feb31) == nil
+    end
+
     test "one attempt on the scheduling queue" do
       opts = Scheduler.__opts__()
       assert opts[:queue] == :scheduling

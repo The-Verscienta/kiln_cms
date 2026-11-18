@@ -427,6 +427,9 @@ Every summary line below that was shortened links to its own entry there.
 - **`restore.sh` no longer fails a multi-part media restore at random with "… is not listed in … — nothing was extracted" (a broken pipe under `pipefail` made a listed part read as missing).**
   ([#3110](https://github.com/The-Verscienta/kiln_cms/pull/3110) · [long form](docs/changelog/unreleased.md#restore-sigpipe))
 
+- **Backups → Schedule: a warning when `KILN_BACKUP_SCHEDULER_CRON` ticks less often than a schedule runs; the tab no longer freezes on a hung backup directory; and a keep-days change made while a backup runs reaches the `.hold` markers when it ends, even if it failed.**
+  ([long form](docs/changelog/unreleased.md#backup-schedule-tab-followups))
+
 ### Security
 
 - **API keys of accounts erased before 0.9.0 no longer sign in, and the boot-time erasure backfill revokes them (GHSA-96vh-3m56-p8gx).**
