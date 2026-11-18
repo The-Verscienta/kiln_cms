@@ -130,6 +130,7 @@ defmodule KilnCMS.Backups.Chain do
     Recorder,
     Resend,
     Retention,
+    RunDestination,
     Steps,
     StepWorker,
     WorkState
@@ -462,7 +463,9 @@ defmodule KilnCMS.Backups.Chain do
 
   The part-1 step settles its targets again when it runs; they are not in
   its args. `{:ok, %{status: :started, chain: chain, targets: labels,
-  skipped: labels}}` or `{:error, reason}`.
+  skipped: labels, unreadable_skipped?: boolean}}` (the last when the run's
+  "unreadable" entry has no stored destination enabled now to stand for) or
+  `{:error, reason}`.
   """
   @spec request_resend(String.t()) :: {:ok, map()} | {:error, term()}
   def request_resend(stamp) do
@@ -480,12 +483,18 @@ defmodule KilnCMS.Backups.Chain do
       with {:ok, chain} <- with_lock(&decide_resend(&1, run, opts)) do
         resend_requested(run, chain, plan)
 
+        # The "unreadable" entry with no stored destination to stand for is
+        # not a destination that was removed: said apart.
+        {unreadable, skipped} =
+          Enum.split_with(plan.skipped, &(&1.key == RunDestination.unreadable_key()))
+
         {:ok,
          %{
            status: :started,
            chain: chain,
            targets: Enum.map(plan.targets, & &1["label"]),
-           skipped: Enum.map(plan.skipped, &(&1.label || &1.key))
+           skipped: Enum.map(skipped, &(&1.label || &1.key)),
+           unreadable_skipped?: unreadable != []
          }}
       end
     end
@@ -1202,7 +1211,8 @@ defmodule KilnCMS.Backups.Chain do
       step: row.step,
       part: row.part,
       node: node,
-      resume: row.resume_stamp
+      resume: row.resume_stamp,
+      phase: row.phase
     }
   end
 
@@ -1480,7 +1490,22 @@ defmodule KilnCMS.Backups.Chain do
   # refusal note instead of nothing.
   # A re-send (#2949) is never failed and never writes a failure manifest:
   # its run succeeded and stays so (`Steps.resend_interrupted/5`, which logs
-  # it). `:resend` keeps the callers from saying "the backup failed".
+  # it). One that was already finishing had written its outcome to the run,
+  # so only its tail is left (`Steps.resend_finished_from_outside/3`).
+  # `:resend` keeps the callers from saying "the backup failed".
+  defp interrupt(%{step: :resend, stamp: stamp, phase: :finishing} = info, _message)
+       when is_binary(stamp) do
+    :ok = Steps.resend_finished_from_outside(stamp, info.chain, info.dir_id)
+    :resend
+  rescue
+    error ->
+      Logger.warning(
+        "Couldn't finish the interrupted backup re-send: #{Exception.message(error)}"
+      )
+
+      :resend
+  end
+
   defp interrupt(%{step: :resend, stamp: stamp} = info, message) when is_binary(stamp) do
     :ok = Steps.resend_interrupted(stamp, info.chain, info.dir_id, info.part, message)
     :resend

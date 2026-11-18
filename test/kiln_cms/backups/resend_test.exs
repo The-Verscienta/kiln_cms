@@ -20,6 +20,7 @@ defmodule KilnCMS.Backups.ResendTest do
     Chain,
     Heartbeat,
     Manifest,
+    Markers,
     Recorder,
     Resend,
     RunDestination,
@@ -358,6 +359,73 @@ defmodule KilnCMS.Backups.ResendTest do
       assert Backups.in_flight() == nil
     end
 
+    test "the last-good marker leaves a backup the re-send just marked unverified", ctx do
+      # An older backup that reached its one destination, then a newer one
+      # that missed Bucket B: the newer is last good.
+      fake!("Bucket A", 0, %{})
+      assert :ok = BackupChain.run()
+      older = run!()
+      b = fake!("Bucket B", 1, %{"put_mode" => "fail"})
+      assert :ok = BackupChain.run()
+      newer = Enum.find(Backups.list_runs!(actor: Backups.system()), &(&1.stamp != older.stamp))
+      assert newer.offsite_status == :partial
+      assert Markers.last_good(Markers.read(ctx.dir), :db) == newer.stamp
+
+      settings!(b, %{}, ctx.admin)
+      File.write!(Path.join([ctx.dir, "db", "kiln-db-#{newer.stamp}.dump"]), "x", [:append])
+
+      assert {{:error, :refused}, _started} = resend!(newer.stamp)
+
+      # Synced again at the re-send's end: the older one is last good now.
+      assert Markers.last_good(Markers.read(ctx.dir), :db) == older.stamp
+    end
+
+    test "a checksum sidecar that changed unverifies the files it covers, run and manifest",
+         ctx do
+      %{run: run, b: b} = partial!(ctx)
+      settings!(b, %{}, ctx.admin)
+      sidecar = Path.join([ctx.dir, "db", Artifact.sidecar_name(:db, run.stamp)])
+      File.write!(sidecar, String.duplicate("e", 64) <> "  kiln-db-#{run.stamp}.dump\n")
+
+      assert {{:error, :refused}, _started} = resend!(run.stamp)
+
+      run = run_of(run.stamp)
+      assert run.status == :succeeded
+      assert %{status: :failed, error: "REFUSED" <> _} = entry(run, key(b))
+      assert [%{kind: :db, verified: false}] = run.artifacts
+      assert Enum.find(Manifest.read(ctx.dir).artifacts, &(&1.path =~ ".dump")).verified == false
+      assert Enum.any?(run.log, &(&1.message =~ "Marked unverified"))
+    end
+
+    # Permissions don't bind root: it reads a 0o000 file.
+    if match?({"0\n", 0}, System.cmd("id", ["-u"])),
+      do: @tag(skip: "running as root: a 0o000 file doesn't stop root reading it")
+
+    test "a file that can't be read stops it as unreadable, and unverifies nothing", ctx do
+      %{run: run, b: b} = partial!(ctx)
+      settings!(b, %{}, ctx.admin)
+      manifest = File.read!(Manifest.path(ctx.dir))
+      dump = Path.join([ctx.dir, "db", "kiln-db-#{run.stamp}.dump"])
+      File.chmod!(dump, 0o000)
+      on_exit(fn -> File.chmod(dump, 0o600) end)
+
+      assert {{:error, :unreadable_file}, _started} = resend!(run.stamp)
+
+      run = run_of(run.stamp)
+      assert run.status == :succeeded
+      assert [%{verified: true}] = run.artifacts
+      assert %{status: :failed, error: "not sent: couldn't read " <> _} = entry(run, key(b))
+      assert File.read!(Manifest.path(ctx.dir)) == manifest
+
+      assert Enum.any?(
+               run.log,
+               &(&1.message =~ "Re-send stopped: couldn't read kiln-db-#{run.stamp}.dump")
+             )
+
+      assert Enum.any?(run.log, &(&1.message =~ "stopped (a file couldn't be read)"))
+      assert Backups.in_flight() == nil
+    end
+
     test "changed after the first destination took it: the second refuses it", ctx do
       %{run: run, b: b, extra: [c]} = partial!(ctx, ["Bucket C"])
       name = "kiln-db-#{run.stamp}.dump"
@@ -600,6 +668,65 @@ defmodule KilnCMS.Backups.ResendTest do
     end
   end
 
+  describe "a step taken over while it finishes" do
+    # A re-send marks the lock finishing before its last Run write. Its node
+    # stops after that, before the release; the step's job runs again.
+    test "the next attempt only finishes: no part sent again, nothing logged, markers synced",
+         ctx do
+      %{run: run, b: b, b_log: b_log} = partial!(ctx)
+      settings!(b, %{"log" => b_log}, ctx.admin)
+
+      assert {:ok, %{chain: chain}} = Backups.resend_offsite(run.stamp, Backups.system())
+      [job] = BackupChain.step_jobs(chain: chain)
+      assert {:ok, lease} = Chain.begin_step(job)
+      assert :ok = Chain.mark_finishing(lease)
+
+      # Its state is still there (the node stopped before the discard).
+      work = work_dir(ctx.dir, run.stamp)
+      File.mkdir_p!(work)
+
+      :ok =
+        WorkState.write(
+          work,
+          WorkState.new(run.stamp, %{"kind" => "resend", "resend_chain" => chain})
+        )
+
+      log = run_of(run.stamp).log
+
+      assert :ok =
+               BackupChain.listen(fn ->
+                 BackupChain.drain()
+                 BackupChain.settled(chain)
+               end)
+
+      assert lines(b_log) == []
+      assert run_of(run.stamp).log == log
+      refute File.exists?(work)
+      assert Backups.in_flight() == nil
+      assert Markers.last_good(Markers.read(ctx.dir), :db) == run.stamp
+    end
+
+    test "reaped with no attempts left while finishing: finished, not stopped", ctx do
+      %{run: run, b: b} = partial!(ctx)
+      settings!(b, %{}, ctx.admin)
+
+      assert {:ok, %{chain: chain}} = Backups.resend_offsite(run.stamp, Backups.system())
+      [job] = BackupChain.step_jobs(chain: chain)
+      assert {:ok, lease} = Chain.begin_step(job)
+      assert :ok = Chain.mark_finishing(lease)
+      :ok = Oban.cancel_job(job.id)
+
+      assert BackupChain.listen(fn ->
+               assert {:ok, {:orphaned, _}} = Chain.reap()
+               BackupChain.settled(chain)
+             end) == :ok
+
+      run = run_of(run.stamp)
+      refute Enum.any?(run.log, &(&1.message =~ "Re-send stopped"))
+      assert Backups.in_flight() == nil
+    end
+  end
+
   describe "never a failure manifest" do
     test "the re-send's state.json names its chain under resend_chain, never chain", ctx do
       %{run: run, b: b} = partial!(ctx)
@@ -663,6 +790,44 @@ defmodule KilnCMS.Backups.ResendTest do
       assert run.error == nil
       assert Backups.in_flight() == nil
       refute File.exists?(work_dir(ctx.dir, run.stamp))
+    end
+  end
+
+  describe "the unreadable entry with nothing to stand for" do
+    test "is skipped with its own line, apart from removed destinations", ctx do
+      %{run: run, b: b} = partial!(ctx)
+      settings!(b, %{}, ctx.admin)
+
+      unreadable = %{
+        key: RunDestination.unreadable_key(),
+        label: "Stored destinations",
+        status: :failed,
+        error: "couldn't read the backup destinations"
+      }
+
+      run =
+        Backups.record_run_resend!(
+          run,
+          %{destinations: run.destinations ++ [unreadable]},
+          actor: Backups.system()
+        )
+
+      assert {:ok, %{skipped: [], unreadable_skipped?: true}} =
+               BackupChain.listen(fn ->
+                 result = Backups.resend_offsite(run.stamp, Backups.system())
+                 BackupChain.drain()
+                 result
+               end)
+
+      run = run_of(run.stamp)
+
+      assert Enum.any?(
+               run.log,
+               &(&1.message =~
+                   "Skipped Stored destinations: no stored destination is enabled now")
+             )
+
+      refute Enum.any?(run.log, &(&1.message =~ "Stored destinations: removed or disabled"))
     end
   end
 

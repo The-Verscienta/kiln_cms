@@ -18068,11 +18068,6 @@ msgstr "Renvoi lancé — cette page se met à jour quand il se termine."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Re-send started — this page updates when it finishes. Skipped, because they were removed or disabled since: %{names}."
-msgstr "Renvoi lancé — cette page se met à jour quand il se termine. Ignorées, car supprimées ou désactivées depuis : %{names}."
-
-#: lib/kiln_cms_web/live/backup_live.ex
-#, elixir-autogen, elixir-format
 msgid "Re-send this backup to %{names}? Each file is checked against its recorded checksum before it is copied."
 msgstr "Renvoyer cette sauvegarde vers %{names} ? Chaque fichier est vérifié par rapport à sa somme de contrôle enregistrée avant d’être copié."
 
@@ -21739,6 +21734,11 @@ msgstr "Aller au contenu principal"
 msgid "Skipped"
 msgstr "Ignoré"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Skipped, because they were removed or disabled since: %{names}."
+msgstr "Ignorées, car supprimées ou désactivées depuis : %{names}."
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Slack"
@@ -23684,6 +23684,11 @@ msgstr "La clé secrète du déploiement a changé depuis l’enregistrement. Ta
 #, elixir-autogen, elixir-format
 msgid "The description is about %{pixels}px wide — over the %{max}px Google shows, so it may be cut off."
 msgstr "La description fait environ %{pixels}px de large, au-delà des %{max}px affichés par Google : elle risque d'être tronquée."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The destinations this backup couldn't read were skipped: no stored destination it has no entry for is enabled now."
+msgstr "Les destinations que cette sauvegarde n’a pas pu lire ont été ignorées : aucune destination enregistrée pour laquelle elle n’a pas d’entrée n’est activée maintenant."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format

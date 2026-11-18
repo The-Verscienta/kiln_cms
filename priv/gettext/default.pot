@@ -18068,11 +18068,6 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Re-send started — this page updates when it finishes. Skipped, because they were removed or disabled since: %{names}."
-msgstr ""
-
-#: lib/kiln_cms_web/live/backup_live.ex
-#, elixir-autogen, elixir-format
 msgid "Re-send this backup to %{names}? Each file is checked against its recorded checksum before it is copied."
 msgstr ""
 
@@ -21739,6 +21734,11 @@ msgstr ""
 msgid "Skipped"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Skipped, because they were removed or disabled since: %{names}."
+msgstr ""
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Slack"
@@ -23683,6 +23683,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "The description is about %{pixels}px wide — over the %{max}px Google shows, so it may be cut off."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The destinations this backup couldn't read were skipped: no stored destination it has no entry for is enabled now."
 msgstr ""
 
 #: lib/kiln_cms_web/live/experiment_live.ex

@@ -660,9 +660,23 @@ defmodule KilnCMS.Backups.Recorder do
   Never the status: the run stays `succeeded`.
   """
   @spec resend_progress(t()) :: t()
-  def resend_progress(%__MODULE__{run: nil} = rec), do: rec
-
   def resend_progress(%__MODULE__{} = rec) do
+    case resend_written(rec) do
+      {:ok, rec} -> rec
+      {:error, rec} -> rec
+    end
+  end
+
+  @doc """
+  `resend_progress/1`, saying whether the write landed: `{:ok, rec}` with the
+  run as written, or `{:error, rec}` (no run, or the write was refused or
+  failed, with a warning). For a re-send's last write, whose
+  `manifest.json` follows only a Run write that landed (#2949).
+  """
+  @spec resend_written(t()) :: {:ok, t()} | {:error, t()}
+  def resend_written(%__MODULE__{run: nil} = rec), do: {:error, rec}
+
+  def resend_written(%__MODULE__{} = rec) do
     params = %{artifacts: rec.artifacts, log: rec.log, destinations: rec.destinations}
 
     params =
@@ -674,8 +688,8 @@ defmodule KilnCMS.Backups.Recorder do
     case safely("resend", fn ->
            Backups.record_run_resend(rec.run, params, actor: Backups.system())
          end) do
-      {:ok, run} -> %{rec | run: run}
-      _ -> rec
+      {:ok, run} -> {:ok, %{rec | run: run}}
+      _ -> {:error, rec}
     end
   end
 

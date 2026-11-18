@@ -63,8 +63,21 @@ the re-send's chain, `Run :record_resend` writes only the artifacts'
 per-file outcomes, the log, the destination entries and the
 `offsite_status` they add up to, and only on a run that is still
 `succeeded` under that chain. Nothing in the re-send's path calls the
-backup's `fail`, writes a failure manifest or runs the Importer: a step
-that can go no further *stops* the re-send.
+backup's `fail` or writes a failure manifest: a step that can go no
+further *stops* the re-send. A re-send that ends normally runs the tail
+a backup's finish runs (the Importer, the marker sync under the lease,
+the release); the Importer there only records cron-made backups and
+touches no in-app run, so it is harmless. A stopped re-send skips it.
+
+**A step taken over past the point of no return finishes, it doesn't
+re-send.** A re-send marks the lock `:finishing` before its last Run write,
+and a reclaimed step keeps that phase. The step that takes over finds it
+and runs only the tail: the manifest synced from the run, the work
+directory removed, the marker sync, the release. A re-send reaped or
+reclaimed with no attempts left while finishing gets the same tail from
+outside, with the manifest synced under the lock while it is free. The
+run's log keeps the outcome the last write recorded, never "stopped" after
+"done".
 
 **The order of its first step is fixed.** Part 1 makes `.work/<stamp>`
 before anything else, so retention (the app's and `backup.sh`'s) treats
@@ -89,13 +102,19 @@ is re-hashed immediately before each copy (ADR 0043). One that no longer
 matches is not sent; the re-send stops; that destination is recorded
 failed ("REFUSED"); the artifact is marked unverified on the run, and in
 `manifest.json` too when the manifest is still this run's, written under
-the lease, as `backup.sh`'s `refuse_offsite` does. The file is left where
+the lease, as `backup.sh`'s `refuse_offsite` does. The manifest is written
+only after the run's last write landed, and derived from it (every file of
+an artifact the run says is unverified), so a Cancel or a failed write
+never leaves the manifest saying unverified where the run doesn't. A
+checksum sidecar that changed or no longer parses unverifies the files it
+covers. The file is left where
 it is, under its own name: it is the backup's only copy and nothing will
 rebuild it, so it is not set aside as a backup's refused file is (#2484).
 The marker sync runs at the end, so an unverified backup stops counting as
 the last good one. A file that is **gone** is not that: it says nothing of
 whether the backup verified, so it stops the re-send as "local files
-missing" and leaves `verified` alone.
+missing" and leaves `verified` alone. Neither does a file that can't be
+read (permissions, an I/O error): it stops the re-send as unreadable.
 
 **Cancel is its own action.** `Run :cancel_resend`, a platform admin's,
 takes the advisory lock, refuses unless the lock holds a re-send of this

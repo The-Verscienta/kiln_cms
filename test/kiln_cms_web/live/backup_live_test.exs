@@ -4071,6 +4071,17 @@ defmodule KilnCMSWeb.BackupLiveTest do
       end
     end
 
+    test "a started re-send says what it skipped, the unreadable entry apart" do
+      assert KilnCMSWeb.BackupLive.resend_started_message(%{skipped: ["NAS"]}) =~
+               "removed or disabled since: NAS."
+
+      message =
+        KilnCMSWeb.BackupLive.resend_started_message(%{skipped: [], unreadable_skipped?: true})
+
+      assert message =~ "no stored destination it has no entry for is enabled now"
+      refute message =~ "removed or disabled"
+    end
+
     test "the late Cancel's words" do
       error = %Ash.Error.Invalid{
         errors: [

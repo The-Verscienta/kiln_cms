@@ -501,15 +501,35 @@ defmodule KilnCMSWeb.BackupLive do
     end
   end
 
-  defp resend_started_message(%{skipped: [_ | _] = skipped}),
-    do:
-      gettext(
-        "Re-send started — this page updates when it finishes. Skipped, because they were removed or disabled since: %{names}.",
-        names: Enum.join(skipped, ", ")
-      )
+  @doc false
+  # Public for the test of what a started re-send says it skipped.
+  def resend_started_message(started) do
+    started_line = gettext("Re-send started — this page updates when it finishes.")
 
-  defp resend_started_message(_started),
-    do: gettext("Re-send started — this page updates when it finishes.")
+    skipped =
+      case started[:skipped] do
+        [_ | _] = names ->
+          [
+            gettext("Skipped, because they were removed or disabled since: %{names}.",
+              names: Enum.join(names, ", ")
+            )
+          ]
+
+        _none ->
+          []
+      end
+
+    unreadable =
+      if started[:unreadable_skipped?],
+        do: [
+          gettext(
+            "The destinations this backup couldn't read were skipped: no stored destination it has no entry for is enabled now."
+          )
+        ],
+        else: []
+
+    Enum.join([started_line | skipped ++ unreadable], " ")
+  end
 
   @doc false
   # Public for the tests of refusals a LiveView test can't easily stage.

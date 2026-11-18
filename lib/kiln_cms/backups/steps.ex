@@ -2865,13 +2865,20 @@ defmodule KilnCMS.Backups.Steps do
     message = "Copy of #{name} to #{label} REFUSED: #{why}; it was not uploaded"
     Logger.error(message)
 
-    # A re-send's file that is gone is "local files missing", not a file
-    # that changed (#2949, critic change 6): it says nothing of whether the
-    # backup verified.
-    unverify? = not (reason_opts[:resend?] == true and missing_file?(reason))
+    # In a re-send (#2949) only a file that changed is unverified: one that
+    # is gone, or couldn't be read, says nothing of whether the backup
+    # verified (critic change 6). A checksum sidecar that changed unverifies
+    # the files it covers.
+    resend? = reason_opts[:resend?] == true
+    unverify? = not resend? or changed_refusal?(reason)
 
     rec =
       cond do
+        file[:sidecar?] == true and resend? and unverify? ->
+          Enum.reduce(file.entries, rec, fn {covered, _hex}, rec ->
+            Recorder.put_unverified(rec, covered)
+          end)
+
         file[:sidecar?] ->
           rec
 
@@ -2897,14 +2904,21 @@ defmodule KilnCMS.Backups.Steps do
   #   * part 1 sets it up (`resend_setup/3`); there is no start step;
   #   * a destination removed or disabled since the run is skipped, its
   #     entry left as it was (O5);
-  #   * a refused file stops the re-send (`resend_refused/6`): the
-  #     destination is recorded failed, the artifact unverified on the run
-  #     and in `manifest.json` (O4), and the file stays where it is;
+  #   * a refused file stops the re-send (`resend_refused/6`): a file (or
+  #     checksum sidecar) that changed leaves the destination failed and
+  #     the artifact unverified (O4), on the run and then in `manifest.json`;
+  #     one that is gone or can't be read stops it without that; either way
+  #     the file stays where it is;
   #   * no destination failing fails anything: the run stays `succeeded`;
-  #   * it ends in `resend_done/5` (the work directory removed, then the
-  #     marker sync and release a finish runs) or `resend_stopped/5`;
-  #     neither writes a failure manifest or closes the run, and the stop
-  #     doesn't run the Importer.
+  #   * it ends in `resend_done/5`: past the point of no return, the last
+  #     Run write, `manifest.json` only once that write landed, the work
+  #     directory removed, then the finish's tail (`finish_tail/3`: the
+  #     Importer, the marker sync and the release), or in
+  #     `resend_stopped/5`, which skips the Importer and the marker sync.
+  #     Neither writes a failure manifest or closes the run;
+  #   * a step that finds the lock `:finishing` (its predecessor stopped
+  #     between the last Run write and the release) runs only that tail
+  #     (`resend_finish_only/1`), never the part again.
   #
   # Its `state.json` (`"kind" => "resend"`) names its chain under
   # `"resend_chain"`, never `"chain"` (critic change 3): every match on
@@ -2912,7 +2926,39 @@ defmodule KilnCMS.Backups.Steps do
   # release, fails for it, so nothing can take it for a backup's state and
   # write a failure manifest from it.
 
+  # Each way a re-send ends, as its last log line says it.
+  @resend_outcomes [
+    done: "done",
+    refused: "stopped (a file was refused)",
+    local_files_missing: "stopped (local files missing)",
+    unreadable_file: "stopped (a file couldn't be read)"
+  ]
+
   defp resend(lease, job) do
+    case resend_finishing?(lease) do
+      {:ok, true} -> resend_finish_only(lease)
+      {:ok, false} -> resend_step(lease, job)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # Whether this chain is past the point of no return: a `resend_done/5`
+  # marked it so, then its node stopped before the release, and this is the
+  # step taken back (`Chain.reclaim_stale/0` keeps the phase).
+  defp resend_finishing?(lease) do
+    case Backups.backup_lock(actor: Backups.system(), authorize_with: :error) do
+      {:ok, %{chain_id: chain, phase: phase}} when chain == lease.chain ->
+        {:ok, phase == :finishing}
+
+      {:ok, _other} ->
+        {:ok, false}
+
+      {:error, error} ->
+        {:error, {:lock_read, error.__struct__}}
+    end
+  end
+
+  defp resend_step(lease, job) do
     work_dir = WorkState.path(Backups.dir(), lease.stamp)
 
     case WorkState.read(work_dir) do
@@ -3128,14 +3174,20 @@ defmodule KilnCMS.Backups.Steps do
       )
 
     Enum.reduce(skipped, rec, fn entry, rec ->
-      Recorder.log(
-        rec,
-        :warn,
-        "resend",
-        "Skipped #{entry.label || entry.key}: removed or disabled since this backup; " <>
-          "its outcome stays failed"
-      )
+      Recorder.log(rec, :warn, "resend", skipped_line(entry))
     end)
+  end
+
+  # An "unreadable" entry with no stored destination to stand for (O3) was
+  # not removed: nothing is enabled now that it could be.
+  defp skipped_line(%{key: key} = entry) do
+    if key == RunDestination.unreadable_key(),
+      do:
+        "Skipped #{entry.label || key}: no stored destination is enabled now that this " <>
+          "backup has no entry for; its outcome stays failed",
+      else:
+        "Skipped #{entry.label || key}: removed or disabled since this backup; " <>
+          "its outcome stays failed"
   end
 
   # Every file and checksum sidecar a re-send copies, `lstat`ed: the names
@@ -3159,6 +3211,11 @@ defmodule KilnCMS.Backups.Steps do
 
   defp missing_file?(reason), do: reason in [:enoent, :not_regular]
 
+  # A file, or a checksum sidecar, whose content is no longer what the
+  # backup recorded (O4). Not a read that failed.
+  defp changed_refusal?({:changed, _found}), do: true
+  defp changed_refusal?(reason), do: reason in [:sidecar_changed, :malformed]
+
   # A destination removed or disabled since the run (O5).
   defp resend_skipped(dest, state, rec) do
     label = dest.entry["label"]
@@ -3171,22 +3228,25 @@ defmodule KilnCMS.Backups.Steps do
     next_destination(dest, state, Recorder.log(rec, :warn, "resend", message))
   end
 
-  # A file refused on its way to this destination. One that is gone (or no
-  # longer a regular file) stops the re-send as local files missing (critic
-  # change 6). One that changed (O4): this destination failed "REFUSED",
-  # the artifact unverified on the run (`record_put/5` did that) and in
-  # `manifest.json` when that is still this run's (critic change 4, as
-  # `backup.sh`'s `refuse_offsite` does), and the file left where it is.
-  # Either way the re-send stops here.
-  defp resend_refused(ctx, dest, counts, problems, state, rec) do
-    {missing, changed} = Enum.split_with(problems.refused, fn {_name, r} -> missing_file?(r) end)
+  # A file refused on its way to this destination; the re-send stops here,
+  # and the file stays where it is. Three kinds, the first that applies:
+  #
+  #   * it changed (a file, or a checksum sidecar, O4): this destination
+  #     failed "REFUSED" and the artifact unverified (`record_put/5` did the
+  #     run's; `manifest.json` follows the last Run write, `resend_done/5`);
+  #   * it is gone or no longer a regular file: local files missing
+  #     (critic change 6);
+  #   * it couldn't be read (permissions, an I/O error): unreadable.
+  #
+  # Only the first unverifies anything.
+  defp resend_refused(_ctx, dest, counts, problems, state, rec) do
+    {changed, rest} = Enum.split_with(problems.refused, fn {_n, r} -> changed_refusal?(r) end)
+    {missing, unreadable} = Enum.split_with(rest, fn {_n, r} -> missing_file?(r) end)
 
-    # A file that changed is unverified in the manifest too, whatever else
-    # was refused beside it (`record_put/5` did the run).
-    case unverify_manifest(ctx, Enum.map(changed, &elem(&1, 0))) do
-      :ok when missing != [] -> resend_missing(dest, counts, missing, state, rec)
-      :ok -> resend_changed(dest, counts, problems, changed, state, rec)
-      {:error, :superseded} -> {:result, {:cancel, :superseded}}
+    cond do
+      changed != [] -> resend_changed(dest, counts, problems, changed, state, rec)
+      missing != [] -> resend_missing(dest, counts, missing, state, rec)
+      true -> resend_unreadable(dest, counts, unreadable, state, rec)
     end
   end
 
@@ -3207,6 +3267,28 @@ defmodule KilnCMS.Backups.Steps do
 
     resend_event(dest, rec, :missing)
     {:resend_done, :local_files_missing, state, rec}
+  end
+
+  defp resend_unreadable(dest, counts, unreadable, state, rec) do
+    rec =
+      Recorder.put_run_destination(
+        rec,
+        dest.entry["key"],
+        Map.merge(counts, %{
+          status: :failed,
+          error: "not sent: couldn't read " <> named(unreadable, &short_refusal/1),
+          permanent: false
+        })
+      )
+
+    message =
+      "Re-send stopped: couldn't read " <>
+        named(unreadable, &short_refusal/1) <>
+        " in BACKUP_DIR; it was not sent, and the backup is not marked unverified"
+
+    Logger.error("Backup " <> message)
+    resend_event(dest, rec, :unreadable)
+    {:resend_done, :unreadable_file, state, Recorder.log(rec, :error, "resend", message)}
   end
 
   defp resend_changed(dest, counts, problems, changed, state, rec) do
@@ -3233,21 +3315,24 @@ defmodule KilnCMS.Backups.Steps do
     {:resend_done, :refused, state, Recorder.log(rec, :error, "resend", message)}
   end
 
-  # `manifest.json`'s entries of `names` say `verified: false`, when the
-  # manifest is still this run's: written outside the lock, renamed into
-  # place under the lease, as every manifest write of a step. A newer
-  # backup's manifest is left alone.
-  defp unverify_manifest(ctx, names) do
-    case Manifest.read(ctx.dir) do
-      %Manifest{stamp: stamp, artifacts: artifacts} = manifest when stamp == ctx.stamp ->
-        updated = Enum.map(artifacts, &unverify_named(&1, names))
+  # `manifest.json` says `verified: false` for every file of `run`'s
+  # artifacts that the run says is not verified, when the manifest is still
+  # this run's. A re-send began only with every artifact verified, so those
+  # are the ones it refused. Derived from the run as written, so it can be
+  # done again by a step that takes over (`resend_finish_only/1`) and never
+  # says more than the run. `opts` are the step's fence (`fence/1`), or none
+  # under the lock (`resend_finished_from_outside/3`). A newer backup's
+  # manifest is left alone.
+  defp sync_manifest(_dir, _stamp, nil, _opts), do: :ok
 
-        if updated == artifacts,
-          do: :ok,
-          else: write_manifest(ctx.dir, %{manifest | artifacts: updated}, fence(ctx.lease))
+  defp sync_manifest(dir, stamp, run, opts) do
+    names = for a <- run.artifacts, a.verified != true, name <- Artifact.files(a), do: name
 
-      _another_or_none ->
-        :ok
+    with %Manifest{stamp: ^stamp, artifacts: artifacts} = manifest <- Manifest.read(dir),
+         updated when updated != artifacts <- Enum.map(artifacts, &unverify_named(&1, names)) do
+      write_manifest(dir, %{manifest | artifacts: updated}, opts)
+    else
+      _another_none_or_same -> :ok
     end
   end
 
@@ -3264,19 +3349,97 @@ defmodule KilnCMS.Backups.Steps do
   # released (`finish_tail/3`), which also re-syncs the markers of an
   # artifact a refusal just marked unverified.
   defp resend_done(ctx, lease, _state, rec, outcome) do
-    case Chain.mark_finishing(lease) do
-      :ok ->
-        rec
-        |> log_resend_done(ctx.stamp, outcome)
-        |> Recorder.resend_progress()
-        |> resend_close(ctx, lease, outcome)
-
-      {:error, :superseded} ->
-        {:cancel, :superseded}
-
-      {:error, reason} ->
-        {:error, reason}
+    with :ok <- Chain.mark_finishing(lease),
+         {:ok, rec} <- written(rec |> log_resend_done(ctx.stamp, outcome)),
+         :ok <- sync_manifest(ctx.dir, ctx.stamp, rec.run, fence(lease)) do
+      resend_close(rec, ctx, lease, outcome)
+    else
+      # The Run write didn't land: the manifest is left as the run is.
+      {:not_written, rec} -> resend_close(rec, ctx, lease, outcome)
+      {:error, :superseded} -> {:cancel, :superseded}
+      {:error, reason} -> {:error, reason}
     end
+  end
+
+  # The last Run write, first (critic change 4 of the review): `manifest.json`
+  # never says unverified where the run doesn't.
+  defp written(rec) do
+    case Recorder.resend_written(rec) do
+      {:ok, rec} -> {:ok, rec}
+      {:error, rec} -> {:not_written, rec}
+    end
+  end
+
+  # The step that took over a re-send past the point of no return
+  # (`resend_finishing?/1`): the run already says how it ended, so the part
+  # is not sent again and nothing is added to the run's log. What may be
+  # left is done again: the manifest from the run, the work directory, the
+  # marker sync and the release.
+  defp resend_finish_only(lease) do
+    ctx = context(lease, nil)
+    rec = Recorder.from_run(lease.stamp, lease.chain)
+    outcome = logged_outcome(rec.run, lease.stamp)
+
+    Logger.info("Backup re-send of #{lease.stamp}: finishing after an interruption")
+
+    case sync_manifest(ctx.dir, ctx.stamp, rec.run, fence(lease)) do
+      :ok -> resend_close(rec, ctx, lease, outcome)
+      {:error, :superseded} -> {:cancel, :superseded}
+    end
+  end
+
+  @doc false
+  # A re-send whose step was interrupted from outside past the point of no
+  # return (`Chain`'s reap or reclaim with no attempts left, once the lock
+  # is released): as `resend_finish_only/1`, without a lease. The manifest
+  # is synced from the run only while the lock is free, under it; the work
+  # directory goes when this node has it; the marker sync skips while
+  # another chain holds the lock (it syncs them itself).
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec resend_finished_from_outside(String.t(), String.t(), String.t() | nil) :: :ok
+  def resend_finished_from_outside(stamp, chain, dir_id) do
+    dir = Backups.dir()
+    rec = Recorder.from_run(stamp, chain)
+    outcome = logged_outcome(rec.run, stamp)
+
+    _ =
+      Chain.with_lock(fn
+        %{chain_id: nil} -> {:ok, sync_manifest(dir, stamp, rec.run, [])}
+        _held -> {:ok, :busy}
+      end)
+
+    work_dir = WorkState.path(dir, stamp)
+
+    if dir_id != nil and DirId.current(dir) == {:ok, dir_id} and
+         match?({:ok, %{"kind" => "resend", "resend_chain" => ^chain}}, WorkState.read(work_dir)),
+       do: File.rm_rf(work_dir)
+
+    _ = Chain.sync_last_good(dir)
+    Logger.info("Backup re-send of #{stamp}: finished after an interruption")
+    {reached, total} = resend_counts(rec)
+    lease = %{chain: chain, stamp: stamp}
+    resend_stop_event(lease, outcome, offsite_of(rec), reached, total)
+    settled(lease, settle(outcome))
+    :ok
+  end
+
+  # How the re-send ended, as its last Run write said it
+  # (`log_resend_done/3`); `:done` when that line can't be found.
+  defp logged_outcome(nil, _stamp), do: :done
+
+  defp logged_outcome(run, stamp) do
+    prefix = "Re-send of #{stamp} "
+
+    run.log
+    |> Enum.reverse()
+    |> Enum.find_value(:done, fn entry ->
+      if String.starts_with?(entry.message || "", prefix),
+        do: Enum.find_value(@resend_outcomes, :done, &outcome_of(entry.message, prefix, &1))
+    end)
+  end
+
+  defp outcome_of(message, prefix, {outcome, why}) do
+    if String.starts_with?(message, prefix <> why), do: outcome
   end
 
   # The work directory moved aside under the lease (a re-send that lost its
@@ -3303,13 +3466,7 @@ defmodule KilnCMS.Backups.Steps do
   defp log_resend_done(rec, stamp, outcome) do
     {reached, total} = resend_counts(rec)
     offsite = offsite_of(rec)
-
-    why =
-      case outcome do
-        :done -> "done"
-        :refused -> "stopped (a file was refused)"
-        :local_files_missing -> "stopped (local files missing)"
-      end
+    why = Keyword.fetch!(@resend_outcomes, outcome)
 
     level = if outcome == :done and offsite == :complete, do: :info, else: :warn
 

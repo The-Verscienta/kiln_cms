@@ -1532,8 +1532,8 @@ as before.
 | `[:kiln_cms, :backups, :offsite, :failed]` | `stamp`, `chain`, `reason` (`:destinations_unreadable`) | A backup finished without reaching any destination because the destinations table couldn't be read and `BACKUP_RCLONE_REMOTE` is not set: it stays Succeeded, marked not copied off-site (#2951). |
 | `[:kiln_cms, :backups, :status, :destinations_unreadable]` | `error` (the error's module) | The Backups or Home page couldn't read which destinations are configured, so the partly off-site alarm was left as recorded (logged at most every 15 minutes) (#2951). |
 | `[:kiln_cms, :backups, :resend, :requested]` | `stamp`, `chain`; measurements also `targets` and `skipped` (how many destinations) | A re-send of a partly off-site backup took the lock ([Re-send a partly off-site backup](#re-send-a-partly-off-site-backup)). |
-| `[:kiln_cms, :backups, :resend, :destination]` | `stamp`, `chain`, `destination` (its key), `status` (`:ok`, `:failed`, `:skipped`, `:refused` or `:missing`); measurements also `files_ok` and `files_total` | One destination of a re-send settled. |
-| `[:kiln_cms, :backups, :resend, :stop]` | `stamp`, `chain`, `outcome` (`:done`, `:refused`, `:local_files_missing`, `:stopped`, `:interrupted` or `:canceled`), `offsite_status` (what the run's destinations now add up to, nil when unknown); measurements also `reached` and `total` | A re-send ended. |
+| `[:kiln_cms, :backups, :resend, :destination]` | `stamp`, `chain`, `destination` (its key), `status` (`:ok`, `:failed`, `:skipped`, `:refused`, `:missing` or `:unreadable`); measurements also `files_ok` and `files_total` | One destination of a re-send settled. |
+| `[:kiln_cms, :backups, :resend, :stop]` | `stamp`, `chain`, `outcome` (`:done`, `:refused`, `:local_files_missing`, `:unreadable_file`, `:stopped`, `:interrupted` or `:canceled`), `offsite_status` (what the run's destinations now add up to, nil when unknown); measurements also `reached` and `total` | A re-send ended. |
 
 The in-app schedules emit their own events,
 `[:kiln_cms, :backups, :schedule, …]` and
@@ -4187,7 +4187,11 @@ unset, is **skipped**: the run's log says "Skipped NAS: removed or disabled
 since this backup; its outcome stays failed", and its entry keeps the
 failure. A "Stored destinations" entry (the destinations couldn't be read
 when the backup ran) stands for the stored destinations enabled now that
-the run has no entry for.
+the run has no entry for. With none, it is skipped too: the log says
+"Skipped Stored destinations: no stored destination is enabled now that
+this backup has no entry for; its outcome stays failed", and the page adds
+"The destinations this backup couldn't read were skipped: no stored
+destination it has no entry for is enabled now."
 
 What it does for each destination, one step job after another under the
 backup lock:
@@ -4212,8 +4216,11 @@ error, if any, stays as it was.
 destination is recorded failed ("REFUSED for 1 file: …"), the artifact is
 marked **unverified** on the run, and in `manifest.json` too when the
 manifest is still this backup's (as `scripts/backup.sh` does when it
-refuses a copy). The file is left where it is, under its own name: it is
-the backup's only copy, and nothing will rebuild it. The last-good markers
+refuses a copy). A checksum sidecar that changed or no longer parses
+counts the same, for the files it covers. The run is written first and the
+manifest after, from what the run says, so the two never disagree. The file
+is left where it is, under its own name: it is the backup's only copy, and
+nothing will rebuild it. The last-good markers
 are synced again, so an unverified backup stops counting as the last good
 one. Something other than the backup wrote to `BACKUP_DIR`: find out what
 before you trust this backup.
@@ -4223,6 +4230,16 @@ before you trust this backup.
 copy) or records the destination as "not sent: `<name>` no longer in
 BACKUP_DIR" (during one). The backup is not marked unverified: a missing
 file says nothing about whether it verified. Take a new backup.
+
+**A file that can't be read** (its permissions, an I/O error) stops the
+re-send with "Re-send stopped: couldn't read `<name>` (…) in BACKUP_DIR; it
+was not sent, and the backup is not marked unverified". Fix the file's
+permissions or the disk, then **Re-send** again.
+
+**A server that stops while the re-send finishes** (after its last write
+to the run, before it released the lock): the step that takes over only
+finishes it (the manifest, the work directory, the markers, the lock); it
+sends nothing again and adds nothing to the run's log.
 
 While it runs:
 
@@ -4258,7 +4275,8 @@ From a release console, as the backup system actor:
 
 ```elixir
 KilnCMS.Backups.resend_offsite("20261118-031700", KilnCMS.Backups.system())
-# {:ok, %{status: :started, chain: "5f0c…", targets: ["NAS"], skipped: []}}
+# {:ok, %{status: :started, chain: "5f0c…", targets: ["NAS"], skipped: [],
+#        unreadable_skipped?: false}}
 ```
 
 It returns `{:error, reason}` for the refusals above (`:busy`,
