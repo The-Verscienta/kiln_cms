@@ -560,7 +560,7 @@ claimed window is never asked for again is argued in
 | Action | platform admin | editor | org admin (not platform admin) | viewer | anonymous | `:backups` system actor |
 |--------|:-----:|:------:|:-----:|:------:|:---------:|:-----:|
 | `read`, `enabled` | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| `create`, `update`, `destroy` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `create`, `update`, `reorder`, `destroy` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `record_test_result` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 
 Where in-app backups copy their files besides `BACKUP_DIR` and

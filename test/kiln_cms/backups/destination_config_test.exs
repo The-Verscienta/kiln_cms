@@ -653,57 +653,8 @@ defmodule KilnCMS.Backups.DestinationConfigTest do
     end
   end
 
-  # #2952: the cap is counted again inside the transaction, under a lock.
-  # Without it both saves pass the validation's count, which runs before the
-  # transaction, and nine end up enabled.
-  describe "the enabled cap under concurrency" do
-    setup do
-      admin = platform_admin()
-      for _ <- 1..(DestinationConfig.max_enabled() - 1), do: destination!(%{}, admin)
-      a = destination!(%{name: "A", enabled: false}, admin)
-      b = destination!(%{name: "B", enabled: false}, admin)
-      %{admin: admin, a: a, b: b}
-    end
-
-    test "two enables at once: one is saved, one refused", %{admin: admin, a: a, b: b} do
-      results =
-        [a, b]
-        |> Enum.map(fn row ->
-          Task.async(fn ->
-            Backups.update_backup_destination(row, %{enabled: true}, actor: admin)
-          end)
-        end)
-        |> Task.await_many(10_000)
-
-      assert [{:ok, %{enabled: true}}] = Enum.filter(results, &match?({:ok, _}, &1))
-      assert [{:error, error}] = Enum.filter(results, &match?({:error, _}, &1))
-      assert messages(error) =~ "at most 8"
-      assert length(Backups.list_enabled_backup_destinations!(actor: admin)) == 8
-    end
-
-    test "two creates at once: one is saved, one refused", %{admin: admin} do
-      results =
-        for name <- ["C", "D"] do
-          Task.async(fn ->
-            Backups.create_backup_destination(
-              %{
-                name: name,
-                kind: "fake",
-                settings: %{"mode" => "ok"},
-                secrets: %{"token" => @secret}
-              },
-              actor: admin
-            )
-          end)
-        end
-        |> Task.await_many(10_000)
-
-      assert [{:ok, _}] = Enum.filter(results, &match?({:ok, _}, &1))
-      assert [{:error, error}] = Enum.filter(results, &match?({:error, _}, &1))
-      assert messages(error) =~ "at most 8"
-      assert length(Backups.list_enabled_backup_destinations!(actor: admin)) == 8
-    end
-  end
+  # The cap under concurrency (#2952) is `DestinationCapRaceTest`: it needs
+  # two real connections, which the sandbox doesn't give.
 
   # #2952: the env destination's Test, behind its read-only row's button.
   describe "test_env_destination/1" do

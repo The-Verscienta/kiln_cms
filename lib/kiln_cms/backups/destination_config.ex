@@ -54,8 +54,9 @@ defmodule KilnCMS.Backups.DestinationConfig do
 
   `:update` writes only while the row's `updated_at` is the one the caller
   read (`Changes.UnchangedSinceRead`, #2952): an edit form opened before
-  another save fails with `Ash.Error.Changes.StaleRecord`. A Test's result
-  doesn't move `updated_at`.
+  another save fails with `Ash.Error.Changes.StaleRecord`. Neither a Test's
+  result nor a reorder (`:reorder`, `position` only) moves `updated_at`, so
+  neither makes an open form stale.
   """
   use Ash.Resource,
     domain: KilnCMS.Backups,
@@ -129,6 +130,24 @@ defmodule KilnCMS.Backups.DestinationConfig do
               when: &Audit.changed?/2}
     end
 
+    # The arrows' renumbering (#2952): `position` only, with no stale check
+    # and `updated_at` left where it was, so moving rows doesn't make an edit
+    # form open on one of them stale. Audited as a change, as before.
+    update :reorder do
+      accept [:position]
+      require_atomic? false
+
+      change Changes.KeepUpdatedAt
+
+      change {KilnCMS.Security.Changes.Record,
+              type: :backup_destination_changed,
+              scope: :instance,
+              mode: :in_transaction,
+              target: &Audit.target/2,
+              metadata: &Audit.changed/2,
+              when: &Audit.changed?/2}
+    end
+
     destroy :destroy do
       primary? true
       require_atomic? false
@@ -179,7 +198,7 @@ defmodule KilnCMS.Backups.DestinationConfig do
     end
 
     # A platform admin manages destinations; the pipeline never does.
-    policy action([:create, :update, :destroy]) do
+    policy action([:create, :update, :reorder, :destroy]) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
 

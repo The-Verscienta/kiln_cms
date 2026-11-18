@@ -2684,6 +2684,28 @@ carries the reasoning.
   it claimed it again; it now counts only a change of owner.
   ([#3082](https://github.com/The-Verscienta/kiln_cms/issues/3082), [#3083](https://github.com/The-Verscienta/kiln_cms/issues/3083))
 
+<a id="backup-destinations-tab-polish"></a>
+
+- **Backups → Destinations and the Backups page: safer edits and more help (#2952, #3030, #3084, #3087).**
+  - **A stale form is refused.** Saving a destination someone else changed
+    since you opened it now says "This destination was changed since you
+    opened it, so nothing was saved" instead of overwriting their change;
+    Enable, Disable and the order arrows say the same when they clash. This
+    applies to every update of a destination, so a release-console script
+    must update the record a previous update returned, not an older copy.
+  - **The enabled cap holds under concurrency.** Two admins enabling or
+    creating at once can no longer leave more than 8 destinations enabled.
+  - **The `BACKUP_RCLONE_REMOTE` row has a Test** (platform admins only),
+    which runs the same check as a stored rclone destination and never shows
+    the remote's credentials. Its result shows only on the page.
+  - **Help.** A destination that failed at once on a permanent error says
+    so in its History tooltip ("Failed at once: the destination said no
+    retry fixes this."); the S3 form labels "Access key ID" and explains
+    when Path style is required; a resumable kind says its uploads resume;
+    built-in field labels are translated; and the waiting-resume labels on
+    the Backups page link to why the resume is waiting.
+  ([#2952](https://github.com/The-Verscienta/kiln_cms/issues/2952), [#3030](https://github.com/The-Verscienta/kiln_cms/issues/3030), [#3084](https://github.com/The-Verscienta/kiln_cms/issues/3084), [#3087](https://github.com/The-Verscienta/kiln_cms/issues/3087))
+
 ## Security
 
 <a id="backup-url-sslpassword"></a>

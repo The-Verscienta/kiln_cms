@@ -2084,7 +2084,8 @@ defmodule KilnCMS.Backups.Steps do
             key,
             Map.merge(counts, %{
               status: :failed,
-              error: destination_error({:offsite, problems}, dest.resumable?)
+              error: destination_error({:offsite, problems}, dest.resumable?),
+              permanent: false
             })
           )
 
@@ -2110,8 +2111,13 @@ defmodule KilnCMS.Backups.Steps do
 
   defp permanent_failure?({_name, reason}), do: Destination.permanent?(reason)
 
-  # Whether the destination failed at once on an error its adapter says no
-  # retry fixes, as its Run entry records it for History (#3084).
+  # Whether the destination failed at once, before its last attempt, on an
+  # error its adapter says no retry fixes, as its Run entry records it for
+  # History's "Failed at once" (#3084). On the last attempt it ran out of
+  # attempts, whatever its reasons: false.
+  defp failed_at_once?(%{last_attempt?: true}, _reason), do: false
+  defp failed_at_once?(_dest, reason), do: permanent_reason?(reason)
+
   defp permanent_reason?({:offsite, %{failed: failed}}),
     do: Enum.any?(failed, &permanent_failure?/1)
 
@@ -2459,7 +2465,10 @@ defmodule KilnCMS.Backups.Steps do
 
     rec =
       rec
-      |> Recorder.put_run_destination(key, Map.merge(counts, %{status: :ok, error: nil}))
+      |> Recorder.put_run_destination(
+        key,
+        Map.merge(counts, %{status: :ok, error: nil, permanent: false})
+      )
       |> sweep_uploads(dest, config)
       |> prune_destination(ctx, dest, config)
 
@@ -2639,7 +2648,7 @@ defmodule KilnCMS.Backups.Steps do
   defp destination_failed(dest, reason, state, rec, counts \\ %{}) do
     key = dest.entry["key"]
     error = destination_error(reason, dest.resumable?)
-    failed = %{status: :failed, error: error, permanent: permanent_reason?(reason)}
+    failed = %{status: :failed, error: error, permanent: failed_at_once?(dest, reason)}
 
     rec =
       rec
@@ -2892,7 +2901,8 @@ defmodule KilnCMS.Backups.Steps do
           do:
             Recorder.put_run_destination(rec, key, %{
               status: :failed,
-              error: "not attempted: its off-site step never ran"
+              error: "not attempted: its off-site step never ran",
+              permanent: false
             }),
           else: rec
 

@@ -7,9 +7,9 @@ defmodule KilnCMS.Backups.DestinationConfig.Changes.UnchangedSinceRead do
   instead of writing over it.
 
   `updated_at` is the version: every `:update` moves it, and no column is
-  needed for it. `:record_test_result` leaves it where it was
-  (`Changes.KeepUpdatedAt`), so pressing **Test** doesn't make an open form
-  stale.
+  needed for it. `:record_test_result` and `:reorder` leave it where it was
+  (`Changes.KeepUpdatedAt`), so pressing **Test** or an arrow doesn't make
+  an open form stale.
 
   A filter rather than `optimistic_lock/1`, which increments its attribute
   and so takes an integer column.

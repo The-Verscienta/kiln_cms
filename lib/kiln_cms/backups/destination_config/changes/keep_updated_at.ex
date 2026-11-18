@@ -1,9 +1,9 @@
 defmodule KilnCMS.Backups.DestinationConfig.Changes.KeepUpdatedAt do
   @moduledoc """
-  A Test's result is not an edit (#2952): `:record_test_result` leaves
-  `updated_at`, the version `Changes.UnchangedSinceRead` compares, where it
-  was, so an edit form open on the destination can still be saved after a
-  Test.
+  Neither a Test's result nor a reorder is an edit (#2952):
+  `:record_test_result` and `:reorder` leave `updated_at`, the version
+  `Changes.UnchangedSinceRead` compares, where it was, so an edit form open
+  on the destination can still be saved after a Test or a move.
 
   An atomic `updated_at = updated_at`: an attribute the changeset already
   changes gets no update default, and the `UPDATE` keeps the row's own

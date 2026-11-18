@@ -479,7 +479,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
       |> Enum.with_index()
       |> Enum.reject(fn {row, index} -> row.position == index end)
       |> Enum.reduce_while(:ok, fn {row, index}, :ok ->
-        case Backups.update_backup_destination(row, %{position: index}, write_opts(socket)) do
+        case Backups.reorder_backup_destination(row, %{position: index}, write_opts(socket)) do
           {:ok, _row} -> {:cont, :ok}
           {:error, error} -> {:halt, {:error, error}}
         end

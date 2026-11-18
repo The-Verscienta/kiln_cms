@@ -150,6 +150,7 @@ defmodule KilnCMS.Backups do
       define :get_backup_destination, action: :read, get_by: [:id], not_found_error?: false
       define :create_backup_destination, action: :create
       define :update_backup_destination, action: :update
+      define :reorder_backup_destination, action: :reorder
       define :destroy_backup_destination, action: :destroy
       define :list_enabled_backup_destinations, action: :enabled
       define :record_backup_destination_test, action: :record_test_result

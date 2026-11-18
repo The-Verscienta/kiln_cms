@@ -760,6 +760,24 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
       assert %{name: "Renamed", enabled: false} = stored(row.id)
     end
 
+    test "moving rows while the form is open doesn't make it stale", %{conn: conn} do
+      a = fake!(%{name: "A"})
+      b = fake!(%{name: "B"})
+      lv = mount(conn)
+      lv |> element("#backup-destination-#{a.id} [data-role=edit]") |> render_click()
+
+      # Moving B up renumbers both, the edited A included.
+      lv |> element("#backup-destination-#{b.id} [data-role=up]") |> render_click()
+      assert ["B", "A"] = Enum.map(all_destinations(), & &1.name)
+      assert stored(a.id).position == 1
+
+      assert lv
+             |> form("#destination-form", destination: %{name: "A renamed"})
+             |> render_submit() =~ "Destination saved."
+
+      assert %{name: "A renamed", position: 1} = stored(a.id)
+    end
+
     test "a Test while the form is open doesn't make it stale", %{conn: conn} do
       row = fake!()
       lv = mount(conn)

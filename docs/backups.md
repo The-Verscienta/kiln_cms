@@ -3598,9 +3598,10 @@ destination was renamed, enabled, disabled or otherwise saved after you
 clicked **Edit** (by another admin, or in another tab), **Save destination**
 keeps the form open with "This destination was changed since you opened
 it, so nothing was saved. Cancel, then edit it again to see the change."
-(#2952). A **Test** doesn't count as a change. **Enable**, **Disable** or an
-arrow clicked on a row that changed in the same instant says "That
-destination was changed meanwhile. Nothing was saved; try again."
+(#2952). A **Test**, or moving rows with the arrows, doesn't count as a
+change. **Enable** or **Disable** clicked on a row that changed in the same
+instant says "That destination was changed meanwhile. Nothing was saved;
+try again."
 
 **Where a destination writes can't be changed.** On **Edit**, the location
 fields (a directory's **Path**; a remote's **Remote name** and **Path**; an
@@ -4051,7 +4052,9 @@ other calls, each with `actor: admin`:
 `KilnCMS.Backups.list_backup_destinations/1`,
 `get_backup_destination(id, actor: admin)` (`{:ok, nil}` when there is
 none), `update_backup_destination(d, %{enabled: false}, actor: admin)` and
-`destroy_backup_destination(d, actor: admin)`. A test that fails still
+`destroy_backup_destination(d, actor: admin)`. For a second change, use the
+record `update` returns; an older copy is refused as changed meanwhile
+(`Ash.Error.Changes.StaleRecord`, #2952). A test that fails still
 returns `{:ok, d}`, with `last_test_ok: false` and the reason in
 `last_test_error`.
 
