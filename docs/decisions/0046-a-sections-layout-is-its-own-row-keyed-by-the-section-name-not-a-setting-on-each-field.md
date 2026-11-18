@@ -17,8 +17,8 @@
   for the field sync file that carries the layouts.
 - **Changelog** — [1.9.0](../changelog/v1.9.0.md#field-layout); the
   amendment in the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md)
-  ([Fixed](../changelog/unreleased.md#section-layouts-kept-in-step) and
-  [Breaking](../changelog/unreleased.md#field-sync-section-entries-stricter)).
+  ([Fixed](../changelog/v1.11.0.md#section-layouts-kept-in-step) and
+  [Breaking](../changelog/v1.11.0.md#field-sync-section-entries-stricter)).
 
 ## The problem
 

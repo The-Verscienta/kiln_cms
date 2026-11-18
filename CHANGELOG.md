@@ -56,390 +56,398 @@ else.
 
 ## [Unreleased]
 
-What's new, with examples and migration steps: [docs/whats-new/v1.11.md](docs/whats-new/v1.11.md).
-
 Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+## [1.11.0] - 2026-11-18
+
+Long form: [docs/changelog/v1.11.0.md](docs/changelog/v1.11.0.md) —
+the 1.11.0 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
+What's new, with examples and migration steps: [docs/whats-new/v1.11.md](docs/whats-new/v1.11.md).
+
 ### Upgrade notes
 
 - **Overlays and plugins: the field type names `address` and `flexible` are now built in. Rename a type that uses either.**
-  ([long form](docs/changelog/unreleased.md#address-field-type-name-upgrade))
-
+  ([long form](docs/changelog/v1.11.0.md#address-field-type-name-upgrade))
 
 - **Run `mix ash.migrate` (new nullable `field_definitions.flex_of_id` and `item_setting`, part of #2282). Nothing changes for existing fields; rolling back is safe.**
-  ([#2969](https://github.com/The-Verscienta/kiln_cms/pull/2969) · [long form](docs/changelog/unreleased.md#flexible-item-types-upgrade))
+  ([#2969](https://github.com/The-Verscienta/kiln_cms/pull/2969) · [long form](docs/changelog/v1.11.0.md#flexible-item-types-upgrade))
 
 - **Run `mix ash.migrate` (new table `backup_destinations`, new `backup_runs.destinations` and `offsite_status`). Don't start a backup until every node runs this release. After rolling back to 1.10, backups sent to a stored destination read wrong in History: 1.10 refuses their Run writes.**
-  ([long form](docs/changelog/unreleased.md#backup-destinations-upgrade))
+  ([long form](docs/changelog/v1.11.0.md#backup-destinations-upgrade))
 
 - **Run `mix ash.migrate` (new table `backup_notices`, for the backup warnings under Added). Nothing to backfill; rolling back is safe.**
-  ([long form](docs/changelog/unreleased.md#backup-notices-upgrade))
+  ([long form](docs/changelog/v1.11.0.md#backup-notices-upgrade))
 
 - **Run `mix ash.migrate` (new table `backup_uploads`, for resumable backup uploads; part of #2223). No environment variable to set; rolling back is safe.**
-  ([#3081](https://github.com/The-Verscienta/kiln_cms/pull/3081) · [long form](docs/changelog/unreleased.md#resumable-backup-uploads-upgrade))
+  ([#3081](https://github.com/The-Verscienta/kiln_cms/pull/3081) · [long form](docs/changelog/v1.11.0.md#resumable-backup-uploads-upgrade))
 
 - **About 10 minutes after boot, a job deletes the newsletter subscriptions still linked to accounts erased before this release (`:erasure_backfill_on_boot`, default on). No migration; rolling back is safe, and what it deleted stays deleted.**
-  ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/unreleased.md#erasure-backfill-newsletter-upgrade))
+  ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/v1.11.0.md#erasure-backfill-newsletter-upgrade))
 
 - **The boot-time erasure backfill now also demotes the site memberships of accounts erased before this release (its result gains `memberships`). No migration; rolling back is safe.**
-  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#erasure-backfill-memberships-upgrade))
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/v1.11.0.md#erasure-backfill-memberships-upgrade))
 
 - **About 10 minutes after boot and daily, a job drops form submission data and automation payloads from finished jobs (`KILN_PRIVATE_ARGS_SCRUB_CRON`). No migration. Drain the `mail` queue before rolling back: form mail queued by this release fails on the previous one and is lost.**
-  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#private-job-args-upgrade))
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/v1.11.0.md#private-job-args-upgrade))
 
 - **In-app backups name their temporary files `<name>.<job>-<attempt>.partial`. No migration; update the host's `scripts/backup.sh` in the same rollout, since an older copy doesn't recognize the new names. Rolling back is safe.**
-  ([long form](docs/changelog/unreleased.md#backup-step-files-fenced-upgrade))
+  ([long form](docs/changelog/v1.11.0.md#backup-step-files-fenced-upgrade))
 
 - **Workflow and task mail jobs now carry ids (no migration). Drain the `mail` queue before rolling back: those queued by this release fail eight times on the previous one and are discarded. Upgrading straight from 1.9.x, old-shape mail still waiting is not sent.**
-  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/unreleased.md#workflow-task-mail-ids-upgrade))
+  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/v1.11.0.md#workflow-task-mail-ids-upgrade))
 
 - **Account mail jobs now record the account they are for. No migration, nothing to drain. During a rolling deploy old nodes send without the new check; rolling back is safe.**
-  ([long form](docs/changelog/unreleased.md#account-mail-names-account-upgrade))
+  ([long form](docs/changelog/v1.11.0.md#account-mail-names-account-upgrade))
 
 - **The boot-time erasure backfill now also clears what accounts erased before #2514 kept: audiences, push subscriptions, private saved views and notifications (its result gains those four keys). No migration; rolling back is safe.**
-  ([long form](docs/changelog/unreleased.md#erasure-backfill-2514-steps-upgrade))
+  ([long form](docs/changelog/v1.11.0.md#erasure-backfill-2514-steps-upgrade))
 
 - **In-app backups and demo resets now require TLS when the app does, refuse a `key=value` database URL with a password, and give up after `BACKUP_LOCK_WAIT_SECONDS` (600 s) on a table lock; `?ssl=false` becomes `sslmode=disable`. Cron: put `sslmode` in `DATABASE_URL`. No migration; rolling back is safe.**
-  ([long form](docs/changelog/unreleased.md#backup-pg-tools-connection-upgrade))
+  ([long form](docs/changelog/v1.11.0.md#backup-pg-tools-connection-upgrade))
 
 - **Copy the new `scripts/backup.sh` and `scripts/restore.sh` to every host. `RESTORE_REQUIRE_CHECKSUM=1` now also makes `restore.sh db` and `drill` refuse a dump with no `kiln-db-<stamp>.sha256` (an old one, or a renamed one). No migration; rolling back is safe.**
-  ([long form](docs/changelog/unreleased.md#backup-script-hardening-upgrade))
+  ([long form](docs/changelog/v1.11.0.md#backup-script-hardening-upgrade))
 
 - **Run `mix ash.migrate` (new `users.notify_on_webhook_failure`, default `true`). Rolling back is safe; 1.10 shows the new webhook notices as a neutral line.**
-  ([long form](docs/changelog/unreleased.md#webhook-failure-alerts-upgrade))
+  ([long form](docs/changelog/v1.11.0.md#webhook-failure-alerts-upgrade))
 
 - **Run `mix ash.migrate` (new nullable `backup_node_beats.last_dir_id`). Until every node runs this release, a node on the previous one still resumes a backup from a copy of its files while the source host is alive. Rolling back is safe.**
-  ([#3090](https://github.com/The-Verscienta/kiln_cms/pull/3090) · [long form](docs/changelog/unreleased.md#backup-resume-source-host-first-upgrade))
+  ([#3090](https://github.com/The-Verscienta/kiln_cms/pull/3090) · [long form](docs/changelog/v1.11.0.md#backup-resume-source-host-first-upgrade))
 
 - **Run `mix ash.migrate` (new nullable `backup_node_beats.dir_queue` and `dir_queue_boot_id`). Finish a rolling deploy before you start, cancel or resume a backup. Before rolling back past this release, cancel running backups or let them finish.**
-  ([#3094](https://github.com/The-Verscienta/kiln_cms/pull/3094) · [long form](docs/changelog/unreleased.md#backup-dir-queues-upgrade))
+  ([#3094](https://github.com/The-Verscienta/kiln_cms/pull/3094) · [long form](docs/changelog/v1.11.0.md#backup-dir-queues-upgrade))
 
 - **Re-send (#2949) adds a backup-lock step, `resend`: finish a rolling deploy before you click Re-send, and cancel a running re-send before you roll back.**
-  ([#3105](https://github.com/The-Verscienta/kiln_cms/pull/3105) · [long form](docs/changelog/unreleased.md#backup-resend-upgrade))
+  ([#3105](https://github.com/The-Verscienta/kiln_cms/pull/3105) · [long form](docs/changelog/v1.11.0.md#backup-resend-upgrade))
 
 - **An in-app media backup that skipped a folder it could list but not enter (for example mode 0644) now fails, naming the folder, as cron already did. Fix the folder's permissions or add it to `BACKUP_MEDIA_EXCLUDE`. Cron now also resets an existing `$BACKUP_DIR/media` to 0700 on every run and fails if it can't.**
-  ([#3096](https://github.com/The-Verscienta/kiln_cms/pull/3096) · [long form](docs/changelog/unreleased.md#backup-cron-app-parity-upgrade))
+  ([#3096](https://github.com/The-Verscienta/kiln_cms/pull/3096) · [long form](docs/changelog/v1.11.0.md#backup-cron-app-parity-upgrade))
 
 - **Backups now check free space before the database dump and before the media parts, and refuse at once when the disk is short (cron too). The new `BACKUP_FREE_SPACE_CHECK=false` turns the check off, for example when media compresses well and the estimate is too high.**
-  ([#3097](https://github.com/The-Verscienta/kiln_cms/pull/3097) · [long form](docs/changelog/unreleased.md#backup-free-space-preflight-upgrade))
+  ([#3097](https://github.com/The-Verscienta/kiln_cms/pull/3097) · [long form](docs/changelog/v1.11.0.md#backup-free-space-preflight-upgrade))
 
 - **A backup, restore, staging or demo database URL with `sslpassword` in its query is now refused before pg_dump, pg_restore or psql runs. Decrypt the client key (`openssl pkey -in client.key -out client.key.plain`), `chmod 0600` it, point `sslkey=` at it and drop `sslpassword`.**
-  ([#3099](https://github.com/The-Verscienta/kiln_cms/pull/3099) · [long form](docs/changelog/unreleased.md#backup-url-sslpassword-upgrade))
+  ([#3099](https://github.com/The-Verscienta/kiln_cms/pull/3099) · [long form](docs/changelog/v1.11.0.md#backup-url-sslpassword-upgrade))
 
 - **A field-sync file exported by this release doesn't import into 1.10.x (every field carries `step`/`prefix`/`suffix`, every type `title_template`): upgrade environments together, or strip those keys first.**
-  ([long form](docs/changelog/unreleased.md#field-sync-export-not-importable-by-1-10))
+  ([long form](docs/changelog/v1.11.0.md#field-sync-export-not-importable-by-1-10))
 
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
-  ([long form](docs/changelog/unreleased.md#staging-scrub-refuses-live-node))
+  ([long form](docs/changelog/v1.11.0.md#staging-scrub-refuses-live-node))
 
 - **`mix kiln.staging.scrub` and `Release.scrub_staging/0` now refuse, changing nothing, while an overlay or plugin domain owns a non-content table with no `staging_scrub/0` entry: add `{:purge, R}`, `{:rewrite, R, set: [...]}` or `{:keep, R, "reason"}` for each and require `{:kiln_plugin, "~> 1.5"}`.**
-  ([long form](docs/changelog/unreleased.md#plugin-staging-scrub-refuses-undeclared))
+  ([long form](docs/changelog/v1.11.0.md#plugin-staging-scrub-refuses-undeclared))
 
 - **Field sync import refuses a non-default `"sections"` entry no field carries (a hand-edited file that imported before now fails, nothing written). An entry at the default deletes the stored layout, and a section the import empties loses its layout, without `--prune`.**
-  ([long form](docs/changelog/unreleased.md#field-sync-section-entries-stricter))
+  ([long form](docs/changelog/v1.11.0.md#field-sync-section-entries-stricter))
 
 - **Calling `:publish_scheduled`, `:unpublish_scheduled` or `:archive_scheduled` directly (`CMS.publish_scheduled_page!` and the like) on a record whose date hasn't passed now returns a `StaleRecord` and changes nothing: make the date due first, or call `:publish`, `:unpublish` or `:archive`.**
-  ([long form](docs/changelog/unreleased.md#scheduled-content-actions-due-only))
+  ([long form](docs/changelog/v1.11.0.md#scheduled-content-actions-due-only))
 
 ### Known issues
 
 - **Two referrer breakdowns of overlapping traffic (dashboard span vs. the export's days, site chart vs. item bars, 7 vs. 30 days, today read twice) can be differenced to recover a suppressed count. No workaround short of turning off `KILN_ANALYTICS_REFERRERS`.**
-  ([#2989](https://github.com/The-Verscienta/kiln_cms/issues/2989) · [long form](docs/changelog/unreleased.md#referrer-breakdowns-differenced))
+  ([#2989](https://github.com/The-Verscienta/kiln_cms/issues/2989) · [long form](docs/changelog/v1.11.0.md#referrer-breakdowns-differenced))
 
 - **Automation jobs still hold the event's document, drafts included, in plain text while pending and in Oban's `job:start` / `job:stop` log lines, until the next release seals it. No workaround short of logging above `info`.**
-  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#automation-payload-plain-in-pending-jobs))
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/v1.11.0.md#automation-payload-plain-in-pending-jobs))
 
 - **GraphQL `customWhere` with `dateTime` can miss date-time list items saved with fractional seconds.**
-  ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678) · [long form](docs/changelog/unreleased.md#graphql-customwhere-datetime-fractional-seconds))
+  ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678) · [long form](docs/changelog/v1.11.0.md#graphql-customwhere-datetime-fractional-seconds))
 
 - **On a site other than the default one, New draft and Translations can be offered or hidden by the default site's type scope.**
-  ([#2599](https://github.com/The-Verscienta/kiln_cms/issues/2599) · [long form](docs/changelog/unreleased.md#non-default-site-new-draft-type-scope))
+  ([#2599](https://github.com/The-Verscienta/kiln_cms/issues/2599) · [long form](docs/changelog/v1.11.0.md#non-default-site-new-draft-type-scope))
 
 - **Lock and teaser pages, embedded forms and newsletter confirmation mail can be in the wrong language on a multilingual site.**
-  ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597) · [long form](docs/changelog/unreleased.md#locale-lock-teaser-embed-newsletter))
+  ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597) · [long form](docs/changelog/v1.11.0.md#locale-lock-teaser-embed-newsletter))
 
 - **A gallery carousel can't be scrolled with the keyboard.**
-  ([#2590](https://github.com/The-Verscienta/kiln_cms/issues/2590) · [long form](docs/changelog/unreleased.md#gallery-carousel-keyboard))
+  ([#2590](https://github.com/The-Verscienta/kiln_cms/issues/2590) · [long form](docs/changelog/v1.11.0.md#gallery-carousel-keyboard))
 
 - **The sign-in page on a site's own address offers "Use a passkey", which fails there.**
-  ([#2827](https://github.com/The-Verscienta/kiln_cms/issues/2827) · [long form](docs/changelog/unreleased.md#site-host-offers-passkey))
+  ([#2827](https://github.com/The-Verscienta/kiln_cms/issues/2827) · [long form](docs/changelog/v1.11.0.md#site-host-offers-passkey))
 
 - **"Confirm it's you with your passkey" shows no passkey button.**
-  ([#2887](https://github.com/The-Verscienta/kiln_cms/issues/2887) · [long form](docs/changelog/unreleased.md#confirm-passkey-no-button))
+  ([#2887](https://github.com/The-Verscienta/kiln_cms/issues/2887) · [long form](docs/changelog/v1.11.0.md#confirm-passkey-no-button))
 
 - **A recurrence rule with a date-time `UNTIL` (`…T000000Z`) can end a day early or late.**
-  ([#2861](https://github.com/The-Verscienta/kiln_cms/issues/2861) · [long form](docs/changelog/unreleased.md#recurrence-until-date-time))
+  ([#2861](https://github.com/The-Verscienta/kiln_cms/issues/2861) · [long form](docs/changelog/v1.11.0.md#recurrence-until-date-time))
 
 - **A member who starts checkout again for the tier they hold drops to "incomplete" and loses access.**
-  ([#2747](https://github.com/The-Verscienta/kiln_cms/issues/2747) · [long form](docs/changelog/unreleased.md#re-checkout-drops-to-incomplete))
+  ([#2747](https://github.com/The-Verscienta/kiln_cms/issues/2747) · [long form](docs/changelog/v1.11.0.md#re-checkout-drops-to-incomplete))
 
 - **A scrubbed staging clone keeps production's S3 storage credentials.**
-  ([#2973](https://github.com/The-Verscienta/kiln_cms/issues/2973) · [long form](docs/changelog/unreleased.md#staging-scrub-keeps-storage-credentials))
+  ([#2973](https://github.com/The-Verscienta/kiln_cms/issues/2973) · [long form](docs/changelog/v1.11.0.md#staging-scrub-keeps-storage-credentials))
 
 - **A scrubbed staging clone keeps the provenance signing key.**
-  ([#2974](https://github.com/The-Verscienta/kiln_cms/issues/2974) · [long form](docs/changelog/unreleased.md#staging-scrub-keeps-provenance-key))
+  ([#2974](https://github.com/The-Verscienta/kiln_cms/issues/2974) · [long form](docs/changelog/v1.11.0.md#staging-scrub-keeps-provenance-key))
 
 - **`scripts/staging.sh up` with the default `KILN_BIN=mix` migrates the dev database unless `MIX_ENV=prod` is set.**
-  ([#2977](https://github.com/The-Verscienta/kiln_cms/issues/2977) · [long form](docs/changelog/unreleased.md#staging-sh-mix-migrates-dev-db))
+  ([#2977](https://github.com/The-Verscienta/kiln_cms/issues/2977) · [long form](docs/changelog/v1.11.0.md#staging-sh-mix-migrates-dev-db))
 
 ### Added
 
 - **Backups → History: a partly off-site backup (or one not copied off-site) whose files are still on disk gets a Re-send button that sends it to the destinations it missed, re-checking every file first; the run's status never changes.**
-  ([#3105](https://github.com/The-Verscienta/kiln_cms/pull/3105) · [long form](docs/changelog/unreleased.md#backup-resend))
+  ([#3105](https://github.com/The-Verscienta/kiln_cms/pull/3105) · [long form](docs/changelog/v1.11.0.md#backup-resend))
 
 - **Site admins are told when a webhook stops getting through: a bell notice and an email on the first delivery that exhausts its retries, and again when the endpoint is auto-disabled. The email can be turned off under Your settings.**
-  ([long form](docs/changelog/unreleased.md#webhook-failure-alerts))
+  ([#3056](https://github.com/The-Verscienta/kiln_cms/issues/3056) · [long form](docs/changelog/v1.11.0.md#webhook-failure-alerts))
 
 - **A new custom field type, Flexible content: an ordered list of items of different kinds (a hero, a quote), defined under Fields (Item types panel) and edited as cards in the content editor. Field-sync files now carry `item_types`, which 1.10 refuses.**
-  ([long form](docs/changelog/unreleased.md#flexible-content))
+  ([long form](docs/changelog/v1.11.0.md#flexible-content))
 
 - **A built-in `:address` custom field type: a postal address stored as one object, with a country select, trimmed single-line parts and a postal-code format check for 14 countries.**
   Served as generic JSON, filterable only for "Empty or not", not sortable. Country-driven labels, region lists and schema.org output are not yet.
-  ([#2279](https://github.com/The-Verscienta/kiln_cms/issues/2279) · [long form](docs/changelog/unreleased.md#address-field-type))
-
-
-
+  ([#2279](https://github.com/The-Verscienta/kiln_cms/issues/2279) · [long form](docs/changelog/v1.11.0.md#address-field-type))
 
 - **Number fields: Step, Prefix and Suffix in the Validation fieldset and a Slider editor input. Field-sync exports now carry `step`, `prefix` and `suffix`, which a release before this one refuses as unknown keys.**
-  ([long form](docs/changelog/unreleased.md#number-field-options))
+  ([#2966](https://github.com/The-Verscienta/kiln_cms/issues/2966) · [long form](docs/changelog/v1.11.0.md#number-field-options))
 
 - **GraphQL `customWhere` takes `_or` / `_and` / `_not` groups, the typed form of `customFilter`'s: same nesting (4 deep), same member cap (50), same errors for unknown and private fields.**
-  ([#2445](https://github.com/The-Verscienta/kiln_cms/issues/2445) · [long form](docs/changelog/unreleased.md#graphql-custom-where-groups))
+  ([#2445](https://github.com/The-Verscienta/kiln_cms/issues/2445) · [long form](docs/changelog/v1.11.0.md#graphql-custom-where-groups))
 
-- **Import field definitions from the console: upload a file, review the dry-run diff and data-loss refusals, confirm `--prune` and `--allow-data-loss` separately, and apply.** ([#2438](https://github.com/The-Verscienta/kiln_cms/issues/2438) · [long form](docs/changelog/unreleased.md#field-sync-screen))
+- **Import field definitions from the console: upload a file, review the dry-run diff and data-loss refusals, confirm `--prune` and `--allow-data-loss` separately, and apply.** ([#2438](https://github.com/The-Verscienta/kiln_cms/issues/2438) · [long form](docs/changelog/v1.11.0.md#field-sync-screen))
+
 - **Backups → Destinations: send in-app backups to several places (a directory on the server, a named rclone remote, a plugin's), each tested and pruned of only what this installation sent. A backup that reaches only some succeeds as "Partly off-site" and raises the alarm.**
-  ([long form](docs/changelog/unreleased.md#backup-destinations))
+  ([#2220](https://github.com/The-Verscienta/kiln_cms/issues/2220) · [long form](docs/changelog/v1.11.0.md#backup-destinations))
 
 - **`kiln_plugin` 1.5.0: plugins can add backup destinations (`Kiln.BackupDestination`, `c:Kiln.Plugin.backup_destinations/0`).**
-  ([long form](docs/changelog/unreleased.md#backup-destination-plugins))
+  ([#2220](https://github.com/The-Verscienta/kiln_cms/issues/2220) · [long form](docs/changelog/v1.11.0.md#backup-destination-plugins))
 
 - **Backup uploads can resume: a destination adapter that opts in continues a cut-off upload on the next attempt. Every `put/3` gets `opts[:deadline]` and may answer `{:ok, :already_present}` or a permanent error, which fails that destination at once.**
-  ([#3081](https://github.com/The-Verscienta/kiln_cms/pull/3081) · [long form](docs/changelog/unreleased.md#resumable-backup-uploads))
+  ([#3081](https://github.com/The-Verscienta/kiln_cms/pull/3081) · [long form](docs/changelog/v1.11.0.md#resumable-backup-uploads))
 
 - **Backups → Destinations: a new kind, S3-compatible storage (AWS S3, R2, B2, Wasabi, MinIO, Garage), with resumable multipart uploads, a Test, and retention. A store on a private network or over `http://` needs its host in the new `BACKUP_S3_PRIVATE_HOSTS`.**
-  ([#3086](https://github.com/The-Verscienta/kiln_cms/pull/3086) · [long form](docs/changelog/unreleased.md#s3-backup-destination))
+  ([#3086](https://github.com/The-Verscienta/kiln_cms/pull/3086) · [long form](docs/changelog/v1.11.0.md#s3-backup-destination))
 
 - **`kiln_plugin` 1.5.0: plugins declare what the staging scrub does to each table their domains own (`c:Kiln.Plugin.staging_scrub/0`): purge, rewrite columns, or keep with a reason, all checked before the scrub changes anything.**
-  ([long form](docs/changelog/unreleased.md#plugin-staging-scrub))
+  ([#2975](https://github.com/The-Verscienta/kiln_cms/issues/2975) · [long form](docs/changelog/v1.11.0.md#plugin-staging-scrub))
 
 - **Backup schedules can run every 2, 4, 8 or 12 hours. A schedule that runs more often than daily must set Keep for (days), and its alarm threshold drops to 8 to 18 hours.**
-  ([#2219](https://github.com/The-Verscienta/kiln_cms/issues/2219) · [long form](docs/changelog/unreleased.md#backup-sub-daily-schedules))
+  ([#2219](https://github.com/The-Verscienta/kiln_cms/issues/2219) · [long form](docs/changelog/v1.11.0.md#backup-sub-daily-schedules))
 
 - **Backups → History badges each backup a schedule's keep settings hold: "Kept by a schedule: Database" or "… Media".**
-  ([#2933](https://github.com/The-Verscienta/kiln_cms/issues/2933) · [long form](docs/changelog/unreleased.md#backup-history-held-badge))
+  ([#2933](https://github.com/The-Verscienta/kiln_cms/issues/2933) · [long form](docs/changelog/v1.11.0.md#backup-history-held-badge))
 
 - **Retention skipped or stopped part-way, locally or on a destination, now shows on the Backups page and turns Home's backup strip red until a clean pass clears it. Four backup metrics are registered.**
-  ([long form](docs/changelog/unreleased.md#backup-retention-warnings))
+  ([long form](docs/changelog/v1.11.0.md#backup-retention-warnings))
 
 - **The Backups page and the Schedule tab warn for eight days when a backup a schedule keeps was deleted outside the app, usually by a host `backup.sh` older than the hold markers.**
-  ([long form](docs/changelog/unreleased.md#backup-held-deleted-warning))
+  ([long form](docs/changelog/v1.11.0.md#backup-held-deleted-warning))
 
 - **Color fields can be limited to a palette (`validation["palette"]`, shown as swatches in the editor) and JSON fields can carry a JSON Schema (`validation["json_schema"]`, draft 2020-12, local `$ref` only, bounded, never fetches); both are checked when a value changes. No migration.**
-  ([long form](docs/changelog/unreleased.md#color-palette-json-schema))
+  ([#2962](https://github.com/The-Verscienta/kiln_cms/issues/2962) · [long form](docs/changelog/v1.11.0.md#color-palette-json-schema))
 
 - **A content type can build every record's title from its fields with a title template (`{{ field.last_name }}, {{ field.first_name }}`): editors no longer type one, and existing titles are re-derived.**
-  ([long form](docs/changelog/unreleased.md#computed-titles))
+  ([#2968](https://github.com/The-Verscienta/kiln_cms/issues/2968) · [long form](docs/changelog/v1.11.0.md#computed-titles))
 
 ### Changed
 
 - **A document whose `:user` custom field names an erased person is refused on its next save that changes custom fields ("must be a person on this site"), as for a removed member.**
-  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#user-field-erased-person))
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/v1.11.0.md#user-field-erased-person))
 
 - **`custom_sort` / `customSort` now sorts a single-valued reference or media field by its target's current title (filename), last where the caller cannot read the target; a list of them is still refused.**
-  ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#sort-reference-media))
+  ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/v1.11.0.md#sort-reference-media))
+
 - **The content list can sort by a single-valued reference or media field too (Sort by → Field), by the target's current title or filename.**
-  ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/unreleased.md#list-sort-reference-media))
+  ([#2444](https://github.com/The-Verscienta/kiln_cms/issues/2444) · [long form](docs/changelog/v1.11.0.md#list-sort-reference-media))
+
 - **Telemetry: `[:kiln_cms, :backups, :retention, :skipped | :stopped]` now also fire for destinations (`scope: :destination`); local events carry `scope: :local`. Match on `scope` to count local only.**
-  ([long form](docs/changelog/unreleased.md#backup-retention-telemetry-scope))
+  ([long form](docs/changelog/v1.11.0.md#backup-retention-telemetry-scope))
+
 - **Contributors: the backup script tests also run in CI under bash 3.2.57 and under bsdtar, and check that busybox tar is refused. The docs now say `backup.sh all` keeps its verified database dump when it refuses a tar.**
-  ([long form](docs/changelog/unreleased.md#backup-scripts-portability-ci))
+  ([long form](docs/changelog/v1.11.0.md#backup-scripts-portability-ci))
 
 - **Form mail built from the stored submission when the job runs: a submission deleted or marked spam before then sends nothing, and no confirmation goes out if its email field was removed or renamed, or the autoresponder switched off, since.**
-  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#form-mail-reads-stored-submission))
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/v1.11.0.md#form-mail-reads-stored-submission))
 
 - **Workflow and task mail checks again when it sends: an event muted since it was queued is not sent, nor is mail about content trashed or deleted, a comment deleted, or a task completed, deleted or reassigned in the meantime.**
-  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/unreleased.md#workflow-task-mail-send-time-checks))
+  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/v1.11.0.md#workflow-task-mail-send-time-checks))
 
 - **Workflow and task mail is not sent to an address on the instance suppression list or the site's own, checked when it sends; a list that can't be read retries the job.**
-  ([#3036](https://github.com/The-Verscienta/kiln_cms/issues/3036) · [long form](docs/changelog/unreleased.md#workflow-task-mail-suppression))
+  ([#3036](https://github.com/The-Verscienta/kiln_cms/issues/3036) · [long form](docs/changelog/v1.11.0.md#workflow-task-mail-suppression))
 
 - **The "Someone tried to create a (site) account with your address" notice is not sent if no account holds the address by the time it is queued.**
-  ([long form](docs/changelog/unreleased.md#registration-notice-needs-account))
+  ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035) · [long form](docs/changelog/v1.11.0.md#registration-notice-needs-account))
 
 - **The API key reuse email names the key's owner by display name, or "account" and their id, instead of their email address.**
-  ([long form](docs/changelog/unreleased.md#api-key-reuse-alert-names-owner))
+  ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035) · [long form](docs/changelog/v1.11.0.md#api-key-reuse-alert-names-owner))
 
 - **`backup.sh` stops at once on `HUP`, `INT` or `TERM`: it stops the running `pg_dump`, `tar` or `rclone` (`TERM`, then `KILL` after 5 s) and cleans up, instead of waiting for it to finish; a second signal no longer cuts the cleanup short.**
-  ([long form](docs/changelog/unreleased.md#backup-sh-signals-stop-child))
+  ([long form](docs/changelog/v1.11.0.md#backup-sh-signals-stop-child))
 
 - **The email telling someone a platform admin removed their passkey or authenticator app names that admin by display name ("an administrator" when they have none) instead of their email address.**
-  ([#3044](https://github.com/The-Verscienta/kiln_cms/issues/3044) · [long form](docs/changelog/unreleased.md#factor-removed-notice-names-admin))
+  ([#3044](https://github.com/The-Verscienta/kiln_cms/issues/3044) · [long form](docs/changelog/v1.11.0.md#factor-removed-notice-names-admin))
 
 - **Backup steps and marker syncs that must run where a backup directory is now go to that directory's own Oban queue, `backup_dir_<id>`, so they no longer use up attempts on nodes without the files. One left there with no server for its directory fails the backup after 30 minutes.**
-  ([#3094](https://github.com/The-Verscienta/kiln_cms/pull/3094) · [long form](docs/changelog/unreleased.md#backup-dir-queues))
+  ([#3094](https://github.com/The-Verscienta/kiln_cms/pull/3094) · [long form](docs/changelog/v1.11.0.md#backup-dir-queues))
 
 ### Fixed
 
-- **The `kiln_reporting_v1` views show a reference inside a group row or a flexible item as `{id, type}` only, never the target's title or slug.** Hardening ahead of reference sub-fields inside items; a migration re-creates the six views with the same columns. ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282))
+- **The `kiln_reporting_v1` views show a reference inside a group row or a
+  flexible item as `{id, type}` only, never the target's title or slug.**
+  ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282) · [long form](docs/changelog/v1.11.0.md#the-kilnreportingv1-views-show-a-reference-inside-a-group-row-or-a-flexible))
 
 - **`scripts/staging.sh up` stops when `pg_dump` or `psql` fails, under bash 3.2 on Linux too; it used to migrate and scrub an empty clone.**
-  ([#3020](https://github.com/The-Verscienta/kiln_cms/pull/3020) · [long form](docs/changelog/unreleased.md#staging-up-stops-on-a-failed-copy))
+  ([#3020](https://github.com/The-Verscienta/kiln_cms/pull/3020) · [long form](docs/changelog/v1.11.0.md#staging-up-stops-on-a-failed-copy))
 
 - **The staging scrub now removes newsletter subscribers, form submissions, suppression lists, federation followers and keys, per-site integrations and every queued job, and no cloned job can run first. Re-scrub any clone you share.**
-  ([long form](docs/changelog/unreleased.md#staging-scrub-personal-data))
+  ([#2721](https://github.com/The-Verscienta/kiln_cms/issues/2721) · [long form](docs/changelog/v1.11.0.md#staging-scrub-personal-data))
 
 - **A section's layout is deleted with its last field by every route (rename, cleared section, delete, join graduation, sync), so a later field no longer inherits it; a section rename in the fields admin decides from the fields as they are at Save.**
-  ([#2652](https://github.com/The-Verscienta/kiln_cms/issues/2652) · [long form](docs/changelog/unreleased.md#section-layouts-kept-in-step))
+  ([#2652](https://github.com/The-Verscienta/kiln_cms/issues/2652) · [long form](docs/changelog/v1.11.0.md#section-layouts-kept-in-step))
 
 - **`/embed.js` mounts nothing when `data-kiln-origin` isn't an `http:` or `https:` URL, and it and `@kiln-cms/client` trim trailing slashes without a quadratic regex.**
-  ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/unreleased.md#codeql-embed-origin-hardening))
+  ([#2947](https://github.com/The-Verscienta/kiln_cms/pull/2947) · [long form](docs/changelog/v1.11.0.md#codeql-embed-origin-hardening))
 
 - **`/embed.js` builds the iframe from the parsed `data-kiln-origin` URL, and resize messages now work when that URL has a path. `kiln-types` can no longer emit code from a hostile schema's format version or type names. Third-party Actions are pinned to commit SHAs.**
-  ([long form](docs/changelog/unreleased.md#codeql-second-pass))
+  ([#3070](https://github.com/The-Verscienta/kiln_cms/issues/3070) · [long form](docs/changelog/v1.11.0.md#codeql-second-pass))
 
 - **A referrer breakdown with `"< n"` and one `"hidden"` category no longer lets a reader who knows the rule recover the suppressed counts; such breakdowns now show every category hidden.**
-  ([#2752](https://github.com/The-Verscienta/kiln_cms/issues/2752) · [long form](docs/changelog/unreleased.md#referrer-suppression-partner-bounds))
+  ([#2752](https://github.com/The-Verscienta/kiln_cms/issues/2752) · [long form](docs/changelog/v1.11.0.md#referrer-suppression-partner-bounds))
 
 - **A referrer breakdown of 5 views or fewer over 4 sources or more, each below the threshold, now shows every category hidden, so an all-hidden breakdown on its own no longer gives its counts away.**
-  ([long form](docs/changelog/unreleased.md#referrer-breakdown-all-hidden))
+  ([#2981](https://github.com/The-Verscienta/kiln_cms/issues/2981) · [long form](docs/changelog/v1.11.0.md#referrer-breakdown-all-hidden))
 
 - **A backup schedule change made while a marker sync is running now reaches the `.hold` markers right after that sync, not at the next 15-minute slot.**
-  ([#2932](https://github.com/The-Verscienta/kiln_cms/issues/2932) · [long form](docs/changelog/unreleased.md#backup-hold-sync-after-change))
+  ([#2932](https://github.com/The-Verscienta/kiln_cms/issues/2932) · [long form](docs/changelog/v1.11.0.md#backup-hold-sync-after-change))
 
 - **An in-app backup whose finish step was interrupted after it closed the run now completes and syncs its markers, instead of failing with "work state … missing".**
-  ([long form](docs/changelog/unreleased.md#backup-finish-after-interruption))
+  ([long form](docs/changelog/v1.11.0.md#backup-finish-after-interruption))
 
 - **A backup step run again after recording its work no longer lists its files twice, which made the off-site copy refuse the checksum file and fail the backup.**
-  ([long form](docs/changelog/unreleased.md#backup-retried-step-duplicate-outputs))
+  ([long form](docs/changelog/v1.11.0.md#backup-retried-step-duplicate-outputs))
 
 - **A resume waiting to start (for the server with its files, or after a Cancel) shows on the Backups page with a Cancel for platform admins, so it no longer holds other backups back for up to an hour.**
-  ([long form](docs/changelog/unreleased.md#backup-cancel-waiting-resume))
+  ([long form](docs/changelog/v1.11.0.md#backup-cancel-waiting-resume))
 
 - **A finish step taken back from a stopped node stays finishing, so Cancel is refused until it completes (not yet when a node on an older release takes it back).**
-  ([long form](docs/changelog/unreleased.md#backup-reclaimed-finish-stays-finishing))
+  ([long form](docs/changelog/v1.11.0.md#backup-reclaimed-finish-stays-finishing))
 
 - **A backup's finish step syncs the `.good` and `.hold` markers only while it still holds the backup lock.**
-  ([long form](docs/changelog/unreleased.md#backup-finish-marker-sync-fenced))
+  ([long form](docs/changelog/v1.11.0.md#backup-finish-marker-sync-fenced))
 
 - **A backup step that outlives its Cancel can no longer replace the backup's files: each file is written under the step's own temporary name, outside the backup lock, and only renamed into place while the step holds it.**
-  ([long form](docs/changelog/unreleased.md#backup-step-files-fenced))
+  ([long form](docs/changelog/v1.11.0.md#backup-step-files-fenced))
 
 - **Erasure now deletes the account's linked newsletter subscriptions on every site, so the person's real address stops receiving newsletters, and Export my data lists them (without tokens).**
-  ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/unreleased.md#erasure-deletes-newsletter-subscriptions))
+  ([#2991](https://github.com/The-Verscienta/kiln_cms/issues/2991) · [long form](docs/changelog/v1.11.0.md#erasure-deletes-newsletter-subscriptions))
 
 - **Erasure now demotes every site membership of the account (viewer, no temporary tier, no audiences), so an erased person is on no roster, gets no mail and can't be given a tier back. Team marks the row Erased.**
-  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#erasure-demotes-site-memberships))
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/v1.11.0.md#erasure-demotes-site-memberships))
 
 - **A payment webhook for an erased member is acknowledged and changes nothing, instead of reviving the canceled membership, and no longer deadlocks with that member's erasure.**
-  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/unreleased.md#billing-webhook-erased-account))
+  ([#2774](https://github.com/The-Verscienta/kiln_cms/issues/2774) · [long form](docs/changelog/v1.11.0.md#billing-webhook-erased-account))
 
 - **Form mail jobs carry only ids, and form data and automation payloads are dropped from a job's row when it finishes and from Sentry events. Automation payloads stay plain while pending (Known issues).**
-  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#form-automation-job-args))
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/v1.11.0.md#form-automation-job-args))
 
 - **Workflow and task mail queued before an erasure is no longer sent to the erased person; the jobs carry ids, not the address, title or names, and erasure strips the address from finished mail jobs.**
-  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/unreleased.md#workflow-task-mail-erased-recipient))
+  ([#3019](https://github.com/The-Verscienta/kiln_cms/issues/3019) · [long form](docs/changelog/v1.11.0.md#workflow-task-mail-erased-recipient))
 
 - **Workflow and task mail re-checks each event's own rule when it sends (a review request goes only to a current site admin, a publish notice only to the author, comment mail only to the thread or the author), and a task digest lists only the tasks still open and assigned.**
-  ([#3037](https://github.com/The-Verscienta/kiln_cms/issues/3037) · [long form](docs/changelog/unreleased.md#workflow-task-mail-event-rule))
+  ([#3037](https://github.com/The-Verscienta/kiln_cms/issues/3037) · [long form](docs/changelog/v1.11.0.md#workflow-task-mail-event-rule))
 
 - **Account mail (password resets, sign-in links, alerts) queued before an erasure is no longer sent to the erased person: it is sent only while its account holds the address, and erasure withholds it.**
-  ([long form](docs/changelog/unreleased.md#account-mail-erased-recipient))
+  ([#3035](https://github.com/The-Verscienta/kiln_cms/issues/3035) · [long form](docs/changelog/v1.11.0.md#account-mail-erased-recipient))
 
 - **Docs: the data-flows guide lists the personal data held outside accounts (form submissions, suppression lists, fediverse followers, delivery logs, queued jobs), with retention and erasure for each, and what erasure does not reach.**
-  ([#2978](https://github.com/The-Verscienta/kiln_cms/issues/2978) · [long form](docs/changelog/unreleased.md#data-flows-personal-data-rows))
+  ([#2978](https://github.com/The-Verscienta/kiln_cms/issues/2978) · [long form](docs/changelog/v1.11.0.md#data-flows-personal-data-rows))
 
 - **An erased account can no longer be given a platform role, temporary role or audiences, and `mix kiln.deprecations` and its boot job leave erased accounts out.**
-  ([long form](docs/changelog/unreleased.md#erasure-refuses-platform-role))
+  ([#3010](https://github.com/The-Verscienta/kiln_cms/issues/3010) · [long form](docs/changelog/v1.11.0.md#erasure-refuses-platform-role))
 
 - **Export my data now lists the account's site memberships, in any status, with what each grants.**
-  ([long form](docs/changelog/unreleased.md#export-lists-site-memberships))
+  ([#3010](https://github.com/The-Verscienta/kiln_cms/issues/3010) · [long form](docs/changelog/v1.11.0.md#export-lists-site-memberships))
 
 - **The backup tools accept an `ecto://` URL with Ecto's own query parameters: `ssl=false` becomes `sslmode=disable`, and `pool_size`, `timeout` and `idle_interval` are left out.**
-  ([long form](docs/changelog/unreleased.md#backup-url-ecto-query-params))
+  ([long form](docs/changelog/v1.11.0.md#backup-url-ecto-query-params))
 
 - **A database dump stuck behind a table lock gives up after `BACKUP_LOCK_WAIT_SECONDS` (default 600) and says so; a failed cron `pg_dump` records its own error in the manifest.**
-  ([long form](docs/changelog/unreleased.md#backup-pg-dump-lock-wait))
+  ([long form](docs/changelog/v1.11.0.md#backup-pg-dump-lock-wait))
 
 - **A cron `backup.sh` and an in-app backup finishing together no longer publish a mixed `manifest.json`: every writer uses its own temporary name, and leftovers are removed after an hour (also by `backup.sh prune`).**
-  ([long form](docs/changelog/unreleased.md#backup-manifest-temp-names))
+  ([long form](docs/changelog/v1.11.0.md#backup-manifest-temp-names))
 
 - **A `pg_dump`, `tar` or `rclone` left running by a `backup.sh` killed with `kill -9` is now stopped by the script's heartbeat within 5 minutes.**
-  ([long form](docs/changelog/unreleased.md#backup-sh-orphaned-child))
+  ([long form](docs/changelog/v1.11.0.md#backup-sh-orphaned-child))
 
 - **`restore.sh db` and `drill` verify the dump against its `kiln-db-<stamp>.sha256` before touching the database and refuse a mismatch; with no sidecar they warn and continue.**
-  ([long form](docs/changelog/unreleased.md#restore-db-verifies-checksum))
+  ([long form](docs/changelog/v1.11.0.md#restore-db-verifies-checksum))
 
 - **A node whose heartbeat hangs on `BACKUP_DIR` still stops its backup steps after 90 s without a successful beat, and a hung `.kiln-dir-id` read no longer holds up the beat.**
-  ([#2848](https://github.com/The-Verscienta/kiln_cms/issues/2848) · [long form](docs/changelog/unreleased.md#backup-self-fence-watchdog))
+  ([#2848](https://github.com/The-Verscienta/kiln_cms/issues/2848) · [long form](docs/changelog/v1.11.0.md#backup-self-fence-watchdog))
 
 - **A `.kiln-dir-id.<uuid>.tmp` left by a node stopped mid-publish is removed after an hour, by the next in-app backup and by `backup.sh prune`.**
-  ([#2849](https://github.com/The-Verscienta/kiln_cms/issues/2849) · [long form](docs/changelog/unreleased.md#backup-dir-id-temp-sweep))
+  ([#2849](https://github.com/The-Verscienta/kiln_cms/issues/2849) · [long form](docs/changelog/v1.11.0.md#backup-dir-id-temp-sweep))
 
 - **A deferred A/V strip retries a passing read failure (a timeout, a `5xx`) instead of leaving the upload for the quarantine reaper, which now deletes a file only after purging its row. The 1.10.0 known issue #2835 could not occur; nothing to repair.**
-  ([long form](docs/changelog/unreleased.md#av-strip-transient-read-retries))
+  ([long form](docs/changelog/v1.11.0.md#av-strip-transient-read-retries))
 
 - **A release page or calendar held open while the release moved can no longer reschedule, unschedule, archive, reopen or delete it over the newer state (rescheduling a published release shipped it twice); the page reloads and says so. The cron no longer ships a release unscheduled or moved as it fired.**
-  ([long form](docs/changelog/unreleased.md#release-transitions-on-the-row))
+  ([long form](docs/changelog/v1.11.0.md#release-transitions-on-the-row))
 
 - **An item added to a release as its go-live started is refused, instead of being left pending on the published release, where it blocked its content from every other release.**
-  ([long form](docs/changelog/unreleased.md#release-items-during-go-live))
+  ([long form](docs/changelog/v1.11.0.md#release-items-during-go-live))
 
 - **A scheduled publish, unpublish or archive does nothing when the record was archived, published, rescheduled or given a new expiry action as the job fired; it used to overwrite that change.**
-  ([long form](docs/changelog/unreleased.md#scheduled-content-on-the-row))
+  ([long form](docs/changelog/v1.11.0.md#scheduled-content-on-the-row))
 
 - **A resume no longer runs from a copy of the backup's files on another host while the host that holds its directory is alive; the copy resumes once that host has stopped beating for 180 s.**
-  ([#3090](https://github.com/The-Verscienta/kiln_cms/pull/3090) · [long form](docs/changelog/unreleased.md#backup-resume-source-host-first))
+  ([#3090](https://github.com/The-Verscienta/kiln_cms/pull/3090) · [long form](docs/changelog/v1.11.0.md#backup-resume-source-host-first))
 
 - **A last-good marker sync job on a node whose `BACKUP_DIR` hangs gives up after 5 s (id read) or 120 s (sync) instead of holding an Oban worker for as long as the mount hangs.**
-  ([#3093](https://github.com/The-Verscienta/kiln_cms/pull/3093) · [long form](docs/changelog/unreleased.md#backup-marker-sync-hung-dir))
+  ([#3093](https://github.com/The-Verscienta/kiln_cms/pull/3093) · [long form](docs/changelog/v1.11.0.md#backup-marker-sync-hung-dir))
 
 - **Cron and in-app backups that start in the same second no longer share a stamp: each side steps to a free one, so a failed cron run's cleanup can't remove the app's files.**
-  ([#3096](https://github.com/The-Verscienta/kiln_cms/pull/3096) · [long form](docs/changelog/unreleased.md#backup-cron-app-parity))
+  ([#3096](https://github.com/The-Verscienta/kiln_cms/pull/3096) · [long form](docs/changelog/v1.11.0.md#backup-cron-app-parity))
 
 - **A media part whose file list couldn't be fully written (for example a full disk) now fails, instead of archiving fewer files and passing verification.**
-  ([#3097](https://github.com/The-Verscienta/kiln_cms/pull/3097) · [long form](docs/changelog/unreleased.md#backup-media-list-close))
+  ([#3097](https://github.com/The-Verscienta/kiln_cms/pull/3097) · [long form](docs/changelog/v1.11.0.md#backup-media-list-close))
 
 - **The Backups and Schedule pages now say when `KILN_BACKUP_SCHEDULER_CRON` isn't a valid cron expression, or can only match a date that doesn't exist, instead of calling it "turned off"; a never-matching expression can no longer hang the Schedule tab.**
-  ([#3098](https://github.com/The-Verscienta/kiln_cms/pull/3098) · [long form](docs/changelog/unreleased.md#backup-scheduler-cron-states))
+  ([#3098](https://github.com/The-Verscienta/kiln_cms/pull/3098) · [long form](docs/changelog/v1.11.0.md#backup-scheduler-cron-states))
 
 - **A backup file refused off-site because its content changed is now kept beside the original as `<name>.refused-<UTC stamp>`, so a Resume no longer destroys the evidence; the run error names the path, and retention removes it after `BACKUP_KEEP_DAYS`.**
-  ([#3100](https://github.com/The-Verscienta/kiln_cms/pull/3100) · [long form](docs/changelog/unreleased.md#backup-keep-refused-file))
+  ([#3100](https://github.com/The-Verscienta/kiln_cms/pull/3100) · [long form](docs/changelog/v1.11.0.md#backup-keep-refused-file))
 
 - **A backup step that outlived its Cancel, or an earlier attempt of the same step, can no longer prune the resumed backup's units or overwrite its local off-site copies: the lease is now per attempt, and the prune step and uploads are fenced.**
-  ([#3101](https://github.com/The-Verscienta/kiln_cms/pull/3101) · [long form](docs/changelog/unreleased.md#backup-fence-attempts-prune-offsite))
+  ([#3101](https://github.com/The-Verscienta/kiln_cms/pull/3101) · [long form](docs/changelog/v1.11.0.md#backup-fence-attempts-prune-offsite))
 
 - **An upload stopped at the step's time limit on its last attempt no longer says it resumes on the next attempt, and a resumable upload's attempt count no longer grows when the same step claims it again.**
-  ([#3102](https://github.com/The-Verscienta/kiln_cms/pull/3102) · [long form](docs/changelog/unreleased.md#backup-upload-resume-details))
+  ([#3102](https://github.com/The-Verscienta/kiln_cms/pull/3102) · [long form](docs/changelog/v1.11.0.md#backup-upload-resume-details))
 
 - **Backups → Destinations: saving a form someone else changed since you opened it is refused instead of overwriting their change, two admins enabling at once can no longer exceed the 8-destination cap, the `BACKUP_RCLONE_REMOTE` row gets a Test, and the S3 form, failure tooltips and waiting-resume strip gain help text and links.**
-  ([#3103](https://github.com/The-Verscienta/kiln_cms/pull/3103) · [long form](docs/changelog/unreleased.md#backup-destinations-tab-polish))
+  ([#3103](https://github.com/The-Verscienta/kiln_cms/pull/3103) · [long form](docs/changelog/v1.11.0.md#backup-destinations-tab-polish))
 
 - **A backup that couldn't read its destinations and has no `BACKUP_RCLONE_REMOTE` now reads "not copied off-site" instead of "reached 0 of 1", and the partly off-site alarm clears once the destinations that failed are no longer configured.**
-  ([#3104](https://github.com/The-Verscienta/kiln_cms/pull/3104) · [long form](docs/changelog/unreleased.md#backup-partial-offsite-status))
+  ([#3104](https://github.com/The-Verscienta/kiln_cms/pull/3104) · [long form](docs/changelog/v1.11.0.md#backup-partial-offsite-status))
 
 ### Security
 
 - **API keys of accounts erased before 0.9.0 no longer sign in, and the boot-time erasure backfill revokes them (GHSA-96vh-3m56-p8gx).**
-  ([#3064](https://github.com/The-Verscienta/kiln_cms/pull/3064) · [long form](docs/changelog/unreleased.md#api-keys-of-erased-accounts))
+  ([#3064](https://github.com/The-Verscienta/kiln_cms/pull/3064) · [long form](docs/changelog/v1.11.0.md#api-keys-of-erased-accounts))
 
 - **A database URL's `?sslpassword=` (an encrypted client key's passphrase) no longer reaches the command line of pg_dump, pg_restore or psql, where every process on the host could read it: the URL is refused instead.**
-  ([#3099](https://github.com/The-Verscienta/kiln_cms/pull/3099) · [long form](docs/changelog/unreleased.md#backup-url-sslpassword))
+  ([#3099](https://github.com/The-Verscienta/kiln_cms/pull/3099) · [long form](docs/changelog/v1.11.0.md#backup-url-sslpassword))
 
 - **An in-app backup's `.work/<stamp>/state.json` no longer holds the raw `BACKUP_RCLONE_REMOTE`, connection-string credentials included.**
-  ([long form](docs/changelog/unreleased.md#backup-state-json-remote))
+  ([#2220](https://github.com/The-Verscienta/kiln_cms/issues/2220) · [long form](docs/changelog/v1.11.0.md#backup-state-json-remote))
 
 - **In-app backups and demo resets connect with the app's TLS settings (`PGSSLMODE`/`PGSSLROOTCERT` from `DATABASE_SSL`), so a dump no longer falls back to cleartext or skips the app's certificate check.**
-  ([long form](docs/changelog/unreleased.md#backup-pg-tools-tls))
+  ([long form](docs/changelog/v1.11.0.md#backup-pg-tools-tls))
 
 - **A `key=value` database connection string carrying a password is refused, instead of putting the password in `pg_dump`'s, `pg_restore`'s or `psql`'s command line.**
-  ([long form](docs/changelog/unreleased.md#backup-conninfo-password-refused))
+  ([long form](docs/changelog/v1.11.0.md#backup-conninfo-password-refused))
 
 - **plug 1.20.4 fixes EEF-CVE-2026-120287: an unauthenticated multipart request made of empty parts or empty header lines no longer slips under the `:length` limit and holds many times its size in memory.**
-  ([#3092](https://github.com/The-Verscienta/kiln_cms/pull/3092) · [long form](docs/changelog/unreleased.md#plug-multipart-framing-advisory))
+  ([#3092](https://github.com/The-Verscienta/kiln_cms/pull/3092) · [long form](docs/changelog/v1.11.0.md#plug-multipart-framing-advisory))
 
 ## [1.10.1] - 2026-11-16
 
