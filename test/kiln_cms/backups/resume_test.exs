@@ -77,7 +77,14 @@ defmodule KilnCMS.Backups.ResumeTest do
     real_dump = System.find_executable("pg_dump")
     real_tar = System.find_executable("tar")
 
-    write_exe(bin, "pg_dump", ~s|echo x >> "#{counter}"\nexec "#{real_dump}" "$@"\n|)
+    dump_gate = Path.join(base, "pg_dump.gate")
+
+    write_exe(
+      bin,
+      "pg_dump",
+      ~s|[ -f "#{dump_gate}" ] \&\& { echo "pg_dump: stubbed failure" >\&2; exit 1; }\n| <>
+        ~s|echo x >> "#{counter}"\nexec "#{real_dump}" "$@"\n|
+    )
 
     write_exe(bin, "tar", """
     for a in "$@"; do
@@ -90,7 +97,7 @@ defmodule KilnCMS.Backups.ResumeTest do
     """)
 
     System.put_env("PATH", bin <> ":" <> System.get_env("PATH"))
-    %{counter: counter, gate: gate}
+    %{counter: counter, gate: gate, dump_gate: dump_gate}
   end
 
   defp write_exe(bin, name, body) do
@@ -326,9 +333,99 @@ defmodule KilnCMS.Backups.ResumeTest do
                run.log,
                &(&1.step == "dump" and
                    &1.message ==
-                     "#{Path.basename(dump)} changed after this backup recorded it: kept as " <>
-                       "#{kept} and rebuilt; retention removes it once it is older than 14 days")
+                     "#{Path.basename(dump)} no longer matched the sha256 this backup " <>
+                       "recorded for it: kept as #{kept}, and rebuilt; retention removes it " <>
+                       "once it is older than 14 days")
              )
+    end
+
+    # The window between a rebuild's rename and the step's state write: the
+    # kept file's record is forgotten in `state.json` before the rebuild, so
+    # a fresh file the retry finds there is unrecorded, rebuilt, and not kept
+    # as if it had changed.
+    test "a rebuild cut off before its state landed is not kept as changed on the retry", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{stamp: stamp, work: work, dump: dump} = fail_at_part_3(dir, tools)
+
+      flip_byte!(dump)
+      File.write!(tools.dump_gate, "")
+      assert {:error, _} = BackupChain.resume(stamp)
+      File.rm!(tools.dump_gate)
+
+      # Kept once, and its digest no longer on record.
+      assert [kept] = refused_files(dump)
+      assert {:ok, state} = WorkState.read(work)
+      assert WorkState.dump(state) == nil
+
+      # What a rebuild that landed and was then cut off leaves: a fresh dump
+      # under the name, which no record vouches for.
+      File.write!(dump, "a fresh dump this chain renamed into place")
+
+      assert :ok = BackupChain.resume(stamp)
+      assert refused_files(dump) == [kept]
+      assert {_, 0} = System.cmd("pg_restore", ["--list", dump], stderr_to_stdout: true)
+      assert [%{status: :succeeded} = run] = runs()
+      assert Enum.count(run.log, &(&1.message =~ "kept as")) == 1
+    end
+
+    test "a changed file that can't be kept aside is not rebuilt over: the resume fails", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{stamp: stamp, dump: dump} = fail_at_part_3(dir, tools)
+
+      flip_byte!(dump)
+      changed = File.read!(dump)
+      db_dir = Path.dirname(dump)
+      File.chmod!(db_dir, 0o555)
+      on_exit(fn -> File.chmod(db_dir, 0o755) end)
+
+      assert {:error, {:keep_failed, ^dump, :eacces}} = BackupChain.resume(stamp)
+      File.chmod!(db_dir, 0o755)
+
+      assert File.read!(dump) == changed
+      assert refused_files(dump) == []
+      assert dump_count(tools) == 1
+      assert [%{status: :failed} = run] = runs()
+
+      assert run.error ==
+               "Couldn't keep the changed #{Path.basename(dump)} aside (permission denied), so " <>
+                 "it was not rebuilt: it is still at #{dump}. Move it out of BACKUP_DIR, then Resume."
+
+      assert {:ok, _} = Backups.resumable_run(stamp)
+
+      # Once it can be kept, the next resume keeps it and rebuilds.
+      assert :ok = BackupChain.resume(stamp)
+      assert [kept] = refused_files(dump)
+      assert File.read!(kept) == changed
+      assert [%{status: :succeeded}] = runs()
+    end
+
+    test "a db sidecar that no longer says what the reused dump's record says is kept, then rewritten",
+         %{base: base, dir: dir} do
+      tools = stub_tools(base)
+      %{stamp: stamp, dump: dump} = fail_at_part_3(dir, tools)
+
+      sidecar = Path.join(Path.dirname(dump), Artifact.sidecar_name(:db, stamp))
+      File.write!(sidecar, File.read!(sidecar) <> "#{String.duplicate("0", 64)}  extra.dump\n")
+      changed = File.read!(sidecar)
+      dump_mtime = aged(dump)
+
+      assert :ok = BackupChain.resume(stamp)
+
+      # The dump is reused; the sidecar kept, then rewritten from the record.
+      assert dump_count(tools) == 1
+      assert mtime(dump) == dump_mtime
+      assert [kept] = refused_files(sidecar)
+      assert File.read!(kept) == changed
+      {:ok, hex, _} = Checksum.file(dump)
+      assert File.read!(sidecar) == "#{hex}  #{Path.basename(dump)}\n"
+      assert [%{status: :succeeded} = run] = runs()
+      assert Enum.any?(run.log, &(&1.step == "dump" and &1.message =~ "kept as #{kept}"))
     end
 
     # A part changed between its archive and the checksum step fails the
@@ -470,7 +567,10 @@ defmodule KilnCMS.Backups.ResumeTest do
       File.mkdir_p!(bin)
 
       gates =
-        Map.new([:fail, :tamper, :sidecar, :symlink], &{&1, Path.join(base, "rclone.#{&1}")})
+        Map.new(
+          [:fail, :tamper, :sidecar, :symlink, :readonly],
+          &{&1, Path.join(base, "rclone.#{&1}")}
+        )
 
       log = Path.join(base, "rclone.log")
 
@@ -481,6 +581,7 @@ defmodule KilnCMS.Backups.ResumeTest do
         *part01.tar.gz)
           p2="$(printf '%s' "$2" | sed 's/part01/part02/')"
           if [ -f "#{gates.tamper}" ]; then printf tampered >> "$p2"; fi
+          if [ -f "#{gates.readonly}" ]; then chmod 555 "$(dirname "$2")"; fi
           if [ -f "#{gates.symlink}" ]; then
             mv "$p2" "$p2.moved" && ln -s "$p2.moved" "$p2"
           fi ;;
@@ -730,6 +831,18 @@ defmodule KilnCMS.Backups.ResumeTest do
                "#{days} days on, the kept file should #{outcome}"
       end
 
+      # The boundary, from the refusal stamp itself: `find -mtime +14` is at
+      # least 15 whole days, so at exactly 15 days it stays and a second later
+      # it goes.
+      {:ok, %{refused_at: refused_at}} = Artifact.parse_refused_name(name)
+      {:ok, at} = Artifact.parse_stamp(refused_at)
+      day15 = DateTime.to_unix(at) + 15 * 86_400
+
+      for {at_s, outcome} <- [{day15, :keep}, {day15 + 1, :delete}] do
+        plan = Retention.plan(inventory, runs, Retention.Policy.legacy(14), at_s)
+        assert Enum.any?(Map.fetch!(plan, outcome), &(&1.files == [name])), "#{at_s}: #{outcome}"
+      end
+
       # And a real pass at that age removes it, and nothing of the backup.
       backup_files = File.ls!(Path.join(dir, "media")) -- [name]
       {:ok, inventory} = Retention.scan(dir)
@@ -741,6 +854,43 @@ defmodule KilnCMS.Backups.ResumeTest do
       assert deleted == [name]
       refute File.exists?(kept)
       assert File.ls!(Path.join(dir, "media")) |> Enum.sort() == Enum.sort(backup_files)
+    end
+
+    test "a refused file that can't be kept aside says so on the run, and Resume keeps it", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      rclone = stub_rclone(base, dir)
+      media_dir = Path.join(dir, "media")
+      on_exit(fn -> File.chmod(media_dir, 0o755) end)
+      gate!(rclone.tamper)
+      gate!(rclone.readonly)
+
+      assert {:error, {:offsite, %{refused: [_]}}} = BackupChain.run()
+      File.rm!(rclone.tamper)
+      File.rm!(rclone.readonly)
+      File.chmod!(media_dir, 0o755)
+
+      assert [%{status: :failed} = failed] = runs()
+      p2 = Path.join(media_dir, Artifact.part_name(failed.stamp, 2))
+      assert File.read!(p2) =~ ~r/tampered\z/
+      assert refused_files(p2) == []
+
+      assert Enum.any?(
+               failed.log,
+               &(&1.step == "offsite" and
+                   &1.message ==
+                     "Couldn't keep the refused #{Path.basename(p2)} aside (permission denied); " <>
+                       "it is still at #{p2}. Move it out of BACKUP_DIR before you Resume")
+             )
+
+      # The Resume keeps it before it rebuilds it.
+      assert :ok = BackupChain.resume(failed.stamp)
+      assert [kept] = refused_files(p2)
+      assert File.read!(kept) =~ ~r/tampered\z/
+      assert dump_count(tools) == 1
+      assert [%{status: :succeeded}] = runs()
     end
 
     # Since #2218 every backup has a work directory, so a database-only one
@@ -773,6 +923,19 @@ defmodule KilnCMS.Backups.ResumeTest do
   end
 
   # -- refusals --------------------------------------------------------------
+
+  describe "keeping a file aside under a lease that no longer holds (#2484)" do
+    test "moves nothing and says :superseded", %{dir: dir} do
+      path = Path.join([dir, "db", "kiln-db-20260101-000000.dump"])
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "evidence")
+      stale = %{chain: Ecto.UUID.generate(), epoch: 0, job_id: -1}
+
+      assert {:error, :superseded} = KilnCMS.Backups.Steps.set_aside(stale, path)
+      assert File.read!(path) == "evidence"
+      assert refused_files(path) == []
+    end
+  end
 
   describe "refusals" do
     @forged [

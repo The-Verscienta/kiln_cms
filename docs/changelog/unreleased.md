@@ -2623,6 +2623,31 @@ carries the reasoning.
   expression" warning.
   ([#2935](https://github.com/The-Verscienta/kiln_cms/issues/2935))
 
+<a id="backup-keep-refused-file"></a>
+
+- **A file refused off-site because its content changed is kept as evidence (#2484).**
+  Since #2481 a backup file whose sha256 changed between verification and
+  its off-site copy is refused and the run fails. The cause is something
+  other than the backup (a disk or controller fault, a sync tool,
+  tampering), and the next **Resume** rebuilt the file by renaming a fresh
+  one over it, destroying what changed. Now the in-app backup (under its
+  lease) and `backup.sh` rename the changed file to
+  `<name>.refused-<YYYYMMDD-HHMMSS>` (the UTC time of the refusal) in the
+  same `db/` or `media/` directory, with its bytes and modification time
+  unchanged, and the run error says `kept as <path>`. A Resume that finds a
+  recorded dump, part or db sidecar changed keeps it the same way before
+  rebuilding it; if it can't (for example a read-only directory), the
+  Resume fails instead of rebuilding over it, and says to move the file out
+  of `BACKUP_DIR` first. Don't restore from a kept file: `restore.sh` reads
+  it as a file Kiln didn't name. Nothing
+  reads a kept file as a backup file (History, verify, restore, the
+  importer). The app's retention and `backup.sh prune` delete it once both
+  its modification time and its refusal stamp are older than
+  `BACKUP_KEEP_DAYS`; copy it out of `BACKUP_DIR` to keep it longer, or
+  delete it by hand. The release console's lease-less off-site copy does
+  not rename.
+  ([#2484](https://github.com/The-Verscienta/kiln_cms/issues/2484))
+
 ## Security
 
 <a id="backup-url-sslpassword"></a>

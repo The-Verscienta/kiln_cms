@@ -3418,7 +3418,11 @@ The error names where it went, `… found 8c02d7e5b6f1…); kept as
 and the run's log adds `Kept the refused <name> as <path>; retention removes
 it once it is older than <N> days`. Cron's error adds `It was kept as <path>;
 prune removes it once it is older than BACKUP_KEEP_DAYS.` A file refused as
-missing, or as no longer a regular file, has nothing to keep.
+missing, or as no longer a regular file, has nothing to keep. If the rename
+itself fails (a read-only directory, say), the file stays where it is and the
+run's log says `Couldn't keep the refused <name> aside (<reason>); it is still
+at <path>. Move it out of BACKUP_DIR before you Resume`; cron prints `warning:
+could not keep <name> aside; it is still at <path>`.
 
 Nothing reads a kept file as a backup: not History, `backup.sh verify`,
 `restore.sh` (a stamp prefix or one part never picks it up), the cron prune's
@@ -3430,10 +3434,21 @@ is still kept that long after the refusal. A refusal stamp that is not a real
 moment, or more than a day ahead, counts for nothing. To remove it sooner,
 delete it by hand once you are done with it: `rm <path>`.
 
-A resume (or a retried step) that finds a file it recorded changed since, for
-example a media part that changed between its archive and the checksum step,
-keeps it the same way before rebuilding it, and says so on the run:
-`<name> changed after this backup recorded it: kept as <path> and rebuilt`.
+Don't restore from a kept `.refused-` file. Its name is not one `restore.sh`
+recognizes, so given one by path it treats it as a dump or archive Kiln did not
+name: there is no sidecar to check it against, and it only warns, unless
+`RESTORE_REQUIRE_CHECKSUM=1`, which refuses it.
+
+A resume (or a retried step) that finds a file it recorded no longer matching
+its recorded SHA-256, for example a media part that changed between its archive
+and the checksum step, or the database's `.sha256` file beside a dump it
+reuses, keeps it the same way before rebuilding or rewriting it, and says so on
+the run: `<name> no longer matched the sha256 this backup recorded for it:
+kept as <path>, and rebuilt`. If it can't be kept, the resume does not rebuild
+over it: the run fails with `Couldn't keep the changed <name> aside (<reason>),
+so it was not rebuilt: it is still at <path>. Move it out of BACKUP_DIR, then
+Resume.` (The media `.sha256` file is rewritten on a resume without this
+check: a rebuilt part changes it legitimately.)
 
 **What to check.** Look at the disk (`dmesg`, SMART, filesystem errors) and at
 anything else that can write to `BACKUP_DIR`: a second cron entry or host, a
@@ -3442,9 +3457,11 @@ file with the digest the error names (`sha256sum <path>`).
 
 **Then retry.**
 
-1. The changed file is already kept aside, and a resume leaves it alone. If
-   you need it for longer than `BACKUP_KEEP_DAYS`, copy it out of
-   `BACKUP_DIR`.
+1. The changed file is normally already kept aside, and a resume leaves it
+   alone. If the run's log says it couldn't be kept, move it out of
+   `BACKUP_DIR` yourself first; a resume that can't keep it fails rather than
+   rebuild over it. If you need a kept file for longer than
+   `BACKUP_KEEP_DAYS`, copy it out of `BACKUP_DIR`.
 2. **App:** open **Backups** as a platform admin and
    click **Resume** on the failed History row (see [Interrupted? Resume
    it.](#media-backups-in-parts-2218)). Files that still match `state.json`
