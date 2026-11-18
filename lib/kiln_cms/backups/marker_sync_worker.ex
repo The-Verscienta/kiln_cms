@@ -81,9 +81,10 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
   One known limit: the sync runs under the backup lock (`Chain.with_lock/1`,
   a cluster-wide advisory lock in a transaction). A task blocked on the
   directory inside that transaction keeps holding the lock, and the
-  connection, until the file operation returns. In the meantime every
-  other sync returns `:busy` or waits, and the heartbeat's lock sweep waits
-  its query timeout each tick.
+  connection, until the file operation returns. In the meantime everything
+  else that takes the lock (other syncs, in-app backup requests and steps,
+  the heartbeat's lock sweep) blocks on the advisory lock until its query
+  times out.
 
   ## Failures
 

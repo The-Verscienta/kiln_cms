@@ -466,7 +466,10 @@ slots its own node happens to pick up the job:
 For as long as reading `BACKUP_DIR` hangs (a hard-mounted NFS export that
 stopped answering, say), the node also reports no id, so the queued syncs
 stop going to it until the directory answers again
-([The backup-directory id read](#the-backup-directory-id-read-2848)).
+([The backup-directory id read](#the-backup-directory-id-read-2848)). A job
+already on such a node gives up after a bounded wait instead of holding an
+Oban slot
+([The marker sync on a hung backup directory](#the-marker-sync-on-a-hung-backup-directory-3079)).
 
 **A cloned directory now always carries an id.** Copying a backup directory to
 another host (`rsync`, a volume snapshot) copies its `.kiln-dir-id`, and two
@@ -525,6 +528,8 @@ emit `[:kiln_cms, :backups, :last_good, :failed]` with measurements
 | `Backup last-good marker sync skipped: couldn't read the node heartbeats (<message>)` | none | A scheduled run couldn't tell which nodes report a directory id, so it synced nothing. |
 | `Couldn't queue the last-good marker sync for backup directory <id> (<reason>)` | none | A scheduled run couldn't queue the sync for that directory; the next slot tries again. |
 | `Backup last-good marker sync for backup directory <id> gave up: no node with that directory picked it up` | none | No running node reads that directory id; see **Several nodes** above. A node that has just stopped can cause it: its id counts until its last heartbeat is 10 minutes old. |
+| `Backup last-good marker sync: the id read of the backup directory <dir> took more than <ms> ms (a hung mount?). Giving up for this slot; the id read is left running.` (or `the marker sync of`) | none (emits `[:kiln_cms, :backups, :marker_sync, :timeout]` instead) | The directory didn't answer in time, so the job gave up for this slot and left the task running ([The marker sync on a hung backup directory](#the-marker-sync-on-a-hung-backup-directory-3079)). |
+| `Backup last-good marker sync didn't start the id read of <dir>: 2 earlier ones it gave up on are still running (a hung mount?)` (or `the marker sync of`) | none | Two tasks the job gave up on are still stuck, so this one started none ([same section](#the-marker-sync-on-a-hung-backup-directory-3079)). |
 
 ### The hold markers
 
@@ -1452,7 +1457,7 @@ at all (`BACKUP_ENABLED=false`, no `pg_dump` in the image on the node that
 picked up the start step) is a `Skipped` row and leaves `manifest.json` alone,
 as before.
 
-**Telemetry.** The chain and the heartbeat emit, each with measurements `%{count: 1}`:
+**Telemetry.** The chain, the heartbeat and the marker sync emit, each with measurements `%{count: 1}`:
 
 | Event | Metadata | When |
 |---|---|---|
@@ -1462,6 +1467,7 @@ as before.
 | `[:kiln_cms, :backups, :status, :history_unreadable]` | `error` (the error's module) | The status could not read History and fell back to the manifest ([above](#check-the-last-backup-of-each-component)). |
 | `[:kiln_cms, :backups, :offsite, :partial]` | `stamp`, `chain`, `missed` (the keys of the destinations not reached); measurements also `reached` and `total` | A backup finished having reached some of its off-site destinations but not all ([below](#when-a-backup-reaches-only-some-destinations)). |
 | `[:kiln_cms, :backups, :heartbeat, :dir_id_timeout]` | `node`; measurements also `waited_ms` | A heartbeat beat with no backup-directory id because reading `.kiln-dir-id` is held up, once per beat while it is ([below](#the-backup-directory-id-read-2848)). |
+| `[:kiln_cms, :backups, :marker_sync, :timeout]` | `phase` (`:dir_id` or `:sync`); measurements also `waited_ms` | A last-good marker sync job stopped waiting on the backup directory's id read or sync and gave up for the slot ([below](#the-marker-sync-on-a-hung-backup-directory-3079)). |
 
 The in-app schedules emit their own events,
 `[:kiln_cms, :backups, :schedule, …]` and
@@ -1924,6 +1930,82 @@ The wait is `config :kiln_cms, KilnCMS.Backups, dir_id_timeout_ms: 5000`.
 There is no reason to change it; the stall doesn't stop the self-fence,
 which runs apart from the heartbeat
 ([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)).
+
+### The marker sync on a hung backup directory (#3079)
+
+The [last-good marker sync](#the-last-good-marker) job reads the directory's
+id, then syncs its markers, and both touch `BACKUP_DIR`. Before #3079 a job on
+a node whose directory had stopped answering blocked in that read, holding
+one of the Oban `default` queue's slots (10 by default) for as long as the
+mount hung, and the heartbeat stopping its routing didn't free the jobs
+already routed there. Now:
+
+- **The job waits a bounded time.** Each piece of directory I/O runs in a
+  task of its own, under `KilnCMS.Backups.MarkerSyncIO`. The job waits up to
+  5 seconds for the id read (the heartbeat's `dir_id_timeout_ms`, the same
+  setting) and up to 120 seconds for the sync. The sync's wait includes any
+  wait for the backup lock behind another marker sync.
+- **On a timeout the job gives up for the slot.** It logs a warning, emits
+  the event below and fails with `{:error, :backup_dir_unresponsive}`, so its
+  Oban slot is free again. The task is left running: a process blocked in a
+  file operation on a hung mount can't be killed. If it finishes later, a
+  line at info says how long it took, so a slow but healthy directory shows
+  up as one.
+- **A routed job whose id read times out snoozes**, as it does whenever the
+  id isn't its directory's, so another node with that directory can still
+  pick it up. After 20 snoozes it gives up as usual.
+- **A scheduled job whose own id read times out** still queues the jobs for
+  every other reported directory, then fails without syncing its own. An id
+  read that crashes counts as no id, and that job syncs in place as before.
+- **Only tasks a job gave up on are limited.** While two of them are still
+  running, no job starts any more directory I/O: it logs a warning and fails
+  with `{:error, :backup_dir_io_busy}` (a routed job snoozes instead). Each
+  stuck task holds one of the VM's dirty I/O schedulers, which the
+  heartbeat's id reads share. Jobs that were already waiting when the mount
+  hung can each still leave one behind, so the count can go past two.
+  Tasks a job is still waiting on are never "busy": the queue's concurrency
+  bounds them.
+- **The job's own timeout is both waits plus 60 seconds** (185 seconds by
+  default), so a hung directory fails it with one of the reasons above
+  rather than through Oban's timeout.
+
+What the server log says:
+
+| Log line | Level | Meaning |
+|---|---|---|
+| "Backup last-good marker sync: the id read of the backup directory `<dir>` took more than N ms (a hung mount?). Giving up for this slot; the id read is left running." | warning | The id read passed `dir_id_timeout_ms`. A routed job snoozes; a scheduled job queues the other directories' jobs and fails. |
+| "Backup last-good marker sync: the marker sync of the backup directory `<dir>` took more than N ms (a hung mount?). Giving up for this slot; the marker sync is left running." | warning | The sync passed `marker_sync_io_timeout_ms`. The job fails; the next slot tries again. |
+| "Backup last-good marker sync didn't start the id read of `<dir>`: 2 earlier ones it gave up on are still running (a hung mount?)" (or "the marker sync of") | warning | Two abandoned tasks are still stuck, so this job started none. |
+| "Backup last-good marker sync: the id read of `<dir>` finished after N s more, after the job had given up on it" (or "the marker sync of") | info | An abandoned task ended, N seconds after the job stopped waiting. A task that ended abnormally reads "ended after N s more (`<reason>`)". |
+
+Each timeout emits `[:kiln_cms, :backups, :marker_sync, :timeout]`, with
+measurements `%{count: 1, waited_ms: ms}` (the wait that ran out) and
+metadata `%{phase: :dir_id | :sync}`. Alert on it alongside the heartbeat's
+`dir_id_timeout`: both mean the backup directory on some node isn't
+answering.
+
+Both waits are set under `config :kiln_cms, KilnCMS.Backups`:
+
+```elixir
+config :kiln_cms, KilnCMS.Backups,
+  # The id read, shared with the heartbeat.
+  dir_id_timeout_ms: 5_000,
+  # The marker sync, backup-lock wait included.
+  marker_sync_io_timeout_ms: 120_000
+```
+
+The defaults suit most deployments. Raise `marker_sync_io_timeout_ms` only if
+a healthy directory's sync (import and marker writes on a slow volume) takes
+longer than two minutes; the job's timeout follows it.
+
+**Known limit: a sync stuck inside the backup lock keeps it.** The sync runs
+under the backup lock (`Chain.with_lock/1`, a cluster-wide advisory lock in a
+transaction). A task that blocks on the directory inside that transaction
+keeps holding the lock and its database connection until the file operation
+returns. Until then anything else that takes the backup lock, on any node,
+waits for it until its query times out: other marker syncs, in-app backup
+requests and steps, and the heartbeat's lock sweep on each tick. Bring the
+directory back (or force-unmount it) to release the lock.
 
 ### What a step that outlives its Cancel can write
 
