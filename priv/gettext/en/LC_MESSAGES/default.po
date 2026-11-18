@@ -2243,6 +2243,11 @@ msgstr ""
 msgid "A restore puts the document back without a propagation record"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A resume of this backup is waiting to start. Cancel the resume instead."
+msgstr ""
+
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "A role was raised"

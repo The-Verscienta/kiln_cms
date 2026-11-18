@@ -421,6 +421,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A backup that couldn't read its destinations and has no `BACKUP_RCLONE_REMOTE` now reads "not copied off-site" instead of "reached 0 of 1", and the partly off-site alarm clears once the destinations that failed are no longer configured.**
   ([#3104](https://github.com/The-Verscienta/kiln_cms/pull/3104) · [long form](docs/changelog/unreleased.md#backup-partial-offsite-status))
 
+- **Canceling a backup no longer writes the admin's email into its run log (the audited security event keeps who canceled), and a console Cancel of a run whose resume is waiting to start is refused instead of being undone by the resume.**
+  ([#3107](https://github.com/The-Verscienta/kiln_cms/pull/3107) · [long form](docs/changelog/unreleased.md#backup-cancel-followups))
+
 ### Security
 
 - **API keys of accounts erased before 0.9.0 no longer sign in, and the boot-time erasure backfill revokes them (GHSA-96vh-3m56-p8gx).**

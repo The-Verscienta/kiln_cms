@@ -16,7 +16,7 @@ defmodule KilnCMS.Backups.CancelResumeTest do
   alias KilnCMS.Accounts.{OrgMembership, User}
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Chain, DirId, Heartbeat, Recorder, Steps, StepWorker, WorkState}
-  alias KilnCMS.Backups.Run.Changes.CancelResume
+  alias KilnCMS.Backups.Run.Changes.{Cancel, CancelResume}
   alias KilnCMS.Repo
   alias KilnCMS.Security
   alias KilnCMS.SystemActor
@@ -257,6 +257,42 @@ defmodule KilnCMS.Backups.CancelResumeTest do
       assert Backups.in_flight() == nil
       assert Enum.all?(step_jobs(chain), &(&1.state == "cancelled"))
       assert Backups.run_resumable?(noted)
+    end
+
+    # #3028: marking the stale row canceled would leave the resume to re-open
+    # it after the settle window, so the plain Cancel (a console's
+    # `cancel_run`) is refused before it touches anything.
+    test "the plain Cancel of a stale running run is refused; the lock and start job stay",
+         %{admin: admin} = ctx do
+      stamp = "20261101-010106"
+      failed_run!(ctx.dir, stamp)
+      quiet = ago_ms(5 * 3_600_000)
+
+      set_run!(stamp,
+        status: "running",
+        finished_at: nil,
+        error: nil,
+        started_at: quiet,
+        updated_at: quiet
+      )
+
+      chain = waiting_for_files!(ctx, stamp)
+      before = run_of(stamp)
+      held = lock()
+      job = current_job()
+
+      assert {:error, %Ash.Error.Invalid{} = error} = Backups.cancel_run(before, actor: admin)
+      assert Exception.message(error) =~ Cancel.resume_waiting()
+
+      assert lock() == held
+      assert current_job() == job
+      assert [%{state: "scheduled"}] = step_jobs(chain)
+      assert %{chain: ^chain, step: :start, resume: ^stamp} = Backups.in_flight()
+      assert run_of(stamp) == before
+      assert canceled_events(admin) == []
+
+      # The resume's own Cancel still stops it.
+      assert {:ok, %{status: :failed}} = Backups.cancel_run_resume(before, actor: admin)
     end
   end
 
