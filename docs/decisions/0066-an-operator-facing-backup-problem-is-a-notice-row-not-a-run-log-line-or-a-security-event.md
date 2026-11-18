@@ -13,7 +13,7 @@
   for retention on a destination.
 - **Changelog** — the Unreleased section of
   [CHANGELOG.md](../../CHANGELOG.md): Upgrade notes and Added
-  ([long form](../changelog/unreleased.md#backup-retention-warnings)).
+  ([long form](../changelog/v1.11.0.md#backup-retention-warnings)).
 
 ## The problem
 

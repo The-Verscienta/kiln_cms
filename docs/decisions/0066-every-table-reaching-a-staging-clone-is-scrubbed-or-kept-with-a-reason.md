@@ -8,8 +8,8 @@
   [#2721](https://github.com/The-Verscienta/kiln_cms/issues/2721). The guide
   is [staging-environments.md](../staging-environments.md#plugin-tables).
 - **Changelog** — Unreleased, under Added
-  ([long form](../changelog/unreleased.md#plugin-staging-scrub)) and Breaking
-  ([long form](../changelog/unreleased.md#plugin-staging-scrub-refuses-undeclared)).
+  ([long form](../changelog/v1.11.0.md#plugin-staging-scrub)) and Breaking
+  ([long form](../changelog/v1.11.0.md#plugin-staging-scrub-refuses-undeclared)).
 
 ## The problem
 

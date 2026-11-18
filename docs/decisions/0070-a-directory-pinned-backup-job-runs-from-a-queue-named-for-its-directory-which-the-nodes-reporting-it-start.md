@@ -20,8 +20,8 @@
   (the directory id).
 - **Changelog** — the Unreleased section of
   [CHANGELOG.md](../../CHANGELOG.md): Upgrade notes
-  ([long form](../changelog/unreleased.md#backup-dir-queues-upgrade)) and
-  Changed ([long form](../changelog/unreleased.md#backup-dir-queues)).
+  ([long form](../changelog/v1.11.0.md#backup-dir-queues-upgrade)) and
+  Changed ([long form](../changelog/v1.11.0.md#backup-dir-queues)).
 
 ## The problem
 

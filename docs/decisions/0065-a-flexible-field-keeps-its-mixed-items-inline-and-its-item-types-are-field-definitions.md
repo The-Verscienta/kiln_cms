@@ -12,7 +12,7 @@
 - **Changelog** — held. The plan keeps the feature entry until the admin and
   editor PR (PR 2); this change is in the Unreleased section of
   [CHANGELOG.md](../../CHANGELOG.md) only as an upgrade note for its
-  migration ([long form](../changelog/unreleased.md#flexible-item-types-upgrade)).
+  migration ([long form](../changelog/v1.11.0.md#flexible-item-types-upgrade)).
 
 ## The problem
 

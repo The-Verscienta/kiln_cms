@@ -12,7 +12,7 @@
   (the local markers, which stay local).
 - **Changelog** — the Unreleased section of
   [CHANGELOG.md](../../CHANGELOG.md): Added, #2220
-  ([long form](../changelog/unreleased.md#backup-destinations)).
+  ([long form](../changelog/v1.11.0.md#backup-destinations)).
 
 ## The problem
 

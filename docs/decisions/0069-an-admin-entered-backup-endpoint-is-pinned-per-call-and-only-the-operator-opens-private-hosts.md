@@ -14,7 +14,7 @@
   (what a permanent failure does to a recorded upload).
 - **Changelog** — the Unreleased section of
   [CHANGELOG.md](../../CHANGELOG.md): Added
-  ([long form](../changelog/unreleased.md#s3-backup-destination)).
+  ([long form](../changelog/v1.11.0.md#s3-backup-destination)).
 
 ## The problem
 
