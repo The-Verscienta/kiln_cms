@@ -198,7 +198,14 @@ nodes could then write the same backup.
   `KilnCMS.Backups.DirIdReaders` (at most four at a time), waited on for 5
   seconds (`dir_id_timeout_ms`). While it is held up the beat reports no id,
   so the last-good marker sync stops routing to that node; no second read
-  starts until the first ends.
+  starts until the first ends. Since #2817 each beat also carries
+  `last_dir_id`, the id the last answered read gave, kept through a held-up,
+  crashed or busy read and cleared by one that finds no id file. A resume's
+  start reads it, so a stuck read on the source host doesn't let a copy of
+  its directory resume elsewhere
+  ([ADR 0040](0040-a-backup-chain-runs-where-its-backup-directory-is-routed-by-kiln-dir-id-with-a-bounded-snooze.md),
+  "Amendment (2026-11-17, #2817)"). The marker sync still routes by `dir_id`
+  only.
 
 The thresholds (90 and 180 seconds) and the reclaim are unchanged. Every
 other rule above is unchanged.

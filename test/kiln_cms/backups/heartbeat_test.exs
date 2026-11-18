@@ -440,20 +440,66 @@ defmodule KilnCMS.Backups.HeartbeatTest do
       blocking_reader!()
 
       {state, first} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
-      assert beat_of("this@node").dir_id == nil
+      assert %{dir_id: nil, last_dir_id: ^id} = beat_of("this@node")
       assert first =~ "Beating with no id"
 
-      # Still hung: still no id, and one warning per stall.
+      # Still hung: still no id, and one warning per stall. The last id read
+      # stays (#2817).
       {state, second} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
-      assert beat_of("this@node").dir_id == nil
+      assert %{dir_id: nil, last_dir_id: ^id} = beat_of("this@node")
       assert second == ""
 
       # It answers: the next tick reports the id again.
       assert_received {:reader, reader}
       release(reader, {:ok, id})
       state = Heartbeat.tick(state)
-      assert beat_of("this@node").dir_id == id
+      assert %{dir_id: ^id, last_dir_id: ^id} = beat_of("this@node")
       assert %{dir_id_task: nil, dir_id_stalled?: false} = state
+    end
+
+    # #2817: what a resume's start counts as this node reporting its directory.
+    test "with the readers full, the beat keeps the last id read", %{dir: dir, state: state} do
+      {id, state} = read_once!(dir, state)
+      blocking_reader!()
+
+      held =
+        for n <- 1..4 do
+          Heartbeat.tick(Heartbeat.new_state(node: "held-#{n}@node"))
+          assert_received {:reader, reader}
+          reader
+        end
+
+      state = Heartbeat.tick(state)
+
+      assert %{readers_full?: true, dir_id_task: nil} = state
+      assert %{dir_id: nil, last_dir_id: ^id} = beat_of("this@node")
+
+      Enum.each(held, &release(&1, {:error, :enoent}))
+    end
+
+    test "a restarted heartbeat whose first read hangs reports no last id", %{
+      dir: dir,
+      state: state
+    } do
+      {id, _state} = read_once!(dir, state)
+      assert beat_of("this@node").last_dir_id == id
+      blocking_reader!()
+
+      # The same node, a new boot: nothing read yet.
+      Heartbeat.tick(Heartbeat.new_state(node: "this@node"))
+
+      assert %{dir_id: nil, last_dir_id: nil} = beat_of("this@node")
+      assert_received {:reader, reader}
+      release(reader, {:error, :enoent})
+    end
+
+    test "a read that finds no id file clears the last id", %{dir: dir, state: state} do
+      {_id, state} = read_once!(dir, state)
+      put_backups_env(dir_id_reader: fn _dir, _ensure? -> {:error, :enoent} end)
+
+      Heartbeat.tick(state)
+
+      assert %{dir_id: nil, last_dir_id: nil} = beat_of("this@node")
     end
 
     test "single-flight: ticks while a read hangs start no other read", %{state: state} do
@@ -488,27 +534,30 @@ defmodule KilnCMS.Backups.HeartbeatTest do
       assert readers() == []
     end
 
-    test "a read that crashes reports no id", %{dir: dir, state: state} do
-      {_id, state} = read_once!(dir, state)
+    test "a read that crashes reports no id, and keeps the last id read", %{
+      dir: dir,
+      state: state
+    } do
+      {id, state} = read_once!(dir, state)
       put_backups_env(dir_id_reader: fn _dir, _ensure? -> raise "boom" end)
 
       state = Heartbeat.tick(state)
 
       assert %{beat_ok?: true, dir_id_task: nil} = state
-      assert beat_of("this@node").dir_id == nil
+      assert %{dir_id: nil, last_dir_id: ^id} = beat_of("this@node")
     end
 
     test "a read that answers something unexpected reports no id and ends the read", %{
       dir: dir,
       state: state
     } do
-      {_id, state} = read_once!(dir, state)
+      {id, state} = read_once!(dir, state)
       put_backups_env(dir_id_reader: fn _dir, _ensure? -> :unexpected end)
 
       {state, log} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
 
       assert %{beat_ok?: true, dir_id_task: nil} = state
-      assert beat_of("this@node").dir_id == nil
+      assert %{dir_id: nil, last_dir_id: ^id} = beat_of("this@node")
       assert log =~ "unexpected answer :unexpected"
       assert readers() == []
     end

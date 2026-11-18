@@ -387,6 +387,28 @@ carries the reasoning.
   column, and shows a `webhook_failing` or `webhook_disabled` notice in the
   bell as a neutral line rather than failing to load it (#2509).
 
+<a id="backup-resume-source-host-first-upgrade"></a>
+
+- **Run `mix ash.migrate` (new nullable `backup_node_beats.last_dir_id`, #2817). Until every node runs this release, a node on the previous release still resumes a backup from a copy of its files while the source host is alive. Rolling back is safe.**
+  The migration `add_node_beat_last_dir_id` adds one nullable `uuid` column
+  to `backup_node_beats`, with nothing to backfill: each node writes it on
+  its next beat. Every beat of this release writes it, so migrate before the
+  new release's nodes start, as with any other column. It carries the last
+  backup-directory id the node's heartbeat read, which a resume's start now
+  checks before it resumes from a copy of the backup's files (see the
+  *Fixed* entry below).
+
+  **During a rolling deploy.** A node still on the previous release keeps the
+  old rule: a copy of `.work/<stamp>/` in its backup directory resumes there
+  at once, whether or not the source host is alive. Only a deployment with a
+  `BACKUP_DIR` per host, and a copy of one host's work files on another, can
+  notice. To be sure, don't resume a backup until every node runs this
+  release.
+
+  **Rolling back.** The previous release ignores the column and resumes by
+  its own files-first rule. The column stays; nothing needs undoing.
+  ([#2817](https://github.com/The-Verscienta/kiln_cms/issues/2817))
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -2330,6 +2352,62 @@ carries the reasoning.
   back is safe. See
   [Content lifecycles](../content-lifecycles.md#expiry-one-timestamp-three-outcomes).
   Fixes #2746.
+
+<a id="backup-resume-source-host-first"></a>
+
+- **A resume no longer runs from a copy of the backup's files on another host while the host that holds the run's backup directory is alive. The copy resumes once that host has stopped beating for 180 seconds.**
+  Each backup run records the id of its backup directory (`.kiln-dir-id`,
+  #2539). A resume's `start` used to run on any node that had
+  `.work/<stamp>/state.json` itself, before it looked at that id. So with a
+  `BACKUP_DIR` per host, a copy of a host's directory (restored, cloned, or
+  rsynced with `--exclude .kiln-dir-id`, as the docs recommend) took the
+  resume while the source host was still running, and the two directories
+  went on to hold the same backup.
+
+  Now the node that reads the run's recorded id comes first, files or not.
+  A node with its own copy resumes only when no live node, one with a
+  heartbeat in the last 180 seconds (`Chain.stale_after_s/0`, the backup
+  lock's own threshold for a stopped node), reports that id. Otherwise it
+  puts the start back, within the usual budget (20 snoozes of 30 seconds per
+  attempt, four attempts). A copy that resumes records its own directory as
+  the run's `dir_id`, and the backup's later steps run there.
+
+  - **While the source host is alive, the copy waits.** If the source host's
+    `.work/<stamp>/` is gone, the resume is refused there, visibly: "Resume
+    refused: its work files (.work/`<stamp>`/state.json) are not on the
+    server that picked it up". To resume from the copy, stop the app on the
+    source host; the copy takes the start 180 seconds after its last beat.
+  - **A stuck id read still counts as alive.** While a hung mount holds up a
+    host's `.kiln-dir-id` read, its beats report no `dir_id` (#2848). Each
+    beat now also reports `last_dir_id`, the id its last answered read gave,
+    kept through a held-up, crashed or busy read and cleared by a read that
+    finds no id file. A resume's start counts either one; the last-good
+    marker sync still routes by `dir_id` only. Known limit: a host that
+    restarts and whose first read hangs reports neither, so a copy can resume
+    beside it.
+  - **It fails closed.** If the heartbeats can't be read, a node with a copy
+    puts the start back and logs "Backup resume of `<stamp>`: couldn't read
+    the node heartbeats (…); waiting for the server with its backup
+    directory (id `<id>`) rather than resuming from the files here". If the
+    run itself can't be read, a node with a copy puts the start back too
+    ("…couldn't read where its files are (…); waiting rather than resuming
+    from the files here"), and each attempt that spends its snoozes fails
+    with `:run_unreadable`. Before, both cases resumed from the copy. A node
+    with no copy still starts it and refuses on the missing files. A
+    `state.json` that can't be parsed counts as no copy.
+  - **Why 180 seconds and not the marker sync's 600.** The last-good marker
+    sync routes to every directory reported in the last 10 minutes, because
+    a host that missed a few beats is still worth a sync job that waits for
+    it. A resume asks whether the source host may still write its copy of
+    the backup, and the lock already treats a node silent for 180 seconds as
+    stopped and takes its step back.
+
+  On a single shared volume, where every node reads the same id, nothing
+  changes. See
+  [Several nodes and the backup lock](../backups.md#several-nodes-and-the-backup-lock)
+  and the amendment to
+  [ADR 0040](../decisions/0040-a-backup-chain-runs-where-its-backup-directory-is-routed-by-kiln-dir-id-with-a-bounded-snooze.md).
+  ([#2817](https://github.com/The-Verscienta/kiln_cms/issues/2817))
 
 ## Security
 

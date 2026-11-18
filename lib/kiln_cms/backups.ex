@@ -508,6 +508,41 @@ defmodule KilnCMS.Backups do
     end
   end
 
+  @doc false
+  # Whether a resume of `stamp` could build on files here (#2817): a
+  # `.work/<stamp>/state.json` this node can read and parse. A corrupt,
+  # partial or unreadable one is no match. `work_state?/1` (the file exists)
+  # stays the check for the Resume button and the request.
+  @spec local_resume_state?(term()) :: boolean()
+  def local_resume_state?(stamp) do
+    WorkState.valid_stamp?(stamp) and match?({:ok, _}, stamp |> work_dir() |> WorkState.read())
+  end
+
+  @doc false
+  # Whether a live node, one whose beat is under `within_s` seconds old on the
+  # database's clock, reports backup directory `dir_id` (#2817): as the id it
+  # read this beat, or as the last one it read while its read is held up
+  # (`last_dir_id`). Fails closed: a refused or failed read is an error,
+  # never "no".
+  @spec dir_id_live?(String.t(), pos_integer()) :: {:ok, boolean()} | {:error, term()}
+  def dir_id_live?(dir_id, within_s) do
+    with {:ok, beats} <- live_beats(within_s) do
+      {:ok, Enum.any?(beats, &(dir_id in [&1.dir_id, &1.last_dir_id]))}
+    end
+  end
+
+  # `config :kiln_cms, KilnCMS.Backups, live_beats_reader:` (a one-argument
+  # function of `within_s`) stands in for the read in tests.
+  defp live_beats(within_s) do
+    case config(:live_beats_reader) do
+      reader when is_function(reader, 1) ->
+        reader.(within_s)
+
+      nil ->
+        list_live_node_beats(within_s, actor: system(), authorize_with: :error)
+    end
+  end
+
   @doc "The work directory of a (valid) stamp. Raises for any other."
   @spec work_dir(String.t()) :: Path.t()
   def work_dir(stamp), do: WorkState.path(dir(), stamp)

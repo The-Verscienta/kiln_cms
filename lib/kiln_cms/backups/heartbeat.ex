@@ -56,6 +56,13 @@ defmodule KilnCMS.Backups.Heartbeat do
   or answers with something other than `{:ok, id}` or `{:error, reason}`,
   also reports no id.
 
+  Each beat also reports `last_dir_id` (#2817): the id the last answered
+  read gave, kept while a read is held up, crashes or can't start. A resume's
+  start counts it as this node reporting its directory, so a copy elsewhere
+  doesn't resume from a live node whose read is stuck. The marker sync never
+  routes by it. A read that finds no id file clears it, and a restarted
+  heartbeat has none until its first read answers.
+
   The supervisor runs at most four reads at a time, so heartbeats restarted
   on a hung mount can't pile up blocked readers; a tick that finds it full
   starts none and beats with no id. Nothing in the id read stops a beat: an
@@ -122,7 +129,8 @@ defmodule KilnCMS.Backups.Heartbeat do
           dir_id_warned: MapSet.t(),
           dir_id_task: dir_id_task() | nil,
           dir_id_stalled?: boolean(),
-          readers_full?: boolean()
+          readers_full?: boolean(),
+          last_dir_id: String.t() | nil
         }
 
   @typep dir_id_task :: %{
@@ -204,7 +212,8 @@ defmodule KilnCMS.Backups.Heartbeat do
       dir_id_warned: MapSet.new(),
       dir_id_task: nil,
       dir_id_stalled?: false,
-      readers_full?: false
+      readers_full?: false,
+      last_dir_id: nil
     }
   end
 
@@ -279,7 +288,12 @@ defmodule KilnCMS.Backups.Heartbeat do
   end
 
   defp beat(state, dir_id) do
-    attrs = %{node: state.node, boot_id: state.boot_id, dir_id: dir_id}
+    attrs = %{
+      node: state.node,
+      boot_id: state.boot_id,
+      dir_id: dir_id,
+      last_dir_id: state.last_dir_id
+    }
 
     case Backups.beat_node(attrs, actor: Backups.system()) do
       {:ok, _beat} ->
@@ -387,8 +401,10 @@ defmodule KilnCMS.Backups.Heartbeat do
 
   # With the marker sync off nothing routes by a cron-only directory's id, so
   # the read creates none, and its errors are not worth a warning.
-  defp dir_id_result(state, _ensure?, {:ok, id}), do: {id, state}
-  defp dir_id_result(state, _ensure?, {:error, :enoent}), do: {nil, state}
+  # `last_dir_id` follows a read that answered: the id, or none when the
+  # directory has no id file. An error, a crash or a stall leaves it.
+  defp dir_id_result(state, _ensure?, {:ok, id}), do: {id, %{state | last_dir_id: id}}
+  defp dir_id_result(state, _ensure?, {:error, :enoent}), do: {nil, %{state | last_dir_id: nil}}
   defp dir_id_result(state, true, {:error, reason}), do: {nil, warn_dir_id(state, reason)}
   defp dir_id_result(state, false, {:error, _reason}), do: {nil, state}
 
