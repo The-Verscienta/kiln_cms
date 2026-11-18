@@ -2054,13 +2054,16 @@ defmodule KilnCMS.Backups.Steps do
         do: Map.put(state, "sent", Map.put(sent_map(state), sent_key, sent)),
         else: state
 
+    problems = offsite_problems(results)
+    retry? = retry_destination?(dest, problems)
+
     rec = Enum.reduce(resumed, rec, &log_resumed(&2, &1, label_for(dest)))
-    rec = Enum.reduce(results, rec, &record_put(&1, &2, key, label_for(dest)))
+    rec = Enum.reduce(results, rec, &record_put(&1, &2, key, label_for(dest), retry?))
     rec = Enum.reduce(kept, rec, &log_kept/2)
     rec = Enum.reduce(not_kept, rec, &log_not_kept/2)
     counts = %{files_ok: Enum.count(results, &sent?/1), files_total: length(files)}
 
-    case offsite_problems(results) do
+    case problems do
       %{refused: [], failed: []} ->
         destination_ok(ctx, dest, config, counts, state, rec)
 
@@ -2077,14 +2080,22 @@ defmodule KilnCMS.Backups.Steps do
         {:fatal, {:offsite, problems}, state, rec}
 
       problems ->
-        # A failure the adapter says no retry fixes fails the destination
-        # now, whatever attempt this is (#2223); the chain moves on.
-        if dest.last_attempt? or Enum.any?(problems.failed, &permanent_failure?/1),
-          do: destination_failed(dest, {:offsite, problems}, state, rec, counts),
-          else:
-            {:retry, {:offsite, problems}, state, Recorder.put_run_destination(rec, key, counts)}
+        if retry?,
+          do:
+            {:retry, {:offsite, problems}, state, Recorder.put_run_destination(rec, key, counts)},
+          else: destination_failed(dest, {:offsite, problems}, state, rec, counts)
     end
   end
+
+  # Whether a step attempt follows that tries this destination's failed
+  # files again. A refusal fails the backup. A failure the adapter says no
+  # retry fixes fails the destination now, whatever attempt this is (#2223),
+  # and the chain moves on, as it does on the step's last attempt.
+  defp retry_destination?(_dest, %{refused: [_ | _]}), do: false
+  defp retry_destination?(_dest, %{failed: []}), do: false
+
+  defp retry_destination?(dest, %{failed: failed}),
+    do: not dest.last_attempt? and not Enum.any?(failed, &permanent_failure?/1)
 
   defp permanent_failure?({_name, reason}), do: Destination.permanent?(reason)
 
@@ -2695,19 +2706,22 @@ defmodule KilnCMS.Backups.Steps do
   defp short_destination_failure({:permanent, message}) when is_binary(message),
     do: String.slice(message, 0, 160)
 
-  defp short_destination_failure(reason), do: Destination.format_reason(reason)
+  # A destination's error is set when it failed, so no attempt of this step
+  # follows (#3082).
+  defp short_destination_failure(reason),
+    do: Destination.format_reason(reason, next_attempt?: false)
 
   # The per-file outcome, on the Run log and the artifact's destination map
   # under `key`. `label` nil is the env destination alone, said as it always
   # was (`record_offsite/3`).
-  defp record_put({file, :skipped}, rec, key, label) do
+  defp record_put({file, :skipped}, rec, key, label, _retry?) do
     name = Path.basename(file.path)
     rec = if file[:sidecar?], do: rec, else: Recorder.put_destination(rec, name, key, :ok)
     Recorder.log(rec, :info, "offsite", "#{name} was already copied to #{label}; not sent again")
   end
 
   # The destination already held it, same size and sha256 (#2223): as sent.
-  defp record_put({file, :present}, rec, key, label) do
+  defp record_put({file, :present}, rec, key, label, _retry?) do
     name = Path.basename(file.path)
     rec = if file[:sidecar?], do: rec, else: Recorder.put_destination(rec, name, key, :ok)
 
@@ -2720,17 +2734,18 @@ defmodule KilnCMS.Backups.Steps do
     )
   end
 
-  defp record_put(result, rec, key, nil), do: record_offsite(result, rec, key)
+  defp record_put(result, rec, key, nil, _retry?), do: record_offsite(result, rec, key)
 
-  defp record_put({file, :ok}, rec, key, label) do
+  defp record_put({file, :ok}, rec, key, label, _retry?) do
     name = Path.basename(file.path)
     rec = if file[:sidecar?], do: rec, else: Recorder.put_destination(rec, name, key, :ok)
     Recorder.log(rec, :info, "offsite", "Copied #{name} to #{label}")
   end
 
-  defp record_put({file, {:error, reason}}, rec, key, label) do
+  # `retry?`: whether a step attempt follows that sends this file again.
+  defp record_put({file, {:error, reason}}, rec, key, label, retry?) do
     name = Path.basename(file.path)
-    error = Destination.format_reason(reason)
+    error = Destination.format_reason(reason, next_attempt?: retry?)
 
     rec =
       if file[:sidecar?],
@@ -2740,7 +2755,7 @@ defmodule KilnCMS.Backups.Steps do
     Recorder.log(rec, :error, "offsite", "Copy of #{name} to #{label} failed: #{error}")
   end
 
-  defp record_put({file, {:refused, reason}}, rec, key, label) do
+  defp record_put({file, {:refused, reason}}, rec, key, label, _retry?) do
     name = Path.basename(file.path)
     why = describe_refusal(reason)
     message = "Copy of #{name} to #{label} REFUSED: #{why}; it was not uploaded"

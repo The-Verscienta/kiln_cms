@@ -341,6 +341,21 @@ defmodule KilnCMS.Backups.DestinationTest do
       assert Destination.format_reason(:superseded) =~ "took over the upload"
     end
 
+    test "format_reason/2 says where a :deadline upload resumes (#3082)" do
+      assert Destination.format_reason(:deadline, next_attempt?: true) ==
+               "stopped before the step's time ran out; the upload resumes on the next attempt"
+
+      assert Destination.format_reason(:deadline, next_attempt?: false) ==
+               "stopped before the step's time ran out; it resumes when the backup is " <>
+                 "resumed or runs again"
+
+      assert Destination.format_reason(:deadline, []) == Destination.format_reason(:deadline)
+
+      # Any other reason reads as format_reason/1 has it.
+      assert Destination.format_reason(:superseded, next_attempt?: false) ==
+               Destination.format_reason(:superseded)
+    end
+
     test "permanent?/1 is the tagged reason with a message only" do
       assert Destination.permanent?({:permanent, "gone"})
       refute Destination.permanent?("permanent")

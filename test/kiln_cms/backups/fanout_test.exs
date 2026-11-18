@@ -513,6 +513,42 @@ defmodule KilnCMS.Backups.FanoutTest do
       assert %{status: :ok} = entry(run, "dest:" <> c.id)
     end
 
+    test "an upload stopped at the deadline resumes on the next attempt, until the last " <>
+           "one (#3082)",
+         %{base: base} do
+      log = Path.join(base, "b.log")
+      b = fake!("Slow", 1, %{"put_mode" => "deadline", "log" => log})
+      c = fake!("Fine", 2, %{})
+
+      assert :ok = BackupChain.run()
+      run = run!()
+
+      # The deadline ends each attempt after its first file.
+      attempts = length(lines(log))
+      assert attempts > 1
+      assert %{attempt: ^attempts, state: "completed"} = offsite_job(1)
+
+      failed =
+        for entry <- run.log, entry.message =~ "to Slow failed: ", do: entry.message
+
+      assert length(failed) == attempts
+      {earlier, [last]} = Enum.split(failed, -1)
+
+      for message <- earlier do
+        assert message =~
+                 "stopped before the step's time ran out; the upload resumes on the " <>
+                   "next attempt"
+      end
+
+      assert last =~ "it resumes when the backup is resumed or runs again"
+      refute last =~ "next attempt"
+
+      assert %{status: :failed, error: error} = entry(run, "dest:" <> b.id)
+      assert error =~ "it resumes when the backup is resumed or runs again"
+      refute error =~ "next attempt"
+      assert %{status: :ok} = entry(run, "dest:" <> c.id)
+    end
+
     test "a hanging destination times out, fails, and the others still run", %{base: base} do
       call_timeout!(300)
       log = Path.join(base, "b.log")

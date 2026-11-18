@@ -145,7 +145,20 @@ defmodule KilnCMS.Backups.Upload do
 
       change set_attribute(:owner_job_id, arg(:job_id))
       change set_attribute(:owner_attempt, arg(:attempt))
-      change atomic_update(:attempts, expr(attempts + 1))
+
+      # A step attempt counts once: its owner claiming the row again (#3083)
+      # leaves `attempts` as it is. The comparison reads the row before this
+      # update, as SQL's SET does.
+      change atomic_update(
+               :attempts,
+               expr(
+                 attempts +
+                   if(owner_job_id == ^arg(:job_id) and owner_attempt == ^arg(:attempt),
+                     do: 0,
+                     else: 1
+                   )
+               )
+             )
     end
 
     # Progress, from the owner only.

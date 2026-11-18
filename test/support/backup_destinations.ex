@@ -68,6 +68,8 @@ defmodule KilnCMS.Test.BackupDestinations do
         (#2223);
       * `"present"` — `{:ok, :already_present}`, and `"ok_weird"` some other
         `{:ok, _}`;
+      * `"deadline"` — `{:error, :deadline}`, as a resumable adapter that
+        stopped at the step's deadline answers (#3082);
       * `"req"` — a `Req` request through the `Req.Test` stub named by
         `"req_stub"`, answering `{:ok, body}` (for a non-put call).
 
@@ -218,6 +220,7 @@ defmodule KilnCMS.Test.BackupDestinations do
 
     defp behave("present", _settings, _token), do: {:ok, :already_present}
     defp behave("ok_weird", _settings, _token), do: {:ok, :weird}
+    defp behave("deadline", _settings, _token), do: {:error, :deadline}
 
     defp behave("req", settings, _token) do
       case Req.get("http://store.test/ping", plug: {Req.Test, settings["req_stub"]}, retry: false) do

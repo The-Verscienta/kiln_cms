@@ -167,6 +167,34 @@ defmodule KilnCMS.Backups.UploadPoliciesTest do
     assert checkpoint == %{"upload_id" => "u1"}
   end
 
+  test "a claim counts an attempt only when the owner changes (#3083)" do
+    system = Backups.system()
+    row = open!(attrs())
+    assert %Upload{owner_job_id: 7, owner_attempt: 1, attempts: 1} = row
+
+    # The owner claiming its own row again is the same attempt.
+    assert {:ok, %Upload{owner_job_id: 7, owner_attempt: 1, attempts: 1} = row} =
+             Backups.claim_backup_upload(row, 7, 1, actor: system)
+
+    assert {:ok, %Upload{attempts: 1} = row} =
+             Backups.claim_backup_upload(row, 7, 1, actor: system)
+
+    # A newer attempt of the job, then a newer job: one more each.
+    assert {:ok, %Upload{owner_job_id: 7, owner_attempt: 2, attempts: 2} = row} =
+             Backups.claim_backup_upload(row, 7, 2, actor: system)
+
+    assert {:ok, %Upload{owner_job_id: 9, owner_attempt: 1, attempts: 3} = row} =
+             Backups.claim_backup_upload(row, 9, 1, actor: system)
+
+    assert {:ok, %Upload{attempts: 3}} = Backups.claim_backup_upload(row, 9, 1, actor: system)
+
+    # An older owner is still refused, and counts nothing.
+    assert {:error, _} = Backups.claim_backup_upload(row, 7, 3, actor: system)
+
+    assert [%Upload{owner_job_id: 9, owner_attempt: 1, attempts: 3}] =
+             Backups.list_backup_uploads!(actor: system, authorize_with: :error)
+  end
+
   test "one open upload per file and destination; a closed one doesn't count" do
     first = open!(attrs())
     same = %{attrs() | destination_key: first.destination_key}

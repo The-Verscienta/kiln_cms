@@ -368,6 +368,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A backup step that outlived its Cancel, or an earlier attempt of the same step, can no longer prune the resumed backup's units or overwrite its local off-site copies: the lease is now per attempt, and the prune step and uploads are fenced.**
   ([#3101](https://github.com/The-Verscienta/kiln_cms/pull/3101) · [long form](docs/changelog/unreleased.md#backup-fence-attempts-prune-offsite))
 
+- **An upload stopped at the step's time limit on its last attempt no longer says it resumes on the next attempt, and a resumable upload's attempt count no longer grows when the same step claims it again.**
+  ([long form](docs/changelog/unreleased.md#backup-upload-resume-details))
+
 ### Security
 
 - **A database URL's `?sslpassword=` (an encrypted client key's passphrase) no longer reaches the command line of pg_dump, pg_restore or psql, where every process on the host could read it: the URL is refused instead.**
