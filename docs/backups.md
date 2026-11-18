@@ -1619,8 +1619,9 @@ so it can be resumed later.
 3. Confirm "Cancel this backup? Its files are kept, so it can be resumed
    later." (with "A queued backup will start next." when one is waiting).
 4. The page says "Backup canceled. Its files are kept, so it can be resumed."
-   The row reads `Canceled`, its error "Canceled by a platform admin", and its
-   log "Canceled by `<your email>`".
+   The row reads `Canceled`, and its error and log "Canceled by a platform
+   admin". Who canceled is in the instance security log (`backup_canceled`),
+   not in the run.
 
 What Cancel does:
 
@@ -1750,6 +1751,11 @@ system actor is refused):
 ```bash
 bin/kiln_cms rpc 'admin = KilnCMS.Accounts.get_user_by_email!("admin@example.com", authorize?: false); {:ok, run} = KilnCMS.Backups.get_run_by_stamp("20260805-031700", actor: admin); {:ok, run} = KilnCMS.Backups.cancel_run_resume(run, actor: admin); IO.inspect(run.status)'
 ```
+
+The plain `KilnCMS.Backups.cancel_run/2` is refused while the resume waits
+("a resume of this backup is waiting to start; cancel the resume instead"),
+and changes nothing: marking the row canceled would not stop the resume
+([#3028](https://github.com/The-Verscienta/kiln_cms/issues/3028)).
 
 A fresh backup (not a resume) can also wait at its `start` step, for up to
 three hours, while a legacy `KilnCMS.Backups.Worker` job still runs on a node
@@ -5133,10 +5139,13 @@ so, since #2220, is the remote in a backup's `.work/<stamp>/state.json`, which
 held it as configured before. A destination's errors are also scrubbed of its
 own secret fields. Read
 access is the platform admin only. The table is written by the `:backups`
-system actor, and by one person's action: a platform admin's `:cancel` of a
-running backup, which sets its status, finish time and error ("Canceled by a
-platform admin") and appends a log line naming that admin by email. It is
-purged by
+system actor, and by three platform-admin actions: `:cancel` of a running
+backup, which sets its status, finish time and error ("Canceled by a
+platform admin") and appends a log line saying the same; `:cancel_resume`
+of a resume waiting to start; and `:cancel_resend` of a running re-send.
+Each logs "a platform admin", never a name. Who canceled is in
+the instance security log only (#3029); a run canceled before that names the
+admin by email in its log, which erasure does not rewrite. It is purged by
 the staging scrub (`backup_runs_purged`).
 
 ### It needs the client tools in the image

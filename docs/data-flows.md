@@ -58,6 +58,7 @@ your deployment.
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
 | Security log | `security_events` | Yes | Admin-only audit log (#2241): the acting user's id and an **email snapshot** (known accounts only), the target, the **raw IP address** and **user agent** of the request, and a short allowlisted metadata map with no secrets. Kept 365 days by default (per-site setting, `0` keeps forever; then raw IPs are kept indefinitely). Scrubbed on erasure, purged on retention and by the staging scrub. A request refused by the site's block list (`ip_block_refused`, #2245) is the exception: it records the rule and surface only, with no IP address or user agent. See [Security log](security-events.md). |
 | Instance security log | `instance_security_events` | Yes | Platform-admin-only audit log of events about the installation rather than a site (#2541; today `backup_canceled`): the same columns as the site log (acting user's id and **email snapshot**, target, **raw IP address**, **user agent**, allowlisted metadata), with no site. Kept 365 days by default (`KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS`, `0` keeps forever). Scrubbed on erasure, purged on retention and by the staging scrub. See [The instance log](security-events.md#the-instance-log). |
+| Backup history | `backup_runs` | Possibly | One row per backup (#2217): its stamp, trigger, status, files and a step log. The log and error of a backup a platform admin canceled say "Canceled by a platform admin"; who canceled is in the instance security log (`backup_canceled`) only ([#3029](https://github.com/The-Verscienta/kiln_cms/issues/3029)). A run canceled before #3029 shipped still names that admin by email in its log, and erasure does not rewrite it (see [What erasure does not reach](#what-erasure-does-not-reach)). Platform-admin only. Purged by the staging scrub. See [Backups](backups.md). |
 | Security alert queue | `security_alert_dispatches` | Pseudonymous (transient) | One row per security alert window or silencing notice (#2245): the site, the alert kind, the window, the id of the security event that raised it, delivery stamps, and for a notice what changed, the kinds, the webhook endpoint's id and the acting user's id. Never an address, email, URL or token. Deleted by an hourly prune a day after its window ends, and by the staging scrub. Not touched by erasure: it holds ids only and is gone within a day. See [Security alerts](security-alerts.md). |
 | Security alert settings | `site_security_alerts` | No | Per site (#2245): the alert kinds turned off, whether admins get the bell and email, whether alerts show full IP addresses. |
 | Platform security alert settings | `platform_security_alerts` | No | One row for the installation (#2245): the platform alert kinds a platform admin turned off (today only `api_key_rate_limited` can be). No person, address or key. Each save is recorded in the instance security log (`platform_alerts_changed`). |
@@ -840,6 +841,10 @@ data about the person that it leaves as it is:
   "An editor".
 - **Backups.** A backup taken before the erasure holds everything as it was,
   until that backup is deleted under your backup retention.
+- **A backup canceled before #3029.** Its run log on **Backups**
+  (`backup_runs.log`) says "Canceled by" the admin's email. Erasure leaves
+  it as it is; backups canceled since say "a platform admin"
+  ([#3029](https://github.com/The-Verscienta/kiln_cms/issues/3029)).
 
 ## Audit trail vs. user erasure (#219)
 

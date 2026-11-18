@@ -24,15 +24,19 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
   its `state.json` write to its lease (its rename into place is
   `Chain.fenced_rename/3`, #2818).
 
-  The run is logged as canceled by the actor, with the step it was on in the
-  audit event's metadata (`changeset.context[:backup_step]`).
+  The run's log and error say "Canceled by a platform admin", and so does the
+  server log line: the run log is not scrubbed on account erasure (#3029). Who
+  canceled is in the audited `backup_canceled` instance event, with the step
+  it was on in its metadata (`changeset.context[:backup_step]`).
 
   A resume that holds the lock but has not re-opened its run yet is not what
   this action is for. While its start snoozes for the server with the run's
-  files, the lock holds a chain the run is not on and no stamp yet, so a stale
-  `running` row is just marked canceled and the resume carries on. Its own
-  Cancel is `Run`'s `:cancel_resume` (`Run.Changes.CancelResume`, #2816),
-  which the Backups page offers instead.
+  files, the lock holds a chain the run is not on and no stamp yet: marking a
+  stale `running` row canceled would leave the resume to re-open it after the
+  settle window. So this action is refused then (#3028, "cancel the resume
+  instead", on `Run.Changes.CancelResume.waiting?/2`), and `Run`'s
+  `:cancel_resume` (`Run.Changes.CancelResume`, #2816), which the Backups page
+  offers instead, stops it.
 
   Nor is a re-send of the run to the destinations it missed (#2949): while
   one holds the lock this action is refused ("cancel the re-send instead"),
@@ -41,11 +45,15 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
   use Ash.Resource.Change
 
   alias KilnCMS.Backups.{Chain, Steps}
+  alias KilnCMS.Backups.Run.Changes.CancelResume
 
   require Logger
 
+  # Never the actor's email: the run log outlives an account's erasure (#3029).
+  @canceled "Canceled by a platform admin"
+
   @impl true
-  def change(changeset, _opts, context) do
+  def change(changeset, _opts, _context) do
     run = changeset.data
 
     if run.origin != :app do
@@ -54,18 +62,16 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
         message: "can't be canceled: only an in-app backup can"
       )
     else
-      by = actor_label(context.actor)
-
       entry = %{
         at: DateTime.utc_now(),
         level: :warn,
         step: "cancel",
-        message: "Canceled by #{by}"
+        message: @canceled
       }
 
       changeset
       |> Ash.Changeset.force_change_attribute(:log, (run.log || []) ++ [entry])
-      |> Ash.Changeset.force_change_attribute(:error, "Canceled by a platform admin")
+      |> Ash.Changeset.force_change_attribute(:error, @canceled)
       |> Ash.Changeset.before_action(&stop_chain/1)
       |> Ash.Changeset.after_transaction(&announce/2)
     end
@@ -80,6 +86,9 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
     cond do
       resending?(row, run) ->
         Ash.Changeset.add_error(changeset, field: :status, message: resending())
+
+      CancelResume.waiting?(row, run) ->
+        Ash.Changeset.add_error(changeset, field: :status, message: resume_waiting())
 
       not holds?(row, run) ->
         Ash.Changeset.set_context(changeset, %{backup_step: nil, backup_chain: nil})
@@ -119,6 +128,15 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
   @spec resending() :: String.t()
   def resending, do: "is being re-sent off-site: cancel the re-send instead"
 
+  @doc """
+  The refusal while the lock holds a resume of the run that has not re-opened
+  it yet (#3028): marking the run canceled would not stop it, `Run`'s
+  `:cancel_resume` does.
+  """
+  @spec resume_waiting() :: String.t()
+  def resume_waiting,
+    do: "a resume of this backup is waiting to start; cancel the resume instead"
+
   # A re-send of this run's stamp holds the lock (#2949). The run is
   # `succeeded`, so this action's filter would refuse it anyway, but only
   # after `stop_chain/1` had canceled the re-send's jobs inside the
@@ -144,7 +162,7 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
     step = changeset.context[:backup_step]
 
     Logger.warning(
-      "Backup #{run.stamp} canceled by #{actor_label(changeset.context[:private][:actor])}" <>
+      "Backup #{run.stamp} canceled by a platform admin" <>
         if(step, do: " during #{step}", else: "")
     )
 
@@ -157,7 +175,4 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
   end
 
   defp announce(_changeset, result), do: result
-
-  defp actor_label(%{email: email}) when not is_nil(email), do: to_string(email)
-  defp actor_label(_actor), do: "a platform admin"
 end

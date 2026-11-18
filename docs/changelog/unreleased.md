@@ -2758,6 +2758,21 @@ carries the reasoning.
   the destinations can't be read, the alarm is left as recorded.
   ([#2951](https://github.com/The-Verscienta/kiln_cms/issues/2951))
 
+<a id="backup-cancel-followups"></a>
+
+- **Two backup Cancel fixes (#3028, #3029).**
+  Canceling a running backup wrote "Canceled by <email>" into the run's
+  log, its error and the server log; `backup_runs` isn't reached by account
+  erasure. All three now say "Canceled by a platform admin", and who
+  canceled is kept in the audited `backup_canceled` security event only.
+  Runs canceled before this release still name the admin and are not
+  rewritten. And `Backups.cancel_run/2` from a release console on a stale
+  running run whose resume was waiting to start marked it canceled while
+  the resume later re-opened it; it is now refused ("a resume of this
+  backup is waiting to start; cancel the resume instead") and changes
+  nothing.
+  ([#3028](https://github.com/The-Verscienta/kiln_cms/issues/3028), [#3029](https://github.com/The-Verscienta/kiln_cms/issues/3029))
+
 ## Security
 
 <a id="backup-url-sslpassword"></a>

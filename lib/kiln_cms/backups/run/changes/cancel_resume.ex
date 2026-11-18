@@ -150,13 +150,18 @@ defmodule KilnCMS.Backups.Run.Changes.CancelResume do
   @spec started() :: String.t()
   def started, do: "has no resume waiting to start: the resume has started"
 
-  # The lock holds a resume of `run` that has not re-opened it: a resume of
-  # its stamp at the `start` step, under a chain that is not the run's.
-  defp waiting?(%{chain_id: chain, step: :start, resume_stamp: stamp}, %{stamp: stamp} = run)
-       when is_binary(chain) and is_binary(stamp),
-       do: run.chain_id != chain
+  @doc """
+  Whether the backup lock `row` (`Chain.locked_row/0`) holds a resume of
+  `run` that has not re-opened it: a resume of its stamp at the `start` step,
+  under a chain that is not the run's. `Run.Changes.Cancel` refuses on it too
+  (#3028), so a plain Cancel never leaves such a resume to re-open the run.
+  """
+  @spec waiting?(map(), map()) :: boolean()
+  def waiting?(%{chain_id: chain, step: :start, resume_stamp: stamp}, %{stamp: stamp} = run)
+      when is_binary(chain) and is_binary(stamp),
+      do: run.chain_id != chain
 
-  defp waiting?(_row, _run), do: false
+  def waiting?(_row, _run), do: false
 
   # The lock holds the chain the run was re-opened under: a resume of it (or
   # a retry) that has started.
