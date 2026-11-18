@@ -118,7 +118,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#3096](https://github.com/The-Verscienta/kiln_cms/pull/3096) · [long form](docs/changelog/unreleased.md#backup-cron-app-parity-upgrade))
 
 - **Backups now check free space before the database dump and before the media parts, and refuse at once when the disk is short (cron too). The new `BACKUP_FREE_SPACE_CHECK=false` turns the check off, for example when media compresses well and the estimate is too high.**
-  ([long form](docs/changelog/unreleased.md#backup-free-space-preflight-upgrade))
+  ([#3097](https://github.com/The-Verscienta/kiln_cms/pull/3097) · [long form](docs/changelog/unreleased.md#backup-free-space-preflight-upgrade))
 
 ### Breaking
 
@@ -354,7 +354,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#3096](https://github.com/The-Verscienta/kiln_cms/pull/3096) · [long form](docs/changelog/unreleased.md#backup-cron-app-parity))
 
 - **A media part whose file list couldn't be fully written (for example a full disk) now fails, instead of archiving fewer files and passing verification.**
-  ([long form](docs/changelog/unreleased.md#backup-media-list-close))
+  ([#3097](https://github.com/The-Verscienta/kiln_cms/pull/3097) · [long form](docs/changelog/unreleased.md#backup-media-list-close))
 
 ### Security
 
