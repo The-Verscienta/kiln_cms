@@ -190,8 +190,11 @@ reads):
   operator (`customWhere supports only eq, notEq, in and isNull on it
   (customFilter also takes has, has_all, has_none and count)`).
 - Not in `customWhere`: `has`, `has_all`, `has_none` and `count` on a list,
-  other `multiple` fields, reference, media, group, geolocation and link
-  fields, and the relationship operators. Use `customFilter` for those.
+  other `multiple` fields (a flexible field among them), reference, media,
+  group, geolocation, and the fields served as `JsonValue` (address, json,
+  range, key_value, link, …), and the relationship operators. The error reads
+  `custom field "office" has kind json, which customWhere does not support;
+  use customFilter`.
   Sorting stays `customSort`; a list is not sortable.
 - **Groups.** Instead of `name` and a kind, a condition can be one group:
   `_or` or `_and` (a non-empty list of conditions) or `_not` (one condition).
@@ -219,6 +222,16 @@ reads):
   (the error text is the same). Each condition, at any depth, adds 5 to the
   query's [complexity](#query-cost), so the 200 cap allows fewer than 50
   once the query's own fields are priced.
+- The errors a group can return, in `errors[].message`:
+
+  | Message contains | Cause |
+  |---|---|
+  | `_or must be a non-empty list of conditions` | An empty `_or` (the message names the group: `_and must be …`) |
+  | `_or cannot be combined with "name" in one condition` | A group with `name` or a kind key beside it (the message names both) |
+  | `a condition takes one of _or, _and, _not` | Two group keys in one condition |
+  | `every condition needs a name` | A condition with neither `name` nor a group |
+  | `_or / _and / _not nest at most 4 deep` | A fifth level of nesting |
+  | `_or / _and hold at most 50 conditions in all` | More than 50 conditions across the groups |
 
 How a custom field's `customFilter` / `customSort` differs from a column's
 `filter` / `sort` (the same vocabulary as JSON:API, full table in
@@ -352,9 +365,13 @@ generated types [below](#generate-types-and-fragments-for-your-site).
 - A `geolocation` field is a `GeolocationValue`: `lat` and `lng` are floats,
   `label` (place name) and `zoom` are `null` when not set. A stored value that
   is not a coordinate (a legacy shape) is left out, as for any other kind.
-- `json`, `range`, `key_value`, `link`, `computed`, `datetime_range` and
-  `recurrence` fields, and a plugin type that does not name a GraphQL kind,
-  are `JsonValue`.
+- `json`, `range`, `key_value`, `link`, `address`, `computed`,
+  `datetime_range` and `recurrence` fields, and a plugin type that does not
+  name a GraphQL kind, are `JsonValue`. An address's `value` is its object
+  (`{"country": "GB", "postal_code": "SW1A 1AA", …}`).
+- A `flexible` field is a `ListValue` of `JsonValue`s, one per item in the
+  editor's order, each `value` the item's object with its `_id`, `_type` and
+  optional `_settings`. A typed item value is not in the schema yet.
 - **A reference field returns ids only** (`ReferenceValue { ids }`; a
   `multiple` one is a `ListValue` of `ReferenceValue`s, one id each). For the
   records, use [`references(field:)`](#relationships-references-and-referencedby).
@@ -715,7 +732,21 @@ mutation ($id: ID!, $input: UpdatePageInput!) {
 The error's `message` contains `Subtitle (subtitle) must be a single value,
 not an object or a list`. Send `null` or `""` to clear a field. The full
 rules are in [json-api.md](json-api.md) → "A single custom field takes one
-value".
+value". An `address` takes an object and a `flexible` field a list of items,
+in the same JSON as JSON:API's
+([Address and flexible values](json-api.md#address-and-flexible-values)):
+
+```json
+{ "id": "<uuid>", "input": { "customFields": "{\"office\": {\"country\": \"nl\", \"postal_code\": \"1234ab\"}, \"sections\": [{\"_type\": \"quote\", \"text\": \"Be brief\"}]}" } }
+```
+
+The result's `customFields` holds `{"country": "NL", "postal_code": "1234 AB"}`
+and the item with its new `_id`.
+
+On a type with a title template, `title` is built from the record's fields on
+every save. A `title` you send is accepted and ignored unless every field the
+template reads is empty
+([Build record titles from fields](extending-content.md#build-record-titles-from-fields)).
 
 ### Writing relationships
 

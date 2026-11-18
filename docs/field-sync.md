@@ -3,7 +3,7 @@
 Custom fields are rows an admin sets up in the console, so moving a model from
 staging to production used to mean clicking it through again. `mix
 kiln.fields.export` and `mix kiln.fields.import` move the **definitions** — the
-fields, their link fields and group sub-fields, how each type's sections are
+fields, their link fields, group sub-fields and flexible item types, how each type's sections are
 laid out in the editor, and the admin-defined content types that own some of
 them — as one JSON file. They never move content.
 
@@ -121,8 +121,9 @@ must fail on a refused import.
 
 ## Import from the console
 
-An admin with no shell on the environment can import from **Custom fields →
-Sync definitions from a file** (`/editor/fields/sync`). It is a screen over the
+An admin with no shell on the environment can import from the console: open
+**Fields** (`/editor/fields`, the page headed *Custom fields*) and follow
+**Sync definitions from a file** (`/editor/fields/sync`). It is a screen over the
 same import as `mix kiln.fields.import`: nothing is diffed or validated by the
 screen itself.
 
@@ -176,7 +177,11 @@ release `rpc` is **not** recorded there.
   search flags, reference rules, and so on. The list is read from the action, so
   a field attribute added in a later release is exported without a change here.
 - A `:reference` field holds its link fields under `link_fields`; a `:group`
-  its sub-fields under `group_fields`.
+  its sub-fields under `group_fields`; a `:flexible` field its item types
+  under `item_types` ([Flexible fields](#flexible-fields)).
+- `validation` carries a color field's `palette` and a JSON field's
+  `json_schema` as they are stored
+  ([Constrain the values of a field](extending-content.md#constrain-the-values-of-a-field)).
 - An owner's `sections` lists how its sections are laid out in the editor
   (`KilnCMS.CMS.FieldSection`): `name` (the `section` its fields carry),
   `display` (`accordion`, `fieldset` or `tab`) and `initially` (`auto`,
@@ -207,8 +212,9 @@ release `rpc` is **not** recorded there.
   with a newer version is refused rather than half-read. A new field
   attribute does not bump it, so an older build refuses such a file by the
   unknown key instead (below). Every release with field sync, 1.9.0 onward,
-  reads and writes the same version-1 keys, `width`, `widget` and `sections`
-  included; [ADR 0047](decisions/0047-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md)
+  reads and writes `width`, `widget` and `sections`; 1.11.0 adds the keys
+  listed under [What an older build refuses in a new export](#what-an-older-build-refuses-in-a-new-export).
+  [ADR 0047](decisions/0047-the-field-sync-file-stays-version-1-and-a-new-attribute-does-not-bump-it.md)
   records why the file is still version 1.
 
 ### A section entry no field carries
@@ -267,19 +273,42 @@ before the attribute existed. The import then sets that attribute back to the
 default on every field that holds something else, and the dry run lists it
 as `~`.
 
+### What an older build refuses in a new export
+
+An export from 1.11.0 does not import into 1.10.x or older as it is. Nothing
+is written; the older build lists one error per problem:
+
+| In the 1.11.0 file | When | What 1.10.x says |
+| --- | --- | --- |
+| `step`, `prefix`, `suffix` on a field | every field (`null` when unset) | `unknown key(s) prefix, step, suffix` |
+| `title_template` in a dynamic type's `definition` | every dynamic type (`null` when unset) | `owners[N].definition: unknown key(s) title_template` |
+| `item_types`, `item_setting` | only on a flexible field | `unknown key(s) …` |
+| `validation` with `palette` or `json_schema` | only when a color or JSON field sets one | `has unknown constraints: palette` |
+| `"field_type": "address"` or `"flexible"` | only when the site has such a field | the field fails with its path |
+
+Export from the older build if you can. Otherwise strip the keys that are
+always there, and remove the rest by hand:
+
+```bash
+jq 'walk(if type == "object" and has("field_type") then del(.step, .prefix, .suffix) else . end)
+  | .owners[] |= (if .definition then .definition |= del(.title_template) else . end)' \
+  fields.json > fields-for-1.10.json
+```
+
+The older build then leaves its own values for those keys alone; it has no
+number options or title templates to set.
+
 ### Number options (`step`, `prefix`, `suffix`)
 
 A number field's export carries `"step"` (a number), `"prefix"` and
 `"suffix"` (text), each `null` when unset. See
 [Show a number as a slider or with a unit](extending-content.md#show-a-number-as-a-slider-or-with-a-unit).
 
-- **A release before this one refuses the file.** These keys first ship
-  after 1.10, so an older build reads an export that has them as unknown keys,
-  one error per field (`unknown key(s) step, prefix, suffix`), the same way it
-  treats `width` (see
-  [Moving a file to an older build](#moving-a-file-to-an-older-build)).
-  Export from the older build, or remove the keys with `jq`, and accept that
-  the target keeps its own values.
+- **1.10.x and older refuse the file.** These keys first ship in 1.11.0, and
+  every field carries them, so an older build reads any 1.11.0 export as
+  unknown keys, one error per field (`unknown key(s) prefix, step, suffix`).
+  Export from the older build, or remove the keys with `jq` (see
+  [What an older build refuses in a new export](#what-an-older-build-refuses-in-a-new-export)).
 - **An older file still imports, and clears the options.** A file without
   the keys is read with all three as `null`, so importing it into this
   release sets them back to `null` on every field that has them, and the dry
@@ -343,10 +372,11 @@ A hand-written entry may leave out `field_type` and `multiple` on an item type
 - **`item_setting` is written only when it is `true`.** A sub-field that is
   not a setting has no such key, so a site with no flexible fields exports the
   same file as before, and a missing key imports as `false`.
-- **A release before this one refuses a file that has `item_types` or an
+- **1.10.x and older refuse a file that has `item_types` or an
   `item_setting: true`**, as an unknown key (see
-  [Moving a file to an older build](#moving-a-file-to-an-older-build)). 1.10
-  cannot import such a file. Export from the older build, or remove the keys.
+  [What an older build refuses in a new export](#what-an-older-build-refuses-in-a-new-export)),
+  and do not know the `flexible` type either. Export from the older build, or
+  remove the flexible field from the file.
 - **Flipping `item_setting` over stored items is blocked** without
   `--allow-data-loss`, because the stored values stay where they were.
 - **Deleting a whole flexible field that holds items needs `--prune` and

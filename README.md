@@ -506,6 +506,17 @@ from the field
 security alerts can be posted to a Slack channel
 ([`docs/security-alerts.md`](docs/security-alerts.md#send-alerts-to-slack)).
 
+Since 1.11, also: a Flexible content field, an ordered list of items of different
+kinds edited as cards
+([`docs/extending-content.md`](docs/extending-content.md#build-flexible-content-in-the-admin)),
+a built-in address field, and record titles built from a content type's fields
+([`docs/extending-content.md`](docs/extending-content.md#build-record-titles-from-fields));
+in-app backups sent to several destinations, S3-compatible storage among them, with
+uploads that resume and a Re-send for a backup that reached only some
+([`docs/backups.md`](docs/backups.md#send-backups-to-several-destinations)); and a bell
+notice and an email to a site's admins when one of its webhooks stops getting through
+([`docs/webhooks.md`](docs/webhooks.md#failure-alerts)).
+
 > **Note:** clone this project to a path **without spaces**. One dependency,
 > `picosat_elixir`, cannot compile under a spaced path such as iCloud Drive's
 > `Mobile Documents` (fixed upstream in

@@ -1,7 +1,7 @@
 # Minimum system requirements
 
 What a machine needs to run Kiln, to build the release image, and to develop
-on it. Written against v1.10.0. The versions here restate
+on it. Written against v1.11.0. The versions here restate
 [`.tool-versions`](https://github.com/The-Verscienta/kiln_cms/blob/main/.tool-versions)
 and the [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile);
 when they disagree, those files win and this page needs editing
@@ -23,7 +23,7 @@ Postgres, a reverse proxy, and somewhere for media to live.
 | Reverse proxy | TLS termination, WebSocket pass-through | | LiveView and the API sockets need WebSockets forwarded; the proxy must set `x-forwarded-for` and `x-forwarded-proto`. See [deploy.md](deploy.md) |
 | Main host reachable | The `PHX_HOST` address answers everyone who signs in | | Passkeys and the authenticator app are added and removed only on the main host or a console host (`KILN_CONSOLE_HOST`). A site that requires two-step sign-in sends a person who has no second factor yet to `/account/two-factor` there, so on a multi-site install the main host must be reachable by every site's members, readers included when a site requires it of everyone. See [Requiring two-step sign-in on a site](two-factor-auth.md#requiring-two-step-sign-in-on-a-site) |
 | Outbound network | 443, and DNS | | Webhooks, oEmbed, the update feed, the search engines' published crawler IP lists, image imports and the CDN purge all go out over HTTPS through `KilnCMS.SafeFetch`. Some calls are on by default; see [Outbound calls made by default](#outbound-calls-made-by-default) below for each, and the switch that stops it. Port 25 outbound only for `MAIL_MODE=direct` (the built-in MTA); most clouds block it, see [direct-email-delivery.md](direct-email-delivery.md) |
-| Database TLS | On by default | | `ssl: true`; set `DATABASE_CACERTFILE` to verify the server certificate |
+| Database TLS | On by default | | `ssl: true`; set `DATABASE_SSL_CACERTFILE` to verify the server certificate. In-app backups and demo resets give `pg_dump` and `psql` the same TLS settings ([backups.md](backups.md#how-the-backup-tools-choose-tls-2830)). A database URL with `sslpassword` (an encrypted client key's passphrase) is refused by every backup and restore tool: use a client key that is not encrypted |
 
 **Native libraries in the runner.** These are installed in the image and are
 what a from-source deployment has to provide itself:
@@ -33,7 +33,7 @@ what a from-source deployment has to provide itself:
 | libvips 8.x (`libvips42t64` on Debian trixie) | Every image derivative and transform | Uploads fail to derive; nothing else runs |
 | `qpdf` | PDF metadata stripping on upload | A PDF that cannot be stripped is **refused** (a privacy control that silently does not apply is worse than none), see [media-pipeline.md](media-pipeline.md) |
 | `postgresql-client-17` (`pg_dump`) | In-app backups | Backups unavailable. **Must match the server's major version**; see [backups.md](backups.md) |
-| `rclone` (a pinned upstream release, checksum-verified at build time) | The off-site copy of in-app backups, when `BACKUP_RCLONE_REMOTE` is set | With the variable set, every in-app backup fails at its off-site step, and the Backups page says so beforehand. Unset, it is never called. See [backups.md](backups.md#it-needs-the-client-tools-in-the-image) |
+| `rclone` (a pinned upstream release, checksum-verified at build time) | The off-site copy of in-app backups to `BACKUP_RCLONE_REMOTE` and to **Rclone remote** destinations | With `BACKUP_RCLONE_REMOTE` set, every in-app backup's copy there fails, and the Backups page says so beforehand; an Rclone remote destination can't be saved. **Directory on this server** and **S3-compatible storage** destinations don't use it. See [backups.md](backups.md#it-needs-the-client-tools-in-the-image) |
 | `ffmpeg` | A/V duration, poster frames, A/V metadata stripping | Optional and not in the image. Without it audio and video upload without enrichment, and `REQUIRE_AV_METADATA_STRIP` turns a missing strip into a refusal |
 | `openssl`, `ca-certificates`, `locales` (`en_US.UTF-8`) | TLS, outbound HTTPS, the BEAM's string handling | Boot failures |
 
@@ -75,9 +75,11 @@ such call.
 Opt-in calls, made only once you configure the feature: human verification
 (`challenges.cloudflare.com` for Turnstile, `www.recaptcha.net` for reCAPTCHA,
 from the server and from visitors' browsers), the `BACKUP_RCLONE_REMOTE`
-remote, `KILN_CDN_PURGE_URL`, webhooks (a Slack-format endpoint posts to
-the chat tool's incoming-webhook URL, such as `hooks.slack.com`), mail, S3, Meilisearch, Sentry,
-OpenTelemetry, and the AI providers.
+remote and every [backup destination](backups.md#send-backups-to-several-destinations)
+(Kiln calls an S3-compatible store itself, not through rclone),
+`KILN_CDN_PURGE_URL`, webhooks (a Slack-format endpoint posts to the chat
+tool's incoming-webhook URL, such as `hooks.slack.com`), mail, S3,
+Meilisearch, Sentry, OpenTelemetry, and the AI providers.
 
 ## Presets
 
@@ -128,12 +130,20 @@ image. That machine needs:
 | GNU tar or bsdtar | Media parts | busybox tar is refused before any media part is written: it cannot read the NUL-separated file list each part is built from. In `backup.sh all` the database dump runs first, so it is kept and verified, and `manifest.json` records the refusal |
 | `gzip`, `stat` (GNU or BSD), `xargs`, `mktemp`, `head` | Media parts | Standard on Debian, Ubuntu and macOS |
 | `sha256sum`, or `shasum` on macOS | Checksum sidecars, `verify`, `restore.sh media`, `db` and `drill` | |
+| `df` that takes `-P`, and `awk` | `db`, `media`, `all` | The free-space check before the dump and before the media parts. A `df` that fails or prints something unexpected is warned about and the run goes ahead; `BACKUP_FREE_SPACE_CHECK=false` skips the check ([backups.md](backups.md#media-backups-in-parts-2218)) |
 | `ps` that takes `-o … -p`, or `/proc` | `db`, `media`, `all` | Lets the background loop of a run killed with `kill -9` stop the `pg_dump`, `tar` or `rclone` it left running, and check that the PID is still that program first. Without either it goes by the PID alone ([backups.md](backups.md#when-a-cron-run-is-killed-outright-2478)) |
 | `rclone` | Off-site copy | Only with `BACKUP_RCLONE_REMOTE` set |
 | `curl` | `BACKUP_PING_URL` | Only with that set |
 
 Disk: room in `BACKUP_DIR` for the retained backups, plus the file lists the
-media phase builds in `TMPDIR` (default `/tmp`).
+media phase builds in `TMPDIR` (default `/tmp`). Both the script and the app
+refuse a backup up front when `BACKUP_DIR` lacks room for the estimated dump
+or media, plus 10% and a 256 MB margin.
+
+The database URL the scripts read needs its TLS mode in it
+(`?sslmode=require` or `verify-full`), since the scripts can't see the app's
+`DATABASE_SSL`, and must not carry `sslpassword`
+([backups.md](backups.md#which-database-url-the-backup-tools-accept-2719)).
 
 What CI tests. `scripts/backup.sh`, `restore.sh` and `staging.sh` are tested
 under three combinations of bash and tar:

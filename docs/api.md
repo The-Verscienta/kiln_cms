@@ -534,13 +534,19 @@ curl -s 'http://localhost:4000/api/json/posts' \
   [json-api.md](json-api.md) or [headless-graphql-api.md](headless-graphql-api.md),
   and [mcp.md](mcp.md) → "Tools".
 - Keys always **expire** and can be **revoked** immediately from the admin UI; an
-  expired/revoked key returns **401**.
+  expired/revoked key returns **401**. So does a key whose owner's account was
+  erased, revoked or not: JSON:API, GraphQL, `/mcp` and
+  `POST /api/keys/rotate` answer it exactly as they answer a revoked or
+  unknown key. `/editor/api-keys` shows such a key as *Expired*, not
+  *Active*, until it is revoked.
 - A **drafts-only** (`draft_write`) key minted with a self-rotation window can
   renew itself: `POST /api/keys/rotate` with the key as the bearer returns a
   fresh key of the same account, scope and name and revokes the old one. See
   [headless-consumer-guide.md](headless-consumer-guide.md#keeping-the-key-alive-self-rotation).
-- Works on JSON:API (`/api/json`), GraphQL (`/gql`, incl. the subscription
-  WebSocket via the `token` connection param), and MCP (`/mcp`).
+- Works on JSON:API (`/api/json`), GraphQL (`POST /gql`) and MCP (`/mcp`).
+  The GraphQL subscription WebSocket (`/ws/gql`) takes a user JWT only and
+  refuses a `kiln_` key
+  ([headless-graphql-api.md](headless-graphql-api.md#connecting-with-a-token)).
 
 ### Reading drafts
 
@@ -1472,6 +1478,23 @@ Notable properties:
   `{"min": 1, "max": "2026-12-31"}` and `{}`, as a save does. The TypeScript
   formats emit the two shapes as a union; the Swift and Kotlin models keep
   one struct with optional bounds (#2548);
+- an `address` custom field is a closed object: `country` (an ISO 3166-1
+  alpha-2 code, upper case) is required, and `address_line1`,
+  `address_line2`, `locality`, `administrative_area` and `postal_code` are
+  present only when set (`{"country": "NL", "postal_code": "1234 AB"}`);
+- a `flexible` custom field is an array of objects in the order the editor
+  arranged them. Each item carries `_id`, `_type` (its item type's name), that
+  item type's keys and, when it has settings, `_settings`. The items are typed
+  as generic objects for now, with `x-kiln-min-items` / `x-kiln-max-items`
+  when the field sets bounds;
+- a field's value rules are annotations, not assertions, because a stored
+  value may predate the rule: besides `x-kiln-minimum` and its siblings, a
+  color field with a palette carries `x-kiln-palette` (its hex values,
+  lower case), a JSON field with a schema carries `x-kiln-json-schema` (the
+  admin's draft 2020-12 document, whole), and a number field carries
+  `x-kiln-step`, `x-kiln-prefix` and `x-kiln-suffix` when they are set (the
+  step is an input hint and is never enforced on write). See
+  [Constrain the values of a field](extending-content.md#constrain-the-values-of-a-field);
 - `social`, the document's link-preview title, description and absolute image
   ([headless-consumer-guide.md](headless-consumer-guide.md#link-previews-the-social-object)),
   is optional: an artifact fired before `format_version` 4 lacks it until it
@@ -1897,10 +1920,20 @@ Any active form can be embedded on a third-party site with a one-line snippet
 `/embed.js` injects an iframe pointing at **`GET /forms/:slug/embed`** — a
 standalone document rendering the same form markup as an on-site form block —
 and keeps its height in sync with the content, so there's no inner scrollbar.
-Optional attributes: `data-kiln-origin` (CMS base URL, defaults to the script's
-own origin; it must be an `http:` or `https:` URL, and with any other value,
-such as `javascript:` or `data:`, the snippet mounts nothing), `data-kiln-title`,
-`data-kiln-height` (initial px).
+Optional attributes:
+
+- `data-kiln-origin`: the CMS base URL. It defaults to the script's own
+  origin. It must be an `http:` or `https:` URL; with any other value, such as
+  `javascript:` or `data:`, the snippet mounts nothing. A path in it is kept,
+  so a CMS served under a prefix works
+  (`data-kiln-origin="https://cms.example.com/kiln"` frames
+  `https://cms.example.com/kiln/forms/contact/embed`), and trailing slashes
+  are dropped. Resize messages are accepted only from that URL's origin
+  (`https://cms.example.com`), so the frame resizes with or without a path.
+- `data-kiln-title`: the iframe's title for assistive technology (default
+  `Form`).
+- `data-kiln-height`: the height in px before the first resize (default
+  `480`).
 
 **Schema.** `GET /api/forms/:slug` returns each field as `name`, `label`,
 `type`, `required`, `options`, `help_text`, `placeholder`, `default_value`,

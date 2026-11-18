@@ -119,7 +119,7 @@ Anyone who can reach the console (editor or admin on the site) can do this.
 ### When the badge looks wrong
 
 - **The badge still shows a tier whose grant has expired.** The page worked it
-  out when it loaded. Reload it. The policies stopped honouring the grant the
+  out when it loaded. Reload it. The policies stopped honoring the grant the
   moment it expired, whatever the page still says.
 - **A standing viewer with an admin grant doesn't appear under the *Admin*
   filter.** The **Standing role** filter matches the stored role, not the
@@ -246,7 +246,7 @@ still needed the decision-time check for those long-lived actors, and the fold
 made every *write* of `role` hazardous: Ash drops a submitted attribute equal to
 `changeset.data`, so promoting a temporary admin from an ordinary read silently
 wrote nothing. It also fails in the unsafe direction — code that trusts a folded
-`role` keeps honouring an expired grant — where code that reads `role` directly
+`role` keeps honoring an expired grant — where code that reads `role` directly
 today merely ignores a live one.
 
 **Reading a tier in new code.** `user.role` is the standing tier. To ask what
@@ -1009,7 +1009,7 @@ has on the same site:
 
 Each of these records *Registration approved* in the security log, with
 `via` `invitation` (an accepted invitation; no person, since the system
-honours it) or `added` (Add or invite; the person is the platform admin).
+honors it) or `added` (Add or invite; the person is the platform admin).
 Neither writes a separate *Role granted*.
 
 ### Sign-ups on another site's host
@@ -1329,7 +1329,7 @@ not cancel an older one.
   already sent this hour. Wait for the pause to end, or reset your password.
 - "This link has already been used or is no longer valid. If you still can't
   sign in, request a new one." The link was used, is older than 15 minutes,
-  was opened on another site's host, or was cancelled by a password or email
+  was opened on another site's host, or was canceled by a password or email
   change. Some mail security scanners click links as well as open them; if
   yours does, the scanner may have used it. Click **Request a new link**.
 - "Too many requests" after submitting. Your IP address made more than 40
@@ -1657,7 +1657,13 @@ A content type whose documents **could not be read** is reported by name — on 
 confirmation screen ("could not be counted") and in the result — never folded into
 a success count. Erasure also clears the account's temporary grant, demotes
 every site membership it holds, and **revokes its API keys**: a surviving key
-would sign the tombstone straight back in.
+would sign the tombstone straight back in. An erased account's key is refused
+at sign-in even if it was never revoked, with the same answer as a revoked
+key. An account erased by an older release can hold such keys; **API keys**
+(`/editor/api-keys`) lists each as *Expired*, and the boot-time erasure
+backfill revokes them
+([Newsletter](newsletter.md#accounts-erased-before-this-release) has its
+result map and how to run it by hand).
 
 **Site memberships are kept, and grant nothing** (#2774). Each membership row
 stays on its site's Team page as the record that the person belonged there,

@@ -337,6 +337,14 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
 - Records without the field are excluded by every comparison (they're SQL
   `NULL`), and a record whose stored value has another JSON type simply
   doesn't match — it can't error the query.
+- **Composite fields answer `null` only.** An `address`, `flexible`, `group`,
+  `json`, `range`, `key_value` or `link` field takes `null` (has a value, or
+  not) and nothing else: any other operator is a `400` reading `custom field
+  "office" (address) only supports null` (`(json) only supports null` on a
+  JSON field). A `geolocation` field takes `null` too, and answers any other
+  operator with `(geolocation) is not filterable`. None of them can be
+  sorted: `custom_sort=office` is a `400`, `custom field "office" (address)
+  is not sortable`.
 
 **Relationship operators** — a `reference` field, single or a list, also
 takes `has` (holds any of the ids), `has_all` (holds every one), `has_none`
@@ -443,7 +451,13 @@ organization, or is only readable through a shared-draft preview link), the key
 is `NULL`: that record sorts last with the unset ones, so the order never shows
 where an unreadable target would sit. Your own list may still show the stored
 label until the referrer is saved again. A `multiple` one is refused: the `400`
-reads `custom field "x" (reference) holds a list and is not sortable`.
+reads `custom field "x" (reference) holds a list and is not sortable: a list has
+no single key; sort by a single-valued field or a built-in`.
+
+```
+GET /api/json/posts?custom_sort=mentor
+GET /api/json/posts?custom_sort=-hero_image,_native:title
+```
 
 Cost: each matching row looks up its target by primary key in each content
 type the field may point at (`target_types`; a field whose type no longer
@@ -616,6 +630,59 @@ GET /api/json/posts?custom_filter[scores][count][gte]=2
   so send one value. An object item there is refused (`must be a single
   value`).
 
+### Address and flexible values
+
+An `address` field holds one object, and a `flexible` field a list of items of
+different kinds ([extending-content.md](extending-content.md)). Write them in
+`custom_fields` like any other field:
+
+```bash
+curl -s -X PATCH http://localhost:4000/api/json/posts/$ID \
+  -H 'accept: application/vnd.api+json' \
+  -H 'content-type: application/vnd.api+json' \
+  -H "authorization: Bearer $KILN_API_KEY" \
+  -d '{"data": {"type": "post", "id": "'$ID'", "attributes": {
+        "custom_fields": {
+          "office": {"country": "ca", "locality": " Ottawa ", "postal_code": "k1a0b1",
+                     "administrative_area": "ON", "address_line1": "80 Wellington St"},
+          "sections": [
+            {"_type": "hero", "headline": "Hello", "_settings": {"background": "dark"}},
+            {"_type": "quote", "text": "Be brief", "cite": "Me"}]}}}}'
+```
+
+```json
+"custom_fields": {
+  "office": {"country": "CA", "locality": "Ottawa", "postal_code": "K1A 0B1",
+             "administrative_area": "ON", "address_line1": "80 Wellington St"},
+  "sections": [
+    {"_id": "5f0c…", "_type": "hero", "headline": "Hello", "_settings": {"background": "dark"}},
+    {"_id": "9b1e…", "_type": "quote", "text": "Be brief", "cite": "Me"}]
+}
+```
+
+- **Address.** `country` is an ISO 3166-1 alpha-2 code, stored upper case, and
+  is required once any other part is given (`needs a country`). The other
+  keys are `address_line1`, `address_line2`, `locality`,
+  `administrative_area` and `postal_code`, each trimmed, one line, and left
+  out when blank; any other key is refused. A postal code is upper-cased and
+  its spacing made canonical, and for US, CA, GB, DE, FR, NL, AU, ES, IT, JP,
+  CH, SE, BR and IN a code in the wrong format is refused. A map of blank
+  parts is an empty field, never stored as `{}`.
+- **Flexible.** Each item needs a `_type` naming one of the field's item
+  types; the item's settings go under `_settings`. A write replaces the whole
+  list: send the items in the order you want, and an item you leave out is
+  removed. Kiln gives each item an `_id`. Send an item's `_id` back to keep
+  it; an absent, malformed or repeated `_id` gets a new one. An unknown
+  `_type` is a `400` naming the item's path and the type's item types
+  (`sections[2]._type`, `item types: hero, quote`). Omitting the field keeps
+  the stored list; `[]` clears it. The field's item types are defined under
+  **Fields** (see [Discovering dynamic types](#discovering-dynamic-types) for
+  what the API exposes of them).
+- Both answer `null` only in `custom_filter` and cannot be sorted (see
+  "Composite fields" under **Filtering** above). GraphQL's `fields(names:)`
+  serves an address as a `JsonValue` and a flexible field as a `ListValue` of
+  `JsonValue` items ([headless-graphql-api.md](headless-graphql-api.md#read-custom-fields-typed-by-kind)).
+
 ### Naming a custom field like a column
 
 In `filter[...]` and `sort=` on the
@@ -676,7 +743,7 @@ What differs between a custom field and a column, in one table:
 | Records without the field | excluded by every comparison | per the column's nulls |
 | Unknown name | `400` `invalid_argument`, `unknown custom field "x"` | native `400` |
 | Sort | nulls last in both directions; in the order written, with built-in keys mixed in | plain `asc` / `desc` |
-| Sort on `media` / `reference` | not supported | n/a |
+| Sort on `media` / `reference` | a single-valued one by its target's current title (filename for media), unreadable targets last; a list is refused | n/a |
 | Relationship operators (`has`, `has_all`, `has_none`, `count`) | on `reference` fields and on `tags` / `related_<type>s`; the same names on [lists of values](#lists-of-values) | not available |
 | Index | the GIN index for equality and membership; ranges and sort only for a name in `indexed_custom_fields` ([Which custom filters use an index](#which-custom-filters-use-an-index)) | per column |
 
@@ -1026,7 +1093,8 @@ is still always enough. A type with a **title template**
 (`TypeDefinition.title_template`, readable on `/type-definitions`; the Content
 macro's `title_template:` option) builds the `title` itself from the record's
 fields on every save: a `title` you send is accepted and ignored, and the
-response carries the derived one (see
+response carries the derived one. Only when every field the template reads is
+empty does the `title` you sent (or, on an update, the stored one) stand (see
 [Build record titles from fields](extending-content.md#build-record-titles-from-fields)).
 Three surfaces let a
 front end handle URLs without mirroring Kiln's scheme:
@@ -1209,9 +1277,12 @@ value (see
 `?include=field_definitions.group_fields` adds the sub-fields of
 each `:group` field — the keys each of its rows takes; a sub-field names its
 group in `group_of_id`.
-`?include=field_definitions.item_types` adds the **item types** of each
-`:flexible` field (a `:group`-typed definition whose `flex_of_id` names the
-field; `item_setting` marks a sub-field that is one of the item's settings).
+The **item types** of a `:flexible` field cannot be included yet:
+`?include=field_definitions.item_types` is a `400` (`invalid_includes`),
+because the type's include list names `group_fields` only. An item type is a
+`:group`-typed definition whose `flex_of_id` names the flexible field, and
+`item_setting` marks a sub-field that is one of the item's settings; MCP's
+`read_field_definitions` lists them with the other definitions.
 A flexible field's value in `custom_fields` is a list of objects, each with
 `_id`, `_type`, its item type's keys and optional `_settings`; see
 [Define a flexible field from code](extending-content.md#define-a-flexible-field-from-code).

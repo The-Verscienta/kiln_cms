@@ -46,7 +46,7 @@ you*).
 
 | Surface | What is promised |
 |---|---|
-| `KilnCMS.CMS.Content` options | `:type`, `:plural`, `:table`, `:domain`, `:excerpt?`, `:schema_org_type`, `:slug_pattern`, `:alias_pattern`, `:title_template` (new after 1.10, computed titles, #2287: the computed-field language, validated at build time), `:seo_title_pattern`, `:seo_description_pattern`, and since 1.1 `:localization` (field-level localization, #1327; since 1.7 its `shared:` list also accepts `:tags` and `:related`, #1859), keep their names, defaults and meaning. This is the covered subset, not the full option list: `:dynamic?` is core-internal and `:published?` is ignored, deprecated in 0.12 and removed at 1.0 (see *Deprecated surfaces* below) — neither is promised. Since 0.12 an option outside this list and those two warns at compile time, at your `use` line, instead of being silently ignored: a later minor may give that name a meaning. 2.0 makes it a compile error |
+| `KilnCMS.CMS.Content` options | `:type`, `:plural`, `:table`, `:domain`, `:excerpt?`, `:schema_org_type`, `:slug_pattern`, `:alias_pattern`, `:title_template` (since 1.11, computed titles, #2287: the computed-field language, validated at build time), `:seo_title_pattern`, `:seo_description_pattern`, and since 1.1 `:localization` (field-level localization, #1327; since 1.7 its `shared:` list also accepts `:tags` and `:related`, #1859), keep their names, defaults and meaning. This is the covered subset, not the full option list: `:dynamic?` is core-internal and `:published?` is ignored, deprecated in 0.12 and removed at 1.0 (see *Deprecated surfaces* below) — neither is promised. Since 0.12 an option outside this list and those two warns at compile time, at your `use` line, instead of being silently ignored: a later minor may give that name a meaning. 2.0 makes it a compile error |
 | The **two** token vocabularies the `*_pattern` options accept | `KilnCMS.Slug.Pattern` validates `:slug_pattern` and `:alias_pattern`; `KilnCMS.Seo.Pattern` validates the two SEO patterns, and they accept *different* tokens. Both run at build time, so a withdrawn token breaks *your* compile |
 | The `__kiln_*__/0` functions the macro injects | The seam between a resource and every core registry. The double underscores read private; they are contract |
 | Workflow action names on a content resource | `:read`, `:published`, `:public_by_slug`, `:trashed`, `:create`, `:update`, `:autosave`, `:submit_for_review`, `:return_to_draft`, `:publish`, `:unpublish`, `:archive`, `:unarchive`, `:restore`, `:destroy`. Note `:restore` undoes trashing and `:unarchive` undoes `:archive` — they are not the same inverse |
@@ -125,6 +125,19 @@ that counting as a major.
   - `KilnCMS.Accounts.Bootstrap.create_first_admin/1` returns
     `{:ok, user, notices}` (`notices` is `[]` or `[:password_breach]`), not
     `{:ok, user}`.
+  - Since 1.11, `:publish_scheduled`, `:unpublish_scheduled` and
+    `:archive_scheduled` (`CMS.publish_scheduled_page!` and the like, or your
+    own type's `define`) change a record only while its AshOban trigger would
+    pick it up: its `scheduled_at`, or its `unpublish_at` with the matching
+    `expiry_action`, has passed. On any other record they fail with a
+    `StaleRecord` and change nothing. Set the date in the past first, or call
+    `:publish`, `:unpublish` or `:archive` to act now
+    ([Content lifecycles](content-lifecycles.md#expiry-one-timestamp-three-outcomes)).
+  - Since 1.11, `mix kiln.staging.scrub` and `Release.scrub_staging/0` refuse,
+    changing nothing, while a domain of your overlay owns a table that needs
+    a `staging_scrub/0` entry on its plugin and has none: any table but a
+    content type's, and a content type's whose columns look personal.
+    Declare each one ([Staging scrub](plugin-extensibility.md#staging-scrub)).
 - **Which image the built-in logo and the home page screenshots are served
   as.** Core renders the stock logo through `KilnCMSWeb.Layouts.brand_mark/1`
   as a right-sized WebP/PNG pair, and the home page screenshots as WebP

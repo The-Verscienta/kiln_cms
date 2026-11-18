@@ -56,13 +56,15 @@ else.
 
 ## [Unreleased]
 
+What's new, with examples and migration steps: [docs/whats-new/v1.11.md](docs/whats-new/v1.11.md).
+
 Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
-- **Overlays and plugins: the field type name `address` is now built in. Rename a type that uses it.**
+- **Overlays and plugins: the field type names `address` and `flexible` are now built in. Rename a type that uses either.**
   ([long form](docs/changelog/unreleased.md#address-field-type-name-upgrade))
 
 
@@ -126,6 +128,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A backup, restore, staging or demo database URL with `sslpassword` in its query is now refused before pg_dump, pg_restore or psql runs. Decrypt the client key (`openssl pkey -in client.key -out client.key.plain`), `chmod 0600` it, point `sslkey=` at it and drop `sslpassword`.**
   ([#3099](https://github.com/The-Verscienta/kiln_cms/pull/3099) · [long form](docs/changelog/unreleased.md#backup-url-sslpassword-upgrade))
 
+- **A field-sync file exported by this release doesn't import into 1.10.x (every field carries `step`/`prefix`/`suffix`, every type `title_template`): upgrade environments together, or strip those keys first.**
+  ([long form](docs/changelog/unreleased.md#field-sync-export-not-importable-by-1-10))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -147,6 +152,39 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Automation jobs still hold the event's document, drafts included, in plain text while pending and in Oban's `job:start` / `job:stop` log lines, until the next release seals it. No workaround short of logging above `info`.**
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#automation-payload-plain-in-pending-jobs))
+
+- **GraphQL `customWhere` with `dateTime` can miss date-time list items saved with fractional seconds.**
+  ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678) · [long form](docs/changelog/unreleased.md#graphql-customwhere-datetime-fractional-seconds))
+
+- **On a site other than the default one, New draft and Translations can be offered or hidden by the default site's type scope.**
+  ([#2599](https://github.com/The-Verscienta/kiln_cms/issues/2599) · [long form](docs/changelog/unreleased.md#non-default-site-new-draft-type-scope))
+
+- **Lock and teaser pages, embedded forms and newsletter confirmation mail can be in the wrong language on a multilingual site.**
+  ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597) · [long form](docs/changelog/unreleased.md#locale-lock-teaser-embed-newsletter))
+
+- **A gallery carousel can't be scrolled with the keyboard.**
+  ([#2590](https://github.com/The-Verscienta/kiln_cms/issues/2590) · [long form](docs/changelog/unreleased.md#gallery-carousel-keyboard))
+
+- **The sign-in page on a site's own address offers "Use a passkey", which fails there.**
+  ([#2827](https://github.com/The-Verscienta/kiln_cms/issues/2827) · [long form](docs/changelog/unreleased.md#site-host-offers-passkey))
+
+- **"Confirm it's you with your passkey" shows no passkey button.**
+  ([#2887](https://github.com/The-Verscienta/kiln_cms/issues/2887) · [long form](docs/changelog/unreleased.md#confirm-passkey-no-button))
+
+- **A recurrence rule with a date-time `UNTIL` (`…T000000Z`) can end a day early or late.**
+  ([#2861](https://github.com/The-Verscienta/kiln_cms/issues/2861) · [long form](docs/changelog/unreleased.md#recurrence-until-date-time))
+
+- **A member who starts checkout again for the tier they hold drops to "incomplete" and loses access.**
+  ([#2747](https://github.com/The-Verscienta/kiln_cms/issues/2747) · [long form](docs/changelog/unreleased.md#re-checkout-drops-to-incomplete))
+
+- **A scrubbed staging clone keeps production's S3 storage credentials.**
+  ([#2973](https://github.com/The-Verscienta/kiln_cms/issues/2973) · [long form](docs/changelog/unreleased.md#staging-scrub-keeps-storage-credentials))
+
+- **A scrubbed staging clone keeps the provenance signing key.**
+  ([#2974](https://github.com/The-Verscienta/kiln_cms/issues/2974) · [long form](docs/changelog/unreleased.md#staging-scrub-keeps-provenance-key))
+
+- **`scripts/staging.sh up` with the default `KILN_BIN=mix` migrates the dev database unless `MIX_ENV=prod` is set.**
+  ([#2977](https://github.com/The-Verscienta/kiln_cms/issues/2977) · [long form](docs/changelog/unreleased.md#staging-sh-mix-migrates-dev-db))
 
 ### Added
 
@@ -384,6 +422,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3104](https://github.com/The-Verscienta/kiln_cms/pull/3104) · [long form](docs/changelog/unreleased.md#backup-partial-offsite-status))
 
 ### Security
+
+- **API keys of accounts erased before 0.9.0 no longer sign in, and the boot-time erasure backfill revokes them (GHSA-96vh-3m56-p8gx).**
+  ([#3064](https://github.com/The-Verscienta/kiln_cms/pull/3064) · [long form](docs/changelog/unreleased.md#api-keys-of-erased-accounts))
 
 - **A database URL's `?sslpassword=` (an encrypted client key's passphrase) no longer reaches the command line of pg_dump, pg_restore or psql, where every process on the host could read it: the URL is refused instead.**
   ([#3099](https://github.com/The-Verscienta/kiln_cms/pull/3099) · [long form](docs/changelog/unreleased.md#backup-url-sslpassword))

@@ -9,14 +9,14 @@ carries the reasoning.
 
 <a id="address-field-type-name-upgrade"></a>
 
-- **The field type name `address` is reserved (#2279).**
-  Kiln now ships a built-in `:address` type, and a name can be registered only
-  once. An overlay or plugin `Kiln.FieldType` that registers `address` must be
-  renamed, in the module's `name/0` and in any stored field definition;
-  `mix kiln.plugins.doctor` fails otherwise. A stored definition that already
-  used the name is cast by the built-in type. No migration. Rolling back to
-  1.8.0 or older needs the `address` fields removed first, like `key_value`
-  and `telephone`; see
+- **The field type names `address` and `flexible` are reserved (#2279, #2282).**
+  Kiln now ships built-in `:address` and `:flexible` types, and a name can be
+  registered only once. An overlay or plugin `Kiln.FieldType` that registers
+  either name must be renamed, in the module's `name/0` and in any stored
+  field definition; `mix kiln.plugins.doctor` fails otherwise. A stored
+  definition that already used the name is cast by the built-in type. No
+  migration. Rolling back to 1.8.0 or older needs the `address` and
+  `flexible` fields removed first, like `key_value` and `telephone`; see
   [docs/releasing.md](../releasing.md#new-values-in-an-atom-column).
 
 
@@ -498,6 +498,18 @@ carries the reasoning.
   treat the order above as the rule. No migration.
   ([#2949](https://github.com/The-Verscienta/kiln_cms/issues/2949))
 
+<a id="field-sync-export-not-importable-by-1-10"></a>
+
+- **A field-sync file exported by this release doesn't import into 1.10.x.**
+  Every exported field now carries `step`, `prefix` and `suffix` (`null`
+  when unset) and every exported type definition carries `title_template`,
+  and 1.10.x refuses unknown keys, so it refuses the whole file. If you sync
+  fields between environments, upgrade them together, or strip those keys
+  first (a `jq` command is in
+  [What an older build refuses in a new export](../field-sync.md#what-an-older-build-refuses-in-a-new-export)).
+  Address and flexible fields, palettes and JSON Schemas can't be stripped:
+  a 1.10.x build has no such types or constraints. No migration.
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -632,6 +644,72 @@ carries the reasoning.
   config, which hides every job's lines. See
   [Job args retention](../data-flows.md#job-args-retention).
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992))
+
+<a id="graphql-customwhere-datetime-fractional-seconds"></a>
+
+- **GraphQL `customWhere` with `dateTime` can miss date-time list items saved with fractional seconds.**
+  Still open from 1.10.0, not reproduced yet. Filter with `custom_filter` on the REST API instead.
+  ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678))
+
+<a id="non-default-site-new-draft-type-scope"></a>
+
+- **On a site other than the default one, New draft and Translations can be offered or hidden by the default site's type scope.**
+  Still open from 1.10.0. Saving is still checked against the right site. No workaround.
+  ([#2599](https://github.com/The-Verscienta/kiln_cms/issues/2599))
+
+<a id="locale-lock-teaser-embed-newsletter"></a>
+
+- **Lock and teaser pages, embedded forms and newsletter confirmation mail can be in the wrong language on a multilingual site.**
+  Still open from 1.10.0. No workaround yet.
+  ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597))
+
+<a id="gallery-carousel-keyboard"></a>
+
+- **A gallery carousel can't be scrolled with the keyboard.**
+  Still open from 1.10.0. Affects keyboard and switch users. Use the grid layout where that matters.
+  ([#2590](https://github.com/The-Verscienta/kiln_cms/issues/2590))
+
+<a id="site-host-offers-passkey"></a>
+
+- **The sign-in page on a site's own address offers "Use a passkey", which fails there.**
+  Still open from 1.10.0. Passkeys work only on the main and console hosts. Sign in there, or with a password and code on the site's address.
+  ([#2827](https://github.com/The-Verscienta/kiln_cms/issues/2827))
+
+<a id="confirm-passkey-no-button"></a>
+
+- **"Confirm it's you with your passkey" shows no passkey button.**
+  Still open from 1.10.0. Affects passkey-only accounts in a browser without WebAuthn or with JavaScript off. Use another browser, a recovery code, or ask an admin.
+  ([#2887](https://github.com/The-Verscienta/kiln_cms/issues/2887))
+
+<a id="recurrence-until-date-time"></a>
+
+- **A recurrence rule with a date-time `UNTIL` (`…T000000Z`) can end a day early or late.**
+  Still open from 1.10.0. Affects events whose zone is not UTC. Write `UNTIL` as a date (`UNTIL=20261231`).
+  ([#2861](https://github.com/The-Verscienta/kiln_cms/issues/2861))
+
+<a id="re-checkout-drops-to-incomplete"></a>
+
+- **A member who starts checkout again for the tier they hold drops to "incomplete" and loses access.**
+  Still open from 1.10.0. Affects paid memberships, comps included. The provider's next subscription update restores a paid one; comp a comped one again.
+  ([#2747](https://github.com/The-Verscienta/kiln_cms/issues/2747))
+
+<a id="staging-scrub-keeps-storage-credentials"></a>
+
+- **A scrubbed staging clone keeps production's S3 storage credentials.**
+  The scrub keeps `storage_profiles` and `site_storages`, whose secret is sealed under production's `SECRET_KEY_BASE`. A clone started with production's key base can read, write and delete in production's bucket, scheduled hard-deletes included. Always start a clone with its own `SECRET_KEY_BASE`, as [Staging environments](../staging-environments.md) says: it then can't decrypt the secret.
+  ([#2973](https://github.com/The-Verscienta/kiln_cms/issues/2973))
+
+<a id="staging-scrub-keeps-provenance-key"></a>
+
+- **A scrubbed staging clone keeps the provenance signing key.**
+  `provenance_settings.private_key_encrypted` survives the scrub, so a clone started with production's `SECRET_KEY_BASE` signs versions as production's instance. Start the clone with its own `SECRET_KEY_BASE`; it then can't decrypt the key.
+  ([#2974](https://github.com/The-Verscienta/kiln_cms/issues/2974))
+
+<a id="staging-sh-mix-migrates-dev-db"></a>
+
+- **`scripts/staging.sh up` with the default `KILN_BIN=mix` migrates the dev database unless `MIX_ENV=prod` is set.**
+  Without `MIX_ENV=prod` the dev configuration's `kiln_cms_dev` wins over `DATABASE_URL`: the script migrates that database, then the scrub refuses it and the clone is left unscrubbed. Export `MIX_ENV=prod` (and what a prod boot needs), or set `KILN_BIN` to a release's `bin/kiln_cms`.
+  ([#2977](https://github.com/The-Verscienta/kiln_cms/issues/2977))
 
 ## Added
 
@@ -2759,6 +2837,22 @@ carries the reasoning.
   ([#2951](https://github.com/The-Verscienta/kiln_cms/issues/2951))
 
 ## Security
+
+<a id="api-keys-of-erased-accounts"></a>
+
+- **API keys of accounts erased before 0.9.0 no longer sign in, and the boot-time erasure backfill revokes them (GHSA-96vh-3m56-p8gx).**
+  GDPR erasure has revoked an account's API keys only since 0.9.0, so an
+  account erased on 0.5.0 to 0.8.x could still hold unrevoked, unexpired
+  keys, and API-key sign-in did not check `anonymized_at`: such a key still
+  signed in as the erased account. Sign-in now refuses a key whose owner is
+  erased exactly as it refuses a revoked or unknown one (same status, body
+  and timing), on every surface that takes API keys: JSON:API, GraphQL, the
+  feeds and specs, `/mcp`, the visual-editing bridge and key rotation. The
+  boot-time erasure backfill revokes those keys (its result gains
+  `api_keys`), and API keys and the `core.api_keys` posture check show them
+  as not valid. No migration; rolling back is safe, and what the backfill
+  revoked stays revoked.
+  ([GHSA-96vh-3m56-p8gx](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-96vh-3m56-p8gx) · [#3064](https://github.com/The-Verscienta/kiln_cms/pull/3064))
 
 <a id="backup-url-sslpassword"></a>
 

@@ -557,7 +557,7 @@ only reason the default differs is that ffmpeg is optional today: requiring it
 would stop A/V upload working on every deployment that does not have it, on
 upgrade, with no warning. That is a migration, not a default.
 
-So the behaviour is stated exactly rather than implied:
+So the behavior is stated exactly rather than implied:
 
 | ffmpeg | `REQUIRE_AV_METADATA_STRIP` | Result |
 |---|---|---|
@@ -592,7 +592,7 @@ told exactly that. Free space up, or point `TMPDIR` at a larger filesystem.
 
 The check runs *before* ffmpeg starts, but it cannot be the whole answer —
 concurrent uploads can each see enough room and then exhaust the disk together
-— so an ENOSPC that happens anyway is recognised in ffmpeg's output and
+— so an ENOSPC that happens anyway is recognized in ffmpeg's output and
 refused identically. If free space cannot be measured at all (no `df`, or
 output we cannot parse), the strip proceeds rather than refusing: refusing on
 an unknown would be an outage in exchange for a guess, and the ENOSPC path
@@ -632,9 +632,15 @@ of that happens on the request:
      missing (`:enoent`, `:not_found`, an HTTP `404`), there is nothing to
      strip: the job completes, logs "private blob unreadable", and leaves the
      row to the reaper. Any other read error (an object-store timeout or
-     `5xx`, a full temp disk, an S3 `403`) fails the job, and Oban retries it
-     up to 5 attempts with backoff (#2723). A storage hiccup therefore costs
-     a few minutes, not the upload.
+     `5xx`, a full temp disk, an S3 `403`) fails the job with the warning
+     "Deferred metadata strip for media (id): could not read its private blob
+     (…); will retry.", and Oban retries it up to 5 attempts with backoff
+     (#2723). A storage hiccup therefore costs a few minutes, not the upload.
+     If every attempt fails, the reaper removes the row after its window, as
+     before. (An S3 bucket that answers `403` for a missing key, because the
+     credentials lack `s3:ListBucket`, ends that way too.) Before 1.11 any read
+     error completed the job, so an upload already reaped after a passing
+     fault can't be recovered: upload the file again.
    - **The strip fails for a passing reason** (`insufficient_space`,
      `timeout`): retried the same way.
    - **The strip fails for a standing reason** (no ffmpeg, a container that
@@ -1195,15 +1201,15 @@ mix kiln.media.adopt_image_backend --dry-run   # count, write nothing
 mix kiln.media.adopt_image_backend             # --org <uuid> for another site
 ```
 
-hands it every row with no stored file whose URL it recognises as its own
+hands it every row with no stored file whose URL it recognizes as its own
 (`key_for_url/1`), and enqueues each one's variants, which read its
 dimensions back from the backend. A row Kiln holds a file for is never
 touched. Content already published keeps the URL its snapshot recorded, which
 the backend still serves.
 
 System → Image backend counts the same rows before you run it: those the
-backend holds, the imported links it recognises but doesn't hold yet (what
-the task would adopt), and the imported links it doesn't recognise. When
+backend holds, the imported links it recognizes but doesn't hold yet (what
+the task would adopt), and the imported links it doesn't recognize. When
 there is something to adopt it prints the command with the site's `--org`
 filled in, and the `bin/kiln_cms rpc` form for a release, which has no
 `mix`.

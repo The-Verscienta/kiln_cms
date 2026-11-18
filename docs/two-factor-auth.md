@@ -376,9 +376,12 @@ lines as the email for a factor added, and never the passkey's name.
   the email gives the same two steps: reset your password, then ask an
   administrator of your site to check your account's sign-in methods.
 - **When a platform admin removed it**, the email says "It was removed by an
-  administrator," followed by that admin's display name ("an administrator"
-  alone when they have none; never their email address), and suggests asking
-  an administrator of your site why.
+  administrator, (their display name)." It says "It was removed by an
+  administrator." when the admin has no display name or has been erased, and
+  never gives their email address. The security log's `two_factor_disabled`
+  event still records which admin it was. The email suggests asking an
+  administrator of your site why. A notice already queued before 1.11 keeps
+  the wording it was written with.
 
 No email is sent when the removal is refused (the last factor a site
 requires, the shared demo account, another person's passkey, a wrong code),

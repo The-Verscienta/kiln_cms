@@ -326,3 +326,11 @@ cover:
   own that leaves `rclone` out fails every in-app backup while the variable
   is set. See
   [backups.md](backups.md#it-needs-the-client-tools-in-the-image).
+  Instead of, or as well as, that remote, a platform admin can add an
+  **S3-compatible storage** destination on the **Destinations** tab of
+  **Backups**: its key pair is stored in the database, encrypted with a key
+  derived from `SECRET_KEY_BASE`, so it needs no platform secret
+  ([Send backups to several destinations](backups.md#send-backups-to-several-destinations)).
+  Keep the bucket's details and keys outside Kiln as well, since the
+  database that lists them is one of the files the bucket holds
+  ([Keep destination credentials outside Kiln](backups.md#keep-destination-credentials-outside-kiln)).

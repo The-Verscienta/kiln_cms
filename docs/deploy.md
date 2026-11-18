@@ -107,6 +107,14 @@ file does exactly that. Point `DATABASE_SSL_CACERTFILE` at the provider's CA
 bundle to verify the server certificate; without it the connection is
 encrypted but skips peer verification.
 
+The in-app backup and the demo reset run `pg_dump` and `psql` with the same
+choice: TLS required when `DATABASE_SSL` is on, and the server verified
+against `DATABASE_SSL_CACERTFILE` when it is set, unless the database URL
+sets `sslmode` or `PGSSLMODE` is set. `scripts/backup.sh` on the host does
+not read `DATABASE_SSL`, so put `sslmode=require` (or `verify-full`) in the
+`DATABASE_URL` cron gives it
+([How the backup tools choose TLS](backups.md#how-the-backup-tools-choose-tls-2830)).
+
 ## Building the image
 
 The [`Dockerfile`](https://github.com/The-Verscienta/kiln_cms/blob/main/Dockerfile) is a multi-stage build: an `hexpm/elixir`
@@ -429,7 +437,7 @@ Rolling back to a release before the schedules fires none of them, so keep
 cron ready if you might roll back
 ([Schedule backups in the app](backups.md#schedule-backups-in-the-app)).
 
-Three more things the two paths need from a deployment:
+Four more things the two paths need from a deployment:
 
 - **Keep the host's `scripts/backup.sh` at the release you run.** Cron runs a
   copy outside the image, so an upgrade does not update it. Since v1.9.0 the
@@ -442,7 +450,12 @@ Three more things the two paths need from a deployment:
   `BACKUP_KEEP_DAYS` ([The hold markers](backups.md#the-hold-markers)), and a
   live run keeps its `.partial` files fresh, so an older copy's run that is
   quiet for 3 hours can be recorded in History as Interrupted
-  ([When a cron run is killed outright](backups.md#when-a-cron-run-is-killed-outright-2478)). The script needs
+  ([When a cron run is killed outright](backups.md#when-a-cron-run-is-killed-outright-2478)).
+  Since v1.11.0 an in-app backup names its temporary files
+  `<name>.<job>-<attempt>.partial`, which an older copy's `prune` neither
+  counts nor removes, and the script reads `BACKUP_LOCK_WAIT_SECONDS` and
+  `BACKUP_FREE_SPACE_CHECK` as the app does. Copy `scripts/restore.sh` in the
+  same rollout. The script needs
   GNU tar or bsdtar on the host, not busybox tar
   ([system-requirements.md](system-requirements.md#running-the-backup-scripts-on-the-host)).
   The reasoning is in [ADR 0041](decisions/0041-the-app-and-backup-sh-agree-on-what-to-keep-only-through-presence-only-marker-files.md) (the markers) and
@@ -467,6 +480,16 @@ Three more things the two paths need from a deployment:
   `RCLONE_CONFIG_<NAME>_*` variables or a mounted `rclone.conf` named by
   `RCLONE_CONFIG` in the app's environment
   ([It needs the client tools in the image](backups.md#it-needs-the-client-tools-in-the-image)).
+- **Mounts and hosts for in-app destinations.** A platform admin can add
+  more places for in-app backups to go on the **Destinations** tab of
+  **Backups**. A **Directory on this server** must be inside one of the
+  directories `BACKUP_LOCAL_DESTINATION_ROOTS` lists, and that directory must
+  be set and mounted on every node
+  ([Let backups be written to a directory on this server](backups.md#let-backups-be-written-to-a-directory-on-this-server)).
+  An **S3-compatible storage** endpoint on your own network, or reached over
+  `http://`, must be named in `BACKUP_S3_PRIVATE_HOSTS`
+  ([Reach a store on your own network](backups.md#reach-a-store-on-your-own-network)).
+  `scripts/backup.sh` never sends to these destinations.
 
 ## Optional infrastructure
 
