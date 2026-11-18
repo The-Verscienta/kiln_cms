@@ -435,6 +435,26 @@ carries the reasoning.
   [Rolling back past backup directory queues](../backups.md#rolling-back-past-backup-directory-queues)).
   The columns stay; the previous release ignores them.
 
+<a id="backup-cron-app-parity-upgrade"></a>
+
+- **An in-app media backup that skipped a folder it could list but not enter now fails, naming the folder (#2477). Cron now resets `$BACKUP_DIR/media` to 0700 on every run.**
+  A media folder that can be listed but not entered (no execute
+  permission, for example mode 0644) used to be skipped by the in-app
+  backup: its files were counted as unreadable names and the run still
+  ended Succeeded. Cron failed the whole run. Both now fail, at once and
+  without retries, with the same message:
+  `media folder "<folder>" can be listed but not entered (no execute permission): fix its permissions, or leave it out with BACKUP_MEDIA_EXCLUDE`.
+  Some runs that were green turn red after the upgrade; fix the folder's
+  permissions or exclude it.
+
+  Cron also used to set `$BACKUP_DIR/media` to 0700 only when it created
+  it. It now resets an existing directory to 0700 on every run, as the app
+  does, and fails with `could not make <dir> private (chmod 700)` when the
+  cron user can't (for example a directory it doesn't own). No migration;
+  rolling back is safe. See
+  [Cron backups in parts](../backups.md#cron-backups-in-parts).
+  ([#2477](https://github.com/The-Verscienta/kiln_cms/issues/2477))
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -2515,6 +2535,34 @@ carries the reasoning.
   directory answers. No migration; rolling back is safe. See
   [The marker sync on a hung backup directory](../backups.md#the-marker-sync-on-a-hung-backup-directory-3079).
   ([#3079](https://github.com/The-Verscienta/kiln_cms/issues/3079))
+
+<a id="backup-cron-app-parity"></a>
+
+- **Cron and in-app backups that start in the same second no longer share a stamp (#2477).**
+  Both writers use per-second stamps. An app schedule and a cron line set
+  to the same minute could pick the same stamp; cron's cleanup of a failed
+  run could then remove the app's files, and the importer folded cron's
+  files into the app's Run. Now `backup.sh` claims its stamp with
+  `mkdir $BACKUP_DIR/.claims/<stamp>`, which only one run can win, and
+  treats a stamp as in use when it has `kiln-db-<stamp>.*` or
+  `kiln-media-<stamp>.*` files, the app's `.work/<stamp>`, or a claim; it
+  checks again after claiming and steps forward one second (up to 60) when
+  the stamp is taken. It removes its claim when it ends. The app's start
+  step makes `.work/<stamp>` first, before anything else, and its stamp
+  choice skips stamps that have files or a cron claim. When the stamp
+  moved, cron prints `Stamp <stamp> is already in use …; this run is
+  <stamp>`, and the manifest's `stamp` can then differ from its
+  `started_at`. When no stamp is free, the run fails under the stamp 60
+  seconds on (or with none), so History still records it. A cron run and
+  an app start within the same few milliseconds can still pick the same
+  stamp. Separate `db` and `media` cron lines that start in the same second
+  now produce two History rows one second apart. A run killed outright
+  leaves an empty `.claims/<stamp>`, which only makes later runs skip that
+  stamp and can be deleted.
+
+  Also tested now on the cron side: a failed off-site copy of a part set's
+  checksum sidecar fails the run, as it already did in the app.
+  ([#2477](https://github.com/The-Verscienta/kiln_cms/issues/2477))
 
 ## Security
 

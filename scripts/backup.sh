@@ -720,6 +720,12 @@ on_exit() {
     # than recording an empty reason.
     write_manifest false "${LAST_ERROR:-backup.sh exited ${status} - see the backup log}"
   fi
+
+  # Last: this run's stamp claim (claim_stamp), success or failure. Only the
+  # directory this run made, and rmdir, which never removes anything inside.
+  if [ -n "$CLAIM_DIR" ]; then
+    rmdir -- "$CLAIM_DIR" 2>/dev/null || true
+  fi
 }
 
 # The operator's umask; the media phase narrows it to 077 for its own files.
@@ -1335,7 +1341,10 @@ walk_dir() {
     exit 1
   fi
   if [ ! -x "$abs" ]; then
-    echo "media folder \"${rel:-.}\" can be listed but not entered (no execute permission): fix its permissions, or leave it out with BACKUP_MEDIA_EXCLUDE" >&2
+    # Quoted as the app's `inspect` quotes it: `\` and `"` escaped. A newline
+    # or a byte that is not UTF-8 in the name can still print differently.
+    name="$(printf '%s' "${rel:-.}" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')"
+    echo "media folder \"${name}\" can be listed but not entered (no execute permission): fix its permissions, or leave it out with BACKUP_MEDIA_EXCLUDE" >&2
     exit 1
   fi
 
@@ -1387,6 +1396,10 @@ walk_media() {
   rc=$?
   set -e
   if [ "$rc" -ne 0 ]; then
+    # A folder that can't be entered is named in the app's words, unprefixed.
+    if grep -q '^media folder ' "$WORK_DIR/walk.err"; then
+      die "$(head -c 1000 "$WORK_DIR/walk.err")"
+    fi
     die "could not list the media directory: $(tail -c 500 "$WORK_DIR/walk.err")"
   fi
   read -r PLAN_FILES PLAN_EXCLUDED < "$WORK_DIR/walk.counts"
@@ -2280,16 +2293,26 @@ cmd_prune() {
 #
 # An in-app schedule and a cron line set for the same minute can read the same
 # second. Sharing a stamp would fold one run's files into the other's Run, and
-# one's prune or cleanup could remove the other's files. So a stamp is taken
+# one's prune or cleanup could remove the other's files. So a stamp is in use
 # when any file of either kind carries it (`db/kiln-db-<stamp>.*`,
-# `media/kiln-media-<stamp>.*`: dumps, parts, sidecars, partials) or the app
-# has a work directory for it (`.work/<stamp>`), and the run steps forward one
-# second at a time to a free one. It then claims the free stamp by creating
-# its first file exclusively (noclobber): of two cron runs that find the same
-# stamp free, one creates it and the other steps on. The app skips stamps
-# with files on disk the same way (KilnCMS.Backups.Chain); a cron run and an
-# app start that look within the same few milliseconds can still pick one
-# stamp (docs/backups.md). Before the heartbeat starts, which reads STAMP.
+# `media/kiln-media-<stamp>.*`: dumps, parts, sidecars, partials), when the
+# app has a work directory for it (`.work/<stamp>`, which the app's start step
+# makes first thing), or when another cron run claims it (`.claims/<stamp>`).
+# The run steps forward one second at a time to a free one and claims it with
+# `mkdir .claims/<stamp>`, which only one caller can win: two cron runs never
+# share a stamp, whatever they back up. It then looks for the app's work
+# directory once more, and steps on if the app took the stamp meanwhile. The
+# claim is removed when the run exits (on_exit); the run's files mark the
+# stamp from then on.
+#
+# The claim is not `.work/<stamp>`: the app's retention and `prune` treat
+# that as a backup in flight, so the one a run killed outright leaves would
+# pin the stamp's files and keep `prune` off its partials. A claim left that
+# way only makes later runs skip its stamp. The app skips stamps with a claim
+# or files on disk too (KilnCMS.Backups.Chain); a cron run and an app start
+# that look within the same few milliseconds can still pick one stamp
+# (docs/backups.md). Before the heartbeat starts, which reads STAMP.
+CLAIM_DIR=""
 
 # `YYYYMMDD-HHMMSS` (UTC) for $1 seconds since the epoch: GNU `date -d @N` or
 # BSD `date -r N`, whichever this host has. Fails, printing nothing, when
@@ -2304,70 +2327,67 @@ stamp_of() {
   fi
 }
 
-# Whether stamp $1 is in use in $BACKUP_DIR (see above). Without nullglob an
-# unmatched pattern stays literal, and the tests fail on it.
-stamp_taken() {
+# Whether `$BACKUP_DIR/$1` exists (lstat: a dangling symlink counts).
+present() { [ -e "$BACKUP_DIR/$1" ] || [ -L "$BACKUP_DIR/$1" ]; }
+
+# Whether stamp $1 has files or an app work directory (see above). Without
+# nullglob an unmatched pattern stays literal, and the test fails on it.
+stamp_used() {
   local f
-  if [ -e "$BACKUP_DIR/.work/$1" ] || [ -L "$BACKUP_DIR/.work/$1" ]; then return 0; fi
+  present ".work/$1" && return 0
   for f in "$BACKUP_DIR"/db/kiln-db-"$1".* "$BACKUP_DIR"/media/kiln-media-"$1".*; do
     if [ -e "$f" ] || [ -L "$f" ]; then return 0; fi
   done
   return 1
 }
 
-# Create this run's first file for STAMP exclusively ($1 = "media": the
-# in-progress marker, see open_media_marker; "db": the dump's `.partial`,
-# which pg_dump then writes). Fails when the name already exists; dies when it
-# can't be created for any other reason.
-claim_first() {
-  local f
-  if [ "$1" = media ]; then
-    private_media_dir
-    f="$BACKUP_DIR/media/kiln-media-${STAMP}.sha256.partial"
-  else
-    mkdir -p "$BACKUP_DIR/db"
-    f="$BACKUP_DIR/db/kiln-db-${STAMP}.dump.partial"
+# Claim STAMP: `.claims/<stamp>` created by this run, and nothing else using
+# the stamp once it is. Fails when another writer has it; dies when the claim
+# can't be made for any other reason.
+claim() {
+  local dir="$BACKUP_DIR/.claims/$STAMP"
+  stamp_used "$STAMP" && return 1
+  if ! mkdir "$dir" 2>/dev/null; then
+    present ".claims/$STAMP" && return 1
+    die "could not create ${dir}"
   fi
-  if (umask 077 && set -C && : > "$f") 2>/dev/null; then
-    track_partial "$f"
-    if [ "$1" = media ]; then MEDIA_MARKER="$f"; fi
-    return 0
+  if stamp_used "$STAMP"; then
+    rmdir "$dir" 2>/dev/null || true
+    return 1
   fi
-  if [ -e "$f" ] || [ -L "$f" ]; then return 1; fi
-  die "could not create ${f}"
+  CLAIM_DIR="$dir"
 }
 
-# $1 = which file the run writes first (claim_first). Sets STAMP. Gives up
-# after 60 stamps in use.
+# Sets STAMP and CLAIM_DIR. After 60 stamps in use the run fails, under a
+# stamp no file carries (the next one, when it is free), so its failure
+# manifest names no other run's backup.
 claim_stamp() {
-  local first="$1" epoch="$NOW_EPOCH" tries=0 from="$STAMP"
+  local epoch="$NOW_EPOCH" tries=0 from="$STAMP"
+  mkdir -p "$BACKUP_DIR"
+  (umask 077 && mkdir -p "$BACKUP_DIR/.claims") || die "could not create ${BACKUP_DIR}/.claims"
   while :; do
-    if ! stamp_taken "$STAMP" && claim_first "$first"; then
+    if claim; then
       if [ "$STAMP" != "$from" ]; then
         echo "==> Stamp ${from} is already in use in ${BACKUP_DIR}; this run is ${STAMP}"
       fi
       return 0
     fi
     tries=$((tries + 1))
-    [ "$tries" -lt 60 ] ||
-      die "no free backup stamp from ${from}: the 60 seconds from it are all in use in ${BACKUP_DIR}"
     epoch=$((epoch + 1))
     STAMP="$(stamp_of "$epoch")" || die "date cannot format a time (neither GNU -d @N nor BSD -r N)"
+    if [ "$tries" -ge 60 ]; then
+      if stamp_used "$STAMP" || present ".claims/$STAMP"; then STAMP=""; fi
+      die "no free backup stamp from ${from}: the 60 seconds from it are all in use in ${BACKUP_DIR}"
+    fi
   done
 }
 
-# Which file `all` writes first: the media marker when it backs up media
-# (cmd_all), else the dump.
-all_first() {
-  if [ -n "${MEDIA_DIR:-}" ] && [ -d "$MEDIA_DIR" ]; then echo media; else echo db; fi
-}
-
 case "${1:-}" in
-  db) install_traps; claim_stamp db; start_heartbeat; cmd_db ;;
-  media) install_traps; require_media_dir; claim_stamp media; start_heartbeat; cmd_media ;;
+  db) install_traps; claim_stamp; start_heartbeat; cmd_db ;;
+  media) install_traps; require_media_dir; claim_stamp; start_heartbeat; cmd_media ;;
   # BACKUP_KEEP_DAYS is read before the traps, so a failure manifest records
   # the value `prune` would have used.
-  all) WRITE_MANIFEST=1; read_keep_days; install_traps; claim_stamp "$(all_first)"; start_heartbeat; cmd_all ;;
+  all) WRITE_MANIFEST=1; read_keep_days; install_traps; claim_stamp; start_heartbeat; cmd_all ;;
   verify) cmd_verify ;;
   prune) read_keep_days; cmd_prune ;;
   *) die "usage: $0 {db|media|all|verify|prune}" ;;

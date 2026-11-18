@@ -504,9 +504,12 @@ defmodule KilnCMS.Backups.Chain do
   # step forward past any stamp already used. So would this chain and a cron
   # run of `scripts/backup.sh` started in the same second (#2477): its files
   # have no Run until the Importer reads them, so a stamp with files on disk
-  # (`on_disk`, `stamps_on_disk/0`) is used too. The script steps past the
-  # app's stamps the same way; a cron run and a start that look within the
-  # same few milliseconds can still pick one stamp (docs/backups.md).
+  # or a cron run's claim (`on_disk`, `stamps_on_disk/0`) is used too. The
+  # script steps past the app's stamps the same way: the start step makes
+  # `.work/<stamp>` before anything else (`Steps`), and the script looks for
+  # it before and after it claims a stamp. A cron run and a start that look
+  # within the same few milliseconds can still pick one stamp
+  # (docs/backups.md).
   defp fresh_stamp(on_disk, at \\ DateTime.utc_now(), tries \\ 60) do
     stamp = Artifact.stamp(at)
 
@@ -522,18 +525,28 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   # The stamps any file in this node's `db/` or `media/` carries
-  # (`Artifact.name_stamp/1`). A directory that can't be listed (not created
-  # yet, say) adds none: the start step fails on it later if it matters.
+  # (`Artifact.name_stamp/1`), and those a running `backup.sh` claims
+  # (`.claims/<stamp>`, made before its first file). A directory that can't
+  # be listed (not created yet, say) adds none: the start step fails on it
+  # later if it matters.
   # sobelow_skip ["Traversal.FileModule"]
   defp stamps_on_disk do
     dir = Backups.dir()
 
-    for kind <- Artifact.kinds(),
-        {:ok, names} <- [File.ls(Path.join(dir, Artifact.subdir(kind)))],
-        name <- names,
-        {:ok, stamp} <- [Artifact.name_stamp(name)],
-        into: MapSet.new(),
-        do: stamp
+    files =
+      for kind <- Artifact.kinds(),
+          {:ok, names} <- [File.ls(Path.join(dir, Artifact.subdir(kind)))],
+          name <- names,
+          {:ok, stamp} <- [Artifact.name_stamp(name)],
+          do: stamp
+
+    claims =
+      case File.ls(Path.join(dir, ".claims")) do
+        {:ok, names} -> Enum.filter(names, &WorkState.valid_stamp?/1)
+        {:error, _} -> []
+      end
+
+    MapSet.new(files ++ claims)
   end
 
   defp lease(row, job_id) do

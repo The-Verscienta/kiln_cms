@@ -4299,14 +4299,21 @@ files can be read. The error names the folder, relative to the media directory:
 `media folder "<folder>" can be listed but not entered (no execute permission):
 fix its permissions, or leave it out with BACKUP_MEDIA_EXCLUDE`.
 
-**A cron run and the app starting in the same second.** A stamp is taken when
-any `kiln-db-<stamp>.*` or `kiln-media-<stamp>.*` file, or a `.work/<stamp>`
-directory, is in `$BACKUP_DIR`. The script then moves on one second at a time to
-a free stamp ("Stamp `<stamp>` is already in use in `<dir>`; this run is
-`<stamp>`"), and claims it by creating its first file exclusively, so two cron
-runs never share one. After 60 stamps in use it fails. The app moves past a
-stamp with files on disk the same way. A cron run and an app backup that check
-within the same few milliseconds can still choose the same stamp.
+**A cron run and the app starting in the same second.** A stamp is in use
+when any `kiln-db-<stamp>.*` or `kiln-media-<stamp>.*` file is in
+`$BACKUP_DIR`, when the app has a `.work/<stamp>` directory (an in-app backup
+makes it first, as soon as its start step runs), or when another cron run has
+claimed it. The script moves on one second at a time to a free stamp ("Stamp
+`<stamp>` is already in use in `<dir>`; this run is `<stamp>`"), claims it by
+creating `.claims/<stamp>` (a `mkdir` only one run can win, so two cron runs
+cannot share a stamp whatever they back up), and looks for the app's
+`.work/<stamp>` once more. The claim is removed when the run exits. After 60
+stamps in use the run fails, under the next stamp when that one is free, so
+History records the failure. The app moves past a stamp with files or a
+claim on disk the same way. A cron run and an in-app backup that check within
+the same few milliseconds can still choose the same stamp. A run killed
+outright leaves its empty `.claims/<stamp>` behind; it only makes later runs
+skip that stamp, and can be deleted.
 
 **When a run fails.** Cron has no resume. If any part fails (`tar` is retried
 once from a re-checked list first), or the run is interrupted with `HUP`, `INT`

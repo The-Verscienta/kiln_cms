@@ -114,6 +114,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new nullable `backup_node_beats.dir_queue` and `dir_queue_boot_id`). Finish a rolling deploy before you start, cancel or resume a backup. Before rolling back past this release, cancel running backups or let them finish.**
   ([#3094](https://github.com/The-Verscienta/kiln_cms/pull/3094) · [long form](docs/changelog/unreleased.md#backup-dir-queues-upgrade))
 
+- **An in-app media backup that skipped a folder it could list but not enter (for example mode 0644) now fails, naming the folder, as cron already did. Fix the folder's permissions or add it to `BACKUP_MEDIA_EXCLUDE`. Cron now also resets an existing `$BACKUP_DIR/media` to 0700 on every run and fails if it can't.**
+  ([long form](docs/changelog/unreleased.md#backup-cron-app-parity-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -343,6 +346,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **A last-good marker sync job on a node whose `BACKUP_DIR` hangs gives up after 5 s (id read) or 120 s (sync) instead of holding an Oban worker for as long as the mount hangs.**
   ([#3093](https://github.com/The-Verscienta/kiln_cms/pull/3093) · [long form](docs/changelog/unreleased.md#backup-marker-sync-hung-dir))
+
+- **Cron and in-app backups that start in the same second no longer share a stamp: each side steps to a free one, so a failed cron run's cleanup can't remove the app's files.**
+  ([long form](docs/changelog/unreleased.md#backup-cron-app-parity))
 
 ### Security
 
