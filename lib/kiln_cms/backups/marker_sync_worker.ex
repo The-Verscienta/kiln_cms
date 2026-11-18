@@ -58,13 +58,19 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
   longer is left running: the job logs a warning, emits
   `[:kiln_cms, :backups, :marker_sync, :timeout]` and gives up for the slot
   with `{:error, :backup_dir_unresponsive}`, so the Oban slot is free again.
-  The job's own `timeout/1` (5 minutes) is longer than both waits, and well
-  inside the Lifeline's rescue window.
+  If the task finishes later, a line at info says how long it took, so a slow
+  but healthy directory shows up as one. The job's own `timeout/1` is both
+  waits plus a minute, so it outlasts them under any configuration; keep it
+  well inside the Lifeline's rescue window.
 
-  The supervisor runs at most two tasks, so a mount that stays hung can't
-  pile up blocked tasks (each holds one of the VM's dirty I/O schedulers,
-  which the heartbeat's id reads share). While two are still blocked, a job
-  starts none and fails with `{:error, :backup_dir_io_busy}`.
+  Tasks the job is still waiting on are not limited: the queue's concurrency
+  bounds them, and a sync waiting its turn for the backup lock is normal.
+  Abandoned ones are (`KilnCMS.Backups.MarkerSyncAbandoned`): while two that
+  a job gave up on are still running, a job starts none and fails with
+  `{:error, :backup_dir_io_busy}`, so a mount that stays hung can't pile up
+  blocked tasks (each holds one of the VM's dirty I/O schedulers, which the
+  heartbeat's id reads share). Jobs already waiting when the mount hung can
+  each still leave one behind, so the limit is two plus those.
 
   A cron job whose own id read gives up still queues the jobs for the other
   directories, then fails without syncing its own. A per-directory job whose
@@ -121,7 +127,7 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
     ]
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, DirId}
+  alias KilnCMS.Backups.{Chain, DirId, MarkerSyncAbandoned}
 
   require Logger
 
@@ -131,11 +137,14 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
   @io KilnCMS.Backups.MarkerSyncIO
   @dir_id_timeout_ms 5_000
   @sync_timeout_ms 120_000
+  @timeout_margin_ms 60_000
+  @max_abandoned 2
 
-  # Longer than both I/O waits (#3079), so a hung directory fails the job
-  # through `run_io/3`, with a reason, rather than through Oban's timeout.
+  # Longer than both I/O waits (#3079), whatever they are configured to, so a
+  # hung directory fails the job through `run_io/4`, with a reason, rather
+  # than through Oban's timeout.
   @impl Oban.Worker
-  def timeout(_job), do: :timer.minutes(5)
+  def timeout(_job), do: io_wait_ms() + @timeout_margin_ms
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"dir" => dir_id}} = job) when is_binary(dir_id) do
@@ -232,7 +241,11 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
     run_io(:dir_id, dir, dir_id_timeout_ms(), fn -> reader.(dir) end)
   end
 
-  defp sync_here(dir), do: run_io(:sync, dir, sync_timeout_ms(), fn -> sync(dir) end)
+  defp sync_here(dir) do
+    syncer = Keyword.get(backups_env(), :marker_sync_syncer, &sync/1)
+
+    run_io(:sync, dir, sync_timeout_ms(), fn -> syncer.(dir) end)
+  end
 
   defp sync(dir) do
     if File.dir?(dir) do
@@ -248,29 +261,35 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
 
   # `fun` in a task under `KilnCMS.Backups.MarkerSyncIO`, waited on for
   # `timeout` ms (see "A backup directory that hangs"). The task carries this
-  # process in `$callers`. One that takes longer is left running: it can't
-  # be killed while blocked in a file operation.
+  # process in `$callers`. One that takes longer is left running, since it
+  # can't be killed while blocked in a file operation, and handed to
+  # `MarkerSyncAbandoned`.
   defp run_io(phase, dir, timeout, fun) do
-    task = Task.Supervisor.async_nolink(@io, fun)
+    if MarkerSyncAbandoned.count() >= @max_abandoned do
+      busy(phase, dir)
+    else
+      task = Task.Supervisor.async_nolink(@io, fun)
 
-    case Task.yield(task, timeout) || Task.ignore(task) do
-      {:ok, result} -> result
-      {:exit, reason} -> {:error, {:crashed, reason}}
-      nil -> unresponsive(phase, dir, timeout)
+      case Task.yield(task, timeout) || Task.ignore(task) do
+        {:ok, result} -> result
+        {:exit, reason} -> {:error, {:crashed, reason}}
+        nil -> unresponsive(phase, dir, timeout, task.pid)
+      end
     end
-  rescue
-    # `async_nolink/2` raises when the supervisor already runs `max_children`
-    # tasks: earlier ones are still blocked on the directory.
-    error in RuntimeError ->
-      Logger.warning(
-        "Backup last-good marker sync couldn't start the #{describe(phase)} of #{dir}: " <>
-          Exception.message(error) <> " (earlier ones are still hung?)"
-      )
-
-      {:error, :backup_dir_io_busy}
   end
 
-  defp unresponsive(phase, dir, timeout) do
+  defp busy(phase, dir) do
+    Logger.warning(
+      "Backup last-good marker sync didn't start the #{describe(phase)} of #{dir}: " <>
+        "#{@max_abandoned} earlier ones it gave up on are still running (a hung mount?)"
+    )
+
+    {:error, :backup_dir_io_busy}
+  end
+
+  defp unresponsive(phase, dir, timeout, pid) do
+    :ok = MarkerSyncAbandoned.abandon(pid, phase, dir)
+
     :telemetry.execute(
       [:kiln_cms, :backups, :marker_sync, :timeout],
       %{count: 1, waited_ms: timeout},
@@ -297,7 +316,8 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
 
   # `config :kiln_cms, KilnCMS.Backups`: `dir_id_timeout_ms:` (shared with the
   # heartbeat's id read), `marker_sync_io_timeout_ms:`, and
-  # `marker_sync_dir_reader:` (a one-argument function, tests only).
+  # `marker_sync_dir_reader:` and `marker_sync_syncer:` (one-argument
+  # functions, tests only).
   defp dir_id_timeout_ms, do: Keyword.get(backups_env(), :dir_id_timeout_ms, @dir_id_timeout_ms)
 
   defp sync_timeout_ms,

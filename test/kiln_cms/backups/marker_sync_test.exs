@@ -829,29 +829,29 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
     end
   end
 
-  # #2931's acceptance: a backup a schedule keeps, deleted by a host prune
-  # that ignores `.hold` (a `backup.sh` older than the hold markers), is
-  # logged and reported at the next sync, and both Backups pages warn.
   # #3079: the job's backup-directory I/O runs in tasks it waits on for a
   # bounded time, so a hung BACKUP_DIR can't hold an Oban slot.
   describe "a backup directory that hangs (#3079)" do
-    # Every id read announces itself and blocks until released with its
-    # answer, as a read on a hung mount would.
-    defp blocking_reader!(timeout_ms \\ 50) do
+    # A one-argument seam that announces itself as `{tag, pid}` and blocks
+    # until released with its answer, as I/O on a hung mount would.
+    defp blocking(tag) do
       parent = self()
 
-      reader = fn _dir ->
-        send(parent, {:reader, self()})
+      fn _dir ->
+        send(parent, {tag, self()})
 
         receive do
           {:release, result} -> result
         end
       end
+    end
 
+    # Every id read blocks; the job waits `timeout_ms` for it.
+    defp blocking_reader!(timeout_ms \\ 50) do
       # A blocked task is left running on purpose; a test must not leave it
       # to the next one, nor to the sandbox's check-in.
       on_exit(&kill_io_tasks/0)
-      put_backups_env(marker_sync_dir_reader: reader, dir_id_timeout_ms: timeout_ms)
+      put_backups_env(marker_sync_dir_reader: blocking(:reader), dir_id_timeout_ms: timeout_ms)
     end
 
     defp kill_io_tasks do
@@ -867,6 +867,21 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
     defp put_backups_env(opts) do
       env = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
       Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.merge(env, opts))
+    end
+
+    defp release(pid, result) do
+      ref = Process.monitor(pid)
+      send(pid, {:release, result})
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}
+    end
+
+    # Two jobs that gave up on their id read, whose reads are still blocked.
+    defp two_abandoned! do
+      for _ <- 1..2 do
+        assert {:error, :backup_dir_unresponsive} = perform_job(MarkerSyncWorker, %{})
+        assert_received {:reader, reader}
+        reader
+      end
     end
 
     test "an id read that hangs gives up promptly: an event, a warning, no marker, and the " <>
@@ -932,25 +947,95 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
       assert goods(dir) == []
     end
 
-    test "with two tasks still blocked, the next job starts none and fails as busy",
+    for {kind, args} <- [{"a per-directory job", :routed}, {"the cron job", :cron}] do
+      test "#{kind} whose sync hangs gives up promptly, with an event and a warning",
+           %{dir: dir} do
+        cron_backup!(dir, @cron)
+        {:ok, local} = DirId.local(dir)
+        on_exit(&kill_io_tasks/0)
+        put_backups_env(marker_sync_syncer: blocking(:syncer), marker_sync_io_timeout_ms: 50)
+        ref = attach([[:kiln_cms, :backups, :marker_sync, :timeout]])
+        args = if unquote(args) == :routed, do: %{"dir" => local}, else: %{}
+
+        {{micros, result}, log} =
+          with_log([level: :warning], fn ->
+            :timer.tc(fn -> perform_job(MarkerSyncWorker, args) end)
+          end)
+
+        assert result == {:error, :backup_dir_unresponsive}
+        assert micros < 1_000_000
+        assert micros < MarkerSyncWorker.timeout(%Oban.Job{args: args}) * 1000
+
+        assert_received {[:kiln_cms, :backups, :marker_sync, :timeout], ^ref,
+                         %{count: 1, waited_ms: 50}, %{phase: :sync}}
+
+        assert log =~ "the marker sync of the backup directory #{dir} took more than 50 ms"
+        assert_received {:syncer, syncer}
+        assert Process.alive?(syncer)
+        assert goods(dir) == []
+      end
+    end
+
+    test "tasks a job still waits on are not limited: three healthy reads at once all answer" do
+      put_backups_env(marker_sync_dir_reader: blocking(:reader), dir_id_timeout_ms: 5_000)
+      on_exit(&kill_io_tasks/0)
+      here = Ash.UUID.generate()
+
+      jobs =
+        for _ <- 1..3 do
+          Task.async(fn -> perform_job(MarkerSyncWorker, %{"dir" => Ash.UUID.generate()}) end)
+        end
+
+      readers =
+        for _ <- 1..3 do
+          assert_receive {:reader, reader}
+          reader
+        end
+
+      assert length(io_tasks()) == 3
+      Enum.each(readers, &send(&1, {:release, {:ok, here}}))
+
+      # Another directory's id: each snoozes, none is refused as busy.
+      assert Enum.map(jobs, &Task.await/1) == [{:snooze, 30}, {:snooze, 30}, {:snooze, 30}]
+    end
+
+    test "with two abandoned tasks still blocked, the next job starts none and fails as busy",
          %{dir: dir} do
       cron_backup!(dir, @cron)
       blocking_reader!()
-
-      for _ <- 1..2 do
-        assert {:error, :backup_dir_unresponsive} = perform_job(MarkerSyncWorker, %{})
-        assert_received {:reader, _reader}
-      end
-
-      assert length(io_tasks()) == 2
+      two_abandoned!()
 
       {result, log} = with_log([level: :warning], fn -> perform_job(MarkerSyncWorker, %{}) end)
 
       assert result == {:error, :backup_dir_io_busy}
       refute_received {:reader, _}
-      assert log =~ "couldn't start the id read of #{dir}"
-      assert log =~ "maximum number of tasks"
+      assert log =~ "didn't start the id read of #{dir}: 2 earlier ones it gave up on"
       assert goods(dir) == []
+    end
+
+    test "an abandoned task that finishes frees its slot, and says how long it took",
+         %{dir: dir} do
+      cron_backup!(dir, @cron)
+      blocking_reader!()
+      [first, _second] = two_abandoned!()
+
+      # An info line, below the test config's level (this module is not async).
+      level = Logger.level()
+      Logger.configure(level: :info)
+      on_exit(fn -> Logger.configure(level: level) end)
+
+      log =
+        capture_log([level: :info], fn ->
+          release(first, {:error, :enoent})
+          # The tracker has handled the `:DOWN` once it answers.
+          assert KilnCMS.Backups.MarkerSyncAbandoned.count() == 1
+        end)
+
+      assert log =~ ~r/the id read of #{Regex.escape(dir)} finished after \d+ s more/
+
+      put_backups_env(marker_sync_dir_reader: fn _dir -> {:error, :enoent} end)
+      assert :ok = perform_job(MarkerSyncWorker, %{})
+      assert goods(dir) == ["db/kiln-#{@cron}.good", "media/kiln-#{@cron}.good"]
     end
 
     test "an id read that crashes is no id: the cron job syncs in place", %{dir: dir} do
@@ -974,14 +1059,28 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
     end
 
     test "the job's timeout outlasts both waits and sits well inside the rescue window" do
-      timeout = MarkerSyncWorker.timeout(%Oban.Job{args: %{}})
+      rescue_after = KilnCMS.Application.oban_rescue_after()
+      assert is_integer(rescue_after)
+      job = %Oban.Job{args: %{}}
 
       assert MarkerSyncWorker.io_wait_ms() == 125_000
-      assert timeout > MarkerSyncWorker.io_wait_ms()
-      assert timeout + :timer.minutes(30) < KilnCMS.Application.oban_rescue_after()
+      assert MarkerSyncWorker.timeout(job) > MarkerSyncWorker.io_wait_ms()
+      assert MarkerSyncWorker.timeout(job) + :timer.minutes(30) < rescue_after
+
+      # Configured long waits move the timeout with them.
+      put_backups_env(
+        dir_id_timeout_ms: :timer.minutes(1),
+        marker_sync_io_timeout_ms: :timer.minutes(20)
+      )
+
+      assert MarkerSyncWorker.io_wait_ms() == :timer.minutes(21)
+      assert MarkerSyncWorker.timeout(job) > :timer.minutes(21)
     end
   end
 
+  # #2931's acceptance: a backup a schedule keeps, deleted by a host prune
+  # that ignores `.hold` (a `backup.sh` older than the hold markers), is
+  # logged and reported at the next sync, and both Backups pages warn.
   describe "a held backup deleted outside the app (#2931)" do
     @endpoint KilnCMSWeb.Endpoint
 
