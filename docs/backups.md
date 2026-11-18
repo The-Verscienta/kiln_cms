@@ -215,7 +215,10 @@ Last-good and hold markers are never aged either; the app moves them itself
 [The hold markers](#the-hold-markers)). A `kiln-*` file in `db/` or `media/` that belongs to no
 unit, such as a part named `part001` instead of `part01`, is a stray: the app
 deletes it once it is older than `BACKUP_KEEP_DAYS`, and `backup.sh` leaves it
-alone.
+alone. The one exception is a file kept after its off-site copy was refused,
+`<name>.refused-<stamp>`: both prunes delete it once it is older than
+`BACKUP_KEEP_DAYS` counted from the refusal as well as from its mtime
+([When an off-site copy is refused](#when-an-off-site-copy-is-refused)).
 
 In History, a run whose dump retention removed while its media is still on disk
 reads `Database: pruned (retention)` beside `Media: on disk`
@@ -733,8 +736,8 @@ off-site destination that still has it, with its `.sha256` file.
 - **It cannot see an in-app backup that is `Running`.** It relies on that
   backup's `.work/<stamp>/` directory and `.partial` files instead.
 
-It never deletes strays, and never deletes a `.keep`, `.good` or `.hold`
-marker.
+It never deletes strays, other than a file kept after a refusal, and never
+deletes a `.keep`, `.good` or `.hold` marker.
 
 ### When retention is skipped or stops
 
@@ -3338,7 +3341,8 @@ wrapped here):
 ```text
 Off-site copy REFUSED for 1 file: kiln-media-20261108-031700.part02.tar.gz
 (changed on disk after this backup verified it (sha256 expected 3b1f0c9a2e41…,
-found 8c02d7e5b6f1…)). Something other than this backup wrote to the backup
+found 8c02d7e5b6f1…); kept as /var/backups/kiln/media/kiln-media-20261108-
+031700.part02.tar.gz.refused-20261108-034512). Something other than this backup wrote to the backup
 directory: check the disk and anything with access to BACKUP_DIR before
 trusting this backup. The local files are kept; Resume retries the off-site
 copy and rebuilds any file that changed.
@@ -3370,7 +3374,9 @@ wrapped here):
 ```text
 REFUSING off-site copy of kiln-media-20261108-031700.part02.tar.gz: its
 sha256 changed after this backup verified it (expected 3b1f…, found 8c02…).
-Nothing was uploaded for it. Something other than this backup wrote to
+Nothing was uploaded for it. It was kept as /var/backups/kiln/media/kiln-media-
+20261108-031700.part02.tar.gz.refused-20261108-034512; prune removes it once
+it is older than BACKUP_KEEP_DAYS. Something other than this backup wrote to
 /var/backups/kiln: check the disk before trusting this backup.
 ```
 
@@ -3391,8 +3397,9 @@ that log.
 - **Cron:** files copied before the refusal are on the remote; nothing after it
   was copied, and for `backup.sh all` a refusal during the database phase means
   the media set was never built.
-- **Both:** all local files are kept, the changed one included, and the
-  manifest records the refused file as not verified and `"offsite": null`.
+- **Both:** all local files are kept, and the manifest records the refused
+  file as not verified and `"offsite": null`. The changed file is kept under
+  a new name (below).
 - **The sidecars differ slightly.** Cron hashes a sidecar's bytes, so any edit
   to it is caught. The app compares the sidecar's parsed lines with the
   digests and names it recorded, in order: a changed digest, name, line order
@@ -3400,15 +3407,44 @@ that log.
   one space instead of two before the name, `sha256sum`'s `*` binary marker)
   is not.
 
+**The changed file is kept (#2484).** The moment a file is refused because
+its content changed (a checksum sidecar too), it is renamed beside itself to
+`<name>.refused-<UTC stamp>`, the stamp being the moment of the refusal, not
+the backup's: for example
+`media/kiln-media-20261108-031700.part02.tar.gz.refused-20261108-034512`. The
+rename keeps the file's bytes and its mtime, which says when it last changed.
+The error names where it went, `… found 8c02d7e5b6f1…); kept as
+/var/backups/kiln/media/kiln-media-20261108-031700.part02.tar.gz.refused-20261108-034512)`,
+and the run's log adds `Kept the refused <name> as <path>; retention removes
+it once it is older than <N> days`. Cron's error adds `It was kept as <path>;
+prune removes it once it is older than BACKUP_KEEP_DAYS.` A file refused as
+missing, or as no longer a regular file, has nothing to keep.
+
+Nothing reads a kept file as a backup: not History, `backup.sh verify`,
+`restore.sh` (a stamp prefix or one part never picks it up), the cron prune's
+units or the off-site copies. Its stamp still counts as in use, so no new
+backup takes it. Both the app's retention and `backup.sh prune` delete it once
+it is older than `BACKUP_KEEP_DAYS` counted from **both** its mtime and the
+refusal stamp in its name, so a file that changed long before it was refused
+is still kept that long after the refusal. A refusal stamp that is not a real
+moment, or more than a day ahead, counts for nothing. To remove it sooner,
+delete it by hand once you are done with it: `rm <path>`.
+
+A resume (or a retried step) that finds a file it recorded changed since, for
+example a media part that changed between its archive and the checksum step,
+keeps it the same way before rebuilding it, and says so on the run:
+`<name> changed after this backup recorded it: kept as <path> and rebuilt`.
+
 **What to check.** Look at the disk (`dmesg`, SMART, filesystem errors) and at
 anything else that can write to `BACKUP_DIR`: a second cron entry or host, a
-sync job pointed the wrong way, a restore unpacked into it. Compare the file
-with the digest the error names (`sha256sum <file>`).
+sync job pointed the wrong way, a restore unpacked into it. Compare the kept
+file with the digest the error names (`sha256sum <path>`).
 
 **Then retry.**
 
-1. If you want the changed file as evidence, copy it out of `BACKUP_DIR`
-   first. A resume replaces it.
+1. The changed file is already kept aside, and a resume leaves it alone. If
+   you need it for longer than `BACKUP_KEEP_DAYS`, copy it out of
+   `BACKUP_DIR`.
 2. **App:** open **Backups** as a platform admin and
    click **Resume** on the failed History row (see [Interrupted? Resume
    it.](#media-backups-in-parts-2218)). Files that still match `state.json`

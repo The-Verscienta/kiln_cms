@@ -22,7 +22,8 @@ defmodule KilnCMS.Backups.Artifact do
   File names are built and parsed here and nowhere else: `parse_file/1`,
   `part_name/2`, `set_names/2`, `sidecar_name/2`, `parse_sidecar_name/1`,
   `keep_name/1`, `parse_keep_name/1`, `good_name/1`, `parse_good_name/1`,
-  `hold_name/1`, `parse_hold_name/1`, `partial_name/2`, `name_stamp/1`.
+  `hold_name/1`, `parse_hold_name/1`, `partial_name/2`, `name_stamp/1`,
+  `refused_name/2`, `parse_refused_name/1`.
 
   ## Temporary files
 
@@ -220,9 +221,11 @@ defmodule KilnCMS.Backups.Artifact do
   @doc """
   The stamp of any file a backup writes under one, as `{:ok, stamp}`, or
   `:error`: a name starting `kiln-db-<stamp>.` or `kiln-media-<stamp>.`
-  (a dump, a part, a sidecar, any of their `.partial`s). Broader than
-  `parse_file/1` on purpose: it answers "is this stamp in use on disk"
-  (#2477), the same names `scripts/backup.sh` checks before it takes a stamp.
+  (a dump, a part, a sidecar, any of their `.partial`s, a file kept after a
+  refusal, `refused_name/2`). Broader than `parse_file/1` on purpose: it
+  answers "is this stamp in use on disk" (#2477), the same names
+  `scripts/backup.sh` checks before it takes a stamp. For a kept file it is
+  the backup's stamp, never the refusal's.
   """
   @spec name_stamp(String.t()) :: {:ok, String.t()} | :error
   def name_stamp(name) when is_binary(name) do
@@ -233,6 +236,46 @@ defmodule KilnCMS.Backups.Artifact do
   end
 
   def name_stamp(_other), do: :error
+
+  @doc """
+  The name a backup file is kept under once its content changed after the
+  backup recorded it (#2484): `<name>.refused-<stamp>`, where `name` is the
+  artifact's or sidecar's own name and the stamp is `at`, the moment it was set
+  aside (UTC, `stamp/1`), not the backup's. `scripts/backup.sh` writes the same
+  name. No other parser here reads it as a backup file: `parse_file/1` and
+  `parse_sidecar_name/1` answer `:error`.
+  """
+  @spec refused_name(String.t(), DateTime.t()) :: String.t()
+  def refused_name(name, %DateTime{} = at) when is_binary(name),
+    do: name <> ".refused-" <> stamp(at)
+
+  @refused_name ~r/\A(.+)\.refused-(\d{8}-\d{6})\z/
+
+  @doc """
+  Parse a name `refused_name/2` builds into `{:ok, %{name, kind, stamp,
+  refused_at}}`, or `:error`. `name` is the file's own name, `stamp` the
+  backup's and `refused_at` the stamp in the suffix, as written (it may not
+  name a real instant). Only a whole artifact or sidecar name counts as the
+  original: never a `.partial`.
+  """
+  @spec parse_refused_name(String.t()) ::
+          {:ok,
+           %{name: String.t(), kind: :db | :media, stamp: String.t(), refused_at: String.t()}}
+          | :error
+  def parse_refused_name(name) when is_binary(name) do
+    with [_, original, refused_at] <- Regex.run(@refused_name, name),
+         {:ok, %{kind: kind, stamp: stamp, partial?: false}} <- parse_original(original) do
+      {:ok, %{name: original, kind: kind, stamp: stamp, refused_at: refused_at}}
+    else
+      _ -> :error
+    end
+  end
+
+  def parse_refused_name(_other), do: :error
+
+  defp parse_original(name) do
+    with :error <- parse_file(name), do: parse_sidecar_name(name)
+  end
 
   @doc """
   The temporary name a file is written under before it is renamed to `name`.

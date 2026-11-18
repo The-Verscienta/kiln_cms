@@ -2173,6 +2173,157 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     end
   end
 
+  # A file kept after its off-site copy was refused (#2484):
+  # `<name>.refused-<stamp>` beside it, the stamp the refusal's.
+  describe "a file kept after a refusal (#2484)" do
+    defp refused!(ctx, rel, days_since_refusal, mtime_days) do
+      at = DateTime.add(DateTime.utc_now(), -days_since_refusal * 86_400, :second)
+      refused_at!(ctx, rel, Artifact.stamp(at), mtime_days)
+    end
+
+    defp refused_at!(ctx, rel, refused_at, mtime_days) do
+      path = Path.join(ctx.backups, rel <> ".refused-" <> refused_at)
+      File.write!(path, "changed after it verified")
+      age!([path], mtime_days)
+      path
+    end
+
+    test "verify and restore.sh never take one for a backup file", ctx do
+      good = "20260301-000000"
+      newer = "20260302-000000"
+      dump!(ctx, good)
+      parts = app_set!(ctx, good)
+      sidecar = Path.join(ctx.backups, "media/kiln-media-#{good}.sha256")
+
+      # A newer stamp's files, all of them kept after refusals: none is the
+      # newest dump or media set.
+      refused!(ctx, "db/kiln-db-#{newer}.dump", 0, 0)
+      refused!(ctx, "db/kiln-db-#{newer}.sha256", 0, 0)
+      refused!(ctx, "media/kiln-media-#{newer}.part01.tar.gz", 0, 0)
+      refused!(ctx, "media/kiln-media-#{newer}.sha256", 0, 0)
+      # And one of the good set's own parts, refused on an earlier run.
+      refused!(ctx, "media/" <> Path.basename(Enum.at(parts, 1)), 0, 0)
+      refused!(ctx, "media/kiln-media-#{good}.sha256", 0, 0)
+
+      assert {out, 0} = backup(ctx, "verify")
+      assert out =~ "Newest dump: kiln-db-#{good}.dump"
+      assert out =~ "Newest media backup: #{good}"
+      refute out =~ "refused"
+
+      # restore.sh: a stamp prefix and one part both find the set, and only
+      # the set, which its sidecar vouches for.
+      for arg <- [Path.join(ctx.backups, "media/kiln-media-#{good}"), hd(parts)] do
+        File.rm_rf!(Path.join(ctx.tmp, "restored"))
+
+        assert {out, 0} = System.cmd("bash", [@restore, "media", arg], env: restore_env(ctx))
+        assert out =~ "Verifying checksums from #{Path.basename(sidecar)}"
+      end
+    end
+
+    test "prune ages one by its mtime and its refusal stamp, as the app does (PARITY)", ctx do
+      s = "20260101-000000"
+
+      gone = [
+        refused!(ctx, "db/kiln-db-#{s}.dump", 40, 40),
+        # A refusal stamp that is no real instant, or more than a day ahead,
+        # counts for nothing: the mtime alone decides.
+        refused_at!(ctx, "media/kiln-media-#{s}.sha256", "20261340-996199", 40),
+        refused_at!(ctx, "media/kiln-media-#{s}.tar.gz", "29991231-000000", 40)
+      ]
+
+      kept = [
+        # Set aside yesterday, last changed long ago: the refusal decides.
+        refused!(ctx, "media/kiln-media-#{s}.part02.tar.gz", 1, 40),
+        # The mtime is recent: it decides.
+        refused!(ctx, "db/kiln-db-#{s}.sha256", 40, 1),
+        refused!(ctx, "db/kiln-db-#{s}.dump", 14, 14)
+      ]
+
+      {:ok, inventory} = Retention.scan(ctx.backups)
+      plan = Retention.plan(inventory, %{}, Policy.legacy(14), System.os_time(:second))
+      planned = for e <- plan.delete, name <- e.files, into: MapSet.new(), do: name
+
+      assert MapSet.new(gone, &Path.basename/1) == planned
+
+      assert {out, 0} = backup(ctx, "prune")
+      for path <- gone, do: assert(out =~ path)
+      assert Enum.all?(gone, &(not File.exists?(&1)))
+      assert Enum.all?(kept, &File.exists?/1)
+    end
+
+    test "prune leaves one that is not a regular file, or not in its own directory", ctx do
+      s = "20260101-000000"
+      target = Path.join(ctx.tmp, "elsewhere")
+      File.write!(target, "not Kiln's")
+      link = Path.join(ctx.backups, "db/kiln-db-#{s}.dump.refused-20260101-000000")
+      File.ln_s!(target, link)
+      foreign = refused!(ctx, "db/kiln-media-#{s}.tar.gz", 40, 40)
+      partial = refused!(ctx, "db/kiln-db-#{s}.dump.partial", 40, 40)
+
+      assert {_out, 0} = backup(ctx, "prune")
+      assert {:ok, %{type: :symlink}} = File.lstat(link)
+      assert File.exists?(target)
+      assert File.exists?(foreign)
+      assert File.exists?(partial)
+    end
+
+    test "a unit's prune never takes one with it", ctx do
+      s = "20260101-000000"
+      newest = "20260301-000000"
+      files = set_files!(ctx, s)
+      age!(files, 40)
+      set_files!(ctx, newest)
+      kept = refused!(ctx, "db/kiln-db-#{s}.dump", 1, 40)
+
+      assert {_out, 0} = backup(ctx, "prune")
+      assert Enum.all?(files, &(not File.exists?(&1)))
+      assert File.exists?(kept)
+    end
+
+    # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
+    unless ShellTools.bash32(),
+      do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
+
+    test "the refusal's rename and prune's ageing also work under bash 3.2", ctx do
+      bash = ShellTools.bash32()
+      log = Path.join(ctx.tmp, "rclone.log")
+      File.rm_rf!(ctx.media)
+      File.mkdir_p!(ctx.media)
+      for n <- 1..3, do: sparse!(Path.join(ctx.media, "f#{n}.bin"), 9 * @mb)
+
+      # rclone, copying part01, appends to part02, as in "a part changed while
+      # the one before it uploads is refused".
+      stub!(ctx.bin, "rclone", """
+      #!/bin/sh
+      printf '%s %s %s\\n' "$1" "$(basename "$2")" "$3" >> "#{log}"
+      case "$2" in
+        *part01.tar.gz) printf tampered >> "$(printf '%s' "$2" | sed 's/part01/part02/')" ;;
+      esac
+      """)
+
+      env = [{"BACKUP_MEDIA_PART_MB", "16"}, {"BACKUP_RCLONE_REMOTE", "r2:kiln"}]
+      assert {out, status} = backup(ctx, "all", env, bash)
+      assert status != 0
+
+      assert [kept] =
+               Path.wildcard(Path.join(ctx.backups, "media/kiln-media-*.part02.tar.gz.refused-*"))
+
+      assert out =~ "It was kept as #{kept}"
+      assert File.read!(kept) =~ ~r/tampered\z/
+
+      # Its mtime old, its refusal just now: kept.
+      age!([kept], 40)
+      assert {_out, 0} = backup(ctx, "prune", [], bash)
+      assert File.exists?(kept)
+
+      old = refused!(ctx, "db/kiln-db-20260101-000000.dump", 40, 40)
+      assert {out, 0} = backup(ctx, "prune", [], bash)
+      assert out =~ old
+      refute File.exists?(old)
+      assert File.exists?(kept)
+    end
+  end
+
   describe "off-site copies of a part set" do
     setup ctx do
       File.rm_rf!(ctx.media)
@@ -2334,7 +2485,9 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
                ])
 
       assert status != 0
-      [part02] = Enum.filter(media_parts(ctx), &(&1 =~ ".part02."))
+      # Set aside under a new name (below), so found by its stamp.
+      [part01] = Enum.filter(media_parts(ctx), &(&1 =~ ".part01."))
+      part02 = String.replace(part01, ".part01.", ".part02.")
       assert out =~ "REFUSING off-site copy of #{Path.basename(part02)}: its sha256 changed"
       assert out =~ "Nothing was uploaded for it"
 
@@ -2361,8 +2514,22 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert verified[Path.basename(part02)] == false
       assert verified |> Map.delete(Path.basename(part02)) |> Map.values() |> Enum.all?()
 
-      # The set is kept as evidence, and verify says it no longer checks out.
-      assert length(media_parts(ctx)) == 3
+      # The changed part is kept as evidence under a name nothing reads as a
+      # backup file (#2484), with the bytes it was refused for and its mtime,
+      # and the error says where. The rest of the set stays, and verify says
+      # it no longer checks out.
+      assert [kept] = Path.wildcard(part02 <> ".refused-*")
+      assert {:ok, %{name: name, kind: :media}} = Artifact.parse_refused_name(Path.basename(kept))
+      assert name == Path.basename(part02)
+      assert File.read!(kept) =~ ~r/tampered\z/
+      assert %{type: :regular} = File.lstat!(kept)
+      refute File.exists?(part02)
+
+      assert out =~
+               "It was kept as #{kept}; prune removes it once it is older than BACKUP_KEEP_DAYS."
+
+      assert manifest["error"] =~ "It was kept as #{kept}"
+      assert length(media_parts(ctx)) == 2
       assert [_sidecar] = Path.wildcard(Path.join(ctx.backups, "media/*.sha256"))
       assert {_, verify_status} = backup(ctx, "verify")
       assert verify_status != 0
@@ -2393,6 +2560,12 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert manifest!(ctx)["offsite"] == nil
       # Every part was the part it verified.
       assert Enum.all?(manifest!(ctx)["artifacts"], & &1["verified"])
+
+      # The rewritten sidecar is kept the same way as a data file (#2484).
+      assert [] = Path.wildcard(Path.join(ctx.backups, "media/kiln-media-*.sha256"))
+      assert [kept] = Path.wildcard(Path.join(ctx.backups, "media/kiln-media-*.sha256.refused-*"))
+      assert File.read!(kept) =~ ~r/\n\n\z/
+      assert manifest!(ctx)["error"] =~ "It was kept as #{kept}"
     end
   end
 

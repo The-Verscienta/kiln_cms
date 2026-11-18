@@ -14,7 +14,7 @@ defmodule KilnCMS.Backups.ResumeTest do
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Checksum, DirId, Manifest, Worker, WorkState}
+  alias KilnCMS.Backups.{Artifact, Checksum, DirId, Manifest, Retention, Worker, WorkState}
   alias KilnCMS.Test.{BackupChain, BackupCluster}
 
   @moduletag :capture_log
@@ -121,6 +121,9 @@ defmodule KilnCMS.Backups.ResumeTest do
   end
 
   defp mtime(path), do: File.stat!(path, time: :posix).mtime
+
+  # The files `path` was kept as after a refusal (#2484).
+  defp refused_files(path), do: Path.wildcard(path <> ".refused-*")
 
   # The temporary name the lock's current step writes `state.json` under on
   # its `attempt`-th attempt (#2818).
@@ -308,10 +311,48 @@ defmodule KilnCMS.Backups.ResumeTest do
       %{stamp: stamp, dump: dump} = fail_at_part_3(dir, tools)
 
       flip_byte!(dump)
+      changed = File.read!(dump)
 
       assert :ok = BackupChain.resume(stamp)
       assert dump_count(tools) == 2
       assert {_, 0} = System.cmd("pg_restore", ["--list", dump], stderr_to_stdout: true)
+
+      # The changed dump was set aside first, not replaced (#2484).
+      assert [kept] = refused_files(dump)
+      assert File.read!(kept) == changed
+      assert [run] = runs()
+
+      assert Enum.any?(
+               run.log,
+               &(&1.step == "dump" and
+                   &1.message ==
+                     "#{Path.basename(dump)} changed after this backup recorded it: kept as " <>
+                       "#{kept} and rebuilt; retention removes it once it is older than 14 days")
+             )
+    end
+
+    # A part changed between its archive and the checksum step fails the
+    # backup (D7); the resume keeps it before rebuilding it (#2484).
+    test "a part whose recorded hash no longer matches is kept aside before it is rebuilt", %{
+      base: base,
+      dir: dir
+    } do
+      tools = stub_tools(base)
+      %{stamp: stamp, parts: [p1, _p2, _p3]} = fail_at_part_3(dir, tools)
+
+      flip_byte!(p1)
+      changed = File.read!(p1)
+      mtime = aged(p1)
+
+      assert :ok = BackupChain.resume(stamp)
+
+      assert [kept] = refused_files(p1)
+      assert File.read!(kept) == changed
+      # The rename keeps the mtime: when it last changed.
+      assert mtime(kept) == mtime
+      assert {_, 0} = System.cmd("tar", ["-tzf", p1], stderr_to_stdout: true)
+      assert [%{status: :succeeded} = run] = runs()
+      assert Enum.any?(run.log, &(&1.step == "media" and &1.message =~ "kept as #{kept}"))
     end
 
     test "a resumed run that fails again stays resumable, and the next resume converges", %{
@@ -532,9 +573,33 @@ defmodule KilnCMS.Backups.ResumeTest do
 
       assert failed.error =~ "Off-site copy REFUSED for 1 file: #{Path.basename(p2)}"
       refute Enum.any?(rclone_calls(rclone), &(&1 =~ Path.basename(p2)))
+
+      # Set aside the moment it was refused (#2484): the error and the run's
+      # log say where, and the bytes are what was refused.
+      refute File.exists?(p2)
+      assert [kept] = refused_files(p2)
+      assert File.read!(kept) =~ ~r/tampered\z/
+      assert failed.error =~ "(changed on disk after this backup verified it ("
+      assert failed.error =~ "…); kept as #{kept})."
+
+      assert Enum.any?(
+               failed.log,
+               &(&1.step == "offsite" and
+                   &1.message ==
+                     "Kept the refused #{Path.basename(p2)} as #{kept}; retention removes it " <>
+                       "once it is older than 14 days")
+             )
+
+      evidence = File.read!(kept)
+      kept_mtime = aged(kept)
       old = Map.new([dump, p1, p3], &{&1, aged(&1)})
 
       assert :ok = BackupChain.resume(failed.stamp)
+
+      # It survives the Resume, untouched, beside the rebuilt part.
+      assert refused_files(p2) == [kept]
+      assert File.read!(kept) == evidence
+      assert mtime(kept) == kept_mtime
 
       assert dump_count(tools) == 1
       for {path, mtime} <- old, do: assert(mtime(path) == mtime, "#{path} was rewritten")
@@ -605,6 +670,12 @@ defmodule KilnCMS.Backups.ResumeTest do
       %{tools: tools, run: failed, dump: dump, parts: parts} = fail_offsite(base, dir, :sidecar)
 
       assert failed.error =~ "Off-site copy REFUSED for 1 file: kiln-media-#{failed.stamp}.sha256"
+      sidecar = Path.join([dir, "media", Artifact.sidecar_name(:media, failed.stamp)])
+
+      # A sidecar is kept like any refused file (#2484).
+      assert [kept] = refused_files(sidecar)
+      assert File.read!(kept) =~ "kiln-media-x.part04.tar.gz"
+      assert failed.error =~ "kept as #{kept}"
       old = Map.new([dump | parts], &{&1, aged(&1)})
 
       assert :ok = BackupChain.resume(failed.stamp)
@@ -613,9 +684,63 @@ defmodule KilnCMS.Backups.ResumeTest do
       for {path, mtime} <- old, do: assert(mtime(path) == mtime, "#{path} was rewritten")
       assert [%{status: :succeeded}] = runs()
 
-      sidecar = Path.join([dir, "media", Artifact.sidecar_name(:media, failed.stamp)])
       assert {:ok, entries} = Checksum.parse_sidecar(sidecar)
       assert Enum.map(entries, &elem(&1, 1)) == Enum.map(parts, &Path.basename/1)
+      assert refused_files(sidecar) == [kept]
+    end
+
+    # Nothing reads a kept file as a backup file, and retention ages it from
+    # its refusal, not from its mtime alone (#2484).
+    test "a kept file is no backup artifact, and retention ages it out after keep_days", %{
+      base: base,
+      dir: dir
+    } do
+      %{run: failed, parts: [_p1, p2, _p3]} = fail_offsite(base, dir, :tamper)
+      assert [kept] = refused_files(p2)
+      name = Path.basename(kept)
+      assert :ok = BackupChain.resume(failed.stamp)
+
+      assert [run] = runs()
+      refute Enum.any?(run.artifacts, &(&1.name == name))
+      refute Enum.any?(Enum.flat_map(run.artifacts, & &1.parts), &(&1["name"] == name))
+      assert Artifact.parse_file(name) == :error
+      assert Artifact.parse_sidecar_name(name) == :error
+      refute KilnCMS.Backups.Destination.backup_file?(name)
+      assert {:ok, _} = KilnCMS.Backups.Importer.run(dir)
+      assert [_one_run] = runs()
+
+      # Long changed (an old mtime), refused just now: kept for keep_days (14)
+      # from the refusal. A stray to the plan, never a unit's member.
+      File.touch!(kept, System.os_time(:second) - 40 * 86_400)
+      {:ok, inventory} = Retention.scan(dir)
+      assert [%{name: ^name}] = inventory.strays
+
+      refute Enum.any?(Map.values(inventory.units), fn unit ->
+               Enum.any?(unit.files, &(&1.name == name))
+             end)
+
+      now = System.os_time(:second)
+      runs = Map.new(runs(), &{&1.stamp, &1})
+
+      for {days, outcome} <- [{0, :keep}, {14, :keep}, {16, :delete}] do
+        plan = Retention.plan(inventory, runs, Retention.Policy.legacy(14), now + days * 86_400)
+        entries = Map.fetch!(plan, outcome)
+
+        assert Enum.any?(entries, &(&1.kind == :stray and &1.files == [name])),
+               "#{days} days on, the kept file should #{outcome}"
+      end
+
+      # And a real pass at that age removes it, and nothing of the backup.
+      backup_files = File.ls!(Path.join(dir, "media")) -- [name]
+      {:ok, inventory} = Retention.scan(dir)
+      plan = Retention.plan(inventory, runs, Retention.Policy.legacy(14), now + 16 * 86_400)
+
+      {deleted, _units, nil} =
+        Retention.apply_plan(dir, %{plan | delete: Enum.filter(plan.delete, &(&1.kind == :stray))})
+
+      assert deleted == [name]
+      refute File.exists?(kept)
+      assert File.ls!(Path.join(dir, "media")) |> Enum.sort() == Enum.sort(backup_files)
     end
 
     # Since #2218 every backup has a work directory, so a database-only one
