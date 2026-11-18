@@ -384,7 +384,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#3104](https://github.com/The-Verscienta/kiln_cms/pull/3104) · [long form](docs/changelog/unreleased.md#backup-partial-offsite-status))
 
 - **Canceling a backup no longer writes the admin's email into its run log (the audited security event keeps who canceled), and a console Cancel of a run whose resume is waiting to start is refused instead of being undone by the resume.**
-  ([long form](docs/changelog/unreleased.md#backup-cancel-followups))
+  ([#3107](https://github.com/The-Verscienta/kiln_cms/pull/3107) · [long form](docs/changelog/unreleased.md#backup-cancel-followups))
 
 ### Security
 
