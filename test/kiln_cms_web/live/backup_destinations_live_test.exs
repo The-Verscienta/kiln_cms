@@ -14,7 +14,7 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
   @moduletag :tmp_dir
 
   import KilnCMS.Test.BackupSchedules, only: [user: 1, site_admin: 0, platform_admin: 0]
-  import KilnCMS.Test.BackupDestinations, only: [destination!: 3]
+  import KilnCMS.Test.BackupDestinations, only: [destination!: 3, fake_rclone!: 2]
   import Phoenix.LiveViewTest
 
   alias KilnCMS.Backups
@@ -71,8 +71,10 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
     user
   end
 
-  defp mount(conn, user \\ platform_admin()) do
-    {:ok, lv, _html} = conn |> log_in(user) |> live(@path)
+  defp mount(conn, user \\ platform_admin(), locale \\ nil) do
+    conn = log_in(conn, user)
+    conn = if locale, do: Plug.Conn.put_session(conn, "locale", locale), else: conn
+    {:ok, lv, _html} = live(conn, @path)
     lv
   end
 
@@ -175,7 +177,7 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
       }
 
       for socket <- sockets,
-          event <- ~w(new pick edit cancel validate save toggle delete move test) do
+          event <- ~w(new pick edit cancel validate save toggle delete move test test_env) do
         assert_denied(BackupDestinationsLive.handle_event(event, params, socket))
       end
 
@@ -212,7 +214,7 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
     } do
       admin = platform_admin()
 
-      for event <- ~w(toggle test edit delete move) do
+      for event <- ~w(toggle test test_env edit delete move) do
         lv = mount(conn, admin)
 
         :sys.replace_state(lv.pid, fn state ->
@@ -363,6 +365,21 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
 
       assert has_element?(lv, "#destination-s3-hint", "lifecycle rule")
 
+      # #3084: S3 uploads resume, said once; the lifecycle rule stays in its
+      # own hint.
+      assert has_element?(lv, "#destination-resume-hint", "Uploads resume after an interruption.")
+
+      # #3087: "Access key ID", not humanize's "Access key"; Path style says
+      # when a private host needs it.
+      assert has_element?(lv, "label[for=destination-new-access_key_id]", "Access key ID")
+      assert has_element?(lv, "label[for=destination-new-secret_access_key]", "Secret access key")
+
+      assert has_element?(
+               lv,
+               "#destination-new-path_style-hint",
+               "Required for a private host unless <bucket>.<host> is listed in BACKUP_S3_PRIVATE_HOSTS."
+             )
+
       html =
         lv
         |> form("#destination-form",
@@ -504,7 +521,13 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
                "From BACKUP_RCLONE_REMOTE — change it in the server's environment"
              )
 
-      refute has_element?(lv, "#backup-destination-env button")
+      # Read-only: a Test (#2952), nothing that changes it.
+      assert has_element?(lv, "#backup-destination-env button[data-role=test]", "Test")
+
+      for role <- ~w(edit toggle up down delete) do
+        refute has_element?(lv, "#backup-destination-env [data-role=#{role}]")
+      end
+
       refute has_element?(lv, "#backup-destinations-empty")
     end
 
@@ -649,6 +672,159 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
       render_async(lv, 2_000)
       assert [_] = events(:backup_destination_tested)
       refute has_element?(lv, "#backup-destination-#{row.id} [data-role=test][disabled]")
+    end
+  end
+
+  # #3084: only a kind whose uploads resume says so.
+  test "a kind that can't resume has no resume hint", %{conn: conn} do
+    lv = mount(conn)
+    lv |> element("#destination-new") |> render_click()
+    lv |> element("#destination-kind-rclone") |> render_click()
+
+    assert has_element?(lv, "#destination-form")
+    refute has_element?(lv, "#destination-resume-hint")
+    refute has_element?(lv, "#destination-s3-hint")
+  end
+
+  # #2952: Kiln's own adapters' labels are translated; a plugin's stay as
+  # it names its fields.
+  describe "field labels" do
+    test "Kiln's own adapters' labels are translated", %{conn: conn} do
+      lv = mount(conn, platform_admin(), "fr")
+      lv |> element("#destination-new") |> render_click()
+      lv |> element("#destination-kind-s3") |> render_click()
+
+      for {name, label} <- [
+            {"endpoint", "Point de terminaison"},
+            {"region", "Région"},
+            {"bucket", "Bucket"},
+            {"prefix", "Préfixe"},
+            {"path_style", "Adressage par chemin"},
+            {"access_key_id", "ID de clé d’accès"},
+            {"secret_access_key", "Clé d’accès secrète"}
+          ] do
+        assert has_element?(lv, "label[for=destination-new-#{name}]", label)
+      end
+
+      assert has_element?(lv, "#destination-resume-hint", "Les téléversements reprennent")
+      assert has_element?(lv, "#destination-new-path_style-hint", "BACKUP_S3_PRIVATE_HOSTS")
+      lv |> element("#destination-form-panel button", "Annuler") |> render_click()
+
+      lv |> element("#destination-new") |> render_click()
+      lv |> element("#destination-kind-rclone") |> render_click()
+      assert has_element?(lv, "label[for=destination-new-remote_name]", "Nom du remote")
+      assert has_element?(lv, "label[for=destination-new-path]", "Chemin")
+    end
+
+    test "a plugin's fields are its names, humanized, in every locale", %{conn: conn} do
+      lv = mount(conn, platform_admin(), "fr")
+      lv |> element("#destination-new") |> render_click()
+      lv |> element("#destination-kind-fake") |> render_click()
+
+      assert has_element?(lv, "label[for=destination-new-mode]", "Mode")
+      assert has_element?(lv, "label[for=destination-new-token]", "Token")
+    end
+  end
+
+  # #2952: a form opened before another save doesn't write over it.
+  describe "a stale form" do
+    test "a Save after another change is refused, says so, and saves nothing", %{conn: conn} do
+      row = fake!(%{name: "Offsite"})
+      lv = mount(conn)
+      lv |> element("#backup-destination-#{row.id} [data-role=edit]") |> render_click()
+
+      # Another tab disables it meanwhile.
+      Backups.update_backup_destination!(row, %{enabled: false}, actor: platform_admin())
+
+      lv
+      |> form("#destination-form", destination: %{name: "Renamed", enabled: "true"})
+      |> render_submit()
+
+      assert has_element?(
+               lv,
+               "#destination-form-errors",
+               "This destination was changed since you opened it, so nothing was saved."
+             )
+
+      assert %{name: "Offsite", enabled: false} = stored(row.id)
+      assert [%{metadata: %{"changed" => "enabled"}}] = events(:backup_destination_changed)
+
+      # Opened again, it saves.
+      lv |> element("#destination-form-panel button", "Cancel") |> render_click()
+      lv |> element("#backup-destination-#{row.id} [data-role=edit]") |> render_click()
+
+      assert lv
+             |> form("#destination-form", destination: %{name: "Renamed"})
+             |> render_submit() =~ "Destination saved."
+
+      assert %{name: "Renamed", enabled: false} = stored(row.id)
+    end
+
+    test "a Test while the form is open doesn't make it stale", %{conn: conn} do
+      row = fake!()
+      lv = mount(conn)
+      lv |> element("#backup-destination-#{row.id} [data-role=edit]") |> render_click()
+      lv |> element("#backup-destination-#{row.id} [data-role=test]") |> render_click()
+      render_async(lv, 2_000)
+
+      assert lv
+             |> form("#destination-form", destination: %{name: "After the test"})
+             |> render_submit() =~ "Destination saved."
+
+      assert %{name: "After the test"} = stored(row.id)
+    end
+  end
+
+  # #2952: the env destination's Test, as a stored Rclone one's, never
+  # showing the remote's credentials.
+  describe "Test on the env destination" do
+    setup %{tmp_dir: tmp} do
+      path = System.get_env("PATH")
+      on_exit(fn -> System.put_env("PATH", path) end)
+      %{tmp: tmp}
+    end
+
+    test "a passing test says so on the row and in a flash, and records nothing", %{
+      conn: conn,
+      tmp: tmp
+    } do
+      fake_rclone!(tmp, [])
+      put_backups(rclone_remote: "offsite:kiln/backups")
+      lv = mount(conn)
+
+      lv |> element("#backup-destination-env [data-role=test]") |> render_click()
+      html = render_async(lv, 2_000)
+
+      assert html =~ "offsite:kiln/backups: the test passed"
+
+      assert has_element?(
+               lv,
+               "#backup-destination-env [data-role=last-test]",
+               "Last test passed"
+             )
+
+      refute has_element?(lv, "#backup-destination-env [data-role=test][disabled]")
+      assert events(:backup_destination_tested) == []
+    end
+
+    test "a failing test shows the error, without the remote's credentials", %{
+      conn: conn,
+      tmp: tmp
+    } do
+      fake_rclone!(tmp, fail?: true)
+
+      put_backups(
+        rclone_remote: ":s3,access_key_id=AKIAENVFORM,secret_access_key=hunter2envform:bucket"
+      )
+
+      lv = mount(conn)
+      lv |> element("#backup-destination-env [data-role=test]") |> render_click()
+      html = render_async(lv, 2_000)
+
+      assert html =~ "the test failed"
+      assert has_element?(lv, "#backup-destination-env [data-role=last-test]", "copyto refused")
+      refute html =~ "AKIAENVFORM"
+      refute html =~ "hunter2envform"
     end
   end
 end

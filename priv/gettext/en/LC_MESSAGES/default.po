@@ -2704,6 +2704,7 @@ msgstr ""
 msgid "Access ends on %{date}"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Access key ID"
@@ -4613,6 +4614,11 @@ msgstr ""
 msgid "Awaiting admin approval"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "BACKUP_RCLONE_REMOTE is no longer set on this server."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/form_html.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -5059,6 +5065,7 @@ msgstr ""
 msgid "Browsers are not told to insist on HTTPS (HSTS)."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Bucket"
@@ -9456,6 +9463,7 @@ msgstr ""
 msgid "End this temporary tier now?"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
@@ -10190,6 +10198,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Failed"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Failed at once: the destination said no retry fixes this."
 msgstr ""
 
 #: lib/kiln_cms_web/security_log.ex
@@ -16967,6 +16980,7 @@ msgstr ""
 msgid "Paste the secret"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Path"
@@ -16986,6 +17000,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Path alias pattern (optional)"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Path style"
 msgstr ""
 
 #: lib/kiln_cms_web/live/redirect_live.ex
@@ -17446,6 +17465,7 @@ msgstr ""
 msgid "Preferred languages"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Prefix"
@@ -18294,6 +18314,7 @@ msgstr ""
 msgid "Regeneration queued — renames apply in the background."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Region"
@@ -18535,6 +18556,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reloaded the latest version."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remote name"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
@@ -19033,6 +19059,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Required disclaimer"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Required for a private host unless <bucket>.<host> is listed in BACKUP_S3_PRIVATE_HOSTS."
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
@@ -20326,6 +20357,7 @@ msgstr ""
 msgid "Second value"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
 msgid "Secret access key"
@@ -22962,6 +22994,11 @@ msgstr ""
 msgid "That destination no longer exists."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "That destination was changed meanwhile. Nothing was saved; try again."
+msgstr ""
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "That didn't work — try again."
@@ -24656,6 +24693,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "This deployment runs one locale."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "This destination was changed since you opened it, so nothing was saved. Cancel, then edit it again to see the change."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -26393,6 +26435,11 @@ msgstr ""
 msgid "Uploads get responsive variants, alt text and tags."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Uploads resume after an interruption."
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Use"
@@ -27417,6 +27464,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "Why this was blocked"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Why?"
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex

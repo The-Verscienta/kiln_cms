@@ -71,6 +71,7 @@ defmodule KilnCMS.Backups do
     Lock,
     Manifest,
     PgUrl,
+    Redact,
     Refused,
     Run,
     Schedule,
@@ -279,6 +280,82 @@ defmodule KilnCMS.Backups do
 
   defp found({:ok, nil}), do: {:error, :not_found}
   defp found(other), do: other
+
+  @doc """
+  Tests the env destination, `BACKUP_RCLONE_REMOTE` (#2952), behind the
+  **Test** button on its read-only row: the same check as a stored Rclone
+  destination's (`test/1`: write a probe file, read it back, remove it),
+  bounded and scrubbed the same way.
+
+    1. Only someone who may add a destination may test it
+       (`can_create_backup_destination?/2`: a platform admin); anyone else
+       is refused with `Ash.Error.Forbidden` before any file or network I/O.
+       Not the read's helper: a refused read is an empty one, so it always
+       answers yes.
+    2. The remote is read from the environment now, its connection-string
+       credentials split out as secrets, so `Destination.call/4` scrubs them
+       from the error (`Destination.resolve/1`). The remote itself is never
+       returned, only its redacted label.
+    3. Nothing is recorded: the env destination has no row. Call it outside
+       a transaction.
+
+  Returns `{:ok, %{ok: boolean, error: text | nil, node: text, label: text,
+  at: DateTime}}`, or `{:error, :not_set}` when `BACKUP_RCLONE_REMOTE` is
+  unset.
+  """
+  @spec test_env_destination(keyword()) ::
+          {:ok,
+           %{
+             ok: boolean(),
+             error: String.t() | nil,
+             node: String.t(),
+             label: String.t(),
+             at: DateTime.t()
+           }}
+          | {:error, :not_set | Ash.Error.Forbidden.t()}
+  def test_env_destination(opts) do
+    actor = Keyword.fetch!(opts, :actor)
+    timeout = Keyword.get(opts, :timeout, @destination_test_timeout)
+
+    with :ok <- may_test_env(actor),
+         %{} = entry <- Destination.env_destination() || {:error, :not_set} do
+      outcome =
+        case Destination.resolve(entry) do
+          {:ok, config} -> Destination.call(config, :test, [], timeout: timeout)
+          {:error, :removed} -> {:error, :not_set}
+          {:error, _reason} = error -> error
+        end
+
+      env_test_result(entry, outcome)
+    end
+  end
+
+  defp may_test_env(actor) do
+    if can_create_backup_destination?(actor, %{}),
+      do: :ok,
+      else: {:error, Ash.Error.Forbidden.exception([])}
+  end
+
+  # The remote changed between reading the entry and resolving it.
+  defp env_test_result(_entry, {:error, :not_set}), do: {:error, :not_set}
+
+  defp env_test_result(entry, outcome) do
+    {ok?, error} =
+      case outcome do
+        :ok -> {true, nil}
+        {:ok, _value} -> {true, nil}
+        {:error, reason} -> {false, reason |> Destination.format_reason() |> Redact.text([], 500)}
+      end
+
+    {:ok,
+     %{
+       ok: ok?,
+       error: error,
+       node: to_string(node()),
+       label: entry["label"],
+       at: DateTime.utc_now()
+     }}
+  end
 
   defp run_destination_test(destination, timeout) do
     node = to_string(node())

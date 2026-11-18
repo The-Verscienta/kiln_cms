@@ -1686,7 +1686,8 @@ or up to three minutes for a step of the canceled backup to stop
 all that time. A platform admin can cancel it (#2816).
 
 1. Open **Backups** (`/editor/backups`) as a platform admin. The in-flight
-   strip shows the backup's stamp and what the resume waits for:
+   strip shows the backup's stamp and what the resume waits for, with a
+   **Why?** link to this section (#3030):
 
    | Strip label | The resume is waiting for |
    |---|---|
@@ -3536,8 +3537,11 @@ and what the kind of destination needs:
    The page is headed **Backup destinations**. When `BACKUP_RCLONE_REMOTE`
    is set, it is listed first, with its remote (credentials masked) and the
    badge "From BACKUP_RCLONE_REMOTE — change it in the server's
-   environment". It can't be edited, tested or removed here, and what you
-   add is sent to as well as it, never instead of it. With no destination at
+   environment". It can't be edited or removed here, and what you add is
+   sent to as well as it, never instead of it. Its **Test** (#2952) runs the
+   same check as a stored Rclone remote's (step 5); the result shows on its
+   row until you leave the page, and is not in the security log, since
+   nothing is stored for it. Neither shows the remote's credentials. With no destination at
    all, the list reads "No off-site destination: backups stay on this server
    only."
 2. Click **Add a destination**. Under **What kind of destination?** pick
@@ -3557,9 +3561,9 @@ and what the kind of destination needs:
    | **Enabled** | Ticked, backups are sent to it; unticked, it is kept but skipped. |
    | **Delete its old backups (retention)** | Ticked by default: prune it after each backup reaches it ([Retention on a destination](#retention-on-a-destination)). |
 
-   A plugin's kind shows its own fields. A secret field is a password box
-   that is never filled in again; on Edit, leaving it blank keeps the stored
-   value.
+   A plugin's kind shows its own fields, each labelled by its name. A
+   secret field is a password box that is never filled in again; on Edit,
+   leaving it blank keeps the stored value.
 4. Click **Save destination**. The button reads **Checking…** while the
    destination is validated: a directory against the rules
    [below](#let-backups-be-written-to-a-directory-on-this-server), a remote
@@ -3584,9 +3588,19 @@ The arrows on each row (**Move NAS up**, **Move NAS down**) set the order
 the stored destinations are sent to, always after `BACKUP_RCLONE_REMOTE`.
 **Disable** keeps a destination without sending to it. At most eight can be
 enabled at once, because the backup holds the cluster's backup lock while
-it sends to each in turn. **Delete** asks "Delete the destination NAS?
+it sends to each in turn; two admins enabling the eighth at the same moment
+get one save and one "at most 8 destinations can be enabled" (#2952). **Delete** asks "Delete the destination NAS?
 Backups stop being sent to it; the files already there stay, and are no
 longer pruned."
+
+**A form opened before someone else's change saves nothing.** When the
+destination was renamed, enabled, disabled or otherwise saved after you
+clicked **Edit** (by another admin, or in another tab), **Save destination**
+keeps the form open with "This destination was changed since you opened
+it, so nothing was saved. Cancel, then edit it again to see the change."
+(#2952). A **Test** doesn't count as a change. **Enable**, **Disable** or an
+arrow clicked on a row that changed in the same instant says "That
+destination was changed meanwhile. Nothing was saved; try again."
 
 **Where a destination writes can't be changed.** On **Edit**, the location
 fields (a directory's **Path**; a remote's **Remote name** and **Path**; an
@@ -3685,10 +3699,11 @@ they stopped ([Resumable uploads](#resumable-uploads)).
 1. Open **Backups** (`/editor/backups`), click the **Destinations** tab, then
    **Add a destination**.
 2. Under **What kind of destination?** pick **S3-compatible storage**. The
-   form shows the fields below, and under them the hint "Add a lifecycle rule
-   to the bucket that aborts incomplete multipart uploads after a few days:
-   Kiln aborts the uploads it recorded, but not one a crash left before it
-   could record it."
+   form shows the fields below, and under them "Uploads resume after an
+   interruption." (#3084) and the hint "Add a lifecycle rule to the bucket
+   that aborts incomplete multipart uploads after a few days: Kiln aborts
+   the uploads it recorded, but not one a crash left before it could record
+   it."
 3. Fill in the form. The values for each provider are in
    [Settings for each provider](#settings-for-each-provider).
 
@@ -3699,8 +3714,8 @@ they stopped ([Resumable uploads](#resumable-uploads)).
    | **Region** | The bucket's region, lowercase letters, digits and `-`: `us-east-1`, `auto` for R2. |
    | **Bucket** | The bucket's name, 3 to 63 lowercase letters, digits, dots and hyphens. |
    | **Prefix** | Optional. A folder in the bucket to keep the backups under, for example `kiln/site`. Slashes at either end are dropped; no `.` or `..` segment. |
-   | **Path style** | Ticked, the bucket goes in the URL's path (`https://host/bucket/…`) rather than its host name (`https://bucket.host/…`). Tick it for MinIO and Garage. A bucket name with a dot, or an endpoint that is an IP address, is always addressed this way. |
-   | **Access key** | The access key id. A password box: stored encrypted and never shown again. |
+   | **Path style** | Ticked, the bucket goes in the URL's path (`https://host/bucket/…`) rather than its host name (`https://bucket.host/…`). Tick it for MinIO and Garage. A bucket name with a dot, or an endpoint that is an IP address, is always addressed this way. Under it: "Required for a private host unless <bucket>.<host> is listed in BACKUP_S3_PRIVATE_HOSTS." Unticked, Kiln connects to `<bucket>.<host>`, and that name must be listed too ([Reach a store on your own network](#reach-a-store-on-your-own-network)). |
+   | **Access key ID** | The access key's id. A password box: stored encrypted and never shown again. |
    | **Secret access key** | The secret. The same: stored encrypted and never shown again. |
    | **Enabled**, **Delete its old backups (retention)** | As for every destination ([above](#send-backups-to-several-destinations)). |
 
@@ -4176,6 +4191,7 @@ When saving (the form shows the message under the field, or above the form):
 | "where a destination writes can't be changed; add a new destination instead" | A change to the location sent from outside the form. |
 | "the stored credentials can't be decrypted (was SECRET_KEY_BASE changed?); enter them again" | Enter every secret field again ([above](#keep-destination-credentials-outside-kiln)). |
 | "the other backup destinations couldn't be read; try again" | The checks for the cap and overlaps couldn't read the list. Nothing was saved. |
+| "This destination was changed since you opened it, so nothing was saved. …" | Someone saved it after you clicked **Edit** ([above](#send-backups-to-several-destinations)). Cancel, edit it again, and redo your change. |
 | "Only a platform admin can change backup destinations." | Your account is no longer a platform admin. |
 
 On a backup's run, as a destination's error (the chip's tooltip, and the
@@ -4185,7 +4201,7 @@ On a backup's run, as a destination's error (the chip's tooltip, and the
 |---|---|
 | "FAILED for 2 files: kiln-db-20261115-031700.dump (…), …" | Those files' copies still failed on the step's last attempt, or one of them failed permanently on an earlier one. In the brackets is each one's reason: rclone's output, the adapter's error, or one of the reasons below. |
 | "REFUSED for 1 file: kiln-media-20261115-031700.part02.tar.gz (changed on disk after this backup verified it (…))" | The file changed after the backup verified it, and the whole backup failed ([When an off-site copy is refused](#when-an-off-site-copy-is-refused)). |
-| (in the brackets) the adapter's own sentence, on the first attempt | The adapter said no retry fixes it (the bucket doesn't exist, the credentials are refused for good). The destination failed at once, without waiting for the backup's other attempts, and the backup went on to the next destination ([Resumable uploads](#resumable-uploads)). Fix what it names; the next backup tries it again. |
+| (in the brackets) the adapter's own sentence, on the first attempt | The adapter said no retry fixes it (the bucket doesn't exist, the credentials are refused for good). The chip's tooltip ends "Failed at once: the destination said no retry fixes this." (#3084). The destination failed at once, without waiting for the backup's other attempts, and the backup went on to the next destination ([Resumable uploads](#resumable-uploads)). Fix what it names; the next backup tries it again. |
 | (in the brackets) "… timed out after …" | A call ran past what was left of the step's run time, or past `call_timeout` ([below](#how-long-a-destination-may-take)). The rest of that destination's files wait for the next attempt. |
 | (in the brackets) "Local destinations are off: BACKUP_LOCAL_DESTINATION_ROOTS is not set", "… does not exist on this server" | The node that ran the backup has no roots, or not this directory ([above](#let-backups-be-written-to-a-directory-on-this-server)). |
 | "removed or disabled during this backup" | The destination was deleted or disabled after the backup started. |

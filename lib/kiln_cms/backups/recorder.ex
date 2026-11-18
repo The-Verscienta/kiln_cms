@@ -59,7 +59,8 @@ defmodule KilnCMS.Backups.Recorder do
           optional(:at) => DateTime.t() | nil,
           optional(:files_ok) => non_neg_integer(),
           optional(:files_total) => non_neg_integer(),
-          optional(:pruned) => non_neg_integer()
+          optional(:pruned) => non_neg_integer(),
+          optional(:permanent) => boolean() | nil
         }
 
   @type offsite_outcome :: :none | :complete | :partial | :failed | :unknown
@@ -75,7 +76,8 @@ defmodule KilnCMS.Backups.Recorder do
     :at,
     :files_ok,
     :files_total,
-    :pruned
+    :pruned,
+    :permanent
   ]
   @destination_statuses RunDestination.statuses()
 
@@ -516,7 +518,7 @@ defmodule KilnCMS.Backups.Recorder do
   @doc """
   Upsert the Run-level entry for the off-site destination `key` (#2220):
   `attrs` (any of `kind`, `label`, `status`, `error`, `at`, `files_ok`,
-  `files_total`, `pruned`) are merged into the entry with that key, or a new
+  `files_total`, `pruned`, `permanent`) are merged into the entry with that key, or a new
   entry is appended (status `pending` unless given). A status given without
   `at` is stamped now. `error` and `label` are redacted and capped here, and
   again when written.

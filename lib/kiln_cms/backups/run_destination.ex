@@ -24,7 +24,10 @@ defmodule KilnCMS.Backups.RunDestination do
   `offsite_outcome/1` never counts such a run as complete.
 
   `files_ok` and `files_total` count the files sent, `pruned` the units
-  retention deleted on the destination. `error` and `label` are redacted and
+  retention deleted on the destination. `permanent` is true on a `failed`
+  entry the adapter failed at once, with an error it says no retry fixes
+  (`KilnCMS.Backups.Destination.permanent?/1`, #2223), so History can say
+  so (#3084); `nil` on an entry recorded before it existed. `error` and `label` are redacted and
   capped by `KilnCMS.Backups.Run.Changes.Normalize`, not by constraints here: a
   constraint would refuse the whole Run write while it is cast, before any
   change runs (as `KilnCMS.Backups.LogEntry` explains).
@@ -33,18 +36,30 @@ defmodule KilnCMS.Backups.RunDestination do
 
   @statuses [:pending, :ok, :failed, :skipped]
   @unreadable "unreadable"
+  @fields [
+    :key,
+    :kind,
+    :label,
+    :status,
+    :error,
+    :at,
+    :files_ok,
+    :files_total,
+    :pruned,
+    :permanent
+  ]
 
   actions do
     defaults [:read, :destroy]
 
     create :create do
       primary? true
-      accept [:key, :kind, :label, :status, :error, :at, :files_ok, :files_total, :pruned]
+      accept @fields
     end
 
     update :update do
       primary? true
-      accept [:key, :kind, :label, :status, :error, :at, :files_ok, :files_total, :pruned]
+      accept @fields
     end
   end
 
@@ -65,6 +80,8 @@ defmodule KilnCMS.Backups.RunDestination do
     end
 
     attribute :error, :string, public?: true
+
+    attribute :permanent, :boolean, public?: true
 
     attribute :at, :utc_datetime_usec, public?: true
 

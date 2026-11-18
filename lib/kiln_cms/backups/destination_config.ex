@@ -46,7 +46,16 @@ defmodule KilnCMS.Backups.DestinationConfig do
   ## At most eight enabled
 
   The step chain holds the cluster's backup lock through every destination,
-  one after another (decision E8).
+  one after another (decision E8). A save that enables one counts the
+  others under a transaction-scoped advisory lock (`Changes.EnabledCap`), so
+  two at once can't both take the last place (#2952).
+
+  ## A stale save is refused
+
+  `:update` writes only while the row's `updated_at` is the one the caller
+  read (`Changes.UnchangedSinceRead`, #2952): an edit form opened before
+  another save fails with `Ash.Error.Changes.StaleRecord`. A Test's result
+  doesn't move `updated_at`.
   """
   use Ash.Resource,
     domain: KilnCMS.Backups,
@@ -85,6 +94,7 @@ defmodule KilnCMS.Backups.DestinationConfig do
       change Changes.Normalize
       change Changes.StoreSecrets
       validate Validations.AdapterSettings
+      change Changes.EnabledCap
 
       change {KilnCMS.Security.Changes.Record,
               type: :backup_destination_created,
@@ -102,9 +112,13 @@ defmodule KilnCMS.Backups.DestinationConfig do
 
       argument :secrets, :map, sensitive?: true, default: %{}
 
+      # A stale record (a form opened before someone else's save) is
+      # refused, never written over (#2952).
+      change Changes.UnchangedSinceRead
       change Changes.Normalize
       change Changes.StoreSecrets
       validate Validations.AdapterSettings
+      change Changes.EnabledCap
 
       change {KilnCMS.Security.Changes.Record,
               type: :backup_destination_changed,
@@ -141,6 +155,7 @@ defmodule KilnCMS.Backups.DestinationConfig do
       argument :node, :string
 
       change Changes.SetTestResult
+      change Changes.KeepUpdatedAt
 
       change {KilnCMS.Security.Changes.Record,
               type: :backup_destination_tested,

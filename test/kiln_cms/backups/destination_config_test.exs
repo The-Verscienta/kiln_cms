@@ -201,8 +201,11 @@ defmodule KilnCMS.Backups.DestinationConfigTest do
       d = destination!(%{}, admin)
       before = stored_ciphertext(d.id)
 
-      for blank <- [%{}, %{"token" => ""}, %{"token" => "   "}, %{"token" => nil}] do
-        assert {:ok, _} =
+      # Each save from the row the last one returned: `:update` refuses a
+      # stale record (#2952).
+      Enum.reduce([%{}, %{"token" => ""}, %{"token" => "   "}, %{"token" => nil}], d, fn blank,
+                                                                                         d ->
+        assert {:ok, d} =
                  Backups.update_backup_destination(
                    d,
                    %{name: "Renamed #{map_size(blank)}#{inspect(blank)}", secrets: blank},
@@ -210,7 +213,8 @@ defmodule KilnCMS.Backups.DestinationConfigTest do
                  )
 
         assert stored_ciphertext(d.id) == before
-      end
+        d
+      end)
 
       assert {:ok, %Config{secrets: %{"token" => @secret}}} = resolve(d)
     end
@@ -614,6 +618,145 @@ defmodule KilnCMS.Backups.DestinationConfigTest do
   describe "discovery" do
     test "the vault walk finds the column" do
       assert {DestinationConfig, :secrets_encrypted} in Vault.encrypted_attributes()
+    end
+  end
+
+  # #2952: a save from a stale record is refused; a Test is not an edit.
+  describe "a stale save" do
+    test "is refused, and the other save stands" do
+      admin = platform_admin()
+      opened = destination!(%{name: "Offsite"}, admin)
+
+      {:ok, _} = Backups.update_backup_destination(opened, %{prune: false}, actor: admin)
+
+      assert {:error, %Ash.Error.Invalid{errors: errors}} =
+               Backups.update_backup_destination(opened, %{name: "Renamed"}, actor: admin)
+
+      assert Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1))
+
+      assert %{name: "Offsite", prune: false} =
+               Backups.get_backup_destination!(opened.id, actor: admin)
+
+      assert [%{metadata: %{"changed" => "prune"}}] = events(:backup_destination_changed)
+    end
+
+    test "a Test leaves updated_at, so a record read before it still saves" do
+      admin = platform_admin()
+      opened = destination!(%{}, admin)
+
+      assert {:ok, tested} = Backups.test_destination(opened.id, actor: admin)
+      assert tested.updated_at == opened.updated_at
+      assert %DateTime{} = tested.last_tested_at
+
+      assert {:ok, %{name: "After the test"}} =
+               Backups.update_backup_destination(opened, %{name: "After the test"}, actor: admin)
+    end
+  end
+
+  # #2952: the cap is counted again inside the transaction, under a lock.
+  # Without it both saves pass the validation's count, which runs before the
+  # transaction, and nine end up enabled.
+  describe "the enabled cap under concurrency" do
+    setup do
+      admin = platform_admin()
+      for _ <- 1..(DestinationConfig.max_enabled() - 1), do: destination!(%{}, admin)
+      a = destination!(%{name: "A", enabled: false}, admin)
+      b = destination!(%{name: "B", enabled: false}, admin)
+      %{admin: admin, a: a, b: b}
+    end
+
+    test "two enables at once: one is saved, one refused", %{admin: admin, a: a, b: b} do
+      results =
+        [a, b]
+        |> Enum.map(fn row ->
+          Task.async(fn ->
+            Backups.update_backup_destination(row, %{enabled: true}, actor: admin)
+          end)
+        end)
+        |> Task.await_many(10_000)
+
+      assert [{:ok, %{enabled: true}}] = Enum.filter(results, &match?({:ok, _}, &1))
+      assert [{:error, error}] = Enum.filter(results, &match?({:error, _}, &1))
+      assert messages(error) =~ "at most 8"
+      assert length(Backups.list_enabled_backup_destinations!(actor: admin)) == 8
+    end
+
+    test "two creates at once: one is saved, one refused", %{admin: admin} do
+      results =
+        for name <- ["C", "D"] do
+          Task.async(fn ->
+            Backups.create_backup_destination(
+              %{
+                name: name,
+                kind: "fake",
+                settings: %{"mode" => "ok"},
+                secrets: %{"token" => @secret}
+              },
+              actor: admin
+            )
+          end)
+        end
+        |> Task.await_many(10_000)
+
+      assert [{:ok, _}] = Enum.filter(results, &match?({:ok, _}, &1))
+      assert [{:error, error}] = Enum.filter(results, &match?({:error, _}, &1))
+      assert messages(error) =~ "at most 8"
+      assert length(Backups.list_enabled_backup_destinations!(actor: admin)) == 8
+    end
+  end
+
+  # #2952: the env destination's Test, behind its read-only row's button.
+  describe "test_env_destination/1" do
+    @tag :tmp_dir
+    test "runs the Rclone check on BACKUP_RCLONE_REMOTE and records nothing", %{tmp_dir: tmp} do
+      path = System.get_env("PATH")
+      on_exit(fn -> System.put_env("PATH", path) end)
+      store = fake_rclone!(tmp)
+      backups_env(:rclone_remote, "offsite:kiln/backups")
+
+      assert {:ok, %{ok: true, error: nil, label: "offsite:kiln/backups"} = result} =
+               Backups.test_env_destination(actor: platform_admin())
+
+      assert result.node == to_string(node())
+      assert %DateTime{} = result.at
+      # The probe was written, read back and removed.
+      assert File.ls!(store) == []
+      assert events(:backup_destination_tested) == []
+    end
+
+    @tag :tmp_dir
+    test "a failure is scrubbed of a connection-string remote's credentials", %{tmp_dir: tmp} do
+      path = System.get_env("PATH")
+      on_exit(fn -> System.put_env("PATH", path) end)
+      fake_rclone!(tmp, fail?: true)
+
+      backups_env(
+        :rclone_remote,
+        ":s3,access_key_id=AKIAENVTEST,secret_access_key=hunter2envtest:bucket"
+      )
+
+      assert {:ok, %{ok: false, error: error, label: label}} =
+               Backups.test_env_destination(actor: platform_admin())
+
+      assert error =~ "copyto refused"
+
+      for secret <- ["AKIAENVTEST", "hunter2envtest"] do
+        refute error =~ secret
+        refute label =~ secret
+      end
+    end
+
+    test "anyone but a platform admin is refused before anything runs" do
+      backups_env(:rclone_remote, "offsite:kiln/backups")
+
+      for actor <- [user(:editor), user(:viewer), site_admin(), nil] do
+        assert {:error, %Ash.Error.Forbidden{}} = Backups.test_env_destination(actor: actor)
+      end
+    end
+
+    test "with BACKUP_RCLONE_REMOTE unset it is :not_set" do
+      backups_env(:rclone_remote, nil)
+      assert Backups.test_env_destination(actor: platform_admin()) == {:error, :not_set}
     end
   end
 end

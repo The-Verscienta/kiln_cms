@@ -474,10 +474,11 @@ defmodule KilnCMS.Backups.FanoutTest do
       assert %{attempt: 1, state: "completed"} = offsite_job(1)
 
       assert run.offsite_status == :partial
-      assert %{status: :failed, error: error} = entry(run, "dest:" <> b.id)
+      # History's chip says it failed at once (#3084).
+      assert %{status: :failed, error: error, permanent: true} = entry(run, "dest:" <> b.id)
       assert error =~ "the bucket is gone"
       refute error =~ @secret
-      assert %{status: :ok} = entry(run, "dest:" <> c.id)
+      assert %{status: :ok, permanent: nil} = entry(run, "dest:" <> c.id)
     end
 
     test "a file the destination already holds is recorded as sent, not a crash (#2223)" do
@@ -508,7 +509,7 @@ defmodule KilnCMS.Backups.FanoutTest do
       run = run!()
 
       assert run.offsite_status == :partial
-      assert %{status: :failed, error: error} = entry(run, "dest:" <> b.id)
+      assert %{status: :failed, error: error, permanent: false} = entry(run, "dest:" <> b.id)
       assert error =~ "returned an unexpected value"
       assert %{status: :ok} = entry(run, "dest:" <> c.id)
     end

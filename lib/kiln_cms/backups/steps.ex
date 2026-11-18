@@ -2110,6 +2110,13 @@ defmodule KilnCMS.Backups.Steps do
 
   defp permanent_failure?({_name, reason}), do: Destination.permanent?(reason)
 
+  # Whether the destination failed at once on an error its adapter says no
+  # retry fixes, as its Run entry records it for History (#3084).
+  defp permanent_reason?({:offsite, %{failed: failed}}),
+    do: Enum.any?(failed, &permanent_failure?/1)
+
+  defp permanent_reason?(reason), do: Destination.permanent?(reason)
+
   ## A refused file, kept (#2484)
 
   # A file refused because its content changed (`{:changed, _}`, a sidecar
@@ -2632,11 +2639,12 @@ defmodule KilnCMS.Backups.Steps do
   defp destination_failed(dest, reason, state, rec, counts \\ %{}) do
     key = dest.entry["key"]
     error = destination_error(reason, dest.resumable?)
+    failed = %{status: :failed, error: error, permanent: permanent_reason?(reason)}
 
     rec =
       rec
       |> log_destination_failure(dest, reason, error)
-      |> Recorder.put_run_destination(key, Map.merge(counts, %{status: :failed, error: error}))
+      |> Recorder.put_run_destination(key, Map.merge(counts, failed))
 
     if dest.index >= dest.total and not reached_any?(rec, dest) do
       {:fatal, all_failed(dest, reason, rec, state), state, rec}

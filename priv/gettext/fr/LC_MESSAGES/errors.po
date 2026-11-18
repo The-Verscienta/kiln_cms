@@ -108,7 +108,7 @@ msgstr "les endpoints Slack ne peuvent recevoir que des événements de sécurit
 msgid "are still associated with this entry"
 msgstr "sont toujours associés à cette entrée"
 
-#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#: lib/kiln_cms/backups/destination_config/changes/enabled_cap.ex
 #, elixir-autogen, elixir-format
 msgid "at most %{max} destinations can be enabled"
 msgstr "au plus %{max} destinations peuvent être activées"
@@ -246,6 +246,7 @@ msgid_plural "should have at most %{count} item(s)"
 msgstr[0] "doit avoir au plus %{count} élément"
 msgstr[1] "doit avoir au plus %{count} éléments"
 
+#: lib/kiln_cms/backups/destination_config/changes/enabled_cap.ex
 #: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
 #, elixir-autogen, elixir-format
 msgid "the other backup destinations couldn't be read; try again"

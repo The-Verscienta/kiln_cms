@@ -28,14 +28,18 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   `BACKUP_RCLONE_REMOTE`, when it is set, is listed first and read-only,
   with where it comes from: it is changed in the server's environment, never
   here, and the stored destinations add to it rather than replace it
-  (decision E2).
+  (decision E2). Its **Test** (#2952) runs the same check as a stored Rclone
+  destination's (`Backups.test_env_destination/1`); the result, scrubbed of
+  the remote's credentials, is shown on the row for this page only, since
+  the env destination has no row to record it on.
 
   ## The form
 
-  Generated from the adapter's `fields/0`, labelled by each field's name,
-  humanized. A `:secret` field is a password input that is never filled in:
-  the stored value never leaves the vault column, so on edit a blank one
-  keeps it. Its input is `phx-update="ignore"`, so what the admin typed
+  Generated from the adapter's `fields/0`. Kiln's own adapters' fields
+  (Local, Rclone, S3) have translated labels (#2952, #3087); a plugin's are
+  its field names, humanized. A `:secret` field is a password input that is
+  never filled in: the stored value never leaves the vault column, so on
+  edit a blank one keeps it. Its input is `phx-update="ignore"`, so what the admin typed
   survives a re-render without the server ever sending it back, a failed
   save included. Where a destination writes (`Destination.location_fields/1`)
   is fixed once it is stored, so those fields are read-only on edit and the
@@ -46,6 +50,12 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   Validation runs on Save, not on every keystroke: it calls the adapter's
   `validate/1` (an `rclone listremotes` for a stored Rclone remote), which is
   no work to do per key press.
+
+  An edit form keeps the destination as it was when it opened (`:opened`).
+  A Save whose destination was changed since (renamed, enabled, disabled,
+  retention, by another admin or another tab) saves nothing and says so
+  (#2952); the `:update` action refuses a stale record as well, which covers
+  a change landing between this page's read and its write.
 
   ## Test
 
@@ -60,7 +70,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Destination, DestinationConfig}
-  alias KilnCMS.Backups.Destination.{Local, S3}
+  alias KilnCMS.Backups.Destination.{Local, Rclone, S3}
   alias KilnCMS.Backups.DestinationConfig.Fields
 
   @impl true
@@ -70,6 +80,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
        socket
        |> assign(:page_title, gettext("Backup destinations"))
        |> assign(:testing, MapSet.new())
+       |> assign(:env_test, nil)
        |> close_form()
        |> load()}
     else
@@ -86,7 +97,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
       else: deny(socket)
   end
 
-  @events ~w(new pick edit cancel validate save toggle delete move test)
+  @events ~w(new pick edit cancel validate save toggle delete move test test_env)
 
   # Every event asks again, whatever it is: see the moduledoc. An event this
   # page doesn't have falls to the catch-all every Kiln LiveView gets
@@ -101,6 +112,18 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   # A Test's result, applied only for someone who is still a platform admin:
   # a demoted admin's page is sent away, not told how the test went.
   @impl true
+  def handle_async({:test, :env}, result, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      {:noreply,
+       socket
+       |> update(:testing, &MapSet.delete(&1, :env))
+       |> put_env_test(result)
+       |> load()}
+    else
+      deny(socket)
+    end
+  end
+
   def handle_async({:test, id}, result, socket) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
       {:noreply,
@@ -143,7 +166,10 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
 
   defp event("edit", %{"id" => id}, socket) when is_binary(id) do
     with_destination(socket, id, fn row ->
-      {:noreply, open_form(socket, row.id, row.kind, fields_of(row.kind), edit_params(row))}
+      {:noreply,
+       socket
+       |> open_form(row.id, row.kind, fields_of(row.kind), edit_params(row))
+       |> assign(:opened, row)}
     end)
   end
 
@@ -182,24 +208,9 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   defp event("save", %{"destination" => params}, %{assigns: %{editing: id}} = socket)
        when is_map(params) and is_binary(id) do
     with_destination(socket, id, fn row ->
-      %{fields: fields} = socket.assigns
-      locked = Destination.location_fields(row.kind)
-
-      attrs =
-        %{
-          name: text(params["name"]),
-          enabled: params["enabled"] == "true",
-          prune: params["prune"] == "true",
-          secrets: secret_params(params, fields)
-        }
-        |> put_settings(row, fields, settings_params(params, fields, locked))
-
-      socket
-      |> assign_params(params)
-      |> saved(
-        Backups.update_backup_destination(row, attrs, write_opts(socket)),
-        gettext("Destination saved.")
-      )
+      if changed_since_opened?(socket, row),
+        do: {:noreply, socket |> assign_params(params) |> assign_stale()},
+        else: save_edit(socket, row, params)
     end)
   end
 
@@ -252,8 +263,73 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
     end
   end
 
+  # The env destination's Test (#2952): single-flight, as a stored one's.
+  defp event("test_env", _params, socket) do
+    user = socket.assigns.current_user
+
+    cond do
+      MapSet.member?(socket.assigns.testing, :env) ->
+        {:noreply, socket}
+
+      is_nil(Destination.env_destination()) ->
+        {:noreply, socket |> put_flash(:error, env_gone_flash()) |> load()}
+
+      true ->
+        {:noreply,
+         socket
+         |> update(:testing, &MapSet.put(&1, :env))
+         |> start_async({:test, :env}, fn -> Backups.test_env_destination(actor: user) end)}
+    end
+  end
+
   # A mangled payload is a no-op (#764).
   defp event(_event, _params, socket), do: {:noreply, socket}
+
+  # The edit form's Save, of `row` as it is stored now. The form's own
+  # `locked` fields are never read: where a destination writes is the
+  # stored value.
+  defp save_edit(socket, row, params) do
+    %{fields: fields} = socket.assigns
+    locked = Destination.location_fields(row.kind)
+
+    attrs =
+      %{
+        name: text(params["name"]),
+        enabled: params["enabled"] == "true",
+        prune: params["prune"] == "true",
+        secrets: secret_params(params, fields)
+      }
+      |> put_settings(row, fields, settings_params(params, fields, locked))
+
+    socket
+    |> assign_params(params)
+    |> saved(
+      Backups.update_backup_destination(row, attrs, write_opts(socket)),
+      gettext("Destination saved.")
+    )
+  end
+
+  # Whether the destination was saved since the edit form opened (#2952):
+  # its `updated_at` is the version, which a Test doesn't move.
+  defp changed_since_opened?(%{assigns: %{opened: %DestinationConfig{} = opened}}, row),
+    do: DateTime.compare(opened.updated_at, row.updated_at) != :eq
+
+  defp changed_since_opened?(_socket, _row), do: false
+
+  defp assign_stale(socket) do
+    socket
+    |> assign(:field_errors, %{})
+    |> assign(:form_errors, [stale_message()])
+  end
+
+  defp stale_message,
+    do:
+      gettext(
+        "This destination was changed since you opened it, so nothing was saved. Cancel, then edit it again to see the change."
+      )
+
+  defp stale?(%Ash.Error.Invalid{errors: errors}),
+    do: Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1))
 
   # `test_destination/2` reads the row again as this admin, in the task, so a
   # refusal there happens before any file or network I/O.
@@ -298,6 +374,43 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   defp put_test_flash(socket, {:exit, _reason}),
     do: put_flash(socket, :error, gettext("The test didn't finish. Try again."))
 
+  # The env destination's Test result: on its row for this page, and in a
+  # flash. Never the remote's credentials: the label is redacted, and the
+  # error was scrubbed of them (`Backups.test_env_destination/1`).
+  defp put_env_test(socket, {:ok, {:ok, %{ok: true} = result}}) do
+    socket
+    |> assign(:env_test, result)
+    |> put_flash(
+      :info,
+      gettext("%{name}: the test passed (on %{node}).", name: result.label, node: result.node)
+    )
+  end
+
+  defp put_env_test(socket, {:ok, {:ok, %{} = result}}) do
+    socket
+    |> assign(:env_test, result)
+    |> put_flash(
+      :error,
+      gettext("%{name}: the test failed (on %{node}): %{error}",
+        name: result.label,
+        node: result.node,
+        error: result.error || "—"
+      )
+    )
+  end
+
+  defp put_env_test(socket, {:ok, {:error, :not_set}}),
+    do: socket |> assign(:env_test, nil) |> put_flash(:error, env_gone_flash())
+
+  defp put_env_test(socket, {:ok, {:error, error}}),
+    do: put_flash(socket, :error, write_error(error))
+
+  defp put_env_test(socket, {:exit, _reason}),
+    do: put_flash(socket, :error, gettext("The test didn't finish. Try again."))
+
+  defp env_gone_flash,
+    do: gettext("BACKUP_RCLONE_REMOTE is no longer set on this server.")
+
   # The destination `id` as it is stored now, read as this admin: `fun` gets
   # it, and one that is gone (deleted meanwhile, or never was) is a flash.
   defp with_destination(socket, id, fun) do
@@ -317,8 +430,11 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   defp saved(socket, {:ok, _row}, message),
     do: {:noreply, socket |> close_form() |> put_flash(:info, message) |> load()}
 
-  defp saved(socket, {:error, %Ash.Error.Invalid{} = error}, _message),
-    do: {:noreply, assign_errors(socket, error)}
+  defp saved(socket, {:error, %Ash.Error.Invalid{} = error}, _message) do
+    if stale?(error),
+      do: {:noreply, assign_stale(socket)},
+      else: {:noreply, assign_errors(socket, error)}
+  end
 
   defp saved(socket, {:error, error}, _message),
     do: {:noreply, put_flash(socket, :error, write_error(error))}
@@ -408,6 +524,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
     |> assign(:form_errors, [])
     |> assign(:params, %{})
     |> assign(:form, nil)
+    |> assign(:opened, nil)
   end
 
   defp close_form_of(%{assigns: %{editing: id}} = socket, id), do: close_form(socket)
@@ -519,6 +636,10 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
     socket
     |> assign(:destinations, rows)
     |> assign(:env, Destination.env_destination())
+    |> assign(
+      :can_test_env?,
+      Backups.can_create_backup_destination?(socket.assigns.current_user, %{})
+    )
     |> assign(:adapters, offered_adapters())
     |> assign(:local_available?, Local.available?())
   end
@@ -571,18 +692,74 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   defp write_error(%Ash.Error.Forbidden{}),
     do: gettext("Only a platform admin can change backup destinations.")
 
-  defp write_error(%Ash.Error.Invalid{errors: errors}) do
+  defp write_error(%Ash.Error.Invalid{errors: errors} = error) do
+    if stale?(error), do: stale_write_error(), else: invalid_write_error(errors)
+  end
+
+  defp write_error(_error), do: gettext("Couldn't change the backup destination.")
+
+  defp stale_write_error,
+    do: gettext("That destination was changed meanwhile. Nothing was saved; try again.")
+
+  defp invalid_write_error(errors) do
     case Enum.flat_map(errors, &form_errors/1) do
       [{_field, message, vars} | _] -> translate_error({message, vars})
       [] -> gettext("Couldn't change the backup destination.")
     end
   end
 
-  defp write_error(_error), do: gettext("Couldn't change the backup destination.")
-
   ## Display helpers
 
-  defp field_label(name), do: Phoenix.Naming.humanize(name)
+  # Kiln's own adapters' fields by a translated label (#2952), "Access key
+  # ID" included, which humanizing would cut to "Access key" (#3087). A
+  # plugin's field is its name, humanized, as the plugin declares it.
+  defp field_label(kind, name) do
+    case builtin_label(builtin_kind(kind), name) do
+      nil -> Phoenix.Naming.humanize(name)
+      label -> label
+    end
+  end
+
+  # `kind` when Kiln's own adapter answers it, else nil.
+  defp builtin_kind(kind) do
+    case Destination.adapter(kind) do
+      {:ok, module} when module in [Local, Rclone, S3] -> kind
+      _other -> nil
+    end
+  end
+
+  defp builtin_label("local", "path"), do: gettext("Path")
+  defp builtin_label("rclone", "remote_name"), do: gettext("Remote name")
+  defp builtin_label("rclone", "path"), do: gettext("Path")
+  defp builtin_label("s3", "endpoint"), do: gettext("Endpoint")
+  defp builtin_label("s3", "region"), do: gettext("Region")
+  defp builtin_label("s3", "bucket"), do: gettext("Bucket")
+  defp builtin_label("s3", "prefix"), do: gettext("Prefix")
+  defp builtin_label("s3", "path_style"), do: gettext("Path style")
+  defp builtin_label("s3", "access_key_id"), do: gettext("Access key ID")
+  defp builtin_label("s3", "secret_access_key"), do: gettext("Secret access key")
+  defp builtin_label(_kind, _name), do: nil
+
+  # The help under a checkbox: the field's own, and for S3's Path style when
+  # a private host needs it (#3087).
+  defp checkbox_hint(kind, field), do: path_style_hint(builtin_kind(kind), field)
+
+  defp path_style_hint("s3", %{name: "path_style"} = field) do
+    private =
+      gettext(
+        "Required for a private host unless <bucket>.<host> is listed in BACKUP_S3_PRIVATE_HOSTS."
+      )
+
+    if field.help, do: field.help <> " " <> private, else: private
+  end
+
+  defp path_style_hint(_kind, field), do: field.help
+
+  # Whether the kind's uploads resume where they stopped (#3084).
+  defp resumable?(kind) when is_binary(kind),
+    do: Destination.resumable?(%Kiln.BackupDestination.Config{kind: kind})
+
+  defp resumable?(_kind), do: false
 
   defp field_id(editing, name), do: "destination-#{form_key(editing)}-#{name}"
 
@@ -739,6 +916,42 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
                   "Every backup is sent here first, by in-app backups and cron alike. The app never prunes it."
                 )}
               </p>
+              <p :if={@env_test} data-role="last-test" class="text-xs">
+                <span :if={@env_test.ok} class="text-success-ink">
+                  {gettext("Last test passed %{at} on %{node}",
+                    at: stamp(@env_test.at),
+                    node: @env_test.node
+                  )}
+                </span>
+                <span :if={not @env_test.ok} class="text-error-ink">
+                  {gettext("Last test failed %{at} on %{node}: %{error}",
+                    at: stamp(@env_test.at),
+                    node: @env_test.node,
+                    error: @env_test.error || "—"
+                  )}
+                </span>
+              </p>
+              <div :if={@can_test_env?} class="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  phx-click="test_env"
+                  data-role="test"
+                  disabled={MapSet.member?(@testing, :env)}
+                  aria-busy={MapSet.member?(@testing, :env) && "true"}
+                  class="btn btn-sm btn-default"
+                >
+                  <.icon
+                    name="hero-arrow-path"
+                    class={[
+                      "mr-1 size-4",
+                      MapSet.member?(@testing, :env) && "animate-spin motion-reduce:animate-none"
+                    ]}
+                  />
+                  {if MapSet.member?(@testing, :env),
+                    do: gettext("Testing…"),
+                    else: gettext("Test")}
+                </button>
+              </div>
             </li>
 
             <.destination_row
@@ -951,7 +1164,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
                 id={field_id(@editing, field.name)}
                 value=""
                 autocomplete="new-password"
-                label={field_label(field.name)}
+                label={field_label(@kind, field.name)}
                 required={field.required? and @editing == :new}
                 hint={secret_hint(field, @editing)}
               />
@@ -967,16 +1180,24 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
               name={"destination[settings][#{field.name}]"}
               id={field_id(@editing, field.name)}
               value={setting_value(@params, field.name)}
-              label={field_label(field.name)}
+              label={field_label(@kind, field.name)}
               errors={Map.get(@field_errors, field.name, [])}
             />
+            <%!-- A checkbox shows no `hint`: its help is a line of its own. --%>
+            <p
+              :if={field.type == :boolean and checkbox_hint(@kind, field) != nil}
+              id={"#{field_id(@editing, field.name)}-hint"}
+              class="-mt-1 text-xs text-base-content/70"
+            >
+              {checkbox_hint(@kind, field)}
+            </p>
             <.input
               :if={field.type in [:string, :integer]}
               type={if field.type == :integer, do: "number", else: "text"}
               name={"destination[settings][#{field.name}]"}
               id={field_id(@editing, field.name)}
               value={setting_value(@params, field.name)}
-              label={field_label(field.name)}
+              label={field_label(@kind, field.name)}
               required={field.required?}
               readonly={field.name in @locked}
               data-locked={field.name in @locked && "true"}
@@ -1006,6 +1227,9 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
           {gettext(
             "Retention here deletes only backups this installation sent to this destination, by the same rules as on this server, and only on destinations that can list and delete."
           )}
+        </p>
+        <p :if={resumable?(@kind)} id="destination-resume-hint" class="text-xs text-base-content/70">
+          {gettext("Uploads resume after an interruption.")}
         </p>
         <p :if={@kind == "s3"} id="destination-s3-hint" class="text-xs text-base-content/70">
           {gettext(
