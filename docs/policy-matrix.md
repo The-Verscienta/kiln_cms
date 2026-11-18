@@ -305,7 +305,9 @@ the **system** AshOban scheduler, allowed via
 `bypass AshOban.Checks.AshObanInteraction`; no person is checked when they
 fire. Each writes only while the record still matches its trigger's condition
 (#2746), so a person who acts on the record as the job fires is not
-overwritten; see
+overwritten. A direct call, which the policy rows above admit, gets the same
+check: on a record that isn't due yet it fails with a `StaleRecord` and
+changes nothing; see
 [Content lifecycles](content-lifecycles.md#expiry-one-timestamp-three-outcomes).
 
 ⚙️ **Editors can publish, per site.** `SiteEditorialSettings.editors_can_publish`
@@ -437,6 +439,19 @@ everyone. The transform route additionally refuses out-of-bounds parameters
 Endpoint configuration is admin-only. The delivery pipeline reads endpoints and
 keeps their health counters as the **system actor** (see
 [The system actor](#the-system-actor)); it cannot create, edit or delete one.
+
+When an endpoint's first delivery in a row exhausts its retries, and again
+when it is auto-disabled, `KilnCMS.Webhooks.HealthNotice` tells the site's
+admins (a standing platform admin, or an active admin membership on the site,
+not erased). It reads the site as `Accounts.system/0` with
+`authorize_with: :error` and writes each admin a bell notice; nothing about it
+is a person's write. The email that goes with the notice is muted by
+`User.notify_on_webhook_failure` (default `true`), which sits in `User`'s
+field policy beside the other `notify_on_*` flags (read by the account holder
+or a platform admin) and is written through `:update_notification_prefs`.
+Unlike the security alert mute, a platform admin may change it on another
+account. **Your settings** offers the switch only to an account that
+administers a site.
 
 ## Mail settings — `Mail.Settings`
 

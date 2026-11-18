@@ -761,7 +761,10 @@ What can go wrong:
   (`api_key_rate_limited`) is recorded by the same rule. If the event cannot be
   recorded, the platform admins get the plain email this check sent before
   alerts existed, and the log says "API key reuse event for key … not
-  recorded (…); mailing the platform admins directly."
+  recorded (…); mailing the platform admins directly." That email, "A
+  drafts-only API key on (site) was used after it was rotated", names the
+  key's owner by display name, or as `account <id>` when they have none or
+  have been erased, never by email address.
 - **Staging.** `mix kiln.staging.scrub` deletes every row of
   `security_alert_dispatches` (`security_alert_dispatches_purged`), so a clone
   never mails production's admins about production's events.

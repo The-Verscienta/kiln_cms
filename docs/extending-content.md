@@ -485,8 +485,9 @@ shown.
 
 Fields offered: string, text, integer, float, boolean, date, datetime, url,
 select, reference, user, media, email, telephone, color, slug and time, if
-they hold one value. Groups, geolocation, JSON, date ranges, recurrence,
-computed fields and multi-valued fields are not offered. Private fields are
+they hold one value. Groups, flexible content, geolocation, JSON, ranges,
+key/value pairs, links, addresses, date ranges, recurrence, computed fields
+and multi-valued fields are not offered. Private fields are
 offered, as editors already see them in the content editor, except one a read
 grant hides from you.
 
@@ -551,8 +552,6 @@ finding.
 it (`mix kiln.plugins.doctor` fails otherwise). A stored field definition
 that already used one of these names as its `field_type` is now cast by the
 built-in type: values that do not pass its check are refused on the next save.
-
-**Not yet:** number options (step, prefix, suffix, slider).
 
 ### Range and key-value and link fields
 
@@ -626,8 +625,9 @@ one or more of: noopener, noreferrer, nofollow, sponsored, ugc, external*.
 
 An `:address` field holds one postal address as a single object, checked the
 same way in the editor, the API and imports, and served through GraphQL as the
-generic JSON value. Pick it in `/editor/fields` (an admin task). The editor
-shows a **Country** select (every ISO 3166-1 country, blank first), then
+generic JSON value. Pick **Address** as the field type in `/editor/fields`
+(an admin task). The editor shows a **Country** select (*Select a country*,
+then every ISO 3166-1 country), then
 **Address line 1**, **Address line 2**, **City or town**, **State, province or
 region** and **Postal code**.
 
@@ -670,8 +670,10 @@ and "ZIP code", a UK "County"), administrative-area lists, a schema.org
 
 **What can go wrong.** *needs a country* (a part is given without one);
 *country must be an ISO 3166-1 alpha-2 code (like GB or US)*; *postal code is
-not a valid United States postal code* (the country is named); *address line 1
-must be a single line*; *locality is too long (at most 100)*.
+not a valid United States postal code* (the country is named); *address line1
+must be a single line* (a part is named by its key); *locality is too long (at
+most 100)*; *may only have country, address_line1, address_line2, locality,
+administrative_area and postal_code* (an unknown key).
 
 ### Make a field hold a list of values
 
@@ -824,8 +826,10 @@ carries them, and "Load more" keeps them.
    operators (a range: "At least" and "At most") both count.
 4. Click a chip to remove its condition.
 5. To order by a field, open **Sort by** and pick an entry from the **Field**
-   group, such as *Field: Price (↑)* or *Field: Price (↓)*. Rows with no value
-   in that field come last in both directions.
+   group, such as *Field: Price (↑)* or *Field: Price (↓)*. A single-valued
+   reference or media field reads *Field: Mentor by current title (↑)* or
+   *Field: Photo by current filename (↑)*. Rows with no value in that field
+   come last in both directions.
 6. To keep the result, use **Save view**; opening the view restores the
    conditions and the sort.
 
@@ -857,11 +861,16 @@ select, email, telephone, color, slug, time, reference and media fields can be
 sorted by; the **Field** group lists just those. A reference or media field
 orders by its target's *current* title (a media item's current filename), as
 the API's `custom_sort` does, and a target you cannot read sorts with the
-empty ones. Its menu entry says "by current title" because the column shows the
-label saved with the record, which lags a rename until the record is saved
-again. Fields the Columns picker does not offer
-(groups, geolocation, JSON, date ranges, recurrence, computed and multi-valued
-fields) cannot be filtered either. A value typed into a condition on an email,
+empty ones. Its menu entry says "by current title" (or "by current filename")
+because the order follows the target as it is now, not the title or filename
+saved in the field when it was last written. A reference column shows the
+current title too, but a media column shows the alt text, else the file name
+saved in the field, so a list sorted by a media field may not look
+alphabetical.
+Fields the Columns picker does not offer
+(groups, flexible content, geolocation, JSON, ranges, key/value pairs, links,
+addresses, date ranges, recurrence, computed and multi-valued fields) cannot
+be filtered either. A value typed into a condition on an email,
 telephone, color, slug or time field is cleaned the way the field cleans what
 an editor saves (a colour's case, a time's padding), so `#FF8800` finds
 `#ff8800`; "Contains" is matched as typed.
@@ -1228,8 +1237,8 @@ is saved (*expected 1 to 64 hex colors such as #ff8800*).
 
 3. Saving `{"dosage": 1}` to the field, in the editor or the API, now fails with
    *Spec (spec) doesn't match its JSON Schema: /dosage: value 1 is lower than minimum 3*
-   (the `#/dosage` part is the JSON Pointer of the offending value; at most
-   five problems are listed).
+   (`/dosage` is the JSON Pointer of the offending value; at most five
+   problems are listed, separated by `;`).
 
 The schema is admin input that runs on every write, so it is bounded and
 cannot reach out:
@@ -1437,11 +1446,16 @@ syntax and functions are the ones you already know:
 
 **Set it on a dynamic type** (admin):
 
-1. Open **Content types** (`/editor/types`) and create the type, or edit it.
-2. Define the fields the template will read first (Custom fields), then fill
-   in **Title template (optional)** with `{{ field.last_name }}, {{ field.first_name }}`.
+1. Open **Content types** (`/editor/types`). Create the type if it is new,
+   then define the fields the template will read in **Fields**
+   (`/editor/fields`).
+2. Back in **Content types**, edit the type and fill in **Title template
+   (optional)** with `{{ field.last_name }}, {{ field.first_name }}`.
 3. Save. A syntax error, a reference to `title` or `slug`, a private field or
    a field the type does not define is refused with a message under the box.
+   The field names are checked only when you edit an existing type: a
+   template typed into the create form is checked for syntax and `title` /
+   `slug` alone, and a name the type never defines reads as empty.
 4. Open or create a record of the type. **Title** is read-only, with
    "Generated from the template on save". Fill in the last and first name,
    save, and the title reads "Smith, Jane".
@@ -1750,7 +1764,11 @@ What to know before relying on it:
   name, unless the new name has a layout of its own already, which is kept;
   either way the old name's layout is gone. The move is decided when you
   click **Save**, from the type's fields as they are then, not as the page
-  showed them.
+  showed them. From code, `update_field_definition` moves the layout only
+  when you pass `carry_section_layout?: true`, as the fields admin does;
+  without it the old layout is deleted and the new name starts as a default
+  accordion. A write whose layouts can't be kept fails with
+  `KilnCMS.CMS.Errors.SectionLayoutNotKept` and writes nothing.
 - **A section without fields loses its layout.** Deleting a section's last
   field, clearing its **Section**, or moving it to another section deletes
   the section's layout in the same save, by any route: this page, a field
@@ -1948,7 +1966,7 @@ What can go wrong:
 |---|---|
 | `must be a whole number on an integer field` | An integer field's step has a fraction. |
 | `can't be more than the span between min and max` | The step is wider than `max` minus `min`. |
-| `must be more than 0` | Step is zero or negative. |
+| `must be greater than 0` | Step is zero or negative. |
 
 ### Limit what can be picked
 
@@ -2352,9 +2370,10 @@ What the definition rows are:
    you read (a valid UUID, not repeated in the same write); send it back on
    every save so the item keeps its identity.
 
-3. Over JSON:API, a content write takes the same `custom_fields` shape, and
-   `GET /api/json/type-definitions?include=field_definitions.item_types`
-   returns a dynamic type's flexible fields with their `item_types`
+3. Over JSON:API, a content write takes the same `custom_fields` shape. The
+   type-definitions endpoint doesn't include a flexible field's `item_types`
+   (`?include=field_definitions.item_types` is refused); read them with the
+   MCP `read_field_definitions` tool or from a `mix kiln.fields.export` file
    (`flex_of_id` names the owning field; `item_setting` marks a setting on a
    sub-field).
 

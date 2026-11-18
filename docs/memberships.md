@@ -150,7 +150,7 @@ reshape the subscription object the entitlement logic reads.
 
 Deliberately **not** on the behaviour: creating customers (hosted checkout does
 it), creating prices or products (an operator does that in the dashboard), and
-cancelling subscriptions (the hosted portal owns cancellation — a local cancel
+canceling subscriptions (the hosted portal owns cancellation — a local cancel
 primitive would create a second, divergent cancellation path).
 
 ### Webhook signature verification
@@ -204,7 +204,7 @@ with nothing left to revoke it.
 ### Revocation timing
 
 There is **no local timer**. The audience follows the mapped status and the status
-follows the provider, which gives the right behaviour for free: with
+follows the provider, which gives the right behavior for free: with
 "cancel at period end", the provider keeps reporting `active` for the whole paid
 period and sends the deletion event when it lapses. Immediate cancellation
 revokes immediately for the same reason. `current_period_end` is stored only so
@@ -523,7 +523,7 @@ the same audience, because that label has never been an access boundary.
 
 Consent and entitlement stay separate bits — the sync writes only list membership,
 never `Subscriber.status` — so a member can unsubscribe from email while keeping
-full content access, and cancelling a subscription doesn't withdraw their consent
+full content access, and canceling a subscription doesn't withdraw their consent
 record.
 
 A new member lands **pending**, not subscribed: paying for access is not consent

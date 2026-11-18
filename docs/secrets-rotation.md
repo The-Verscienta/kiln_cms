@@ -144,7 +144,7 @@ rotation loses no data. That is what makes it the *safe* one of the two.
 
 1. **Pick the window.** Password resets and magic links in flight die. If you
    can, rotate outside business hours, or accept that anyone mid-reset must
-   start over. There is no way to honour them across the cutover.
+   start over. There is no way to honor them across the cutover.
 2. **Generate the new secret:**
    ```bash
    mix phx.gen.secret
@@ -220,14 +220,14 @@ is neither that type nor explained, so the list cannot fall behind the code.
 | `secret_encrypted` | `KilnCMS.CMS.WebhookEndpoint` (one per endpoint) | Outbound webhook deliveries are refused — the ledger says `"delivery failed: signing secret unreadable"` and the endpoint row reports the secret unreadable | `/editor/webhooks`: *Rotate secret* on each endpoint (the old ciphertext is never opened), then give its receiver the new secret |
 | `secret_access_key_encrypted` | `KilnCMS.CMS.StorageProfile` (one per bucket a site has stored files in) | That site's uploads are **refused**, and its files in that bucket can't be read, derived or deleted (downloads 404, variant jobs retry). Nothing is written to, or read from, the operator's storage instead | `/editor/site-storage` on each such site: enter the secret access key again. A profile the site has since moved away from has no form; move the site back to that bucket, re-enter the key, then move it forward again |
 | `private_key_encrypted` | `KilnCMS.Federation.SiteFederation` | The site can no longer sign ActivityPub deliveries | `/editor/federation` → *Re-key*, or `mix kiln.federation rekey`. See [Re-keying the ActivityPub actor](#re-keying-the-activitypub-actor) |
-| `secrets_encrypted` | `KilnCMS.Backups.DestinationConfig` (one per backup destination whose adapter has secret fields; Kiln's own Local and Rclone destinations have none) | In-app backups stop reaching that destination: each records it failed with "credentials can't be decrypted (was SECRET_KEY_BASE changed?); re-enter them", and reads partly off-site (or fails, when it was the only destination) | Backups → **Destinations**: **Edit** the destination, enter every secret field again, **Save destination** ([backups.md](backups.md#keep-destination-credentials-outside-kiln)) |
-| `users.totp_secret_encrypted`, `users.totp_pending_secret_encrypted` | `KilnCMS.Accounts.User` (one per account with an authenticator app) | The account's authenticator codes are refused, so it signs in with a recovery code or a passkey; an enrolment in progress can't be confirmed | The person turns the authenticator app off and sets it up again under **Settings → Two-step verification**, after signing in with a recovery code. An admin can't do it for them |
+| `secrets_encrypted` | `KilnCMS.Backups.DestinationConfig` (one per backup destination whose adapter has secret fields: an **S3-compatible storage** destination's access key ID and secret access key, or a plugin's; Kiln's own Local and Rclone destinations have none) | In-app backups stop reaching that destination: each records it failed with "credentials can't be decrypted (was SECRET_KEY_BASE changed?); re-enter them", and reads partly off-site (or fails, when it was the only destination) | Backups → **Destinations**: **Edit** the destination, enter every secret field again, **Save destination** ([backups.md](backups.md#keep-destination-credentials-outside-kiln)) |
+| `users.totp_secret_encrypted`, `users.totp_pending_secret_encrypted` | `KilnCMS.Accounts.User` (one per account with an authenticator app) | The account's authenticator codes are refused, so it signs in with a recovery code or a passkey; an enrollment in progress can't be confirmed | The person turns the authenticator app off and sets it up again under **Settings → Two-step verification**, after signing in with a recovery code. An admin can't do it for them |
 
 One more thing is sealed under this secret but is not a column: the subject
 and body of each **queued** mail job (`KilnCMS.Mail.open_args/1`, #1843).
 `mix kiln.vault.reencrypt` does not walk them, because a mail job lives at
 most about 16 hours. Keep `PREVIOUS_SECRET_KEY_BASE` set for a day after the
-switch. A job that still cannot be opened is cancelled with "message could
+switch. A job that still cannot be opened is canceled with "message could
 not be opened", never sent blank; the person asks for the mail again.
 
 **You should never need the last column.** Two pieces make the rotation
@@ -355,7 +355,7 @@ vault consequences, because the vault uses its own fixed salt.
    [If the old value leaked](#if-the-old-value-leaked) first: re-encrypting
    does not protect a copy that has already been taken.
 2. **Take a fresh, verified backup** and record the **old** `SECRET_KEY_BASE`
-   alongside it, labelled. Without it, that dump is only a partial backup
+   alongside it, labeled. Without it, that dump is only a partial backup
    ([`backups.md`](backups.md#what-must-be-backed-up)).
 3. **Check the starting point.** Everything should open under the current
    secret before you change anything:
@@ -476,6 +476,9 @@ objects — not merely read and write them.
    Keep each one a URL: a `key=value` string that carries the password is
    refused
    ([backups.md](backups.md#which-database-url-the-backup-tools-accept-2719)).
+   So is a URL with `sslpassword`: if the new role signs in with a client
+   certificate, point `sslkey=` at a key file that is not encrypted, mode
+   0600, rather than giving its passphrase in the URL.
 4. **Restart the application** so `runtime.exs` re-evaluates. With more than
    one instance behind the proxy, restart them one at a time — the old role is
    still valid, so instances on either side of the cutover both work, and this
@@ -533,8 +536,12 @@ three break together:
 rclone remote, and its credentials are rclone's own: `rclone.conf` on the host
 for cron, and `RCLONE_CONFIG_<NAME>_*` variables or a mounted `rclone.conf`
 in the app's environment for in-app backups
-([backups.md](backups.md#it-needs-the-client-tools-in-the-image)). Rotating
-the bucket credentials there is a separate change — see step 5.
+([backups.md](backups.md#it-needs-the-client-tools-in-the-image)). An
+**Rclone remote** destination on the Backups page's **Destinations** tab uses
+the same rclone configuration, and an **S3-compatible storage** destination
+keeps its own key pair in the database, encrypted
+([backups.md](backups.md#back-up-to-s3-compatible-storage)). Rotating the
+bucket credentials there is a separate change — see step 5.
 
 **How the credentials are read.** ExAws rebuilds its config from application
 environment on **every request** — there is no cached client and no long-lived
@@ -576,8 +583,13 @@ public endpoint), not through the application's credentials.
    succeeds — the script fails the run when the off-site copy fails, so a
    successful manual run is the proof. For in-app backups, change the
    remote's settings in the app's environment as well (the off-site row of
-   the table below), then click **Back up now** on **Backups**
-   (`/editor/backups`) and check that the run ends `Succeeded`.
+   the table below), and the key of any S3-compatible storage destination on
+   the same account
+   ([Backup destination keys](#backup-destination-keys), below). Then click
+   **Back up now** on **Backups** (`/editor/backups`) and check that the run
+   ends `Succeeded` without a **Partly off-site** badge. With more than one
+   destination, a rejected key fails only that destination, and the run
+   still succeeds.
 6. **Delete the old access key** in the provider console. Do this only after
    step 4 and step 5 both pass; until you do, the leaked credential is still
    live.
@@ -588,6 +600,39 @@ Reverse the order: delete the compromised key in the provider console
 **first**, accept that media uploads and gated-document reads fail until step 3
 completes, then create the replacement and restart. A public bucket keeps
 serving existing objects throughout, because that path uses no credentials.
+
+### Backup destination keys
+
+An **S3-compatible storage** backup destination holds its own access key ID
+and secret access key, entered on the Backups page and stored encrypted under
+`SECRET_KEY_BASE` (the `secrets_encrypted` row of the table under
+`SECRET_KEY_BASE`). A plugin's destination may hold secret fields the same
+way. They are not environment variables, so a restart changes nothing.
+Rotate them in the app, as a platform admin, with no restart:
+
+1. **Create a second key** at the provider with the same bucket access as the
+   old one (the permissions are in
+   [Give the key only what it needs](backups.md#give-the-key-only-what-it-needs)).
+2. Open **Backups** (`/editor/backups`), click the **Destinations** tab, and
+   click **Edit** on the destination.
+3. Enter the new **Access key ID** and **Secret access key**. The boxes are
+   empty: stored secrets are never shown, and a box left blank keeps the
+   stored value, so enter both.
+4. Click **Save destination**. The page says "Destination saved."
+   Saving checks the settings and the endpoint's DNS, not the key.
+5. Click **Test** on the row. "`<name>`: the test passed (on `<node>`)."
+   proves the new key can list, write, read and delete under the prefix. A
+   refused key reads, for example, "the store doesn't know the access key id
+   (InvalidAccessKeyId)"
+   ([What can go wrong with an S3 destination](backups.md#what-can-go-wrong-with-an-s3-destination)).
+6. **Delete the old key** at the provider.
+
+If the key leaked, delete it at the provider first. Until step 4, each backup
+records that destination failed and reads **Partly off-site** (or fails, when
+it was the only destination); backups to the others carry on.
+
+An **Rclone remote** destination stores no credential in Kiln: rotate it in
+rclone's configuration, as the off-site row of the next table says.
 
 ---
 
@@ -608,7 +653,7 @@ verify the feature.
 | `KILN_GOVERNANCE_WITNESS_TOKEN` | Set and restart; rotate at the witness endpoint in the same window | Endpoint-dependent | The next checkpoint posts successfully |
 | `UNSPLASH_ACCESS_KEY` | Set and restart | None needed — read-only, no stored state | The Unsplash tab in the media library returns results |
 | `CHALLENGE_SECRET_KEY` (or the file `CHALLENGE_SECRET_KEY_FILE` names) | Create the new secret at the provider, then set it. The variable needs a restart on every node; the file is read at each verification, so replacing its contents takes effect with no restart. Rotate `CHALLENGE_SITE_KEY` with it if the provider issued a new pair (that one needs a restart) | Provider-dependent. While a node holds a secret the provider no longer accepts, Turnstile verifications count as the provider being unavailable (sign-ins are let through within [the outage bounds](human-verification.md#when-the-provider-is-down)), and reCAPTCHA refuses every challenged sign-in, registration and form | Trigger a challenge (a few failed sign-ins on one address) and complete it |
-| Off-site backup credentials (`RCLONE_CONFIG_<NAME>_*`, a mounted `rclone.conf`, or a connection-string `BACKUP_RCLONE_REMOTE`) | Create the new key at the storage provider, set it in the app's environment (and in the cron entry, for `backup.sh`), restart, then revoke the old key. A mounted `rclone.conf` is read each time a backup starts `rclone`, so replacing it needs no restart | Yes, while both provider keys are valid | Take a backup from **Backups** (`/editor/backups`): it ends `Succeeded`, and **Where backups go** shows the **Off-site** line. A rejected key fails the run with the rclone error in the **Last run failed** box |
+| Off-site backup credentials (`RCLONE_CONFIG_<NAME>_*`, a mounted `rclone.conf`, or a connection-string `BACKUP_RCLONE_REMOTE`; also what **Rclone remote** destinations read) | Create the new key at the storage provider, set it in the app's environment (and in the cron entry, for `backup.sh`), restart, then revoke the old key. A mounted `rclone.conf` is read each time a backup starts `rclone`, so replacing it needs no restart. An S3-compatible storage destination's key is rotated in the app instead ([Backup destination keys](#backup-destination-keys)) | Yes, while both provider keys are valid | Click **Test** on each affected row of Backups → **Destinations**, then take a backup from **Backups** (`/editor/backups`): it ends `Succeeded` with no **Partly off-site** badge, and **Last in-app backup off-site** under **Where backups go** lists each destination as `ok`. A rejected key fails that destination with the rclone error beside it; it fails the run, in the **Last run failed** box, only when no destination was reached |
 | `ADMIN_PASSWORD` / `EDITOR_PASSWORD` | Seed-only; change the password in the app, not the variable | — | — |
 | Webhook endpoint secrets (`KilnCMS.CMS.WebhookEndpoint`) | Per-endpoint, in the database, vault-encrypted — so they move with the rest of the vault when you re-encrypt (*Data at rest*, under `SECRET_KEY_BASE` above). *Rotate secret* at `/editor/webhooks` only to mint a *new* secret; it takes effect at once, with no overlap | Consumer-dependent — a consumer verifying signatures will reject deliveries until it has the new secret | A delivery succeeds; `consecutive_failures` stays at 0 |
 | API keys (`kiln_…`) | Mint a new key, hand it to the consumer, then destroy the old row. A drafts-only (`draft_write`) key minted with a **Self-rotation** window at `/editor/api-keys` rotates itself: the service calls `POST /api/keys/rotate` with it and gets a new key, and the old one is revoked in the same step | Overlap is under your control — both keys work until you delete one. A self-rotated key has none: the old key stops working when the new one is issued | The consumer's requests still succeed |
@@ -704,6 +749,7 @@ to be exercised.
 | Kubernetes / other orchestrator | Secret → env | Roll the deployment; instances restart one at a time |
 | Backup cron | `/etc/cron.d/kiln-backup` (`DATABASE_URL`, `BACKUP_RCLONE_REMOTE`) | Next scheduled run — test it by hand first |
 | In-app backups and backup schedules | The app's own environment (`DATABASE_URL` or `BACKUP_DATABASE_URL`, `BACKUP_RCLONE_REMOTE`, `RCLONE_CONFIG*`) | Restart the app; test with **Back up now** on `/editor/backups` |
+| Backup destinations' secret fields (an S3-compatible storage destination's keys) | The database, entered on Backups → **Destinations** | **Save destination**, no restart; test with the row's **Test** ([Backup destination keys](#backup-destination-keys)) |
 | rclone off-site remote | `rclone.conf` on the host | Next run — test with `./scripts/backup.sh all` |
 
 Keep the password-manager snapshot as the source of truth for all of them:

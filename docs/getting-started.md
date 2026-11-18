@@ -72,8 +72,9 @@ Once it boots, the surfaces worth opening:
   and the component kit.
 - **`sdk/kiln_plugin/`** — the extension points a downstream project or plugin
   builds against: `Kiln.Plugin`, `Kiln.Block`, `Kiln.FieldType`,
-  `Kiln.Advisory`, and since `kiln_plugin` 1.4 `Kiln.Challenge.Provider` and
-  `Kiln.Security.Check`, published to Hex as `kiln_plugin`. **`lib/kiln/`**
+  `Kiln.Advisory`, since `kiln_plugin` 1.4 `Kiln.Challenge.Provider` and
+  `Kiln.Security.Check`, and since 1.5 `Kiln.BackupDestination`, published to
+  Hex as `kiln_plugin`. **`lib/kiln/`**
   holds the core side: the plugin registry and its health checks,
   `Kiln.Version`, `Kiln.Updates`, `Kiln.SecurityNotices`.
 - **`projects/`** — downstream overlays. `projects/example/` is the worked
@@ -95,12 +96,13 @@ Kiln's APIs, or an operator running a site, follow
 [Reading paths by role](reading-paths.md). It is the one list of those, and
 the kilncms.dev `/docs` index shows the same tracks.
 
-New in 1.10, each in the guide for its area:
-[requiring two-step sign-in on a site](two-factor-auth.md#requiring-two-step-sign-in-on-a-site),
-[backup schedules in the app](backups.md#schedule-backups-in-the-app),
-[limiting what a reference field can pick](extending-content.md#limit-what-can-be-picked)
-and [letting editors create what they type](extending-content.md#let-editors-create-what-they-type)
-in one, and [security alerts in a Slack channel](security-alerts.md#send-alerts-to-slack).
+New in 1.11, each in the guide for its area:
+[flexible content fields](extending-content.md#build-flexible-content-in-the-admin),
+[address fields](extending-content.md#address-fields),
+[titles built from a record's fields](extending-content.md#build-record-titles-from-fields),
+[backups sent to several destinations](backups.md#send-backups-to-several-destinations),
+[S3-compatible storage](backups.md#back-up-to-s3-compatible-storage) among them,
+and [alerts when a webhook stops getting through](webhooks.md#failure-alerts).
 
 Working on Kiln itself needs a few more:
 

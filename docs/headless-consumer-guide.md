@@ -145,7 +145,17 @@ and a write that adds another is refused on the field with
 `“Title” isn't one of the records this field accepts.` (see
 [json-api.md](json-api.md) → "Writing a reference"). A `geolocation` field is
 `{"lat", "lng"}` (plus optional `"zoom"`/`"label"`), and also appears on the
-`json_ld` surface as the document's `contentLocation`. A `computed` field is
+`json_ld` surface as the document's `contentLocation`. An `address` field is
+one object, `{"country": "GB", "locality": "London", "postal_code": "SW1A 1AA",
+…}`, with `country` always present and the other parts only when set. A
+`flexible` field is an ordered array of items of different kinds, each an
+object with an `_id`, a `_type` naming its item type, that type's keys, and
+`_settings` when it has settings: switch on `_type` to render each one, and
+keep a `default` branch, because an admin can add item types at any time
+(see [json-api.md](json-api.md#address-and-flexible-values)). Neither can be
+filtered on except for presence, or sorted. A single `reference` or `media`
+field can be sorted on: by its target's current title (filename for media),
+with targets the caller cannot read last. A `computed` field is
 **derived server-side and read-only** — writing to its key is silently ignored,
 and the artifact always carries a freshly recomputed value. Per-type typed
 GraphQL/JSON:API schemas are deliberately not generated at runtime — promote

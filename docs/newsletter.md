@@ -208,7 +208,7 @@ join rows and the `user_id` link; it never touches `Subscriber.status`. So:
 - a member who unsubscribes keeps full content access and simply receives
   nothing (the recipient query requires `status == :confirmed` *and* segment
   membership);
-- cancelling a subscription removes the join row and leaves their consent record
+- canceling a subscription removes the join row and leaves their consent record
   and any hand-built segment memberships untouched.
 
 A brand-new member lands **`:pending`**, not `:confirmed` — paying for access is
@@ -280,7 +280,13 @@ The same job also demotes the site memberships of accounts erased before
 #2774, which kept their tier, temporary tier and audiences: each one that
 still grants something drops to `:viewer` with neither, as erasure now does
 ([Data flows](data-flows.md#subject-rights-workflows), erasure step 15).
-It runs first, before the newsletter step.
+It runs before the newsletter step.
+
+Before both, it revokes every API key an erased account still holds
+unrevoked. Such a key is already refused at sign-in, since an erased
+account's key never signs in, revoked or not; revoking it makes that
+permanent. It goes first so that a later step that fails cannot keep it from
+running.
 
 After the newsletter step, it finishes what erasure has done since #2514 for
 accounts erased before then (#3010): it clears the audiences on the
@@ -301,25 +307,28 @@ to it, on the sites where it has them
   ```elixir
   %{memberships: 4, newsletter_accounts: 2, newsletter_subscribers: 3,
     audiences: 1, push_subscriptions: 2, saved_views: 5, notifications: 40,
-    failed: 0}
+    api_keys: 1, failed: 0}
   ```
 
   Four memberships of erased accounts demoted; two erased accounts had three
   newsletter rows between them; one erased account had its audiences
-  cleared; and two push subscriptions, five private saved views and 40
-  notifications deleted. Wrap the call in `IO.inspect/1` to print it.
+  cleared; two push subscriptions, five private saved views and 40
+  notifications deleted; and one API key revoked (counted from what the
+  revoke wrote). Wrap the call in `IO.inspect/1` to print it.
 - To stop the boot from queuing it, set
   `config :kiln_cms, :erasure_backfill_on_boot, false`.
 - An account whose rows could not be deleted, whose memberships could not
-  be demoted or whose audiences could not be cleared is logged at warning
+  be demoted, whose audiences could not be cleared or whose API keys could
+  not be revoked is logged at warning
   and counted under `failed`, once for each step that failed for it. The
   messages start `erasure backfill could not`, then
   `forget newsletter rows for <id>`,
   `demote the memberships of <id>`,
   `clear the audiences of <n> erased account(s)`,
   `delete the push subscriptions of <n> erased account(s)`,
+  `revoke the API keys of <n> erased account(s)`,
   `delete the saved_views of <id>` or
-  `delete the notifications of <id>`. Audiences and push subscriptions are
-  each one statement for every account, so when one fails, every account
-  in it is counted. The job then ends in error and Oban retries it, up to three
+  `delete the notifications of <id>`. Audiences, push subscriptions and API
+  keys are each one pass over every account, so when one fails, every
+  account in it is counted. The job then ends in error and Oban retries it, up to three
   attempts in all; each retry only finds what is still left.

@@ -65,7 +65,7 @@ so that nothing on the clone does so later on production's behalf.
 
 | What | Action | Why |
 |------|--------|-----|
-| **User accounts** | `:anonymize` (per user) — the GDPR-erasure action (`users_anonymized`) | Emails → non-routable tombstones, names cleared, passwords scrambled, roles reset to `:viewer`, auth-event actors nulled. The exact production erasure path (`data-flows.md`). |
+| **User accounts** | `:anonymize` (per user) — the GDPR-erasure action (`users_anonymized`) | Emails → non-routable tombstones, names cleared, passwords scrambled, roles reset to `:viewer`, auth-event actors nulled, and every site membership demoted (tier `:viewer`, no temporary tier, no audiences), so the staging admin below, if you provision one, is the clone's only admin. The exact production erasure path (`data-flows.md`). |
 | **API keys** | purged (`api_keys_purged`) | Live `kiln_*` credentials would otherwise grant API access to the staging copy (and are secrets in their own right). |
 | **Auth tokens** | purged (`tokens_purged`) | Session / reset / magic-link tokens are stale in a clone and are pseudonymous PII. |
 | **Webhook endpoints** | de-activated (`webhooks_deactivated`) | A clone must **never** fire deliveries at production consumers' URLs on the next publish. De-activation is data-only (no SSRF DNS re-check). |
@@ -82,7 +82,7 @@ so that nothing on the clone does so later on production's behalf.
 | **Instance security log** | purged (`instance_security_events_purged`) | The same columns for events about the installation: platform admins' addresses and IPs. See [the instance log](security-events.md#the-instance-log). |
 | **Security alert dispatches** | purged (`security_alert_dispatches_purged`) | A [security alert](security-alerts.md) still to be sent would mail and notify production's admins from the clone, about production events. |
 | **Paid memberships** | scrubbed (`memberships_scrubbed`) | Provider customer/subscription ids nulled and the status set to canceled. **Scrubbed, not deleted**: `billing_membership_events` references them, and the entitlement trail should stay referentially intact — the same audit-retention decision as content history. What must go is the live external reference. |
-| **Membership tiers** | deactivated (`tiers_deactivated`) | The catalogue shape keeps staging useful; the price pointer is replaced with a per-row tombstone so nothing in the clone can bill a real account. (Per-row because `provider_price_id` is `NOT NULL` with a per-org unique index.) |
+| **Membership tiers** | deactivated (`tiers_deactivated`) | The catalog shape keeps staging useful; the price pointer is replaced with a per-row tombstone so nothing in the clone can bill a real account. (Per-row because `provider_price_id` is `NOT NULL` with a per-org unique index.) |
 | **Queued jobs** | purged, every state (`oban_jobs_purged`) | A cloned job is production's work: its args carry recipients, message bodies, form data and outbound URLs, and running it on the clone would mail, notify or call out on production's behalf. Deleted rather than canceled, because a canceled job keeps its args. Purged first, before anything else runs, and again last, for any job the scrub's own work queued. `scripts/staging.sh up` doesn't copy the rows in the first place. |
 | **Newsletter subscribers** | purged (`newsletter_subscribers_purged`) | Readers' addresses and names, with live confirm and unsubscribe tokens. |
 | **Newsletter segment memberships** | purged (`newsletter_segment_memberships_purged`) | Which subscriber is in which segment. Deleted before the subscribers; the segments themselves stay. |
@@ -285,7 +285,10 @@ webhooks, federation deliveries) before the scrub deletes them, so on a fresh cl
 path 1 or 2. With `allow_live?: true`, the scrub first pauses every queue on every node
 of the cluster and prints "Oban is live on this node: every queue is now paused.
 Restart the application after the scrub to resume them." The queues stay paused until
-you do: restart the staging application once the scrub finishes.
+you do: restart the staging application once the scrub finishes. The
+[plugin table check](#plugin-tables) runs before the pause, so a scrub refused for an
+undeclared table leaves a live node's queues running. A node counts as live in any
+Oban `testing` mode but `:manual`, `:inline` included.
 
 ### Safety guards
 
@@ -421,7 +424,7 @@ KILN_ENV_COLOR=warning   # or error, info, success — a tone name, never a hex
 ```
 
 **Leave both unset in production.** No label means no strip: production is the
-environment you recognise by the *absence* of a warning, and nothing has to be
+environment you recognize by the *absence* of a warning, and nothing has to be
 configured for that to hold. See
 [`environment-variables.md`](environment-variables.md#environment-indicator).
 

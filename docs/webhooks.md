@@ -740,9 +740,12 @@ points:
 - **"A webhook was switched off"**: the failure that auto-disables it.
 
 Each one is a notice in the console bell and `/editor/inbox`, linking to
-`/editor/webhooks`, and an email to the same effect. The failures in between
-raise nothing. While a notice about an endpoint is still unread, another of
-the same kind is not sent, so a flapping receiver is one notice and one email,
+`/editor/webhooks`, and an email to the same effect, titled "A webhook is
+failing on (site)" or "A webhook was switched off on (site)". The server log
+gets a warning too: "Webhook endpoint (id) (masked URL) is failing after (n)
+failed deliveries in a row", or "… was switched off after (n) …". The
+failures in between raise nothing. While a notice about an endpoint is still
+unread, another of the same kind is not sent, so a flapping receiver is one notice and one email,
 not one per publish. Opening `/editor/webhooks` marks your notices about the
 site's endpoints read, so the next failure is news again. A successful
 delivery resets the count, so a failure after it is a new "failing" notice.
@@ -758,10 +761,20 @@ carry the delivery's error: open the webhooks page for that.
 on a site I administer stops delivering, or is switched off**, then click
 **Save preferences**. This mutes the email only: the bell notice still
 appears. The switch is one for your whole account, across every site you
-administer.
+administer, and is shown only to someone who would get these notices on some
+site. It is on for every account until turned off; erasure sets it back to on,
+and **Export my data** lists it under `notification_preferences`.
+
+The column behind the switch, `users.notify_on_webhook_failure`, came with
+1.11; run `mix ash.migrate` when you upgrade. Rolling back to 1.10 is safe:
+1.10 ignores the column and shows these notices in the bell as a neutral line.
 
 Retractions are not part of this: they never count toward auto-disable, and
-a lost one has its own notice (below).
+a lost one has its own notice (below). An endpoint subscribed to a
+`security.*` event raises one more notice when it auto-disables: the
+site's member admins get an `alerts_silenced` notice (`webhook_auto_disabled`),
+which nothing mutes
+([Silencing notices](security-alerts.md#silencing-notices)).
 
 **If new content stops appearing on a site that a webhook rebuilds**, check
 `/editor/webhooks` for a **Disabled** badge first. Fix the receiver, tick

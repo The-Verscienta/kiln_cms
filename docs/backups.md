@@ -58,7 +58,7 @@ Meilisearch/embedding reindex) if stale.
 
 | What | Cadence | Local retention | Off-site |
 |---|---|---|---|
-| DB dump | nightly (cron above) | 14 days (`BACKUP_KEEP_DAYS`), and always the newest good one ([below](#what-retention-deletes-and-what-it-keeps)) | every dump, via `BACKUP_RCLONE_REMOTE` |
+| DB dump | nightly (cron above) | 14 days (`BACKUP_KEEP_DAYS`), and always the newest good one ([below](#what-retention-deletes-and-what-it-keeps)) | every dump, via `BACKUP_RCLONE_REMOTE`, and for in-app backups to every [destination](#send-backups-to-several-destinations) |
 | Media archive (Local adapter) | nightly, same run | 14 days, all parts of a set together, and always the newest good one | every part and sidecar |
 | Media (S3/R2 adapter) | continuous | — | bucket **versioning + lifecycle** (e.g. keep noncurrent versions 30 days), or a nightly `rclone sync` to a second bucket/provider |
 | Secrets/env snapshot | on change | — | password manager |
@@ -74,8 +74,9 @@ backups. A schedule can also keep its own backups longer or shorter than
 ([Set how long a schedule keeps its backups](#set-how-long-a-schedule-keeps-its-backups)).
 
 Implied objectives with the nightly cadence: **RPO ≤ 24 h** (worst case, one day
-of content; tighten by raising the cron frequency — dumps are cheap at this DB
-size), **RTO ≈ 1 h** (fresh-VPS walkthrough below). If either stops being
+of content; tighten by raising the cron frequency, or with an in-app schedule
+every 2, 4, 8 or 12 hours ([Back up more often than daily](#back-up-more-often-than-daily)) —
+dumps are cheap at this DB size), **RTO ≈ 1 h** (fresh-VPS walkthrough below). If either stops being
 acceptable, step up to WAL-based point-in-time recovery (pgBackRest / wal-g) —
 deliberately *not* the default here, because a verified nightly dump you have
 drilled beats a PITR setup you haven't.
@@ -87,9 +88,13 @@ Rules that make this a strategy rather than a script:
   file on failure, loudly. Both paths also record a SHA-256 of every file, so a
   copy that was damaged later can be told from one that was never good.
 - **A backup that only lives on the VPS doesn't count.** The threat model is
-  losing the VPS. Set `BACKUP_RCLONE_REMOTE` (R2/B2/S3 — any rclone remote).
-  An off-site copy that fails fails the run, in cron and in the app, so it
-  surfaces: cron exits non-zero, and the app marks the run `Failed`.
+  losing the VPS. Set `BACKUP_RCLONE_REMOTE` (R2/B2/S3 — any rclone remote),
+  and for in-app backups add [destinations](#send-backups-to-several-destinations)
+  (an S3-compatible bucket, a NAS directory, another rclone remote). An
+  off-site copy that fails surfaces: cron exits non-zero, and the app marks
+  the run `Failed` when it reached no destination, or `Succeeded` but
+  **Partly off-site**, with the backup alarm raised, when it reached some
+  ([When a backup reaches only some destinations](#when-a-backup-reaches-only-some-destinations)).
 - **Only the file that verified leaves the host.** Each file (the dump, every
   media part, every `.sha256` sidecar) is hashed again immediately before its
   own off-site copy and compared with the SHA-256 recorded when it verified. A
@@ -109,7 +114,10 @@ Both paths delete old local backups. The app does it during every in-app
 backup, once that backup's own files have verified and before its off-site
 copy; a backup whose own files failed prunes nothing. `backup.sh` does it at the
 end of a `backup.sh all` that succeeded, and on its own as `backup.sh prune`.
-Neither touches the off-site copies.
+Neither touches `BACKUP_RCLONE_REMOTE`. A destination added on the
+**Destinations** tab is pruned by the app, after each backup reaches it, when
+its **Delete its old backups (retention)** box is ticked
+([Retention on a destination](#retention-on-a-destination)).
 
 `BACKUP_KEEP_DAYS` (default 14) is the age at which a backup **may** be
 deleted, not a promise that it will be. "Older than `BACKUP_KEEP_DAYS`" means
@@ -268,7 +276,7 @@ Things to know:
 - Markers live on this host's disk, not in the database, so they survive a
   database restore. `rclone sync` of `BACKUP_DIR` copies them like any file.
 - Rolling back to a release before markers existed: its in-app prune does not
-  honour them, and deletes a marker itself once the marker file is older than
+  honor them, and deletes a marker itself once the marker file is older than
   `BACKUP_KEEP_DAYS`.
 
 **See what the app would delete.** A dry run plans without deleting. Run it
@@ -1551,8 +1559,11 @@ queue clears."
 1. Open **Backups** (`/editor/backups`). While a backup runs, a strip below
    **Back up now** says which step it is on: "Starting a backup", "Dumping the
    database", "Planning the media archive", "Archiving media: part 2 of 5",
-   "Checking the media parts", "Applying retention", "Copying off-site" or
-   "Finishing", with the backup's stamp. ("part 2 of 5" shows the total only on
+   "Checking the media parts", "Applying retention", "Copying off-site"
+   ("Copying off-site (2 of 3: NAS)" with more than one destination) or
+   "Finishing", with the backup's stamp. A re-send reads "Re-sending
+   off-site (1 of 2: NAS)"
+   ([Re-send a partly off-site backup](#re-send-a-partly-off-site-backup)). ("part 2 of 5" shows the total only on
    a node that has the backup's directory.) The page refreshes every 3 seconds
    while a backup runs, for up to an hour.
 2. Click **Back up now**. The page says "A backup is running; this one starts
@@ -2383,7 +2394,7 @@ it requests one and waits for it, returning `:ok` or `{:error, reason}`, and
 `{:error, :queued}` or `{:error, :folded}` without waiting when another backup
 is running (`{:error, {:queue_busy, queued}}` when one of another kind is
 queued). For an off-site failure the reason is the run's error text. Both,
-the `backups` queue and `KilnCMS.Backups.Worker` are still in 1.10 and will be
+the `backups` queue and `KilnCMS.Backups.Worker` are still in 1.11 and will be
 removed in a later release, which its changelog will name. Drain the `backups`
 queue before upgrading to it.
 
@@ -2491,7 +2502,7 @@ account.
 
    | Field | What it takes |
    |---|---|
-   | **What to back up** | **Database**, **Media**, or both. **Media** is greyed out, with "Media isn't archived on this deployment, so a schedule can't include it.", when the media are in S3 or there is no `MEDIA_DIR`. |
+   | **What to back up** | **Database**, **Media**, or both. **Media** is grayed out, with "Media isn't archived on this deployment, so a schedule can't include it.", when the media are in S3 or there is no `MEDIA_DIR`. |
    | **How often** | **Every 2 hours**, **Every 4 hours**, **Every 8 hours**, **Every 12 hours**, **Every day**, **Every week**, **Every 2 weeks** or **Every month**. The four sub-daily ones need **Keep for (days)** ([Back up more often than daily](#back-up-more-often-than-daily)). |
    | **At** | The local time, `HH:MM`, in the schedule's time zone. For a sub-daily schedule, the first backup of the day; the hint under the box says "One backup at this time, and the others every 8 hours around the clock." |
    | **Starting on** | The first local date it may fire. Every week and every 2 weeks take their weekday from it (every 2 weeks also its week), every month its day of the month (the 31st becomes the month's last day). |
@@ -3217,8 +3228,10 @@ finished work in `<BACKUP_DIR>/.work/<stamp>/`: the file lists and a
 `state.json` recording each finished step and part with its hash. Every in-app
 backup has this directory, a database-only one (S3 media adapter, or no media
 directory) included. The directory is mode 0700, the files 0600, and it is
-removed only when the backup and its off-site copy both succeed, so a run that
-failed off-site can be resumed too. A directory older than three days is swept
+removed only when the backup succeeds. A backup that reached none of its
+off-site destinations fails, so a run that failed off-site can be resumed
+too. A partly off-site backup has succeeded, so it has no work
+directory; **Re-send** sends its files from `BACKUP_DIR` instead. A directory older than three days is swept
 automatically, and with it the chance to resume.
 
 1. Open **Backups** (`/editor/backups`) as a platform admin and scroll to
@@ -3303,24 +3316,29 @@ then the sidecar), aged by its newest file, so a sweep can never leave half a
 set; the dump of the same stamp is aged on its own
 ([What retention deletes and what it keeps](#what-retention-deletes-and-what-it-keeps)).
 Off-site copies the dump, each
-part and each sidecar, one `rclone copy` per file, each after its own re-hash.
-A failed copy, of a data file or of a sidecar, fails the run: a part set whose
-sidecar never left the host is one `restore.sh` refuses to restore from the
-remote. rclone's own retries come first (`--retries`, 3 by default, settable
-with `RCLONE_RETRIES` in the environment of the app or the cron line). In the
-app, a copy that still failed retries the whole off-site step, up to four
-attempts 1, 5 and 15 minutes apart
-([How an in-app backup runs](#how-an-in-app-backup-runs-2218)); rclone skips
-the files the remote already holds unchanged. The run is marked failed only
-after the last attempt. Cron does not retry.
+part and each sidecar, one copy per file (`rclone copy` for
+`BACKUP_RCLONE_REMOTE`), each after its own re-hash. A failed copy, of a data
+file or of a sidecar, fails that destination: a part set whose sidecar never
+left the host is one `restore.sh` refuses to restore from there. rclone's own
+retries come first (`--retries`, 3 by default, settable with `RCLONE_RETRIES`
+in the environment of the app or the cron line). In the app, a copy that
+still failed retries that destination's off-site step, up to four attempts
+1, 5 and 15 minutes apart
+([How an in-app backup runs](#how-an-in-app-backup-runs-2218)); a file the
+destination already holds unchanged is not sent again. A destination is
+marked failed only after its last attempt, and the run fails only when it
+reached no destination
+([When a backup reaches only some destinations](#when-a-backup-reaches-only-some-destinations)).
+Cron copies to `BACKUP_RCLONE_REMOTE` only, does not retry, and fails the run
+on the first failed copy.
 
 The app prunes before its off-site copy, so expired backups are removed even
 when the off-site copy then fails. Cron prunes only at the end of a run that
 succeeded, off-site copy included. Neither touches the backup being taken: the
 app's is in flight, and cron's is the newest complete one.
 
-The re-hash costs one extra sequential read of every file, and only when a
-remote is set. It is far quicker than the upload that follows, and it leaves
+The re-hash costs one extra sequential read of every file per destination,
+and only when a destination is set. It is far quicker than the upload that follows, and it leaves
 the file in the page cache for rclone's own read.
 
 ### Off-site credentials stay out of the rclone command line (#2690)
@@ -3518,8 +3536,10 @@ file with the digest the error names (`sha256sum <path>`).
 A copy that failed (rather than was refused) is retried the same way, after
 fixing what rclone reported: usually the remote's name, its credentials in
 `rclone.conf`, or the network. With several destinations that applies only
-when none was reached; a backup that reached some is not resumable, and the
-next backup sends to every destination again.
+when none was reached. A backup that reached some succeeded, so it is not
+resumable: click **Re-send** on its row to send it to the destinations it
+missed ([Re-send a partly off-site backup](#re-send-a-partly-off-site-backup)),
+or let the next backup send to every destination again.
 
 ### Send backups to several destinations
 
@@ -3580,7 +3600,7 @@ and what the kind of destination needs:
    | **Enabled** | Ticked, backups are sent to it; unticked, it is kept but skipped. |
    | **Delete its old backups (retention)** | Ticked by default: prune it after each backup reaches it ([Retention on a destination](#retention-on-a-destination)). |
 
-   A plugin's kind shows its own fields, each labelled by its name. A
+   A plugin's kind shows its own fields, each labeled by its name. A
    secret field is a password box that is never filled in again; on Edit,
    leaving it blank keeps the stored value.
 4. Click **Save destination**. The button reads **Checking…** while the
@@ -4849,7 +4869,11 @@ admins only, like the rest of the page.
    backup first started, so its files can be from different times." A resume
    that was refused after the click shows
    "Resume refused: …" above the row's error. A running in-app one shows **Cancel**
-   ([above](#cancel-a-running-backup)) until it is finishing.
+   ([above](#cancel-a-running-backup)) until it is finishing. A succeeded
+   backup badged **Partly off-site** or **Not off-site** whose files are on
+   disk shows **Re-send**
+   ([Re-send a partly off-site backup](#re-send-a-partly-off-site-backup)),
+   with a `?` (**About Re-send**) beside it.
 3. Use **Previous** / **Next** to page ("Page 1 of 3").
 
 To open one run's row directly, use `/editor/backups?run=<run id>`, which is
@@ -4908,7 +4932,7 @@ The files column reads, for the backup as a whole:
 | `on disk` | Every file is under `BACKUP_DIR`. |
 | `pruned (retention)` | The application's own retention removed them. |
 | `partly pruned (retention)` | Some parts of a media set are still here, and every part that's gone was removed by the application's own retention. |
-| `off-site only` | Gone locally, but every missing file has a successful rclone copy. |
+| `off-site only` | Gone locally, but a copy reached an off-site destination (`BACKUP_RCLONE_REMOTE` or a stored one). |
 | `expired` | `backup.sh prune` on cron removed it. See [Expired, probably expired, missing](#expired-probably-expired-missing). |
 | `probably expired` | Most likely removed by `backup.sh prune`, but cron's `BACKUP_KEEP_DAYS` isn't known here, so the app's own is used. |
 | `missing` | Gone with no recorded reason: deleted by hand, or recorded by another node. |
@@ -5171,14 +5195,17 @@ stage says how to take the new version's digest and check its signature.
 `rclone` out, with `BACKUP_RCLONE_REMOTE` set in the app's environment, an
 in-app backup takes and verifies its local files, then fails at the
 off-site step, like any other failed copy. Nothing is tried again within
-the run, since no retry installs a binary. It is visible ahead of time and
-afterward:
+the run, since no retry installs a binary. With other
+[destinations](#send-backups-to-several-destinations) configured, only
+`BACKUP_RCLONE_REMOTE` (and any Rclone remote destination) fails, and the
+backup succeeds **Partly off-site** if another destination took it. It is
+visible ahead of time and afterward:
 
 - **Where backups go** on `/editor/backups` shows an **Off-site** line with
   the remote (credentials masked) and "rclone is not installed in this
   image, so backups taken from this page fail at the off-site copy. Install
   rclone in the image or unset BACKUP_RCLONE_REMOTE."
-- The run fails with:
+- With `BACKUP_RCLONE_REMOTE` as the only destination, the run fails with:
 
   ```text
   Off-site copy FAILED: BACKUP_RCLONE_REMOTE is set but rclone is not
@@ -5452,11 +5479,13 @@ The app reads them in production only.
 | `KILN_BACKUP_SCHEDULER_CRON` | app | when the app checks its [in-app schedules](#schedule-backups-in-the-app) (default `* * * * *`; `false` turns every schedule off, and so does a value that isn't a cron expression or names no real date, such as `0 0 31 2 *`; the Schedule tab says which). Read in every environment, and not turned off by `BACKUP_ENABLED=false` |
 | `BACKUP_MEDIA_PART_MB` | backup + app | target ceiling on one media part's input size, 16 to 10240 (default 400) |
 | `BACKUP_MEDIA_EXCLUDE` | backup + app | comma-separated globs the media archive leaves out (default none) |
+| `BACKUP_FREE_SPACE_CHECK` | backup + app | `false` (also `0`, `no`, `off`) skips the free-space check made before the dump and before the media parts (default on; anything else keeps it on, with a warning: at boot in the app, on stderr from `backup.sh`). For media that compresses well, or a `df` that misreports the disk ([Disk space](#media-backups-in-parts-2218)) |
 | `BACKUP_LOCK_WAIT_SECONDS` | backup + app | how long `pg_dump` waits for each table lock before it gives up, 1 to 3600 (default 600; anything else keeps 600 and warns). Also the demo golden capture's ([lock waits](#when-pg_dump-waits-for-a-table-lock-2844)) |
 | `TMPDIR` | backup | where `backup.sh` builds the media file lists and keeps the record of its running child that the [heartbeat](#when-a-cron-run-is-killed-outright-2478) reads (default `/tmp`); removed when it exits |
 | `BACKUP_TRIGGER` | backup | label recorded in the manifest (default `cron`) |
 | `BACKUP_RCLONE_REMOTE` | backup + app | off-site rclone remote (strongly recommended). Each file is re-hashed before its copy; a refused copy fails the run, and so does a failed one, unless an in-app backup reached another [destination](#send-backups-to-several-destinations) (then it is partly off-site). The official image ships `rclone`; set without it, an in-app run fails ([above](#it-needs-the-client-tools-in-the-image)) |
 | `BACKUP_LOCAL_DESTINATION_ROOTS` | app | comma-separated absolute directories a **Directory on this server** destination may be under (default unset: that kind isn't offered). One relative or `..` entry drops the whole list with a boot warning ([details](#let-backups-be-written-to-a-directory-on-this-server)). Read in production and development |
+| `BACKUP_S3_PRIVATE_HOSTS` | app | comma-separated host names (or IP addresses) an **S3-compatible storage** destination may reach over `http://` or at a private or loopback address (default unset: public `https://` only). Read in every environment ([details](#reach-a-store-on-your-own-network)) |
 | `BACKUP_PING_URL` | backup | dead-man's-switch ping on success |
 | `BACKUP_DATABASE_URL` | app | connection string the in-app backup dumps, for a connection the app cannot derive from `DATABASE_URL` or the Repo config (a unix-socket repo). Unset, it uses `DATABASE_URL` when that names the connected database, else a URL rebuilt from the Repo. Any of them may be `ecto://`; `ssl=false` becomes `sslmode=disable` and Ecto's pool options are dropped ([connection URLs](#which-database-url-the-backup-tools-accept-2719)). The tools' TLS follows the app's unless this URL sets `sslmode` ([TLS](#how-the-backup-tools-choose-tls-2830)) |
 | `RCLONE_CONFIG`, `RCLONE_CONFIG_<NAME>_*`, `RCLONE_RETRIES` | rclone | read by `rclone` itself, which inherits the environment of whichever path runs it: the named remote's configuration file or settings, and rclone's retry count (default 3). Kiln does not read them. `kiln_offsite` is reserved ([above](#off-site-credentials-stay-out-of-the-rclone-command-line-2690)) |

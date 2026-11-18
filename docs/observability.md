@@ -507,7 +507,16 @@ reclaimed and stranded steps, and the backup directory queues'
 alerting on: `:start_failed`, which means a node's backup directory queue
 never started, and `[:kiln_cms, :backups, :lock, :stranded]` with
 `outcome: :interrupted`, a backup failed because no node had its
-directory), the
+directory; also `[:kiln_cms, :backups, :offsite, :partial]`, a backup that
+reached only some of its off-site destinations, and
+`[:kiln_cms, :backups, :offsite, :failed]`, one that reached none because the
+destinations couldn't be read), the re-send events
+`[:kiln_cms, :backups, :resend, …]` (#2949) in the same table and under
+[Re-send a partly off-site backup](backups.md#re-send-a-partly-off-site-backup),
+each S3 request's `[:kiln_cms, :backups, :s3, :request]` (with its duration)
+under [How an upload to S3 works](backups.md#how-an-upload-to-s3-works),
+`[:kiln_cms, :backups, :upload, :swept]` under
+[Resumable uploads](backups.md#resumable-uploads), the
 marker events under [The last-good marker](backups.md#the-last-good-marker)
 and [The hold markers](backups.md#the-hold-markers) (a held backup deleted
 outside the app under
@@ -620,7 +629,9 @@ Every label is bounded:
 - **`enforced` and `read`** are booleans, exported as `"true"` or `"false"`.
 - **The content-type label (`type`, `kind`)** keeps a compiled type's name but
   folds every admin-defined type into `dynamic`. Admin-defined types are
-  per-org, so on a multi-tenant host they have no ceiling.
+  per-org, so on a multi-tenant host they have no ceiling. The one `kind` that
+  is not a content type is on `kiln_cms_backups_notice_failed_count`, where it
+  is the notice's kind (`retention` or `held_deleted`).
 
 `test/kiln_cms_web/metrics_test.exs` rejects an unbounded tag, and a tag that
 is not a valid Prometheus label name: the exporter writes a tag's name into the

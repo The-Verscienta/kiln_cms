@@ -117,6 +117,13 @@ Full flow, recipe, and the serve step live in
       the plugin tables a plugin keeps. An overlay whose domains own a table
       with no `staging_scrub/0` entry makes the scrub refuse, with nothing
       changed ([Plugin tables](staging-environments.md#plugin-tables)).
+- [ ] **Re-scrub a clone made before 1.11 before you share it.** An older scrub
+      left newsletter subscribers, form submissions, the suppression lists,
+      federation followers and keys, per-site integrations and production's
+      queued jobs in the clone, and left its site admins with their tiers.
+      Run `./scripts/staging.sh scrub` (this release's copy) against the
+      clone, or one of the other paths in
+      [Running the scrub](staging-environments.md#running-the-scrub).
 - [ ] A **distinct staging `SECRET_KEY_BASE`** is what invalidates cloned session
       cookies and prod-signed preview tokens — generate a fresh one, don't reuse
       prod's.

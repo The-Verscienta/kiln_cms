@@ -65,7 +65,9 @@ full-data role.
 
 A field appears only while a live field definition of that record's own site
 and type names it, and the definition is not `private`, not a `user` field,
-and not a link field or a group sub-field. The list is read live: flipping a
+and not nested in another field (a link field, a group sub-field, or a
+flexible field's item type or its fields: their values show inside the parent's
+value). The list is read live: flipping a
 field to private, renaming, retyping or deleting it changes the next query.
 Keys with no definition (orphans) are dropped. A per-role read restriction
 on private custom fields ([granular-rbac.md](granular-rbac.md#per-custom-field-grants-and-read-restrictions))

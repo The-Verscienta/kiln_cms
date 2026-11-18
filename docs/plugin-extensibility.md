@@ -804,7 +804,7 @@ whose `domains/0` lists a domain with AshPostgres resources:
    other.
 3. Run `mix kiln.plugins.doctor`. It fails on an entry it can't use and
    notes each table still undeclared:
-   `note: no staging_scrub/0 entry for bookings: Bookings.Catalog.Guest (table guests)`.
+   `note: no staging_scrub/0 entry for bookings: Bookings.Catalog.Guest (table guests). mix kiln.staging.scrub refuses to run while the table exists: …`.
    When it prints `plugin(s) OK` with no note about your tables, every one
    is declared.
 4. Add a test, so the next table you add can't slip past. It needs no
@@ -892,8 +892,9 @@ central service required for v1. Each plugin optionally declares:
 
 `Kiln.Plugins.manifests/0` collects these plus each plugin's *contribution
 counts* (domains, blocks, field types, advisories, spam checks, image backends,
-human-verification providers, security checks, nav items, admin, editor, public
-and plug routes, queues, children) into plain maps — the data a catalog UI or `mix kiln.plugins.list`
+human-verification providers, security checks, backup destinations, staging
+scrub entries by kind, nav items, admin, editor, public and plug routes,
+queues, children) into plain maps — the data a catalog UI or `mix kiln.plugins.list`
 renders. Screenshots and long-form docs deliberately live in the plugin's own
 repository / README, **not** in the running node: the node carries a pointer
 (`homepage/0`), not a media library.
@@ -961,14 +962,15 @@ agility of a live marketplace while staying compile-time-safe:
   contract rather than special-cased in the host, so they double as reference
   examples: `KilnCMS.CMS.FieldTypes.Geolocation` (#428, composite) and
   `KilnCMS.CMS.FieldTypes.Computed` (#429, derived). Every in-tree type's name
-  is reserved, and since 1.9 that includes `email`, `telephone`, `color`,
-  `slug`, `time`, `json`, `range`, `key_value`, `link` and `address` as well as
-  `geolocation`, `computed`, `datetime_range` and `recurrence`
-  (`KilnCMS.CMS.FieldTypes.reserved/0` lists them with the core types).
-  `mix kiln.plugins.doctor` rejects a plugin that claims one ("collides with
-  a built-in field type"), the same way it rejects one claiming a core type,
-  so a plugin or overlay type with one of the new names must be renamed
-  before upgrading.
+  is reserved: since 1.9 that includes `email`, `telephone`, `color`,
+  `slug`, `time`, `json`, `range`, `key_value` and `link`, since 1.11
+  `address`, and `geolocation`, `computed`, `datetime_range` and
+  `recurrence` before them. The core types are reserved too, and 1.11 adds
+  `flexible` to them (`KilnCMS.CMS.FieldTypes.reserved/0` lists both).
+  `mix kiln.plugins.doctor` rejects a plugin that claims one ("field type
+  :address collides with a built-in field type"), so a plugin or overlay
+  type with one of the new names must be renamed, in its `name/0` and in any
+  stored field definition, before upgrading.
 - **Declarative editorial automation (#342).** "When X, do Y" rules are Oban-
   backed **data**, authored in the admin UI — the safe substitute for the
   "run this script on publish" hooks that other marketplaces sell.

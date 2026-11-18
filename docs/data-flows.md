@@ -82,7 +82,7 @@ your deployment.
 | Idempotency keys | `idempotent_requests` | Pseudonymous (transient) | One row per `Idempotency-Key` a caller used on a write ([api.md](api.md)), holding the key, the acting user's id, a hash of the request and **the response that was sent** — so it carries whatever that response did. Pruned hourly, 24-hour lifetime. Purged by the staging scrub. |
 | Aggregate view counts | `content_views` | No | One upserting counter per content item — no visitor data. |
 | Daily view buckets | `content_view_days` | No | One counter per content item per UTC day, for 7d/30d trends — no visitor data. Purged on retention (below). |
-| Daily referrer buckets | `referrer_days` | No | One counter per content item per coarse source category (`direct`/`internal`/`search`/`social`/`other`) per UTC day — never a raw referrer URL or host. Off by default (`KILN_ANALYTICS_REFERRERS`, #619); turning it back off stops new writes but does not clear rows already recorded — those still age out on the retention purge (below). |
+| Daily referrer buckets | `referrer_days` | No | One counter per content item per coarse source category (`direct`/`internal`/`search`/`social`/`other`) per UTC day — never a raw referrer URL or host. Off by default (`KILN_ANALYTICS_REFERRERS`, #619); turning it back off stops new writes but does not clear rows already recorded — those still age out on the retention purge (below). The analytics dashboard and its CSV export print a count below `KILN_ANALYTICS_LOW_COUNT_THRESHOLD` (default 5) as `"< n"`, hide a second category beside it, and hide the whole breakdown when a reader who knows the rule could still work out the counts, so on the lowest-traffic items and days every category reads hidden. That protects each breakdown on its own. Two breakdowns of overlapping traffic (the dashboard's span and the export's days, the site chart and an item's bars, 7 and 30 days, today read twice) can still be subtracted to recover a suppressed count ([#2989](https://github.com/The-Verscienta/kiln_cms/issues/2989)); the only workaround is leaving referrer attribution off. See [environment-variables.md](environment-variables.md#referrer-attribution-619). |
 | Recorded 404 paths | `missed_paths` | Possibly | The unresolvable request path and its hit count — **no** IP, user agent, referrer, or actor. A path can still be incidentally identifying (`/invoices/jane-doe`), so rows are purged on retention (below). Vulnerability probing is filtered out before anything is written, and the table is hard-capped per site. See [404 capture](#404-capture-472). |
 | Funnel definitions | `funnels`, `funnel_steps` | No | Admin-authored ordered list of content items (landing → pricing → signup, #621). No visitor data, no counter table — step traffic is derived from `content_view_days` at read time. Not on a retention purge; kept until an admin deletes the funnel. |
 | Daily experiment buckets | `content_experiment_variant_days` | No | Impression and conversion counters per variant per UTC day (#499) — no visitor data. |
@@ -656,7 +656,13 @@ Either way, it:
    notification preferences.
 4. Stamps `anonymized_at`.
 5. **Revokes** every stored auth token for the subject (logs out everywhere,
-   removes token PII).
+   removes token PII) and every API key it owns, deletes its passkeys and
+   external sign-in links, and clears its authenticator app and recovery
+   codes. An erased account's API key is refused at sign-in whether or not it
+   was revoked, with the same answer as any revoked key. (An account erased by
+   a release that did not revoke its keys can still hold unrevoked ones;
+   **API keys** on `/editor/api-keys` shows each as "Expired" until the
+   erasure backfill below revokes it.)
 6. **Nulls `actor_id`** on the user's `document_events` and
    `billing_membership_events`, so both audit trails keep the *what* without the
    *who*.
@@ -761,7 +767,8 @@ step removes: before #2514, their Web Push subscriptions, their private saved
 views and the notifications addressed to them (steps 11 to 13), and possibly
 audiences on their own row, which step 7 could miss until then; before step 14, their linked newsletter
 rows; before step 15, memberships that still grant a tier, a temporary tier
-or audiences. A background job, `KilnCMS.Accounts.ErasureBackfill`, finishes
+or audiences; and API keys that were never revoked (step 5). A background job,
+`KilnCMS.Accounts.ErasureBackfill`, finishes
 each of those steps the way erasure now does, about 10 minutes after the
 first boot of the release that added it; see
 [Newsletter](newsletter.md#accounts-erased-before-this-release). An erased
@@ -785,7 +792,7 @@ stays referentially intact, and so are site memberships, demoted (step 15).
 > Step 8 is **local only** — Kiln does not call the provider during erasure. Two
 > reasons: erasure runs inside a database transaction and must not depend on a
 > third party being reachable, and the same code path is used by
-> `KilnCMS.Staging.Scrub` over a *clone* of production, where cancelling would
+> `KilnCMS.Staging.Scrub` over a *clone* of production, where canceling would
 > terminate real customers' billing from a staging environment.
 >
 > So after erasing a paying member, **cancel or refund their subscription in the
@@ -888,7 +895,7 @@ config :kiln_cms, KilnCMS.Experiments, sticky: true
 | **What is stored** | `_kiln_ab` — one integer in `0..99`. And, only where a goal that converts on a later page is running (`content_view` or `funnel_completion`), `_kiln_ab_x` — up to four variant ids. |
 | **Where** | The visitor's browser only. No database row, no log line, nothing server-side is keyed by either. |
 | **How long** | 30 days by default; set `sticky_max_age_days:` to shorten it. |
-| **Why** | `_kiln_ab` so a returning visitor keeps the same arm instead of re-drawing, which is what makes their behaviour across a visit comparable between arms. `_kiln_ab_x` because a conversion that happens on a *later* page can only be attributed to an arm the visitor is known to have seen. |
+| **Why** | `_kiln_ab` so a returning visitor keeps the same arm instead of re-drawing, which is what makes their behavior across a visit comparable between arms. `_kiln_ab_x` because a conversion that happens on a *later* page can only be attributed to an arm the visitor is known to have seen. |
 | **Flags** | `http_only`, `SameSite=Lax`, `Path=/`, and — wherever the deployment's cookies are `Secure` — `Secure` plus the `__Host-` name prefix, so a sibling org's origin cannot plant one. |
 
 **It is a bucket, not an identifier.** With only 100 possible values, every value
@@ -995,6 +1002,10 @@ reuses the `:anonymize` erasure action above (plus the same retention purges) to
 a clone PII-free and secret-free by default. Beyond accounts it deletes newsletter
 subscribers, form submissions, both mail suppression lists, federation followers,
 deliveries and keys, push subscriptions, idempotency keys, the webhook delivery log
-and every queued job, whose args carry recipients and payloads. See
+and every queued job, whose args carry recipients and payloads. A table that a
+plugin or the overlay adds must be declared (purged, rewritten or kept with a
+reason), or the scrub refuses before it changes anything
+([Plugin tables](staging-environments.md#plugin-tables)). A clone scrubbed by a
+release before 1.11 kept most of these: re-scrub it before you share it. See
 [`staging-environments.md`](staging-environments.md), which lists every table it
 touches and [what it keeps](staging-environments.md#what-the-scrub-keeps).

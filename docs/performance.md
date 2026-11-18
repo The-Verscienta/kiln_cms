@@ -109,10 +109,10 @@ queues: [firing: 5, search: 5, mail: 3, newsletter: 3, billing: 3, media: 3, web
 | `push`       | `Push.Worker` (Web Push)                               |
 | `backup_steps` | `Backups.StepWorker`: one step of an in-app backup, concurrency 1 per node ([backups.md](backups.md#how-an-in-app-backup-runs-2218)) |
 | `backup_dir_<id>` | `Backups.StepWorker` and `Backups.MarkerSyncWorker`: the backup steps and last-good marker syncs that must run where one backup directory is. Not in the list above: each node's backup heartbeat starts the queue of the directory it reads at runtime, concurrency 1, on that node only ([backups.md](backups.md#which-node-runs-a-step)) |
-| `backups`    | `Backups.Worker`: only jobs enqueued before #2218, which it hands to `backup_steps`; still in 1.10, removed in a later release |
+| `backups`    | `Backups.Worker`: only jobs enqueued before #2218, which it hands to `backup_steps`; still in 1.11, removed in a later release |
 | `occurrence_backfill` | `Events.BackfillWorker`: the boot-time recompute of events' next dates, one job per recurrence engine version per day, ten minutes after boot ([events.md](events.md#recomputing-stored-dates-at-boot)) |
 | `scheduling` | Every-minute AshOban triggers (scheduled publish, scheduled unpublish/embargo) |
-| `default`    | Daily AshOban triggers (trash purge, untitled sweep)   |
+| `default`    | Daily AshOban triggers (trash purge, untitled sweep), and the boot-time and cron jobs that have no queue of their own, among them `Jobs.PrivateArgsScrub` (drops private args from finished jobs, ten minutes after boot and daily) and `Accounts.ErasureBackfill` |
 
 The `scheduling` queue is isolated because its triggers run on a `* * * * *` cron: if they
 share `default` with bulk publish/embedding work, the scheduler and worker jobs can sit queued
