@@ -432,6 +432,9 @@ What's new, with examples and migration steps: [docs/whats-new/v1.11.md](docs/wh
 - **Canceling a backup no longer writes the admin's email into its run log (the audited security event keeps who canceled), and a console Cancel of a run whose resume is waiting to start is refused instead of being undone by the resume.**
   ([#3107](https://github.com/The-Verscienta/kiln_cms/pull/3107) · [long form](docs/changelog/v1.11.0.md#backup-cancel-followups))
 
+- **`restore.sh` no longer fails a multi-part media restore at random with "… is not listed in … — nothing was extracted" (a broken pipe under `pipefail` made a listed part read as missing).**
+  ([#3110](https://github.com/The-Verscienta/kiln_cms/pull/3110) · [long form](docs/changelog/v1.11.0.md#restore-sigpipe))
+
 ### Security
 
 - **API keys of accounts erased before 0.9.0 no longer sign in, and the boot-time erasure backfill revokes them (GHSA-96vh-3m56-p8gx).**

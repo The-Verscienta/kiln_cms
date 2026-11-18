@@ -637,11 +637,13 @@ cmd_media() {
     # Every file the sidecar names must be in the set (catches a missing
     # LAST part, which contiguity alone cannot), and vice versa.
     while IFS= read -r name; do
-      printf '%s\n' "$sorted" | grep -Fxq -- "$name" ||
+      # A here-string, not a pipe: grep -q exits at the first match, and
+      # under pipefail the writer's SIGPIPE would read as "not found" (#3109).
+      grep -Fxq -- "$name" <<<"$sorted" ||
         die "${sidecar} lists ${name}, which is missing from the set — nothing was extracted"
     done <<<"$listed"
     while IFS= read -r name; do
-      printf '%s\n' "$listed" | grep -Fxq -- "$name" ||
+      grep -Fxq -- "$name" <<<"$listed" ||
         die "${name} is not listed in ${sidecar} — nothing was extracted"
     done <<<"$sorted"
     sha_check "$MEDIA_DIR_SRC" "$sidecar" ||
