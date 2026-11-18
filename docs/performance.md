@@ -108,6 +108,7 @@ queues: [firing: 5, search: 5, mail: 3, newsletter: 3, billing: 3, media: 3, web
 | `federation` | `Federation.DeliveryWorker`, `AnnounceWorker`, `ActorUpdateWorker` |
 | `push`       | `Push.Worker` (Web Push)                               |
 | `backup_steps` | `Backups.StepWorker`: one step of an in-app backup, concurrency 1 per node ([backups.md](backups.md#how-an-in-app-backup-runs-2218)) |
+| `backup_dir_<id>` | `Backups.StepWorker` and `Backups.MarkerSyncWorker`: the backup steps and last-good marker syncs that must run where one backup directory is. Not in the list above: each node's backup heartbeat starts the queue of the directory it reads at runtime, concurrency 1, on that node only ([backups.md](backups.md#which-node-runs-a-step)) |
 | `backups`    | `Backups.Worker`: only jobs enqueued before #2218, which it hands to `backup_steps`; still in 1.10, removed in a later release |
 | `occurrence_backfill` | `Events.BackfillWorker`: the boot-time recompute of events' next dates, one job per recurrence engine version per day, ten minutes after boot ([events.md](events.md#recomputing-stored-dates-at-boot)) |
 | `scheduling` | Every-minute AshOban triggers (scheduled publish, scheduled unpublish/embargo) |
@@ -128,8 +129,8 @@ under rather than for load: during a rolling deploy, a node of the previous rele
 polls `default`, and would run a newer release's job with the older code. A deployment that
 builds Oban's `queues:` list itself must carry both, or their jobs are queued and never run.
 
-**Pool sizing.** Total worker concurrency above is 52, all sharing the Ecto pool with web
-requests. Size `POOL_SIZE` (in `config/runtime.exs`) so jobs and web requests don't starve
+**Pool sizing.** Total worker concurrency above is 52, plus 1 for the backup directory queue
+each node starts at runtime, all sharing the Ecto pool with web requests. Size `POOL_SIZE` (in `config/runtime.exs`) so jobs and web requests don't starve
 each other:
 
 ```

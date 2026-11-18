@@ -409,6 +409,32 @@ carries the reasoning.
   its own files-first rule. The column stays; nothing needs undoing.
   ([#2817](https://github.com/The-Verscienta/kiln_cms/issues/2817))
 
+<a id="backup-dir-queues-upgrade"></a>
+
+- **Run `mix ash.migrate` (new nullable `backup_node_beats.dir_queue` and `dir_queue_boot_id`, #2845). Finish a rolling deploy before you start, cancel or resume a backup. Before rolling back past this release, cancel running backups or let them finish.**
+  The migration `add_node_beat_dir_queue` adds two nullable `uuid` columns
+  to `backup_node_beats`, with nothing to backfill: each node of this
+  release writes them on its beats, to advertise the backup directory queue
+  it runs (see the *Changed* entry below). Migrate before the new release's
+  nodes start, as with any other column.
+
+  **During a rolling deploy.** A node on the previous release never
+  advertises a queue, so its directory's backup steps keep the 30-second
+  put-backs in `backup_steps`, as before. Its **Cancel** misses a step that
+  waits in a directory queue: the run is still canceled and the lock
+  released, and the step cancels itself when it runs; one already running
+  there stops at its next fenced call. To be sure, don't start, cancel or
+  resume a backup until every node runs this release.
+
+  **Rolling back.** The previous release never runs a `backup_dir_<id>`
+  queue, and neither takes back nor fails a step waiting in one, so a
+  backup whose step waits there holds the lock, and every backup behind
+  it, until a platform admin cancels it. Before rolling back, cancel a
+  running backup or let it finish, and check that no job waits in a
+  `backup_dir_` queue (the query is in
+  [Rolling back past backup directory queues](../backups.md#rolling-back-past-backup-directory-queues)).
+  The columns stay; the previous release ignores them.
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -1335,6 +1361,48 @@ carries the reasoning.
   `two_factor_disabled` event. A notice already queued keeps the wording it
   was written with.
   ([#3044](https://github.com/The-Verscienta/kiln_cms/issues/3044))
+
+<a id="backup-dir-queues"></a>
+
+- **A backup step, a resume's start or a last-good marker sync that must run where a backup directory is now goes to that directory's own Oban queue, `backup_dir_<id>`, which only the nodes with that directory run (#2845).**
+  Before this, such a job waited in the shared `backup_steps` (or `default`)
+  queue, and every node without the directory that fetched it put it back
+  for 30 seconds, up to 20 times per attempt. With a `BACKUP_DIR` per host,
+  a host whose node was slow to fetch could see an attempt used up with
+  nothing wrong (`:backup_dir_elsewhere`). Now each node's backup heartbeat
+  starts its directory's queue at runtime (limit 1, that node only) and
+  advertises it in its beat once it runs; a job goes into the queue only
+  while a node with a beat in the last 180 seconds advertises it. A node
+  without the directory that fetches such a job from the shared queue moves
+  it there: the same job id, no attempt spent. On a shared volume every
+  node runs the one queue, so any node still takes any step.
+
+  The put-backs remain the fallback, for a directory whose node runs an
+  older release, a queue that didn't start because Oban's Postgres notifier
+  isn't working (one warning in the log, and
+  `[:kiln_cms, :backups, :dir_queue, :start_failed]`), and a resume whose
+  directory no running node reports. A job left in a directory queue that
+  no node runs is moved back to `backup_steps` after 5 minutes when the
+  directory's node is up but not running its queue. When no node has
+  reported the directory for 180 seconds and the job has waited 30
+  minutes, a backup step fails the backup ("Interrupted: no server with its
+  backup directory (id `<id>`) picked up the `<step>` step for 30
+  minutes"), releasing the lock; a resume's start goes back to
+  `backup_steps`; a marker sync is canceled.
+
+  A queue is paused, never stopped, when its directory's id changes (at
+  once) or stops being read (after 180 seconds), and resumed when the id
+  returns; one paused by anything else is left paused. Cancel now finds a
+  backup's step in any queue. Both workers' uniqueness is over the job's
+  args and worker, not its queue. New telemetry:
+  `[:kiln_cms, :backups, :dir_queue, :started | :paused | :resumed | :start_failed | :routed]`
+  and `[:kiln_cms, :backups, :lock, :stranded]`. The Lock's
+  `:reclaim_stale` action now returns a `stranded:` outcome too. Size
+  `POOL_SIZE` for one more Oban job per node. Off switch, not needed on a
+  working deployment: `config :kiln_cms, KilnCMS.Backups, dir_queues?: false`.
+  See [Which node runs a step](../backups.md#which-node-runs-a-step) and
+  [ADR 0070](../decisions/0070-a-directory-pinned-backup-job-runs-from-a-queue-named-for-its-directory-which-the-nodes-reporting-it-start.md).
+  ([#2845](https://github.com/The-Verscienta/kiln_cms/issues/2845))
 
 ## Fixed
 

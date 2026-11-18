@@ -25,9 +25,9 @@ defmodule KilnCMS.Backups.DirQueues do
   and resumed when the id comes back. A paused queue costs nothing. Each
   tick checks the queues it paused and pauses again one that runs (a pause
   signal lost while Oban's notifier was down, or a later
-  `Oban.resume_all_queues/1`). The heartbeat resumes only a queue it paused
+  `Oban.resume_all_queues(Oban)`). The heartbeat resumes only a queue it paused
   itself: one paused by anything else (an operator, the demo reset's
-  `Oban.pause_all_queues/1`) is left paused and not advertised, so its jobs
+  `Oban.pause_all_queues(Oban)`) is left paused and not advertised, so its jobs
   keep the snooze in `backup_steps` until it runs again.
 
   ## Who may route a job there (the capability)
