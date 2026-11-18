@@ -526,11 +526,36 @@ defmodule KilnCMS.Backups.Destination do
 
   def format_reason({:permanent, message}) when is_binary(message), do: message
 
-  def format_reason(:deadline),
-    do: "stopped before the step's time ran out; the upload resumes on the next attempt"
-
+  def format_reason(:deadline), do: format_reason(:deadline, next_attempt?: true)
   def format_reason(:superseded), do: "a later attempt of this backup took over the upload"
   def format_reason(reason), do: inspect(reason)
+
+  @doc """
+  `format_reason/1`, said for what follows. Only `:deadline` reads
+  differently, by two options:
+
+    * `:next_attempt?` (default `true`) - whether an attempt of the step
+      follows that tries the file again; without one (the step's last
+      attempt, or a destination it failed now), the backup's Resume or its
+      next run does;
+    * `:resumable?` (default `true`) - whether the upload is recorded, so it
+      resumes mid-file; otherwise (the env destination, an adapter that
+      can't resume) the file is sent again whole.
+  """
+  @spec format_reason(term(), keyword()) :: String.t()
+  def format_reason(:deadline, opts) do
+    after_this =
+      case {Keyword.get(opts, :resumable?, true), Keyword.get(opts, :next_attempt?, true)} do
+        {true, true} -> "the upload resumes on the next attempt"
+        {true, false} -> "it resumes when the backup is resumed or runs again"
+        {false, true} -> "it is sent again on the next attempt"
+        {false, false} -> "it is sent again when the backup is resumed or runs again"
+      end
+
+    "stopped before the step's time ran out; " <> after_this
+  end
+
+  def format_reason(reason, _opts), do: format_reason(reason)
 
   @doc """
   Whether `reason` is the error `call/4` gives when the call ran past its

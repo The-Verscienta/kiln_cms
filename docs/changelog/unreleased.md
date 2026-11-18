@@ -2669,6 +2669,21 @@ carries the reasoning.
   ADR 0067's amendment.
   ([#3040](https://github.com/The-Verscienta/kiln_cms/issues/3040), [#3041](https://github.com/The-Verscienta/kiln_cms/issues/3041))
 
+<a id="backup-upload-resume-details"></a>
+
+- **Two resumable-upload details (#3082, #3083).**
+  An upload stopped before the off-site step's time ran out always said
+  "the upload resumes on the next attempt". When no attempt follows (the
+  last attempt, or a failure that ends the destination or the backup), it
+  now says "it resumes when the backup is resumed or runs again", in the
+  Run log and in the destination's error. A destination that doesn't
+  resume an upload (the env rclone remote, or an adapter without resume)
+  says instead that the file "is sent again" on the next attempt, or when
+  the backup is resumed or runs again. And a resumable upload's attempt
+  count (`Resume.attempt`) went up each time the step that already owned
+  it claimed it again; it now counts only a change of owner.
+  ([#3082](https://github.com/The-Verscienta/kiln_cms/issues/3082), [#3083](https://github.com/The-Verscienta/kiln_cms/issues/3083))
+
 ## Security
 
 <a id="backup-url-sslpassword"></a>

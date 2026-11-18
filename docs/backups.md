@@ -4193,9 +4193,15 @@ On a backup's run, as a destination's error (the chip's tooltip, and the
 | "rclone is not installed in this image" | The node that ran the backup has no `rclone`. No retry fixes it, so it fails at once. |
 | "credentials can't be decrypted (was SECRET_KEY_BASE changed?); re-enter them" | [Above](#keep-destination-credentials-outside-kiln). |
 | "the adapter for this destination is not installed (was its plugin removed?)" | A plugin's destination whose plugin is gone. Reinstall it, or disable or delete the destination. |
-| (in the brackets) "stopped before the step's time ran out; the upload resumes on the next attempt" | A resumable adapter stopped at the step's deadline, having recorded how far it got. The rest of that destination's files wait for the next attempt, which continues the upload. |
+| (in the brackets) "stopped before the step's time ran out; it resumes when the backup is resumed or runs again" | A resumable adapter stopped at the step's deadline on the step's last attempt (or with the destination failed for another reason), having recorded how far it got. The upload stays recorded: a Resume of the backup, or the next backup, continues it. |
+| (in the brackets) "stopped before the step's time ran out; it is sent again when the backup is resumed or runs again" | The same, from a destination whose uploads aren't recorded (`BACKUP_RCLONE_REMOTE`, or an adapter that can't resume): a Resume of the backup, or the next backup, sends the whole file again. |
 | (in the brackets) "a later attempt of this backup took over the upload" | This step lost its lease to a newer one (a retry, or a step that took over from a node that went away), which owns the upload now. |
 | (in the brackets) "MyPlugin.BackupDestination.put/3 returned an unexpected value" | A plugin's `put/3` answered something the contract doesn't allow. That file counts as failed; report it to the plugin's author. |
+
+A file stopped at the deadline on an earlier attempt doesn't fail its
+destination. The Run log's line for it ends "the upload resumes on the next
+attempt" (or "it is sent again on the next attempt", from a destination
+whose uploads aren't recorded), and the next attempt continues.
 
 ### How long a destination may take
 
@@ -4326,9 +4332,12 @@ once it is 30 days old.
   or sooner with `call_timeout`
   ([How long a destination may take](#how-long-a-destination-may-take)). A
   resumable adapter that watches the deadline stops cleanly with its
-  progress saved. The destination's error then reads "stopped before the
-  step's time ran out; the upload resumes on the next attempt". One that
-  doesn't is killed at the deadline, and its last checkpoint stands.
+  progress saved. The file's Run log line then reads "stopped before the
+  step's time ran out; the upload resumes on the next attempt", or, on the
+  step's last attempt, "…; it resumes when the backup is resumed or runs
+  again".
+  One that doesn't is killed at the deadline, and its last checkpoint
+  stands.
 - **A node that dies: 3 hours.** A step whose node died mid-upload is
   rescued by Oban's Lifeline after `KILN_OBAN_RESCUE_AFTER_MINUTES` (180 by
   default), and, if it has attempts left, runs again as the next attempt,
