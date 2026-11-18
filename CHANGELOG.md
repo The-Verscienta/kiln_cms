@@ -372,7 +372,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#3102](https://github.com/The-Verscienta/kiln_cms/pull/3102) · [long form](docs/changelog/unreleased.md#backup-upload-resume-details))
 
 - **Backups → Destinations: saving a form someone else changed since you opened it is refused instead of overwriting their change, two admins enabling at once can no longer exceed the 8-destination cap, the `BACKUP_RCLONE_REMOTE` row gets a Test, and the S3 form, failure tooltips and waiting-resume strip gain help text and links.**
-  ([long form](docs/changelog/unreleased.md#backup-destinations-tab-polish))
+  ([#3103](https://github.com/The-Verscienta/kiln_cms/pull/3103) · [long form](docs/changelog/unreleased.md#backup-destinations-tab-polish))
 
 ### Security
 
