@@ -1398,6 +1398,8 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
       assert has_element?(lv, ~s|#backup-held-deleted-docs[href$="backups.md#the-hold-markers"]|)
 
       {:ok, lv, _html} = live(conn, "/editor/backups/schedules")
+      # The Schedule tab reads the status in the background (#2986).
+      render_async(lv, 2_000)
       assert has_element?(lv, "#schedule-held-deleted", line)
       assert has_element?(lv, "#schedule-held-deleted", "scripts/backup.sh is older than this")
 

@@ -32,8 +32,10 @@ defmodule KilnCMS.Backups.Presence do
   An **artifact** is `:present` when every unit is, `:unknown` when any unit
   is, `:partly_pruned` when some units are here and every absent one was
   pruned, and `:missing` (with the absent files in `gone`) when some are here
-  and others are gone for another reason. When none is here, the worst reason
-  among its units wins: `:missing`, then `:probably_expired`, `:expired`,
+  and others are gone for another reason. The files of `gone` that reached an
+  off-site destination are also in `off_site` (#2942), so the row can say
+  which of them have a copy there. When none is here, the worst reason among
+  its units wins: `:missing`, then `:probably_expired`, `:expired`,
   `:pruned`, `:off_site_only`.
 
   A **run** is the state its artifacts share, `:mixed` when they differ (read
@@ -51,7 +53,7 @@ defmodule KilnCMS.Backups.Presence do
       newer complete unit of the same kind in the listing it is `:missing`;
     * otherwise its age (`finished_at`, else `started_at`) against cron's
       `BACKUP_KEEP_DAYS`, which `backup.sh` writes into `manifest.json`
-      (`cron_keep_days`): older than that plus a day is `:expired`, younger is
+      (`keep_days`): older than that plus a day is `:expired`, younger is
       `:missing`. When no manifest of cron's says, the app's `keep_days`
       stands in, and an older unit is only `:probably_expired`.
 
@@ -78,6 +80,7 @@ defmodule KilnCMS.Backups.Presence do
           name: String.t(),
           state: unit_state(),
           gone: [String.t()],
+          off_site: [String.t()],
           parts: pos_integer() | nil
         }
 
@@ -178,6 +181,7 @@ defmodule KilnCMS.Backups.Presence do
       name: artifact.name,
       state: state,
       gone: gone,
+      off_site: for({unit, :off_site_only} <- absent, unit.file in gone, do: unit.file),
       parts: if(artifact.parts == [], do: nil, else: length(artifact.parts))
     }
   end

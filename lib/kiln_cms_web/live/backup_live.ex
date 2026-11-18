@@ -2030,6 +2030,19 @@ defmodule KilnCMSWeb.BackupLive do
     >
       {gettext("couldn't check in time")}
     </span>
+    <.help_tip
+      :if={@disk.state == :timed_out}
+      id={"presence-help-#{@run.id}"}
+      label={gettext("About these files")}
+      title={gettext("couldn't check in time")}
+      learn_more={docs_url("backups.md#what-history-reads-from-disk")}
+    >
+      {ngettext(
+        "This server's backup directory didn't answer within %{count} second (a slow or hung mount), so the app claims nothing about these files. Reload the page to check again.",
+        "This server's backup directory didn't answer within %{count} seconds (a slow or hung mount), so the app claims nothing about these files. Reload the page to check again.",
+        disk_timeout_s()
+      )}
+    </.help_tip>
     <span
       :if={@disk.state == :failed}
       data-role="presence"
@@ -2038,6 +2051,15 @@ defmodule KilnCMSWeb.BackupLive do
     >
       {presence_label(:unknown)}
     </span>
+    <.help_tip
+      :if={@disk.state == :failed}
+      id={"presence-help-#{@run.id}"}
+      label={gettext("About these files")}
+      title={presence_label(:unknown)}
+      learn_more={docs_url("backups.md#backup-history-2217")}
+    >
+      {presence_help_text(:unknown)}
+    </.help_tip>
     <%= if @disk.state in [:idle, :ready] do %>
       <span :if={is_nil(@presence)} data-role="presence" data-presence="checking">
         {gettext("checking…")}
@@ -2062,21 +2084,39 @@ defmodule KilnCMSWeb.BackupLive do
             {presence_label(@presence.state)}
           <% end %>
         </span>
-        <span
-          :for={artifact <- @presence.artifacts}
-          :if={artifact.parts && artifact.gone != []}
-          data-role="parts-missing"
-          data-kind={artifact.kind}
-          title={Enum.join(artifact.gone, ", ")}
-          class="text-warning-ink"
-        >
-          {ngettext(
-            "%{count} part missing: %{parts}",
-            "%{count} parts missing: %{parts}",
-            length(artifact.gone),
-            parts: part_numbers(artifact.gone)
-          )}
-        </span>
+        <%!-- The gone parts with an off-site copy get a chip of their own
+              (#2942). The set still reads missing: this disk can't restore
+              it as it is. --%>
+        <%= for artifact <- @presence.artifacts, artifact.parts do %>
+          <span
+            :if={missing_here(artifact) != []}
+            data-role="parts-missing"
+            data-kind={artifact.kind}
+            title={Enum.join(missing_here(artifact), ", ")}
+            class="text-warning-ink"
+          >
+            {ngettext(
+              "%{count} part missing: %{parts}",
+              "%{count} parts missing: %{parts}",
+              length(missing_here(artifact)),
+              parts: part_numbers(missing_here(artifact))
+            )}
+          </span>
+          <span
+            :if={artifact.off_site != []}
+            data-role="parts-off-site"
+            data-kind={artifact.kind}
+            title={Enum.join(artifact.off_site, ", ")}
+            class="text-warning-ink"
+          >
+            {ngettext(
+              "%{count} part missing here, copied off-site: %{parts}",
+              "%{count} parts missing here, copied off-site: %{parts}",
+              length(artifact.off_site),
+              parts: part_numbers(artifact.off_site)
+            )}
+          </span>
+        <% end %>
         <.help_tip
           :if={presence_help(@presence)}
           id={"presence-help-#{@run.id}"}
@@ -2091,12 +2131,22 @@ defmodule KilnCMSWeb.BackupLive do
     """
   end
 
-  # The state a row's ? tip explains: the worst of its artifacts' that needs
-  # explaining, or nil.
+  # The state a row's ? tip explains: the most telling of its artifacts', or
+  # nil. Couldn't-check comes first: an unreadable directory changes how the
+  # rest is judged (no file is called expired while a marker can't be ruled
+  # out).
   defp presence_help(%{artifacts: artifacts}) do
     states = Enum.map(artifacts, & &1.state)
-    Enum.find([:missing, :probably_expired, :expired], &(&1 in states))
+    Enum.find([:unknown, :missing, :probably_expired, :expired], &(&1 in states))
   end
+
+  # The disk read crashed (`@disk.state == :failed`) or a directory or file
+  # couldn't be read (`:unknown`): one label, one explanation (#2940).
+  defp presence_help_text(:unknown),
+    do:
+      gettext(
+        "The app couldn't read this server's backup directory, or one of these files in it (permissions, an I/O error or a stale network mount), or its read of the directory failed outright, so it claims nothing about these files."
+      )
 
   defp presence_help_text(:missing),
     do:
@@ -2118,6 +2168,9 @@ defmodule KilnCMSWeb.BackupLive do
 
   defp presence_class(state) when state in [:missing, :unknown], do: "text-warning-ink"
   defp presence_class(_state), do: nil
+
+  # The gone files of an artifact that no destination has a copy of.
+  defp missing_here(%{gone: gone, off_site: off_site}), do: gone -- off_site
 
   # "02, 05": the part numbers of the gone files, or their names when a name
   # isn't a part's.

@@ -3,7 +3,11 @@
 - **Status** — accepted (2026-11-13), recording the choice that shipped with
   the backup history (#2217) in 1.9.0. The writers and the one write a person
   makes are described as they are today, after the step chain (#2218) and
-  retention (#2219) added theirs.
+  retention (#2219) added theirs. Partly superseded by
+  [ADR 0072](0072-backup-presence-is-judged-per-artifact-off-the-page-and-expired-means-crons-prune-would-have-removed-it.md)
+  (#2940, 2026-11-18): presence is judged per artifact, adds `:mixed`,
+  `:probably_expired` and `:unknown`, and `:expired` follows cron's prune
+  rules instead of an age heuristic; the disk is read off the page process.
 - **References** — [#2415](https://github.com/The-Verscienta/kiln_cms/issues/2415),
   [#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217) and its pull
   request [#2414](https://github.com/The-Verscienta/kiln_cms/pull/2414);

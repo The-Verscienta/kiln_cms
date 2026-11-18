@@ -474,6 +474,13 @@ msgstr[1] "%{count} parties"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "%{count} part missing here, copied off-site: %{parts}"
+msgid_plural "%{count} parts missing here, copied off-site: %{parts}"
+msgstr[0] "%{count} partie manquante ici, copiée hors site : %{parts}"
+msgstr[1] "%{count} parties manquantes ici, copiées hors site : %{parts}"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "%{count} part missing: %{parts}"
 msgid_plural "%{count} parts missing: %{parts}"
 msgstr[0] "%{count} partie manquante : %{parts}"
@@ -23517,6 +23524,11 @@ msgstr "Le compte est effacé : l'e-mail est remplacé par une adresse fictive, 
 msgid "The admin allowlist could not be saved."
 msgstr "La liste des réseaux autorisés n’a pas pu être enregistrée."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The app couldn't read this server's backup directory, or one of these files in it (permissions, an I/O error or a stale network mount), or its read of the directory failed outright, so it claims nothing about these files."
+msgstr "L’application n’a pas pu lire le répertoire de sauvegarde de ce serveur, ou l’un de ces fichiers qu’il contient (permissions, erreur d’E/S ou montage réseau périmé), ou sa lecture du répertoire a complètement échoué : elle n’affirme donc rien sur ces fichiers."
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "The app icon must be a PNG or JPEG image."
@@ -25319,6 +25331,13 @@ msgstr "Ce serveur ne vérifie pas qu’un client est bien le moteur de recherch
 #, elixir-autogen, elixir-format
 msgid "This server isn't enforcing the admin allowlist (KILN_ADMIN_ALLOWLIST_DISABLED is set). The list is saved but not applied."
 msgstr "Ce serveur n’applique pas la liste des réseaux autorisés (KILN_ADMIN_ALLOWLIST_DISABLED est défini). La liste est enregistrée mais pas appliquée."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "This server's backup directory didn't answer within %{count} second (a slow or hung mount), so the app claims nothing about these files. Reload the page to check again."
+msgid_plural "This server's backup directory didn't answer within %{count} seconds (a slow or hung mount), so the app claims nothing about these files. Reload the page to check again."
+msgstr[0] "Le répertoire de sauvegarde de ce serveur n’a pas répondu en moins de %{count} seconde (montage lent ou bloqué) : l’application n’affirme donc rien sur ces fichiers. Rechargez la page pour vérifier à nouveau."
+msgstr[1] "Le répertoire de sauvegarde de ce serveur n’a pas répondu en moins de %{count} secondes (montage lent ou bloqué) : l’application n’affirme donc rien sur ces fichiers. Rechargez la page pour vérifier à nouveau."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format

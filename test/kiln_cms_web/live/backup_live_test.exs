@@ -12,6 +12,13 @@ defmodule KilnCMSWeb.BackupLiveTest.StallingDiskView do
   end
 end
 
+defmodule KilnCMSWeb.BackupLiveTest.CrashingDiskView do
+  @moduledoc false
+  # A `Backups.DiskView` whose read crashes, so the page's disk state is
+  # `:failed` (#2940).
+  def read(_dir, _runs, _now), do: raise("disk read crashed")
+end
+
 defmodule KilnCMSWeb.BackupLiveTest do
   @moduledoc """
   The backup panel (#484).
@@ -1801,6 +1808,8 @@ defmodule KilnCMSWeb.BackupLiveTest do
       {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
 
       assert has_element?(lv, "#overview-backup-warning", "No media backup has been recorded.")
+      # #3005: a component never backed up keeps the line about the schedule.
+      assert has_element?(lv, "#overview-backup-warning [data-role=backup-schedule]")
       refute has_element?(lv, "#overview-backup-setup")
     end
 
@@ -1927,6 +1936,13 @@ defmodule KilnCMSWeb.BackupLiveTest do
 
       assert has_element?(lv, "#overview-backup-warning", "The last database backup failed.")
       refute has_element?(lv, "#overview-backup-setup")
+
+      # #3005: a backup that didn't happen keeps the line about the schedule.
+      assert has_element?(
+               lv,
+               "#overview-backup-warning [data-role=backup-schedule]",
+               "ask whoever runs this server to check it"
+             )
     end
 
     test "a backup that went stale is the red alarm", %{conn: conn, dir: dir} do
@@ -1942,6 +1958,7 @@ defmodule KilnCMSWeb.BackupLiveTest do
              )
 
       refute has_element?(lv, "#overview-backup-setup")
+      assert has_element?(lv, "#overview-backup-warning [data-role=backup-schedule]")
     end
 
     test "it disappears once a backup is fresh", %{conn: conn, dir: dir} do
@@ -2524,6 +2541,177 @@ defmodule KilnCMSWeb.BackupLiveTest do
              )
 
       assert has_element?(lv, "#presence-help-#{run.id}", "nothing recorded why")
+    end
+
+    # #2942: the gone parts with an off-site copy say so; the others don't.
+    test "a media set split between this disk and off-site says which parts are off-site",
+         %{conn: conn, dir: dir} do
+      stamp = "20260105-030000"
+      write_artifact!(dir, "kiln-db-#{stamp}.dump")
+      names = Backups.Artifact.set_names(stamp, 4)
+      ok = %{"local" => %{"status" => "ok"}, "rclone:r" => %{"status" => "ok"}}
+      failed = %{"local" => %{"status" => "ok"}, "rclone:r" => %{"status" => "failed"}}
+      run = media_run!(dir, stamp, [hd(names)], names, ok)
+
+      # Part 04's own copy failed: it is gone with no copy anywhere.
+      run =
+        Ash.Seed.update!(run, %{
+          artifacts:
+            Enum.map(run.artifacts, fn
+              %{kind: :media, parts: parts} = media ->
+                %{media | parts: List.update_at(parts, 3, &Map.put(&1, "destinations", failed))}
+
+              db ->
+                db
+            end)
+        })
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      row = "#backup-run-#{run.id}"
+      assert has_element?(lv, ~s|#{row} [data-presence="mixed"]|)
+
+      assert has_element?(
+               lv,
+               ~s|#{row} [data-role="parts-off-site"][data-kind="media"]|,
+               "2 parts missing here, copied off-site: 02, 03"
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#{row} [data-role="parts-missing"][data-kind="media"]|,
+               "1 part missing: 04"
+             )
+
+      refute has_element?(lv, ~s|#{row} [data-role="parts-missing"]|, "02")
+    end
+
+    test "every gone part copied off-site: no plain missing-parts chip", %{conn: conn, dir: dir} do
+      stamp = "20260105-030000"
+      write_artifact!(dir, "kiln-db-#{stamp}.dump")
+      names = Backups.Artifact.set_names(stamp, 3)
+      ok = %{"local" => %{"status" => "ok"}, "rclone:r" => %{"status" => "ok"}}
+      run = media_run!(dir, stamp, Enum.take(names, 2), names, ok)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      row = "#backup-run-#{run.id}"
+
+      assert has_element?(
+               lv,
+               ~s|#{row} [data-role="parts-off-site"]|,
+               "1 part missing here, copied off-site: 03"
+             )
+
+      refute has_element?(lv, ~s|#{row} [data-role="parts-missing"]|)
+    end
+
+    # #2940: "couldn't check" has a tip, whichever of its three causes.
+    test "a row that couldn't be checked explains why", %{conn: conn, dir: dir} do
+      run = seed_run!(dir, 1, stamp: "20260101-010000", file?: false)
+      # A file where the directory should be: unlistable for every user.
+      File.rm_rf!(Path.join(dir, "db"))
+      File.write!(Path.join(dir, "db"), "")
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(lv, ~s|#backup-run-#{run.id} [data-presence="unknown"]|)
+
+      assert has_element?(
+               lv,
+               "#presence-help-#{run.id}",
+               "couldn't read this server's backup directory, or one of these files in it"
+             )
+
+      assert has_element?(lv, "#presence-help-#{run.id}-title", "couldn't check")
+
+      assert has_element?(
+               lv,
+               ~s|#presence-help-#{run.id} a[href$="backups.md#backup-history-2217"]|
+             )
+    end
+
+    # An unreadable directory changes how the rest is judged, so its tip
+    # comes ahead of missing's.
+    test "a row with one artifact unchecked and one missing explains couldn't check",
+         %{conn: conn, dir: dir} do
+      stamp = "20260105-030000"
+      [single] = Backups.Artifact.set_names(stamp, 1)
+      run = media_run!(dir, stamp, [], [single], %{"local" => %{"status" => "ok"}})
+      File.rm_rf!(Path.join(dir, "db"))
+      File.write!(Path.join(dir, "db"), "")
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      row = "#backup-run-#{run.id}"
+
+      assert has_element?(
+               lv,
+               ~s|#{row} [data-role="artifact-presence"][data-kind="db"][data-presence="unknown"]|,
+               "Database: couldn't check"
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#{row} [data-role="artifact-presence"][data-kind="media"][data-presence="missing"]|,
+               "Media: missing"
+             )
+
+      assert has_element?(lv, "#presence-help-#{run.id}-title", "couldn't check")
+      assert has_element?(lv, "#presence-help-#{run.id}", "a stale network mount")
+      refute has_element?(lv, "#presence-help-#{run.id}", "nothing recorded why")
+    end
+
+    test "a disk read that crashed explains couldn't check on every row", %{
+      conn: conn,
+      dir: dir
+    } do
+      # VM-global env: the module is `async: false`.
+      Application.put_env(:kiln_cms, KilnCMSWeb.BackupLive,
+        disk_view: KilnCMSWeb.BackupLiveTest.CrashingDiskView
+      )
+
+      on_exit(fn -> Application.delete_env(:kiln_cms, KilnCMSWeb.BackupLive) end)
+      run = seed_run!(dir, 1)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(lv, "#backup-disk-failed")
+      assert has_element?(lv, ~s|#backup-run-#{run.id} [data-presence="unknown"]|)
+      assert has_element?(lv, "#presence-help-#{run.id}", "failed outright")
+    end
+
+    test "a row that couldn't be checked in time explains why", %{conn: conn, dir: dir} do
+      stall_disk!(disk_timeout_ms: 0)
+      run = seed_run!(dir, 1)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups")
+      assert_receive {:disk_read, pid, _ids}
+
+      assert has_element?(lv, ~s|#backup-run-#{run.id} [data-presence="timeout"]|)
+      assert has_element?(lv, "#presence-help-#{run.id}-title", "couldn't check in time")
+
+      assert has_element?(
+               lv,
+               "#presence-help-#{run.id}",
+               "didn't answer within 1 second (a slow or hung mount)"
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#presence-help-#{run.id} a[href$="backups.md#what-history-reads-from-disk"]|
+             )
+
+      # A refresh while the read is out waits for it, then reads once more;
+      # the answer fills the row in, and the tip goes with the chip.
+      send(lv.pid, :refresh)
+      release(pid)
+      render(lv)
+      assert_receive {:disk_read, second, _ids}
+      release(second)
+
+      assert has_element?(lv, ~s|#backup-run-#{run.id} [data-presence="present"]|)
+      refute has_element?(lv, "#presence-help-#{run.id}")
     end
 
     test "an app-made run has no imported-backup tip", %{conn: conn, dir: dir} do
@@ -3395,6 +3583,11 @@ defmodule KilnCMSWeb.BackupLiveTest do
                "#overview-backup-warning [data-role=backup-headline]",
                "The last backup reached 2 of 3 off-site destinations — Bucket failed"
              )
+
+      # #3005: the backup ran on time, so no line is about the schedule.
+      refute has_element?(lv, "#overview-backup-warning [data-role=backup-schedule]")
+      refute has_element?(lv, "#overview-backup-warning [data-role=backup-next]")
+      refute has_element?(lv, "#overview-backup-warning", "the server's cron job")
     end
 
     test "and is hidden from an org admin who is not a platform admin", %{conn: conn} do
@@ -3786,6 +3979,12 @@ defmodule KilnCMSWeb.BackupLiveTest do
                "#overview-backup-warning [data-role=backup-headline]",
                "Retention was skipped on the backup of 2026-11-16 02:00 UTC"
              )
+
+      # #3005: nothing is overdue, so no line sends them to the schedule.
+      refute has_element?(lv, "#overview-backup-warning [data-role=backup-schedule]")
+      refute has_element?(lv, "#overview-backup-warning [data-role=backup-next]")
+      refute has_element?(lv, "#overview-backup-warning", "ask whoever runs this server")
+      assert has_element?(lv, "#overview-backup-warning a[data-role=open-backups]")
     end
 
     test "Home: no strip for a clean run", %{conn: conn} do

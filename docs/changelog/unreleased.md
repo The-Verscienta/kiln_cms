@@ -7,6 +7,23 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="backup-history-home-polish"></a>
+
+- **History and Home wording (#2940, #2942, #3005).**
+  The **couldn't check** and **couldn't check in time** chips on a History
+  row now have a **?** tip saying the app couldn't read the backup
+  directory (or a file in it, or its read failed or timed out) and so
+  claims nothing about those files. A media set with some parts on disk and
+  the rest only off-site still reads missing, but a separate chip now says
+  "2 parts missing here, copied off-site: 02, 03", and "N parts missing"
+  lists only the parts with no copy anywhere. On Home, the red backup strip
+  showed "Scheduled backups run from the server's cron job…" even when its
+  only cause was a retention notice or a partly off-site backup; the
+  schedule and cron lines now appear only when a backup is failed or
+  overdue. ADR 0072 records how History judges what is on disk,
+  superseding ADR 0033's list of states.
+  ([#2940](https://github.com/The-Verscienta/kiln_cms/issues/2940), [#2942](https://github.com/The-Verscienta/kiln_cms/issues/2942), [#3005](https://github.com/The-Verscienta/kiln_cms/issues/3005))
+
 <a id="backup-schedule-tab-followups"></a>
 
 - **Three Schedule tab fixes (#2983, #2985, #2986).**

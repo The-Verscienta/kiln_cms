@@ -2814,6 +2814,13 @@ one) gain an **Open the schedule** link beside **Open Backups**, and say:
 Without an enabled schedule, the strips say scheduled backups are the host's
 cron job, as before.
 
+The red strip says any of these lines only when some component was never
+backed up, failed, or is stale. When its only lines are about retention
+([When retention is skipped or stops](#when-retention-is-skipped-or-stops))
+or the off-site copy
+([When a backup reaches only some destinations](#when-a-backup-reaches-only-some-destinations)),
+the backups are running on time, so it keeps just its links (#3005).
+
 ### When a schedule fires
 
 `KilnCMS.Backups.Scheduler` runs every minute on the `scheduling` queue
@@ -4988,14 +4995,20 @@ can differ:
 - **A part of a media set is gone.** When some parts are still here and
   others aren't, the set reads `missing` and a chip names them:
   `1 part missing: 02` or `2 parts missing: 02, 05` (hover it for the file
-  names). A part counts as gone even if its off-site copy succeeded: the set
-  on this disk can't be restored as it is.
-- A row whose state needs explaining (`missing`, `expired`,
-  `probably expired`) has a **?** tip ("About these files") saying why, with
-  a link to this section.
+  names). A gone part whose off-site copy succeeded still counts as gone,
+  since the set on this disk can't be restored as it is, but it is named in
+  a chip of its own: `2 parts missing here, copied off-site: 02, 03`. A set
+  can show both chips.
+- A row whose state needs explaining (`missing`, `couldn't check`,
+  `couldn't check in time`, `expired`, `probably expired`) has a **?** tip
+  ("About these files") saying why, with a link to this section (to
+  [What History reads from disk](#what-history-reads-from-disk) for
+  `couldn't check in time`).
 
 "Missing" is worked out when the page is shown, for the 25 rows in view only; it
-is never stored, so a restored file turns back to `on disk`. The reasoning is in [ADR 0033](decisions/0033-backup-history-is-rows-only-the-backup-pipeline-writes-and-the-files-stay-the-truth.md).
+is never stored, so a restored file turns back to `on disk`. The reasoning is in [ADR 0033](decisions/0033-backup-history-is-rows-only-the-backup-pipeline-writes-and-the-files-stay-the-truth.md),
+and how each state is judged in
+[ADR 0072](decisions/0072-backup-presence-is-judged-per-artifact-off-the-page-and-expired-means-crons-prune-would-have-removed-it.md).
 
 **Multi-node.** `BACKUP_DIR` belongs to one host. A run recorded by another node
 reads `missing` on this one. That is the node's view, not data loss.
