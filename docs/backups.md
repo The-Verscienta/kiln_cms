@@ -1846,21 +1846,39 @@ looks at the lock:
 
 **Recording an interrupted backup doesn't hold up the heartbeat (#3078).**
 Once a take-back with no attempts left, a step whose job ended, or a step
-stranded in a directory queue has released the lock, what is left reads and
-writes `BACKUP_DIR`: the run is failed and its failure manifest written, a
-finish that had finished is completed, a re-send's work directory removed.
-That runs in a background task, so on a hung mount the heartbeat keeps
-beating and sweeping, and a backup request that swept first doesn't wait on
-it. The lock is free and the queued backup has started by then; the run reads
-`Running` until the task finishes. The tasks run one at a time, so a hung
-directory holds one blocked task, and up to 20 more wait behind it in order.
+stranded in a directory queue has released the lock, the run is failed at
+once, from what its row holds. What is left reads and writes `BACKUP_DIR`:
+the failure manifest, a re-send's work directory, and all of an interrupted
+`finish` step's record, since whether it had in fact finished is read from
+the manifest. That runs in a background task, so on a hung mount the
+heartbeat keeps beating, and a backup request that swept first doesn't wait
+on it. The tasks run one at a time, so a hung directory holds one blocked
+task, and up to 20 more wait behind it in order.
+
+- **A late failure manifest never replaces a newer one.** It is put in place
+  only while the lock is still as the interrupt left it (no backup has held
+  it since) and while `manifest.json` names no later backup, both checked
+  under the lock right before the file is renamed into place.
+- **A node whose record hangs stops sweeping.** While one of its tasks has
+  run for more than a minute, its heartbeat leaves the lock sweep (take-backs,
+  ended jobs, stranded steps) to the other nodes, which can still write their
+  records. A backup request on that node still sweeps first.
+- **An interrupted `finish` whose record is dropped** (the wait is full)
+  reads `Running` until the stale-run check fails it as "Interrupted: the job
+  was killed or the node stopped", about 2 hours 15 minutes after its last
+  update. Only then can it be resumed. Any other step's run is already
+  failed; a dropped record only leaves its failure manifest unwritten, or a
+  re-send's work directory in place.
 
 | Log line | Level | Meaning |
 |---|---|---|
-| "Backup `<stamp>`: recording it as interrupted has taken more than 60 s (a hung BACKUP_DIR?). Records of other interrupted backups wait behind it; the heartbeat and the lock sweep go on." | warning | The directory isn't answering. Once per task. |
-| "Backup `<stamp>`: recorded as interrupted after N s" | info | That slow task finished. |
-| "Backup `<stamp>`: not recorded as interrupted. 20 earlier records are waiting behind one that has run for N s (a hung BACKUP_DIR?). Its run stays Running; Resume it once the directory answers." | error | The wait is full. The run stays `Running` and quiet, so **Resume** treats it as interrupted. |
-| "Backup `<stamp>`: recording it as interrupted crashed: …" | error | The task failed; the next one runs. |
+| "Backup `<stamp>`: the interrupt record has taken more than 60 s (a hung BACKUP_DIR?). Records of other interrupted backups wait behind it, and this node leaves the lock sweep to the others." | warning | The directory isn't answering. Once per task. |
+| "Backup heartbeat: an interrupt record on this node has run for over a minute (a hung BACKUP_DIR?), so this node leaves the backup lock sweep to the other nodes until it finishes" | warning | Once, when this node stops sweeping. |
+| "Backup heartbeat: the interrupt records here caught up; sweeping again" | info | Once, when it sweeps again. |
+| "Backup `<stamp>`: the interrupt record finished after N s" | info | That slow task finished. |
+| "Backup `<stamp>`: its failure manifest was not written: another backup has used the backup lock since it was interrupted, or the manifest names a later one" | info | The record ran late; the newer manifest stays. |
+| "Backup `<stamp>`: dropped from the interrupt records, 20 are waiting behind one that has run for N s (a hung BACKUP_DIR?). …" | error for a `finish`, else warning | The wait is full. The rest of the line says what is left undone (above). |
+| "Backup `<stamp>`: the interrupt record crashed: …" | error | The task failed; the next one runs. |
 
 A resume's start, which has no stamp on the lock yet, is named "the resume
 of `<stamp>`" in these lines and in the take-back lines above.

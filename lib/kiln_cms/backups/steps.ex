@@ -1157,24 +1157,69 @@ defmodule KilnCMS.Backups.Steps do
   @doc """
   Record a chain that was interrupted from outside (its node stopped, its job
   ended without finishing): fail its Run with `message` and, when this node
-  has the chain's backup directory and its state, write the failure manifest.
-  Best-effort throughout.
+  has the chain's backup directory and its state, write the failure manifest
+  (`interrupt_files/5`). Best-effort throughout. What a finish interrupted
+  from outside does when it had not finished (`interrupt_finish/5`); every
+  other step's interrupt is split into `interrupt_run/3`, in the caller,
+  and `interrupt_files/5`, in `KilnCMS.Backups.Interrupts`' task (#3078).
+
+  `opts`: `released:` (`%{epoch: epoch}`, the lock's epoch once the
+  interrupt released it), which fences the failure manifest
+  (`interrupt_files/5`).
 
   A re-send's state (#2949) holds its chain under `"resend_chain"`, never
   `"chain"`, so it never matches here: no node, of this release or an older
   one, writes a failure manifest for a re-send. `Chain` routes a re-send to
   `resend_interrupted/5` instead.
   """
-  @spec interrupt(String.t(), String.t(), String.t() | nil, String.t()) :: :ok
-  def interrupt(stamp, chain, dir_id, message) do
-    dir = Backups.dir()
-    work_dir = WorkState.path(dir, stamp)
-
-    here? = dir_id != nil and DirId.current(dir) == {:ok, dir_id}
-
+  @spec interrupt(String.t(), String.t(), String.t() | nil, String.t(), keyword()) :: :ok
+  def interrupt(stamp, chain, dir_id, message, opts \\ []) do
     rec =
-      with true <- here?,
-           {:ok, %{"chain" => ^chain} = state} <- WorkState.read(work_dir) do
+      case interrupt_files(stamp, chain, dir_id, message, opts) do
+        {:here, state} -> Recorder.load(stamp, chain, state["rec"])
+        :elsewhere -> Recorder.from_run(stamp, chain)
+      end
+
+    rec |> Recorder.log(:error, "interrupt", message) |> Recorder.fail(message)
+    :ok
+  end
+
+  @doc """
+  The database part of `interrupt/5` (#3078): the Run of `stamp`, if it is
+  still `chain`'s and running, failed with `message`, from what its row
+  holds. No `BACKUP_DIR` I/O, so `Chain` runs it in the caller right after
+  the lock's commit.
+  """
+  @spec interrupt_run(String.t(), String.t(), String.t()) :: :ok
+  def interrupt_run(stamp, chain, message) do
+    stamp
+    |> Recorder.from_run(chain)
+    |> Recorder.log(:error, "interrupt", message)
+    |> Recorder.fail(message)
+
+    :ok
+  end
+
+  @doc """
+  The file part of `interrupt/5` (#3078): when this node has the chain's
+  backup directory and its `state.json`, write the failure manifest.
+  `{:here, state}` when this node has them (whether or not the manifest was
+  put in place), `:elsewhere` otherwise.
+
+  With `released: %{epoch: epoch}` in `opts`, the manifest is put in place
+  only while the lock is still as the interrupt left it, free at `epoch`,
+  and the manifest there names no later stamp, checked under the lock
+  right before the rename (`Chain.released_rename/4`): a record that runs
+  late must not write over the manifest of a backup that ran since.
+  """
+  @spec interrupt_files(String.t(), String.t(), String.t() | nil, String.t(), keyword()) ::
+          {:here, map()} | :elsewhere
+  def interrupt_files(stamp, chain, dir_id, message, opts \\ []) do
+    dir = Backups.dir()
+
+    with true <- dir_id != nil and DirId.current(dir) == {:ok, dir_id},
+         {:ok, %{"chain" => ^chain} = state} <- WorkState.read(WorkState.path(dir, stamp)) do
+      written =
         record_failure(
           dir,
           stamp,
@@ -1183,17 +1228,26 @@ defmodule KilnCMS.Backups.Steps do
           message,
           outputs(state),
           components(state),
-          []
+          released_opts(opts[:released], stamp)
         )
 
-        Recorder.load(stamp, chain, state["rec"])
-      else
-        _ -> Recorder.from_run(stamp, chain)
+      if written == {:error, :superseded} do
+        Logger.info(
+          "Backup #{stamp}: its failure manifest was not written: another backup has " <>
+            "used the backup lock since it was interrupted, or the manifest names a later one"
+        )
       end
 
-    rec |> Recorder.log(:error, "interrupt", message) |> Recorder.fail(message)
-    :ok
+      {:here, state}
+    else
+      _ -> :elsewhere
+    end
   end
+
+  defp released_opts(nil, _stamp), do: []
+
+  defp released_opts(released, stamp),
+    do: [rename: &Chain.released_rename(released, stamp, &1, &2)]
 
   @doc """
   Record a chain that was interrupted from outside at its finish step
@@ -1203,13 +1257,13 @@ defmodule KilnCMS.Backups.Steps do
   closed if still running, its work directory removed when this node has it,
   the markers synced (`Chain.sync_last_good/2`: skipped while another chain
   holds the lock, which syncs them itself), and the chain settled `:ok`;
-  that returns `:finished`. Anything else is `interrupt/4`, as is a Run that
-  couldn't be read: the lock is gone, so nothing would retry this, and
-  `interrupt/4` closes only a Run it can read.
+  that returns `:finished`. Anything else is `interrupt/5` (with `opts`), as
+  is a Run that couldn't be read: the lock is gone, so nothing would retry
+  this, and `interrupt/5` closes only a Run it can read.
   """
-  @spec interrupt_finish(String.t(), String.t(), String.t() | nil, String.t()) ::
+  @spec interrupt_finish(String.t(), String.t(), String.t() | nil, String.t(), keyword()) ::
           :ok | :finished
-  def interrupt_finish(stamp, chain, dir_id, message) do
+  def interrupt_finish(stamp, chain, dir_id, message, opts \\ []) do
     case finish_verdict(stamp, chain) do
       {:done, _rec} ->
         finished_from_outside(stamp, chain, dir_id)
@@ -1219,7 +1273,7 @@ defmodule KilnCMS.Backups.Steps do
         finished_from_outside(stamp, chain, dir_id)
 
       :lost ->
-        interrupt(stamp, chain, dir_id, message)
+        interrupt(stamp, chain, dir_id, message, opts)
 
       {:error, reason} ->
         Logger.warning(
@@ -1227,7 +1281,7 @@ defmodule KilnCMS.Backups.Steps do
             "as interrupted: #{inspect(reason, limit: 5)}"
         )
 
-        interrupt(stamp, chain, dir_id, message)
+        interrupt(stamp, chain, dir_id, message, opts)
     end
   end
 
@@ -3537,9 +3591,9 @@ defmodule KilnCMS.Backups.Steps do
   # ended without finishing, or no node with its backup directory picked it
   # up (`Chain`'s reclaim, reap and stranded sweep, once the lock is
   # released). Stopped, never failed: the run says so, keeps its status and
-  # what was sent, and gets no failure manifest. The work directory goes
-  # when this node has it.
-  # sobelow_skip ["Traversal.FileModule"]
+  # what was sent, and gets no failure manifest. No `BACKUP_DIR` I/O, so it
+  # runs in the caller (#3078); the work directory is
+  # `resend_interrupted_files/3`'s, in `Interrupts`' task.
   @spec resend_interrupted(
           String.t(),
           String.t(),
@@ -3548,7 +3602,7 @@ defmodule KilnCMS.Backups.Steps do
           String.t()
         ) ::
           :ok
-  def resend_interrupted(stamp, chain, dir_id, part, message) do
+  def resend_interrupted(stamp, chain, _dir_id, part, message) do
     Logger.warning("Backup re-send of #{stamp} stopped at part #{part}: #{message}")
 
     rec =
@@ -3556,13 +3610,6 @@ defmodule KilnCMS.Backups.Steps do
       |> Recorder.from_run(chain)
       |> Recorder.log(:error, "resend", "Re-send stopped: #{message}")
       |> Recorder.resend_progress()
-
-    dir = Backups.dir()
-    work_dir = WorkState.path(dir, stamp)
-
-    if dir_id != nil and DirId.current(dir) == {:ok, dir_id} and
-         match?({:ok, %{"kind" => "resend", "resend_chain" => ^chain}}, WorkState.read(work_dir)),
-       do: File.rm_rf(work_dir)
 
     {reached, total} = resend_counts(rec)
 
@@ -3575,6 +3622,22 @@ defmodule KilnCMS.Backups.Steps do
     )
 
     settled(%{chain: chain, stamp: stamp}, {:error, :interrupted})
+    :ok
+  end
+
+  @doc false
+  # The file part of `resend_interrupted/5` (#3078): the re-send's work
+  # directory goes when this node has it.
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec resend_interrupted_files(String.t(), String.t(), String.t() | nil) :: :ok
+  def resend_interrupted_files(stamp, chain, dir_id) do
+    dir = Backups.dir()
+    work_dir = WorkState.path(dir, stamp)
+
+    if dir_id != nil and DirId.current(dir) == {:ok, dir_id} and
+         match?({:ok, %{"kind" => "resend", "resend_chain" => ^chain}}, WorkState.read(work_dir)),
+       do: File.rm_rf(work_dir)
+
     :ok
   end
 

@@ -16,7 +16,17 @@ defmodule KilnCMS.Backups.DirQueuesTest do
   import ExUnit.CaptureLog
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, DirId, DirQueues, Heartbeat, MarkerSyncWorker, StepWorker}
+
+  alias KilnCMS.Backups.{
+    Chain,
+    DirId,
+    DirQueues,
+    Heartbeat,
+    Manifest,
+    MarkerSyncWorker,
+    StepWorker
+  }
+
   alias KilnCMS.Repo
   alias KilnCMS.Test.{BackupChain, BackupCluster, DirQueueControl}
 
@@ -845,6 +855,42 @@ defmodule KilnCMS.Backups.DirQueuesTest do
       assert error ==
                "Interrupted: no server with its backup directory (id #{a_id}) picked up the " <>
                  "dump step for 30 minutes"
+    end
+
+    # #3078: the run is failed in the sweep; its failure manifest is written
+    # in `Interrupts`' task.
+    test "(ii) through the interrupt task: the run fails at once, the manifest after", %{
+      holder: holder,
+      q: q,
+      stamp: stamp
+    } do
+      parent = self()
+
+      put_config(
+        interrupts: :async,
+        before_interrupt: fn label ->
+          send(parent, {:interrupt, self(), label})
+
+          receive do
+            :release -> :ok
+          end
+        end
+      )
+
+      on_exit(fn ->
+        Enum.each(Task.Supervisor.children(KilnCMS.Backups.InterruptTasks), &send(&1, :release))
+        KilnCMS.Backups.Interrupts.await_idle()
+      end)
+
+      park!(holder.id, q, 1_801)
+      assert {:ok, {:interrupted, _}} = Chain.sweep_stranded()
+      assert %{status: :failed} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+      assert_receive {:interrupt, task, ^stamp}
+      refute match?(%Manifest{stamp: ^stamp}, Manifest.read(Backups.dir()))
+
+      send(task, :release)
+      assert KilnCMS.Backups.Interrupts.await_idle() == :ok
+      assert %Manifest{stamp: ^stamp, ok: false} = Manifest.read(Backups.dir())
     end
 
     # A Lifeline-rescued job keeps its old `scheduled_at`: hours "waiting".

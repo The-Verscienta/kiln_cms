@@ -17,7 +17,7 @@ defmodule KilnCMS.Backups.HeartbeatTest do
   import ExUnit.CaptureLog
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, DirId, Fence, Heartbeat, Interrupts, StepWorker}
+  alias KilnCMS.Backups.{Chain, DirId, Fence, Heartbeat, Interrupts, Manifest, StepWorker}
   alias KilnCMS.Repo
   alias KilnCMS.Test.BackupChain
 
@@ -83,6 +83,39 @@ defmodule KilnCMS.Backups.HeartbeatTest do
         set: [beat_at: DateTime.add(DateTime.utc_now(), -ago, :second)]
       )
     end
+  end
+
+  # Interrupt records run in `Interrupts`' task (#3078), each announcing
+  # itself and waiting for `:release`.
+  defp blocking_interrupts! do
+    parent = self()
+
+    put_backups_env(
+      interrupts: :async,
+      before_interrupt: fn label ->
+        send(parent, {:interrupt, self(), label})
+
+        receive do
+          :release -> :ok
+        end
+      end
+    )
+
+    on_exit(fn ->
+      Enum.each(Task.Supervisor.children(KilnCMS.Backups.InterruptTasks), &send(&1, :release))
+      Interrupts.await_idle()
+    end)
+  end
+
+  # A dump step on a node gone for 10 minutes, with no attempts left, and a
+  # scheduled backup queued behind it.
+  defp exhausted_on_gone_node! do
+    %{job: job} = dump = at_dump()
+    {:ok, %{status: :queued}} = request(trigger: "schedule")
+    Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id), set: [attempt: 3])
+    executing!(Repo.get!(Oban.Job, job.id), "gone@node", 600)
+    beat!("gone@node", Ash.UUID.generate(), 600)
+    dump
   end
 
   describe "the beat" do
@@ -252,58 +285,118 @@ defmodule KilnCMS.Backups.HeartbeatTest do
 
     # #3078: what follows the reclaim's commit touches BACKUP_DIR, so on a
     # hung mount it blocks; it runs in `Interrupts`' task, never the tick.
+    # The run itself is failed in the tick, with no BACKUP_DIR I/O.
     test "a blocked record of an interrupted backup doesn't hold up the beat or the sweep", %{
       state: state
     } do
-      parent = self()
+      blocking_interrupts!()
+      %{stamp: stamp} = exhausted_on_gone_node!()
 
-      put_backups_env(
-        interrupts: :async,
-        before_interrupt: fn label ->
-          send(parent, {:interrupt, self(), label})
-
-          receive do
-            :release -> :ok
-          end
-        end
-      )
-
-      on_exit(fn ->
-        Enum.each(Task.Supervisor.children(KilnCMS.Backups.InterruptTasks), &send(&1, :release))
-        Interrupts.await_idle()
-      end)
-
-      %{stamp: stamp, job: job} = at_dump()
-      {:ok, %{status: :queued}} = request(trigger: "schedule")
-      Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id), set: [attempt: 3])
-      executing!(Repo.get!(Oban.Job, job.id), "gone@node", 600)
-      beat!("gone@node", Ash.UUID.generate(), 600)
-
-      {micros, state} = :timer.tc(fn -> Heartbeat.tick(state) end)
+      {{micros, state}, log} =
+        with_log([level: :error], fn -> :timer.tc(fn -> Heartbeat.tick(state) end) end)
 
       assert micros < 2_000_000
       assert %{beat_ok?: true} = state
       assert beat_of("this@node").boot_id == state.boot_id
-      # The lock was released and the queued request promoted in the tick.
+      # The lock was released, the queued request promoted and the run failed
+      # in the tick.
       assert %{trigger: "schedule"} = Backups.in_flight()
-
-      assert_receive {:interrupt, task, ^stamp}
-      assert %{status: :running} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
-
-      # Still blocked: the next tick beats and sweeps too.
-      assert %{beat_ok?: true} = Heartbeat.tick(state)
-      refute_received {:interrupt, _, _}
-
-      log =
-        capture_log([level: :error], fn ->
-          send(task, :release)
-          assert Interrupts.await_idle() == :ok
-        end)
 
       assert %{status: :failed, error: "Interrupted: node gone@node stopped responding"} =
                Backups.get_run_by_stamp!(stamp, actor: Backups.system())
 
       assert log =~ "has no attempts left: the backup failed"
+
+      # Its files wait in the task, blocked; the next tick beats and sweeps too.
+      assert_receive {:interrupt, task, ^stamp}
+      refute File.exists?(Manifest.path(Backups.dir()))
+      assert %{beat_ok?: true} = Heartbeat.tick(state)
+      refute_received {:interrupt, _, _}
+
+      send(task, :release)
+      assert Interrupts.await_idle() == :ok
+    end
+
+    # #3078: the record runs late, after the promoted backup succeeded. Its
+    # failure manifest must not replace that backup's.
+    test "a late interrupt record leaves a newer backup's manifest alone", %{state: state} do
+      blocking_interrupts!()
+      %{stamp: stamp} = exhausted_on_gone_node!()
+
+      Heartbeat.tick(state)
+      assert_receive {:interrupt, task, ^stamp}
+
+      # The promoted backup runs to the end and writes its own manifest.
+      %{chain: promoted} = Backups.in_flight()
+      BackupChain.listen(fn -> BackupChain.drain() end)
+      assert BackupChain.settled(promoted) == :ok
+      assert Backups.in_flight() == nil
+      assert %Manifest{stamp: newer, ok: true} = Manifest.read(Backups.dir())
+      assert newer != stamp
+
+      # The test env logs at `:warning`; this reaches the info line.
+      Logger.put_module_level(KilnCMS.Backups.Steps, :info)
+      on_exit(fn -> Logger.delete_module_level(KilnCMS.Backups.Steps) end)
+
+      log =
+        capture_log([level: :info], fn ->
+          send(task, :release)
+          assert Interrupts.await_idle() == :ok
+        end)
+
+      assert log =~ "Backup #{stamp}: its failure manifest was not written"
+      assert %Manifest{stamp: ^newer, ok: true} = Manifest.read(Backups.dir())
+    end
+
+    # #3078: the reap goes through the task too; with the lock still as the
+    # reap left it, the failure manifest is written.
+    test "a reap's record runs in the task and writes the failure manifest", %{state: _state} do
+      blocking_interrupts!()
+      %{stamp: stamp, job: job} = at_dump()
+      Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id), set: [state: "discarded"])
+
+      assert {:ok, {:orphaned, _}} = Chain.reap()
+      assert %{status: :failed} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+      assert_receive {:interrupt, task, ^stamp}
+      refute match?(%Manifest{stamp: ^stamp}, Manifest.read(Backups.dir()))
+
+      send(task, :release)
+      assert Interrupts.await_idle() == :ok
+      assert %Manifest{stamp: ^stamp, ok: false} = Manifest.read(Backups.dir())
+    end
+
+    # #3078: while a record here hangs, this node leaves the sweep to others.
+    test "a stalled interrupt record makes the tick skip the lock sweep, once logged", %{
+      state: state
+    } do
+      blocking_interrupts!()
+      put_backups_env(interrupt_slow_ms: 0)
+      Interrupts.run("blocked", fn -> :ok end)
+      assert_receive {:interrupt, task, "blocked"}
+
+      %{job: job} = at_dump()
+      {:ok, _zombie} = Chain.begin_step(job)
+      executing!(job, "dead@node", 600)
+      beat!("dead@node", Backups.boot_id(), 600)
+
+      {state, log} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
+      assert log =~ "leaves the backup lock sweep to the other nodes"
+      assert %{beat_ok?: true, sweep_skipped?: true} = state
+      assert lock().step_job_id == job.id
+
+      {state, again} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
+      refute again =~ "leaves the backup lock sweep"
+      assert lock().step_job_id == job.id
+
+      send(task, :release)
+      assert Interrupts.await_idle() == :ok
+
+      Logger.put_module_level(Heartbeat, :info)
+      on_exit(fn -> Logger.delete_module_level(Heartbeat) end)
+      {state, resumed} = with_log([level: :info], fn -> Heartbeat.tick(state) end)
+      assert resumed =~ "caught up; sweeping again"
+      assert %{sweep_skipped?: false} = state
+      assert lock().step_job_id != job.id
     end
 
     test "a live step is left alone", %{state: state} do
@@ -558,7 +651,7 @@ defmodule KilnCMS.Backups.HeartbeatTest do
       state: state
     } do
       {_id, state} = read_once!(dir, state)
-      beat!("this@node", state.boot_id, Chain.stale_after_s() + 1)
+      beat!("this@node", state.boot_id, Chain.stale_after_s() + 120)
       blocking_reader!()
 
       restarted = Heartbeat.restore_last_dir_id(Heartbeat.new_state(node: "this@node"))
@@ -581,13 +674,31 @@ defmodule KilnCMS.Backups.HeartbeatTest do
       fresh = %{Heartbeat.new_state(node: "this@node") | last_dir_id: read}
       assert Heartbeat.restore_last_dir_id(fresh).last_dir_id == read
 
-      # A row from a release before #2817 carries `dir_id` only.
+      # The id the last beat read comes first; a row from a release before
+      # #2817 carries only it.
+      other = Ash.UUID.generate()
+
+      Repo.update_all(from(b in "backup_node_beats", where: b.node == "this@node"),
+        set: [last_dir_id: Ecto.UUID.dump!(other)]
+      )
+
+      assert Heartbeat.restore_last_dir_id(Heartbeat.new_state(node: "this@node")).last_dir_id ==
+               id
+
       Repo.update_all(from(b in "backup_node_beats", where: b.node == "this@node"),
         set: [last_dir_id: nil]
       )
 
       assert Heartbeat.restore_last_dir_id(Heartbeat.new_state(node: "this@node")).last_dir_id ==
                id
+
+      # A stalled read beats with no `dir_id`: the last one read stands.
+      Repo.update_all(from(b in "backup_node_beats", where: b.node == "this@node"),
+        set: [dir_id: nil, last_dir_id: Ecto.UUID.dump!(other)]
+      )
+
+      assert Heartbeat.restore_last_dir_id(Heartbeat.new_state(node: "this@node")).last_dir_id ==
+               other
 
       put_backups_env(live_beats_reader: fn _within_s -> {:error, :connection_refused} end)
 

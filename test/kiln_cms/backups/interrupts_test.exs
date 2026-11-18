@@ -48,7 +48,7 @@ defmodule KilnCMS.Backups.InterruptsTest do
 
   defp ran(parent, n), do: fn -> send(parent, {:ran, n}) end
 
-  test "runs in order behind a blocked one; past 20 waiting, one is dropped with an error", %{
+  test "runs in order behind a blocked one; past 20 waiting, one is dropped and logged", %{
     parent: parent
   } do
     assert Interrupts.run("blocked", ran(parent, 0)) == :ok
@@ -57,14 +57,20 @@ defmodule KilnCMS.Backups.InterruptsTest do
     for n <- 1..20, do: Interrupts.run("stamp-#{n}", ran(parent, n))
 
     log =
-      capture_log([level: :error], fn ->
-        Interrupts.run("stamp-21", ran(parent, 21))
-        # The cast is handled before this call.
+      capture_log([level: :warning], fn ->
+        Interrupts.run("stamp-21", ran(parent, 21),
+          dropped: {:error, "Its run reads Running until the stale-run check fails it."}
+        )
+
+        Interrupts.run("stamp-22", ran(parent, 22))
+        # The casts are handled before this call.
         assert Interrupts.await_idle(50) == :timeout
       end)
 
-    assert log =~ "Backup stamp-21: not recorded as interrupted"
-    assert log =~ "20 earlier records are waiting"
+    assert log =~
+             ~r/\[error\] Backup stamp-21: dropped from the interrupt records, 20 are waiting .*Its run reads Running until the stale-run check fails it\./
+
+    assert log =~ ~r/\[warning\] Backup stamp-22: dropped from the interrupt records/
     refute_received {:ran, _}
 
     send(blocked, :release)
@@ -79,6 +85,7 @@ defmodule KilnCMS.Backups.InterruptsTest do
     assert order == Enum.to_list(0..20)
 
     refute_received {:ran, 21}
+    refute_received {:ran, 22}
   end
 
   test "a crash is logged and the next one runs", %{parent: parent} do
@@ -89,7 +96,7 @@ defmodule KilnCMS.Backups.InterruptsTest do
         assert Interrupts.await_idle() == :ok
       end)
 
-    assert log =~ "Backup crashing: recording it as interrupted crashed"
+    assert log =~ "Backup crashing: the interrupt record crashed"
     assert_received {:ran, 1}
   end
 
@@ -100,6 +107,59 @@ defmodule KilnCMS.Backups.InterruptsTest do
     assert_receive {:blocked, blocked}
     send(blocked, :release)
     assert Interrupts.await_idle() == :ok
+  end
+
+  # A restarted `Interrupts` finds the task its predecessor left and starts
+  # no other until it ends: never two at once.
+  test "after a crash, the restarted process waits for the task left running", %{
+    parent: parent
+  } do
+    Interrupts.run("blocked", ran(parent, 0))
+    assert_receive {:blocked, blocked}
+
+    old = Process.whereis(Interrupts)
+    ref = Process.monitor(old)
+    Process.exit(old, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^old, :killed}
+    assert Process.alive?(blocked)
+
+    new = wait_for_restart(old)
+    assert new != old
+    assert Interrupts.stalled?() == false
+
+    Interrupts.run("after", ran(parent, 1))
+    assert Interrupts.await_idle(100) == :timeout
+    refute_received {:ran, _}
+
+    send(blocked, :release)
+    assert Interrupts.await_idle() == :ok
+    assert_received {:ran, 0}
+    assert_received {:ran, 1}
+  end
+
+  test "stalled? is true only while a task has run past the threshold" do
+    env = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+    Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(env, :interrupt_slow_ms, 0))
+
+    refute Interrupts.stalled?()
+    Interrupts.run("blocked", fn -> :ok end)
+    assert_receive {:blocked, blocked}
+    assert Interrupts.stalled?()
+
+    send(blocked, :release)
+    assert Interrupts.await_idle() == :ok
+    refute Interrupts.stalled?()
+  end
+
+  defp wait_for_restart(old, tries \\ 100) do
+    case Process.whereis(Interrupts) do
+      pid when is_pid(pid) and pid != old ->
+        pid
+
+      _ when tries > 0 ->
+        Process.sleep(10)
+        wait_for_restart(old, tries - 1)
+    end
   end
 
   test "inline mode runs the work in the caller", %{parent: parent} do

@@ -212,17 +212,23 @@ nodes could then write the same backup.
   "Amendment (2026-11-17, #2817)"). The marker sync still routes by `dir_id`
   only. A restarted heartbeat takes `last_dir_id` from its own beat row when
   that row beat within 180 seconds (#3091).
-- **The sweep's cleanup can no longer block the beat (#3078).** What a
-  reclaim with no attempts left, a reap or the stranded-step sweep does
-  after its commit (fail the run, write the failure manifest, complete a
-  finish that had finished, a re-send's tail) runs in a task under
+- **The sweep's cleanup can no longer block the beat (#3078).** A reclaim
+  with no attempts left, a reap or the stranded-step sweep fails the run in
+  the caller, right after its commit, with no `BACKUP_DIR` I/O. What is left
+  (the failure manifest, a re-send's work directory, and all of an
+  interrupted finish, whose verdict needs its files) runs in a task under
   `KilnCMS.Backups.InterruptTasks`, handed over by a cast to
-  `KilnCMS.Backups.Interrupts` that the tick never waits on. The same holds
-  for a backup request, which sweeps first. One task runs at a time, so a
-  hung directory holds one blocked process; up to 20 more wait in order, and
-  one past that is dropped with an error, its run left `Running` for
-  **Resume**. The lock's release, the requeue and the promotion stay in the
-  tick's transaction.
+  `KilnCMS.Backups.Interrupts` that the tick never waits on; so does a
+  backup request's, which sweeps first. One task runs at a time, so a hung
+  directory holds one blocked process; up to 20 more wait in order, and one
+  past that is dropped with a line in the log (an error for a finish, whose
+  run then waits for the stale-run check). A failure manifest written late is
+  fenced: it is renamed into place under the lock, only while the lock is
+  free at the epoch the release left and `manifest.json` names no later
+  stamp, so it never replaces a newer backup's. While a task has run for
+  over a minute the node's heartbeat skips the lock sweep and leaves it to
+  healthy nodes. The lock's release, the requeue and the promotion stay in
+  the sweep's transaction.
 
 The thresholds (90 and 180 seconds) and the reclaim are unchanged. Every
 other rule above is unchanged.

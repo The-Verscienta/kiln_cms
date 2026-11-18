@@ -29,11 +29,14 @@ defmodule KilnCMS.Backups.Heartbeat do
        which also sweeps the backup steps stranded in a directory queue
        (`KilnCMS.Backups.Chain.sweep_stranded/0`); the marker syncs stranded
        there are swept after it
-       (`KilnCMS.Backups.MarkerSyncWorker.sweep_stranded/0`). What a
-       backup interrupted there needs after the commit (its run failed, its
-       failure manifest, a finish completed) touches `BACKUP_DIR`, so it
-       runs in a task of `KilnCMS.Backups.Interrupts`, which the tick never
-       waits on (#3078).
+       (`KilnCMS.Backups.MarkerSyncWorker.sweep_stranded/0`). A backup
+       interrupted there has its run failed in the tick (a finish's, whose
+       verdict needs its files, in the task); the rest of its record
+       touches `BACKUP_DIR`, so it runs in a task of
+       `KilnCMS.Backups.Interrupts`, which the tick never waits on. While
+       one of those has run for over a minute (`Interrupts.stalled?/0`),
+       the tick skips the lock sweep, logged once each way, and leaves it to
+       the other nodes (#3078).
     5. Hourly, prune the beats of nodes gone for a day.
 
   ## Self-fence
@@ -74,8 +77,8 @@ defmodule KilnCMS.Backups.Heartbeat do
   doesn't resume from a live node whose read is stuck. The marker sync never
   routes by it. A read that finds no id file clears it.
 
-  A restarted heartbeat starts from the `last_dir_id` (or, from a release
-  before #2817, the `dir_id`) its node's own beat row holds, when that row
+  A restarted heartbeat starts from the id its node's own beat row holds
+  (its `dir_id`, the last read's, else its `last_dir_id`), when that row
   beat within `KilnCMS.Backups.Chain.stale_after_s/0` (180 s) by the
   database's clock (`restore_last_dir_id/1`, #3091): a source host that
   restarts and whose first read hangs still reports its directory, so a copy
@@ -145,7 +148,7 @@ defmodule KilnCMS.Backups.Heartbeat do
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, DirId, DirQueues, Fence, MarkerSyncWorker}
+  alias KilnCMS.Backups.{Chain, DirId, DirQueues, Fence, Interrupts, MarkerSyncWorker}
 
   require Logger
 
@@ -169,7 +172,8 @@ defmodule KilnCMS.Backups.Heartbeat do
           readers_full?: boolean(),
           last_dir_id: String.t() | nil,
           dir_id: String.t() | nil,
-          dir_queues: DirQueues.state()
+          dir_queues: DirQueues.state(),
+          sweep_skipped?: boolean()
         }
 
   @typep dir_id_task :: %{
@@ -261,13 +265,14 @@ defmodule KilnCMS.Backups.Heartbeat do
       readers_full?: false,
       last_dir_id: nil,
       dir_id: nil,
-      dir_queues: DirQueues.new_state()
+      dir_queues: DirQueues.new_state(),
+      sweep_skipped?: false
     }
   end
 
   @doc """
   `state` with the last backup-directory id its node's beat row holds
-  (`last_dir_id`, else `dir_id`), when that row beat within
+  (`dir_id`, the id its last beat read, else `last_dir_id`), when that row beat within
   `KilnCMS.Backups.Chain.stale_after_s/0` by the database's clock (#3091).
   What a restarted heartbeat reports as its last id until its first read
   answers. A state that already has one, a row that is older or has none,
@@ -278,7 +283,7 @@ defmodule KilnCMS.Backups.Heartbeat do
     case Backups.live_beats(Chain.stale_after_s()) do
       {:ok, beats} ->
         case Enum.find(beats, &(&1.node == state.node)) do
-          %{} = row -> %{state | last_dir_id: row.last_dir_id || row.dir_id}
+          %{} = row -> %{state | last_dir_id: row.dir_id || row.last_dir_id}
           nil -> state
         end
 
@@ -645,7 +650,33 @@ defmodule KilnCMS.Backups.Heartbeat do
   # The Lock's `:reclaim_stale` action: `Chain.reclaim_stale/0`,
   # `Chain.reap/0`, then `Chain.sweep_stranded/0` (each logs and reports what
   # it did); then the marker syncs stranded in a directory queue.
+  #
+  # Skipped while an interrupt record here has run for over a minute
+  # (`Interrupts.stalled?/0`, a hung BACKUP_DIR): this node would only queue
+  # the next one behind it, so the healthy nodes take the sweep (#3078).
   defp sweep(state) do
+    state = sweep_lock(state, Interrupts.stalled?())
+    sweep_marker_syncs()
+    state
+  end
+
+  defp sweep_lock(state, true = _stalled?) do
+    unless state.sweep_skipped? do
+      Logger.warning(
+        "Backup heartbeat: an interrupt record on this node has run for over a minute " <>
+          "(a hung BACKUP_DIR?), so this node leaves the backup lock sweep to the other " <>
+          "nodes until it finishes"
+      )
+    end
+
+    %{state | sweep_skipped?: true}
+  end
+
+  defp sweep_lock(state, false) do
+    if state.sweep_skipped? do
+      Logger.info("Backup heartbeat: the interrupt records here caught up; sweeping again")
+    end
+
     case Backups.reclaim_stale_backups(actor: Backups.system()) do
       {:ok, _outcome} ->
         :ok
@@ -654,12 +685,11 @@ defmodule KilnCMS.Backups.Heartbeat do
         Logger.warning("Backup lock sweep failed: #{Exception.message(error)}")
     end
 
-    sweep_marker_syncs()
-    state
+    %{state | sweep_skipped?: false}
   rescue
     error ->
       Logger.warning("Backup lock sweep failed: #{Exception.message(error)}")
-      state
+      %{state | sweep_skipped?: false}
   end
 
   defp sweep_marker_syncs do
