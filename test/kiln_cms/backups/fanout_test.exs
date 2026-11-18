@@ -16,7 +16,6 @@ defmodule KilnCMS.Backups.FanoutTest do
   """
   use KilnCMS.DataCase, async: false
 
-  import Ecto.Query
   import ExUnit.CaptureLog
   import KilnCMS.Test.BackupDestinations, only: [destination!: 3]
 
@@ -141,14 +140,7 @@ defmodule KilnCMS.Backups.FanoutTest do
 
   defp lock, do: Backups.backup_lock!(actor: Backups.system())
 
-  defp offsite_jobs do
-    Repo.all(
-      from(j in Oban.Job,
-        where: j.queue == "backup_steps" and fragment("?->>'step' = 'offsite'", j.args),
-        order_by: j.id
-      )
-    )
-  end
+  defp offsite_jobs, do: BackupChain.step_jobs(step: "offsite")
 
   defp offsite_job(part), do: Enum.find(offsite_jobs(), &(&1.args["part"] == part))
 
@@ -657,12 +649,7 @@ defmodule KilnCMS.Backups.FanoutTest do
 
       assert u.error =~ "couldn't read the backup destinations"
 
-      [start] =
-        Repo.all(
-          from(j in Oban.Job,
-            where: j.queue == "backup_steps" and fragment("?->>'step' = 'start'", j.args)
-          )
-        )
+      [start] = BackupChain.step_jobs(step: "start")
 
       assert start.attempt == 4
 
@@ -726,7 +713,7 @@ defmodule KilnCMS.Backups.FanoutTest do
 
       run = run!()
       {:ok, state} = File.read(WorkState.file(WorkState.path(dir, run.stamp)))
-      jobs = Repo.all(from(j in Oban.Job, where: j.queue == "backup_steps"))
+      jobs = BackupChain.step_jobs()
 
       haystacks = [
         {"the Oban jobs",

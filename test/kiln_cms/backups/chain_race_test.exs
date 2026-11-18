@@ -18,6 +18,7 @@ defmodule KilnCMS.Backups.ChainRaceTest do
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Chain, DirId, Recorder, StepWorker, Worker, WorkState}
   alias KilnCMS.Repo
+  alias KilnCMS.Test.BackupChain
 
   @moduletag :pg_tools
   @moduletag :capture_log
@@ -36,7 +37,7 @@ defmodule KilnCMS.Backups.ChainRaceTest do
 
     on_exit(fn ->
       unboxed(fn ->
-        Repo.delete_all(from(j in "oban_jobs", where: j.queue == "backup_steps"))
+        Repo.delete_all(from(j in "oban_jobs", where: j.worker == "KilnCMS.Backups.StepWorker"))
         Repo.delete_all(from(l in "backup_locks"))
         Repo.delete_all(from(r in "backup_runs"))
       end)
@@ -78,8 +79,7 @@ defmodule KilnCMS.Backups.ChainRaceTest do
       assert %{chain: chain, waiting: %{folds: 0}} = Backups.in_flight()
 
       # One start job, the holder's.
-      assert [%{args: %{"chain" => ^chain}}] =
-               Repo.all(from(j in Oban.Job, where: j.queue == "backup_steps"))
+      assert [%{args: %{"chain" => ^chain}}] = BackupChain.step_jobs()
     end)
   end
 
@@ -89,7 +89,8 @@ defmodule KilnCMS.Backups.ChainRaceTest do
 
     job =
       unboxed(fn ->
-        Repo.one!(from(j in Oban.Job, where: j.queue == "backup_steps"))
+        [job] = BackupChain.step_jobs()
+        job
       end)
 
     assert job.args["chain"] == chain
@@ -122,7 +123,7 @@ defmodule KilnCMS.Backups.ChainRaceTest do
   end
 
   defp start_jobs do
-    unboxed(fn -> Repo.all(from(j in Oban.Job, where: j.queue == "backup_steps")) end)
+    unboxed(fn -> BackupChain.step_jobs() end)
   end
 
   describe "#2421: one resume per stamp" do
@@ -350,7 +351,10 @@ defmodule KilnCMS.Backups.ChainRaceTest do
             end
 
           unboxed(fn ->
-            Repo.delete_all(from(j in "oban_jobs", where: j.queue == "backup_steps"))
+            Repo.delete_all(
+              from(j in "oban_jobs", where: j.worker == "KilnCMS.Backups.StepWorker")
+            )
+
             Repo.delete_all(from(l in "backup_locks"))
           end)
 

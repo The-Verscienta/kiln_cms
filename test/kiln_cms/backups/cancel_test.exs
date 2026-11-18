@@ -81,14 +81,8 @@ defmodule KilnCMS.Backups.CancelTest do
 
   defp run_of(stamp), do: Backups.get_run_by_stamp!(stamp, actor: Backups.system())
 
-  defp step_jobs(chain) do
-    Repo.all(
-      from(j in Oban.Job,
-        where: j.queue == "backup_steps" and fragment("?->>'chain' = ?", j.args, ^chain),
-        order_by: j.id
-      )
-    )
-  end
+  # In whichever queue (#2845).
+  defp step_jobs(chain), do: BackupChain.step_jobs(chain: chain)
 
   defp current_job, do: Repo.get!(Oban.Job, lock().step_job_id)
 
@@ -381,9 +375,7 @@ defmodule KilnCMS.Backups.CancelTest do
       assert Backups.in_flight() == nil
       assert step_jobs(chain) == jobs
 
-      assert Repo.all(
-               from(j in Oban.Job, where: j.queue == "backup_steps" and j.state == "available")
-             ) == []
+      assert BackupChain.step_jobs(state: "available") == []
 
       assert %{status: :canceled} = run_of(stamp)
     end

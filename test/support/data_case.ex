@@ -186,8 +186,11 @@ defmodule KilnCMS.DataCase do
   runs nothing. Returns the summed `%{success:, failure:, …}` map.
   """
   def drain_oban(acc \\ %{}) do
+    # The backup directories' queues (#2845) are started at runtime, so they
+    # are not in the config.
     queues =
-      :kiln_cms |> Application.fetch_env!(Oban) |> Keyword.fetch!(:queues) |> Keyword.keys()
+      (:kiln_cms |> Application.fetch_env!(Oban) |> Keyword.fetch!(:queues) |> Keyword.keys()) ++
+        KilnCMS.Test.BackupChain.dir_queues()
 
     pass =
       Enum.reduce(queues, %{}, fn queue, totals ->

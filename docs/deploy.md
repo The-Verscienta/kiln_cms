@@ -448,12 +448,20 @@ Three more things the two paths need from a deployment:
   The reasoning is in [ADR 0041](decisions/0041-the-app-and-backup-sh-agree-on-what-to-keep-only-through-presence-only-marker-files.md) (the markers) and
   [ADR 0042](decisions/0042-backup-sh-re-implements-the-media-planner-in-bash-and-both-change-in-the-same-pull-request.md) (why the script
   splits media itself).
-- **The `backup_steps` Oban queue.** In-app backups run as a chain of jobs on
-  it, one at a time per node, behind a cluster-wide lock. If you size
-  `POOL_SIZE` as the sum of queue limits plus web traffic, add one. A
-  deployment that builds Oban's `queues:` list itself must add
+- **The `backup_steps` Oban queue, and one queue per backup directory.**
+  In-app backups run as a chain of jobs, one at a time per node, behind a
+  cluster-wide lock. A step that must run where the backup's files are runs
+  from its backup directory's queue, `backup_dir_<id>`, which each node's
+  heartbeat starts at runtime for the directory it reads
+  ([Which node runs a step](backups.md#which-node-runs-a-step)). If you size
+  `POOL_SIZE` as the sum of queue limits plus web traffic, add two: one for
+  each. A deployment that builds Oban's `queues:` list itself must add
   `backup_steps: 1`, or a backup request is accepted and never starts
-  ([How an in-app backup runs](backups.md#how-an-in-app-backup-runs-2218)).
+  ([How an in-app backup runs](backups.md#how-an-in-app-backup-runs-2218));
+  the directory queues need no entry. They need Oban's Postgres notifier to
+  work: on a database connection that can't `LISTEN`, they never start, and
+  backups fall back to the slower routing of earlier releases, with a
+  warning in the log.
 - **Off-site credentials for `rclone`.** The app runs as `nobody`, which has
   no home directory, so a named remote in `BACKUP_RCLONE_REMOTE` needs
   `RCLONE_CONFIG_<NAME>_*` variables or a mounted `rclone.conf` named by
@@ -731,7 +739,10 @@ easy to miss because nothing visible waits on them:
   dates.
 
 Each is concurrency 1; if you size `POOL_SIZE` as the sum of queue limits plus
-web traffic, add one for each. A plugin that already declares a queue of the
+web traffic, add one for each. The per-directory backup queues,
+`backup_dir_<id>`, are started at runtime and need no entry (add one more
+connection for the one each node runs;
+[Which node runs a step](backups.md#which-node-runs-a-step)). A plugin that already declares a queue of the
 same name turns `mix kiln.plugins.doctor` red
 ([overlay-contract.md](overlay-contract.md)).
 

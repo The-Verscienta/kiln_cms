@@ -15,14 +15,22 @@ defmodule KilnCMS.Backups.Heartbeat do
        create is reported as none, with one warning per reason per boot.
        That read runs in a task of its own (below), so a backup directory
        that hangs never holds up the beat.
-    2. **Stop canceled steps**, after a successful beat only (below).
-    3. **Sweep**: `KilnCMS.Backups.Chain.reclaim_stale/0` (a holder whose node
+    2. **Run this directory's queue** (#2845), after a successful beat only:
+       start (or resume) the backup directory's own Oban queue on this node
+       and pause any other, and advertise it in the next beat once it runs
+       (`KilnCMS.Backups.DirQueues`, "The directory's queue" below).
+    3. **Stop canceled steps**, after a successful beat only (below).
+    4. **Sweep**: `KilnCMS.Backups.Chain.reclaim_stale/0` (a holder whose node
        has not beaten for 180 s, or
        restarted, loses the lock and its step is requeued with the attempts it
        has left) and `KilnCMS.Backups.Chain.reap/0` (a holder whose step job
        ended without moving the chain on: the run fails as interrupted and the
-       queued request starts). Through the Lock's `:reclaim_stale` action.
-    4. Hourly, prune the beats of nodes gone for a day.
+       queued request starts). Through the Lock's `:reclaim_stale` action,
+       which also sweeps the backup steps stranded in a directory queue
+       (`KilnCMS.Backups.Chain.sweep_stranded/0`); the marker syncs stranded
+       there are swept after it
+       (`KilnCMS.Backups.MarkerSyncWorker.sweep_stranded/0`).
+    5. Hourly, prune the beats of nodes gone for a day.
 
   ## Self-fence
 
@@ -68,6 +76,24 @@ defmodule KilnCMS.Backups.Heartbeat do
   starts none and beats with no id. Nothing in the id read stops a beat: an
   error in it is logged and the beat goes out with no id.
 
+  ## The directory's queue (#2845)
+
+  With `KilnCMS.Backups.DirQueues.enabled?/0` on, every successful beat that
+  reported a directory id makes sure `backup_dir_<id>` runs here (limit 1,
+  this node only), checks it with `Oban.check_queue/1`, and keeps it to
+  advertise: the next beat writes it as `dir_queue` (with this boot's id),
+  so a job is routed to the queue only once a node runs it. A queue for
+  another id is paused at once when the read gives that other id, and after
+  180 s when reads give none, and paused again on a later tick if it runs;
+  it is resumed when its id comes back, and never stopped, so a running job
+  is never orphaned. A queue paused by anything else (an operator, the demo
+  reset) is never resumed here, nor advertised while paused. A brand-new directory's
+  queue is advertised one or two ticks after its first id read. A start that
+  hasn't taken after three ticks logs a warning and emits
+  `[:kiln_cms, :backups, :dir_queue, :start_failed]`; until it takes, that
+  directory's jobs snooze in `backup_steps` as before #2845. A failed beat
+  changes nothing. An error in this part is logged and the tick goes on.
+
   ## A step whose job was canceled (#2538)
 
   Cancel (`Oban.cancel_all_jobs/2`) and a reclaim (`Oban.cancel_job/2`) stop
@@ -108,7 +134,7 @@ defmodule KilnCMS.Backups.Heartbeat do
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{DirId, Fence, MarkerSyncWorker}
+  alias KilnCMS.Backups.{DirId, DirQueues, Fence, MarkerSyncWorker}
 
   require Logger
 
@@ -130,7 +156,9 @@ defmodule KilnCMS.Backups.Heartbeat do
           dir_id_task: dir_id_task() | nil,
           dir_id_stalled?: boolean(),
           readers_full?: boolean(),
-          last_dir_id: String.t() | nil
+          last_dir_id: String.t() | nil,
+          dir_id: String.t() | nil,
+          dir_queues: DirQueues.state()
         }
 
   @typep dir_id_task :: %{
@@ -164,7 +192,10 @@ defmodule KilnCMS.Backups.Heartbeat do
 
   @impl GenServer
   def init(opts) do
-    {:ok, new_state(opts), {:continue, :tick}}
+    # The directory queues already running here (this heartbeat restarted,
+    # Oban didn't): pausing them stays this heartbeat's job.
+    state = %{new_state(opts) | dir_queues: DirQueues.seeded_state()}
+    {:ok, state, {:continue, :tick}}
   end
 
   @impl GenServer
@@ -213,21 +244,25 @@ defmodule KilnCMS.Backups.Heartbeat do
       dir_id_task: nil,
       dir_id_stalled?: false,
       readers_full?: false,
-      last_dir_id: nil
+      last_dir_id: nil,
+      dir_id: nil,
+      dir_queues: DirQueues.new_state()
     }
   end
 
   @doc """
-  One beat: check the row, beat, stop the steps whose job was canceled (after
-  a successful beat), fence if beating has failed for too long, sweep the
-  lock, prune. Returns the next state. Never raises: each part logs its own
-  failure and the next tick tries again.
+  One beat: check the row, beat, run this directory's queue and stop the
+  steps whose job was canceled (both after a successful beat), fence if
+  beating has failed for too long, sweep the lock, prune. Returns the next
+  state. Never raises: each part logs its own failure and the next tick
+  tries again.
   """
   @spec tick(state()) :: state()
   def tick(state) do
     state
     |> check_shared_name()
     |> beat()
+    |> dir_queues()
     |> stop_canceled()
     |> fence()
     |> sweep()
@@ -292,8 +327,12 @@ defmodule KilnCMS.Backups.Heartbeat do
       node: state.node,
       boot_id: state.boot_id,
       dir_id: dir_id,
-      last_dir_id: state.last_dir_id
+      last_dir_id: state.last_dir_id,
+      dir_queue: state.dir_queues.advertised,
+      dir_queue_boot_id: state.dir_queues.advertised && state.boot_id
     }
+
+    state = %{state | dir_id: dir_id}
 
     case Backups.beat_node(attrs, actor: Backups.system()) do
       {:ok, _beat} ->
@@ -310,6 +349,35 @@ defmodule KilnCMS.Backups.Heartbeat do
       Logger.warning("Backup heartbeat failed: #{Exception.message(error)}")
       Map.put(state, :beat_ok?, false)
   end
+
+  # After a successful beat only (see "The directory's queue"): the id it
+  # reported decides, and what this works out is advertised by the next one.
+  defp dir_queues(%{beat_ok?: true} = state) do
+    if DirQueues.enabled?() do
+      dir_queues = DirQueues.reconcile(state.dir_queues, state.dir_id, now_ms(), state.node)
+      %{state | dir_queues: dir_queues}
+    else
+      state
+    end
+  rescue
+    error ->
+      Logger.warning(
+        "Backup heartbeat couldn't manage its backup directory's queue: " <>
+          Exception.message(error)
+      )
+
+      %{state | dir_queues: %{state.dir_queues | advertised: nil}}
+  catch
+    kind, reason ->
+      Logger.warning(
+        "Backup heartbeat couldn't manage its backup directory's queue: " <>
+          inspect({kind, reason}, limit: 5)
+      )
+
+      %{state | dir_queues: %{state.dir_queues | advertised: nil}}
+  end
+
+  defp dir_queues(state), do: state
 
   # The id to report, and the state with the read's progress: the answer of
   # a read that ends during this tick, none while one is held up. A read
@@ -522,8 +590,9 @@ defmodule KilnCMS.Backups.Heartbeat do
     state
   end
 
-  # The Lock's `:reclaim_stale` action: `Chain.reclaim_stale/0`, then
-  # `Chain.reap/0` (each logs and reports what it did).
+  # The Lock's `:reclaim_stale` action: `Chain.reclaim_stale/0`,
+  # `Chain.reap/0`, then `Chain.sweep_stranded/0` (each logs and reports what
+  # it did); then the marker syncs stranded in a directory queue.
   defp sweep(state) do
     case Backups.reclaim_stale_backups(actor: Backups.system()) do
       {:ok, _outcome} ->
@@ -533,11 +602,21 @@ defmodule KilnCMS.Backups.Heartbeat do
         Logger.warning("Backup lock sweep failed: #{Exception.message(error)}")
     end
 
+    sweep_marker_syncs()
     state
   rescue
     error ->
       Logger.warning("Backup lock sweep failed: #{Exception.message(error)}")
       state
+  end
+
+  defp sweep_marker_syncs do
+    MarkerSyncWorker.sweep_stranded()
+  rescue
+    error ->
+      Logger.warning(
+        "Backup heartbeat couldn't sweep the stranded marker syncs: #{Exception.message(error)}"
+      )
   end
 
   defp prune(%{last_prune: at} = state) when is_integer(at) do

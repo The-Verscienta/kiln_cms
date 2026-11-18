@@ -1090,6 +1090,55 @@ defmodule KilnCMS.Backups.ResumeTest do
       assert dump_count(tools) == 1
     end
 
+    # #2845 (M1, resume): with the source's queue advertised, the copy's node
+    # fetching first moves the start there, the same job, rather than
+    # snoozing, and only the source runs it.
+    test "while the source host runs its directory's queue, the copy's node moves the start " <>
+           "there and the source resumes it",
+         %{base: base, dir: dir} do
+      tools = stub_tools(base)
+      %{stamp: stamp} = fail_at_part_3(dir, tools)
+      {:ok, a_id} = DirId.current(dir)
+      {b, _b_id} = copy_to_b!(base, dir)
+      qa = BackupCluster.dir_queue(dir)
+      a = BackupCluster.tick_as(dir, "a@host")
+      BackupCluster.tick_as(dir, a)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: chain}} =
+          Backups.request([resume: stamp], Backups.system())
+
+        start = start_job!(chain)
+        assert start.queue == "backup_steps"
+
+        # B fetches it first: moved in place, no attempt spent.
+        assert [%{snoozed: 1}] = BackupCluster.drain_as(b, ["backup_steps"])
+        assert %{queue: ^qa, attempt: 0, meta: %{"snoozed" => 1}} = start_job!(chain)
+
+        assert Backups.backup_lock!(actor: Backups.system()).step_job_id == start.id
+        assert %{waiting_for: :files_server} = Backups.in_flight(details: true)
+
+        # From here B never sees a step: they all go to A's queue.
+        Enum.reduce_while(1..40, nil, fn _, _ ->
+          assert [%{success: 0, snoozed: 0}] = BackupCluster.drain_as(b, ["backup_steps"])
+          BackupCluster.drain_as(dir, ["backup_steps", qa])
+
+          case BackupChain.settled(chain) do
+            {:error, :unsettled} -> {:cont, nil}
+            outcome -> {:halt, assert(outcome == :ok)}
+          end
+        end)
+
+        for job <- BackupChain.step_jobs(chain: chain) do
+          assert job.attempt == 1
+          assert (job.meta["snoozed"] || 0) <= 1
+        end
+      end)
+
+      assert [%{status: :succeeded, dir_id: ^a_id}] = runs()
+      assert dump_count(tools) == 1
+    end
+
     test "once the source host's beat is 181 s old, the copy resumes and the run is rebound", %{
       base: base,
       dir: dir

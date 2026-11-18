@@ -34,9 +34,9 @@ defmodule KilnCMS.Backups.NodeBeat do
     # set only by `atomic_set` is left out of the UPDATE, so a second beat would
     # not move it.
     create :beat do
-      accept [:node, :boot_id, :dir_id, :last_dir_id]
+      accept [:node, :boot_id, :dir_id, :last_dir_id, :dir_queue, :dir_queue_boot_id]
       upsert? true
-      upsert_fields [:boot_id, :dir_id, :last_dir_id]
+      upsert_fields [:boot_id, :dir_id, :last_dir_id, :dir_queue, :dir_queue_boot_id]
       change atomic_set(:beat_at, expr(fragment("now()")))
       change atomic_update(:beat_at, expr(fragment("now()")))
     end
@@ -90,6 +90,14 @@ defmodule KilnCMS.Backups.NodeBeat do
     # The marker sync routes by `dir_id` only. Nil until this boot has read
     # an id, and after a read that found none.
     attribute :last_dir_id, :uuid, public?: true
+
+    # The backup directory whose queue (`backup_dir_<id>`) this node runs,
+    # unpaused, as its heartbeat last checked it (#2845); nil when it runs
+    # none. `dir_queue_boot_id` is the boot that wrote it: a node from before
+    # #2845 beats under the same name without touching either column, so a
+    # value left from an earlier boot is no claim (`DirQueues.routable?/1`).
+    attribute :dir_queue, :uuid, public?: true
+    attribute :dir_queue_boot_id, :uuid, public?: true
 
     attribute :beat_at, :utc_datetime_usec do
       allow_nil? false

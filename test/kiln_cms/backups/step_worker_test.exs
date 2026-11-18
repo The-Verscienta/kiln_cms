@@ -371,6 +371,11 @@ defmodule KilnCMS.Backups.StepWorkerTest do
     test "the heartbeats are read only when there are files here to win with", %{local: local} do
       test = self()
 
+      # Directory queues off: routing a job to one (#2845) reads the beats too,
+      # for another reason than this check.
+      env = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+      Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(env, :dir_queues?, false))
+
       put_beats_reader(fn within_s ->
         send(test, {:beats_read, within_s})
         {:ok, []}

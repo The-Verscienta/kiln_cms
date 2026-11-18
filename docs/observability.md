@@ -500,9 +500,14 @@ a label. Useful alert: `increase(kiln_cms_backups_retention_skipped_count[1d]) >
 
 The rest are not metrics: attach a `:telemetry` handler to count them.
 Each is documented beside the behavior it
-reports in [backups.md](backups.md): the run's chain, folded requests and
-reclaimed steps under
-[How an in-app backup runs](backups.md#how-an-in-app-backup-runs-2218), the
+reports in [backups.md](backups.md): the run's chain, folded requests,
+reclaimed and stranded steps, and the backup directory queues'
+`[:kiln_cms, :backups, :dir_queue, …]` under
+[How an in-app backup runs](backups.md#how-an-in-app-backup-runs-2218) (worth
+alerting on: `:start_failed`, which means a node's backup directory queue
+never started, and `[:kiln_cms, :backups, :lock, :stranded]` with
+`outcome: :interrupted`, a backup failed because no node had its
+directory), the
 marker events under [The last-good marker](backups.md#the-last-good-marker)
 and [The hold markers](backups.md#the-hold-markers) (a held backup deleted
 outside the app under
@@ -606,7 +611,10 @@ Every label is bounded:
 - **No metric carries** an org id, a content id, a user or a slug.
 - **`route`** is the router pattern (`/api/content/:type/:slug`), never the
   request path.
-- **`queue` and `worker`** are Oban's.
+- **`queue` and `worker`** are Oban's. `queue` includes one
+  `backup_dir_<id>` per backup directory the nodes have reported (one on a
+  shared volume, one per host otherwise; see
+  [backups.md](backups.md#which-node-runs-a-step)).
 - **`result`, `status`, `surface`, `mode`, `action`, `event`, `class`,
   `scope` and `reason`** are small enumerations.
 - **`enforced` and `read`** are booleans, exported as `"true"` or `"false"`.

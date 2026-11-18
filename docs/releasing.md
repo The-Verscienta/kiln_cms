@@ -1066,6 +1066,20 @@ without breaking it. A new kind of artifact destination key, or a new
 status inside an artifact's `destinations` map, would still be refused by
 it the same way.
 
+### Rolling back past backup directory queues
+
+From the release after v1.10.1 (#2845), a backup step that must run where
+its backup directory is waits in that directory's own Oban queue,
+`backup_dir_<id>`, which only the current release starts. A step waiting
+there when you roll back never runs, and the older release neither takes it
+back nor fails it, so the backup holds the lock until a platform admin
+cancels it. Before rolling back, cancel the running backup or let it finish,
+and check that no job waits in a `backup_dir_` queue; the query and the
+rest are in
+[Rolling back past backup directory queues](backups.md#rolling-back-past-backup-directory-queues).
+The two nullable `backup_node_beats` columns the release adds stay; the
+older release ignores them.
+
 ### Rolling back past form mail jobs that carry ids
 
 From the release after v1.10.1 (#2992), the form notification and

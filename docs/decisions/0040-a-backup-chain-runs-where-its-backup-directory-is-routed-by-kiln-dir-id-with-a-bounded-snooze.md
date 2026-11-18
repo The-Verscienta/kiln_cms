@@ -5,7 +5,11 @@
   marker sync's use of the same id (#2554, #2789) came after it. Amended
   2026-11-17 by [#2817](https://github.com/The-Verscienta/kiln_cms/issues/2817)
   (a copy of a run's files resumes only once the source host stops beating;
-  see "Amendment (2026-11-17, #2817)").
+  see "Amendment (2026-11-17, #2817)"). Its snooze routing superseded by
+  [ADR 0070](0070-a-directory-pinned-backup-job-runs-from-a-queue-named-for-its-directory-which-the-nodes-reporting-it-start.md)
+  ([#2845](https://github.com/The-Verscienta/kiln_cms/issues/2845)): a
+  pinned job now runs from its directory's own Oban queue, and the bounded
+  snooze is the fallback when no node runs that queue.
 - **References** — [#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218)
   (owner decision 1 of 2026-11-09, in its comments; PR #2537),
   [#2539](https://github.com/The-Verscienta/kiln_cms/issues/2539),

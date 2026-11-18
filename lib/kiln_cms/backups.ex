@@ -531,9 +531,13 @@ defmodule KilnCMS.Backups do
     end
   end
 
-  # `config :kiln_cms, KilnCMS.Backups, live_beats_reader:` (a one-argument
-  # function of `within_s`) stands in for the read in tests.
-  defp live_beats(within_s) do
+  @doc false
+  # The beats under `within_s` seconds old, on the database's clock, failing
+  # closed (`DirQueues`). `config :kiln_cms, KilnCMS.Backups,
+  # live_beats_reader:` (a one-argument function of `within_s`) stands in for
+  # the read in tests.
+  @spec live_beats(pos_integer()) :: {:ok, [struct()]} | {:error, term()}
+  def live_beats(within_s) do
     case config(:live_beats_reader) do
       reader when is_function(reader, 1) ->
         reader.(within_s)

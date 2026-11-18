@@ -111,6 +111,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new nullable `backup_node_beats.last_dir_id`). Until every node runs this release, a node on the previous one still resumes a backup from a copy of its files while the source host is alive. Rolling back is safe.**
   ([#3090](https://github.com/The-Verscienta/kiln_cms/pull/3090) · [long form](docs/changelog/unreleased.md#backup-resume-source-host-first-upgrade))
 
+- **Run `mix ash.migrate` (new nullable `backup_node_beats.dir_queue` and `dir_queue_boot_id`). Finish a rolling deploy before you start, cancel or resume a backup. Before rolling back past this release, cancel running backups or let them finish.**
+  ([#3094](https://github.com/The-Verscienta/kiln_cms/pull/3094) · [long form](docs/changelog/unreleased.md#backup-dir-queues-upgrade))
+
 ### Breaking
 
 - **`KilnCMS.Staging.scrub!/1` over `rpc` now refuses a node whose Oban runs jobs: scrub a new clone before serving (`mix kiln.staging.scrub` or `Release.scrub_staging/0`); `allow_live?: true` re-scrubs a scrubbed clone and pauses every queue until restart.**
@@ -222,6 +225,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The email telling someone a platform admin removed their passkey or authenticator app names that admin by display name ("an administrator" when they have none) instead of their email address.**
   ([#3044](https://github.com/The-Verscienta/kiln_cms/issues/3044) · [long form](docs/changelog/unreleased.md#factor-removed-notice-names-admin))
+
+- **Backup steps and marker syncs that must run where a backup directory is now go to that directory's own Oban queue, `backup_dir_<id>`, so they no longer use up attempts on nodes without the files. One left there with no server for its directory fails the backup after 30 minutes.**
+  ([#3094](https://github.com/The-Verscienta/kiln_cms/pull/3094) · [long form](docs/changelog/unreleased.md#backup-dir-queues))
 
 ### Fixed
 

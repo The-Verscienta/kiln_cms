@@ -3,7 +3,8 @@ defmodule KilnCMS.Test.BackupChain do
   Run a backup's step chain (#2218) to the end inside a test.
 
   `run/2` requests a backup as `KilnCMS.Backups.system/0` and drains the
-  `:backup_steps` queue in the calling process (`testing: :manual`), with
+  `:backup_steps` queue and every backup directory's queue (#2845) in the
+  calling process (`testing: :manual`), with
   recursion (each step inserts the next) and scheduled jobs (a retry's backoff
   and a snooze are run at once, so four attempts take no wall time). It returns
   what the chain settled on, from the `[:kiln_cms, :backups, :chain, :settled]`
@@ -11,7 +12,10 @@ defmodule KilnCMS.Test.BackupChain do
   can match the same terms the inline `Worker.run/3` used to return. A request
   that did not start a chain returns the request's own result.
   """
+  import Ecto.Query
+
   alias KilnCMS.Backups
+  alias KilnCMS.Repo
 
   @event [:kiln_cms, :backups, :chain, :settled]
 
@@ -34,12 +38,67 @@ defmodule KilnCMS.Test.BackupChain do
   @spec resume(String.t(), keyword()) :: :ok | {:error, term()} | {:ok, map()}
   def resume(stamp, opts \\ []), do: run("manual", Keyword.put(opts, :resume, stamp))
 
-  @doc "Drain the step queue (every chain in it), as `run/2` does."
+  @doc """
+  Drain the step queues (every chain in them), as `run/2` does: `backup_steps`
+  and each `backup_dir_<id>` queue holding a job, again until a pass runs
+  nothing (a step may move a job to its directory's queue). With
+  `with_recursion: false`, one pass. `queue:` drains that queue alone.
+  Returns the summed results.
+  """
   @spec drain(keyword()) :: map()
   def drain(opts \\ []) do
-    Oban.drain_queue(
-      Keyword.merge([queue: :backup_steps, with_recursion: true, with_scheduled: true], opts)
+    opts = Keyword.merge([with_recursion: true, with_scheduled: true], opts)
+
+    if Keyword.has_key?(opts, :queue),
+      do: Oban.drain_queue(opts),
+      else: drain_all(opts, %{})
+  end
+
+  defp drain_all(opts, acc) do
+    pass =
+      Enum.reduce(["backup_steps" | dir_queues()], %{}, fn queue, totals ->
+        opts |> Keyword.put(:queue, queue) |> Oban.drain_queue() |> sum(totals)
+      end)
+
+    acc = sum(pass, acc)
+
+    if opts[:with_recursion] and pass |> Map.values() |> Enum.sum() > 0,
+      do: drain_all(opts, acc),
+      else: acc
+  end
+
+  defp sum(one, other), do: Map.merge(one, other, fn _key, a, b -> a + b end)
+
+  @doc "The `backup_dir_<id>` queues that hold a job waiting to run."
+  @spec dir_queues() :: [String.t()]
+  def dir_queues do
+    Repo.all(
+      from(j in Oban.Job,
+        where:
+          like(j.queue, "backup\\_dir\\_%") and j.state in ["available", "scheduled", "retryable"],
+        distinct: true,
+        select: j.queue
+      )
     )
+  end
+
+  @doc """
+  The backup step jobs, oldest first, in whichever queue (#2845): what tests
+  query instead of `queue == "backup_steps"`. Filters: `chain:`, `step:`
+  (a string), `state:` (a string or a list).
+  """
+  @spec step_jobs(keyword()) :: [Oban.Job.t()]
+  def step_jobs(filters \\ []) do
+    query = from(j in Oban.Job, where: j.worker == "KilnCMS.Backups.StepWorker", order_by: j.id)
+
+    filters
+    |> Enum.reduce(query, fn
+      {:chain, chain}, q -> where(q, [j], fragment("?->>'chain' = ?", j.args, ^chain))
+      {:step, step}, q -> where(q, [j], fragment("?->>'step' = ?", j.args, ^step))
+      {:state, states}, q when is_list(states) -> where(q, [j], j.state in ^states)
+      {:state, state}, q -> where(q, [j], j.state == ^state)
+    end)
+    |> Repo.all()
   end
 
   @doc """

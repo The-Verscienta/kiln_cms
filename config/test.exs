@@ -5,6 +5,14 @@ config :kiln_cms, Oban, testing: :manual
 # timer against the sandbox. Tests drive `KilnCMS.Backups.Heartbeat.tick/1`.
 config :kiln_cms, KilnCMS.Backups, heartbeat?: false
 
+# Directory queues (#2845) on, as in production, but driven through a recorder:
+# under `testing: :manual` Oban's notifier still runs, so a real
+# `Oban.start_queue/1` would start a producer fetching from the sandbox.
+# `KilnCMS.Test.DirQueueControl` keeps each test's queues to itself.
+config :kiln_cms, KilnCMS.Backups,
+  dir_queues?: true,
+  dir_queue_control: KilnCMS.Test.DirQueueControl
+
 # No boot-time occurrence backfill (#766). Every test runs inside a rolled-back
 # sandbox, but application boot is OUTSIDE them — so an enqueue there commits a
 # real `oban_jobs` row, which `DataCase.drain_oban/0` then re-executes inside

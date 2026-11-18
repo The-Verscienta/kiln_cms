@@ -441,15 +441,26 @@ failed, never gets one. Each slot then:
   covered every slot this way.
 - **queues one sync for every other directory** whose id a node reported in
   the last 10 minutes (judged on the database's clock, so a node whose clock
-  runs ahead still counts). That sync waits for a node that reads the id,
-  putting itself back every 30 seconds up to 20 times (about 10 minutes). If
-  none picks it up, the server log says "Backup last-good marker sync for
-  backup directory `<id>` gave up: no node with that directory picked it up",
-  and the next slot tries again.
+  runs ahead still counts). When a node that beat in the last 180 seconds
+  runs that directory's own queue, `backup_dir_<id>`, the sync goes there,
+  and only a node with the directory picks it up
+  ([Which node runs a step](#which-node-runs-a-step), #2845). Otherwise it
+  goes to `default` and waits for a node that reads the id, putting itself
+  back every 30 seconds up to 20 times (about 10 minutes); a node without
+  the directory that picks it up moves it to the directory's queue once one
+  runs. If none picks it up, the server log says "Backup last-good marker
+  sync for backup directory `<id>` gave up: no node with that directory
+  picked it up", and the next slot tries again. A sync left in a directory's
+  queue that no node runs is canceled with the same line, after 5 minutes
+  when the directory's node is up but its queue isn't running, and after 30
+  when no node has reported the directory for 180 seconds
+  ([Jobs left in a directory queue](#jobs-left-in-a-directory-queue)).
 
 So with a `BACKUP_DIR` per host, each host's directory is synced in a slot
-as long as its node picks up one of the about 21 releases of its queued sync
-in those 10 minutes, the same assumption every backup step makes. A host whose
+its node can reach: through the directory's queue, or, without one, as long
+as its node picks up one of the about 21 releases of its queued sync in
+those 10 minutes. The sync shares the directory's queue with the backup
+steps, one job at a time, so it can wait behind a long step. A host whose
 node is down is left out until its heartbeat is back.
 
 Two things stop a directory getting an id, and leave it synced only in the
@@ -527,7 +538,7 @@ emit `[:kiln_cms, :backups, :last_good, :failed]` with measurements
 | `Couldn't list db/ to remove old last-good markers (<reason>)` | none | The new marker is in place; old ones stay until the next sync. |
 | `Backup last-good marker sync skipped: couldn't read the node heartbeats (<message>)` | none | A scheduled run couldn't tell which nodes report a directory id, so it synced nothing. |
 | `Couldn't queue the last-good marker sync for backup directory <id> (<reason>)` | none | A scheduled run couldn't queue the sync for that directory; the next slot tries again. |
-| `Backup last-good marker sync for backup directory <id> gave up: no node with that directory picked it up` | none | No running node reads that directory id; see **Several nodes** above. A node that has just stopped can cause it: its id counts until its last heartbeat is 10 minutes old. |
+| `Backup last-good marker sync for backup directory <id> gave up: no node with that directory picked it up` | none | No running node reads that directory id, or the one that does doesn't run its queue; see **Several nodes** above. A node that has just stopped can cause it: its id counts until its last heartbeat is 10 minutes old. |
 | `Backup last-good marker sync: the id read of the backup directory <dir> took more than <ms> ms (a hung mount?). Giving up for this slot; the id read is left running.` (or `the marker sync of`) | none (emits `[:kiln_cms, :backups, :marker_sync, :timeout]` instead) | The directory didn't answer in time, so the job gave up for this slot and left the task running ([The marker sync on a hung backup directory](#the-marker-sync-on-a-hung-backup-directory-3079)). |
 | `Backup last-good marker sync didn't start the id read of <dir>: 2 earlier ones it gave up on are still running (a hung mount?)` (or `the marker sync of`) | none | Two tasks the job gave up on are still stuck, so this one started none ([same section](#the-marker-sync-on-a-hung-backup-directory-3079)). |
 
@@ -1367,7 +1378,9 @@ schedule backups away from migrations and maintenance windows.
 ### How an in-app backup runs (#2218)
 
 An in-app backup is a chain of Oban jobs, one per step, on the `backup_steps`
-queue:
+queue, or, for the steps that must run where the backup's files are, on the
+queue of its backup directory, `backup_dir_<id>`
+([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)):
 
 **start** → **dump** → **plan** → **archive** (one job per media part) →
 **checksum** → **prune** → **offsite** (one job per off-site destination) →
@@ -1464,6 +1477,12 @@ as before.
 | `[:kiln_cms, :backups, :chain, :settled]` | `chain`, `stamp`, `outcome` (`:ok` or `{:error, reason}`) | A chain ended: succeeded, failed, canceled or refused at its start. |
 | `[:kiln_cms, :backups, :request, :folded]` | `trigger`, `resume`, `components` (the folding request's; `nil` for everything or a resume) | A request folded into the queued one. |
 | `[:kiln_cms, :backups, :lock, :reclaimed]` | `chain`, `stamp`, `step`, `node`, `outcome` (`:requeued` or `:interrupted`) | A step was taken back from a node that stopped responding ([below](#several-nodes-and-the-backup-lock)). |
+| `[:kiln_cms, :backups, :lock, :stranded]` | `chain`, `stamp`, `step`, `queue`, `outcome` (`:moved_back`, `:returned` or `:interrupted`) | The backup's step had waited in a backup directory's queue that no node runs: moved back to `backup_steps`, or the backup failed ([below](#jobs-left-in-a-directory-queue)). |
+| `[:kiln_cms, :backups, :dir_queue, :started]` | `queue`, `node` | A backup directory's queue began running on this node ([below](#which-node-runs-a-step)). |
+| `[:kiln_cms, :backups, :dir_queue, :paused]` | `queue`, `node`, `reason` (`:changed`: the directory now has another id; `:gone`: no id for 180 seconds) | This node paused a backup directory's queue. |
+| `[:kiln_cms, :backups, :dir_queue, :resumed]` | `queue`, `node` | This node resumed a queue it had paused, because the directory's id came back. |
+| `[:kiln_cms, :backups, :dir_queue, :start_failed]` | `queue`, `node` | A backup directory's queue hadn't started on this node three ticks after the first try. Once per queue until it starts. Check Oban's notifier. |
+| `[:kiln_cms, :backups, :dir_queue, :routed]` | `queue` (where the job went), `from` (the queue it was in), `worker` | A node without the directory moved a job it fetched into the directory's queue. |
 | `[:kiln_cms, :backups, :status, :history_unreadable]` | `error` (the error's module) | The status could not read History and fell back to the manifest ([above](#check-the-last-backup-of-each-component)). |
 | `[:kiln_cms, :backups, :offsite, :partial]` | `stamp`, `chain`, `missed` (the keys of the destinations not reached); measurements also `reached` and `total` | A backup finished having reached some of its off-site destinations but not all ([below](#when-a-backup-reaches-only-some-destinations)). |
 | `[:kiln_cms, :backups, :heartbeat, :dir_id_timeout]` | `node`; measurements also `waited_ms` | A heartbeat beat with no backup-directory id because reading `.kiln-dir-id` is held up, once per beat while it is ([below](#the-backup-directory-id-read-2848)). |
@@ -1615,7 +1634,10 @@ window is its off-site copy and its prune
 
 A resume holds the backup lock from the moment it is requested, but its
 `start` step can wait before it picks the backup up again: up to about an hour
-for [the server that has the backup's files](#several-nodes-and-the-backup-lock),
+for [the server that has the backup's files](#several-nodes-and-the-backup-lock)
+(and up to 30 minutes more if the start was waiting in that directory's
+queue when the server stopped,
+[Jobs left in a directory queue](#jobs-left-in-a-directory-queue)),
 or up to three minutes for a step of the canceled backup to stop
 ([above](#cancel-a-running-backup)). New and scheduled backups queue behind it
 all that time. A platform admin can cancel it (#2816).
@@ -1625,7 +1647,7 @@ all that time. A platform admin can cancel it (#2816).
 
    | Strip label | The resume is waiting for |
    |---|---|
-   | "Waiting for the server that has this backup's files" | The node whose backup directory the run records or, for a copy of the backup's `.work/<stamp>/` on another host, the source host to stop beating for 180 seconds ([why](#several-nodes-and-the-backup-lock)). Other nodes keep putting the step back. Also shown while a node with a copy waits for the run's row to be readable. |
+   | "Waiting for the server that has this backup's files" | The node whose backup directory the run records or, for a copy of the backup's `.work/<stamp>/` on another host, the source host to stop beating for 180 seconds ([why](#several-nodes-and-the-backup-lock)). Other nodes keep putting the step back, or the start waits in that directory's own queue ([Which node runs a step](#which-node-runs-a-step)). Also shown while a node with a copy waits for the run's row to be readable. |
    | "Waiting for the canceled backup's step to stop" | The window after the backup's Cancel to pass. |
    | "Starting a resume" | Nothing the page can name: its start step is about to run, or is running. |
 
@@ -1765,10 +1787,22 @@ step after `start` runs only on a node that reads the same id:
 - **One shared volume** mounted on every node: every node reads the same id,
   so any node runs any step.
 - **A `BACKUP_DIR` per host**: the backup's steps stay on the host whose
-  directory its `start` wrote to. Another node that picks up a step waits
-  30 seconds and puts it back, up to 20 times (about 10 minutes) per attempt,
-  then fails the attempt (`:backup_dir_elsewhere`), which uses one of the four.
-  If that host is gone, the backup ends up failed; take a new one.
+  directory its `start` wrote to. Each host runs an Oban queue named for its
+  directory, `backup_dir_<id>`, and only that host fetches from it, so a
+  step goes there and no other node picks it up
+  ([Which node runs a step](#which-node-runs-a-step), #2845). A step that
+  lands in the shared `backup_steps` queue first is moved there by the first
+  other node to fetch it, without spending an attempt. Only when no node
+  runs the directory's queue (a node on an older release, or Oban's notifier
+  down) does the old rule apply: another node that picks up a step waits 30
+  seconds and puts it back, up to 20 times (about 10 minutes) per attempt,
+  then fails the attempt (`:backup_dir_elsewhere`), which uses one of the
+  four. If that host is gone, the backup ends up failed: for a step waiting
+  in the directory's queue, once it has waited there 30 minutes and no node
+  reports the directory
+  ([Jobs left in a directory queue](#jobs-left-in-a-directory-queue)), or,
+  for a step taken back from the host or still in `backup_steps`, once its
+  attempts have waited (about an hour). Take a new one.
 - **A copied backup directory** (restored onto a new host, or cloned) carries
   the old host's id. Delete `.kiln-dir-id` on the copy, or leave it out of the
   copy (`rsync --exclude .kiln-dir-id`), so it gets its own. A backup whose
@@ -1776,7 +1810,9 @@ step after `start` runs only on a node that reads the same id:
   host it was copied from has stopped (**A resume runs on the host that holds
   its directory**, below).
 
-Why each step runs where its backup directory is, and the bounded wait, is argued in [ADR 0040](decisions/0040-a-backup-chain-runs-where-its-backup-directory-is-routed-by-kiln-dir-id-with-a-bounded-snooze.md).
+Why each step runs where its backup directory is, and the bounded wait, is argued in [ADR 0040](decisions/0040-a-backup-chain-runs-where-its-backup-directory-is-routed-by-kiln-dir-id-with-a-bounded-snooze.md);
+why the directory's own queue replaced that wait, in
+[ADR 0070](decisions/0070-a-directory-pinned-backup-job-runs-from-a-queue-named-for-its-directory-which-the-nodes-reporting-it-start.md).
 
 **A resume runs on the host that holds its directory (#2539, #2817).** The
 Resume button shows only on a node that can see the backup's `.work/<stamp>/`.
@@ -1795,8 +1831,11 @@ runs on:
    `.kiln-dir-id`, resumes only once the host it came from has stopped. The
    resume then records the copy's directory as the run's `dir_id`, and its
    later steps run there.
-3. **Nowhere else.** Any other node that picks up the start waits 30 seconds
-   and puts it back.
+3. **Nowhere else.** Any other node that picks up the start moves it to the
+   queue of the run's directory when a node runs that queue, and otherwise
+   waits 30 seconds and puts it back. A run whose directory no running node
+   reports keeps this wait, so a copy of the directory can still take the
+   start once the source host has stopped.
 
 While the source host runs, the copy waits; the source host takes the start
 and either resumes the backup or refuses it as above. A source host whose id
@@ -1819,10 +1858,13 @@ The start waits, rather than trust the copy, in three more cases:
 A run with no recorded id (imported from cron, or last run before #2539) is
 resumed by whichever node picks it up, and records an id when it does.
 
-A node that is not allowed to start the resume puts it back up to 20 times per
-attempt, like every other step, across the job's four attempts and the 1-, 5-
-and 15-minute pauses between them. When the last attempt has waited too, the
-resume is given up:
+When a node that reads the run's recorded id runs that directory's queue,
+the start is moved there and waits for that node, without counting against
+the limit below ([Which node runs a step](#which-node-runs-a-step)). Without
+one, a node that is not allowed to start the resume puts it back up to 20
+times per attempt, like every other step, across the job's four attempts and
+the 1-, 5- and 15-minute pauses between them. When the last attempt has
+waited too, the resume is given up:
 
 - the lock is released, and a queued backup starts;
 - the History row keeps its status and its **Resume** button, and reads
@@ -1849,7 +1891,11 @@ up, and a host that missed a few beats is worth a sync job that waits for it.
 A resume asks whether the source host might still be writing to its copy of
 the backup, and that is the question the backup lock answers at 180 seconds,
 when it takes a stopped node's step back. A longer window would only keep a
-copy waiting after the lock already treats the source host as gone.
+copy waiting after the lock already treats the source host as gone. Routing
+a job into a backup directory's queue uses 180 seconds too, for the marker
+sync's jobs as well: a directory whose node beat 5 minutes ago still gets a
+queued sync, but it waits in `default` on the 30-second put-backs rather
+than in a queue no running node may fetch.
 
 **During a rolling deploy** a node still on the previous release keeps the
 old rule: a copy of the files there resumes at once, whether or not the
@@ -1870,14 +1916,175 @@ a transaction that first takes `pg_advisory_xact_lock` on one fixed key, then
 reads the single row of `backup_locks`. The advisory lock is what keeps two of
 them apart; the row records which chain, step and job hold the backup.
 
-**Pool size.** The `backup_steps` queue runs one job at a time on each node.
-If you size `POOL_SIZE` as the sum of queue limits plus web traffic
-([performance.md](performance.md)), add one.
+**Pool size.** The `backup_steps` queue runs one job at a time on each node,
+and so does the node's backup directory queue. If you size `POOL_SIZE` as
+the sum of queue limits plus web traffic ([performance.md](performance.md)),
+add two. A queue the node has paused, for a directory it no longer reports,
+fetches nothing.
 
 **Cron is not locked.** `scripts/backup.sh` runs outside the application and
 does not take the lock, so a cron backup and an in-app backup can run at the
 same time. They write different stamps; schedule them apart to keep the load
 down.
+
+### Which node runs a step
+
+A backup step after `start`, a resume's `start` and the last-good marker
+sync's per-directory job must each run on a node that has the backup
+directory. Each backup directory has an Oban queue of its own,
+`backup_dir_<id>`, named for its [`.kiln-dir-id`](#several-nodes-and-the-backup-lock),
+and only the nodes that read that id run it (#2845):
+
+- **Each node's heartbeat starts its directory's queue**, on that node only,
+  one job at a time, after a beat that reported the id. Nothing to add to
+  Oban's `queues:` list: the queue is started at runtime, and again by the
+  first beat after a restart.
+- **It advertises the queue once it runs.** The next beat records it in
+  `backup_node_beats` (`dir_queue`, with the node's boot id in
+  `dir_queue_boot_id`). A brand-new directory is advertised one or two beats,
+  30 to 60 seconds, after its id is first read.
+- **A job goes to the queue only while a live node advertises it.** Live is
+  a beat in the last 180 seconds, on the database's clock, from the boot that
+  wrote the advertisement. The chain inserts its next step straight into the
+  queue then. A step in `backup_steps` (every `start`, a step taken back from
+  a stopped node, or one queued before a node advertised) is moved there by
+  the first node without the directory that fetches it: the same job, with no
+  attempt spent. The marker sync's per-directory job does the same from
+  `default`.
+- **Otherwise the job keeps the 30-second put-backs** of earlier releases:
+  in `backup_steps` (or `default` for the marker sync), up to 20 per attempt.
+  That is what happens while a node on an older release has the directory,
+  while Oban's notifier is down (below), and for a resume whose directory no
+  running node reports.
+- **A queue is paused, never stopped.** When a node's id read gives another
+  id (the directory was replaced or remounted), the old directory's queue is
+  paused at once. When reads give no id (a hung or missing mount), it is
+  paused after 180 seconds. A paused queue lets its running job finish and
+  fetches no other; it is resumed when the id comes back. Each beat checks
+  the queues it paused and pauses again one that runs.
+- **A queue paused by something else stays paused.** The heartbeat resumes
+  only a queue it paused itself. One paused by an operator, or by
+  `Oban.pause_all_queues(Oban)` (the demo reset uses it), is left paused and not
+  advertised, so its jobs take the put-backs until it runs again. The
+  heartbeat also counts a queue it finds already paused when it starts as
+  paused by someone else, so after the heartbeat process itself crashes and
+  restarts, a queue it had paused stays paused until the app restarts on
+  that node. Its jobs are moved back to `backup_steps` after 5 minutes
+  ([below](#jobs-left-in-a-directory-queue)) and run from there.
+- **The marker sync shares the queue**, one job at a time, so a sync for a
+  directory can wait behind a long backup step there.
+
+**It needs Oban's notifier.** Starting, pausing and resuming a queue are
+signals through Oban's Postgres notifier (`LISTEN`/`NOTIFY`, the
+`notifier: Oban.Notifiers.Postgres` in `config/config.exs`). A database
+connection that can't hold a `LISTEN`, such as one through a pooler in
+transaction mode, never delivers them. The heartbeat checks that the queue
+really runs before it advertises it, so nothing is routed to a queue that
+didn't start: those jobs take the put-backs, and three beats after the
+first try the server log warns once and
+`[:kiln_cms, :backups, :dir_queue, :start_failed]` fires.
+
+To switch the queues off and keep every job on the put-backs:
+`config :kiln_cms, KilnCMS.Backups, dir_queues?: false`. It defaults to the
+heartbeat's own switch, `heartbeat?:`. There is no reason to turn it off
+on a working deployment.
+
+What the server log says:
+
+| Log line | Level | Meaning |
+|---|---|---|
+| "Backup directory queue `backup_dir_<id>`: running on this node" | info | The queue started here. The next beat advertises it. |
+| "Backup directory queue `backup_dir_<id>`: paused on this node, whose backup directory now has another id" | info | The node's id read now gives another id. |
+| "Backup directory queue `backup_dir_<id>`: paused on this node, whose backup directory has given no id for 180 s" | info | The directory has been unreadable or missing its id for 180 seconds. |
+| "Backup directory queue `backup_dir_<id>`: resumed on this node" | info | The id is back. |
+| "Backup directory queue `backup_dir_<id>` hasn't started on this node after 3 tries (is Oban's notifier working?). This node doesn't advertise it, so jobs for its backup directory stay in backup_steps and snooze until a node with the directory picks them up." | warning | The start signal hasn't arrived. Once per queue until it starts. Check that the app's database connection can `LISTEN`. |
+| "Backup heartbeat couldn't manage its backup directory's queue: …" | warning | Starting, pausing or checking the queue raised. The beat goes out without advertising a queue; the next tick tries again. |
+
+The `[:kiln_cms, :backups, :dir_queue, …]` telemetry events are in the
+table under [How an in-app backup runs](#how-an-in-app-backup-runs-2218).
+
+### Jobs left in a directory queue
+
+A job in a backup directory's queue runs only when a node with that
+directory runs the queue. Each heartbeat (every 30 seconds) sweeps the jobs
+that have waited there 5 minutes or more, judged on the database's clock;
+the backup steps are swept before every backup request too:
+
+| What the heartbeats show | After | A backup step | A resume's `start` | A marker sync |
+|---|---|---|---|---|
+| A live node reports the directory, none advertises its queue (paused, or not started) | 5 minutes in the queue | Moved back to `backup_steps`, same job, due now | Moved back to `backup_steps` | Canceled |
+| No node has reported the directory for 180 seconds | 30 minutes in the queue | **The backup fails** (below) | Moved back to `backup_steps`, where the 20 put-backs per attempt decide | Canceled |
+| A live node advertises the queue | never | Left: it runs when the queue gets to it | Left | Left |
+
+A node reports a directory through its beat's current id or the last id its
+read gave, so a host whose `BACKUP_DIR` mount is only stuck still counts.
+
+A backup that fails this way has its step's job canceled, the lock released
+and the queued backup, if any, started. Its History row is `Failed` with
+"Interrupted: no server with its backup directory (id `<id>`) picked up the
+`<step>` step for 30 minutes". Bring the host back and **Resume** it, or take
+a new backup. A step job left in a directory queue after its backup moved on
+is canceled in either of the first two rows.
+
+What the server log says:
+
+| Log line | Level | Meaning |
+|---|---|---|
+| "Backup step `<step>` of `<stamp>` waited 30 minutes for a server with its backup directory (id `<id>`), and none is running: the backup failed and the lock was released" | error | The second row, for a step. |
+| "Backup step `<step>` of `<stamp>` moved back to backup_steps: the servers with its backup directory (id `<id>`) don't run its queue" | warning | The first row ("of a starting backup" for a resume's start). Look for a paused queue, or the start warning above, on the node with that directory. |
+| "Backup step start of a starting backup moved back to backup_steps: no server with its backup directory (id `<id>`) is running" | warning | The second row, for a resume's start (which has no stamp of its own on the lock until it runs). |
+| "Backup step job `<id>` was left in `backup_dir_<id>` after its backup moved on: canceled" | warning | A stray job, cleaned up. |
+| "Backup stranded-step sweep skipped: couldn't read the node heartbeats (…)" | warning | Nothing was moved or failed this time; the next sweep tries again. |
+| "Backup stranded-step sweep failed: …" | warning | The sweep raised; the next one tries again. |
+| "Backup last-good marker sync for backup directory `<id>` gave up: no node with that directory picked it up" | warning | A marker sync was canceled, once per directory per sweep. The next slot queues another. |
+| "Backup heartbeat couldn't sweep the stranded marker syncs: …" | warning | The marker sync sweep raised; the next tick tries again. |
+
+Each moved-back or failed backup step also emits
+`[:kiln_cms, :backups, :lock, :stranded]` (`outcome` `:moved_back`,
+`:returned` or `:interrupted`).
+
+### Rolling back past backup directory queues
+
+A release from before #2845 never runs a `backup_dir_<id>` queue. A step
+waiting in one when you roll back never runs there, and that release
+neither takes it back (it takes back only a running step) nor fails the
+backup (its job hasn't ended), so the backup holds the lock, and every
+backup queued behind it, until a platform admin cancels it.
+
+**Before rolling back, cancel the running backup or let it finish.**
+Pause the in-app schedules for the length of the rollback if one could
+fire. To check that nothing is waiting in a directory queue:
+
+```sql
+SELECT id, queue, worker, state
+FROM oban_jobs
+WHERE queue LIKE 'backup_dir_%'
+  AND state IN ('available', 'scheduled', 'retryable', 'executing');
+```
+
+No rows: the rollback is safe for backups. If you rolled back with a
+backup still waiting there, cancel it on the Backups page. Its job stays
+in `oban_jobs`, harmless, until you roll forward again. A marker sync left
+in such a queue is also harmless: the next slot queues a new one in
+`default`.
+
+The migration's two `backup_node_beats` columns stay after a rollback; the
+older release doesn't read them.
+
+**During a rolling deploy**, a node on the older release:
+
+- never advertises a queue, so its directory's jobs keep the put-backs in
+  `backup_steps`;
+- whose node name is reused by a node of this release, or the other way
+  round, carries a new boot id, so an advertisement left by the other is
+  ignored;
+- cancels only the steps in `backup_steps`. Its **Cancel** of a backup
+  whose step waits in a directory queue still cancels the run and releases
+  the lock, and the step cancels itself when it runs (or the sweep cancels
+  it); a step already running there stops at its next fenced call
+  ([What a step that outlives its Cancel can write](#what-a-step-that-outlives-its-cancel-can-write)).
+
+Finish the rolling deploy before you start, cancel or resume a backup.
 
 ### The backup-directory id read (#2848)
 

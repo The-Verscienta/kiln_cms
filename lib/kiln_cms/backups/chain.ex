@@ -108,6 +108,7 @@ defmodule KilnCMS.Backups.Chain do
   alias KilnCMS.Backups.{
     Artifact,
     DirId,
+    DirQueues,
     Heartbeat,
     Importer,
     Lock,
@@ -246,6 +247,7 @@ defmodule KilnCMS.Backups.Chain do
       # dead. Reap needs no beat (it reads only the holder's job state).
       _ = if heartbeat?(), do: reclaim_stale()
       _ = reap()
+      _ = if heartbeat?(), do: sweep_stranded()
 
       result = with_lock(&decide_and_claim(&1, req))
 
@@ -524,21 +526,35 @@ defmodule KilnCMS.Backups.Chain do
   Move the chain on to `step` (`part` for an archive step): insert its job and
   point the lock at it, in one transaction. `{:error, :superseded}` when the
   lease is no longer the holder's; nothing is inserted then.
+
+  The job goes to the queue of the chain's backup directory when a live node
+  advertises it (`KilnCMS.Backups.DirQueues.routable?/1`, #2845), else to
+  `backup_steps`, where a node without the directory moves it there when it
+  fetches it. The beats are read before the lock is taken, so a read never
+  holds it.
   """
   @spec advance(lease(), String.t(), pos_integer() | nil) :: :ok | {:error, term()}
   def advance(lease, step, part \\ nil) do
+    opts = step_queue(lease.dir_id)
+
     result =
       with_lock(fn row ->
         if holds?(row, lease),
-          do: move_to(row, lease, step, part),
+          do: move_to(row, lease, step, part, opts),
           else: {:error, :superseded}
       end)
 
     with {:ok, _job} <- result, do: :ok
   end
 
-  defp move_to(row, lease, step, part) do
-    with {:ok, job} <- insert_step(step_args(lease, step, part)) do
+  defp step_queue(dir_id) do
+    if DirQueues.enabled?() and DirQueues.routable?(dir_id),
+      do: [queue: DirQueues.name(dir_id)],
+      else: []
+  end
+
+  defp move_to(row, lease, step, part, opts) do
+    with {:ok, job} <- insert_step(step_args(lease, step, part), opts) do
       fields = %{step: step, part: part, step_job_id: job.id}
 
       # The start step's hand-over binds the chain to its backup directory
@@ -653,7 +669,8 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   @doc """
-  Inside a lock transaction: cancel every step job of `chain`
+  Inside a lock transaction: cancel every step job of `chain`, in whichever
+  queue (`backup_steps` or a directory's, #2845), by worker and args
   (`Oban.cancel_all_jobs/1`; an executing one is killed once the transaction
   commits). For the person's Cancel (`Run.Changes.Cancel`, and a resume
   canceled before it started, `Run.Changes.CancelResume`), which then releases
@@ -661,9 +678,13 @@ defmodule KilnCMS.Backups.Chain do
   """
   @spec cancel_chain_jobs(String.t()) :: :ok
   def cancel_chain_jobs(chain) when is_binary(chain) do
+    worker = inspect(StepWorker)
+    contains = %{"chain" => chain}
+
+    # `@>` so the args' GIN index serves it.
     query =
       from(j in Oban.Job,
-        where: j.queue == "backup_steps" and fragment("?->>'chain' = ?", j.args, ^chain)
+        where: j.worker == ^worker and fragment("? @> ?", j.args, type(^contains, :map))
       )
 
     {:ok, _canceled} = Oban.cancel_all_jobs(query)
@@ -1047,6 +1068,184 @@ defmodule KilnCMS.Backups.Chain do
       {:error, error}
   end
 
+  @doc """
+  Deal with the backup steps left waiting in a backup directory's queue
+  that no node runs (#2845; `KilnCMS.Backups.DirQueues`, "Jobs left in a
+  queue no node runs"). For each `StepWorker` job that has waited there:
+
+    * a live node (180 s) reports the directory but none advertises its
+      queue, for #{DirQueues.move_back_after_s()} s: the holder's job goes
+      back to `backup_steps` (same id, available), where it snoozes as before
+      #2845 until that node picks it up;
+    * no live node reports the directory, for #{DirQueues.stranded_after_s()} s:
+      a pinned step is interrupted (its job canceled, the lock released, the
+      waiting request promoted, the run failed with a message that says
+      why); a resume's start goes back to `backup_steps`, where its
+      lost-directory fallback decides (`StepWorker`);
+    * otherwise it is left: a node runs the queue, or will soon.
+
+  A job that is not the lock's (superseded, so it would cancel itself when
+  run) is canceled in either of the first two cases. The beats are read
+  before the lock is taken; beats that can't be read leave everything, with
+  a warning. `{:ok, :none | {:interrupted | :returned | :moved_back, info}}`
+  for the holder's job.
+  """
+  @spec sweep_stranded() :: {:ok, term()} | {:error, term()}
+  def sweep_stranded do
+    case DirQueues.waiting(inspect(StepWorker)) do
+      [] -> {:ok, :none}
+      waiting -> sweep_waiting(waiting)
+    end
+  rescue
+    error ->
+      Logger.warning("Backup stranded-step sweep failed: #{Exception.message(error)}")
+      {:error, error}
+  end
+
+  defp sweep_waiting(waiting) do
+    case waiting |> Enum.map(& &1.dir_id) |> Enum.uniq() |> DirQueues.statuses() do
+      {:ok, statuses} ->
+        acts =
+          for job <- waiting,
+              verdict = DirQueues.verdict(statuses[job.dir_id], job.waited_s),
+              verdict != :leave,
+              do: {job, verdict}
+
+        if acts == [], do: {:ok, :none}, else: sweep_acts(acts)
+
+      {:error, error} ->
+        Logger.warning(
+          "Backup stranded-step sweep skipped: couldn't read the node heartbeats " <>
+            "(#{describe(error)})"
+        )
+
+        {:ok, :none}
+    end
+  end
+
+  defp sweep_acts(acts) do
+    result =
+      with_lock(fn row ->
+        Enum.reduce_while(acts, {:ok, :none}, &sweep_step(row, &1, &2))
+      end)
+
+    after_sweep(result)
+  end
+
+  # The holder's outcome is the result; a stray's is `:none`.
+  defp sweep_step(row, {job, verdict}, {:ok, acc}) do
+    case sweep_one(row, job, verdict) do
+      {:ok, :none} -> {:cont, {:ok, acc}}
+      {:ok, outcome} -> {:cont, {:ok, outcome}}
+      {:error, _} = error -> {:halt, error}
+    end
+  end
+
+  # Under the lock: the holder's job is acted on only while it still waits
+  # in that queue (`DirQueues.move_back/2` and the cancel match on both).
+  defp sweep_one(%{step_job_id: id} = row, %{id: id} = job, :move_back) do
+    moved_back(row, job, :moved_back)
+  end
+
+  defp sweep_one(%{step_job_id: id, step: :start} = row, %{id: id} = job, :stranded) do
+    moved_back(row, job, :returned)
+  end
+
+  defp sweep_one(%{step_job_id: id} = row, %{id: id} = job, :stranded) do
+    if still_waiting?(id, job.queue) do
+      :ok = Oban.cancel_job(id)
+
+      with {:ok, promoted} <- release_in_txn(row) do
+        info = info(row, nil) |> Map.put(:queue, job.queue) |> Map.put(:promoted, promoted)
+        {:ok, {:interrupted, info}}
+      end
+    else
+      {:ok, :none}
+    end
+  end
+
+  # Not the lock's job: superseded, whatever the verdict.
+  defp sweep_one(_row, job, _verdict) do
+    if still_waiting?(job.id, job.queue) do
+      :ok = Oban.cancel_job(job.id)
+
+      Logger.warning(
+        "Backup step job #{job.id} was left in #{job.queue} after its backup moved on: canceled"
+      )
+    end
+
+    {:ok, :none}
+  end
+
+  defp moved_back(row, job, outcome) do
+    case DirQueues.move_back(job.id, job.queue) do
+      :ok -> {:ok, {outcome, Map.put(info(row, nil), :queue, job.queue)}}
+      :gone -> {:ok, :none}
+    end
+  end
+
+  defp still_waiting?(id, queue) do
+    Repo.exists?(
+      from(j in Oban.Job,
+        where:
+          j.id == ^id and j.queue == ^queue and
+            j.state in ["available", "scheduled", "retryable"]
+      )
+    )
+  end
+
+  defp after_sweep({:ok, {:interrupted, info}} = result) do
+    dir = DirQueues.dir_id(info.queue)
+
+    message =
+      "Interrupted: no server with its backup directory (id #{dir}) picked up the " <>
+        "#{info.step} step for #{div(DirQueues.stranded_after_s(), 60)} minutes"
+
+    if interrupt(info, message) != :finished do
+      Logger.error(
+        "Backup step #{info.step} of #{info.stamp || "a starting backup"} waited " <>
+          "#{div(DirQueues.stranded_after_s(), 60)} minutes for a server with its backup " <>
+          "directory (id #{dir}), and none is running: the backup failed and the lock was " <>
+          "released"
+      )
+    end
+
+    stranded_event(info, :interrupted)
+    result
+  end
+
+  defp after_sweep({:ok, {outcome, info}} = result) when outcome in [:returned, :moved_back] do
+    dir = DirQueues.dir_id(info.queue)
+
+    why =
+      if outcome == :returned,
+        do: "no server with its backup directory (id #{dir}) is running",
+        else: "the servers with its backup directory (id #{dir}) don't run its queue"
+
+    Logger.warning(
+      "Backup step #{info.step} of #{info.stamp || "a starting backup"} moved back to " <>
+        "backup_steps: #{why}"
+    )
+
+    stranded_event(info, outcome)
+    result
+  end
+
+  defp after_sweep(result), do: result
+
+  defp stranded_event(info, outcome) do
+    :telemetry.execute([:kiln_cms, :backups, :lock, :stranded], %{count: 1}, %{
+      chain: info.chain,
+      stamp: info.stamp,
+      step: info.step,
+      queue: info.queue,
+      outcome: outcome
+    })
+  end
+
+  defp describe(error) when is_exception(error), do: Exception.message(error)
+  defp describe(error), do: inspect(error, limit: 5)
+
   defp release_orphan(row) do
     info = info(row, nil)
 
@@ -1147,17 +1346,21 @@ defmodule KilnCMS.Backups.Chain do
   # What a resume's start is waiting for before it re-opens its run (#2816),
   # from its job: `:files_server` while it snoozes for the server that has the
   # run's files (`StepWorker`'s pinned affinity; a retryable attempt only
-  # when that is what failed it), `:cancel_settle` while it runs inside the
-  # settle window of the run's Cancel (`Steps`), else nil. Only for the
+  # when that is what failed it) or waits in that directory's queue (#2845),
+  # `:cancel_settle` while it runs inside the settle window of the run's
+  # Cancel (`Steps`), else nil. Only for the
   # Backups page (`in_flight/1`'s `details: true`): two more reads, which the
   # `Backups.await/2` poll doesn't need.
   defp waiting_for(%{step: :start, resume_stamp: stamp, step_job_id: id})
        when is_binary(stamp) and is_integer(id) do
-    query = from(j in Oban.Job, where: j.id == ^id, select: map(j, [:state, :meta, :errors]))
+    query =
+      from(j in Oban.Job, where: j.id == ^id, select: map(j, [:state, :meta, :errors, :queue]))
 
     case Repo.one(query) do
       %{state: state} = job when state in ["available", "scheduled", "retryable"] ->
-        if snoozed_for_files?(job), do: :files_server
+        # Parked in its directory's queue (#2845), it waits for a server with
+        # the files by being there.
+        if DirQueues.dir_queue?(job.queue) or snoozed_for_files?(job), do: :files_server
 
       %{state: "executing"} ->
         if canceled_recently?(stamp), do: :cancel_settle

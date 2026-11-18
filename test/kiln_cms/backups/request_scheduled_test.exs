@@ -72,14 +72,7 @@ defmodule KilnCMS.Backups.RequestScheduledTest do
 
   defp lock, do: Backups.backup_lock!(actor: Backups.system())
 
-  defp start_jobs do
-    Repo.all(
-      from(j in Oban.Job,
-        where: j.queue == "backup_steps" and fragment("?->>'step' = 'start'", j.args),
-        order_by: j.id
-      )
-    )
-  end
+  defp start_jobs, do: BackupChain.step_jobs(step: "start")
 
   defp runs, do: Backups.list_runs!(actor: Backups.system())
 
