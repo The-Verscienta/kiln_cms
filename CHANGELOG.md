@@ -112,7 +112,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#3090](https://github.com/The-Verscienta/kiln_cms/pull/3090) · [long form](docs/changelog/unreleased.md#backup-resume-source-host-first-upgrade))
 
 - **Run `mix ash.migrate` (new nullable `backup_node_beats.dir_queue` and `dir_queue_boot_id`). Finish a rolling deploy before you start, cancel or resume a backup. Before rolling back past this release, cancel running backups or let them finish.**
-  ([long form](docs/changelog/unreleased.md#backup-dir-queues-upgrade))
+  ([#3094](https://github.com/The-Verscienta/kiln_cms/pull/3094) · [long form](docs/changelog/unreleased.md#backup-dir-queues-upgrade))
 
 ### Breaking
 
@@ -227,7 +227,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#3044](https://github.com/The-Verscienta/kiln_cms/issues/3044) · [long form](docs/changelog/unreleased.md#factor-removed-notice-names-admin))
 
 - **Backup steps and marker syncs that must run where a backup directory is now go to that directory's own Oban queue, `backup_dir_<id>`, so they no longer use up attempts on nodes without the files. One left there with no server for its directory fails the backup after 30 minutes.**
-  ([long form](docs/changelog/unreleased.md#backup-dir-queues))
+  ([#3094](https://github.com/The-Verscienta/kiln_cms/pull/3094) · [long form](docs/changelog/unreleased.md#backup-dir-queues))
 
 ### Fixed
 
