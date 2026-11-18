@@ -22,7 +22,7 @@ defmodule KilnCMS.Backups.Artifact do
   File names are built and parsed here and nowhere else: `parse_file/1`,
   `part_name/2`, `set_names/2`, `sidecar_name/2`, `parse_sidecar_name/1`,
   `keep_name/1`, `parse_keep_name/1`, `good_name/1`, `parse_good_name/1`,
-  `hold_name/1`, `parse_hold_name/1`, `partial_name/2`.
+  `hold_name/1`, `parse_hold_name/1`, `partial_name/2`, `name_stamp/1`.
 
   ## Temporary files
 
@@ -214,6 +214,25 @@ defmodule KilnCMS.Backups.Artifact do
   end
 
   def parse_sidecar_name(_other), do: :error
+
+  @name_stamp ~r/\Akiln-(?:db|media)-(\d{8}-\d{6})\./
+
+  @doc """
+  The stamp of any file a backup writes under one, as `{:ok, stamp}`, or
+  `:error`: a name starting `kiln-db-<stamp>.` or `kiln-media-<stamp>.`
+  (a dump, a part, a sidecar, any of their `.partial`s). Broader than
+  `parse_file/1` on purpose: it answers "is this stamp in use on disk"
+  (#2477), the same names `scripts/backup.sh` checks before it takes a stamp.
+  """
+  @spec name_stamp(String.t()) :: {:ok, String.t()} | :error
+  def name_stamp(name) when is_binary(name) do
+    case Regex.run(@name_stamp, name) do
+      [_, stamp] -> {:ok, stamp}
+      nil -> :error
+    end
+  end
+
+  def name_stamp(_other), do: :error
 
   @doc """
   The temporary name a file is written under before it is renamed to `name`.

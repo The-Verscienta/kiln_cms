@@ -3082,6 +3082,10 @@ needs only one part keeps the legacy `kiln-media-<stamp>.tar.gz`.
   the run's log (and in the server log), with up to five examples, so an
   operator can see that files are missing from the backup. (`plan.json` carries
   the two additive keys `unreadable_names` and `unreadable_examples`.)
+- **A folder that can be listed but not entered** (mode 0644, say) fails the
+  backup, naming the folder: fix its permissions, or leave it out with
+  `BACKUP_MEDIA_EXCLUDE`. Before #2477 the app left its files out and counted
+  them as names the encoding cannot represent.
 - **Empty directories and directory modes, owners and timestamps are not
   preserved.** Restoring recreates directories as it extracts files into them,
   owned by the user running the restore with that user's default mode
@@ -4283,10 +4287,26 @@ macOS, which CI does not run;
 has the details.
 
 **Permissions.** Parts and the sidecar are 0600 from their first byte (the
-media phase runs under `umask 077`). If the script creates `$BACKUP_DIR/media`,
-it creates it 0700; an existing directory keeps its mode. The app sets the same
-directory to 0700 on every run. If cron and the app run as different users, one
-of them cannot write there, so run both as the same user.
+media phase runs under `umask 077`). The script creates `$BACKUP_DIR/media`
+0700 and sets an existing one back to 0700 on every run, as the app does. If
+that `chmod` fails (a directory the cron user doesn't own), the run fails:
+"could not make `<dir>` private (chmod 700)". If cron and the app run as
+different users, one of them cannot write there, so run both as the same user.
+
+**A media folder that can be listed but not entered** (read permission without
+execute, such as mode 0644) fails the run in both paths, because none of its
+files can be read. The error names the folder, relative to the media directory:
+`media folder "<folder>" can be listed but not entered (no execute permission):
+fix its permissions, or leave it out with BACKUP_MEDIA_EXCLUDE`.
+
+**A cron run and the app starting in the same second.** A stamp is taken when
+any `kiln-db-<stamp>.*` or `kiln-media-<stamp>.*` file, or a `.work/<stamp>`
+directory, is in `$BACKUP_DIR`. The script then moves on one second at a time to
+a free stamp ("Stamp `<stamp>` is already in use in `<dir>`; this run is
+`<stamp>`"), and claims it by creating its first file exclusively, so two cron
+runs never share one. After 60 stamps in use it fails. The app moves past a
+stamp with files on disk the same way. A cron run and an app backup that check
+within the same few milliseconds can still choose the same stamp.
 
 **When a run fails.** Cron has no resume. If any part fails (`tar` is retried
 once from a re-checked list first), or the run is interrupted with `HUP`, `INT`

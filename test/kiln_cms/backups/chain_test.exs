@@ -890,6 +890,37 @@ defmodule KilnCMS.Backups.ChainTest do
     end
   end
 
+  # A cron run of `scripts/backup.sh` has no Run until the Importer reads its
+  # files, so its stamp shows only on disk (#2477).
+  describe "the stamp" do
+    test "a fresh stamp steps past stamps with files on disk", %{dir: dir} do
+      now = DateTime.utc_now()
+
+      # A cron run in progress for each of the next 20 seconds, either kind.
+      taken =
+        for n <- 0..19 do
+          stamp = Artifact.stamp(DateTime.add(now, n, :second))
+
+          rel =
+            if rem(n, 2) == 0,
+              do: "db/kiln-db-#{stamp}.dump.partial",
+              else: "media/kiln-media-#{stamp}.sha256.partial"
+
+          path = Path.join(dir, rel)
+          File.mkdir_p!(Path.dirname(path))
+          File.write!(path, "")
+          stamp
+        end
+
+      {:ok, %{status: :started}} = request()
+      step_until("dump")
+
+      %{stamp: stamp} = lock()
+      refute stamp in taken
+      assert stamp == Artifact.stamp(DateTime.add(now, 20, :second))
+    end
+  end
+
   describe "failures a retry can't fix" do
     test "state.json deleted mid-chain: the backup fails and the previous good manifest stays",
          %{dir: dir} do
@@ -946,6 +977,33 @@ defmodule KilnCMS.Backups.ChainTest do
       for {path, at} <- old, do: assert(mtime(path) == at, "#{path} was rebuilt")
       assert {_, 0} = System.cmd("tar", ["-tzf", p2], stderr_to_stdout: true)
       assert [%{status: :succeeded}] = runs()
+    end
+
+    # Permissions don't bind root: it enters a 0644 folder.
+    if match?({"0\n", 0}, System.cmd("id", ["-u"])),
+      do: @tag(skip: "running as root: a 0644 folder doesn't stop root entering it")
+
+    test "a media folder that can be listed but not entered fails the backup at once, naming it (#2477)",
+         %{media: media} do
+      locked = Path.join(media, "locked")
+      File.mkdir_p!(locked)
+      File.write!(Path.join(locked, "inside.bin"), "unreachable")
+      File.chmod!(locked, 0o644)
+      on_exit(fn -> File.chmod(locked, 0o755) end)
+
+      {:ok, %{status: :started, chain: chain}} = request()
+      job = step_until("plan")
+
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+        assert {:error, {:not_enterable, "locked"}} = BackupChain.settled(chain)
+      end)
+
+      # Not retried.
+      assert %{state: "cancelled", attempt: 1} = Repo.get!(Oban.Job, job.id)
+      assert [%{status: :failed, error: error}] = runs()
+      assert error =~ ~s(media folder "locked" can be listed but not entered)
+      assert error =~ "BACKUP_MEDIA_EXCLUDE"
     end
 
     test "the last attempt's failure is terminal: the job is canceled and the lock released" do

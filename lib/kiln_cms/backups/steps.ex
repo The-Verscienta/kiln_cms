@@ -1389,6 +1389,11 @@ defmodule KilnCMS.Backups.Steps do
       {:error, :superseded} ->
         {:result, {:cancel, :superseded}}
 
+      # A folder that can be listed but not entered (#2477): a retry finds it
+      # the same, so the run fails now, naming it.
+      {:error, {:not_enterable, _rel} = reason} ->
+        {:fatal, reason, state, Recorder.log(rec, :error, "media", describe(reason))}
+
       {:error, reason} ->
         {:retry, reason, state, Recorder.log(rec, :error, "media", describe(reason))}
     end
@@ -3365,6 +3370,7 @@ defmodule KilnCMS.Backups.Steps do
   end
 
   defp describe({:exit_status, _executable, _status, _output} = reason), do: describe_exit(reason)
+  defp describe({:not_enterable, rel}), do: MediaArchive.describe_not_enterable(rel)
   defp describe(reason), do: inspect(reason)
 
   defp describe_exit({:exit_status, executable, status, output}),

@@ -182,6 +182,30 @@ defmodule KilnCMS.Backups.ArtifactTest do
       end
     end
 
+    test "name_stamp/1 reads the stamp of any file of either kind, and nothing else (#2477)" do
+      for name <- [
+            "kiln-db-20260805-031700.dump",
+            "kiln-db-20260805-031700.dump.partial",
+            "kiln-db-20260805-031700.sha256",
+            "kiln-media-20260805-031700.tar.gz",
+            "kiln-media-20260805-031700.part03.tar.gz.48211-2.partial",
+            "kiln-media-20260805-031700.sha256.partial"
+          ] do
+        assert Artifact.name_stamp(name) == {:ok, "20260805-031700"}, name
+      end
+
+      for name <- [
+            "kiln-20260805-031700.keep",
+            "kiln-db-20260805-031700",
+            "kiln-db-2026080-031700.dump",
+            "kiln-files-20260805-031700.dump",
+            "manifest.json",
+            "x-kiln-db-20260805-031700.dump"
+          ] do
+        assert Artifact.name_stamp(name) == :error, name
+      end
+    end
+
     test "partial_name/2 builds what the parsers read" do
       assert Artifact.partial_name("kiln-db-20260805-031700.dump", nil) ==
                "kiln-db-20260805-031700.dump.partial"

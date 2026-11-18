@@ -445,20 +445,28 @@ defmodule KilnCMS.Backups.Chain do
   job is known to be current, so a superseded start never creates it. A
   directory whose id can't be read fails the start, again only once it is
   known to be current.
+
+  A fresh stamp steps past one already in use: by a Run, by a work directory,
+  or by any file in this node's `db/` or `media/` (#2477), which is how a
+  `scripts/backup.sh` run that has no Run yet shows. Those directories are
+  listed before the lock too.
   """
   @spec begin_step(Oban.Job.t()) :: {:ok, lease()} | {:error, term()}
   def begin_step(%Oban.Job{id: id, args: args} = job) do
-    dir_id = if args["step"] == "start", do: DirId.current(), else: :not_start
+    {dir_id, on_disk} =
+      if args["step"] == "start",
+        do: {DirId.current(), stamps_on_disk()},
+        else: {:not_start, MapSet.new()}
 
     with_lock(fn row ->
       if current?(row, args, id),
-        do: claim_step(row, job, dir_id),
+        do: claim_step(row, job, {dir_id, on_disk}),
         else: {:error, :superseded}
     end)
   end
 
-  defp claim_step(row, %Oban.Job{id: job_id, attempt: attempt, args: %{"step" => step}}, dir_id) do
-    with {:ok, fields, dir_id} <- start_fields(row, step, dir_id) do
+  defp claim_step(row, %Oban.Job{id: job_id, attempt: attempt, args: %{"step" => step}}, found) do
+    with {:ok, fields, dir_id} <- start_fields(row, step, found) do
       fields =
         Map.merge(fields, %{
           executing_boot_id: Backups.boot_id(),
@@ -477,13 +485,13 @@ defmodule KilnCMS.Backups.Chain do
       row.step_job_id == job_id
   end
 
-  defp start_fields(row, "start", dir_id) do
+  defp start_fields(row, "start", {dir_id, on_disk}) do
     with {:ok, dir_id} <- start_dir_id(dir_id) do
-      {:ok, %{stamp: row.stamp || row.resume_stamp || fresh_stamp()}, dir_id}
+      {:ok, %{stamp: row.stamp || row.resume_stamp || fresh_stamp(on_disk)}, dir_id}
     end
   end
 
-  defp start_fields(row, _step, _dir_id), do: {:ok, %{}, row.dir_id}
+  defp start_fields(row, _step, _found), do: {:ok, %{}, row.dir_id}
 
   # The id read before the lock (`begin_step/1`). A directory without one is
   # given one here, the only file this transaction may write: the first start
@@ -493,18 +501,39 @@ defmodule KilnCMS.Backups.Chain do
   defp start_dir_id({:error, _} = error), do: error
 
   # Two chains a second apart would share a stamp, and so a Run and file names:
-  # step forward past any stamp already used.
-  defp fresh_stamp(at \\ DateTime.utc_now(), tries \\ 60) do
+  # step forward past any stamp already used. So would this chain and a cron
+  # run of `scripts/backup.sh` started in the same second (#2477): its files
+  # have no Run until the Importer reads them, so a stamp with files on disk
+  # (`on_disk`, `stamps_on_disk/0`) is used too. The script steps past the
+  # app's stamps the same way; a cron run and a start that look within the
+  # same few milliseconds can still pick one stamp (docs/backups.md).
+  defp fresh_stamp(on_disk, at \\ DateTime.utc_now(), tries \\ 60) do
     stamp = Artifact.stamp(at)
 
-    if tries > 0 and stamp_taken?(stamp),
-      do: fresh_stamp(DateTime.add(at, 1, :second), tries - 1),
+    if tries > 0 and stamp_taken?(stamp, on_disk),
+      do: fresh_stamp(on_disk, DateTime.add(at, 1, :second), tries - 1),
       else: stamp
   end
 
-  defp stamp_taken?(stamp) do
-    match?({:ok, %{}}, Backups.get_run_by_stamp(stamp, actor: Backups.system())) or
+  defp stamp_taken?(stamp, on_disk) do
+    MapSet.member?(on_disk, stamp) or
+      match?({:ok, %{}}, Backups.get_run_by_stamp(stamp, actor: Backups.system())) or
       File.exists?(Backups.work_dir(stamp))
+  end
+
+  # The stamps any file in this node's `db/` or `media/` carries
+  # (`Artifact.name_stamp/1`). A directory that can't be listed (not created
+  # yet, say) adds none: the start step fails on it later if it matters.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp stamps_on_disk do
+    dir = Backups.dir()
+
+    for kind <- Artifact.kinds(),
+        {:ok, names} <- [File.ls(Path.join(dir, Artifact.subdir(kind)))],
+        name <- names,
+        {:ok, stamp} <- [Artifact.name_stamp(name)],
+        into: MapSet.new(),
+        do: stamp
   end
 
   defp lease(row, job_id) do
