@@ -18,7 +18,7 @@
   for the Run writes, which this leaves as they were.
 - **Changelog** — the Unreleased section of
   [CHANGELOG.md](../../CHANGELOG.md): Upgrade notes and Fixed
-  ([long form](../changelog/unreleased.md#backup-step-files-fenced)).
+  ([long form](../changelog/v1.11.0.md#backup-step-files-fenced)).
 
 ## The problem
 

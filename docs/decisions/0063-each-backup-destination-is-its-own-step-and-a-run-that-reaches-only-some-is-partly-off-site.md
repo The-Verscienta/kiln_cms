@@ -25,7 +25,7 @@
   (retention on a destination).
 - **Changelog** — the Unreleased section of
   [CHANGELOG.md](../../CHANGELOG.md): Upgrade notes and Added, #2220
-  ([long form](../changelog/unreleased.md#backup-destinations)).
+  ([long form](../changelog/v1.11.0.md#backup-destinations)).
 
 ## The problem
 

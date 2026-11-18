@@ -20,7 +20,7 @@
   (the off-site uploads were left unfenced).
 - **Changelog** — the Unreleased section of
   [CHANGELOG.md](../../CHANGELOG.md): Upgrade notes and Added
-  ([long form](../changelog/unreleased.md#resumable-backup-uploads)).
+  ([long form](../changelog/v1.11.0.md#resumable-backup-uploads)).
 
 ## The problem
 

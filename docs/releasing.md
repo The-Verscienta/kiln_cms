@@ -1068,7 +1068,7 @@ it the same way.
 
 ### Rolling back past backup directory queues
 
-From the release after v1.10.1 (#2845), a backup step that must run where
+From v1.11.0 (#2845), a backup step that must run where
 its backup directory is waits in that directory's own Oban queue,
 `backup_dir_<id>`, which only the current release starts. A step waiting
 there when you roll back never runs, and the older release neither takes it
@@ -1082,7 +1082,7 @@ older release ignores them.
 
 ### Rolling back past form mail jobs that carry ids
 
-From the release after v1.10.1 (#2992), the form notification and
+From v1.11.0 (#2992), the form notification and
 autoresponder jobs carry `form_id`, `org_id` and `submission_id`, and the
 worker reads the submission when it runs. A release before it knows only
 the old shape, which carried the submitted `data`. No migration is
@@ -1115,7 +1115,7 @@ restoring a backup taken before the upgrade, run
 
 ### Rolling back past workflow and task mail jobs that carry ids
 
-From the release after v1.10.1 (#3019), workflow mail
+From v1.11.0 (#3019), workflow mail
 (`KilnCMS.Notifications.WorkflowMailWorker`: review requests, published and
 returned-to-draft mail, comment and mention mail) and task mail
 (`KilnCMS.Notifications.TaskMailWorker`: a task assigned, the daily digest)
@@ -1159,7 +1159,7 @@ them from rows that finished under the previous release.
 
 ### Account mail that names its account
 
-From the release after v1.10.1 (#3035), account mail
+From v1.11.0 (#3035), account mail
 (`KilnCMS.Mail.DeliveryWorker`: password resets, magic links, confirmations,
 sign-in unlock links, membership and registration notices, second-factor
 notices, sign-in alerts, security alerts, API key reuse alerts) records the
