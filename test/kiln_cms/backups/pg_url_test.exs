@@ -2,7 +2,7 @@ defmodule KilnCMS.Backups.PgUrlTest do
   @moduledoc """
   `KilnCMS.Backups.PgUrl` (#2719, #2726, #2830, #2831, #2833): a
   `DATABASE_URL` as libpq reads it, with the password moved out of argv, a
-  secret-bearing `key=value` string refused, Ecto's own query parameters
+  secret-bearing `key=value` string or a URI with `sslpassword` (#3049) refused, Ecto's own query parameters
   translated, and TLS settings that follow the app's Repo.
 
   The same table drives the shell copy (`pg_conn_split`) in
@@ -18,8 +18,8 @@ defmodule KilnCMS.Backups.PgUrlTest do
   describe "split/1" do
     for {label, input, url, password} <- @cases do
       @input input
-      @expected (if url == :refused do
-                   {:error, :refused_conninfo}
+      @expected (if is_atom(url) do
+                   {:error, url}
                  else
                    {:ok, {url, if(password, do: [{"PGPASSWORD", password}], else: [])}}
                  end)
@@ -41,8 +41,13 @@ defmodule KilnCMS.Backups.PgUrlTest do
     end
 
     test "a refusal never carries the string it refused" do
-      assert {:error, reason} = PgUrl.split("host=db password=hunter2 dbname=kiln")
-      refute inspect(reason) =~ "hunter2"
+      for input <- [
+            "host=db password=hunter2 dbname=kiln",
+            "postgres://u@h/db?sslpassword=hunter2"
+          ] do
+        assert {:error, reason} = PgUrl.split(input)
+        refute inspect(reason) =~ "hunter2"
+      end
     end
   end
 

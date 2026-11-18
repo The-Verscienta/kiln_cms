@@ -274,6 +274,14 @@ defmodule KilnCMS.Backups.WorkerTest do
 
       assert error.message =~ "is not a postgres:// URL"
       refute error.message =~ "hunter2"
+
+      error =
+        assert_raise ArgumentError, fn ->
+          Worker.split_credentials("postgres://u@h/db?sslpassword=hunter2")
+        end
+
+      assert error.message =~ "carries sslpassword"
+      refute error.message =~ "hunter2"
     end
 
     @tag :pg_tools

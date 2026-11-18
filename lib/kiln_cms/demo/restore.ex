@@ -344,7 +344,7 @@ defmodule KilnCMS.Demo.Restore do
   defp connection(url, kind) do
     case Backups.pg_connection(url) do
       {:ok, _url_and_env} = ok -> ok
-      {:error, :refused_conninfo} -> {:error, {kind, Backups.describe_refused_conninfo()}}
+      {:error, refusal} -> {:error, {kind, Backups.describe_refusal(refusal)}}
     end
   end
 

@@ -2540,6 +2540,7 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     test "a key=value string with a password is refused before pg_dump runs (#2831)", ctx do
       for url <- [
             "host=db user=kiln password=hunter2 dbname=kiln_prod",
+            "host=db user=kiln PASSWORD=hunter2 dbname=kiln_prod",
             "mysql://kiln:hunter2@db/x"
           ] do
         File.rm(ctx.log <> ".args")
@@ -2556,6 +2557,37 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
         assert manifest["error"] =~ "DATABASE_URL is not a postgres:// URL"
         refute manifest["error"] =~ "hunter2"
       end
+    end
+
+    test "a URL carrying sslpassword, in any case, is refused before pg_dump runs (#3049)",
+         ctx do
+      for url <- [
+            "ecto://kiln:pw@db/kiln_prod?sslmode=verify-full&sslpassword=hunter2",
+            "postgres://kiln@db/kiln_prod?SslPassword=hunter2"
+          ] do
+        assert {out, status} = backup(ctx, "all", [{"DATABASE_URL", url}, {"PGPASSWORD", nil}])
+
+        assert status != 0, url
+        refute File.exists?(ctx.log <> ".args"), "pg_dump ran for #{url}"
+        assert out =~ "DATABASE_URL carries sslpassword", url
+        refute out =~ "hunter2", url
+
+        manifest = manifest!(ctx)
+        refute manifest["ok"]
+        assert manifest["error"] =~ "DATABASE_URL carries sslpassword"
+        refute manifest["error"] =~ "hunter2"
+      end
+    end
+
+    test "a query PASSWORD in another case is refused before pg_dump runs (#3049)", ctx do
+      url = "postgres://kiln@db/kiln_prod?PASSWORD=hunter2"
+
+      assert {out, status} = backup(ctx, "db", [{"DATABASE_URL", url}, {"PGPASSWORD", nil}])
+
+      assert status != 0
+      refute File.exists?(ctx.log <> ".args"), "pg_dump ran"
+      assert out =~ "DATABASE_URL carries PASSWORD (or another spelling of password)"
+      refute out =~ "hunter2"
     end
 
     test "a passwordless key=value string still reaches pg_dump unchanged", ctx do

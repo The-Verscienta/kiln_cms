@@ -104,17 +104,26 @@ pg_conn_decode() {
 # reads `ssl=false` and `pool_size` itself).
 # A string that is not a postgres:// or postgresql:// URI is refused (#2831)
 # when it holds a `password=` or `sslpassword=` keyword (at the start, or
-# after whitespace or a closing quote; libpq keywords are case-sensitive and
-# cannot be quoted, and a match inside a quoted value only refuses more) or
+# after whitespace or a closing quote, in any case: libpq refuses another
+# case by name, but only once the value is already in argv; keywords cannot
+# be quoted, and a match inside a quoted value only refuses more) or
 # `://`: PG_CONN_ERROR says why, PG_CONN_URL is empty, and the caller dies
 # with it. A passwordless `key=value` conninfo or a bare database name is
 # left unchanged.
+# A URI whose query carries `sslpassword` (the key decoded as libpq decodes
+# it, in any case) is refused the same way (#3049): libpq has no environment
+# variable for a client key's passphrase, so it cannot be moved out of argv
+# like the password. So is a query key that is another spelling of
+# `password` (`PASSWORD=`, `Password=`): libpq doesn't read it, so it can't
+# be moved, and left alone its value would sit in argv.
 pg_conn_split() {
   local url="$1" rest userinfo="" has_userinfo=0 host user="" pw="" has_pw=0
   local query="" has_query=0 q seg key val kept="" sep="" shown="" ssep=""
-  local qpw="" has_qpw=0
+  local qpw="" has_qpw=0 has_sslpw=0 has_pwcase=0
   # In a variable: bash 3.2 reads a quoted right-hand side of `=~` literally.
-  local secret_kw="(^|[[:space:]'])(ssl)?password[[:space:]]*="
+  # Bracketed letters, not nocasematch: the match is case-insensitive
+  # without changing the caller's shell options.
+  local secret_kw="(^|[[:space:]'])([Ss][Ss][Ll])?[Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd][[:space:]]*="
   PG_CONN_URL="$url"
   PG_CONN_DISPLAY_URL="$url"
   PG_CONN_PASSWORD=""
@@ -178,31 +187,48 @@ pg_conn_split() {
           val="$PG_CONN_DECODED"
           ;;
       esac
-      if [ "$key" = "password" ]; then
-        qpw="${seg#*=}"
-        has_qpw=1
-      else
-        shown="${shown}${ssep}${seg}"
-        ssep="&"
-        case "$key" in
-          pool_size | timeout | idle_interval) ;;
-          ssl)
-            if [ "$val" = "false" ]; then
-              kept="${kept}${sep}sslmode=disable"
-            else
+      case "$key" in
+        [Ss][Ss][Ll][Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]) has_sslpw=1 ;;
+        password)
+          qpw="${seg#*=}"
+          has_qpw=1
+          ;;
+        [Pp][Aa][Ss][Ss][Ww][Oo][Rr][Dd]) has_pwcase=1 ;;
+        *)
+          shown="${shown}${ssep}${seg}"
+          ssep="&"
+          case "$key" in
+            pool_size | timeout | idle_interval) ;;
+            ssl)
+              if [ "$val" = "false" ]; then
+                kept="${kept}${sep}sslmode=disable"
+              else
+                kept="${kept}${sep}${seg}"
+              fi
+              sep="&"
+              ;;
+            *)
               kept="${kept}${sep}${seg}"
-            fi
-            sep="&"
-            ;;
-          *)
-            kept="${kept}${sep}${seg}"
-            sep="&"
-            ;;
-        esac
-      fi
+              sep="&"
+              ;;
+          esac
+          ;;
+      esac
       [ "$seg" = "$q" ] && break
       q="${q#*&}"
     done
+  fi
+  if [ "$has_sslpw" = 1 ]; then
+    PG_CONN_URL=""
+    PG_CONN_DISPLAY_URL=""
+    PG_CONN_ERROR="carries sslpassword, the passphrase of an encrypted client key, which would sit in the command line of pg_dump, pg_restore and psql for every process on the host to read (libpq has no environment variable for it). Use a client key file that is not encrypted, readable only by its owner (chmod 0600), or decrypt the one you have (openssl pkey -in client.key -out client.key.plain), and drop sslpassword from the URL."
+    return 0
+  fi
+  if [ "$has_pwcase" = 1 ]; then
+    PG_CONN_URL=""
+    PG_CONN_DISPLAY_URL=""
+    PG_CONN_ERROR="carries PASSWORD (or another spelling of password) in its query, which libpq does not read and which would sit in the tools' command line; write it as lower-case password, which Kiln moves out of the command line, or drop it."
+    return 0
   fi
 
   if [ "$has_qpw" = 0 ] && { [ "$has_pw" = 0 ] || [ -z "$pw" ]; }; then

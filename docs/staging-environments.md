@@ -333,7 +333,9 @@ that line
 For the tools, `ssl=false` in either URL becomes `sslmode=disable` and Ecto's
 `pool_size`, `timeout` and `idle_interval` are left out, while the line it
 prints and the URL it hands to migrate and scrub keep your query as written. A
-`key=value` string with a password is refused before anything runs
+`key=value` string with a password, or a URL with `sslpassword` (a client
+key's passphrase, which libpq can only read from the command line), is refused
+before anything runs
 ([backups.md](backups.md#which-database-url-the-backup-tools-accept-2719)).
 The script does not read `DATABASE_SSL`: to require TLS for the copy, put
 `sslmode=require` (or `verify-full`) in the URL.

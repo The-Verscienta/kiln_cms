@@ -474,6 +474,19 @@ carries the reasoning.
   See **Disk space** in [Media backups in parts](../backups.md#media-backups-in-parts-2218).
   ([#2423](https://github.com/The-Verscienta/kiln_cms/issues/2423))
 
+<a id="backup-url-sslpassword-upgrade"></a>
+
+- **A database URL with `sslpassword` in its query is now refused by the backup, restore, staging and demo tooling (#3049).**
+  `DATABASE_URL`, `BACKUP_DATABASE_URL`, `RESTORE_DATABASE_URL`,
+  `PROD_DATABASE_URL` or `STAGING_DATABASE_URL` with `?sslpassword=` used to
+  work, with the passphrase visible in `ps`. It is now refused before any
+  tool runs; an in-app backup fails at once without retries. Decrypt the
+  key (`openssl pkey -in client.key -out client.key.plain`), make it owned
+  by the user the tools run as and `chmod 0600` it, point `sslkey=` at it,
+  and drop `sslpassword` from the URL. The app's own database connection is
+  not affected. No migration; rolling back is safe.
+  ([#3049](https://github.com/The-Verscienta/kiln_cms/issues/3049))
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -2611,6 +2624,21 @@ carries the reasoning.
   ([#2935](https://github.com/The-Verscienta/kiln_cms/issues/2935))
 
 ## Security
+
+<a id="backup-url-sslpassword"></a>
+
+- **A database URL's `?sslpassword=` no longer reaches the argv of pg_dump, pg_restore or psql (#3049).**
+  #2826/#2831 moved a URL's password into `PGPASSWORD`, but libpq has no
+  environment variable for `sslpassword`, the passphrase of an encrypted
+  client key, so it went to the tools' command line, readable by every
+  process on the host. The in-app backup, the release console, demo resets
+  and `backup.sh`, `restore.sh` and `staging.sh` now refuse such a URL
+  (`sslpassword` matched after percent-decoding, as libpq reads it) with
+  one message that says why and how to fix it. Every spelling is refused
+  (`SSLPASSWORD`, `SslPassword`), as is a key=value `PASSWORD=` in any case:
+  libpq would reject those itself, but only after the tool had started with
+  the secret in its command line.
+  ([#3049](https://github.com/The-Verscienta/kiln_cms/issues/3049))
 
 <a id="backup-state-json-remote"></a>
 

@@ -168,7 +168,8 @@ same residue production has.
   `BACKUP_DATABASE_URL` can point anywhere, so that URL's host and database
   must match the Repo's. It is the in-app backup's URL, so `ecto://` works,
   the password travels as `PGPASSWORD`, and a `key=value` string with a
-  password is refused
+  password, or a URL with `sslpassword` (a client key's passphrase, which
+  libpq can only read from the command line), is refused
   ([backups.md](backups.md#which-database-url-the-backup-tools-accept-2719)).
   The tools' TLS follows the app's `DATABASE_SSL` and
   `DATABASE_SSL_CACERTFILE` unless that URL sets `sslmode`
