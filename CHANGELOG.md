@@ -63,7 +63,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **Backups → Schedule: a warning when `KILN_BACKUP_SCHEDULER_CRON` ticks less often than a schedule runs; the tab no longer freezes on a hung backup directory; and a keep-days change made while a backup runs reaches the `.hold` markers when it ends, even if it failed.**
-  ([long form](docs/changelog/unreleased.md#backup-schedule-tab-followups))
+  ([#3112](https://github.com/The-Verscienta/kiln_cms/pull/3112) · [long form](docs/changelog/unreleased.md#backup-schedule-tab-followups))
 
 ## [1.11.0] - 2026-11-18
 
