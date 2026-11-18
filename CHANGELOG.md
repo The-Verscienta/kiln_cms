@@ -336,7 +336,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#3090](https://github.com/The-Verscienta/kiln_cms/pull/3090) · [long form](docs/changelog/unreleased.md#backup-resume-source-host-first))
 
 - **A last-good marker sync job on a node whose `BACKUP_DIR` hangs gives up after 5 s (id read) or 120 s (sync) instead of holding an Oban worker for as long as the mount hangs.**
-  ([long form](docs/changelog/unreleased.md#backup-marker-sync-hung-dir))
+  ([#3093](https://github.com/The-Verscienta/kiln_cms/pull/3093) · [long form](docs/changelog/unreleased.md#backup-marker-sync-hung-dir))
 
 ### Security
 
