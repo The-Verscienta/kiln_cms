@@ -28,6 +28,19 @@ defmodule KilnCMS.Backups.Destination.Local do
   is removed: nothing lands unverified. `list/1` and `delete/2` touch regular
   files only.
 
+  The off-site step passes two options of the core's own, never given to a
+  plugin's adapter (#3041, ADR 0067): `:tag`, its job and attempt, so the
+  temporary file is `<name>.<job>-<attempt>.partial`
+  (`KilnCMS.Backups.Artifact.partial_name/2`) and no two steps share one; and
+  `:rename`, the rename into place under the step's lease
+  (`KilnCMS.Backups.Chain.fenced_rename/3`). A step that outlived its Cancel
+  then never replaces the file the resumed backup put there: its rename is
+  refused with `{:error, :superseded}` and it removes its own temporary file.
+  Without them (a call made outside a step) the file is `<name>.partial` and
+  the rename is a plain one, as before. A temporary file of an earlier copy
+  of the same file, left by a node that stopped mid-copy, is removed by the
+  next copy once it is older than `KilnCMS.Backups.Retention.partial_grace_s/0`.
+
   A file already in place with the same size and sha256 is not copied again:
   `put/3` answers `{:ok, :already_present}` (#2223). The size is compared
   first; only a file of the right size is read whole to hash it.
@@ -37,7 +50,7 @@ defmodule KilnCMS.Backups.Destination.Local do
 
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Checksum, Destination}
+  alias KilnCMS.Backups.{Artifact, Checksum, Destination, Retention}
 
   @subdirs ["db", "media"]
   @test_dir ".kiln-test"
@@ -132,23 +145,63 @@ defmodule KilnCMS.Backups.Destination.Local do
   # directory; `source` is the backup step's own file, not admin input.
   # sobelow_skip ["Traversal.FileModule"]
   @impl Kiln.BackupDestination
-  def put(config, %{path: source, subdir: subdir, name: name} = file, _opts) do
+  def put(config, %{path: source, subdir: subdir, name: name} = file, opts) do
     with {:ok, dir} <- checked(config),
          :ok <- safe_ref(subdir, name),
          {:ok, target_dir} <- ensure_dir(dir, subdir) do
       target = Path.join(target_dir, name)
-      partial = target <> ".partial"
+      partial = Artifact.partial_name(target, Keyword.get(opts, :tag))
+      rename = Keyword.get(opts, :rename, &File.rename/2)
 
-      if present?(target, file),
-        do: {:ok, :already_present},
-        else: copy_in(source, partial, target, file)
+      if present?(target, file) do
+        {:ok, :already_present}
+      else
+        sweep_stale_partials(target)
+        copy_in(source, {partial, target, rename}, file)
+      end
     end
   end
 
-  # `partial` and `target` are `put/3`'s verified paths.
+  # The temporary files of earlier copies of this very file, left by a node
+  # that stopped mid-copy: each attempt has a name of its own, so the next
+  # one no longer reuses (and clears) them. Removed once older than
+  # `Retention.partial_grace_s/0`, as the backup directory's own are, so a
+  # copy still under way keeps its file. Best-effort.
+  # `target` is `put/3`'s verified target; only its own siblings are removed.
   # sobelow_skip ["Traversal.FileModule"]
-  defp copy_in(source, partial, target, file) do
-    with {:error, _reason} = error <- place(source, partial, target, file) do
+  defp sweep_stale_partials(target) do
+    dir = Path.dirname(target)
+    cutoff = System.os_time(:second) - Retention.partial_grace_s()
+
+    with {:ok, names} <- File.ls(dir) do
+      for name <- names,
+          partial_of?(name, Path.basename(target)),
+          path = Path.join(dir, name),
+          {:ok, %File.Stat{type: :regular, mtime: mtime}} <- [File.lstat(path, time: :posix)],
+          mtime < cutoff,
+          do: File.rm(path)
+    end
+
+    :ok
+  end
+
+  # `<name>.partial`, or `<name>.<tag>.partial` for a tag a step writes.
+  defp partial_of?(name, base) do
+    case String.split(name, base <> ".", parts: 2) do
+      ["", "partial"] -> true
+      ["", rest] -> String.ends_with?(rest, ".partial") and Artifact.tag?(tag_of(rest))
+      _other -> false
+    end
+  end
+
+  defp tag_of(rest), do: String.replace_suffix(rest, ".partial", "")
+
+  # `partial` and `target` are `put/3`'s verified paths. The temporary file
+  # is this call's own, so it is removed on any error, a refused rename
+  # included.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp copy_in(source, {partial, _target, _rename} = paths, file) do
+    with {:error, _reason} = error <- place(source, paths, file) do
       File.rm(partial)
       error
     end
@@ -365,17 +418,21 @@ defmodule KilnCMS.Backups.Destination.Local do
   end
 
   # Copy, verify, then rename into place: `target` exists only once whole.
-  defp place(source, partial, target, file) do
-    with :ok <- copy_verified(source, partial, file),
-         {:error, reason} <- File.rename(partial, target) do
-      {:error, "couldn't move #{file.name} into place: #{format(reason)}"}
+  # A step that lost its lease gets `{:error, :superseded}` from the rename.
+  defp place(source, {partial, target, rename}, file) do
+    with :ok <- copy_verified(source, partial, file) do
+      case rename.(partial, target) do
+        :ok -> :ok
+        {:error, :superseded} = superseded -> superseded
+        {:error, reason} -> {:error, "couldn't move #{file.name} into place: #{format(reason)}"}
+      end
     end
   end
 
   # Copy into a new 0600 `partial` (made 0600 before a byte is written), then
   # hash what landed: the bytes and the sha256 the file verified with locally,
   # or the copy is refused.
-  # `partial` is `put/3`'s verified target plus `.partial`.
+  # `partial` is `put/3`'s verified target plus its temporary suffix.
   # sobelow_skip ["Traversal.FileModule"]
   defp copy_verified(source, partial, file) do
     File.rm(partial)

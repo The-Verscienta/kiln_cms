@@ -16,6 +16,11 @@ defmodule KilnCMS.Backups.Destination.S3 do
   is `KilnCMS.Backups.Destination.S3.Multipart`'s. Every call parses the
   settings and pins the endpoint again.
 
+  The off-site step passes `:holds`, an option of the core's own that a
+  plugin's adapter is never given (#3041): its lease check, made just before
+  a multipart upload is completed, so a step that outlived its Cancel does
+  not complete an upload over what the resumed backup sends.
+
   `test/1`, behind the form's Test button: `HeadBucket` (and the store's
   clock against this server's), a one-key `ListObjectsV2`, then a probe
   written under `<prefix>/.kiln-test/`, read back and deleted, whatever
@@ -106,7 +111,8 @@ defmodule KilnCMS.Backups.Destination.S3 do
     with :ok <- safe_ref(subdir, name),
          {:ok, client} <- client(config, opts) do
       key = Endpoint.object_key(client.endpoint, subdir, name)
-      Multipart.put(client, key, file, Keyword.get(opts, :resume))
+      holds = Keyword.get(opts, :holds, fn -> :ok end)
+      Multipart.put(client, key, file, Keyword.get(opts, :resume), holds)
     end
   end
 

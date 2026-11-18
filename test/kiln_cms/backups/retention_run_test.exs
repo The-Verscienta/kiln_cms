@@ -792,6 +792,98 @@ defmodule KilnCMS.Backups.RetentionRunTest do
     end
   end
 
+  # #3041: the prune step passes its lease as `under_lease:` and `discard:`.
+  describe "under a backup step's lease" do
+    defp holding, do: fn fun -> {:ok, fun.()} end
+
+    # Removes the paths, as the step's move into the trash ends up doing,
+    # and remembers each call.
+    defp discarding(calls) do
+      fn paths ->
+        names = Enum.map(paths, &Path.basename/1)
+        Agent.update(calls, &(&1 ++ [names]))
+        Enum.each(paths, &File.rm/1)
+        :ok
+      end
+    end
+
+    test "every unit goes through discard, data first and the sidecar last", %{dir: dir} do
+      newest(dir)
+      dump(dir, @old, 365)
+      {:ok, calls} = Agent.start_link(fn -> [] end)
+
+      assert {:ok, %{deleted: deleted, units: 1, stopped: nil}} =
+               Retention.run(dir, under_lease: holding(), discard: discarding(calls))
+
+      assert deleted == ["kiln-db-#{@old}.dump", Artifact.sidecar_name(:db, @old)]
+      assert Agent.get(calls, & &1) == [deleted]
+      assert Enum.all?(left(dir), &String.contains?(&1, @new))
+      assert goods(dir) != []
+    end
+
+    test "a lease gone before the pass deletes nothing and writes no marker", %{dir: dir} do
+      newest(dir)
+      dump(dir, @old, 365)
+
+      discard = fn _paths -> flunk("a superseded prune must not discard") end
+
+      assert {:error, :superseded} =
+               Retention.run(dir,
+                 under_lease: fn _fun -> {:error, :superseded} end,
+                 discard: discard
+               )
+
+      assert File.exists?(Path.join([dir, "db", "kiln-db-#{@old}.dump"]))
+      assert goods(dir) == []
+      assert holds(dir) == []
+    end
+
+    test "a lease lost part-way stops the pass, keeping what went under it", %{dir: dir} do
+      for stamp <- ["20180101-000000", @older, @old, @new],
+          do: put(dir, "db", "kiln-db-#{stamp}.dump", 30)
+
+      {:ok, seen} = Agent.start_link(fn -> 0 end)
+
+      discard = fn paths ->
+        if Agent.get_and_update(seen, &{&1 + 1, &1 + 1}) == 1 do
+          Enum.each(paths, &File.rm/1)
+          :ok
+        else
+          {:error, :superseded}
+        end
+      end
+
+      log =
+        capture_log([level: :error], fn ->
+          assert {:ok,
+                  %{deleted: ["kiln-db-20180101-000000.dump"], units: 1, stopped: :superseded}} =
+                   Retention.run(dir, under_lease: holding(), discard: discard)
+        end)
+
+      # Not a failure: the step that took over prunes.
+      refute log =~ "stopped"
+      assert File.exists?(Path.join([dir, "db", "kiln-db-#{@older}.dump"]))
+      assert [%{destinations: %{"local" => %{"status" => "ok"}}}] = stored(@older).artifacts
+    end
+
+    test "a unit whose move stops part-way counts the files moved before it", %{dir: dir} do
+      newest(dir)
+      dump(dir, @old, 365)
+      dump_name = "kiln-db-#{@old}.dump"
+      sidecar = Artifact.sidecar_name(:db, @old)
+
+      discard = fn [first | _] ->
+        File.rm!(first)
+        {:error, {:move_aside, sidecar, :eacces}}
+      end
+
+      assert {:ok, %{deleted: [^dump_name], units: 1, stopped: nil}} =
+               Retention.run(dir, under_lease: holding(), discard: discard)
+
+      assert File.exists?(Path.join([dir, "db", sidecar]))
+    end
+  end
+
   describe "a delete that stops part-way" do
     test "what was deleted is marked pruned, and nobody is told nothing was", %{dir: dir} do
       for stamp <- ["20180101-000000", @older, @old, @new],

@@ -31,6 +31,11 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
     * **Before completing**, the whole file's sha256, computed in the same
       read as the parts' MD5s (on a resume, the parts already sent are read
       again, not sent), must equal the verified one (ADR 0043).
+    * **Just before completing**, `holds` (the off-site step's lease check,
+      #3041) must answer `:ok`: a step that outlived its Cancel gets
+      `{:error, :superseded}` and never completes an upload over the file
+      the resumed backup sends. A check, not a fence: the Complete runs
+      outside the lock (ADR 0045).
     * **After completing** (whatever the answer, a `200` carrying an
       `<Error>` included) a `HeadObject` decides: the object must have the
       file's size and sha256 metadata. An upload the store says it no longer
@@ -87,23 +92,31 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
 
   @doc """
   Copies `file` to `key`. `resume` is the `Kiln.BackupDestination.Resume`
-  Kiln passed, or `nil`. Answers as `c:Kiln.BackupDestination.put/3` does.
+  Kiln passed, or `nil`; `holds` is checked before a multipart upload is
+  completed (`:ok` or `{:error, :superseded}`). Answers as
+  `c:Kiln.BackupDestination.put/3` does.
   """
-  @spec put(Client.t(), String.t(), map(), Kiln.BackupDestination.Resume.t() | nil) ::
+  @spec put(
+          Client.t(),
+          String.t(),
+          map(),
+          Kiln.BackupDestination.Resume.t() | nil,
+          (-> :ok | {:error, term()})
+        ) ::
           :ok | {:ok, :already_present} | {:error, term()}
-  def put(%Client{} = client, key, file, resume) do
+  def put(%Client{} = client, key, file, resume, holds \\ fn -> :ok end) do
     if file.bytes > @max_object do
       {:error, {:permanent, "#{file.name} is larger than the 5 TiB an S3 object can hold"}}
     else
-      client |> send_absent(key, file, resume) |> reason()
+      client |> send_absent(key, file, {resume, holds}) |> reason()
     end
   end
 
-  defp send_absent(client, key, file, resume) do
+  defp send_absent(client, key, file, {resume, holds}) do
     with :absent <- present(client, key, file) do
       if file.bytes < min_part_bytes(),
         do: single(client, key, file),
-        else: multipart(%{client: client, key: key, file: file, resume: resume})
+        else: multipart(%{client: client, key: key, file: file, resume: resume, holds: holds})
     end
   end
 
@@ -303,7 +316,7 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
 
   defp finish(ctx, state, sha) do
     if sha_hex(sha) == String.downcase(ctx.file.sha256) do
-      complete(ctx, state)
+      with :ok <- ctx.holds.(), do: complete(ctx, state)
     else
       abort(ctx.client, ctx.key, state.upload_id)
       changed(ctx.file)

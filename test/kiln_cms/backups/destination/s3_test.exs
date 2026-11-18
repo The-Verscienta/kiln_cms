@@ -514,6 +514,28 @@ defmodule KilnCMS.Backups.Destination.S3Test do
       assert FakeS3.uploads(fake) == %{}
     end
 
+    # #3041: the off-site step's lease check, made just before the Complete.
+    test "a lease lost before the Complete: nothing is completed", %{tmp_dir: dir} do
+      fake = FakeS3.start()
+      file = file!(dir, 5_000)
+
+      assert put(file, resume: resume(), holds: fn -> {:error, :superseded} end) ==
+               {:error, :superseded}
+
+      assert parts_sent(fake) == [1, 2, 3, 4, 5]
+      assert FakeS3.count(fake, :complete) == 0
+      assert FakeS3.object(fake, key(file)) == nil
+    end
+
+    test "a lease that holds completes as before", %{tmp_dir: dir} do
+      fake = FakeS3.start()
+      file = file!(dir, 5_000)
+
+      assert put(file, resume: resume(), holds: fn -> :ok end) == :ok
+      assert FakeS3.count(fake, :complete) == 1
+      assert sha256(FakeS3.object(fake, key(file)).body) == file.sha256
+    end
+
     test "superseded while resuming another call's upload leaves it alone", %{tmp_dir: dir} do
       fake = FakeS3.start()
       file = file!(dir, 5_000)

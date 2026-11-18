@@ -2,7 +2,11 @@
 
 - **Status** — accepted (2026-11-17). Amended 2026-11-17 by
   [#2832](https://github.com/The-Verscienta/kiln_cms/issues/2832) (every
-  manifest writer has a temporary name of its own; see "Amendment").
+  manifest writer has a temporary name of its own; see "Amendment"), and
+  2026-11-18 by [#3040](https://github.com/The-Verscienta/kiln_cms/issues/3040)
+  and [#3041](https://github.com/The-Verscienta/kiln_cms/issues/3041) (the
+  lease is per attempt; the prune step and the off-site uploads are fenced;
+  see "Amendment (#3040, #3041)").
 - **References** — [#2818](https://github.com/The-Verscienta/kiln_cms/issues/2818)
   (no file write inside the lock transaction),
   [#2819](https://github.com/The-Verscienta/kiln_cms/issues/2819) (a step
@@ -108,8 +112,10 @@ directory can still hold Cancel back.
   this is for.
 - **Tag the files `backup.sh` writes.** Cron takes no lock and has no lease;
   a tag would fence nothing.
-- **Drop the 150-second wait after a Cancel.** Off-site uploads and the prune
-  step are not fenced by this record and still rely on it.
+- **Drop the 150-second wait after a Cancel.** An off-site upload already
+  under way when the lease is lost (an `rclone copy`, a single-request S3
+  upload, a plugin's `put/3`) can't be stopped by a lease check, and still
+  relies on it (see "Amendment (#3040, #3041)").
 
 ## Consequences
 
@@ -125,13 +131,10 @@ directory can still hold Cancel back.
 - An older node's readers and an older `backup.sh` don't parse tagged names.
   The host's `backup.sh` is updated in the same rollout; until then an app
   backup is still protected by its `.work/<stamp>/`.
-- **Still not fenced:** the off-site uploads (including a local
-  destination's `<target>.partial`) and the prune step (`Retention.run/2`);
-  `interrupt/4`'s failure manifest and `finished_from_outside/3`'s removal of
-  the work directory, which run from the reclaim with no lease. A retry of the
-  same job, including one Oban's Lifeline rescues, holds the same lease as an
-  earlier attempt that is still running: their temporary files are apart,
-  but both renames are admitted.
+- **Still not fenced:** an off-site upload already under way when the lease
+  is lost (see "Amendment (#3040, #3041)"); `interrupt/4`'s failure manifest
+  and `finished_from_outside/3`'s removal of the work directory, which run
+  from the reclaim with no lease.
 
 ## When to revisit
 
@@ -139,11 +142,10 @@ directory can still hold Cancel back.
   practice, the renames have to move out of the lock transaction too, which
   needs a fence that does not hold a transaction open across a file-system
   call.
-- When the off-site steps or the prune step get a lease check, extend this
-  record rather than starting another: the rule is the same.
-- If the lease gains a per-attempt epoch (so a retried or Lifeline-rescued
-  job no longer shares its lease with the attempt before it), the last
-  consequence above goes away.
+- If an off-site upload can ever be committed under the lease (a store, or
+  an rclone mode, that stages under a temporary name the step then renames),
+  the 150-second wait after a Cancel can be revisited: nothing else in a
+  step depends on it.
 - If `backup.sh` ever takes the backup lock, its temporary files should be
   tagged and fenced the same way.
 
@@ -180,3 +182,35 @@ is removed by the start step's sweep, and now by `backup.sh prune` as well,
 whichever of the three writers left it. The untagged `manifest.json.partial`
 of an older `backup.sh` is removed by neither: it may still be that script's
 live file. The fence itself, and every other rule above, is unchanged.
+
+## Amendment (2026-11-18, #3040, #3041): the lease is per attempt; prune and off-site are fenced
+
+- **Per attempt (#3040).** `Chain.begin_step/1` already recorded the
+  claiming attempt on the lock row (`executing_job_id`,
+  `executing_attempt`); the lease check (`holds?`) now compares them too, so
+  an earlier attempt of the same job (a retry after a timeout, a Lifeline
+  rescue) is superseded once a later attempt has claimed, and an attempt
+  older than the one that last claimed is refused at the claim. No column
+  was added. Oban's attempt only rises from one execution of a job to the
+  next: a snooze (an affinity wait, or a move to the directory's queue,
+  #2845) takes back the attempt it was fetched with, so the job comes back
+  with the same number and claims again. A lease without an attempt is
+  judged by its job, as before.
+- **Prune (#3041).** The prune step's marker sync runs under the lease
+  (`Chain.while_holding/2`, as the finish step's does, #3013), and each unit
+  is moved into the trash under it and deleted after, like every other
+  delete here. A prune that lost its lease deletes nothing more and cancels
+  itself.
+- **Off-site (#3041).** The lease is checked before each file's upload,
+  whatever the destination, a plugin's included (`Chain.check_lease/1`), and
+  before the destination's upload sweep and retention. Kiln's own adapters
+  get more, through options a plugin's adapter is never given: a Local
+  destination copies under `<name>.<job>-<attempt>.partial` and renames into
+  place with `Chain.fenced_rename/3`, the same rule as the backup's own
+  files; an S3 destination checks the lease just before it completes a
+  multipart upload. That check is outside the lock (ADR 0045), so a lease
+  lost between it and the Complete is not caught.
+- **What still is not fenced** is an upload already under way: an `rclone
+  copy`, a single-request S3 upload, a plugin's `put/3`. It can land after a
+  resume's copy of the same file, which matters only when the resume rebuilt
+  that file. The 150-second wait after a Cancel stays for it.

@@ -252,6 +252,67 @@ defmodule KilnCMS.Backups.Destination.LocalTest do
       assert {:error, _} = Local.list(config(root))
     end
 
+    # #3041: what the off-site step passes, its tag and its fenced rename.
+    test "stages under the step's own tag and renames through its :rename",
+         %{tmp_dir: tmp, root: root} do
+      file = source!(tmp, "kiln-db-20260101-000000.dump")
+      parent = self()
+
+      rename = fn from, to ->
+        send(parent, {:rename, from, to})
+        File.rename(from, to)
+      end
+
+      assert Local.put(config(root), file, tag: "41-2", rename: rename) == :ok
+
+      target = Path.join([root, "db", file.name])
+      assert_received {:rename, from, ^target}
+      assert from == target <> ".41-2.partial"
+      assert File.read!(target) == File.read!(file.path)
+      assert File.ls!(Path.join(root, "db")) == [file.name]
+    end
+
+    test "a refused rename leaves the file in place and removes only its own temporary file",
+         %{tmp_dir: tmp, root: root} do
+      file = source!(tmp, "kiln-db-20260101-000000.dump", "the zombie's")
+      db = Path.join(root, "db")
+      File.mkdir_p!(db)
+      target = Path.join(db, file.name)
+      File.write!(target, "the resumed chain's")
+      # Another step's temporary file, mid-copy.
+      theirs = target <> ".41-3.partial"
+      File.write!(theirs, "another step's")
+
+      refused = fn _from, _to -> {:error, :superseded} end
+
+      assert Local.put(config(root), file, tag: "41-2", rename: refused) == {:error, :superseded}
+      assert File.read!(target) == "the resumed chain's"
+      assert File.read!(theirs) == "another step's"
+      refute File.exists?(target <> ".41-2.partial")
+    end
+
+    test "removes an earlier copy's temporary files once an hour old, and only those",
+         %{tmp_dir: tmp, root: root} do
+      file = source!(tmp, "kiln-db-20260101-000000.dump")
+      db = Path.join(root, "db")
+      File.mkdir_p!(db)
+      target = Path.join(db, file.name)
+      hours_ago = System.os_time(:second) - 2 * 3600
+
+      stale = [target <> ".41-1.partial", target <> ".partial"]
+      young = target <> ".41-3.partial"
+      other = Path.join(db, "kiln-db-20250101-000000.dump.7-1.partial")
+      not_a_tag = target <> ".x.partial"
+
+      for path <- stale ++ [young, other, not_a_tag], do: File.write!(path, "left")
+      for path <- stale ++ [other, not_a_tag], do: File.touch!(path, hours_ago)
+
+      assert Local.put(config(root), file, tag: "41-2") == :ok
+
+      assert Enum.sort(File.ls!(db)) ==
+               Enum.sort(Enum.map([target, young, other, not_a_tag], &Path.basename/1))
+    end
+
     test "refuses a name that is not a basename in db or media", %{tmp_dir: tmp, root: root} do
       file = source!(tmp, "kiln-db-20260101-000000.dump")
 

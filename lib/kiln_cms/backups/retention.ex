@@ -304,6 +304,19 @@ defmodule KilnCMS.Backups.Retention do
     * `:now` - posix seconds (default: now).
     * `:dry_run` - plan only; delete nothing and write no marker (default
       `false`).
+    * `:under_lease` - a function that runs a 0-arity function only while
+      the backup step's lease holds, `{:ok, result}` or
+      `{:error, :superseded}` (the prune step's `Chain.while_holding/2`,
+      #3041). The marker sync runs inside it.
+    * `:discard` - a function that removes a unit's paths under that lease,
+      `:ok` or `{:error, reason}` (the prune step's move into the trash,
+      ADR 0067). Used instead of deleting each file in place.
+
+  With them, a prune step that lost its lease (canceled, then resumed, on a
+  node that missed the Cancel) deletes nothing and writes no marker: the
+  pass is `{:error, :superseded}` when the lease was gone before it started,
+  and stops with `stopped: :superseded` when it went part-way, keeping what
+  it had deleted under the lease in `deleted`.
   """
   @spec run(Path.t(), keyword()) ::
           {:ok,
@@ -326,8 +339,8 @@ defmodule KilnCMS.Backups.Retention do
     end
   end
 
-  # Everything before the first delete. Any failure here, a raise included,
-  # means nothing was deleted.
+  # Everything before the first delete. Any failure here, a raise or an exit
+  # included, means nothing was deleted.
   defp prepare(dir, opts) do
     now = Keyword.get_lazy(opts, :now, fn -> System.os_time(:second) end)
 
@@ -339,18 +352,43 @@ defmodule KilnCMS.Backups.Retention do
     end
   rescue
     error -> {:error, {:crashed, error.__struct__}}
+  catch
+    # A call into a process that died, or a query that timed out, exits;
+    # retention is then skipped like any other failure to start.
+    :exit, _reason -> {:error, {:crashed, :exit}}
   end
 
   # Whatever was deleted is marked on its runs, even when the deleting stopped
   # part-way. The markers move first: nothing below deletes the newest
   # verified unit, and a cron prune that runs meanwhile sees the new one.
   defp execute(dir, {plan, inventory, runs}, opts) do
-    _ = sync(dir, plan.last_good, opts)
-    _ = sync_holds(dir, plan.holds, inventory, runs, opts)
-    {deleted, units, stopped} = apply_plan(dir, plan, Keyword.take(opts, [:before_unit]))
-    Recorder.mark_pruned(deleted)
-    if stopped, do: stopped(deleted, stopped)
-    {:ok, %{deleted: deleted, units: units, plan: plan, stopped: stopped}}
+    markers = fn ->
+      _ = sync(dir, plan.last_good, opts)
+      sync_holds(dir, plan.holds, inventory, runs, opts)
+    end
+
+    case under_lease(opts, markers) do
+      {:ok, _synced} ->
+        {deleted, units, stopped} =
+          apply_plan(dir, plan, Keyword.take(opts, [:before_unit, :discard]))
+
+        Recorder.mark_pruned(deleted)
+        if stopped, do: stopped(deleted, stopped)
+        {:ok, %{deleted: deleted, units: units, plan: plan, stopped: stopped}}
+
+      {:error, :superseded} = superseded ->
+        Logger.info("Backup retention skipped: the prune step no longer holds the backup lock")
+        superseded
+    end
+  end
+
+  # The marker sync, under the step's lease when it has one (#3041), as the
+  # finish step's sync is (#3013).
+  defp under_lease(opts, fun) do
+    case Keyword.get(opts, :under_lease) do
+      nil -> {:ok, fun.()}
+      under_lease -> under_lease.(fun)
+    end
   end
 
   defp skipped(reason) do
@@ -362,6 +400,14 @@ defmodule KilnCMS.Backups.Retention do
     })
 
     {:error, reason}
+  end
+
+  # Not a failure: the step that took over prunes.
+  defp stopped(deleted, :superseded) do
+    Logger.info(
+      "Backup retention removed #{length(deleted)} file(s), then stopped: the prune step " <>
+        "no longer holds the backup lock"
+    )
   end
 
   defp stopped(deleted, reason) do
@@ -417,10 +463,16 @@ defmodule KilnCMS.Backups.Retention do
   def describe(:not_prunable), do: "this destination is never pruned by Kiln"
   def describe(:unsupported), do: "its adapter can't list and delete files"
   def describe({:crashed, module}), do: "it crashed (#{inspect(module)})"
+  def describe(:superseded), do: "this backup step no longer holds the backup lock"
   def describe(reason), do: inspect(reason)
 
+  # `config :kiln_cms, KilnCMS.Backups, importer:` swaps the module in tests
+  # only, as for the steps' own imports (`KilnCMS.Backups.Steps`).
   defp import_first(dir) do
-    case Importer.run(dir) do
+    importer =
+      Keyword.get(Application.get_env(:kiln_cms, KilnCMS.Backups, []), :importer, Importer)
+
+    case importer.run(dir) do
       {:ok, summary} -> {:ok, summary}
       {:error, reason} -> {:error, {:import, reason}}
     end
@@ -1688,17 +1740,20 @@ defmodule KilnCMS.Backups.Retention do
   @doc false
   # Deletes a plan's `delete` entries, each unit re-checked first. Returns
   # `{file_names_removed, units_touched, stopped}`: `stopped` is `nil`, or why
-  # the deleting broke off (a raise), with what was removed before it kept.
-  # `before_unit:` (tests only) runs ahead of each entry. Public for the tests
-  # that change the directory between the plan and the delete.
+  # the deleting broke off (a raise, or `:superseded` when `discard:` says the
+  # step lost its lease), with what was removed before it kept.
+  # `before_unit:` (tests only) runs ahead of each entry; `discard:` is
+  # `run/2`'s. Public for the tests that change the directory between the
+  # plan and the delete.
   @spec apply_plan(Path.t(), plan(), keyword()) ::
           {[String.t()], non_neg_integer(), term() | nil}
   def apply_plan(dir, plan, opts \\ []) do
     before_unit = Keyword.get(opts, :before_unit, fn _entry -> :ok end)
+    discard = Keyword.get(opts, :discard)
 
     {deleted, units, stopped} =
       Enum.reduce_while(plan.delete, {[], 0, nil}, fn entry, {deleted, units, nil} ->
-        case remove_safely(dir, entry, before_unit) do
+        case remove_safely(dir, entry, before_unit, discard) do
           {:ok, []} -> {:cont, {deleted, units, nil}}
           {:ok, names} -> {:cont, {[names | deleted], units + 1, nil}}
           {:error, reason} -> {:halt, {deleted, units, reason}}
@@ -1708,19 +1763,23 @@ defmodule KilnCMS.Backups.Retention do
     {deleted |> Enum.reverse() |> List.flatten(), units, stopped}
   end
 
-  defp remove_safely(dir, entry, before_unit) do
+  defp remove_safely(dir, entry, before_unit, discard) do
     before_unit.(entry)
-    {:ok, remove(dir, entry)}
+
+    case remove(dir, entry, discard) do
+      {:error, :superseded} = superseded -> superseded
+      names -> {:ok, names}
+    end
   rescue
     error -> {:error, {:crashed, error.__struct__}}
   end
 
-  defp remove(dir, %{kind: :stray} = entry), do: remove_files(dir, entry)
+  defp remove(dir, %{kind: :stray} = entry, discard), do: remove_files(dir, entry, discard)
 
-  defp remove(dir, entry) do
+  defp remove(dir, entry, discard) do
     case recheck(dir, entry.stamp) do
       :ok ->
-        remove_files(dir, entry)
+        remove_files(dir, entry, discard)
 
       {:skip, why} ->
         Logger.info("Retention left #{label(entry)} in place: #{why} since it was planned")
@@ -1756,28 +1815,49 @@ defmodule KilnCMS.Backups.Retention do
 
   # Stops at the first file that can't be removed (the sidecar is last, so a
   # unit cut short keeps its checksums); one already gone counts as removed.
+  # With `discard`, the unit's files go through it in that order (#3041),
+  # and `{:error, :superseded}` means none went.
   # sobelow_skip ["Traversal.FileModule"]
-  defp remove_files(dir, entry) do
-    removed =
-      Enum.reduce_while(entry.files, [], fn name, removed ->
-        case File.rm(Path.join([dir, entry.sub, name])) do
-          result when result in [:ok, {:error, :enoent}] ->
-            {:cont, [name | removed]}
+  defp remove_files(dir, entry, nil) do
+    entry.files
+    |> Enum.reduce_while([], fn name, removed ->
+      case File.rm(Path.join([dir, entry.sub, name])) do
+        result when result in [:ok, {:error, :enoent}] ->
+          {:cont, [name | removed]}
 
-          {:error, reason} ->
-            Logger.warning(
-              "Retention couldn't remove #{name} (#{inspect(reason)}); kept the rest"
-            )
+        {:error, reason} ->
+          Logger.warning("Retention couldn't remove #{name} (#{inspect(reason)}); kept the rest")
+          {:halt, removed}
+      end
+    end)
+    |> Enum.reverse()
+    |> removed(entry)
+  end
 
-            {:halt, removed}
-        end
-      end)
-      |> Enum.reverse()
+  defp remove_files(dir, entry, discard) do
+    case discard.(Enum.map(entry.files, &Path.join([dir, entry.sub, &1]))) do
+      :ok ->
+        removed(entry.files, entry)
 
-    if removed != [],
+      {:error, :superseded} = superseded ->
+        superseded
+
+      # The files before the one that failed were moved aside, then deleted.
+      {:error, {:move_aside, name, reason}} ->
+        Logger.warning("Retention couldn't remove #{name} (#{inspect(reason)}); kept the rest")
+        entry.files |> Enum.take_while(&(&1 != name)) |> removed(entry)
+
+      {:error, reason} ->
+        Logger.warning("Retention couldn't remove #{label(entry)} (#{inspect(reason)})")
+        []
+    end
+  end
+
+  defp removed(names, entry) do
+    if names != [],
       do: Logger.info("Retention removed #{label(entry)}: #{reason_text(entry.reason)}")
 
-    removed
+    names
   end
 
   defp label(%{kind: :stray, files: [name]}) do

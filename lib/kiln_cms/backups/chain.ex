@@ -39,10 +39,12 @@ defmodule KilnCMS.Backups.Chain do
 
   ## Fencing
 
-  A step presents what `begin_step/1` gave it (`epoch`, its job id) to
-  `advance/3`, `mark_finishing/1` and `release/1`. A step whose job was
-  reclaimed, canceled or otherwise superseded meanwhile gets
-  `{:error, :superseded}` and its results are discarded.
+  A step presents what `begin_step/1` gave it (`epoch`, its job id and
+  attempt) to `advance/3`, `mark_finishing/1` and `release/1`. A step whose job
+  was reclaimed, canceled or otherwise superseded meanwhile gets
+  `{:error, :superseded}` and its results are discarded. So does an attempt
+  of the same job once a later attempt has claimed the lock (#3040): a retry
+  or a Lifeline rescue doesn't share the lease of the attempt it replaced.
 
   Work that must not outlive the lease runs inside `while_holding/2`, and is
   kept to what cannot be done outside it. A step writes the contents of its
@@ -429,7 +431,10 @@ defmodule KilnCMS.Backups.Chain do
 
   @doc """
   A step job claims the lock. Its chain, step, part and job id must be what the
-  row names, else `{:error, :superseded}`. The start step also settles the
+  row names, else `{:error, :superseded}`. The claim records the job's attempt,
+  and the lease is that attempt's alone (#3040): an attempt of the same job
+  that claimed earlier no longer holds it, and one older than the attempt
+  that last claimed is refused here. The start step also settles the
   chain's stamp here, once: a retried start reads it back, so it keeps the same
   stamp.
 
@@ -466,7 +471,8 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   defp claim_step(row, %Oban.Job{id: job_id, attempt: attempt, args: %{"step" => step}}, found) do
-    with {:ok, fields, dir_id} <- start_fields(row, step, found) do
+    with :ok <- not_earlier(row, job_id, attempt),
+         {:ok, fields, dir_id} <- start_fields(row, step, found) do
       fields =
         Map.merge(fields, %{
           executing_boot_id: Backups.boot_id(),
@@ -478,6 +484,18 @@ defmodule KilnCMS.Backups.Chain do
       {:ok, %{lease(row, job_id) | dir_id: dir_id, attempt: attempt}}
     end
   end
+
+  # An attempt of this job older than the one that last claimed the lock
+  # (#3040): one Lifeline rescued, or that timed out, and only now got here.
+  # Oban's attempt only goes up from one execution of a job to the next (a
+  # snooze takes back the one it was fetched with, so a snoozed or moved job
+  # comes back with the same number), so a lower one is never the current
+  # execution.
+  defp not_earlier(%{executing_job_id: job_id, executing_attempt: claimed}, job_id, attempt)
+       when is_integer(claimed) and is_integer(attempt) and attempt < claimed,
+       do: {:error, :superseded}
+
+  defp not_earlier(_row, _job_id, _attempt), do: :ok
 
   defp current?(row, args, job_id) do
     row.chain_id != nil and row.chain_id == args["chain"] and
@@ -697,6 +715,15 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   @doc """
+  `:ok` when `lease` still holds the lock, else `{:error, :superseded}`
+  (`fenced/2` around nothing). True of that moment only: for work that can't
+  run inside the lock transaction, an off-site upload (ADR 0045) or a call
+  into a plugin, and must not start once the lease is gone (#3041).
+  """
+  @spec check_lease(map()) :: :ok | {:error, term()}
+  def check_lease(lease), do: fenced(lease, fn -> :ok end)
+
+  @doc """
   Rename `from` to `to` only while `lease` holds the lock (`fenced/2`): how a
   step puts a file it wrote under a temporary name of its own into place
   (#2819). A superseded step's rename is refused with `{:error, :superseded}`
@@ -707,8 +734,23 @@ defmodule KilnCMS.Backups.Chain do
   def fenced_rename(lease, from, to), do: fenced(lease, fn -> File.rename(from, to) end)
 
   defp holds?(row, lease) do
-    row.chain_id == lease.chain and row.epoch == lease.epoch and row.step_job_id == lease.job_id
+    row.chain_id == lease.chain and row.epoch == lease.epoch and row.step_job_id == lease.job_id and
+      this_attempt?(row, lease)
   end
+
+  # Two attempts of one job share its chain, epoch and job id (#3040): a
+  # retry, or an attempt Oban's Lifeline rescued, while the attempt before it
+  # still runs (a timed-out step whose dirty-IO write finishes late, a node
+  # that lost the database but not its disk). The lease is the attempt that
+  # last claimed the lock (`begin_step/1` records it as `executing_job_id`
+  # and `executing_attempt`). A snoozed or moved job claims again when it
+  # runs, with its own attempt, so it holds. A lease with no attempt (a map
+  # built by hand, a step run with none) is judged by the job alone, as
+  # before.
+  defp this_attempt?(row, %{attempt: attempt} = lease) when is_integer(attempt),
+    do: row.executing_job_id == lease.job_id and row.executing_attempt == attempt
+
+  defp this_attempt?(_row, _lease), do: true
 
   @doc """
   Inside a lock transaction: cancel every step job of `chain`, in whichever

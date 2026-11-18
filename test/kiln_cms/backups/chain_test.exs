@@ -576,6 +576,65 @@ defmodule KilnCMS.Backups.ChainTest do
       assert {:error, :superseded} = Chain.fenced(lease, fn -> flunk("ran") end)
     end
 
+    # #3040: a retry, or an attempt Lifeline rescued, has the job id, epoch and
+    # lease of the attempt it replaced, which may still be running.
+    test "of two attempts of one job, only the later one's rename is admitted (#3040)" do
+      {:ok, %{status: :started}} = request()
+      job = current_job()
+      {:ok, first} = Chain.begin_step(%{job | attempt: 1})
+      {:ok, second} = Chain.begin_step(%{job | attempt: 2})
+      assert {first.job_id, first.epoch} == {second.job_id, second.epoch}
+
+      dir = Backups.dir()
+      File.mkdir_p!(dir)
+      final = Path.join(dir, "h")
+      [late, ours] = for tag <- ["1", "2"], do: Path.join(dir, "h.#{job.id}-#{tag}.partial")
+      File.write!(late, "late")
+      File.write!(ours, "ours")
+
+      assert {:error, :superseded} = Chain.fenced_rename(first, late, final)
+      refute File.exists?(final)
+      assert :ok = Chain.fenced_rename(second, ours, final)
+      assert File.read!(final) == "ours"
+
+      assert {:error, :superseded} = Chain.check_lease(first)
+      assert :ok = Chain.check_lease(second)
+      assert {:error, :superseded} = Chain.advance(first, "dump")
+      assert :ok = Chain.advance(second, "dump")
+    end
+
+    test "an earlier attempt that claims after a later one is refused (#3040)" do
+      {:ok, %{status: :started}} = request()
+      job = current_job()
+      {:ok, later} = Chain.begin_step(%{job | attempt: 2})
+
+      assert {:error, :superseded} = Chain.begin_step(%{job | attempt: 1})
+      assert %{executing_attempt: 2} = lock()
+      assert :ok = Chain.check_lease(later)
+    end
+
+    # Oban's snooze ack takes back the attempt it was fetched with, so a job
+    # that snoozed (or moved to its directory's queue, #2845) runs again with
+    # the same attempt number, and claims again.
+    test "a snoozed job that runs again with the same attempt holds the lease (#3040)" do
+      {:ok, %{status: :started}} = request()
+      job = %{current_job() | attempt: 1}
+      {:ok, before_snooze} = Chain.begin_step(job)
+      {:ok, again} = Chain.begin_step(job)
+
+      assert again.attempt == before_snooze.attempt
+      assert :ok = Chain.check_lease(again)
+      assert :ok = Chain.advance(again, "dump")
+    end
+
+    test "a lease with no attempt is judged by its job alone" do
+      {:ok, %{status: :started}} = request()
+      {:ok, lease} = Chain.begin_step(%{current_job() | attempt: 1})
+
+      assert :ok = Chain.check_lease(Map.delete(lease, :attempt))
+      assert :ok = Chain.check_lease(%{lease | attempt: nil})
+    end
+
     test "an advance whose next job already exists rolls back and leaves the lock alone" do
       {:ok, %{status: :started, chain: chain}} = request()
       {:ok, lease} = Chain.begin_step(current_job())

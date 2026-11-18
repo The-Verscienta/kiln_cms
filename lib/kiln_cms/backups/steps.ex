@@ -1819,9 +1819,33 @@ defmodule KilnCMS.Backups.Steps do
   # and says so on the run; the backup's own outcome does not change. A skip
   # or a stop is also a notice the Backups page and Home show until a clean
   # pass here clears it (#2487, `Notices`).
+  #
+  # Fenced like the rest of the chain's files (#3041, ADR 0067): the marker
+  # sync runs under the lease, as the finish step's does, and each unit is
+  # moved into the trash under it (`discard/4`) and deleted after. A prune
+  # that outlived its Cancel deletes nothing of the resumed chain's, writes
+  # no marker, notice or log line, and cancels itself.
   defp prune_step(ctx, state, rec) do
-    result = Retention.run(ctx.dir)
+    lease = ctx.lease
 
+    result =
+      Retention.run(ctx.dir,
+        under_lease: fn fun ->
+          AfterCommit.deferring(fn -> Chain.while_holding(lease, fun) end)
+        end,
+        discard: &discard(lease, ctx.dir, "prune", &1)
+      )
+
+    if superseded?(result),
+      do: {:result, {:cancel, :superseded}},
+      else: pruned(ctx, state, rec, result)
+  end
+
+  defp superseded?({:error, :superseded}), do: true
+  defp superseded?({:ok, %{stopped: :superseded}}), do: true
+  defp superseded?(_result), do: false
+
+  defp pruned(ctx, state, rec, result) do
     rec =
       case result do
         {:ok, %{deleted: [], stopped: nil}} ->
@@ -1990,7 +2014,6 @@ defmodule KilnCMS.Backups.Steps do
   end
 
   defp copy_to(ctx, dest, config, state, rec) do
-    key = dest.entry["key"]
     sent_key = Destination.target_key(dest.entry, config)
     artifacts = outputs(state)
     files = artifacts ++ expected_sidecars(artifacts)
@@ -2005,7 +2028,19 @@ defmodule KilnCMS.Backups.Steps do
       stamp: ctx.stamp
     }
 
-    {results, sent, resumed} = put_files(ctx.dir, files, {config, target}, sent)
+    case put_files(ctx.dir, files, {config, target, ctx.lease}, sent) do
+      {:superseded, _results} ->
+        {:result, {:cancel, :superseded}}
+
+      {results, sent, resumed} ->
+        copied(ctx, dest, {config, sent_key, files}, {results, sent, resumed}, state, rec)
+    end
+  end
+
+  # What a pass over the files came to. A pass cut short because the step
+  # lost its lease (#3041) never gets here: it records nothing.
+  defp copied(ctx, dest, {config, sent_key, files}, {results, sent, resumed}, state, rec) do
+    key = dest.entry["key"]
     {kept, not_kept} = keep_refused(ctx, results)
 
     state =
@@ -2242,6 +2277,12 @@ defmodule KilnCMS.Backups.Steps do
   # failure (no retry fixes it), and losing a resumable upload to a newer
   # step (#2223). A file the destination already holds, same size and
   # digest, counts as sent (`:present`).
+  #
+  # Each put checks the lease first (#3041): a step that outlived its Cancel
+  # sends nothing more once the lock has moved on, whatever the destination
+  # (a plugin's included), and the pass ends as `{:superseded, results}`. A
+  # put can't run under the lock (ADR 0045), so for the core's own adapters
+  # the lease also goes into the put (`core_opts/3`).
   defp put_files(dir, files, target, sent) do
     {results, sent, resumed} =
       Enum.reduce_while(files, {[], sent, []}, fn file, {acc, sent, resumed} ->
@@ -2250,7 +2291,9 @@ defmodule KilnCMS.Backups.Steps do
         {step, {[{file, result} | acc], sent, resumed}}
       end)
 
-    {Enum.reverse(results), sent, Enum.reverse(resumed)}
+    if Enum.any?(results, &match?({_file, {:error, :superseded}}, &1)),
+      do: {:superseded, Enum.reverse(results)},
+      else: {Enum.reverse(results), sent, Enum.reverse(resumed)}
   end
 
   defp send_one(dir, file, target, sent) do
@@ -2306,22 +2349,35 @@ defmodule KilnCMS.Backups.Steps do
   # bytes}` of a put that continued an earlier upload, else nil. Every
   # adapter gets the step's `:deadline`; only the env destination's key is
   # nil, so it records nothing and never resumes.
-  defp put_file(dir, file, {config, target}) do
+  defp put_file(dir, file, {config, target, lease}) do
     path = Path.join(dir, file.path)
 
     with :ok <- precheck(path, file),
          {:ok, put} <- put_args(path, file) do
-      case Uploads.handle(config, put, target) do
-        {:ok, opts, info} ->
-          result = Destination.call(config, :put, [put, opts], deadline: target.deadline)
-          Uploads.settle(config, info, result)
-          {result, resumed(info)}
-
-        {:error, :superseded} = superseded ->
-          {superseded, nil}
+      with :ok <- Chain.check_lease(lease),
+           {:ok, opts, info} <- Uploads.handle(config, put, target) do
+        opts = core_opts(opts, config, lease)
+        result = Destination.call(config, :put, [put, opts], deadline: target.deadline)
+        Uploads.settle(config, info, result)
+        {result, resumed(info)}
+      else
+        {:error, :superseded} = superseded -> {superseded, nil}
       end
     else
       {:error, reason} -> {{:refused, reason}, nil}
+    end
+  end
+
+  # The lease, for Kiln's own adapters only (#3041): `Destination.Local`
+  # stages under the step's own temporary name (`:tag`) and renames into
+  # place under the lease (`:rename`), and `Destination.S3` checks it before
+  # it completes a multipart upload (`:holds`). A plugin's adapter is never
+  # given them; it gets the check between files (`put_file/3`).
+  defp core_opts(opts, %{kind: kind}, lease) do
+    if kind in Destination.core_kinds() do
+      Keyword.merge(opts, fence(lease) ++ [holds: fn -> Chain.check_lease(lease) end])
+    else
+      opts
     end
   end
 
@@ -2350,7 +2406,17 @@ defmodule KilnCMS.Backups.Steps do
   defp label_for(%{solo?: true}), do: nil
   defp label_for(%{entry: entry}), do: entry["label"]
 
+  # The lease is checked once more before the destination's upload sweep and
+  # retention (#3041): a step that lost it while its last file was on the
+  # way aborts and deletes nothing there, and records nothing.
   defp destination_ok(ctx, dest, config, counts, state, rec) do
+    case Chain.check_lease(ctx.lease) do
+      :ok -> reached(ctx, dest, config, counts, state, rec)
+      {:error, :superseded} -> {:result, {:cancel, :superseded}}
+    end
+  end
+
+  defp reached(ctx, dest, config, counts, state, rec) do
     key = dest.entry["key"]
 
     rec =
