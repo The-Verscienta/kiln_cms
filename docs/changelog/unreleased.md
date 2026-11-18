@@ -2851,6 +2851,19 @@ carries the reasoning.
   nothing.
   ([#3028](https://github.com/The-Verscienta/kiln_cms/issues/3028), [#3029](https://github.com/The-Verscienta/kiln_cms/issues/3029))
 
+<a id="restore-sigpipe"></a>
+
+- **`restore.sh` media restores no longer fail at random on a broken pipe (#3109).**
+  Before extracting a multi-part media set, `restore.sh` checks that every
+  part is listed in the set's checksum sidecar and the other way round. It
+  did so by piping the list into `grep -q`, which stops at the first match;
+  with a long list the writer then got a broken pipe, and under `pipefail`
+  a part that was listed read as missing, so the restore stopped with
+  "… is not listed in … — nothing was extracted" (nothing was extracted,
+  and running it again usually worked). The check now reads the list
+  without a pipe.
+  ([#3109](https://github.com/The-Verscienta/kiln_cms/issues/3109))
+
 ## Security
 
 <a id="api-keys-of-erased-accounts"></a>
