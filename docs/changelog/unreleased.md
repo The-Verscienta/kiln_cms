@@ -2414,3 +2414,4 @@ carries the reasoning.
   EEF-CVE-2026-118391 from them; the core was already past all three. A
   library's lock file does not ship to its users, so only the SDK's own CI
   build ran the old versions.
+  ([#3092](https://github.com/The-Verscienta/kiln_cms/pull/3092))

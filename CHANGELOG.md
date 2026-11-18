@@ -341,7 +341,7 @@ Every summary line below that was shortened links to its own entry there.
   ([long form](docs/changelog/unreleased.md#backup-conninfo-password-refused))
 
 - **plug 1.20.4 fixes EEF-CVE-2026-120287: an unauthenticated multipart request made of empty parts or empty header lines no longer slips under the `:length` limit and holds many times its size in memory.**
-  ([long form](docs/changelog/unreleased.md#plug-multipart-framing-advisory))
+  ([#3092](https://github.com/The-Verscienta/kiln_cms/pull/3092) · [long form](docs/changelog/unreleased.md#plug-multipart-framing-advisory))
 
 ## [1.10.1] - 2026-11-16
 
