@@ -425,7 +425,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#3107](https://github.com/The-Verscienta/kiln_cms/pull/3107) · [long form](docs/changelog/unreleased.md#backup-cancel-followups))
 
 - **`restore.sh` no longer fails a multi-part media restore at random with "… is not listed in … — nothing was extracted" (a broken pipe under `pipefail` made a listed part read as missing).**
-  ([long form](docs/changelog/unreleased.md#restore-sigpipe))
+  ([#3110](https://github.com/The-Verscienta/kiln_cms/pull/3110) · [long form](docs/changelog/unreleased.md#restore-sigpipe))
 
 ### Security
 
