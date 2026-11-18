@@ -214,9 +214,19 @@ defmodule KilnCMS.Backups.CancelTest do
       assert run.status == :running
 
       BackupChain.listen(fn ->
-        assert {:ok, %{status: :canceled} = canceled} = Backups.cancel_run(run, actor: admin)
+        {result, log} =
+          ExUnit.CaptureLog.with_log(fn -> Backups.cancel_run(run, actor: admin) end)
+
+        assert {:ok, %{status: :canceled} = canceled} = result
         assert canceled.error == "Canceled by a platform admin"
-        assert List.last(canceled.log).message == "Canceled by #{admin.email}"
+
+        # Who canceled is in the audit event only, never the run log, which
+        # erasure doesn't rewrite, or the server log (#3029).
+        assert List.last(canceled.log).message == "Canceled by a platform admin"
+        refute Enum.any?(canceled.log, &(&1.message =~ to_string(admin.email)))
+        assert log =~ "Backup #{stamp} canceled by a platform admin during archive part"
+        refute log =~ to_string(admin.email)
+
         assert {:error, :canceled} = BackupChain.settled(chain)
       end)
 

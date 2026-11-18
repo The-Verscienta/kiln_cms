@@ -2243,6 +2243,11 @@ msgstr "Une réinitialisation confirme aussi l’adresse et supprime tout ce que
 msgid "A restore puts the document back without a propagation record"
 msgstr "Une restauration remet le document en ligne sans enregistrement de propagation"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "A resume of this backup is waiting to start. Cancel the resume instead."
+msgstr "Une reprise de cette sauvegarde attend de démarrer. Annulez plutôt la reprise."
+
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "A role was raised"

@@ -167,7 +167,7 @@ defmodule KilnCMSWeb.BackupLive do
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Destination, DiskView, Importer, Manifest, Markers, Resend}
-  alias KilnCMS.Backups.Run.Changes.{CancelResend, CancelResume}
+  alias KilnCMS.Backups.Run.Changes.{Cancel, CancelResend, CancelResume}
   alias KilnCMSWeb.Params
 
   import KilnCMSWeb.BackupComponents,
@@ -415,6 +415,11 @@ defmodule KilnCMSWeb.BackupLive do
 
       Enum.any?(errors, &(Exception.message(&1) =~ "too late to cancel")) ->
         gettext("Too late to cancel: the backup is finishing.")
+
+      # The page offers only the resume's Cancel then; a stale page can still
+      # send this one (#3028).
+      Enum.any?(errors, &(Exception.message(&1) =~ Cancel.resume_waiting())) ->
+        gettext("A resume of this backup is waiting to start. Cancel the resume instead.")
 
       true ->
         gettext("That backup can't be canceled.")
