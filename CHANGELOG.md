@@ -363,7 +363,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#3098](https://github.com/The-Verscienta/kiln_cms/pull/3098) · [long form](docs/changelog/unreleased.md#backup-scheduler-cron-states))
 
 - **A backup file refused off-site because its content changed is now kept beside the original as `<name>.refused-<UTC stamp>`, so a Resume no longer destroys the evidence; the run error names the path, and retention removes it after `BACKUP_KEEP_DAYS`.**
-  ([long form](docs/changelog/unreleased.md#backup-keep-refused-file))
+  ([#3100](https://github.com/The-Verscienta/kiln_cms/pull/3100) · [long form](docs/changelog/unreleased.md#backup-keep-refused-file))
 
 ### Security
 
