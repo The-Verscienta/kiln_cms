@@ -400,6 +400,52 @@ defmodule KilnCMS.Backups.SchedulerTest do
       end
     end
 
+    test "cron_state/1: on, off, invalid" do
+      assert Scheduler.cron_state("* * * * *") == :on
+      assert Scheduler.cron_state(" */5 * * * * ") == :on
+      assert Scheduler.cron_state("@reboot") == :on
+
+      for off <- [false, nil, "", "false", "off"] do
+        assert Scheduler.cron_state(off) == :off
+      end
+
+      assert Scheduler.cron_state("not a cron") == :invalid
+      assert Scheduler.cron_state("61 * * * *") == :invalid
+    end
+
+    # #2935: 31 February parses on some Oban releases and then never matches,
+    # and `last_at/2` searched for it forever, so the Schedule tab never
+    # mounted. Oban 2.24 refuses it at parse; either way the scheduler is not
+    # on and no slot is expected. The timeout turns a hang into a failure.
+    @tag timeout: 10_000
+    test "a cron that can never match is not on, and expects no tick" do
+      put_cron("0 0 31 2 *")
+
+      assert Scheduler.cron_state() in [:invalid, :never_matches]
+      refute Scheduler.enabled?()
+      assert Scheduler.expected_tick_at(~U[2026-03-01 10:03:30Z], 60) == nil
+    end
+
+    # The bound itself, on expressions built by hand: Oban 2.24 won't parse one
+    # that never matches, an older or later release may.
+    test "matches_some_date?/1: a day that exists in a month named" do
+      expression = Oban.Cron.Expression.parse!("0 0 1 1 *")
+
+      at = fn days, months ->
+        %{expression | days: MapSet.new(days), months: MapSet.new(months)}
+      end
+
+      refute Scheduler.matches_some_date?(at.([31], [2]))
+      refute Scheduler.matches_some_date?(at.([30, 31], [2]))
+      refute Scheduler.matches_some_date?(at.([31], [4, 6, 9, 11]))
+      refute Scheduler.matches_some_date?(%{expression | hours: MapSet.new()})
+
+      assert Scheduler.matches_some_date?(at.([29], [2]))
+      assert Scheduler.matches_some_date?(at.([31], [2, 3]))
+      assert Scheduler.matches_some_date?(at.([30, 31], [2, 4]))
+      assert Scheduler.matches_some_date?(Oban.Cron.Expression.parse!("0 0 29 2 1"))
+    end
+
     test "one attempt on the scheduling queue" do
       opts = Scheduler.__opts__()
       assert opts[:queue] == :scheduling

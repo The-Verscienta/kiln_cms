@@ -2648,7 +2648,9 @@ Above the list, a warning box appears when any of these holds:
 
 | Warning | When |
 |---|---|
-| "The scheduler is turned off on this deployment (KILN_BACKUP_SCHEDULER_CRON), so these schedules don't run." | `KILN_BACKUP_SCHEDULER_CRON` is `false` or unparseable ([The scheduler job](#the-scheduler-job)). |
+| "The scheduler is turned off on this deployment (KILN_BACKUP_SCHEDULER_CRON), so these schedules don't run." | `KILN_BACKUP_SCHEDULER_CRON` is `false` ([The scheduler job](#the-scheduler-job)). |
+| "KILN_BACKUP_SCHEDULER_CRON isn't a valid cron expression, so the scheduler is off and these schedules don't run." | `KILN_BACKUP_SCHEDULER_CRON` doesn't parse, such as `0 0 31 2 *` (31 February), which Oban refuses ([The scheduler job](#the-scheduler-job)). |
+| "KILN_BACKUP_SCHEDULER_CRON only matches a date that doesn't exist, such as 31 February, so these schedules never run." | `KILN_BACKUP_SCHEDULER_CRON` parses but names no real date, on an Oban release that accepts such an expression ([The scheduler job](#the-scheduler-job)). |
 | "In-app backups can't run here, so schedules are skipped: `<reason>`" | This node can't run backups: `BACKUP_ENABLED=false`, no database connection, or no PostgreSQL client tools. |
 | "The scheduler hasn't run since 2026-11-13 09:12 UTC. Check that background jobs are running." (or "… hasn't run yet.") | The scheduler is on, and no scheduler job has started since the newest run of `KILN_BACKUP_SCHEDULER_CRON` (read in UTC) that is at least five minutes old, although an enabled schedule was created, edited or resumed before that run. Each run gets five minutes to start: at the default `* * * * *` that is five minutes of silence, at `0 * * * *` a tick missed at 09:00 shows from 09:05. A weekday-only cron such as `* * * * 1-5` expects nothing after Friday 23:59 until Monday 00:00, so a weekend shows no warning. With `@reboot`, the threshold is five minutes. It reads Oban's `oban_jobs` table, so a job queue that has stopped shows here. |
 | "Couldn't check when the scheduler last ran." | Reading `oban_jobs` for that check failed. |
@@ -3021,7 +3023,10 @@ since only the latest due one fires
 ([Back up more often than daily](#back-up-more-often-than-daily)). Every minute leaves about 10 000 completed job rows a week, which
 Oban prunes after 7 days. `false` (also `off`, `no`, `0` or blank) turns every
 schedule off, and the Backups page says so; an unparseable value does the same
-and warns on stderr at boot. It is read in every environment, and
+and warns on stderr at boot, and the Schedule tab says it isn't a valid cron
+expression. One that names no date that exists, such as `0 0 31 2 *`
+(31 February), never runs: Oban refuses it as unparseable, and where an Oban
+release accepts it, the Schedule tab says it never matches. It is read in every environment, and
 `BACKUP_ENABLED=false` does not remove it
 ([environment-variables.md](environment-variables.md)).
 
@@ -5109,7 +5114,7 @@ The app reads them in production only.
 | `BACKUP_ENABLED` | app | set false to disable the in-app path only; cron is unaffected (default true) |
 | `KILN_BACKUP_MARKER_SYNC_CRON` | app | when the app moves the [last-good](#the-last-good-marker) and [hold](#the-hold-markers) markers for cron's backups (default `*/15 * * * *`; `false` turns it off). Read in every environment, and not turned off by `BACKUP_ENABLED=false` |
 | `BACKUP_STALE_AFTER_HOURS` | app | how old before the console warns (default 36); an in-app schedule replaces it for the components it covers ([threshold rules](#how-a-schedule-sets-the-alarm-threshold)) |
-| `KILN_BACKUP_SCHEDULER_CRON` | app | when the app checks its [in-app schedules](#schedule-backups-in-the-app) (default `* * * * *`; `false` turns every schedule off). Read in every environment, and not turned off by `BACKUP_ENABLED=false` |
+| `KILN_BACKUP_SCHEDULER_CRON` | app | when the app checks its [in-app schedules](#schedule-backups-in-the-app) (default `* * * * *`; `false` turns every schedule off, and so does a value that isn't a cron expression or names no real date, such as `0 0 31 2 *`; the Schedule tab says which). Read in every environment, and not turned off by `BACKUP_ENABLED=false` |
 | `BACKUP_MEDIA_PART_MB` | backup + app | target ceiling on one media part's input size, 16 to 10240 (default 400) |
 | `BACKUP_MEDIA_EXCLUDE` | backup + app | comma-separated globs the media archive leaves out (default none) |
 | `BACKUP_LOCK_WAIT_SECONDS` | backup + app | how long `pg_dump` waits for each table lock before it gives up, 1 to 3600 (default 600; anything else keeps 600 and warns). Also the demo golden capture's ([lock waits](#when-pg_dump-waits-for-a-table-lock-2844)) |

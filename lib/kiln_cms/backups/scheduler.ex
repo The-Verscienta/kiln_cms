@@ -60,12 +60,61 @@ defmodule KilnCMS.Backups.Scheduler do
   def perform(%Oban.Job{}), do: tick(DateTime.utc_now())
 
   @doc """
-  Whether the scheduler runs on this deployment: `KILN_BACKUP_SCHEDULER_CRON`
-  resolves to a cron expression (not `false`, blank or unparseable). Silent;
-  the boot warns about an unparseable value.
+  Whether the scheduler runs on this deployment: `cron_state/1` is `:on`.
+  Silent; the boot warns about an unparseable value.
   """
   @spec enabled?() :: boolean()
-  def enabled?, do: KilnCMS.Application.cron_expression(:backup_scheduler_cron) != nil
+  def enabled?, do: cron_state() == :on
+
+  @doc """
+  What `KILN_BACKUP_SCHEDULER_CRON` (`value`, the configured value by
+  default) makes of the scheduler: `:on`; `:off` (`false`, blank or unset);
+  `:invalid` when it isn't a cron expression Oban parses; or
+  `:never_matches` when it parses but names no date that exists, such as
+  `0 0 31 2 *` (31 February) on an Oban that accepts it (#2935). Only `:on`
+  runs schedules. Silent; what the Schedule tab's warning reads.
+  """
+  @spec cron_state(term()) :: :on | :off | :invalid | :never_matches
+  def cron_state(value \\ Application.get_env(:kiln_cms, :backup_scheduler_cron, false)) do
+    case expression(value) do
+      {:ok, _expression} -> :on
+      state -> state
+    end
+  end
+
+  @doc false
+  # Whether `expression` has a slot on a date that exists: some day it names
+  # falls in some month it names (31 February doesn't; 29 February does, in a
+  # leap year), and every other field names something. A real date
+  # falls on every weekday within 400 years, so `Oban.Cron.Expression.last_at/2`
+  # ends. Without one it searches forever (#2935): Oban 2.24 refuses such an
+  # expression when it parses it, an older or a future one may not.
+  # `@reboot` has no slot and is not asked. Public for the tests.
+  @spec matches_some_date?(Oban.Cron.Expression.t()) :: boolean()
+  def matches_some_date?(%Oban.Cron.Expression{months: months, days: days} = expression) do
+    not Enum.any?([expression.minutes, expression.hours, expression.weekdays], &Enum.empty?/1) and
+      Enum.any?(months, fn month ->
+        # 2000 is a leap year: its February has the 29th.
+        Enum.any?(days, &(&1 <= Calendar.ISO.days_in_month(2000, month)))
+      end)
+  end
+
+  # The parsed `KILN_BACKUP_SCHEDULER_CRON`, or what `cron_state/1` says
+  # instead.
+  defp expression(value) do
+    with {:ok, cron} <- invalid_or_off(KilnCMS.Application.cron_setting(value)),
+         {:ok, expression} <- Oban.Cron.Expression.parse(cron) do
+      if expression.reboot? or matches_some_date?(expression),
+        do: {:ok, expression},
+        else: :never_matches
+    else
+      {:error, _reason} -> :invalid
+      state -> state
+    end
+  end
+
+  defp invalid_or_off({:invalid, _cron}), do: :invalid
+  defp invalid_or_off(setting), do: setting
 
   # The job states of a tick that was picked up (an `attempted_at` is set).
   @ticked_states ~w(executing completed retryable discarded cancelled)
@@ -106,7 +155,9 @@ defmodule KilnCMS.Backups.Scheduler do
   `slack_s` seconds before `now`, or nil when the scheduler is off or runs
   only at boot (`@reboot`, which has no slot to be late for). A healthy
   scheduler has started a tick since then; what the Schedule tab's "the
-  scheduler hasn't run" warning compares the last tick with.
+  scheduler hasn't run" warning compares the last tick with. Nil too for an
+  expression that never matches (`cron_state/1`), which would otherwise
+  search back forever (#2935).
 
   Looking back at the slot that should have run, not ahead at the gaps to
   come (#2875): a weekday-only `* * * * 1-5` read on a Saturday expects
@@ -114,14 +165,14 @@ defmodule KilnCMS.Backups.Scheduler do
   """
   @spec expected_tick_at(DateTime.t(), non_neg_integer()) :: DateTime.t() | nil
   def expected_tick_at(%DateTime{} = now, slack_s) when is_integer(slack_s) and slack_s >= 0 do
-    with cron when is_binary(cron) <-
-           KilnCMS.Application.cron_expression(:backup_scheduler_cron),
-         {:ok, %{reboot?: false} = expression} <- Oban.Cron.Expression.parse(cron) do
-      # `last_at/2` answers the newest slot at or before the minute *before*
-      # the time it is given; a minute later makes that `now - slack_s`.
-      Oban.Cron.Expression.last_at(expression, DateTime.add(now, 60 - slack_s, :second))
-    else
-      _ -> nil
+    case expression(Application.get_env(:kiln_cms, :backup_scheduler_cron, false)) do
+      {:ok, %{reboot?: false} = expression} ->
+        # `last_at/2` answers the newest slot at or before the minute *before*
+        # the time it is given; a minute later makes that `now - slack_s`.
+        Oban.Cron.Expression.last_at(expression, DateTime.add(now, 60 - slack_s, :second))
+
+      _off_reboot_or_never ->
+        nil
     end
   end
 

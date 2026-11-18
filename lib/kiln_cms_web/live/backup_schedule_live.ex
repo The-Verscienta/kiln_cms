@@ -939,9 +939,21 @@ defmodule KilnCMSWeb.BackupScheduleLive do
       }
       class="space-y-2 rounded-lg border border-warning/30 bg-warning/5 p-4 text-sm text-warning-ink"
     >
-      <p :if={not @status.scheduler_enabled?} id="schedule-scheduler-off">
+      <p :if={@status.scheduler_cron == :off} id="schedule-scheduler-off">
         {gettext(
           "The scheduler is turned off on this deployment (KILN_BACKUP_SCHEDULER_CRON), so these schedules don't run."
+        )}
+      </p>
+      <p :if={@status.scheduler_cron == :invalid} id="schedule-scheduler-invalid">
+        {gettext(
+          "KILN_BACKUP_SCHEDULER_CRON isn't a valid cron expression, so the scheduler is off and these schedules don't run."
+        )}
+      </p>
+      <%!-- #2935: an expression such as 0 0 31 2 * (31 February) on an Oban
+           that parses it. --%>
+      <p :if={@status.scheduler_cron == :never_matches} id="schedule-scheduler-never">
+        {gettext(
+          "KILN_BACKUP_SCHEDULER_CRON only matches a date that doesn't exist, such as 31 February, so these schedules never run."
         )}
       </p>
       <p :if={@status.scheduler_enabled? and not @status.available?} id="schedule-unavailable">

@@ -580,6 +580,7 @@ defmodule KilnCMS.Backups do
           reason: atom() | nil,
           rclone_missing?: boolean(),
           scheduler_enabled?: boolean(),
+          scheduler_cron: :on | :off | :invalid | :never_matches,
           schedules: :none | :unreadable | [schedule_entry()],
           next_at: DateTime.t() | nil,
           offsite: offsite_status(),
@@ -843,7 +844,8 @@ defmodule KilnCMS.Backups do
 
   `schedules` lists every schedule with `next_at`, its next window (a past
   one when it is due and waiting), or nil when it can't fire here: it is
-  paused, `scheduler_enabled?` is false (`KILN_BACKUP_SCHEDULER_CRON`), backups
+  paused, `scheduler_enabled?` is false (`KILN_BACKUP_SCHEDULER_CRON`;
+  `scheduler_cron` says why, `KilnCMS.Backups.Scheduler.cron_state/1`), backups
   are unavailable, or it backs up only media and there is no media directory.
   `:none` when there are none, `:unreadable` when they can't be read (then
   every threshold is the environment's, and a warning is logged now and
@@ -910,7 +912,8 @@ defmodule KilnCMS.Backups do
     expected = expected_components()
     {source, runs} = status_runs(expected)
     now = DateTime.utc_now()
-    scheduler? = Scheduler.enabled?()
+    scheduler_cron = Scheduler.cron_state()
+    scheduler? = scheduler_cron == :on
     schedules = status_schedules()
     firing? = availability == :ok and scheduler?
 
@@ -935,6 +938,7 @@ defmodule KilnCMS.Backups do
       failed?: Enum.any?(components, fn {_c, cs} -> cs.failed? end),
       rclone_missing?: rclone_missing?(),
       scheduler_enabled?: scheduler?,
+      scheduler_cron: scheduler_cron,
       schedules: schedule_entries(schedules, firing?, now),
       next_at: components |> Enum.map(fn {_c, cs} -> cs.next_at end) |> earliest(),
       offsite: status_offsite()

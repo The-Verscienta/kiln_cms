@@ -12506,6 +12506,16 @@ msgstr ""
 msgid "Just me — publish directly"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "KILN_BACKUP_SCHEDULER_CRON isn't a valid cron expression, so the scheduler is off and these schedules don't run."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "KILN_BACKUP_SCHEDULER_CRON only matches a date that doesn't exist, such as 31 February, so these schedules never run."
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "KILN_CONSOLE_HOST is unset, so the editor console answers on each organization's own host. Code an organization's admin adds to their site's head or footer runs on the same origin as the console, and can act as any editor who opens that site while signed in — a platform admin included."

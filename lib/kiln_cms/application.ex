@@ -590,7 +590,7 @@ defmodule KilnCMS.Application do
   # it is off or unparseable: what the crontab holds for it. Silent; the boot
   # (`with_cron_entries/1`) is where an unparseable value warns. For a page or
   # a status that says whether a scheduled job runs here
-  # (`KilnCMS.Backups.Scheduler.enabled?/0`).
+  # (`KilnCMS.Backups.MarkerSyncWorker.enabled?/0`).
   @spec cron_expression(atom()) :: String.t() | nil
   def cron_expression(key) do
     case cron_value(key) do
@@ -599,12 +599,16 @@ defmodule KilnCMS.Application do
     end
   end
 
-  defp cron_value(key) do
-    case Application.get_env(:kiln_cms, key, false) do
-      cron when is_binary(cron) -> parse_cron(String.trim(cron))
-      _disabled -> :off
-    end
-  end
+  defp cron_value(key), do: cron_setting(Application.get_env(:kiln_cms, key, false))
+
+  @doc false
+  # What a scheduled-work key's configured value `value` resolves to:
+  # `{:ok, cron}`, `:off` (`false`, nil, blank, `off`...), or `{:invalid, cron}`
+  # when Oban can't parse it. Silent. For `KilnCMS.Backups.Scheduler.cron_state/1`,
+  # which tells an invalid value from one that is off.
+  @spec cron_setting(term()) :: {:ok, String.t()} | :off | {:invalid, String.t()}
+  def cron_setting(cron) when is_binary(cron), do: parse_cron(String.trim(cron))
+  def cron_setting(_disabled), do: :off
 
   defp inject_crontab(plugins, entries) do
     {plugins, injected?} =

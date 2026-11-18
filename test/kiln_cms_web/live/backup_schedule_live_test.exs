@@ -1437,7 +1437,36 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       lv = mount(conn, platform_admin())
 
       assert has_element?(lv, "#schedule-scheduler-off", "KILN_BACKUP_SCHEDULER_CRON")
+      refute has_element?(lv, "#schedule-scheduler-invalid")
       refute has_element?(lv, "#schedule-stale-tick")
+    end
+
+    # #2935: a cron that never matches (31 February) used to hang the mount
+    # in `Oban.Cron.Expression.last_at/2`. Oban 2.24 refuses it at parse, so it
+    # reads as invalid; the timeout turns a hang into a failure.
+    @tag timeout: 30_000
+    test "a scheduler cron that can never match", %{conn: conn} do
+      put_cron("0 0 31 2 *")
+      admin = platform_admin()
+      force!(schedule!(%{}, admin), baseline_at: DateTime.add(DateTime.utc_now(), -600, :second))
+      lv = mount(conn, admin)
+
+      assert has_element?(
+               lv,
+               "#schedule-scheduler-invalid",
+               "KILN_BACKUP_SCHEDULER_CRON isn't a valid cron expression, so the scheduler is off and these schedules don't run."
+             )
+
+      refute has_element?(lv, "#schedule-scheduler-off")
+      refute has_element?(lv, "#schedule-stale-tick")
+    end
+
+    test "a scheduler cron that isn't one", %{conn: conn} do
+      put_cron("not a cron")
+      lv = mount(conn, platform_admin())
+
+      assert has_element?(lv, "#schedule-scheduler-invalid")
+      refute has_element?(lv, "#schedule-scheduler-off")
     end
 
     test "backups that can't run here", %{conn: conn} do
