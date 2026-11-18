@@ -369,7 +369,7 @@ Every summary line below that was shortened links to its own entry there.
   ([#3101](https://github.com/The-Verscienta/kiln_cms/pull/3101) · [long form](docs/changelog/unreleased.md#backup-fence-attempts-prune-offsite))
 
 - **An upload stopped at the step's time limit on its last attempt no longer says it resumes on the next attempt, and a resumable upload's attempt count no longer grows when the same step claims it again.**
-  ([long form](docs/changelog/unreleased.md#backup-upload-resume-details))
+  ([#3102](https://github.com/The-Verscienta/kiln_cms/pull/3102) · [long form](docs/changelog/unreleased.md#backup-upload-resume-details))
 
 ### Security
 
