@@ -362,6 +362,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The Backups and Schedule pages now say when `KILN_BACKUP_SCHEDULER_CRON` isn't a valid cron expression, or can only match a date that doesn't exist, instead of calling it "turned off"; a never-matching expression can no longer hang the Schedule tab.**
   ([#3098](https://github.com/The-Verscienta/kiln_cms/pull/3098) · [long form](docs/changelog/unreleased.md#backup-scheduler-cron-states))
 
+- **A backup file refused off-site because its content changed is now kept beside the original as `<name>.refused-<UTC stamp>`, so a Resume no longer destroys the evidence; the run error names the path, and retention removes it after `BACKUP_KEEP_DAYS`.**
+  ([#3100](https://github.com/The-Verscienta/kiln_cms/pull/3100) · [long form](docs/changelog/unreleased.md#backup-keep-refused-file))
+
 ### Security
 
 - **A database URL's `?sslpassword=` (an encrypted client key's passphrase) no longer reaches the command line of pg_dump, pg_restore or psql, where every process on the host could read it: the URL is refused instead.**

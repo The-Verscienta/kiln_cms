@@ -488,8 +488,10 @@ pg_conn_split() {
 
 # $1 = file, $2 = recorded sha256, $3 = what it hashes to now (empty: missing
 # or not a regular file). The failure manifest must not call it verified.
+# A file whose sha256 changed is kept as evidence (keep_refused, #2484), and
+# the error says where.
 refuse_offsite() {
-  local name pattern why
+  local name pattern why kept="" where=""
   name="$(basename "$1")"
   if [ -z "${2:-}" ]; then
     why="no sha256 was recorded for it"
@@ -497,11 +499,37 @@ refuse_offsite() {
     why="it is missing or no longer a regular file (expected sha256 $2)"
   else
     why="its sha256 changed after this backup verified it (expected $2, found $3)"
+    if kept="$(keep_refused "$1")"; then
+      where=" It was kept as ${kept}; prune removes it once it is older than BACKUP_KEEP_DAYS."
+    else
+      warn "could not keep ${name} aside; it is still at $1"
+    fi
   fi
   pattern="$(printf '%s' "$(basename "$(dirname "$1")")/${name}" | sed 's/[.[\*^$/]/\\&/g')"
   MANIFEST_ARTIFACTS="$(printf '%s' "$MANIFEST_ARTIFACTS" |
     sed "s/\(\"path\":\"${pattern}\",\"bytes\":[0-9]*,\"verified\":\)true/\1false/")"
-  die "REFUSING off-site copy of ${name}: ${why}. Nothing was uploaded for it. Something other than this backup wrote to ${BACKUP_DIR}: check the disk before trusting this backup."
+  die "REFUSING off-site copy of ${name}: ${why}. Nothing was uploaded for it.${where} Something other than this backup wrote to ${BACKUP_DIR}: check the disk before trusting this backup."
+}
+
+# Rename refused file $1 to `<name>.refused-<UTC stamp>` beside it (#2484;
+# KilnCMS.Backups.Artifact.refused_name/2), the stamp being now, the moment it
+# is set aside, and print the new path. `mv` within one directory is a rename,
+# so the file keeps its mtime: when it last changed. A name already taken
+# steps the stamp on a second at a time. Fails, printing nothing, when no
+# name is free or the rename fails.
+keep_refused() {
+  local epoch stamp kept tries=0
+  epoch="$(date -u +%s)" || return 1
+  while :; do
+    stamp="$(stamp_of "$epoch")" || return 1
+    kept="${1}.refused-${stamp}"
+    if [ ! -e "$kept" ] && [ ! -L "$kept" ]; then break; fi
+    tries=$((tries + 1))
+    [ "$tries" -lt 60 ] || return 1
+    epoch=$((epoch + 1))
+  done
+  mv -- "$1" "$kept" || return 1
+  printf '%s\n' "$kept"
 }
 
 # SHA-256 (lowercase hex) of a file: sha256sum on GNU/Linux, shasum on macOS.
@@ -2064,8 +2092,9 @@ cmd_verify() {
 # no database, so it cannot, and it knows the newest VERIFIED backup only
 # through the `.good` marker the app keeps on it, and what the schedules keep
 # only through the `.hold` markers. It never deletes a symlink,
-# a directory, or a file that is no unit's member. Only regular files count,
-# judged with `find` (`[ -f ]` follows symlinks).
+# a directory, or a file that is no unit's member, but for the temporary and
+# refused files below. Only regular files count, judged with `find` (`[ -f ]`
+# follows symlinks).
 #
 # Before the units, the `.partial` files of runs killed outright (#2478; see
 # HEARTBEAT_S): a stamp's partials go once EVERY file of that stamp in db/ and
@@ -2079,8 +2108,11 @@ cmd_verify() {
 # touched here; they age as an incomplete unit like any other.
 #
 # Then the manifest temporary files at BACKUP_DIR's root that a writer stopped
-# between its write and its rename left behind (prune_manifest_partials), and
-# the app's abandoned backup-directory id temporary files (prune_dir_id_temps).
+# between its write and its rename left behind (prune_manifest_partials), the
+# app's abandoned backup-directory id temporary files (prune_dir_id_temps), and
+# the files kept after their off-site copy was refused, once they are older
+# than KEEP_DAYS (prune_refused, #2484). Those are no unit's member, the one
+# kind of such file prune deletes.
 
 PART_NUM_ERE='(0[1-9]|[1-9][0-9]|[1-9][0-9]{2,})'
 
@@ -2365,6 +2397,48 @@ prune_dir_id_temps() {
 
 DIR_ID_TEMP_ERE='^\.kiln-dir-id\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$'
 
+# The files kept after their off-site copy was refused (#2484, keep_refused),
+# in their own kind's directory ($1 = db names, $2 = media names):
+# `<dump, part, archive or sidecar name>.refused-<stamp>`. One goes once it is
+# older than KEEP_DAYS by its mtime (`-mtime +N`, which the rename kept) AND by
+# the refusal stamp in its name, as KilnCMS.Backups.Retention ages it; a
+# refusal stamp that is not a plausible one (plausible_stamp) counts for
+# nothing. Only regular files; each removal is echoed, and one that fails is
+# warned about while the rest go on.
+prune_refused() {
+  local kind dir names name ere refused_at cutoff
+  if ! cutoff="$(stamp_of $(($(date -u +%s) - (KEEP_DAYS + 1) * 86400)))" || [ -z "$cutoff" ]; then
+    warn "could not work out the refusal cutoff with this date(1); kept every refused file"
+    return 0
+  fi
+  for kind in db media; do
+    dir="$BACKUP_DIR/$kind"
+    if [ "$kind" = db ]; then
+      names="$1"
+      ere="^kiln-db-[0-9]{8}-[0-9]{6}\\.(dump|sha256)${REFUSED_SUFFIX_ERE}\$"
+    else
+      names="$2"
+      ere="^kiln-media-[0-9]{8}-[0-9]{6}((\\.part${PART_NUM_ERE})?\\.tar\\.gz|\\.sha256)${REFUSED_SUFFIX_ERE}\$"
+    fi
+    [ -n "$names" ] || continue
+    for name in $(printf '%s\n' "$names" | grep -E "$ere" || true); do
+      is_regular "$dir/$name" || continue
+      [ -n "$(find "$dir/$name" -prune -mtime "+${KEEP_DAYS}" -print 2>/dev/null)" ] || continue
+      refused_at="${name##*.refused-}"
+      if plausible_stamp "$refused_at" && [[ ! "$refused_at" < "$cutoff" ]]; then
+        continue
+      fi
+      if rm -f -- "$dir/$name"; then
+        echo "$dir/$name"
+      else
+        warn "could not remove $dir/$name"
+      fi
+    done
+  done
+}
+
+REFUSED_SUFFIX_ERE='\.refused-[0-9]{8}-[0-9]{6}'
+
 cmd_prune() {
   echo "==> Pruning backups older than ${KEEP_DAYS} days"
   local kind dir names stamp members newest fresh name db_names="" media_names=""
@@ -2405,6 +2479,7 @@ cmd_prune() {
   prune_abandoned_partials "$db_names" "$media_names"
   prune_manifest_partials
   prune_dir_id_temps
+  prune_refused "$db_names" "$media_names"
 
   for kind in db media; do
     dir="$BACKUP_DIR/$kind"

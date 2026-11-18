@@ -68,7 +68,10 @@ defmodule KilnCMS.Backups.Retention do
   "Older than `keep_days`" is `find -mtime +keep_days`: an age of at least
   `keep_days + 1` whole days. A `kiln-*` file in `db/` or `media/` that is no
   unit's member (a "stray") ages alone under `keep_days`; markers (`.keep`,
-  `.good` and `.hold`) and `.partial` files are never strays.
+  `.good` and `.hold`) and `.partial` files are never strays. A file kept after
+  its off-site copy was refused, `<name>.refused-<stamp>` in its own kind's
+  directory (`Artifact.refused_name/2`, #2484), is a stray aged from the later
+  of its mtime and the refusal stamp in its name.
 
   ## The last-good marker
 
@@ -157,7 +160,8 @@ defmodule KilnCMS.Backups.Retention do
   keeps the markers in step; a host whose copy of `backup.sh` predates a
   marker ignores it. Where a schedule keeps less than `BACKUP_KEEP_DAYS`,
   cron keeps more than the app, never less. Cron never deletes strays or
-  markers. Unlike this module, it does delete `.partial` files: those of a run
+  markers, except a file kept after a refusal, which it ages as this module
+  does. Unlike this module, it does delete `.partial` files: those of a run
   killed outright, once every file of the stamp is 12 hours old (#2478). Here
   a `.partial` is only ever a reason to keep; the start step's sweep removes
   one, once its stamp has a run row.
@@ -244,7 +248,14 @@ defmodule KilnCMS.Backups.Retention do
           required(:units) => %{{String.t(), :db | :media} => unit()},
           required(:markers) => MapSet.t(String.t()),
           required(:work) => MapSet.t(String.t()),
-          required(:strays) => [%{name: String.t(), sub: String.t(), mtime: integer()}],
+          required(:strays) => [
+            %{
+              required(:name) => String.t(),
+              required(:sub) => String.t(),
+              required(:mtime) => integer(),
+              optional(:refused_at) => String.t()
+            }
+          ],
           optional(:held) => MapSet.t({String.t(), :db | :media}),
           optional(:key) => String.t()
         }
@@ -852,10 +863,21 @@ defmodule KilnCMS.Backups.Retention do
       :error ->
         case Artifact.parse_sidecar_name(name) do
           {:ok, parsed} -> {:sidecar, Map.put(parsed, :part, nil)}
-          :error -> :none
+          :error -> refused_or_none(name)
         end
     end
   end
+
+  defp refused_or_none(name) do
+    case Artifact.parse_refused_name(name) do
+      {:ok, refused} -> {:refused, refused}
+      :error -> :none
+    end
+  end
+
+  # A file kept after a refusal (#2484) is no unit's member: a stray that
+  # ages from its refusal as well as its mtime (`stray_age/2`).
+  defp classify_file(dir, sub, name, {:refused, refused}), do: refused(dir, sub, name, refused)
 
   defp classify_file(dir, sub, name, {role, %{kind: kind} = parsed}) do
     home? = Artifact.subdir(kind) == sub
@@ -889,6 +911,16 @@ defmodule KilnCMS.Backups.Retention do
          size: stat.size,
          mtime: stat.mtime
        }}
+    end
+  end
+
+  # Only in its own kind's directory, where the backup sets one aside; one
+  # anywhere else is a plain stray.
+  defp refused(dir, sub, name, %{kind: kind, refused_at: refused_at}) do
+    with {:stray, stray} <- stray(dir, sub, name) do
+      if Artifact.subdir(kind) == sub,
+        do: {:stray, Map.put(stray, :refused_at, refused_at)},
+        else: {:stray, stray}
     end
   end
 
@@ -1342,10 +1374,27 @@ defmodule KilnCMS.Backups.Retention do
   defp decide_stray(stray, policy, now) do
     entry = %{stamp: nil, kind: :stray, sub: stray.sub, files: [stray.name]}
 
-    if expired?(stray.mtime, policy.keep_days, now),
+    if expired?(stray_age(stray, now), policy.keep_days, now),
       do: {:delete, Map.put(entry, :reason, {:expired, :stray, policy.keep_days})},
       else: {:keep, Map.put(entry, :reason, :keep_days)}
   end
+
+  # A file kept after a refusal (#2484) ages from the later of its mtime and
+  # the refusal its name records: the rename kept the mtime, which says when
+  # the file last changed and may be long before it was set aside. A refusal
+  # stamp that is no plausible instant (`plausible_stamp?/2`) counts for
+  # nothing, so a forged name can't keep the file forever. `backup.sh prune`
+  # ages it the same way.
+  defp stray_age(%{refused_at: refused_at, mtime: mtime}, now) do
+    with true <- plausible_stamp?(refused_at, now),
+         {:ok, at} <- Artifact.parse_stamp(refused_at) do
+      max(mtime, DateTime.to_unix(at))
+    else
+      _ -> mtime
+    end
+  end
+
+  defp stray_age(stray, _now), do: stray.mtime
 
   ## Destinations (#2220)
 
@@ -1731,7 +1780,12 @@ defmodule KilnCMS.Backups.Retention do
     removed
   end
 
-  defp label(%{kind: :stray, files: [name]}), do: "stray file #{name}"
+  defp label(%{kind: :stray, files: [name]}) do
+    if Artifact.parse_refused_name(name) == :error,
+      do: "stray file #{name}",
+      else: "refused file #{name}"
+  end
+
   defp label(%{kind: kind, stamp: stamp}), do: "#{kind} backup #{stamp}"
 
   defp reason_text({:expired, :unrecorded, days}),

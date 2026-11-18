@@ -114,6 +114,15 @@ defmodule KilnCMS.Backups.Steps do
   is kept until the off-site copy succeeds, so Resume retries it, rebuilding
   only a file that changed.
 
+  A file refused because its content changed (a sidecar too) is renamed, under
+  the lease, to `<name>.refused-<UTC stamp>` (`Artifact.refused_name/2`,
+  #2484) the moment it is refused, and the run's error names where it went.
+  A Resume then rebuilds the file under its own name, leaving the kept one
+  alone; a file a resume or a retried step finds changed is set aside the same
+  way before it is rebuilt. Nothing reads a kept file as a backup file;
+  retention removes it once both its mtime (which the rename keeps) and its
+  suffix are older than `keep_days`.
+
   The check runs once per destination (ADR 0043), immediately before that
   destination's copy, never once for all of them. A refused file fails the
   whole backup, whichever destination it was refused for. Each adapter call
@@ -1105,6 +1114,8 @@ defmodule KilnCMS.Backups.Steps do
         ". Something other than this backup wrote to the backup directory; Resume rebuilds " <>
         "the changed part(s)."
 
+  defp describe_failure({:keep_failed, path, reason}), do: describe_keep_failed(path, reason)
+
   defp describe_failure(reason), do: describe(reason)
 
   @doc """
@@ -1271,9 +1282,10 @@ defmodule KilnCMS.Backups.Steps do
 
   defp dump_db(ctx, state, rec, next) do
     case reuse_dump(ctx, state) do
-      {:ok, db, at} ->
+      {:ok, db, at, sidecar_kept} ->
         rec =
           rec
+          |> log_sidecar_kept(sidecar_kept)
           |> Recorder.add_artifact(db)
           |> Recorder.log(
             :info,
@@ -1286,7 +1298,11 @@ defmodule KilnCMS.Backups.Steps do
       {:error, :superseded} ->
         {:result, {:cancel, :superseded}}
 
-      :build ->
+      {:error, _} = error ->
+        keep_failed(error, "dump", state, rec)
+
+      build ->
+        {state, rec} = log_rebuilt_kept({state, rec}, "dump", build)
         db_dir = Path.join(ctx.dir, "db")
 
         case preflight(rec, :db, db_dir, Preflight.dump_estimate(db_dir, ctx.stamp)) do
@@ -1357,27 +1373,49 @@ defmodule KilnCMS.Backups.Steps do
   # A dump is reused only if `state.json` recorded its digest AND the file on
   # disk still hashes to it (and has the recorded size). The name is rebuilt
   # from the stamp, never taken from the file. The state is this chain's (a
-  # retry) or the resumed run's.
+  # retry) or the resumed run's. One that hashes to something else is kept
+  # aside before it is rebuilt (#2484, `keep_changed/4`). So is a sidecar
+  # that no longer says what the reused dump's record says, before it is
+  # rewritten: `{:ok, artifact, at, sidecar_kept_path | nil}`.
   # sobelow_skip ["Traversal.FileModule"]
   defp reuse_dump(ctx, state) do
     name = "kiln-db-#{ctx.stamp}.dump"
     target = Path.join([ctx.dir, "db", name])
+    sidecar = Path.join(Path.dirname(target), Artifact.sidecar_name(:db, ctx.stamp))
 
     with %{"name" => ^name, "bytes" => bytes, "sha256" => sha256} = entry <-
            WorkState.dump(state),
          # The off-site gate's own check, so a file reused here is one the
          # upload will accept (a symlink is rebuilt, never reused).
          :ok <- Checksum.recheck(target, sha256, bytes),
-         :ok <-
-           Checksum.write_sidecar(
-             Path.join(Path.dirname(target), Artifact.sidecar_name(:db, ctx.stamp)),
-             [{name, sha256}],
-             fence(ctx.lease)
-           ) do
-      {:ok, artifact("db", ctx.dir, target, sha256, bytes), entry["at"]}
+         {:ok, sidecar_kept} <- keep_changed_sidecar(ctx.lease, sidecar, [{name, sha256}]),
+         :ok <- Checksum.write_sidecar(sidecar, [{name, sha256}], fence(ctx.lease)) do
+      {:ok, artifact("db", ctx.dir, target, sha256, bytes), entry["at"], sidecar_kept}
     else
       {:error, :superseded} = superseded -> superseded
+      {:error, {:keep_failed, _path, _reason}} = failed -> failed
+      {:error, {:changed, _found}} -> keep_changed(ctx, state, target, &Map.delete(&1, "dump"))
       _ -> :build
+    end
+  end
+
+  # The db sidecar a reused dump is about to rewrite, when its content no
+  # longer says `entries` (the dump's recorded name and digest): kept aside
+  # first, `{:ok, kept_path}`. Nothing to keep (no sidecar, or one that still
+  # says it) is `{:ok, nil}`. The media sidecar is not checked: a resume may
+  # rebuild a part, and then its old sidecar differs legitimately, with no
+  # record of what it said to tell the two apart.
+  defp keep_changed_sidecar(lease, sidecar, entries) do
+    case Checksum.check_sidecar(sidecar, entries) do
+      {:error, reason} when reason in [:sidecar_changed, :malformed] ->
+        case set_aside(lease, sidecar) do
+          {:ok, kept} -> {:ok, kept}
+          {:error, :superseded} = superseded -> superseded
+          {:error, reason} -> {:error, {:keep_failed, sidecar, reason}}
+        end
+
+      _ ->
+        {:ok, nil}
     end
   end
 
@@ -1479,8 +1517,14 @@ defmodule KilnCMS.Backups.Steps do
 
   # An earlier set's files under this stamp, moved aside under the lease and
   # deleted outside it (`discard/4`).
+  # Never a file kept after a refusal (#2484): that is evidence, not the set's.
   defp discard_media_files(ctx, target_dir) do
-    paths = Path.wildcard(Path.join(target_dir, "kiln-media-#{ctx.stamp}*"))
+    paths =
+      target_dir
+      |> Path.join("kiln-media-#{ctx.stamp}*")
+      |> Path.wildcard()
+      |> Enum.filter(&(Artifact.parse_refused_name(Path.basename(&1)) == :error))
+
     discard(ctx.lease, ctx.dir, "media", paths)
   end
 
@@ -1554,7 +1598,14 @@ defmodule KilnCMS.Backups.Steps do
           state = Map.update(state, "reused", [[index, at]], &(&1 ++ [[index, at]]))
           next_part(state, rec, index, total)
 
-        :build ->
+        {:error, :superseded} ->
+          {:result, {:cancel, :superseded}}
+
+        {:error, _} = error ->
+          keep_failed(error, "media", state, rec)
+
+        build ->
+          {state, rec} = log_rebuilt_kept({state, rec}, "media", build)
           build_part(ctx, {plan, part, target_dir}, {index, total}, state, rec)
       end
     else
@@ -1591,8 +1642,9 @@ defmodule KilnCMS.Backups.Steps do
 
   # A part is reused only if `state.json` recorded its digest AND the file in
   # the media directory still hashes to it with the recorded size. The name
-  # comes from the frozen plan, not from the state file.
-  defp reuse_part(_ctx, plan, part, target_dir, state) do
+  # comes from the frozen plan, not from the state file. One that hashes to
+  # something else is kept aside before it is rebuilt (#2484).
+  defp reuse_part(ctx, plan, part, target_dir, state) do
     name = plan |> MediaArchive.names() |> Enum.at(part.index - 1)
     path = Path.join(target_dir, name)
 
@@ -1603,9 +1655,13 @@ defmodule KilnCMS.Backups.Steps do
          :ok <- Checksum.recheck(path, sha256, bytes) do
       {:ok, finished(part, entry, path), entry["at"]}
     else
+      {:error, {:changed, _found}} -> keep_changed(ctx, state, path, &forget_part(&1, part.index))
       _ -> :build
     end
   end
+
+  defp forget_part(state, index),
+    do: Map.update(state, "parts", %{}, &Map.delete(&1, Integer.to_string(index)))
 
   defp finished(part, entry, path) do
     %{
@@ -1950,6 +2006,7 @@ defmodule KilnCMS.Backups.Steps do
     }
 
     {results, sent, resumed} = put_files(ctx.dir, files, {config, target}, sent)
+    {kept, not_kept} = keep_refused(ctx, results)
 
     state =
       if sent_key,
@@ -1958,6 +2015,8 @@ defmodule KilnCMS.Backups.Steps do
 
     rec = Enum.reduce(resumed, rec, &log_resumed(&2, &1, label_for(dest)))
     rec = Enum.reduce(results, rec, &record_put(&1, &2, key, label_for(dest)))
+    rec = Enum.reduce(kept, rec, &log_kept/2)
+    rec = Enum.reduce(not_kept, rec, &log_not_kept/2)
     counts = %{files_ok: Enum.count(results, &sent?/1), files_total: length(files)}
 
     case offsite_problems(results) do
@@ -1965,6 +2024,8 @@ defmodule KilnCMS.Backups.Steps do
         destination_ok(ctx, dest, config, counts, state, rec)
 
       %{refused: [_ | _]} = problems ->
+        problems = Map.put(problems, :kept, kept)
+
         rec =
           Recorder.put_run_destination(
             rec,
@@ -1985,6 +2046,185 @@ defmodule KilnCMS.Backups.Steps do
   end
 
   defp permanent_failure?({_name, reason}), do: Destination.permanent?(reason)
+
+  ## A refused file, kept (#2484)
+
+  # A file refused because its content changed (`{:changed, _}`, a sidecar
+  # that changed or no longer parses) is evidence of whatever wrote to the
+  # backup directory, and a Resume would rebuild it in place. So it is set
+  # aside now, the moment it is refused, whether or not anyone resumes:
+  # `{%{file_name => kept_path}, [{path, reason}]}`, the second the files that
+  # couldn't be. A file refused as missing, not regular or without a digest
+  # has no content to keep, and stays as it is. One whose rename failed stays
+  # where it was, said on the run; a Resume then refuses to rebuild over it
+  # until it can be kept (`keep_changed/4`).
+  defp keep_refused(ctx, results) do
+    for {file, {:refused, reason}} <- results, keep?(reason), reduce: {%{}, []} do
+      {kept, not_kept} ->
+        path = Path.join(ctx.dir, file.path)
+
+        case set_aside(ctx.lease, path) do
+          {:ok, kept_path} -> {Map.put(kept, Path.basename(file.path), kept_path), not_kept}
+          {:error, why} -> {kept, not_kept ++ [{path, why}]}
+        end
+    end
+  end
+
+  defp keep?({:changed, _found}), do: true
+  defp keep?(reason), do: reason in [:sidecar_changed, :malformed]
+
+  defp log_kept({name, path}, rec) do
+    Recorder.log(
+      rec,
+      :warn,
+      "offsite",
+      "Kept the refused #{name} as #{path}; " <> kept_until()
+    )
+  end
+
+  defp log_not_kept({path, why}, rec) do
+    message =
+      "Couldn't keep the refused #{Path.basename(path)} aside (#{format_why(why)}); it is " <>
+        "still at #{path}. Move it out of BACKUP_DIR before you Resume"
+
+    Logger.warning(message)
+    Recorder.log(rec, :warn, "offsite", message)
+  end
+
+  defp kept_until,
+    do: "retention removes it once it is older than #{Backups.keep_days()} days"
+
+  # A file whose recorded digest no longer matches, about to be rebuilt by a
+  # resume (or a retried step): set aside first, so the rebuild doesn't
+  # replace it, and then its record forgotten in `state.json` (`forget`),
+  # written at once under the lease. A rebuild that lands and is then cut off
+  # before the step writes its state therefore leaves a file with no recorded
+  # digest, which the retry rebuilds without keeping, instead of a fresh file
+  # that seems to have changed. Cut off between the keep and the write, the
+  # retry finds the file gone and builds it.
+  #
+  # `{:build, kept_path, state}`; `{:error, {:keep_failed, path, reason}}`
+  # when it couldn't be kept (the step fails, `keep_failed/4`: never rebuilt
+  # over); `{:error, {:forget_failed, kept_path, reason}}` when the state
+  # couldn't be written (retried); `{:error, :superseded}` when this step lost
+  # its lease.
+  defp keep_changed(ctx, state, path, forget) do
+    with {:keep, {:ok, kept}} <- {:keep, set_aside(ctx.lease, path)},
+         state = forget.(state),
+         {:forget, :ok} <- {:forget, WorkState.write(ctx.work_dir, state, fence(ctx.lease))} do
+      {:build, kept, state}
+    else
+      {_, {:error, :superseded} = superseded} -> superseded
+      {:keep, {:error, reason}} -> {:error, {:keep_failed, path, reason}}
+      {:forget, {:error, reason}} -> {:error, {:forget_failed, path, reason}}
+    end
+  end
+
+  # A changed file that couldn't be kept: the step fails rather than rebuild
+  # over it, and a retry can't move it either (fatal). A record that couldn't
+  # be forgotten is retried: the file is already kept, so the retry finds it
+  # gone and builds it.
+  defp keep_failed({:error, {:keep_failed, path, reason}} = error, step, state, rec) do
+    message = describe_keep_failed(path, reason)
+    Logger.error(message)
+    {:fatal, elem(error, 1), state, Recorder.log(rec, :error, step, message)}
+  end
+
+  defp keep_failed({:error, {:forget_failed, path, reason}}, step, state, rec) do
+    message =
+      "#{Path.basename(path)} was kept aside, but this backup's state couldn't be " <>
+        "written (#{format_why(reason)}); retrying"
+
+    {:retry, reason, state, Recorder.log(rec, :warn, step, message)}
+  end
+
+  defp describe_keep_failed(path, reason) do
+    "Couldn't keep the changed #{Path.basename(path)} aside (#{format_why(reason)}), so it " <>
+      "was not rebuilt: it is still at #{path}. Move it out of BACKUP_DIR, then Resume."
+  end
+
+  defp format_why(reason) when is_atom(reason) do
+    case :file.format_error(reason) do
+      ~c"unknown POSIX error" ++ _ -> inspect(reason)
+      text -> List.to_string(text)
+    end
+  end
+
+  defp format_why(reason), do: inspect(reason)
+
+  defp log_rebuilt_kept({state, rec}, _step, :build), do: {state, rec}
+
+  defp log_rebuilt_kept({_state, rec}, step, {:build, kept, state}) do
+    name = kept |> Path.basename() |> refused_original()
+
+    {state,
+     Recorder.log(
+       rec,
+       :warn,
+       step,
+       "#{name} no longer matched the sha256 this backup recorded for it: kept as #{kept}, " <>
+         "and rebuilt; " <> kept_until()
+     )}
+  end
+
+  defp log_sidecar_kept(rec, nil), do: rec
+
+  defp log_sidecar_kept(rec, kept) do
+    name = kept |> Path.basename() |> refused_original()
+
+    Recorder.log(
+      rec,
+      :warn,
+      "dump",
+      "#{name} no longer matched the dump's recorded sha256: kept as #{kept}, and " <>
+        "rewritten; " <> kept_until()
+    )
+  end
+
+  defp refused_original(kept_name) do
+    case Artifact.parse_refused_name(kept_name) do
+      {:ok, %{name: name}} -> name
+      :error -> kept_name
+    end
+  end
+
+  @doc false
+  # `path` renamed to `Artifact.refused_name/2` beside it, under the lease
+  # (`Chain.fenced_rename/3`), like every other move of the chain's files:
+  # `{:ok, kept_path}`, `{:error, :superseded}` when the lease no longer holds
+  # (nothing moved), or the error. The rename keeps the file's mtime, which
+  # says when it last changed; the suffix says when it was set aside. A name
+  # already taken (a second refusal within the same second) steps the suffix
+  # on a second at a time. Public for the tests.
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec set_aside(map(), Path.t()) :: {:ok, Path.t()} | {:error, term()}
+  def set_aside(lease, path) do
+    with {:ok, kept} <- free_refused_path(path, DateTime.utc_now(), 60),
+         :ok <- Chain.fenced_rename(lease, path, kept) do
+      Logger.warning("Kept the refused backup file #{Path.basename(path)} as #{kept}")
+      {:ok, kept}
+    end
+  end
+
+  # Only "nothing there" makes a name free; any other lstat error is returned.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp free_refused_path(path, at, tries) do
+    kept = Path.join(Path.dirname(path), Artifact.refused_name(Path.basename(path), at))
+
+    case File.lstat(kept) do
+      {:error, :enoent} ->
+        {:ok, kept}
+
+      {:ok, _taken} when tries > 1 ->
+        free_refused_path(path, DateTime.add(at, 1, :second), tries - 1)
+
+      {:ok, _taken} ->
+        {:error, :eexist}
+
+      {:error, _} = error ->
+        error
+    end
+  end
 
   # A put that continued an earlier attempt's upload (#2223).
   defp log_resumed(rec, {name, from, total}, label) do
@@ -2360,8 +2600,9 @@ defmodule KilnCMS.Backups.Steps do
   defp next_destination(_dest, state, rec), do: {:next, "finish", nil, state, rec}
 
   # One line for a destination's Run entry.
-  defp destination_error({:offsite, %{refused: [_ | _] = refused}}),
-    do: "REFUSED for #{count_files(refused)}: " <> named(refused, &short_refusal/1)
+  defp destination_error({:offsite, %{refused: [_ | _] = refused} = problems}),
+    do:
+      "REFUSED for #{count_files(refused)}: " <> named(refused, &short_refusal/1, kept(problems))
 
   defp destination_error({:offsite, %{failed: failed}}),
     do: "FAILED for #{count_files(failed)}: " <> named(failed, &short_destination_failure/1)
@@ -2761,11 +3002,11 @@ defmodule KilnCMS.Backups.Steps do
     "Off-site copy FAILED to every destination (#{length(failures)}): #{named}#{more}. " <> tail
   end
 
-  def describe_offsite({:offsite, %{refused: refused, failed: failed}}, resumable?) do
+  def describe_offsite({:offsite, %{refused: refused, failed: failed} = problems}, resumable?) do
     refused_text =
       if refused != [] do
         "Off-site copy REFUSED for #{count_files(refused)}: " <>
-          named(refused, &short_refusal/1) <>
+          named(refused, &short_refusal/1, kept(problems)) <>
           ". Something other than this backup wrote to the backup directory: check the disk " <>
           "and anything with access to BACKUP_DIR before trusting this backup."
       end
@@ -2785,12 +3026,24 @@ defmodule KilnCMS.Backups.Steps do
     [refused_text, failed_text, tail] |> Enum.reject(&is_nil/1) |> Enum.join(" ")
   end
 
+  defp kept(problems), do: Map.get(problems, :kept, %{})
+
+  defp kept_as(kept, name) do
+    case Map.fetch(kept, name) do
+      {:ok, path} -> "; kept as #{path}"
+      :error -> ""
+    end
+  end
+
   defp count_files([_]), do: "1 file"
   defp count_files(list), do: "#{length(list)} files"
 
-  defp named(list, short) do
+  # `kept`: where a refused file was set aside (#2484), said after its reason.
+  defp named(list, short, kept \\ %{}) do
     shown =
-      list |> Enum.take(@max_named) |> Enum.map_join(", ", fn {n, r} -> "#{n} (#{short.(r)})" end)
+      list
+      |> Enum.take(@max_named)
+      |> Enum.map_join(", ", fn {n, r} -> "#{n} (#{short.(r)}#{kept_as(kept, n)})" end)
 
     case length(list) - @max_named do
       more when more > 0 -> "#{shown} and #{more} more"

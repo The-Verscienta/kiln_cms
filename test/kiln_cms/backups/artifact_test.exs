@@ -206,6 +206,46 @@ defmodule KilnCMS.Backups.ArtifactTest do
       end
     end
 
+    test "a file kept after a refusal is no artifact or sidecar, and carries its backup's stamp (#2484)" do
+      at = ~U[2026-11-18 10:15:00Z]
+
+      for {name, kind} <- [
+            {"kiln-db-20260805-031700.dump", :db},
+            {"kiln-db-20260805-031700.sha256", :db},
+            {"kiln-media-20260805-031700.tar.gz", :media},
+            {"kiln-media-20260805-031700.part03.tar.gz", :media},
+            {"kiln-media-20260805-031700.sha256", :media}
+          ] do
+        kept = Artifact.refused_name(name, at)
+        assert kept == name <> ".refused-20261118-101500"
+        assert Artifact.parse_file(kept) == :error, kept
+        assert Artifact.parse_sidecar_name(kept) == :error, kept
+        refute KilnCMS.Backups.Destination.backup_file?(kept)
+        # The backup's stamp, never the refusal's: the stamp stays in use.
+        assert Artifact.name_stamp(kept) == {:ok, "20260805-031700"}
+
+        assert Artifact.parse_refused_name(kept) ==
+                 {:ok,
+                  %{
+                    name: name,
+                    kind: kind,
+                    stamp: "20260805-031700",
+                    refused_at: "20261118-101500"
+                  }}
+      end
+
+      for name <- [
+            "kiln-db-20260805-031700.dump",
+            "kiln-db-20260805-031700.dump.partial.refused-20261118-101500",
+            "kiln-db-20260805-031700.dump.refused-20261118",
+            "kiln-db-20260805-031700.dump.refused-20261118-101500.partial",
+            "kiln-notes.txt.refused-20261118-101500",
+            "kiln-20260805-031700.keep.refused-20261118-101500"
+          ] do
+        assert Artifact.parse_refused_name(name) == :error, name
+      end
+    end
+
     test "partial_name/2 builds what the parsers read" do
       assert Artifact.partial_name("kiln-db-20260805-031700.dump", nil) ==
                "kiln-db-20260805-031700.dump.partial"
