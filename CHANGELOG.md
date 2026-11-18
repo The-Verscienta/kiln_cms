@@ -340,6 +340,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A `key=value` database connection string carrying a password is refused, instead of putting the password in `pg_dump`'s, `pg_restore`'s or `psql`'s command line.**
   ([long form](docs/changelog/unreleased.md#backup-conninfo-password-refused))
 
+- **plug 1.20.4 fixes EEF-CVE-2026-120287: an unauthenticated multipart request made of empty parts or empty header lines no longer slips under the `:length` limit and holds many times its size in memory.**
+  ([long form](docs/changelog/unreleased.md#plug-multipart-framing-advisory))
+
 ## [1.10.1] - 2026-11-16
 
 Long form: [docs/changelog/v1.10.1.md](docs/changelog/v1.10.1.md) —

@@ -2391,3 +2391,26 @@ carries the reasoning.
   string. See
   [Which database URL the backup tools accept](../backups.md#which-database-url-the-backup-tools-accept-2719).
   ([#2831](https://github.com/The-Verscienta/kiln_cms/issues/2831))
+
+<a id="plug-multipart-framing-advisory"></a>
+
+- **plug 1.20.4 fixes EEF-CVE-2026-120287: an unauthenticated multipart request made of empty parts or empty header lines no longer slips under the `:length` limit and holds many times its size in memory.**
+  `Plug.Parsers.MULTIPART` charged its `:length` limit only with header
+  names, header values and part bodies. Part delimiters, header framing
+  and line endings cost nothing, and a part without a
+  `content-disposition` header was kept until the whole body was read. A
+  4.5 MB body of empty parts reached about 92 MiB in the parser process
+  on 1.20.3, and with enough such requests at once a node runs out of
+  memory. Kiln is exposed: the endpoint runs the multipart parser (through
+  `KilnCMSWeb.Plugs.MultipartParser`) before authentication on every route
+  except `POST /api/media`, which reads its body after authenticating.
+  The advisory was published 2026-11-17 and affects plug 1.13.0 up to
+  1.20.3. Lock-only: `mix deps.update plug`, which also moved telemetry
+  1.4.2 → 1.4.3, in the core, `clients/elixir/kiln_client`,
+  `examples/phoenix_showcase` and `sdk/fixtures/dep_plugin` lock files.
+  The same change brings the plugin SDK's development lock files
+  (`sdk/kiln_plugin` and `sdk/fixtures/dep_plugin`) to ash 3.37.6 and ecto
+  3.14.3, clearing EEF-CVE-2026-96581, EEF-CVE-2026-114214 and
+  EEF-CVE-2026-118391 from them; the core was already past all three. A
+  library's lock file does not ship to its users, so only the SDK's own CI
+  build ran the old versions.
