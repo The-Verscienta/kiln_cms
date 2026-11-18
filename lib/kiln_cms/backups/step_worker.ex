@@ -1,9 +1,11 @@
 defmodule KilnCMS.Backups.StepWorker do
   @moduledoc """
   One step of a backup's chain (#2218): `start`, `dump`, `plan`, `archive`
-  (one job per media part), `checksum`, `prune`, `offsite`, `finish`. The
-  bodies are `KilnCMS.Backups.Steps`; the lock and the order between steps are
-  `KilnCMS.Backups.Chain`.
+  (one job per media part), `checksum`, `prune`, `offsite`, `finish`; or of
+  a re-send of a partly off-site run (#2949): `resend`, one job per
+  destination, pinned to the run's backup directory like every step after
+  `start`. The bodies are `KilnCMS.Backups.Steps`; the lock and the order
+  between steps are `KilnCMS.Backups.Chain`.
 
   ## Its own queue
 

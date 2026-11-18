@@ -101,6 +101,17 @@ defmodule KilnCMS.Backups.Chain do
   stamp folds into it (#2540): a fresh request and a resume never fold into
   each other (`request/1`), so neither widens nor narrows the other. A resume
   queued by a node from before #2219 covers everything.
+
+  ## A re-send (#2949)
+
+  A third kind of holder: a re-send of a partly off-site run to the
+  destinations it missed (`request_resend/1`, `KilnCMS.Backups.Resend`). It
+  takes only a free lock (step `:resend`, part 1, the run's stamp and
+  directory) and is never queued; a backup requested while it holds the
+  lock queues behind it as usual. Its steps are fenced, reclaimed, reaped
+  and routed like any step, but an interrupted one is routed to
+  `Steps.resend_interrupted/5`: it stops, and never fails the run or writes
+  a failure manifest.
   """
   import Ecto.Query
 
@@ -109,6 +120,7 @@ defmodule KilnCMS.Backups.Chain do
 
   alias KilnCMS.Backups.{
     Artifact,
+    Destination,
     DirId,
     DirQueues,
     Heartbeat,
@@ -116,7 +128,9 @@ defmodule KilnCMS.Backups.Chain do
     Lock,
     Markers,
     Recorder,
+    Resend,
     Retention,
+    RunDestination,
     Steps,
     StepWorker,
     WorkState
@@ -425,6 +439,121 @@ defmodule KilnCMS.Backups.Chain do
       resume: req.resume,
       components: req.components
     })
+  end
+
+  ## Re-sending a partly off-site run (#2949)
+
+  @doc """
+  Re-send the run of `stamp` to the destinations it missed
+  (`KilnCMS.Backups.Resend`): take the free lock for a re-send, with its
+  first step job (`"resend"`, part 1, in the queue of the run's backup
+  directory when a live node advertises it), in one transaction. Never
+  queued (owner decision O2).
+
+  Outside the lock, first: `BACKUP_ENABLED` (`:disabled`), the run
+  (`Resend.fetch_run/1`, `Resend.eligible/2`), and the destinations
+  configured now (`KilnCMS.Backups.Destination.configured/0`, read as the
+  `:backups` system actor; `:destinations_unreadable` when that read fails),
+  which settle the targets (`Resend.targets/2`; `:nothing_to_send` when there
+  are none). Then the same housekeeping as `request/1`, so a holder that is
+  gone doesn't refuse this. Inside the lock: `:in_flight` when the lock
+  holds a re-send of this stamp, `:busy` when it holds anything else (O1:
+  two clicks at once take the advisory lock one after the other, and the
+  second gets `:in_flight`).
+
+  The part-1 step settles its targets again when it runs; they are not in
+  its args. `{:ok, %{status: :started, chain: chain, targets: labels,
+  skipped: labels, unreadable_skipped?: boolean}}` (the last when the run's
+  "unreadable" entry has no stored destination enabled now to stand for) or
+  `{:error, reason}`.
+  """
+  @spec request_resend(String.t()) :: {:ok, map()} | {:error, term()}
+  def request_resend(stamp) do
+    with :ok <- Resend.enabled(),
+         {:ok, run} <- Resend.fetch_run(stamp),
+         :ok <- Resend.eligible(run),
+         {:ok, plan} <- resend_plan(run) do
+      _ = if heartbeat?(), do: reclaim_stale()
+      _ = reap()
+      _ = if heartbeat?(), do: sweep_stranded()
+
+      # The beats are read before the lock is taken, as `advance/3` does.
+      opts = step_queue(run.dir_id)
+
+      with {:ok, chain} <- with_lock(&decide_resend(&1, run, opts)) do
+        resend_requested(run, chain, plan)
+
+        # The "unreadable" entry with no stored destination to stand for is
+        # not a destination that was removed: said apart.
+        {unreadable, skipped} =
+          Enum.split_with(plan.skipped, &(&1.key == RunDestination.unreadable_key()))
+
+        {:ok,
+         %{
+           status: :started,
+           chain: chain,
+           targets: Enum.map(plan.targets, & &1["label"]),
+           skipped: Enum.map(skipped, &(&1.label || &1.key)),
+           unreadable_skipped?: unreadable != []
+         }}
+      end
+    end
+  end
+
+  defp resend_plan(run) do
+    case Destination.configured() do
+      {:ok, configured} ->
+        case Resend.targets(run, configured) do
+          %{targets: []} -> {:error, :nothing_to_send}
+          plan -> {:ok, plan}
+        end
+
+      {:error, _error} ->
+        {:error, :destinations_unreadable}
+    end
+  end
+
+  defp decide_resend(%{chain_id: nil} = row, run, opts) do
+    chain = Ash.UUID.generate()
+
+    args = %{
+      "chain" => chain,
+      "step" => "resend",
+      "part" => 1,
+      "stamp" => run.stamp,
+      "dir" => run.dir_id,
+      "trigger" => "resend",
+      "resume" => nil
+    }
+
+    with {:ok, job} <- insert_step(args, opts) do
+      write!(&Backups.hold_backup_lock_for_resend!/3, row, %{
+        chain_id: chain,
+        stamp: run.stamp,
+        dir_id: run.dir_id,
+        step_job_id: job.id
+      })
+
+      {:ok, chain}
+    end
+  end
+
+  defp decide_resend(%{step: :resend, stamp: stamp}, %{stamp: stamp}, _opts),
+    do: {:error, :in_flight}
+
+  defp decide_resend(_held, _run, _opts), do: {:error, :busy}
+
+  defp resend_requested(run, chain, plan) do
+    Logger.info(
+      "Backup re-send of #{run.stamp} started: to #{length(plan.targets)} destination(s)" <>
+        if(plan.skipped == [], do: "", else: ", #{length(plan.skipped)} skipped")
+    )
+
+    :telemetry.execute(
+      [:kiln_cms, :backups, :resend, :requested],
+      %{count: 1, targets: length(plan.targets), skipped: length(plan.skipped)},
+      %{stamp: run.stamp, chain: chain}
+    )
   end
 
   ## Steps
@@ -1082,7 +1211,8 @@ defmodule KilnCMS.Backups.Chain do
       step: row.step,
       part: row.part,
       node: node,
-      resume: row.resume_stamp
+      resume: row.resume_stamp,
+      phase: row.phase
     }
   end
 
@@ -1097,7 +1227,10 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   defp after_reclaim({:ok, {:interrupted, info}} = result) do
-    if interrupt(info, "Interrupted: node #{info.node} stopped responding") != :finished do
+    if interrupt(info, "Interrupted: node #{info.node} stopped responding") not in [
+         :finished,
+         :resend
+       ] do
       Logger.error(
         "Backup step #{info.step} of #{info.stamp || "a starting backup"} was on node " <>
           "#{info.node}, which stopped responding, and has no attempts left: the backup failed"
@@ -1137,7 +1270,7 @@ defmodule KilnCMS.Backups.Chain do
       end)
 
     with {:ok, {:orphaned, info}} <- result,
-         outcome when outcome != :finished <-
+         outcome when outcome not in [:finished, :resend] <-
            interrupt(info, "Interrupted: the backup's step job ended without finishing its step") do
       Logger.error(
         "Backup step #{info.step} of #{info.stamp || "a starting backup"} ended without " <>
@@ -1285,7 +1418,7 @@ defmodule KilnCMS.Backups.Chain do
       "Interrupted: no server with its backup directory (id #{dir}) picked up the " <>
         "#{info.step} step for #{div(DirQueues.stranded_after_s(), 60)} minutes"
 
-    if interrupt(info, message) != :finished do
+    if interrupt(info, message) not in [:finished, :resend] do
       Logger.error(
         "Backup step #{info.step} of #{info.stamp || "a starting backup"} waited " <>
           "#{div(DirQueues.stranded_after_s(), 60)} minutes for a server with its backup " <>
@@ -1355,6 +1488,36 @@ defmodule KilnCMS.Backups.Chain do
   # killed before it claimed the lock, or before the re-open) has no run of its
   # own to fail: the run still names the chain it last ran under. It gets the
   # refusal note instead of nothing.
+  # A re-send (#2949) is never failed and never writes a failure manifest:
+  # its run succeeded and stays so (`Steps.resend_interrupted/5`, which logs
+  # it). One that was already finishing had written its outcome to the run,
+  # so only its tail is left (`Steps.resend_finished_from_outside/3`).
+  # `:resend` keeps the callers from saying "the backup failed".
+  defp interrupt(%{step: :resend, stamp: stamp, phase: :finishing} = info, _message)
+       when is_binary(stamp) do
+    :ok = Steps.resend_finished_from_outside(stamp, info.chain, info.dir_id)
+    :resend
+  rescue
+    error ->
+      Logger.warning(
+        "Couldn't finish the interrupted backup re-send: #{Exception.message(error)}"
+      )
+
+      :resend
+  end
+
+  defp interrupt(%{step: :resend, stamp: stamp} = info, message) when is_binary(stamp) do
+    :ok = Steps.resend_interrupted(stamp, info.chain, info.dir_id, info.part, message)
+    :resend
+  rescue
+    error ->
+      Logger.warning(
+        "Couldn't record the interrupted backup re-send: #{Exception.message(error)}"
+      )
+
+      :resend
+  end
+
   defp interrupt(%{step: :finish, stamp: stamp} = info, message) when is_binary(stamp) do
     Steps.interrupt_finish(stamp, info.chain, info.dir_id, message)
   rescue
@@ -1503,8 +1666,8 @@ defmodule KilnCMS.Backups.Chain do
   # label of the one `part` names, readable only on a node that has the
   # chain's backup directory. `{nil, nil}` elsewhere, and for the no-op
   # `offsite` of a backup without destinations.
-  defp destination_progress(%{step: :offsite, part: part, stamp: stamp, dir_id: dir_id})
-       when is_integer(part) and is_binary(stamp) do
+  defp destination_progress(%{step: step, part: part, stamp: stamp, dir_id: dir_id})
+       when step in [:offsite, :resend] and is_integer(part) and is_binary(stamp) do
     with {:ok, ^dir_id} <- DirId.current(),
          {:ok, %{"destinations" => list}} when is_list(list) <-
            WorkState.read(Backups.work_dir(stamp)),

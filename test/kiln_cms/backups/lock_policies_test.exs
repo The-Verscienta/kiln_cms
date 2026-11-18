@@ -68,7 +68,14 @@ defmodule KilnCMS.Backups.LockPoliciesTest do
       queue_waiting: fn actor ->
         Backups.queue_backup_request(lock!(), %{waiting_trigger: "manual"}, actor: actor)
       end,
-      fold: fn actor -> Backups.fold_backup_request(lock!(), actor: actor) end
+      fold: fn actor -> Backups.fold_backup_request(lock!(), actor: actor) end,
+      hold_resend: fn actor ->
+        Backups.hold_backup_lock_for_resend(
+          lock!(),
+          %{chain_id: chain, stamp: "20261118-010203", step_job_id: 3},
+          actor: actor
+        )
+      end
     ]
   end
 
@@ -108,6 +115,27 @@ defmodule KilnCMS.Backups.LockPoliciesTest do
 
     test "another subsystem's system actor is refused" do
       refute Backups.can_request_backup?(SystemActor.new(:billing))
+    end
+  end
+
+  # #2949: a re-send of a partly off-site run, the platform admin's or the
+  # console's (O8). The refusals are checked on the policy and on the call,
+  # which a refused actor never gets past.
+  describe "request_resend" do
+    test "a platform admin and the :backups system actor may request a re-send" do
+      assert Backups.can_request_backup_resend?(user(:admin), "20261118-010203")
+      assert Backups.can_request_backup_resend?(Backups.system(), "20261118-010203")
+    end
+
+    test "editor, viewer, site admin, anonymous and another system actor are refused" do
+      for actor <- [user(:editor), user(:viewer), site_admin(), nil, SystemActor.new(:billing)] do
+        refute Backups.can_request_backup_resend?(actor, "20261118-010203"),
+               "request_resend must refuse #{inspect(actor)}"
+
+        assert {:error, :forbidden} = Backups.resend_offsite("20261118-010203", actor)
+      end
+
+      assert Backups.in_flight() == nil
     end
   end
 
@@ -176,6 +204,30 @@ defmodule KilnCMS.Backups.LockPoliciesTest do
       again = lock!()
       assert again.chain_id == chain
       assert again.epoch == 1
+    end
+
+    test "hold_resend takes the lock for a re-send's first part (#2949)" do
+      chain = Ash.UUID.generate()
+      dir_id = Ash.UUID.generate()
+
+      lock =
+        Backups.hold_backup_lock_for_resend!(
+          lock!(),
+          %{chain_id: chain, stamp: "20261118-010203", dir_id: dir_id, step_job_id: 9},
+          actor: Backups.system()
+        )
+
+      assert %{
+               chain_id: ^chain,
+               step: :resend,
+               part: 1,
+               trigger: "resend",
+               stamp: "20261118-010203",
+               dir_id: ^dir_id,
+               resume_stamp: nil,
+               phase: :running,
+               epoch: 1
+             } = lock
     end
 
     test "hold, move and clear each advance the epoch; clear keeps the waiting request" do

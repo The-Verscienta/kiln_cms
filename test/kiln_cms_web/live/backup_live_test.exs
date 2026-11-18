@@ -3877,4 +3877,249 @@ defmodule KilnCMSWeb.BackupLiveTest do
       refute html =~ "deleted outside the app"
     end
   end
+
+  describe "re-send a partly off-site backup (#2949)" do
+    @bucket_id "1d2e3f40-5a6b-4c7d-8e9f-0a1b2c3d4e5f"
+    @bucket_key "dest:" <> @bucket_id
+    @env_remote "offsite:kiln"
+
+    # A partly off-site in-app run `days` old that reached the env remote and
+    # not the stored "Bucket", with its dump on disk (`file?:`).
+    defp resend_run!(dir, opts \\ []) do
+      days = Keyword.get(opts, :days, 0)
+      at = DateTime.add(DateTime.utc_now(), -days * 86_400 - 3600, :second)
+      stamp = Backups.Artifact.stamp(at)
+      name = "kiln-db-#{stamp}.dump"
+
+      if Keyword.get(opts, :file?, true) do
+        File.mkdir_p!(Path.join(dir, "db"))
+        File.write!(Path.join([dir, "db", name]), "dump")
+      end
+
+      Application.put_env(
+        :kiln_cms,
+        Backups,
+        Keyword.put(Application.get_env(:kiln_cms, Backups), :rclone_remote, @env_remote)
+      )
+
+      unless Keyword.get(opts, :bucket?, true) == false do
+        Ash.Seed.seed!(Backups.DestinationConfig, %{
+          id: @bucket_id,
+          name: "Bucket",
+          kind: "local",
+          settings: %{},
+          enabled: true,
+          prune: Keyword.get(opts, :prune, false),
+          position: 1
+        })
+      end
+
+      %{stamp: stamp, trigger: "manual", components: [:db], started_at: at}
+      |> Map.put(:dir_id, Ash.UUID.generate())
+      |> Backups.start_run!(actor: Backups.system())
+      |> Backups.finish_run!(
+        %{
+          artifacts: [
+            %{
+              kind: :db,
+              name: name,
+              bytes: 4,
+              sha256: String.duplicate("d", 64),
+              verified: true,
+              destinations: %{"local" => %{"status" => "ok"}}
+            }
+          ],
+          destinations: [
+            %{key: "rclone:" <> @env_remote, kind: "rclone", label: @env_remote, status: :ok},
+            %{key: @bucket_key, kind: "local", label: "Bucket", status: :failed, error: "x"}
+          ],
+          offsite_status: Keyword.get(opts, :offsite_status, :partial)
+        },
+        actor: Backups.system()
+      )
+    end
+
+    defp resend_button(run), do: ~s|#backup-run-#{run.id} button[data-role="resend"]|
+
+    test "a partly off-site run whose files are here offers Re-send, naming where", %{
+      conn: conn,
+      dir: dir
+    } do
+      run = resend_run!(dir)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(lv, resend_button(run), "Re-send")
+
+      assert has_element?(
+               lv,
+               resend_button(run) <> ~s|[data-confirm*="Re-send this backup to Bucket?"]|
+             )
+
+      refute has_element?(lv, resend_button(run) <> ~s|[data-confirm*="retention"]|)
+      assert has_element?(lv, "#resend-help-#{run.id}")
+    end
+
+    test "an old run says retention there may remove it again", %{conn: conn, dir: dir} do
+      run = resend_run!(dir, days: 20, prune: true)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               resend_button(run) <>
+                 ~s|[data-confirm*="older than 14 days, so retention on Bucket may remove it"]|
+             )
+    end
+
+    test "no Re-send without files here, a destination to send to, or a partial outcome", %{
+      conn: conn,
+      dir: dir
+    } do
+      no_file = resend_run!(dir, file?: false)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+      assert has_element?(lv, "#backup-run-#{no_file.id}")
+      refute has_element?(lv, resend_button(no_file))
+
+      Backups.DestinationConfig
+      |> KilnCMS.Repo.get!(@bucket_id)
+      |> Ecto.Changeset.change(enabled: false)
+      |> KilnCMS.Repo.update!()
+
+      gone = resend_run!(dir, bucket?: false, days: 1)
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+      refute has_element?(lv, resend_button(gone))
+    end
+
+    test "clicking it starts the re-send: a flash, the strip with its Cancel, a badge", %{
+      conn: conn,
+      dir: dir
+    } do
+      run = resend_run!(dir)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+      html = lv |> element(resend_button(run)) |> render_click()
+
+      assert html =~ "Re-send started"
+      assert has_element?(lv, "#backup-in-flight [data-role=step]", "Re-sending off-site")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-in-flight button[data-role="cancel-resend"][data-confirm="Stop this re-send? What was already sent stays recorded."]|
+             )
+
+      refute has_element?(lv, ~s|#backup-in-flight button[data-role="cancel"]|)
+      assert has_element?(lv, "#backup-run-#{run.id} [data-role=resending]")
+      refute has_element?(lv, resend_button(run))
+
+      # The strip's Cancel stops it.
+      html =
+        lv |> element(~s|#backup-in-flight button[data-role="cancel-resend"]|) |> render_click()
+
+      assert html =~ "Re-send canceled"
+      refute has_element?(lv, "#backup-in-flight")
+      assert Backups.in_flight() == nil
+    end
+
+    test "a second click while it runs is told it is already being re-sent", %{
+      conn: conn,
+      dir: dir
+    } do
+      run = resend_run!(dir)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+      assert render_hook(lv, "resend_run", %{"id" => run.id}) =~ "Re-send started"
+      assert render_hook(lv, "resend_run", %{"id" => run.id}) =~ "being re-sent right now"
+    end
+
+    test "a run that can't be re-sent, or no run, is refused with a flash", %{
+      conn: conn,
+      dir: dir
+    } do
+      complete = resend_run!(dir, offsite_status: :complete)
+
+      complete =
+        Backups.record_run_resend!(
+          complete,
+          %{destinations: [%{key: @bucket_key, status: :ok}], offsite_status: :complete},
+          actor: Backups.system()
+        )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      for id <- [complete.id, Ecto.UUID.generate(), "not-a-uuid"] do
+        assert render_hook(lv, "resend_run", %{"id" => id}) =~ "can&#39;t be re-sent"
+      end
+
+      render_hook(lv, "resend_run", %{"stamp" => "../../x"})
+      assert Backups.in_flight() == nil
+    end
+
+    test "every refusal has its own words" do
+      for {reason, text} <- [
+            busy: "never queued",
+            in_flight: "being re-sent right now",
+            pruned: "gone, pruned or no longer verified",
+            nothing_to_send: "nowhere to re-send it",
+            canceled_recently: "canceled moments ago",
+            forbidden: "Only a platform admin",
+            destinations_unreadable: "Couldn't read the backup destinations",
+            disabled: "BACKUP_ENABLED"
+          ] do
+        reason = if reason == :canceled_recently, do: {:canceled_recently, 30}, else: reason
+        assert KilnCMSWeb.BackupLive.resend_message(reason) =~ text
+      end
+    end
+
+    test "a started re-send says what it skipped, the unreadable entry apart" do
+      assert KilnCMSWeb.BackupLive.resend_started_message(%{skipped: ["NAS"]}) =~
+               "removed or disabled since: NAS."
+
+      message =
+        KilnCMSWeb.BackupLive.resend_started_message(%{skipped: [], unreadable_skipped?: true})
+
+      assert message =~ "no stored destination it has no entry for is enabled now"
+      refute message =~ "removed or disabled"
+    end
+
+    test "the late Cancel's words" do
+      error = %Ash.Error.Invalid{
+        errors: [
+          Ash.Error.Changes.InvalidAttribute.exception(
+            field: :status,
+            message: KilnCMS.Backups.Run.Changes.CancelResend.finishing()
+          )
+        ]
+      }
+
+      assert KilnCMSWeb.BackupLive.cancel_resend_message(error) =~ "Too late to cancel"
+    end
+
+    test "the handlers re-check platform admin: editor, org admin, expired grant and anonymous are sent away",
+         %{dir: dir} do
+      run = resend_run!(dir)
+
+      org_admin = authed_user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: org_admin.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      for user <- [
+            authed_user(:editor),
+            org_admin,
+            authed_user(:viewer),
+            expired_grant_user(),
+            nil
+          ],
+          event <- ["resend_run", "cancel_resend"] do
+        socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, current_user: user}}
+        assert_denied(KilnCMSWeb.BackupLive.handle_event(event, %{"id" => run.id}, socket))
+      end
+
+      assert Backups.in_flight() == nil
+    end
+  end
 end

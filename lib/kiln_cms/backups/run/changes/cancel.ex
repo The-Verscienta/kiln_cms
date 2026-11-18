@@ -33,6 +33,10 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
   `running` row is just marked canceled and the resume carries on. Its own
   Cancel is `Run`'s `:cancel_resume` (`Run.Changes.CancelResume`, #2816),
   which the Backups page offers instead.
+
+  Nor is a re-send of the run to the destinations it missed (#2949): while
+  one holds the lock this action is refused ("cancel the re-send instead"),
+  and `Run`'s `:cancel_resend` (`Run.Changes.CancelResend`) stops it.
   """
   use Ash.Resource.Change
 
@@ -74,6 +78,9 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
     row = Chain.locked_row()
 
     cond do
+      resending?(row, run) ->
+        Ash.Changeset.add_error(changeset, field: :status, message: resending())
+
       not holds?(row, run) ->
         Ash.Changeset.set_context(changeset, %{backup_step: nil, backup_chain: nil})
 
@@ -103,6 +110,24 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
         end
     end
   end
+
+  @doc """
+  The refusal while the lock holds a re-send of the run (#2949, critic
+  change 9): that one is stopped by `Run`'s `:cancel_resend`, which the
+  Backups page offers instead.
+  """
+  @spec resending() :: String.t()
+  def resending, do: "is being re-sent off-site: cancel the re-send instead"
+
+  # A re-send of this run's stamp holds the lock (#2949). The run is
+  # `succeeded`, so this action's filter would refuse it anyway, but only
+  # after `stop_chain/1` had canceled the re-send's jobs inside the
+  # transaction that the refusal then rolls back: refused here first.
+  defp resending?(%{chain_id: chain, step: :resend, stamp: stamp}, %{stamp: stamp})
+       when is_binary(chain),
+       do: true
+
+  defp resending?(_row, _run), do: false
 
   # The lock works on this run: its chain, or (a resume or retry whose Run
   # write lagged) its stamp.

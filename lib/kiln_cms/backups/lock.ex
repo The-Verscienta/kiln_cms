@@ -59,16 +59,28 @@ defmodule KilnCMS.Backups.Lock do
   ## Who writes
 
   No person. A platform admin reads the row (the Backups page's in-flight
-  strip) and calls `:request`, whose implementation writes as
-  `KilnCMS.Backups.system/0`. Every other action is the `:backups` system
-  actor's alone.
+  strip) and calls `:request` or `:request_resend`, whose implementations
+  write as `KilnCMS.Backups.system/0`. Every other action is the `:backups`
+  system actor's alone.
+
+  ## A re-send (#2949)
+
+  A third kind of holder besides a backup and a resume: a re-send of a
+  partly off-site run to the destinations it missed
+  (`KilnCMS.Backups.Resend`). `:hold_resend` takes a free lock for it with
+  step `:resend`, part 1, the run's own stamp and backup directory and
+  trigger `"resend"`; each further destination is a `:move` to the next
+  part. It is never queued: a request while the lock is held is refused.
   """
   use Ash.Resource,
     domain: KilnCMS.Backups,
     data_layer: AshPostgres.DataLayer,
     authorizers: [Ash.Policy.Authorizer]
 
-  @steps [:start, :dump, :plan, :archive, :checksum, :prune, :offsite, :finish]
+  # `:resend` (#2949) is not a backup's step: it is the one step of a re-send
+  # of a partly off-site run (`KilnCMS.Backups.Resend`), part k per target.
+  # The column has no check constraint, so adding a value needs no migration.
+  @steps [:start, :dump, :plan, :archive, :checksum, :prune, :offsite, :finish, :resend]
   @components [:db, :media]
   @stamp ~r/\A\d{8}-\d{6}\z/
 
@@ -110,6 +122,24 @@ defmodule KilnCMS.Backups.Lock do
       change set_attribute(:waiting_schedule_ids, nil)
       change set_attribute(:waiting_scope_at, nil)
       change set_attribute(:waiting_scope_folds, nil)
+    end
+
+    # A free lock taken by a re-send of a partly off-site run (#2949): its
+    # one step, `:resend`, part 1, on the run's stamp and backup directory,
+    # with no start step. The lock is free, so nothing waits: the waiting
+    # fields are left as they are rather than cleared.
+    update :hold_resend do
+      accept [:chain_id, :stamp, :dir_id, :step_job_id]
+      change atomic_update(:epoch, expr(epoch + 1))
+      change atomic_update(:acquired_at, expr(now()))
+      change set_attribute(:step, :resend)
+      change set_attribute(:part, 1)
+      change set_attribute(:trigger, "resend")
+      change set_attribute(:resume_stamp, nil)
+      change set_attribute(:phase, :running)
+      change set_attribute(:executing_boot_id, nil)
+      change set_attribute(:executing_job_id, nil)
+      change set_attribute(:executing_attempt, nil)
     end
 
     # The chain's next step (or a reclaimed step's replacement job).
@@ -223,6 +253,20 @@ defmodule KilnCMS.Backups.Lock do
       run KilnCMS.Backups.Lock.Actions.RequestScheduled
     end
 
+    # Re-send a partly off-site run to the destinations it missed (#2949):
+    # start it when the lock is free, else refuse (`:in_flight` when this
+    # stamp is being re-sent, `:busy` otherwise). Never queued.
+    action :request_resend, :map do
+      argument :stamp, :string do
+        allow_nil? false
+        constraints match: @stamp
+      end
+
+      # As `:request`: `Chain` opens its own lock transaction.
+      transaction? false
+      run KilnCMS.Backups.Lock.Actions.RequestResend
+    end
+
     # The heartbeat's sweep: a holder whose node stopped beating loses the lock.
     action :reclaim_stale, :map do
       transaction? false
@@ -244,6 +288,14 @@ defmodule KilnCMS.Backups.Lock do
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :backups}
     end
 
+    # A re-send (#2949): the Backups page's button, or the console as the
+    # `:backups` system actor. The implementation writes the row as
+    # `Backups.system/0`, not as the caller.
+    policy action(:request_resend) do
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :backups}
+    end
+
     # Scheduled backups (part of #2219): the scheduler's, never a person's,
     # platform admin included.
     policy action(:request_scheduled) do
@@ -254,6 +306,7 @@ defmodule KilnCMS.Backups.Lock do
     policy action([
              :ensure,
              :hold,
+             :hold_resend,
              :move,
              :mark_executing,
              :finishing,

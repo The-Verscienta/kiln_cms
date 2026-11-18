@@ -487,6 +487,17 @@ carries the reasoning.
   not affected. No migration; rolling back is safe.
   ([#3049](https://github.com/The-Verscienta/kiln_cms/issues/3049))
 
+<a id="backup-resend-upgrade"></a>
+
+- **Re-send (#2949) adds a backup-lock step, `resend`.**
+  Finish a rolling deploy before you click **Re-send**, and cancel a running
+  re-send before you roll back past this release. A node of the previous
+  release doesn't know the step; if one picks it up anyway, the re-send's
+  state stores its chain under a key no backup step reads, so that node
+  closes it without writing a failure manifest or changing the run, but
+  treat the order above as the rule. No migration.
+  ([#2949](https://github.com/The-Verscienta/kiln_cms/issues/2949))
+
 ## Breaking
 
 <a id="staging-scrub-refuses-live-node"></a>
@@ -623,6 +634,31 @@ carries the reasoning.
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992))
 
 ## Added
+
+<a id="backup-resend"></a>
+
+- **Re-send a partly off-site backup to the destinations it missed (#2949).**
+  A run that reached some destinations but not others (Partly off-site),
+  or none of them (Not off-site), could only be completed by the next
+  backup. Platform admins now get a **Re-send** button on its History row
+  while its files are still on this server and at least one destination it
+  missed is still configured; the release console can call
+  `KilnCMS.Backups.resend_offsite(stamp, KilnCMS.Backups.system())`. The
+  re-send holds the backup lock, so it never races a backup or a prune, and
+  runs on the node that has the backup's directory. It re-checks each
+  file's SHA-256 before every copy: a file that changed is refused, the
+  artifact is marked unverified (in History and `manifest.json`) and the
+  file is left where it is; a file that is gone stops the re-send. A
+  destination removed or disabled since the backup is skipped and keeps its
+  failed entry; an "unreadable" entry is replaced by the stored
+  destinations enabled now. Only the missed destinations' entries change,
+  the off-site status is re-derived, and each destination's retention runs
+  after a successful copy (the confirm says when retention may remove an
+  old backup there again). The run's status never changes. A re-send is
+  refused while a backup runs and while backups are disabled; it has its
+  own Cancel, which is audited. See *Re-send a partly off-site backup* in
+  `docs/backups.md` and ADR 0071.
+  ([#2949](https://github.com/The-Verscienta/kiln_cms/issues/2949))
 
 <a id="webhook-failure-alerts"></a>
 

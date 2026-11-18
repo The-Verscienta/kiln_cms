@@ -114,6 +114,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Run `mix ash.migrate` (new nullable `backup_node_beats.dir_queue` and `dir_queue_boot_id`). Finish a rolling deploy before you start, cancel or resume a backup. Before rolling back past this release, cancel running backups or let them finish.**
   ([#3094](https://github.com/The-Verscienta/kiln_cms/pull/3094) · [long form](docs/changelog/unreleased.md#backup-dir-queues-upgrade))
 
+- **Re-send (#2949) adds a backup-lock step, `resend`: finish a rolling deploy before you click Re-send, and cancel a running re-send before you roll back.**
+  ([#3105](https://github.com/The-Verscienta/kiln_cms/pull/3105) · [long form](docs/changelog/unreleased.md#backup-resend-upgrade))
+
 - **An in-app media backup that skipped a folder it could list but not enter (for example mode 0644) now fails, naming the folder, as cron already did. Fix the folder's permissions or add it to `BACKUP_MEDIA_EXCLUDE`. Cron now also resets an existing `$BACKUP_DIR/media` to 0700 on every run and fails if it can't.**
   ([#3096](https://github.com/The-Verscienta/kiln_cms/pull/3096) · [long form](docs/changelog/unreleased.md#backup-cron-app-parity-upgrade))
 
@@ -146,6 +149,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992) · [long form](docs/changelog/unreleased.md#automation-payload-plain-in-pending-jobs))
 
 ### Added
+
+- **Backups → History: a partly off-site backup (or one not copied off-site) whose files are still on disk gets a Re-send button that sends it to the destinations it missed, re-checking every file first; the run's status never changes.**
+  ([#3105](https://github.com/The-Verscienta/kiln_cms/pull/3105) · [long form](docs/changelog/unreleased.md#backup-resend))
 
 - **Site admins are told when a webhook stops getting through: a bell notice and an email on the first delivery that exhausts its retries, and again when the endpoint is auto-disabled. The email can be turned off under Your settings.**
   ([long form](docs/changelog/unreleased.md#webhook-failure-alerts))
