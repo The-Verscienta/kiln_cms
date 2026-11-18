@@ -31,6 +31,11 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
     * **Before completing**, the whole file's sha256, computed in the same
       read as the parts' MD5s (on a resume, the parts already sent are read
       again, not sent), must equal the verified one (ADR 0043).
+    * **Just before completing**, `holds` (the off-site step's lease check,
+      #3041) must answer `:ok`: a step that outlived its Cancel gets
+      `{:error, :superseded}` and never completes an upload over the file
+      the resumed backup sends. A check, not a fence: the Complete runs
+      outside the lock (ADR 0045).
     * **After completing** (whatever the answer, a `200` carrying an
       `<Error>` included) a `HeadObject` decides: the object must have the
       file's size and sha256 metadata. An upload the store says it no longer
@@ -40,9 +45,10 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
       retry margin plus one and a half times the last part's duration; the
       answer is then `{:error, :deadline}`, with the progress saved.
 
-  A `save` answering `{:error, :superseded}` ends the put; an upload created
-  in this call is aborted first. Any failure of the first `save` after the
-  upload is created aborts it too, since nothing would know of it. Without a
+  A `save` or `holds` answering `{:error, :superseded}` ends the put and
+  leaves the upload alone: the step that took over may already be resuming
+  it (#3041). Any failure of the first `save` after the upload is created
+  aborts it, since nothing would know of it. Without a
   `Resume` (a put Kiln doesn't record) every failure aborts the upload this
   call started.
   """
@@ -87,23 +93,31 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
 
   @doc """
   Copies `file` to `key`. `resume` is the `Kiln.BackupDestination.Resume`
-  Kiln passed, or `nil`. Answers as `c:Kiln.BackupDestination.put/3` does.
+  Kiln passed, or `nil`; `holds` is checked before a multipart upload is
+  completed (`:ok` or `{:error, :superseded}`). Answers as
+  `c:Kiln.BackupDestination.put/3` does.
   """
-  @spec put(Client.t(), String.t(), map(), Kiln.BackupDestination.Resume.t() | nil) ::
+  @spec put(
+          Client.t(),
+          String.t(),
+          map(),
+          Kiln.BackupDestination.Resume.t() | nil,
+          (-> :ok | {:error, term()})
+        ) ::
           :ok | {:ok, :already_present} | {:error, term()}
-  def put(%Client{} = client, key, file, resume) do
+  def put(%Client{} = client, key, file, resume, holds \\ fn -> :ok end) do
     if file.bytes > @max_object do
       {:error, {:permanent, "#{file.name} is larger than the 5 TiB an S3 object can hold"}}
     else
-      client |> send_absent(key, file, resume) |> reason()
+      client |> send_absent(key, file, {resume, holds}) |> reason()
     end
   end
 
-  defp send_absent(client, key, file, resume) do
+  defp send_absent(client, key, file, {resume, holds}) do
     with :absent <- present(client, key, file) do
       if file.bytes < min_part_bytes(),
         do: single(client, key, file),
-        else: multipart(%{client: client, key: key, file: file, resume: resume})
+        else: multipart(%{client: client, key: key, file: file, resume: resume, holds: holds})
     end
   end
 
@@ -303,7 +317,7 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
 
   defp finish(ctx, state, sha) do
     if sha_hex(sha) == String.downcase(ctx.file.sha256) do
-      complete(ctx, state)
+      with :ok <- ctx.holds.(), do: complete(ctx, state)
     else
       abort(ctx.client, ctx.key, state.upload_id)
       changed(ctx.file)
@@ -369,8 +383,7 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
         etags: %{},
         md5?: true,
         bytes_done: 0,
-        last_ms: 0,
-        created?: true
+        last_ms: 0
       }
 
       # Recorded before any data is sent; unrecorded, it is aborted here.
@@ -436,8 +449,7 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
          etags: %{},
          md5?: checkpoint["md5_etags"] == true,
          bytes_done: min(done * size, ctx.file.bytes),
-         last_ms: 0,
-         created?: false
+         last_ms: 0
        }}
     else
       _unusable -> unusable(checkpoint)
@@ -522,13 +534,14 @@ defmodule KilnCMS.Backups.Destination.S3.Multipart do
 
   # On the way out with an error: a superseded put aborts an upload it
   # created itself; a put nothing records aborts whatever it started.
-  defp give_up(ctx, state, {:error, reason} = error) do
-    cond do
-      reason == :superseded and state.created? -> abort(ctx.client, ctx.key, state.upload_id)
-      ctx.resume == nil -> abort(ctx.client, ctx.key, state.upload_id)
-      true -> :ok
-    end
-
+  # A recorded upload is never aborted here, least of all on `:superseded`
+  # (a refused `save` or `holds`): the step that took over may have adopted
+  # it from the checkpoint and be resuming it, and the newer owner or the
+  # uploads sweep settles it (#3041). Only an upload nothing records (no
+  # `Resume`) is aborted on a failure. An upload whose first `save` failed is
+  # aborted where it was created (`create/1`).
+  defp give_up(ctx, state, {:error, _reason} = error) do
+    if ctx.resume == nil, do: abort(ctx.client, ctx.key, state.upload_id)
     error
   end
 

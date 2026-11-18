@@ -502,7 +502,9 @@ defmodule KilnCMS.Backups.Destination.S3Test do
       assert parts_sent(fake) == []
     end
 
-    test "superseded after a part: aborts the upload it created, sends nothing more", %{
+    # #3041: the upload was recorded, so the step that took over may be
+    # resuming it from the checkpoint; aborting it would undo that.
+    test "superseded after a part: sends nothing more, and leaves the recorded upload", %{
       tmp_dir: dir
     } do
       fake = FakeS3.start()
@@ -511,7 +513,60 @@ defmodule KilnCMS.Backups.Destination.S3Test do
 
       assert put(file, resume: resume(nil, answer)) == {:error, :superseded}
       assert parts_sent(fake) == [1, 2]
+      assert map_size(FakeS3.uploads(fake)) == 1
+      assert FakeS3.count(fake, :abort_multipart) == 0
+    end
+
+    # #3041: the off-site step's lease check, made just before the Complete.
+    test "a lease lost before the Complete: nothing is completed", %{tmp_dir: dir} do
+      fake = FakeS3.start()
+      file = file!(dir, 5_000)
+
+      assert put(file, resume: resume(), holds: fn -> {:error, :superseded} end) ==
+               {:error, :superseded}
+
+      assert parts_sent(fake) == [1, 2, 3, 4, 5]
+      assert FakeS3.count(fake, :complete) == 0
+      assert FakeS3.object(fake, key(file)) == nil
+      # Left for the step that took over, which may have adopted it.
+      assert FakeS3.count(fake, :abort_multipart) == 0
+      assert map_size(FakeS3.uploads(fake)) == 1
+    end
+
+    test "a lease lost before the Complete, then the newer owner resumes and completes it", %{
+      tmp_dir: dir
+    } do
+      fake = FakeS3.start()
+      file = file!(dir, 5_000)
+
+      assert put(file, resume: resume(), holds: fn -> {:error, :superseded} end) ==
+               {:error, :superseded}
+
+      # The step that took over adopts the recorded upload.
+      assert put(file, resume: resume(last_saved()), holds: fn -> :ok end) == :ok
+      assert FakeS3.count(fake, :create_multipart) == 1
+      assert parts_sent(fake) == [1, 2, 3, 4, 5]
+      assert sha256(FakeS3.object(fake, key(file)).body) == file.sha256
+    end
+
+    test "without a Resume, a lost lease still aborts the upload nothing records", %{
+      tmp_dir: dir
+    } do
+      fake = FakeS3.start()
+      file = file!(dir, 5_000)
+
+      assert put(file, holds: fn -> {:error, :superseded} end) == {:error, :superseded}
+      assert FakeS3.count(fake, :abort_multipart) == 1
       assert FakeS3.uploads(fake) == %{}
+    end
+
+    test "a lease that holds completes as before", %{tmp_dir: dir} do
+      fake = FakeS3.start()
+      file = file!(dir, 5_000)
+
+      assert put(file, resume: resume(), holds: fn -> :ok end) == :ok
+      assert FakeS3.count(fake, :complete) == 1
+      assert sha256(FakeS3.object(fake, key(file)).body) == file.sha256
     end
 
     test "superseded while resuming another call's upload leaves it alone", %{tmp_dir: dir} do

@@ -36,7 +36,19 @@ defmodule KilnCMS.Backups.ChainTest do
   import Ecto.Query
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Chain, DirId, Manifest, Steps, StepWorker, Worker, WorkState}
+
+  alias KilnCMS.Backups.{
+    Artifact,
+    Chain,
+    DirId,
+    Manifest,
+    Retention,
+    Steps,
+    StepWorker,
+    Worker,
+    WorkState
+  }
+
   alias KilnCMS.Backups.ChainTest.ProbingImporter
   alias KilnCMS.Repo
   alias KilnCMS.Test.BackupChain
@@ -574,6 +586,132 @@ defmodule KilnCMS.Backups.ChainTest do
       assert {:error, :superseded} = Chain.fenced_rename(lease, ours, final)
       assert File.read!(final) == "theirs"
       assert {:error, :superseded} = Chain.fenced(lease, fn -> flunk("ran") end)
+    end
+
+    # #3040: a retry, or an attempt Lifeline rescued, has the job id, epoch and
+    # lease of the attempt it replaced, which may still be running.
+    test "of two attempts of one job, only the later one's rename is admitted (#3040)" do
+      {:ok, %{status: :started}} = request()
+      job = current_job()
+      {:ok, first} = Chain.begin_step(%{job | attempt: 1})
+      {:ok, second} = Chain.begin_step(%{job | attempt: 2})
+      assert {first.job_id, first.epoch} == {second.job_id, second.epoch}
+
+      dir = Backups.dir()
+      File.mkdir_p!(dir)
+      final = Path.join(dir, "h")
+      [late, ours] = for tag <- ["1", "2"], do: Path.join(dir, "h.#{job.id}-#{tag}.partial")
+      File.write!(late, "late")
+      File.write!(ours, "ours")
+
+      assert {:error, :superseded} = Chain.fenced_rename(first, late, final)
+      refute File.exists?(final)
+      assert :ok = Chain.fenced_rename(second, ours, final)
+      assert File.read!(final) == "ours"
+
+      assert {:error, :superseded} = Chain.check_lease(first)
+      assert :ok = Chain.check_lease(second)
+      assert {:error, :superseded} = Chain.advance(first, "dump")
+      assert :ok = Chain.advance(second, "dump")
+    end
+
+    test "an earlier attempt that claims after a later one is refused (#3040)" do
+      {:ok, %{status: :started}} = request()
+      job = current_job()
+      {:ok, later} = Chain.begin_step(%{job | attempt: 2})
+
+      assert {:error, :superseded} = Chain.begin_step(%{job | attempt: 1})
+      assert %{executing_attempt: 2} = lock()
+      assert :ok = Chain.check_lease(later)
+    end
+
+    # Oban's snooze ack takes back the attempt it was fetched with, so a job
+    # that snoozed (or moved to its directory's queue, #2845) runs again with
+    # the same attempt number, and claims again.
+    test "a snoozed job that runs again with the same attempt holds the lease (#3040)" do
+      {:ok, %{status: :started}} = request()
+      job = %{current_job() | attempt: 1}
+      {:ok, before_snooze} = Chain.begin_step(job)
+      {:ok, again} = Chain.begin_step(job)
+
+      assert again.attempt == before_snooze.attempt
+      assert :ok = Chain.check_lease(again)
+      assert :ok = Chain.advance(again, "dump")
+    end
+
+    # #3041: what the off-site step hands Kiln's own adapters, and not a
+    # plugin's.
+    test "Local and S3 get the step's tag, fenced rename and lease check; a plugin doesn't" do
+      {:ok, %{status: :started}} = request()
+      job = current_job()
+      {:ok, lease} = Chain.begin_step(%{job | attempt: 1})
+      base = [deadline: 1]
+
+      for kind <- ["local", "s3"] do
+        opts = Steps.core_opts(base, %{kind: kind}, lease)
+        assert opts[:deadline] == 1
+        assert opts[:tag] == "#{job.id}-1"
+        assert is_function(opts[:rename], 2)
+        assert opts[:holds].() == :ok
+      end
+
+      assert Steps.core_opts(base, %{kind: "fake"}, lease) == base
+
+      # The lease moves on: the check and the rename are refused.
+      opts = Steps.core_opts(base, %{kind: "local"}, lease)
+      :ok = Chain.advance(lease, "dump")
+      assert opts[:holds].() == {:error, :superseded}
+      dir = Backups.dir()
+      File.mkdir_p!(dir)
+      from = Path.join(dir, "late.#{job.id}-1.partial")
+      File.write!(from, "late")
+      assert opts[:rename].(from, Path.join(dir, "late")) == {:error, :superseded}
+    end
+
+    # #3041: two units to prune, the lease moved on between them, through
+    # the prune step's own fencing (`Steps.prune_opts/2`: the trash move under
+    # `Chain.fenced/2`).
+    test "a prune whose lease moves on between two units moves the first and leaves the second",
+         %{dir: dir} do
+      {:ok, %{status: :started}} = request()
+      {:ok, lease} = Chain.begin_step(%{current_job() | attempt: 1})
+
+      File.mkdir_p!(Path.join(dir, "db"))
+
+      for stamp <- ["20180101-000000", "20190101-000000", "20200101-000000"] do
+        path = Path.join([dir, "db", "kiln-db-#{stamp}.dump"])
+        File.write!(path, "x")
+        File.touch!(path, System.os_time(:second) - 30 * 24 * 3600)
+      end
+
+      parent = self()
+      {:ok, seen} = Agent.start_link(fn -> 0 end)
+
+      before_unit = fn entry ->
+        send(parent, {:unit, entry.files})
+
+        if Agent.get_and_update(seen, &{&1 + 1, &1 + 1}) == 2,
+          do: :ok = Chain.advance(lease, "dump")
+      end
+
+      opts = Steps.prune_opts(lease, dir) ++ [before_unit: before_unit]
+
+      assert {:ok, %{deleted: [first_name], units: 1, stopped: :superseded}} =
+               Retention.run(dir, opts)
+
+      assert_received {:unit, [^first_name]}
+      assert_received {:unit, [second_name]}
+      refute File.exists?(Path.join([dir, "db", first_name]))
+      assert File.exists?(Path.join([dir, "db", second_name]))
+      assert Path.wildcard(Path.join([dir, "db", ".kiln-trash", "*"]), match_dot: true) == []
+    end
+
+    test "a lease with no attempt is judged by its job alone" do
+      {:ok, %{status: :started}} = request()
+      {:ok, lease} = Chain.begin_step(%{current_job() | attempt: 1})
+
+      assert :ok = Chain.check_lease(Map.delete(lease, :attempt))
+      assert :ok = Chain.check_lease(%{lease | attempt: nil})
     end
 
     test "an advance whose next job already exists rolls back and leaves the lock alone" do

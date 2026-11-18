@@ -1,3 +1,38 @@
+defmodule KilnCMS.Backups.CancelTest.GatedImporter do
+  @moduledoc false
+  # The `:importer` seam, one-shot: the first call touches `<gate>.started`
+  # and waits for `<gate>` (or for `base` to be gone), then imports as usual;
+  # later calls just import. How a test holds a prune step inside
+  # `Retention.run/2`, which imports first.
+  @key {__MODULE__, :gate}
+
+  def arm(gate, base), do: :persistent_term.put(@key, {gate, base})
+  def disarm, do: :persistent_term.erase(@key)
+
+  def run(dir) do
+    case :persistent_term.get(@key, nil) do
+      nil ->
+        :ok
+
+      {gate, base} ->
+        disarm()
+        File.write!(gate <> ".started", "")
+        wait(gate, base)
+    end
+
+    KilnCMS.Backups.Importer.run(dir)
+  end
+
+  defp wait(gate, base) do
+    if File.exists?(gate) or not File.dir?(base) do
+      :ok
+    else
+      Process.sleep(50)
+      wait(gate, base)
+    end
+  end
+end
+
 defmodule KilnCMS.Backups.CancelTest do
   @moduledoc """
   Canceling a running backup (#2218, D4/D5): the run's step jobs are canceled,
@@ -552,6 +587,208 @@ defmodule KilnCMS.Backups.CancelTest do
     end
   end
 
+  # #3041: the prune step and the off-site uploads are fenced too. As above,
+  # the zombie is the job the chain held before the Cancel, run by hand in a
+  # Task as its first attempt, and held at a gate until the resumed chain has
+  # done what the zombie could otherwise undo.
+  describe "#3041: a prune or an upload that outlives its Cancel" do
+    test "a zombie prune released after a resume deletes nothing and writes no marker", %{
+      base: base,
+      dir: dir,
+      admin: admin
+    } do
+      {:ok, %{status: :started}} = request()
+      job = %{step_until("prune") | attempt: 1}
+      %{stamp: stamp} = lock()
+
+      # Two old backups made by cron: any prune deletes the older one.
+      [older, old] =
+        for old_stamp <- ["20190101-000000", "20200101-000000"] do
+          path = Path.join([dir, "db", "kiln-db-#{old_stamp}.dump"])
+          File.write!(path, "x")
+          aged_days(path, 30)
+          path
+        end
+
+      gate = Path.join(base, "prune.gate")
+      on_exit(fn -> File.write(gate, "") end)
+      KilnCMS.Backups.CancelTest.GatedImporter.arm(gate, base)
+      on_exit(&KilnCMS.Backups.CancelTest.GatedImporter.disarm/0)
+      put_backups_env(:importer, KilnCMS.Backups.CancelTest.GatedImporter)
+
+      zombie = Task.async(fn -> StepWorker.perform(job) end)
+      wait_for!(gate <> ".started")
+
+      assert {:ok, %{status: :canceled}} = Backups.cancel_run(run_of(stamp), actor: admin)
+      backdate_finished!(stamp)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: resumed}} = request(resume: stamp)
+        step_until("prune")
+
+        dump = Path.join([dir, "db", "kiln-db-#{stamp}.dump"])
+        inode = File.stat!(dump).inode
+        listed = backup_files(dir)
+
+        # The zombie plans, then finds its lease gone before its first write.
+        File.write!(gate, "")
+        assert {:cancel, :superseded} = Task.await(zombie, 30_000)
+
+        assert backup_files(dir) == listed
+        assert File.exists?(older) and File.exists?(old)
+        assert File.stat!(dump).inode == inode
+        refute Enum.any?(listed, &String.ends_with?(&1, [".good", ".hold"]))
+        assert trash_entries(dir) == []
+        refute Enum.any?(run_of(stamp).log, &(&1.message =~ "Retention"))
+
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(resumed)
+      end)
+
+      assert %{status: :succeeded} = run_of(stamp)
+      # The resumed chain's own prune did what the zombie was kept from.
+      refute File.exists?(older)
+      assert File.exists?(old)
+    end
+
+    # `:tmp_dir`: a Local destination's path may hold no symbolic link, and
+    # the system temp directory sits behind one on macOS.
+    @tag :tmp_dir
+    test "a zombie upload released after a resume sends nothing more", %{
+      base: base,
+      admin: admin,
+      tmp_dir: tmp_dir
+    } do
+      log = Path.join(base, "rclone.log")
+      gate = Path.join(base, "rclone.gate")
+      on_exit(fn -> File.write(gate, "") end)
+
+      # Every call is logged; only the first once armed waits at the gate.
+      fake_rclone!(base, """
+      echo "$*" >> "#{log}"
+      if [ -f "#{gate}.armed" ] && [ ! -f "#{gate}.started" ]; then
+        touch "#{gate}.started"
+        while [ ! -f "#{gate}" ] && [ -d "#{base}" ]; do sleep 0.05; done
+      fi
+      exit 0
+      """)
+
+      put_backups_env(:local_destination_roots, [tmp_dir])
+      path = Path.join(tmp_dir, "site")
+      File.mkdir_p!(path)
+
+      Backups.create_backup_destination!(
+        %{name: "Disk", kind: "local", position: 1, settings: %{"path" => path}},
+        actor: admin
+      )
+
+      {:ok, %{status: :started}} = request()
+      job = %{step_until("offsite", 1) | attempt: 1}
+      %{stamp: stamp} = lock()
+
+      # The zombie claims the lease and blocks in its first `rclone copy`.
+      File.write!(gate <> ".armed", "")
+      zombie = Task.async(fn -> StepWorker.perform(job) end)
+      wait_for!(gate <> ".started")
+
+      assert {:ok, %{status: :canceled}} = Backups.cancel_run(run_of(stamp), actor: admin)
+      backdate_finished!(stamp)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: resumed}} = request(resume: stamp)
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(resumed)
+      end)
+
+      assert %{status: :succeeded, offsite_status: :complete} = run_of(stamp)
+      landed = local_files(path)
+      assert landed != []
+      sends = log |> File.read!() |> String.split("\n", trim: true) |> length()
+
+      # The zombie's copy finishes; the lease is gone before its next one.
+      File.write!(gate, "")
+      assert {:cancel, :superseded} = Task.await(zombie, 15_000)
+
+      assert log |> File.read!() |> String.split("\n", trim: true) |> length() == sends
+      assert local_files(path) == landed
+      assert %{status: :succeeded, offsite_status: :complete} = run_of(stamp)
+    end
+  end
+
+  # #3041: the zombie is held inside `Destination.Local.put/3`, its copy
+  # made and verified under its own tagged name, before its rename. The
+  # resumed chain lands every file meanwhile; the zombie's rename, fenced,
+  # is refused.
+  describe "#3041: a Local upload that outlives its Cancel" do
+    @tag :tmp_dir
+    test "is refused at its rename, leaving the resumed chain's file in place", %{
+      base: base,
+      admin: admin,
+      tmp_dir: tmp_dir
+    } do
+      put_backups_env(:local_destination_roots, [tmp_dir])
+      path = Path.join(tmp_dir, "site")
+      File.mkdir_p!(path)
+
+      Backups.create_backup_destination!(
+        %{name: "Disk", kind: "local", position: 1, settings: %{"path" => path}},
+        actor: admin
+      )
+
+      {:ok, %{status: :started}} = request()
+      job = %{step_until("offsite", 1) | attempt: 1}
+      %{stamp: stamp} = lock()
+      gate = Path.join(base, "local.gate")
+      on_exit(fn -> File.write(gate, "") end)
+      tag = "#{job.id}-1"
+
+      original = Application.get_env(:kiln_cms, KilnCMS.Backups.Destination.Local, [])
+
+      on_exit(fn ->
+        Application.put_env(:kiln_cms, KilnCMS.Backups.Destination.Local, original)
+      end)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups.Destination.Local,
+        Keyword.put(original, :before_rename, fn partial ->
+          if String.ends_with?(partial, ".#{tag}.partial") do
+            File.write!(gate <> ".started", partial)
+            wait_open(gate, base)
+          end
+        end)
+      )
+
+      zombie = Task.async(fn -> StepWorker.perform(job) end)
+      wait_for!(gate <> ".started")
+      # The step's own tag reached the adapter (`Steps.core_opts/3`).
+      held = File.read!(gate <> ".started")
+      assert String.starts_with?(held, path)
+      assert File.exists?(held)
+
+      assert {:ok, %{status: :canceled}} = Backups.cancel_run(run_of(stamp), actor: admin)
+      backdate_finished!(stamp)
+
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: resumed}} = request(resume: stamp)
+        BackupChain.drain()
+        assert :ok = BackupChain.settled(resumed)
+      end)
+
+      assert %{status: :succeeded, offsite_status: :complete} = run_of(stamp)
+      final = String.replace_suffix(held, ".#{tag}.partial", "")
+      assert File.regular?(final)
+      landed = local_files(path) |> Enum.reject(&String.ends_with?(elem(&1, 0), ".partial"))
+
+      File.write!(gate, "")
+      assert {:cancel, :superseded} = Task.await(zombie, 15_000)
+
+      # Every file as the resumed chain left it, and the zombie's copy gone.
+      assert local_files(path) == landed
+      refute File.exists?(held)
+    end
+  end
+
   describe "cancel during the second destination (#2220)" do
     test "the destination's call dies with its step; a Resume sends to both", %{
       base: base,
@@ -610,6 +847,46 @@ defmodule KilnCMS.Backups.CancelTest do
 
       assert %{status: :succeeded, offsite_status: :complete} = run = run_of(stamp)
       assert Enum.map(run.destinations, & &1.status) == [:ok, :ok]
+    end
+  end
+
+  defp aged_days(path, days),
+    do: File.touch!(path, System.os_time(:second) - days * 24 * 3600)
+
+  defp put_backups_env(key, value) do
+    env = Application.get_env(:kiln_cms, KilnCMS.Backups)
+    Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(env, key, value))
+  end
+
+  # Every entry of `db/` and `media/`, sorted.
+  defp backup_files(dir) do
+    Enum.sort(
+      for sub <- ["db", "media"], name <- File.ls!(Path.join(dir, sub)), do: "#{sub}/#{name}"
+    )
+  end
+
+  defp trash_entries(dir) do
+    for sub <- ["db", "media"],
+        name <- Path.wildcard(Path.join([dir, sub, ".kiln-trash", "*"]), match_dot: true),
+        do: name
+  end
+
+  # Each file under a Local destination's directory with its inode and
+  # mtime, so a file replaced in place shows.
+  defp local_files(path) do
+    for file <- Path.wildcard(Path.join(path, "**"), match_dot: true),
+        File.regular?(file),
+        stat = File.stat!(file, time: :posix),
+        do: {Path.relative_to(file, path), stat.inode, stat.mtime, stat.size}
+  end
+
+  # Until `gate` exists, or the test's `base` is gone.
+  defp wait_open(gate, base) do
+    if File.exists?(gate) or not File.dir?(base) do
+      :ok
+    else
+      Process.sleep(50)
+      wait_open(gate, base)
     end
   end
 

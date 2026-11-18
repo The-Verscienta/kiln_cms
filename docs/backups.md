@@ -1648,8 +1648,9 @@ What can go wrong:
 **Resume waits about two and a half minutes after a Cancel (#2538).** A node
 that lost the database misses the Cancel, and stops its step only once it
 has gone 90 seconds without a successful heartbeat. A resume that started sooner could run
-beside that step: its file writes are fenced, but an off-site copy or a prune
-is not ([below](#what-a-step-that-outlives-its-cancel-can-write)). So for 150 seconds after the Cancel (counted from
+beside that step: its file writes, its prune and each off-site upload it
+starts are fenced, but an upload already on its way is not
+([below](#what-a-step-that-outlives-its-cancel-can-write)). So for 150 seconds after the Cancel (counted from
 the time the row was canceled), **Resume** on that row is refused with "That
 backup was canceled moments ago. Resume it again in N seconds: a step on a
 server that lost contact with the database may still be stopping." The button
@@ -2273,16 +2274,31 @@ its node stops it ([above](#several-nodes-and-the-backup-lock)). Until then:
 - **The History row**: it can't write it. A step's progress, success and
   failure land only on a `Running` run that is still on that step's chain,
   so it can't overwrite a Cancel or the progress of a resume of the same run. The fence is argued in [ADR 0039](decisions/0039-a-backup-steps-node-is-judged-by-a-heartbeat-on-the-database-clock-and-a-superseded-step-is-fenced.md), and why History writes stay out of the lock transaction in [ADR 0045](decisions/0045-a-backup-run-write-never-shares-the-lock-transaction-except-cancel.md).
-- **Off-site and prune: not fenced yet.** An `offsite` step that outlived
-  its Cancel can still upload to its destination, and a `prune` step can
-  still delete what retention allows. Only the wait after a Cancel
-  ([above](#cancel-a-running-backup)) keeps them apart from a resume.
-- **A retry of the same job is not told apart from it.** A step's lease is
-  its job, so a later attempt of the same job (an Oban retry, or the job
-  rescued by Oban's Lifeline after about three hours) holds the same lease as
-  an earlier attempt that is somehow still running. Their temporary files are
-  still apart (the attempt is in the name), but the renames of both are
-  admitted.
+- **Prune**: it can't delete anything or move a marker. The `prune` step
+  syncs the `.good` and `.hold` markers under the lock, only while its job
+  still holds it, and deletes each backup by moving its files into the trash
+  the same way. A prune whose backup was canceled or taken back deletes
+  nothing more and stops (#3041).
+- **Off-site**: it starts no upload. Before each file, the `offsite` step
+  checks that its job still holds the lock, and stops when it doesn't, so it
+  sends nothing more, and neither sweeps nor prunes that destination. A
+  [Local destination](#let-backups-be-written-to-a-directory-on-this-server) copies each file under a
+  temporary name tagged with the step's job and attempt and renames it into
+  place under the lock, so a late copy never replaces the resumed backup's
+  file. An S3 destination checks again just before it completes a multipart
+  upload (#3041).
+  **What is not fenced:** an upload already under way when the backup was
+  canceled. An `rclone copy` (`BACKUP_RCLONE_REMOTE` or an rclone
+  destination), a single-request S3 upload, or a plugin's upload runs to its
+  end, and can land after a resume's own copy of that file. The wait after a
+  Cancel ([above](#cancel-a-running-backup)) covers it.
+- **A retry of the same job**: an earlier attempt can't write once a later
+  one has started. A step's lease is its job and the attempt that last
+  claimed it, so an earlier attempt that is somehow still running (an Oban
+  retry after a timeout, or the job rescued by Oban's Lifeline after about
+  three hours) has its renames, its prune and its uploads refused like any
+  superseded step's (#3040). A job that waited for its backup directory and
+  runs again keeps its attempt, and claims the lock again.
 
 **A stalled backup directory can still hold the lock.** The contents of every
 file are written outside the lock, so a hung NFS mount no longer holds the
@@ -3630,9 +3646,14 @@ checked again that:
 Files land as `BACKUP_DIR` lays them out, `db/` and `media/` under the
 destination's directory, mode 0600; a directory it has to create is made
 mode 0700, and one that exists is left as it is. Each is
-written as `<name>.partial`, hashed again and compared with the SHA-256
-the backup verified, and only then renamed, so a file that doesn't match
-never appears under its real name. A file already in place with the same
+written as `<name>.<job>-<attempt>.partial` (the backup step's own
+temporary name), hashed again and compared with the SHA-256
+the backup verified, and only then renamed, under the backup lock and only
+while that step still holds it, so a file that doesn't match
+never appears under its real name, and a step that outlived its Cancel never
+replaces the resumed backup's copy (#3041). A temporary file left by a node
+that stopped mid-copy is removed by the next copy to that destination, of any
+file, once it is an hour old. A file already in place with the same
 size and SHA-256 is not copied again: the size is compared first, and only
 a file of the right size is read whole to hash it, so a resend reads a
 large media part back from the mount once instead of writing it

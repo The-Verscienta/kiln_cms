@@ -13,6 +13,7 @@ defmodule KilnCMS.Backups.Destination.LocalTest do
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups.Destination
   alias KilnCMS.Backups.Destination.Local
+  alias KilnCMS.Backups.Retention
 
   @moduletag :tmp_dir
 
@@ -250,6 +251,116 @@ defmodule KilnCMS.Backups.Destination.LocalTest do
 
       backups!(local_destination_roots: [])
       assert {:error, _} = Local.list(config(root))
+    end
+
+    # #3041: what the off-site step passes, its tag and its fenced rename.
+    test "stages under the step's own tag and renames through its :rename",
+         %{tmp_dir: tmp, root: root} do
+      file = source!(tmp, "kiln-db-20260101-000000.dump")
+      parent = self()
+
+      rename = fn from, to ->
+        send(parent, {:rename, from, to})
+        File.rename(from, to)
+      end
+
+      assert Local.put(config(root), file, tag: "41-2", rename: rename) == :ok
+
+      target = Path.join([root, "db", file.name])
+      assert_received {:rename, from, ^target}
+      assert from == target <> ".41-2.partial"
+      assert File.read!(target) == File.read!(file.path)
+      assert File.ls!(Path.join(root, "db")) == [file.name]
+    end
+
+    test "a refused rename leaves the file in place and removes only its own temporary file",
+         %{tmp_dir: tmp, root: root} do
+      file = source!(tmp, "kiln-db-20260101-000000.dump", "the zombie's")
+      db = Path.join(root, "db")
+      File.mkdir_p!(db)
+      target = Path.join(db, file.name)
+      File.write!(target, "the resumed chain's")
+      # Another step's temporary file, mid-copy.
+      theirs = target <> ".41-3.partial"
+      File.write!(theirs, "another step's")
+
+      refused = fn _from, _to -> {:error, :superseded} end
+
+      assert Local.put(config(root), file, tag: "41-2", rename: refused) == {:error, :superseded}
+      assert File.read!(target) == "the resumed chain's"
+      assert File.read!(theirs) == "another step's"
+      refute File.exists?(target <> ".41-2.partial")
+    end
+
+    test "every put removes the temporary files a stopped copy left, once an hour old",
+         %{tmp_dir: tmp, root: root} do
+      file = source!(tmp, "kiln-db-20260101-000000.dump")
+      db = Path.join(root, "db")
+      media = Path.join(root, "media")
+      File.mkdir_p!(db)
+      File.mkdir_p!(media)
+      target = Path.join(db, file.name)
+      hours_ago = System.os_time(:second) - 2 * 3600
+
+      stale = [
+        target <> ".41-1.partial",
+        target <> ".partial",
+        Path.join(db, "kiln-db-20250101-000000.dump.7-1.partial"),
+        Path.join(media, "kiln-media-20250101-000000.part01.tar.gz.7-1.partial")
+      ]
+
+      young = target <> ".41-3.partial"
+      not_a_tag = target <> ".x.partial"
+      not_a_backup = Path.join(db, "notes.txt.7-1.partial")
+
+      for path <- stale ++ [young, not_a_tag, not_a_backup], do: File.write!(path, "left")
+      for path <- stale ++ [not_a_tag, not_a_backup], do: File.touch!(path, hours_ago)
+
+      assert Local.put(config(root), file, tag: "41-2") == :ok
+
+      assert Enum.sort(File.ls!(db)) ==
+               Enum.sort(Enum.map([target, young, not_a_tag, not_a_backup], &Path.basename/1))
+
+      assert File.ls!(media) == []
+    end
+
+    test "a put that finds the file already there still sweeps", %{tmp_dir: tmp, root: root} do
+      file = source!(tmp, "kiln-db-20260101-000000.dump")
+      assert Local.put(config(root), file, tag: "41-2") == :ok
+
+      # A later attempt's copy, killed mid-way, left behind.
+      left = Path.join([root, "db", file.name <> ".41-1.partial"])
+      File.write!(left, "half")
+      File.touch!(left, System.os_time(:second) - 2 * 3600)
+
+      assert Local.put(config(root), file, tag: "41-3") == {:ok, :already_present}
+      refute File.exists?(left)
+    end
+
+    # The source's old mtime goes on the file in place, never on the
+    # temporary file waiting for its rename, so a concurrent sweep can't
+    # take that one for a stopped copy's.
+    test "a verified copy waiting for its rename is not swept by another put",
+         %{tmp_dir: tmp, root: root} do
+      file = source!(tmp, "kiln-db-20260101-000000.dump")
+      File.touch!(file.path, 1_700_000_000)
+      other = source!(tmp, "kiln-db-20260102-000000.dump")
+      parent = self()
+
+      rename = fn from, to ->
+        # Another step's put runs while this copy waits for its rename.
+        send(parent, {:waiting, File.stat!(from, time: :posix).mtime})
+        assert Local.put(config(root), other, tag: "42-1") == :ok
+        File.rename(from, to)
+      end
+
+      assert Local.put(config(root), file, tag: "41-2", rename: rename) == :ok
+
+      assert_received {:waiting, mtime}
+      assert mtime > System.os_time(:second) - Retention.partial_grace_s()
+      target = Path.join([root, "db", file.name])
+      assert File.read!(target) == File.read!(file.path)
+      assert File.stat!(target, time: :posix).mtime == 1_700_000_000
     end
 
     test "refuses a name that is not a basename in db or media", %{tmp_dir: tmp, root: root} do

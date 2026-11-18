@@ -144,8 +144,9 @@ narrowed. The reasoning is in
   (`<name>.<job>-<attempt>.partial`, `Artifact.partial_name/2`), and is
   renamed into place by `Chain.fenced_rename/3`, only while the lease holds.
   A superseded step's rename is refused. The 150-second wait after a Cancel
-  stays, for what is still not fenced: the off-site uploads and the prune
-  step.
+  stays. *Since #3041* (ADR 0067's second amendment) the prune step and each
+  off-site upload a step starts are fenced too; the wait is left for an
+  upload already under way when the lease is lost.
 - **"The fenced `state.json` write holds the cluster-wide advisory lock while
   it writes the file."** The contents of `state.json`, of the failure and
   finish manifests and of every other file are now written outside the lock;
@@ -159,10 +160,14 @@ narrowed. The reasoning is in
   through `fenced_rename/3`, which is `while_holding/2` around the rename
   alone.
 
-The fence itself (chain, epoch and job id) is unchanged. So is its gap: a
-later attempt of the same job, an Oban retry or a Lifeline rescue, holds the
-same lease as an earlier attempt still running, and the renames of both are
-admitted. Every other rule above is unchanged.
+The fence itself (chain, epoch and job id) is unchanged. So, until #3040,
+was its gap: a later attempt of the same job, an Oban retry or a Lifeline
+rescue, held the same lease as an earlier attempt still running, and the
+renames of both were admitted. *Since #3040* the lease is also the attempt
+that last claimed the lock (`executing_job_id`, `executing_attempt`), so the
+earlier attempt is superseded once the later one claims; see
+[ADR 0067](0067-a-backup-steps-temporary-files-are-its-own-and-only-their-rename-is-fenced.md),
+"Amendment (#3040, #3041)". Every other rule above is unchanged.
 
 ## Amendment (2026-11-17, #2848): the self-fence runs in a watchdog, and fires on no successful beat
 
