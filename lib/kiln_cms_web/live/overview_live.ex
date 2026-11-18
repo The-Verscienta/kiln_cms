@@ -514,13 +514,20 @@ defmodule KilnCMSWeb.OverviewLive do
           >
             {line}
           </span>
-          <span :if={!@backup_scheduled?} class="block text-xs text-base-content/70">
+          <%!-- #3005: the schedule lines are about a backup that didn't
+                happen. When the alarm is only retention or the off-site copy,
+                they'd send the reader to a schedule that is working. --%>
+          <span
+            :if={@backup_overdue? and !@backup_scheduled?}
+            data-role="backup-schedule"
+            class="block text-xs text-base-content/70"
+          >
             {gettext(
               "Scheduled backups run from the server's cron job — ask whoever runs this server to check it, or take one now from Backups."
             )}
           </span>
           <span
-            :if={@backup_scheduled? and @backup_next_at}
+            :if={@backup_overdue? and @backup_scheduled? and @backup_next_at}
             data-role="backup-next"
             class="block text-xs text-base-content/70"
           >
@@ -529,7 +536,8 @@ defmodule KilnCMSWeb.OverviewLive do
             )}
           </span>
           <span
-            :if={@backup_scheduled? and is_nil(@backup_next_at)}
+            :if={@backup_overdue? and @backup_scheduled? and is_nil(@backup_next_at)}
+            data-role="backup-schedule"
             class="block text-xs text-base-content/70"
           >
             {gettext(
@@ -1084,12 +1092,15 @@ defmodule KilnCMSWeb.OverviewLive do
 
   # Platform admins only (#2219): the strips are theirs alone, and the status
   # reads the run history as well as the manifest, which nobody else's home
-  # page should pay for.
+  # page should pay for. `backup_overdue?` is some component never backed up,
+  # failed or stale (a component never backed up is stale): only then do the
+  # alarm's schedule lines apply (#3005).
   defp assign_backup_warning(%{assigns: %{platform_admin?: true}} = socket) do
     status = KilnCMS.Backups.status()
 
     socket
     |> assign(:backup_state, backup_state(status))
+    |> assign(:backup_overdue?, status.stale? or status.failed?)
     |> assign(:backup_headline, backup_headline(status))
     |> assign(:backup_scheduled?, backup_scheduled?(status))
     |> assign(:backup_next_at, backup_next_at(status))
@@ -1098,6 +1109,7 @@ defmodule KilnCMSWeb.OverviewLive do
   defp assign_backup_warning(socket) do
     socket
     |> assign(:backup_state, :ok)
+    |> assign(:backup_overdue?, false)
     |> assign(:backup_headline, [])
     |> assign(:backup_scheduled?, false)
     |> assign(:backup_next_at, nil)

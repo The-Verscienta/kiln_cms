@@ -331,8 +331,55 @@ defmodule KilnCMS.Backups.PresenceTest do
       land_parts(dir, [1])
       remote = %{"local" => %{"status" => "ok"}, "rclone:r" => %{"status" => "ok"}}
 
-      assert [%{state: :missing, gone: gone}] = presence(run([set(remote)]), dir).artifacts
+      assert [%{state: :missing, gone: gone, off_site: off_site}] =
+               presence(run([set(remote)]), dir).artifacts
+
       assert gone == [Artifact.part_name(@stamp, 2), Artifact.part_name(@stamp, 3)]
+      # #2942: and which of them have a copy off-site.
+      assert off_site == gone
+    end
+
+    # #2942: only the gone parts whose own copy reached a destination.
+    test "off_site lists only the gone parts copied off-site", %{dir: dir} do
+      land_parts(dir, [1])
+      ok = %{"local" => %{"status" => "ok"}, "rclone:r" => %{"status" => "ok"}}
+      failed = %{"local" => %{"status" => "ok"}, "rclone:r" => %{"status" => "failed"}}
+      art = set(ok, ok)
+      [one, two, three] = art.parts
+      art = %{art | parts: [one, two, Map.put(three, "destinations", failed)]}
+
+      assert [%{state: :missing, gone: gone, off_site: off_site}] =
+               presence(run([art]), dir).artifacts
+
+      assert gone == [Artifact.part_name(@stamp, 2), Artifact.part_name(@stamp, 3)]
+      assert off_site == [Artifact.part_name(@stamp, 2)]
+    end
+
+    test "a pruned part is neither gone nor off-site, whatever reached off-site", %{dir: dir} do
+      land_parts(dir, [1])
+      pruned = %{"local" => %{"status" => "pruned"}, "rclone:r" => %{"status" => "ok"}}
+      ok = %{"local" => %{"status" => "ok"}, "rclone:r" => %{"status" => "ok"}}
+      art = set(ok, ok)
+      [one, two, three] = art.parts
+      art = %{art | parts: [one, Map.put(two, "destinations", pruned), three]}
+
+      assert [%{state: :missing, gone: gone, off_site: off_site}] =
+               presence(run([art]), dir).artifacts
+
+      assert gone == [Artifact.part_name(@stamp, 3)]
+      assert off_site == gone
+    end
+
+    test "a set with every part here or none here lists nothing off-site", %{dir: dir} do
+      remote = %{"local" => %{"status" => "ok"}, "rclone:r" => %{"status" => "ok"}}
+
+      assert [%{state: :off_site_only, gone: [], off_site: []}] =
+               presence(run([set(remote)]), dir).artifacts
+
+      land_parts(dir, 1..3)
+
+      assert [%{state: :present, gone: [], off_site: []}] =
+               presence(run([set(remote)]), dir).artifacts
     end
 
     test "a sidecar alone is not the artifact", %{dir: dir} do

@@ -474,6 +474,13 @@ msgstr[1] ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "%{count} part missing here, copied off-site: %{parts}"
+msgid_plural "%{count} parts missing here, copied off-site: %{parts}"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "%{count} part missing: %{parts}"
 msgid_plural "%{count} parts missing: %{parts}"
 msgstr[0] ""
@@ -23517,6 +23524,11 @@ msgstr ""
 msgid "The admin allowlist could not be saved."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "The app couldn't read this server's backup directory, or one of these files in it (permissions, an I/O error or a hung mount), or its read of the directory failed outright, so it claims nothing about these files."
+msgstr ""
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "The app icon must be a PNG or JPEG image."
@@ -25319,6 +25331,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "This server isn't enforcing the admin allowlist (KILN_ADMIN_ALLOWLIST_DISABLED is set). The list is saved but not applied."
 msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "This server's backup directory didn't answer within %{count} second (a slow or hung mount), so the app claims nothing about these files. Reload the page to check again."
+msgid_plural "This server's backup directory didn't answer within %{count} seconds (a slow or hung mount), so the app claims nothing about these files. Reload the page to check again."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
