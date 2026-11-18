@@ -381,6 +381,62 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
       assert Enum.flat_map(parts, &listing(&1.path)) == ["./ok.txt"]
     end
 
+    # Permissions don't bind root: it enters a 0644 folder.
+    if match?({"0\n", 0}, System.cmd("id", ["-u"])),
+      do: @tag(skip: "running as root: a 0644 folder doesn't stop root entering it")
+
+    test "a folder that can be listed but not entered fails the plan, naming it (#2477)", ctx do
+      put(ctx.media, "ok.txt", "fine")
+      locked = Path.dirname(put(ctx.media, "a/locked/inside.bin", "unreachable"))
+      File.chmod!(locked, 0o644)
+      on_exit(fn -> File.chmod(locked, 0o755) end)
+
+      log =
+        capture_log(fn ->
+          assert {:error, {:not_enterable, "a/locked"}} =
+                   MediaArchive.plan(ctx.media, ctx.work,
+                     stamp: @stamp,
+                     part_bytes: 1_000_000,
+                     exclude: []
+                   )
+        end)
+
+      # Not taken for a name the encoding cannot represent.
+      refute log =~ "could not archive"
+      assert {:error, :no_plan} = MediaArchive.load_plan(ctx.media, ctx.work)
+
+      # Left out by an exclusion, it is never listed, and the plan succeeds.
+      plan = plan!(ctx, exclude: ["a/locked"])
+      assert plan.files == 1
+      assert plan.excluded == 1
+      assert plan.unreadable_names == 0
+    end
+
+    if match?({"0\n", 0}, System.cmd("id", ["-u"])),
+      do: @tag(skip: "running as root: a 0644 folder doesn't stop root entering it")
+
+    test "an empty folder that can be listed but not entered fails the plan too", ctx do
+      locked = Path.join(ctx.media, "empty")
+      File.mkdir_p!(locked)
+      File.chmod!(locked, 0o644)
+      on_exit(fn -> File.chmod(locked, 0o755) end)
+
+      assert {:error, {:not_enterable, "empty"}} =
+               MediaArchive.plan(ctx.media, ctx.work,
+                 stamp: @stamp,
+                 part_bytes: 1_000_000,
+                 exclude: []
+               )
+    end
+
+    test "describe_not_enterable/1 names the folder and the way out" do
+      assert MediaArchive.describe_not_enterable("a/locked") ==
+               "media folder \"a/locked\" can be listed but not entered (no execute permission): " <>
+                 "fix its permissions, or leave it out with BACKUP_MEDIA_EXCLUDE"
+
+      assert MediaArchive.describe_not_enterable("") =~ ~s(media folder "." can be listed)
+    end
+
     test "a plan.json without the unreadable fields (an older plan) loads as zero", ctx do
       put(ctx.media, "a.txt", "a")
       plan!(ctx)

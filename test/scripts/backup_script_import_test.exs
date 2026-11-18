@@ -30,7 +30,7 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
   use KilnCMS.DataCase, async: false
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, Checksum, Importer, Manifest}
+  alias KilnCMS.Backups.{Artifact, Chain, Checksum, Importer, Manifest}
   alias KilnCMS.Test.ShellTools
 
   @moduletag :capture_log
@@ -133,6 +133,34 @@ defmodule KilnCMS.Scripts.BackupScriptImportTest do
 
     assert %{status: :failed, error: "incomplete media set: missing part02"} =
              Backups.get_run_by_stamp!(second, actor: Backups.system())
+  end
+
+  # #2477: with every stamp in its window claimed, the run fails under the
+  # next, free one, so the Importer records the failure instead of dropping
+  # it as another backup's.
+  test "a cron run with no free stamp is recorded as a failed run", ctx do
+    epoch = System.os_time(:second)
+    real = System.find_executable("date")
+
+    stub!(ctx.bin, "date", """
+    #!/bin/sh
+    case "$2" in -d | -r) exec #{real} "$@" ;; esac
+    #{real} -u -r #{epoch} "$2" 2>/dev/null || exec #{real} -u -d @#{epoch} "$2"
+    """)
+
+    at = &Artifact.stamp(DateTime.from_unix!(epoch + &1))
+    for n <- 0..59, do: File.mkdir_p!(Path.join([ctx.backups, ".claims", at.(n)]))
+
+    assert {out, status} = backup(ctx)
+    assert status != 0
+    assert out =~ "no free backup stamp from #{at.(0)}"
+
+    assert {:ok, %{imported: 1}} = Importer.run(ctx.backups)
+
+    assert %{status: :failed, error: error} =
+             Backups.get_run_by_stamp!(at.(60), actor: Backups.system())
+
+    assert error =~ "no free backup stamp"
   end
 
   describe "a run killed outright (#2478)" do

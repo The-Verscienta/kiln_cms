@@ -147,6 +147,12 @@ defmodule KilnCMS.Backups.MediaArchive do
   quietly. `:list_dir` and `:lstat` (functions with the `:file` signatures)
   exist so a test can stand in for a filesystem that refuses such names.
 
+  A folder that can be listed but not entered (read permission without
+  execute) fails the plan with `{:error, {:not_enterable, rel}}`, `rel` its
+  path relative to `media_dir` (`""` for `media_dir` itself), as
+  `scripts/backup.sh` fails on it (#2477). `describe_not_enterable/1` says
+  what to do. One left out by an exclusion is never listed.
+
   Always produces at least one part: an empty (or fully excluded) tree is one
   part with no files, archived as a valid empty tarball.
   """
@@ -203,6 +209,18 @@ defmodule KilnCMS.Backups.MediaArchive do
     end
 
     with :ok <- write_plan(plan, opts), do: {:ok, plan}
+  end
+
+  @doc """
+  The message for `{:not_enterable, rel}` (`plan/3`): the folder, and the two
+  ways out. `scripts/backup.sh` prints the same words.
+  """
+  @spec describe_not_enterable(String.t()) :: String.t()
+  def describe_not_enterable(rel) when is_binary(rel) do
+    folder = if rel == "", do: ".", else: String.replace_invalid(rel)
+
+    "media folder #{inspect(folder)} can be listed but not entered (no execute permission): " <>
+      "fix its permissions, or leave it out with BACKUP_MEDIA_EXCLUDE"
   end
 
   @doc """
@@ -388,6 +406,8 @@ defmodule KilnCMS.Backups.MediaArchive do
 
     case state.fs.list_dir.(abs) do
       {:ok, names} ->
+        enterable!(abs, rel, state)
+
         {dirs, state} =
           names
           |> Enum.map(&raw_name/1)
@@ -404,6 +424,23 @@ defmodule KilnCMS.Backups.MediaArchive do
       {:error, reason} ->
         close_io(state)
         throw({:walk_error, {:list_dir, abs, reason}})
+    end
+  end
+
+  # A folder that can be listed but not entered (read permission, no execute,
+  # e.g. mode 0644) gives its names but no file in it can be opened (#2477).
+  # Each would fail `lstat` with `:eacces` and be miscounted as a name the
+  # encoding cannot represent, the run ending Succeeded without the folder.
+  # The planner fails instead, naming it, as `scripts/backup.sh` does: an
+  # `lstat` of `<folder>/.` needs exactly the permission to enter it.
+  defp enterable!(abs, rel, state) do
+    case state.fs.lstat.(Path.join(abs, ".")) do
+      {:error, :eacces} ->
+        close_io(state)
+        throw({:walk_error, {:not_enterable, rel}})
+
+      _other ->
+        :ok
     end
   end
 

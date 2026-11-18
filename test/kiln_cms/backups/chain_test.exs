@@ -1,3 +1,26 @@
+defmodule KilnCMS.Backups.ChainTest.ProbingImporter do
+  @moduledoc false
+  # The `:importer` seam, one-shot: the first call runs the test's function
+  # with the backup directory, then imports as usual; later calls just import.
+  @key {__MODULE__, :once}
+
+  def arm(fun), do: :persistent_term.put(@key, fun)
+  def disarm, do: :persistent_term.erase(@key)
+
+  def run(dir) do
+    case :persistent_term.get(@key, nil) do
+      nil ->
+        :ok
+
+      fun ->
+        disarm()
+        fun.(dir)
+    end
+
+    KilnCMS.Backups.Importer.run(dir)
+  end
+end
+
 defmodule KilnCMS.Backups.ChainTest do
   @moduledoc """
   The backup step chain and its lock (#2218): requests that start, queue and
@@ -14,6 +37,7 @@ defmodule KilnCMS.Backups.ChainTest do
 
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, Chain, DirId, Manifest, Steps, StepWorker, Worker, WorkState}
+  alias KilnCMS.Backups.ChainTest.ProbingImporter
   alias KilnCMS.Repo
   alias KilnCMS.Test.BackupChain
 
@@ -84,6 +108,11 @@ defmodule KilnCMS.Backups.ChainTest do
   end
 
   defp mtime(path), do: File.stat!(path, time: :posix).mtime
+
+  defp put_empty!(path) do
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, "")
+  end
 
   # Same size, one byte different.
   defp flip_byte!(path) do
@@ -890,6 +919,68 @@ defmodule KilnCMS.Backups.ChainTest do
     end
   end
 
+  # A cron run of `scripts/backup.sh` has no Run until the Importer reads its
+  # files, so its stamp shows only on disk (#2477).
+  describe "the stamp" do
+    test "a fresh stamp steps past stamps with files on disk", %{dir: dir} do
+      now = DateTime.utc_now()
+
+      # A cron run in progress for each of the next 20 seconds: its claim,
+      # or a file of either kind.
+      taken =
+        for n <- 0..19 do
+          stamp = Artifact.stamp(DateTime.add(now, n, :second))
+
+          case rem(n, 3) do
+            0 -> File.mkdir_p!(Path.join([dir, ".claims", stamp]))
+            1 -> put_empty!(Path.join(dir, "db/kiln-db-#{stamp}.dump.partial"))
+            2 -> put_empty!(Path.join(dir, "media/kiln-media-#{stamp}.sha256.partial"))
+          end
+
+          stamp
+        end
+
+      {:ok, %{status: :started}} = request()
+      step_until("dump")
+
+      %{stamp: stamp} = lock()
+      refute stamp in taken
+      assert stamp == Artifact.stamp(DateTime.add(now, 20, :second))
+    end
+
+    # `backup.sh` looks for `.work/<stamp>`; the import, sweeps and reconcile
+    # before the run opens can take seconds.
+    test "the start makes .work/<stamp> before it reconciles or imports, and keeps it", %{
+      dir: dir
+    } do
+      parent = self()
+
+      ProbingImporter.arm(fn dir ->
+        %{stamp: stamp} = Backups.in_flight()
+        work = WorkState.path(dir, stamp)
+        send(parent, {:at_import, stamp, File.dir?(work)})
+
+        # A leftover of another chain under the stamp: its files must go, the
+        # directory (this chain's claim) stay.
+        File.write!(Path.join(work, "state.json"), ~s({"chain": "another"}))
+        File.write!(Path.join(work, "part01.list"), "another chain's list")
+        send(parent, {:inode, File.stat!(work).inode})
+      end)
+
+      set_config(importer: ProbingImporter)
+
+      {:ok, %{status: :started, chain: chain}} = request()
+      step_until("dump")
+
+      assert_received {:at_import, stamp, true}
+      assert_received {:inode, inode}
+      work = WorkState.path(dir, stamp)
+      assert File.stat!(work).inode == inode
+      refute File.exists?(Path.join(work, "part01.list"))
+      assert {:ok, %{"chain" => ^chain}} = WorkState.read(work)
+    end
+  end
+
   describe "failures a retry can't fix" do
     test "state.json deleted mid-chain: the backup fails and the previous good manifest stays",
          %{dir: dir} do
@@ -946,6 +1037,33 @@ defmodule KilnCMS.Backups.ChainTest do
       for {path, at} <- old, do: assert(mtime(path) == at, "#{path} was rebuilt")
       assert {_, 0} = System.cmd("tar", ["-tzf", p2], stderr_to_stdout: true)
       assert [%{status: :succeeded}] = runs()
+    end
+
+    # Permissions don't bind root: it enters a 0644 folder.
+    if match?({"0\n", 0}, System.cmd("id", ["-u"])),
+      do: @tag(skip: "running as root: a 0644 folder doesn't stop root entering it")
+
+    test "a media folder that can be listed but not entered fails the backup at once, naming it (#2477)",
+         %{media: media} do
+      locked = Path.join(media, "locked")
+      File.mkdir_p!(locked)
+      File.write!(Path.join(locked, "inside.bin"), "unreachable")
+      File.chmod!(locked, 0o644)
+      on_exit(fn -> File.chmod(locked, 0o755) end)
+
+      {:ok, %{status: :started, chain: chain}} = request()
+      job = step_until("plan")
+
+      BackupChain.listen(fn ->
+        BackupChain.drain()
+        assert {:error, {:not_enterable, "locked"}} = BackupChain.settled(chain)
+      end)
+
+      # Not retried.
+      assert %{state: "cancelled", attempt: 1} = Repo.get!(Oban.Job, job.id)
+      assert [%{status: :failed, error: error}] = runs()
+      assert error =~ ~s(media folder "locked" can be listed but not entered)
+      assert error =~ "BACKUP_MEDIA_EXCLUDE"
     end
 
     test "the last attempt's failure is terminal: the job is canceled and the lock released" do

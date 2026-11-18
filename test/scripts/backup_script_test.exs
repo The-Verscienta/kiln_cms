@@ -23,7 +23,7 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
   """
   use ExUnit.Case, async: false
 
-  alias KilnCMS.Backups.{Checksum, MediaArchive, Retention}
+  alias KilnCMS.Backups.{Artifact, Checksum, MediaArchive, Retention}
   alias KilnCMS.Backups.Retention.Policy
   alias KilnCMS.Test.ShellTools
 
@@ -144,6 +144,147 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
     test "no .partial is left behind", ctx do
       assert {_, 0} = backup(ctx, "all")
       assert Path.wildcard(Path.join(ctx.backups, "**/*.partial")) == []
+    end
+  end
+
+  # The app and a cron line set for the same minute can read the same second
+  # (#2477): the script steps to a free stamp and claims it exclusively.
+  describe "the run's stamp" do
+    setup ctx do
+      epoch = System.os_time(:second)
+      fixed_clock!(ctx, epoch)
+      at = &Artifact.stamp(DateTime.from_unix!(epoch + &1))
+      %{stamp: at.(0), next: at.(1), at: at}
+    end
+
+    test "steps past a stamp the app's files use, keeping the start", ctx do
+      app = Path.join(ctx.backups, "media/kiln-media-#{ctx.stamp}.sha256")
+      File.write!(app, "the app's\n")
+
+      assert {out, 0} = backup(ctx, "all")
+
+      assert out =~
+               "Stamp #{ctx.stamp} is already in use in #{ctx.backups}; this run is #{ctx.next}"
+
+      assert File.exists?(Path.join(ctx.backups, "db/kiln-db-#{ctx.next}.dump"))
+      assert File.exists?(Path.join(ctx.backups, "media/kiln-media-#{ctx.next}.tar.gz"))
+      assert Path.wildcard(Path.join(ctx.backups, "db/kiln-db-#{ctx.stamp}.*")) == []
+      assert File.read!(app) == "the app's\n"
+
+      manifest = manifest!(ctx)
+      assert manifest["stamp"] == ctx.next
+      assert {:ok, started_at, 0} = DateTime.from_iso8601(manifest["started_at"])
+      assert Artifact.stamp(started_at) == ctx.stamp
+    end
+
+    test "a work directory of the app's takes the stamp too", ctx do
+      File.mkdir_p!(Path.join([ctx.backups, ".work", ctx.stamp]))
+
+      assert {_out, 0} = backup(ctx, "media")
+      assert File.exists?(Path.join(ctx.backups, "media/kiln-media-#{ctx.next}.tar.gz"))
+      assert Path.wildcard(Path.join(ctx.backups, "media/kiln-media-#{ctx.stamp}.*")) == []
+    end
+
+    test "a stamp another run holds the claim on is skipped, and its claim left alone", ctx do
+      real_mkdir = System.find_executable("mkdir")
+      claim = Path.join([ctx.backups, ".claims", ctx.stamp])
+      flag = Path.join(ctx.tmp, "raced")
+
+      # Another run claims the stamp between this run's check and its mkdir.
+      stub!(ctx.bin, "mkdir", """
+      #!/bin/sh
+      if [ "$1" = "#{claim}" ] && [ ! -e "#{flag}" ]; then
+        : > "#{flag}"
+        #{real_mkdir} "#{claim}"
+      fi
+      exec #{real_mkdir} "$@"
+      """)
+
+      assert {_out, 0} = backup(ctx, "db")
+      assert File.exists?(Path.join(ctx.backups, "db/kiln-db-#{ctx.next}.dump"))
+      refute File.exists?(Path.join(ctx.backups, "db/kiln-db-#{ctx.stamp}.dump"))
+      # The other run's claim stays; this run's own is gone.
+      assert File.ls!(Path.join(ctx.backups, ".claims")) == [ctx.stamp]
+    end
+
+    # `all` (whose first file is the media marker) and `db` (the dump) claim
+    # the same name, so they can't share a stamp either.
+    test "all and db racing for one stamp: the second looks again after its claim", ctx do
+      real_mkdir = System.find_executable("mkdir")
+      claim = Path.join([ctx.backups, ".claims", ctx.stamp])
+      flag = Path.join(ctx.tmp, "raced")
+      db_out = Path.join(ctx.tmp, "db.out")
+
+      # Between `all`'s check and its claim, a whole `db` run takes the stamp
+      # and finishes (its claim gone, its dump there).
+      stub!(ctx.bin, "mkdir", """
+      #!/bin/sh
+      if [ "$1" = "#{claim}" ] && [ ! -e "#{flag}" ]; then
+        : > "#{flag}"
+        bash "#{@script}" db > "#{db_out}" 2>&1 || exit 99
+      fi
+      exec #{real_mkdir} "$@"
+      """)
+
+      assert {out, 0} = backup(ctx, "all")
+      assert File.read!(db_out) =~ "ok:"
+      assert out =~ "this run is #{ctx.next}"
+
+      assert ctx.backups |> Path.join("db/kiln-db-*.dump") |> Path.wildcard() |> Enum.sort() ==
+               Enum.map([ctx.stamp, ctx.next], &Path.join(ctx.backups, "db/kiln-db-#{&1}.dump"))
+
+      assert File.exists?(Path.join(ctx.backups, "media/kiln-media-#{ctx.next}.tar.gz"))
+      assert Path.wildcard(Path.join(ctx.backups, "media/kiln-media-#{ctx.stamp}.*")) == []
+      assert manifest!(ctx)["stamp"] == ctx.next
+      assert File.ls!(Path.join(ctx.backups, ".claims")) == []
+    end
+
+    test "two runs started in the same second get two stamps", ctx do
+      [a, b] =
+        [Task.async(fn -> backup(ctx, "db") end), Task.async(fn -> backup(ctx, "all") end)]
+        |> Task.await_many(60_000)
+
+      assert {_, 0} = a
+      assert {_, 0} = b
+
+      assert ctx.backups |> Path.join("db/kiln-db-*.dump") |> Path.wildcard() |> Enum.sort() ==
+               Enum.map([ctx.stamp, ctx.next], &Path.join(ctx.backups, "db/kiln-db-#{&1}.dump"))
+
+      assert File.ls!(Path.join(ctx.backups, ".claims")) == []
+    end
+
+    test "a failed run removes its claim", ctx do
+      stub!(ctx.bin, "pg_dump", "#!/bin/sh\necho 'connection refused' >&2\nexit 1\n")
+
+      assert {_out, status} = backup(ctx, "all")
+      assert status != 0
+      assert manifest!(ctx)["stamp"] == ctx.stamp
+      assert File.ls!(Path.join(ctx.backups, ".claims")) == []
+    end
+
+    test "gives up after 60 stamps in use, failing under the next, free stamp", ctx do
+      for n <- 0..59, do: File.write!(Path.join(ctx.backups, "db/kiln-db-#{ctx.at.(n)}.dump"), "")
+
+      assert {out, status} = backup(ctx, "all")
+      assert status != 0
+      assert out =~ "error: no free backup stamp from #{ctx.stamp}"
+      assert media_dir_listing(ctx) == []
+      assert File.ls!(Path.join(ctx.backups, ".claims")) == []
+
+      # A stamp no file carries, so the Importer records the failure as its
+      # own run rather than dropping it as another backup's.
+      manifest = manifest!(ctx)
+      refute manifest["ok"]
+      assert manifest["stamp"] == ctx.at.(60)
+      assert Path.wildcard(Path.join(ctx.backups, "*/kiln-*-#{ctx.at.(60)}.*")) == []
+    end
+
+    test "with the next stamp in use too, the failure names no stamp", ctx do
+      for n <- 0..60, do: File.write!(Path.join(ctx.backups, "db/kiln-db-#{ctx.at.(n)}.dump"), "")
+
+      assert {_out, status} = backup(ctx, "all")
+      assert status != 0
+      assert manifest!(ctx)["stamp"] == ""
     end
   end
 
@@ -1710,12 +1851,39 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert Bitwise.band(File.stat!(fresh).mode, 0o777) == 0o755
     end
 
-    test "an existing media dir keeps its mode", ctx do
+    # As the app sets it on every run (#2477).
+    test "an existing media dir is set back to 0700 on every run", ctx do
       dir = Path.join(ctx.backups, "media")
-      File.chmod!(dir, 0o755)
 
-      assert {_out, 0} = backup(ctx, "media")
-      assert Bitwise.band(File.stat!(dir).mode, 0o777) == 0o755
+      for command <- ["media", "all"] do
+        File.chmod!(dir, 0o755)
+        assert {_out, 0} = backup(ctx, command)
+        assert Bitwise.band(File.stat!(dir).mode, 0o777) == 0o700, command
+      end
+    end
+
+    test "a media dir that can't be made private fails the run (#2477)", ctx do
+      real_chmod = System.find_executable("chmod")
+      dir = Path.join(ctx.backups, "media")
+
+      stub!(ctx.bin, "chmod", """
+      #!/bin/sh
+      if [ "$1" = 700 ] && [ "$2" = "#{dir}" ]; then
+        echo "chmod: #{dir}: Operation not permitted" >&2
+        exit 1
+      fi
+      exec #{real_chmod} "$@"
+      """)
+
+      assert {out, status} = backup(ctx, "all")
+      assert status != 0
+      assert out =~ "error: could not make #{dir} private (chmod 700)"
+      assert media_dir_listing(ctx) == []
+      assert Path.wildcard(Path.join(ctx.backups, "db/*")) == []
+
+      manifest = manifest!(ctx)
+      refute manifest["ok"]
+      assert manifest["error"] == "could not make #{dir} private (chmod 700)"
     end
 
     test "a file that vanishes during sizing is dropped and the batch re-run, not stat'ed one by one",
@@ -1765,6 +1933,60 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert out =~ "could not list the media directory"
       assert media_dir_listing(ctx) == []
       refute manifest!(ctx)["ok"]
+    end
+  end
+
+  # The app fails on the same folder with the same words (#2477,
+  # MediaArchive.describe_not_enterable/1).
+  describe "a media folder that can be listed but not entered" do
+    setup ctx do
+      locked = Path.join(ctx.media, "locked")
+      File.mkdir_p!(locked)
+      File.write!(Path.join(locked, "inside.bin"), "unreachable")
+      File.chmod!(locked, 0o644)
+      on_exit(fn -> File.chmod(locked, 0o755) end)
+      :ok
+    end
+
+    # Permissions don't bind root: it enters a 0644 folder.
+    if match?({"0\n", 0}, System.cmd("id", ["-u"])),
+      do: @tag(skip: "running as root: a 0644 folder doesn't stop root entering it")
+
+    test "fails the run, naming the folder and BACKUP_MEDIA_EXCLUDE", ctx do
+      message = MediaArchive.describe_not_enterable("locked")
+
+      assert {out, status} = backup(ctx, "all")
+      assert status != 0
+      assert out =~ "error: " <> message
+      refute out =~ "could not list"
+      assert media_dir_listing(ctx) == []
+      refute manifest!(ctx)["ok"]
+      assert manifest!(ctx)["error"] == message
+    end
+
+    if match?({"0\n", 0}, System.cmd("id", ["-u"])),
+      do: @tag(skip: "running as root: a 0644 folder doesn't stop root entering it")
+
+    test "a name with a quote and a backslash is quoted as the app quotes it", ctx do
+      rel = ~S(odd "name" \here)
+      odd = Path.join(ctx.media, rel)
+      File.mkdir_p!(odd)
+      File.chmod!(odd, 0o644)
+      on_exit(fn -> File.chmod(odd, 0o755) end)
+
+      assert {_out, status} = backup(ctx, "all", [{"BACKUP_MEDIA_EXCLUDE", "locked"}])
+      assert status != 0
+      assert manifest!(ctx)["error"] == MediaArchive.describe_not_enterable(rel)
+    end
+
+    if match?({"0\n", 0}, System.cmd("id", ["-u"])),
+      do: @tag(skip: "running as root: a 0644 folder doesn't stop root entering it")
+
+    test "left out with BACKUP_MEDIA_EXCLUDE, the run succeeds without it", ctx do
+      assert {out, 0} = backup(ctx, "all", [{"BACKUP_MEDIA_EXCLUDE", "locked"}])
+      assert out =~ "1 excluded by BACKUP_MEDIA_EXCLUDE"
+      assert manifest!(ctx)["ok"]
+      refute "./locked/inside.bin" in List.flatten(cron_lists(ctx))
     end
   end
 
@@ -1874,6 +2096,42 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       refute manifest!(ctx)["ok"]
       # A failed run names no remote: nothing may read its files as off-site.
       assert manifest!(ctx)["offsite"] == nil
+    end
+
+    # The app's step fails the same way (offsite_test.exs, "a failed sidecar
+    # copy fails the step"); #2477 adds the cron side.
+    for kind <- ["db", "media"] do
+      test "a failed copy of the #{kind} sidecar fails the run (#2477)", ctx do
+        kind = unquote(kind)
+
+        stub!(ctx.bin, "rclone", """
+        #!/bin/sh
+        printf '%s %s %s\\n' "$1" "$(basename "$2")" "$3" >> "#{ctx.log}"
+        case "$(basename "$2")" in kiln-#{kind}-*.sha256) echo "upload refused" >&2; exit 1 ;; esac
+        """)
+
+        assert {out, status} =
+                 backup(ctx, "all", [
+                   {"BACKUP_MEDIA_PART_MB", "16"},
+                   {"BACKUP_RCLONE_REMOTE", "r2:kiln"}
+                 ])
+
+        assert status != 0
+        assert out =~ "upload refused"
+        refute out =~ "REFUSING"
+
+        # The failed sidecar copy was the last one tried.
+        assert ctx.log |> File.read!() |> String.split("\n", trim: true) |> List.last() =~
+                 ~r/\Acopy kiln-#{kind}-\d{8}-\d{6}\.sha256 r2:kiln\/#{kind}\z/
+
+        manifest = manifest!(ctx)
+        refute manifest["ok"]
+        assert manifest["offsite"] == nil
+
+        # What verified locally is kept.
+        assert [_dump] = Path.wildcard(Path.join(ctx.backups, "db/kiln-db-*.dump"))
+        assert [_sidecar] = Path.wildcard(Path.join(ctx.backups, "#{kind}/*.sha256"))
+      end
     end
 
     test "a part changed while the one before it uploads is refused, and the run stops", ctx do
@@ -2711,6 +2969,19 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
         Process.sleep(25)
         wait_until(fun, tries - 1)
     end
+  end
+
+  # `date` reads a fixed instant: `date -u +FMT` formats `epoch` (BSD `-r N`,
+  # else GNU `-d @N`); a call that formats a given time (`-d`/`-r`) is the
+  # real one.
+  defp fixed_clock!(ctx, epoch) do
+    real = System.find_executable("date")
+
+    stub!(ctx.bin, "date", """
+    #!/bin/sh
+    case "$2" in -d | -r) exec #{real} "$@" ;; esac
+    #{real} -u -r #{epoch} "$2" 2>/dev/null || exec #{real} -u -d @#{epoch} "$2"
+    """)
   end
 
   defp stub!(bin, name, body) do

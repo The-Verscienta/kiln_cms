@@ -344,6 +344,12 @@ defmodule KilnCMS.Backups.Steps do
     dir = Backups.dir()
     work_dir = WorkState.path(dir, lease.stamp)
 
+    # First, so the stamp shows on disk at once (#2477): `backup.sh` treats a
+    # stamp with `.work/<stamp>` as in use, and the reconcile, import and
+    # sweeps below can take seconds. Best effort: `open_fresh/5` makes it
+    # again and fails the step if it can't.
+    _ = with :ok <- mkdir_private(Path.dirname(work_dir)), do: mkdir_private(work_dir)
+
     reconcile_stale_runs()
     import_then_sweep_partials(dir)
     sweep_work_dirs(dir)
@@ -358,8 +364,10 @@ defmodule KilnCMS.Backups.Steps do
       _other ->
         # A leftover directory under this stamp is not this chain's: it must not
         # lend its frozen plan or recorded hashes to a backup that has nothing
-        # to do with them. Moved aside under the lease, deleted outside it.
-        case discard(lease, dir, "work", existing([work_dir])) do
+        # to do with them. Its contents are moved aside under the lease and
+        # deleted outside it; the directory itself stays, as this chain's claim
+        # on the stamp (made above).
+        case discard(lease, dir, "work", work_dir_contents(work_dir)) do
           :ok ->
             open_components(lease, job, work_dir)
 
@@ -369,6 +377,14 @@ defmodule KilnCMS.Backups.Steps do
           {:error, reason} ->
             retry_or_fail(context(lease, nil), lease, job, nil, %Recorder{}, {:discard, reason})
         end
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp work_dir_contents(work_dir) do
+    case File.ls(work_dir) do
+      {:ok, names} -> Enum.map(names, &Path.join(work_dir, &1))
+      {:error, _} -> []
     end
   end
 
@@ -1388,6 +1404,11 @@ defmodule KilnCMS.Backups.Steps do
 
       {:error, :superseded} ->
         {:result, {:cancel, :superseded}}
+
+      # A folder that can be listed but not entered (#2477): a retry finds it
+      # the same, so the run fails now, naming it.
+      {:error, {:not_enterable, _rel} = reason} ->
+        {:fatal, reason, state, Recorder.log(rec, :error, "media", describe(reason))}
 
       {:error, reason} ->
         {:retry, reason, state, Recorder.log(rec, :error, "media", describe(reason))}
@@ -3244,10 +3265,6 @@ defmodule KilnCMS.Backups.Steps do
     end
   end
 
-  # The paths of `paths` that exist (lstat: a dangling symlink is one).
-  # sobelow_skip ["Traversal.FileModule"]
-  defp existing(paths), do: Enum.filter(paths, &match?({:ok, _}, File.lstat(&1)))
-
   @doc false
   # Clear the trash `discard/4` leaves (`.work/.trash`, `db/.kiln-trash` and
   # `media/.kiln-trash`): an entry is left there only when a node stopped
@@ -3365,6 +3382,7 @@ defmodule KilnCMS.Backups.Steps do
   end
 
   defp describe({:exit_status, _executable, _status, _output} = reason), do: describe_exit(reason)
+  defp describe({:not_enterable, rel}), do: MediaArchive.describe_not_enterable(rel)
   defp describe(reason), do: inspect(reason)
 
   defp describe_exit({:exit_status, executable, status, output}),
