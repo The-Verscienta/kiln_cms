@@ -508,7 +508,45 @@ defmodule KilnCMS.Backups.StatusTest do
     defp dest(key, label, status, error \\ nil),
       do: %{key: key, kind: "rclone", label: label, status: status, error: error}
 
-    @nas "dest:6c1f6a52-6a44-4d3e-9b39-0b1f8c1a7e11"
+    @nas_id "6c1f6a52-6a44-4d3e-9b39-0b1f8c1a7e11"
+    @nas "dest:" <> @nas_id
+
+    # Both destinations the runs below name are configured, so a failed one
+    # still counts (#2951): `BACKUP_RCLONE_REMOTE` and a stored "NAS".
+    setup do
+      remote!("offsite:kiln")
+      :persistent_term.erase({Backups, :destinations_warned_at})
+      on_exit(fn -> :persistent_term.erase({Backups, :destinations_warned_at}) end)
+
+      nas =
+        Ash.Seed.seed!(KilnCMS.Backups.DestinationConfig, %{
+          id: @nas_id,
+          name: "NAS",
+          kind: "local",
+          settings: %{},
+          enabled: true
+        })
+
+      %{nas: nas}
+    end
+
+    defp remote!(remote) do
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :rclone_remote, remote)
+      )
+    end
+
+    defp remove!(row), do: Ash.Seed.update!(row, %{enabled: false})
+
+    defp unreadable_entry,
+      do: %{
+        key: KilnCMS.Backups.RunDestination.unreadable_key(),
+        label: "Stored destinations",
+        status: :failed,
+        error: "couldn't read the backup destinations; this backup was not sent to them"
+      }
 
     test "no in-app run with destinations: none, and every other key as before" do
       run!([:db, :media], 1)
@@ -603,6 +641,156 @@ defmodule KilnCMS.Backups.StatusTest do
       )
 
       assert %{state: :failed, ok: 0, total: 1} = Backups.status().offsite
+    end
+
+    # #2951, the broad rule: a failed destination nobody can fix any more
+    # (removed, disabled, the env unset) no longer holds the alarm up.
+    test "a failed destination removed since moves to gone; the reached one stays", %{nas: nas} do
+      offsite_run!(
+        1,
+        [dest(@env_key, "offsite:kiln", :ok), dest(@nas, "NAS", :failed, "down")],
+        :partial
+      )
+
+      remove!(nas)
+
+      assert %{
+               state: :partial,
+               configured?: true,
+               ok: 1,
+               total: 2,
+               failed: [],
+               gone: [%{key: @nas, label: "NAS"}]
+             } = Backups.status().offsite
+    end
+
+    test "every destination removed: nothing configured, nothing failed", %{nas: nas} do
+      offsite_run!(
+        1,
+        [dest(@env_key, "offsite:kiln", :ok), dest(@nas, "NAS", :failed, "down")],
+        :partial
+      )
+
+      remove!(nas)
+      remote!(nil)
+
+      assert %{state: :partial, configured?: false, failed: [], gone: [%{key: @nas}]} =
+               Backups.status().offsite
+    end
+
+    test "a failed destination still configured keeps the alarm" do
+      offsite_run!(
+        1,
+        [dest(@env_key, "offsite:kiln", :ok), dest(@nas, "NAS", :failed, "down")],
+        :partial
+      )
+
+      assert %{configured?: true, failed: [%{key: @nas}], gone: []} = Backups.status().offsite
+    end
+
+    test "destinations that can't be read filter nothing, and are counted" do
+      offsite_run!(
+        1,
+        [dest(@env_key, "offsite:kiln", :ok), dest(@nas, "NAS", :failed, "down")],
+        :partial
+      )
+
+      remote!(nil)
+
+      # A row no release could load: every read of the table fails.
+      KilnCMS.Repo.query!(
+        "INSERT INTO backup_destinations (name, kind, settings) VALUES ('Broken', 'fake', '\"x\"')"
+      )
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
+          [:kiln_cms, :backups, :status, :destinations_unreadable]
+        ])
+
+      assert %{state: :partial, configured?: true, failed: [%{key: @nas}], gone: []} =
+               Backups.status().offsite
+
+      assert_received {[:kiln_cms, :backups, :status, :destinations_unreadable], ^ref,
+                       %{count: 1}, _}
+    end
+
+    test "an unreadable destinations read warns once in 15 minutes, and counts every time" do
+      offsite_run!(
+        1,
+        [dest(@env_key, "offsite:kiln", :ok), dest(@nas, "NAS", :failed, "down")],
+        :partial
+      )
+
+      KilnCMS.Repo.query!(
+        "INSERT INTO backup_destinations (name, kind, settings) VALUES ('Broken', 'fake', '\"x\"')"
+      )
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
+          [:kiln_cms, :backups, :status, :destinations_unreadable]
+        ])
+
+      warning = "Backup status can't tell which off-site destinations are still configured"
+
+      first = ExUnit.CaptureLog.capture_log(fn -> Backups.status() end)
+      assert first =~ warning
+
+      second = ExUnit.CaptureLog.capture_log(fn -> Backups.status() end)
+      refute second =~ warning
+
+      assert_received {[:kiln_cms, :backups, :status, :destinations_unreadable], ^ref,
+                       %{count: 1}, _}
+
+      assert_received {[:kiln_cms, :backups, :status, :destinations_unreadable], ^ref,
+                       %{count: 1}, _}
+    end
+
+    test "a failed run's outcome is not filtered" do
+      offsite_run!(1, [dest(@env_key, "offsite:kiln", :failed, "rclone exited 1")], :failed,
+        status: :failed
+      )
+
+      remote!(nil)
+
+      assert %{state: :failed, succeeded?: false, configured?: true, failed: [%{}]} =
+               Backups.status().offsite
+    end
+
+    # #2951: the stored destinations couldn't be read and there was no env
+    # remote, so the run reached nothing. It succeeded, off-site failed.
+    test "unreadable alone: failed, and counts while a stored destination is enabled", %{
+      nas: nas
+    } do
+      offsite_run!(1, [unreadable_entry()], :failed)
+
+      assert %{
+               state: :failed,
+               succeeded?: true,
+               configured?: true,
+               ok: 0,
+               total: 1,
+               failed: [%{key: "unreadable"}]
+             } = Backups.status().offsite
+
+      remove!(nas)
+
+      assert %{state: :failed, configured?: true, failed: [], gone: [%{key: "unreadable"}]} =
+               Backups.status().offsite
+
+      remote!(nil)
+      assert %{configured?: false, failed: []} = Backups.status().offsite
+    end
+
+    # Critic change 11: a run a release before #2951 stored as partial with
+    # only the unreadable entry reads failed, without being rewritten.
+    test "an old run stored partial with only the unreadable entry reads failed" do
+      run = offsite_run!(1, [unreadable_entry()], :partial)
+
+      assert %{state: :failed, succeeded?: true, failed: [%{key: "unreadable"}]} =
+               Backups.status().offsite
+
+      assert Backups.get_run_by_stamp!(run.stamp, actor: Backups.system()).offsite_status ==
+               :partial
     end
 
     test "imported (cron) runs are not in-app runs" do

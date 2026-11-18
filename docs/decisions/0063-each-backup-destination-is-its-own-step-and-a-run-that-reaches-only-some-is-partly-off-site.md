@@ -5,7 +5,12 @@
   [ADR 0043](0043-a-file-that-changed-before-its-off-site-copy-is-refused-and-only-a-resume-rebuilds-it.md)
   records from decision 3 of #2218 ("a failed off-site copy fails the
   run"). With `BACKUP_RCLONE_REMOTE` as the only destination, that rule
-  holds unchanged.
+  holds unchanged. Amended 2026-11-18 by
+  [#2951](https://github.com/The-Verscienta/kiln_cms/issues/2951): a run
+  that reached nothing because the stored destinations couldn't be read and
+  no `BACKUP_RCLONE_REMOTE` was set succeeds with `offsite_status: failed`
+  (it read "reached 0 of 1" before), and the alarm counts only failed
+  destinations that are still configured.
 - **References** — [#2220](https://github.com/The-Verscienta/kiln_cms/issues/2220)
   and the owner's approval of its decisions E1, E2 and E3 "all as proposed"
   (2026-11-15); [#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218)
@@ -71,6 +76,7 @@ BACKUP_RCLONE_REMOTE — change it in the server's environment".
 | Some, not all | `succeeded` | `partial` | yes: "The last backup reached N of M off-site destinations — … failed" on the Backups page and the home strip, an error line on the run, `Logger.error`, and `[:kiln_cms, :backups, :offsite, :partial]` |
 | None, with at least one configured | `failed` | `failed` | yes, as any failed backup |
 | No destination configured | `succeeded` | `none` | no |
+| None: the stored destinations couldn't be read and `BACKUP_RCLONE_REMOTE` is unset (#2951) | `succeeded` | `failed` | yes: "The last backup was not copied off-site: …" on the Backups page and the home strip, "Not off-site" in History, an error line on the run, `Logger.error`, and `[:kiln_cms, :backups, :offsite, :failed]` |
 
 A refused file is still fatal to the whole backup, whichever destination
 refused it (ADR 0043 is unchanged there). A destination that fails on its
@@ -85,7 +91,9 @@ FAILED to every destination (N): …" naming each one.
 retries; on its fourth attempt the backup goes ahead with
 `BACKUP_RCLONE_REMOTE` alone and records a failed "unreadable" entry, so the
 run can be no better than `partial`. It never reads as complete having
-reached fewer places than were asked for.
+reached fewer places than were asked for. With no `BACKUP_RCLONE_REMOTE`
+the "unreadable" entry is the run's only one, and the run is `failed`
+off-site while it succeeds (#2951; the table's last row).
 
 **A partial run is not resumable.** It succeeded, so its work directory is
 removed as any succeeded backup's is. The next backup tries every

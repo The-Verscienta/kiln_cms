@@ -1111,6 +1111,11 @@ msgstr "Impossible de téléverser %{name} : %{reason}"
 msgid "%{name} declares a kiln_plugin requirement that can't be read: %{requirement}."
 msgstr "%{name} déclare une exigence kiln_plugin illisible : %{requirement}."
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} failed"
+msgstr "échec de %{name}"
+
 #: lib/kiln_cms/security/posture/checks/plugin_health.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} has had no release on Hex since %{date}."
@@ -14982,6 +14987,11 @@ msgstr "Aucun menu pour l'instant"
 msgid "No minimum"
 msgstr "Sans minimum"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "No off-site destination is configured now: new backups stay in BACKUP_DIR only."
+msgstr "Aucune destination hors site n'est configurée pour l'instant : les nouvelles sauvegardes restent uniquement dans BACKUP_DIR."
+
 #: lib/kiln_cms_web/live/backup_destinations_live.ex
 #, elixir-autogen, elixir-format
 msgid "No off-site destination: backups stay on this server only. A copy somewhere else is what lets you recover when this server is lost."
@@ -15480,6 +15490,11 @@ msgstr "Non installé"
 #, elixir-autogen, elixir-format
 msgid "Not now"
 msgstr "Pas maintenant"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not off-site"
+msgstr "Pas hors site"
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -23777,6 +23792,18 @@ msgstr "La dernière sauvegarde a échoué"
 msgid "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed"
 msgstr "La dernière sauvegarde a atteint %{ok} destinations hors site sur %{total} — échec : %{names}"
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed (%{count} more failed and was removed since)"
+msgid_plural "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed (%{count} more failed and were removed since)"
+msgstr[0] "La dernière sauvegarde a atteint %{ok} destinations hors site sur %{total} — échec : %{names} (%{count} autre a échoué et a été supprimée depuis)"
+msgstr[1] "La dernière sauvegarde a atteint %{ok} destinations hors site sur %{total} — échec : %{names} (%{count} autres ont échoué et ont été supprimées depuis)"
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "The last backup was not copied off-site: %{reasons}"
+msgstr "La dernière sauvegarde n'a pas été copiée hors site : %{reasons}"
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
 msgid "The last save was at %{time}."
@@ -24564,6 +24591,11 @@ msgstr "Ce service ne peut pas vérifier sa connexion."
 #, elixir-autogen, elixir-format
 msgid "This backup recorded no outcome for its off-site destinations."
 msgstr "Cette sauvegarde n'a enregistré aucun résultat pour ses destinations hors site."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "This backup succeeded but was copied to no off-site destination."
+msgstr "Cette sauvegarde a réussi, mais n'a été copiée vers aucune destination hors site."
 
 #: lib/kiln_cms_web/live/content_editor/block_ops.ex
 #, elixir-autogen, elixir-format
@@ -28882,6 +28914,11 @@ msgstr "impossible de supprimer le fichier de test du bucket privé (%{detail})"
 #, elixir-autogen, elixir-format
 msgid "couldn't have its metadata removed, so it wasn't stored"
 msgstr "n'a pas pu voir ses métadonnées supprimées, il n'a donc pas été enregistré"
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "couldn't read the backup destinations, and BACKUP_RCLONE_REMOTE was not set"
+msgstr "impossible de lire les destinations de sauvegarde, et BACKUP_RCLONE_REMOTE n'était pas défini"
 
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format

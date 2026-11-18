@@ -71,6 +71,7 @@ defmodule KilnCMS.Backups do
     Lock,
     Manifest,
     PgUrl,
+    Recorder,
     Redact,
     Refused,
     Run,
@@ -700,11 +701,14 @@ defmodule KilnCMS.Backups do
   """
   @type offsite_status :: %{
           state: :none | :complete | :partial | :failed | :unknown,
+          succeeded?: boolean(),
+          configured?: boolean(),
           stamp: String.t() | nil,
           at: DateTime.t() | nil,
           ok: non_neg_integer(),
           total: non_neg_integer(),
           failed: [%{key: String.t(), label: String.t(), error: String.t() | nil}],
+          gone: [%{key: String.t(), label: String.t(), error: String.t() | nil}],
           destinations: [
             %{key: String.t(), label: String.t(), status: term(), error: String.t() | nil}
           ]
@@ -980,15 +984,33 @@ defmodule KilnCMS.Backups do
     * `:complete` — every destination was reached;
     * `:partial` — some were, some weren't: the backup succeeded, partly
       off-site, and the panels raise the backup alarm for it;
-    * `:failed` — none was (the run itself failed);
+    * `:failed` — none was: the run itself failed, or it succeeded with only
+      the "unreadable" entry (the stored destinations couldn't be read and
+      `BACKUP_RCLONE_REMOTE` was unset, #2951), which raises the alarm too;
     * `:unknown` — the run succeeded but recorded no outcome (a node of an
       older release finished it), recorded one this release doesn't know, or
       the history couldn't be read.
+
+  The state is derived from the run's destinations
+  (`run_offsite_state/1`), not from the `offsite_status` it stored, so an
+  older run stored `:partial` with only the "unreadable" entry reads
+  `:failed`. `succeeded?` says whether that run succeeded.
 
   `stamp` and `at` are that run's; `ok` and `total` count the destinations
   reached and tried (skipped ones left out); `destinations` lists each with
   its redacted `label`, `status` and `error`, and `failed` those that failed.
   Read as `system/0`; a read that fails is `:unknown`, never a crash.
+
+  For a succeeded run that is `:partial` or `:failed` (#2951), `failed`
+  keeps only the destinations still configured now (the env destination
+  and the enabled stored ones, `KilnCMS.Backups.Destination.configured/0`;
+  the "unreadable" entry counts while any stored destination is enabled),
+  and the rest move to `gone`: a failed destination that was removed since
+  no longer holds the alarm up. With no destination configured at all,
+  `configured?` is false (it is true otherwise). When the destinations
+  can't be read nothing is moved (the alarm stays), counted as
+  `[:kiln_cms, :backups, :status, :destinations_unreadable]` and logged now
+  and then.
 
   ## Notices (#2487, #2931)
 
@@ -1193,11 +1215,14 @@ defmodule KilnCMS.Backups do
 
   @offsite_none %{
     state: :none,
+    succeeded?: false,
+    configured?: true,
     stamp: nil,
     at: nil,
     ok: 0,
     total: 0,
     failed: [],
+    gone: [],
     destinations: []
   }
 
@@ -1243,27 +1268,90 @@ defmodule KilnCMS.Backups do
         %{key: d.key, label: d.label || d.key, status: d.status, error: d.error}
       end
 
+    state = run_offsite_state(run)
+    succeeded? = run.status == :succeeded
+    failed = for d <- destinations, d.status == :failed, do: Map.take(d, [:key, :label, :error])
+
     %{
-      state: offsite_state(run.offsite_status, counted),
+      state: state,
+      succeeded?: succeeded?,
+      configured?: true,
       stamp: run.stamp,
       at: run.finished_at || run.started_at,
       ok: Enum.count(counted, &(&1.status == :ok)),
       total: length(counted),
-      failed:
-        for(d <- destinations, d.status == :failed, do: Map.take(d, [:key, :label, :error])),
+      failed: failed,
+      gone: [],
       destinations: destinations
     }
+    |> still_configured(state == :partial or (state == :failed and succeeded?))
   end
 
-  # A run whose destinations were all skipped is `:none` whatever it stored.
-  defp offsite_state(_stored, []), do: :none
+  # The broad alarm rule (#2951): a failed destination that is no longer
+  # configured (removed, disabled, `BACKUP_RCLONE_REMOTE` unset) can't be
+  # fixed by anyone, so it moves from `failed` to `gone` and no longer raises
+  # the alarm; with nothing configured at all, `configured?` is false. Only a
+  # succeeded backup's outcome is filtered: a failed one is the run's own
+  # alarm. A read that fails filters nothing (fails closed: the alarm stays).
+  defp still_configured(offsite, false = _check?), do: offsite
 
-  defp offsite_state(stored, _counted) when stored in [:none, :complete, :partial, :failed],
-    do: stored
+  defp still_configured(offsite, true) do
+    case Destination.configured() do
+      {:ok, []} ->
+        %{offsite | configured?: false, failed: [], gone: offsite.failed}
 
-  # Nil (finished by an older node, or with every destination still
-  # pending) or an outcome a newer release wrote.
-  defp offsite_state(_stored, _counted), do: :unknown
+      {:ok, entries} ->
+        keys = Destination.configured_keys(entries)
+        {failed, gone} = Enum.split_with(offsite.failed, &MapSet.member?(keys, &1.key))
+        %{offsite | failed: failed, gone: gone}
+
+      {:error, error} ->
+        destinations_unreadable(error)
+        offsite
+    end
+  end
+
+  @doc """
+  A run's off-site outcome as the status and History say it (#2220, #2951):
+  derived from its `destinations` (`Recorder.offsite_outcome/1`) rather than
+  the `offsite_status` it stored, so a run a release before #2951 stored as
+  `:partial` with only the unreadable entry reads `:failed`, without
+  rewriting it. A run that stored no outcome (finished by an older node), or
+  one this release doesn't know, is `:unknown`, and one whose destinations
+  were all skipped is `:none`.
+  """
+  @spec run_offsite_state(Run.t()) :: :none | :complete | :partial | :failed | :unknown
+  def run_offsite_state(%Run{offsite_status: stored, destinations: destinations}) do
+    cond do
+      Enum.all?(destinations, &(&1.status == :skipped)) -> :none
+      stored in [:none, :complete, :partial, :failed] -> Recorder.offsite_outcome(destinations)
+      true -> :unknown
+    end
+  end
+
+  @destinations_warned {__MODULE__, :destinations_warned_at}
+
+  defp destinations_unreadable(error) do
+    :telemetry.execute(
+      [:kiln_cms, :backups, :status, :destinations_unreadable],
+      %{count: 1},
+      %{error: error.__struct__}
+    )
+
+    now = System.monotonic_time(:millisecond)
+    last = :persistent_term.get(@destinations_warned, nil)
+
+    if is_nil(last) or now - last >= @notices_warn_every_ms do
+      :persistent_term.put(@destinations_warned, now)
+
+      Logger.warning(
+        "Backup status can't tell which off-site destinations are still configured: " <>
+          "a read failed (#{inspect(error.__struct__)}); the off-site alarm is left as it is"
+      )
+    end
+
+    :ok
+  end
 
   # Every schedule, read as `system/0`; `:unreadable` (logged now and then)
   # when that fails, so the thresholds fall back to the environment's.

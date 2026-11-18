@@ -736,6 +736,42 @@ defmodule KilnCMS.Backups.FanoutTest do
                      "BACKUP_RCLONE_REMOTE")
              )
     end
+
+    # #2951: nothing to send to at all. The backup is good and stays
+    # succeeded, but it is only in BACKUP_DIR, and says so; never
+    # "reached 0 of 1".
+    test "with no BACKUP_RCLONE_REMOTE the run succeeds, failed off-site, and says why" do
+      Repo.query!(
+        "INSERT INTO backup_destinations (name, kind, settings) VALUES ('Broken', 'fake', '\"x\"')"
+      )
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [[:kiln_cms, :backups, :offsite, :failed]])
+
+      log = capture_log(fn -> assert :ok = BackupChain.run() end)
+      run = run!()
+
+      assert run.status == :succeeded
+      assert run.offsite_status == :failed
+      assert [%{key: "unreadable", status: :failed}] = run.destinations
+
+      not_offsite =
+        "Not copied off-site: couldn't read the backup destinations, and " <>
+          "BACKUP_RCLONE_REMOTE is not set; this backup is only in BACKUP_DIR"
+
+      assert Enum.any?(run.log, &(&1.level == :error and &1.message == not_offsite))
+      refute Enum.any?(run.log, &(&1.message =~ "reached 0 of"))
+      refute Enum.any?(run.log, &(&1.message =~ "Partly off-site"))
+      assert log =~ not_offsite
+
+      stamp = run.stamp
+
+      assert_received {[:kiln_cms, :backups, :offsite, :failed], ^ref, %{count: 1},
+                       %{stamp: ^stamp, reason: :destinations_unreadable}}
+
+      assert %Manifest{ok: true, destinations: [%{key: "unreadable", status: "failed"}]} =
+               Manifest.read(Backups.dir())
+    end
   end
 
   describe "a chain an older release queued" do
