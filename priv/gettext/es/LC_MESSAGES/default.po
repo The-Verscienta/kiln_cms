@@ -12050,6 +12050,16 @@ msgstr "Las copias de seguridad integradas no pueden ejecutarse aquí, así que 
 msgid "In-app schedules are turned off (KILN_BACKUP_SCHEDULER_CRON)."
 msgstr "Las programaciones integradas están desactivadas (KILN_BACKUP_SCHEDULER_CRON)."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "In-app schedules don't run: KILN_BACKUP_SCHEDULER_CRON isn't a valid cron expression."
+msgstr "Las programaciones integradas no se ejecutan: KILN_BACKUP_SCHEDULER_CRON no es una expresión cron válida."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "In-app schedules never run: KILN_BACKUP_SCHEDULER_CRON only matches a date that doesn't exist, such as 31 February."
+msgstr "Las programaciones integradas nunca se ejecutan: KILN_BACKUP_SCHEDULER_CRON solo coincide con una fecha que no existe, como el 31 de febrero."
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "In:"
@@ -12505,6 +12515,16 @@ msgstr "junio"
 #, elixir-autogen, elixir-format
 msgid "Just me — publish directly"
 msgstr "Solo yo — publicar directamente"
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "KILN_BACKUP_SCHEDULER_CRON isn't a valid cron expression, so the scheduler is off and these schedules don't run."
+msgstr "KILN_BACKUP_SCHEDULER_CRON no es una expresión cron válida, así que el planificador está desactivado y estas programaciones no se ejecutan."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "KILN_BACKUP_SCHEDULER_CRON only matches a date that doesn't exist, such as 31 February, so these schedules never run."
+msgstr "KILN_BACKUP_SCHEDULER_CRON solo coincide con una fecha que no existe, como el 31 de febrero, así que estas programaciones nunca se ejecutan."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
