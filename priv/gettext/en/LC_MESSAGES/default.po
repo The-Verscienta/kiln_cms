@@ -23794,6 +23794,13 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
+msgid "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed (%{count} more failed and was removed since)"
+msgid_plural "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed (%{count} more failed and were removed since)"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
 msgid "The last backup was not copied off-site: %{reasons}"
 msgstr ""
 

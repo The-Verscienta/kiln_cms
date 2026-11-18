@@ -515,6 +515,8 @@ defmodule KilnCMS.Backups.StatusTest do
     # still counts (#2951): `BACKUP_RCLONE_REMOTE` and a stored "NAS".
     setup do
       remote!("offsite:kiln")
+      :persistent_term.erase({Backups, :destinations_warned_at})
+      on_exit(fn -> :persistent_term.erase({Backups, :destinations_warned_at}) end)
 
       nas =
         Ash.Seed.seed!(KilnCMS.Backups.DestinationConfig, %{
@@ -707,6 +709,37 @@ defmodule KilnCMS.Backups.StatusTest do
 
       assert %{state: :partial, configured?: true, failed: [%{key: @nas}], gone: []} =
                Backups.status().offsite
+
+      assert_received {[:kiln_cms, :backups, :status, :destinations_unreadable], ^ref,
+                       %{count: 1}, _}
+    end
+
+    test "an unreadable destinations read warns once in 15 minutes, and counts every time" do
+      offsite_run!(
+        1,
+        [dest(@env_key, "offsite:kiln", :ok), dest(@nas, "NAS", :failed, "down")],
+        :partial
+      )
+
+      KilnCMS.Repo.query!(
+        "INSERT INTO backup_destinations (name, kind, settings) VALUES ('Broken', 'fake', '\"x\"')"
+      )
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
+          [:kiln_cms, :backups, :status, :destinations_unreadable]
+        ])
+
+      warning = "Backup status can't tell which off-site destinations are still configured"
+
+      first = ExUnit.CaptureLog.capture_log(fn -> Backups.status() end)
+      assert first =~ warning
+
+      second = ExUnit.CaptureLog.capture_log(fn -> Backups.status() end)
+      refute second =~ warning
+
+      assert_received {[:kiln_cms, :backups, :status, :destinations_unreadable], ^ref,
+                       %{count: 1}, _}
 
       assert_received {[:kiln_cms, :backups, :status, :destinations_unreadable], ^ref,
                        %{count: 1}, _}

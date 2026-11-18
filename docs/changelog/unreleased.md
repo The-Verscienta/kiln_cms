@@ -2706,6 +2706,22 @@ carries the reasoning.
     the Backups page link to why the resume is waiting.
   ([#2952](https://github.com/The-Verscienta/kiln_cms/issues/2952), [#3030](https://github.com/The-Verscienta/kiln_cms/issues/3030), [#3084](https://github.com/The-Verscienta/kiln_cms/issues/3084), [#3087](https://github.com/The-Verscienta/kiln_cms/issues/3087))
 
+<a id="backup-partial-offsite-status"></a>
+
+- **Two partly off-site status fixes (#2951).**
+  When the destinations table couldn't be read and `BACKUP_RCLONE_REMOTE`
+  is not set, a backup reached nothing but read "Partly off-site: reached 0
+  of 1". It now stays Succeeded and reads **Not off-site**, with the alarm
+  "The last backup was not copied off-site: …" on the Backups page and
+  Home, a Run log error line and a
+  `[:kiln_cms, :backups, :offsite, :failed]` event; older runs recorded
+  that way read correctly too. And the partly off-site alarm stayed up when
+  the destinations that failed were removed: failed destinations that are
+  no longer configured no longer count, the alarm clears once none remain,
+  and with no destination configured at all the Backups page says so. If
+  the destinations can't be read, the alarm is left as recorded.
+  ([#2951](https://github.com/The-Verscienta/kiln_cms/issues/2951))
+
 ## Security
 
 <a id="backup-url-sslpassword"></a>

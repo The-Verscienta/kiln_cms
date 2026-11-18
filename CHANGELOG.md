@@ -374,6 +374,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Backups → Destinations: saving a form someone else changed since you opened it is refused instead of overwriting their change, two admins enabling at once can no longer exceed the 8-destination cap, the `BACKUP_RCLONE_REMOTE` row gets a Test, and the S3 form, failure tooltips and waiting-resume strip gain help text and links.**
   ([#3103](https://github.com/The-Verscienta/kiln_cms/pull/3103) · [long form](docs/changelog/unreleased.md#backup-destinations-tab-polish))
 
+- **A backup that couldn't read its destinations and has no `BACKUP_RCLONE_REMOTE` now reads "not copied off-site" instead of "reached 0 of 1", and the partly off-site alarm clears once the destinations that failed are no longer configured.**
+  ([long form](docs/changelog/unreleased.md#backup-partial-offsite-status))
+
 ### Security
 
 - **A database URL's `?sslpassword=` (an encrypted client key's passphrase) no longer reaches the command line of pg_dump, pg_restore or psql, where every process on the host could read it: the URL is refused instead.**

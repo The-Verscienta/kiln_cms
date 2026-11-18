@@ -67,11 +67,13 @@ defmodule KilnCMSWeb.BackupComponents do
       stored destinations couldn't be read and `BACKUP_RCLONE_REMOTE` was
       unset, #2951): why.
 
-  Only the failed destinations still configured count (`failed`, #2951):
-  once none is left, there is no line.
+  Only the failed destinations still configured are named (`failed`,
+  #2951); those removed since (`gone`) are counted beside them. Once every
+  failed destination was removed, there is no line. Anything else with
+  nothing in `failed` keeps the line: no alarm is dropped on a guess.
   """
   @spec offsite_headline(map() | nil) :: String.t() | nil
-  def offsite_headline(%{failed: []}), do: nil
+  def offsite_headline(%{failed: [], gone: [_ | _]}), do: nil
 
   def offsite_headline(%{state: :failed, succeeded?: true, failed: failed}) do
     gettext("The last backup was not copied off-site: %{reasons}",
@@ -79,13 +81,28 @@ defmodule KilnCMSWeb.BackupComponents do
     )
   end
 
-  def offsite_headline(%{state: :partial, ok: ok, total: total, failed: failed}) do
-    gettext(
-      "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed",
-      ok: ok,
-      total: total,
-      names: Enum.map_join(failed, ", ", &run_destination_label(&1.key, &1.label))
-    )
+  def offsite_headline(%{state: :partial, ok: ok, total: total, failed: failed} = offsite) do
+    names = Enum.map_join(failed, ", ", &run_destination_label(&1.key, &1.label))
+
+    case Map.get(offsite, :gone, []) do
+      [] ->
+        gettext(
+          "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed",
+          ok: ok,
+          total: total,
+          names: names
+        )
+
+      gone ->
+        ngettext(
+          "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed (%{count} more failed and was removed since)",
+          "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed (%{count} more failed and were removed since)",
+          length(gone),
+          ok: ok,
+          total: total,
+          names: names
+        )
+    end
   end
 
   def offsite_headline(_offsite), do: nil

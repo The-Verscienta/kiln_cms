@@ -3496,6 +3496,81 @@ defmodule KilnCMSWeb.BackupLiveTest do
              )
     end
 
+    test "a failed destination removed beside one still failing is counted, not named", %{
+      conn: conn
+    } do
+      configure_destinations!()
+
+      offsite_run!(
+        %{"local" => %{"status" => "ok"}},
+        [
+          %{key: @env_key, kind: "rclone", label: "offsite:kiln", status: :ok},
+          %{key: @nas, kind: "local", label: "NAS", status: :failed, error: "down"},
+          %{key: @bucket, kind: "local", label: "Bucket", status: :failed, error: "gone"}
+        ],
+        :partial
+      )
+
+      remove_destination!(Backups.get_backup_destination!(@bucket_id, actor: Backups.system()))
+
+      line =
+        "The last backup reached 1 of 3 off-site destinations — NAS failed " <>
+          "(1 more failed and was removed since)"
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(lv, "section.border-error\\/30 #backup-headline-offsite", line)
+      refute has_element?(lv, "#backup-headline-offsite", "Bucket")
+
+      assert has_element?(
+               overview(build_conn()),
+               "#overview-backup-warning [data-role=backup-headline]",
+               line
+             )
+    end
+
+    # Fail closed: an empty `failed` drops the alarm only when every failed
+    # destination was removed, not for a partial run that names none.
+    test "a partial run with nothing failed and nothing removed keeps the alarm", %{conn: conn} do
+      configure_destinations!()
+
+      offsite_run!(
+        %{"local" => %{"status" => "ok"}},
+        [
+          %{key: @env_key, kind: "rclone", label: "offsite:kiln", status: :ok},
+          %{key: @nas, kind: "local", label: "NAS", status: :pending}
+        ],
+        :partial
+      )
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "section.border-error\\/30 #backup-headline-offsite",
+               "The last backup reached 1 of 2 off-site destinations"
+             )
+
+      assert has_element?(overview(build_conn()), "#overview-backup-warning")
+    end
+
+    test "offsite_headline/1 is nil only once every failed destination was removed" do
+      base = %{state: :partial, succeeded?: true, ok: 1, total: 2}
+      gone = [%{key: @nas, label: "NAS", error: "down"}]
+
+      assert KilnCMSWeb.BackupComponents.offsite_headline(
+               Map.merge(base, %{failed: [], gone: gone})
+             ) == nil
+
+      assert KilnCMSWeb.BackupComponents.offsite_headline(
+               Map.merge(base, %{failed: [], gone: []})
+             ) =~ "reached 1 of 2"
+
+      assert KilnCMSWeb.BackupComponents.offsite_headline(
+               Map.merge(base, %{state: :failed, failed: [], gone: gone})
+             ) == nil
+    end
+
     # Critic change 11: a release before #2951 stored this run as partial.
     # It reads as failed off-site without being rewritten.
     test "an old run stored partial with only the unreadable entry reads not off-site", %{

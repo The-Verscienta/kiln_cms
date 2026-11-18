@@ -23794,6 +23794,13 @@ msgstr "La dernière sauvegarde a atteint %{ok} destinations hors site sur %{tot
 
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
+msgid "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed (%{count} more failed and was removed since)"
+msgid_plural "The last backup reached %{ok} of %{total} off-site destinations — %{names} failed (%{count} more failed and were removed since)"
+msgstr[0] "La dernière sauvegarde a atteint %{ok} destinations hors site sur %{total} — échec : %{names} (%{count} autre a échoué et a été supprimée depuis)"
+msgstr[1] "La dernière sauvegarde a atteint %{ok} destinations hors site sur %{total} — échec : %{names} (%{count} autres ont échoué et ont été supprimées depuis)"
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
 msgid "The last backup was not copied off-site: %{reasons}"
 msgstr "La dernière sauvegarde n'a pas été copiée hors site : %{reasons}"
 

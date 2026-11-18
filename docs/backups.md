@@ -1529,6 +1529,8 @@ as before.
 | `[:kiln_cms, :backups, :offsite, :partial]` | `stamp`, `chain`, `missed` (the keys of the destinations not reached); measurements also `reached` and `total` | A backup finished having reached some of its off-site destinations but not all ([below](#when-a-backup-reaches-only-some-destinations)). |
 | `[:kiln_cms, :backups, :heartbeat, :dir_id_timeout]` | `node`; measurements also `waited_ms` | A heartbeat beat with no backup-directory id because reading `.kiln-dir-id` is held up, once per beat while it is ([below](#the-backup-directory-id-read-2848)). |
 | `[:kiln_cms, :backups, :marker_sync, :timeout]` | `phase` (`:dir_id` or `:sync`); measurements also `waited_ms` | A last-good marker sync job stopped waiting on the backup directory's id read or sync and gave up for the slot ([below](#the-marker-sync-on-a-hung-backup-directory-3079)). |
+| `[:kiln_cms, :backups, :offsite, :failed]` | `stamp`, `chain`, `reason` (`:destinations_unreadable`) | A backup finished without reaching any destination because the destinations table couldn't be read and `BACKUP_RCLONE_REMOTE` is not set: it stays Succeeded, marked not copied off-site (#2951). |
+| `[:kiln_cms, :backups, :status, :destinations_unreadable]` | `error` (the error's module) | The Backups or Home page couldn't read which destinations are configured, so the partly off-site alarm was left as recorded (logged at most every 15 minutes) (#2951). |
 
 The in-app schedules emit their own events,
 `[:kiln_cms, :backups, :schedule, …]` and
@@ -4090,9 +4092,14 @@ It also clears once none of the failed destinations is configured any more:
 a destination you removed or disabled since, or a `BACKUP_RCLONE_REMOTE`
 you unset, is one nobody can fix, so it no longer holds the alarm up
 (History still shows the run as it was). Another failed destination that
-is still configured keeps it. With no off-site destination configured at
-all, the Backups page says instead, without the alarm, "No off-site
-destination is configured now: new backups stay in BACKUP_DIR only." When
+is still configured keeps it, and the line counts the removed ones beside
+it: "The last backup reached 1 of 3 off-site destinations — NAS failed (1
+more failed and was removed since)". When nothing at all is configured
+any more, the Backups page says, in a neutral tone, "No off-site
+destination is configured now: new backups stay in BACKUP_DIR only." That
+line shows only in this alarm's context: when the last backup was partly
+off-site or not copied off-site, never for a complete one or for a
+deployment that never had a destination. When
 the destinations can't be read for this check, the alarm stays as it is,
 and Kiln emits `[:kiln_cms, :backups, :status, :destinations_unreadable]`
 (metadata `error`, the error's module), with a warning logged at most once
