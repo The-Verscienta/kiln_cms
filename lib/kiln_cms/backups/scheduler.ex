@@ -99,6 +99,71 @@ defmodule KilnCMS.Backups.Scheduler do
       end)
   end
 
+  @minutes_per_day 24 * 60
+  @all_days MapSet.new(1..31)
+  @all_months MapSet.new(1..12)
+  @all_weekdays MapSet.new(0..6)
+
+  @doc """
+  The longest the scheduler can go between two ticks, in minutes, read from
+  `KILN_BACKUP_SCHEDULER_CRON` (`value`, the configured value by default, or
+  an expression already parsed); nil when it doesn't tick on a schedule
+  (`cron_state/1` is not `:on`, or `@reboot`). A schedule whose interval is
+  shorter skips windows: only the latest due one fires. What the Schedule
+  tab's "the scheduler runs less often than this schedule" warning reads
+  (#2983).
+
+  Worked out from the expression's fields, without walking its slots, so it
+  is cheap enough for a page to ask on every render: the longest wait
+  between the day's ticks (minute and hour fields), and the one from the
+  day's last tick to the first of the next day it runs on. With only the
+  weekday restricted, that next day is the next weekday in the set
+  (`* * * * 1-5` waits from Friday 23:59 to Monday 00:00, `0 3 * * 0` a
+  week). A day-of-month or month restriction leaves gaps that depend on the
+  calendar, which this doesn't measure: such an expression counts as at
+  least a day, so it warns about every sub-daily schedule then and never
+  about a daily or longer one. `* * * * *` gives 1.
+  """
+  @spec max_tick_gap_minutes(term()) :: pos_integer() | nil
+  def max_tick_gap_minutes(value \\ Application.get_env(:kiln_cms, :backup_scheduler_cron, false)) do
+    case expression(value) do
+      {:ok, %{reboot?: false} = expression} -> max_gap(expression)
+      _off_reboot_or_never -> nil
+    end
+  end
+
+  defp max_gap(%Oban.Cron.Expression{} = expression) do
+    slots =
+      for hour <- Enum.sort(expression.hours),
+          minute <- Enum.sort(expression.minutes),
+          do: hour * 60 + minute
+
+    # The wrap from the day's last tick to the first of the next day it
+    # runs on, `days_apart` days later.
+    wrap = days_apart(expression) * @minutes_per_day + hd(slots) - List.last(slots)
+
+    gap =
+      slots
+      |> Enum.chunk_every(2, 1, :discard)
+      |> Enum.reduce(wrap, fn [a, b], longest -> max(b - a, longest) end)
+
+    if calendar_restricted?(expression), do: max(gap, @minutes_per_day), else: gap
+  end
+
+  # The most days from one day the expression runs on to the next, counted
+  # from its weekdays: 1 for every day, 3 for Monday to Friday, 7 for one.
+  defp days_apart(%Oban.Cron.Expression{weekdays: weekdays}) do
+    days = weekdays |> MapSet.intersection(@all_weekdays) |> Enum.sort()
+
+    days
+    |> Enum.zip(tl(days) ++ [hd(days) + 7])
+    |> Enum.map(fn {day, next} -> next - day end)
+    |> Enum.max()
+  end
+
+  defp calendar_restricted?(%Oban.Cron.Expression{days: days, months: months}),
+    do: not (MapSet.subset?(@all_days, days) and MapSet.subset?(@all_months, months))
+
   # The parsed `KILN_BACKUP_SCHEDULER_CRON` (or `value` itself when it is
   # already parsed), or what `cron_state/1` says instead.
   defp expression(%Oban.Cron.Expression{} = expression) do

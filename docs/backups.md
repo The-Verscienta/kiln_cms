@@ -620,10 +620,17 @@ Things to know:
   in-app backup succeeds or prunes; a schedule change does not queue a sync.
 - **A schedule change made while a marker sync is running** queues one more
   sync, which waits for the running one to release the backup lock and then
-  reads the change (#2932). One already queued absorbs the change. While an
-  in-app backup holds the lock, the sync writes nothing and the backup
-  syncs the markers when it succeeds; if it fails, the next slot (15 minutes
-  by default) does.
+  reads the change (#2932). One already queued absorbs the change.
+- **A schedule change made while an in-app backup runs** reaches the holds
+  when that backup releases the backup lock, whether it succeeded or failed
+  (#2985). The sync the change queued finds the lock taken, writes nothing,
+  and tries again every two minutes until the backup is done, and so do the
+  syncs it queues for other hosts' backup directories. It gives up after
+  three hours with a warning in the log; the next 15-minute slot then syncs
+  the markers. While it waits it stands in for the 15-minute slots, which
+  queue nothing of their own. A 15-minute sync that was not queued by a
+  change doesn't wait: while a backup runs it skips the slot, since the
+  backup syncs the markers itself when it succeeds.
 - **History shows them**: a row whose backup a `.hold` names has a **Kept by
   a schedule: Database** or **Kept by a schedule: Media** badge
   ([Backup history](#backup-history-2217)).
@@ -2737,6 +2744,11 @@ run" shown there is one the scheduler will act on. Each schedule's card shows:
 - **"This schedule runs more often than daily without Keep for (days), …"**
   on a sub-daily schedule stored without keep days
   ([Back up more often than daily](#back-up-more-often-than-daily)).
+- **"The scheduler (KILN_BACKUP_SCHEDULER_CRON) can go 6 hours between runs,
+  longer than this schedule's interval, …"** when the scheduler can go
+  longer between ticks than the schedule's interval, so some of its windows
+  are skipped ([The scheduler job](#the-scheduler-job)). The form's preview
+  says the same while you pick the interval.
 
 Above the list, a warning box appears when any of these holds:
 
@@ -2756,6 +2768,17 @@ couldn't be read (the alarm thresholds are then the environment's), and
 "Couldn't load the last runs." appears once, instead of every card claiming
 there was no run, when the runs couldn't be read. While the tab is open it
 reads all of this again every minute, and leaves an open form as it is.
+
+The list and the warnings come with this server's backup status, which
+reads `manifest.json` from `BACKUP_DIR`. As on the Backups tab
+([What History reads from disk](#what-history-reads-from-disk)), that read
+runs off the page, one at a time, so a backup directory that hangs can't
+freeze the tab or its forms. Until it answers, the list says "Reading the
+schedules…". If it doesn't answer within 5 seconds, the list says
+"Couldn't check this server's backup status in time, so the schedules
+can't be shown. Reload the page to try again.", or, when the tab already
+showed them, that the list may be out of date. If the stuck read answers
+later, the list fills in.
 
 **On the Backups tab**, the schedules show as:
 
@@ -3058,8 +3081,9 @@ How it behaves:
   the latest due window fires, so with `KILN_BACKUP_SCHEDULER_CRON` coarser
   than the interval (say `0 */6 * * *` for a two-hourly schedule) the
   windows in between are skipped and logged as missed
-  ([The scheduler job](#the-scheduler-job)). The default, every minute, is
-  fine.
+  ([The scheduler job](#the-scheduler-job)). The Schedule tab warns on the
+  schedule's card and in the form when that is so. The default, every
+  minute, is fine.
 - **Rolling back to 1.10** keeps the schedule firing on its keep days, and
   its Schedule tab shows it with "Schedules more often than daily can't be
   edited here yet. You can pause, resume or delete it."
@@ -3118,7 +3142,16 @@ the schedules, not when they fire: a window is the schedule's own time, so a
 coarser cadence such as `*/5 * * * *` only makes a backup start up to five
 minutes late. A cadence coarser than a schedule's interval skips windows,
 since only the latest due one fires
-([Back up more often than daily](#back-up-more-often-than-daily)). Every minute leaves about 10 000 completed job rows a week, which
+([Back up more often than daily](#back-up-more-often-than-daily)). The
+Schedule tab warns about it on the schedule's card and in the form's
+preview: "The scheduler (KILN_BACKUP_SCHEDULER_CRON) can go 6 hours between
+runs, …" for `0 */6 * * *` and an every-2-hours schedule. The gap is worked
+out from the expression's minute, hour and weekday fields: `* * * * 1-5`
+waits from Friday 23:59 to Monday 00:00 ("over 48 hours"), so it warns on a
+daily schedule, and `0 3 * * 0` waits a week. One that restricts the day of
+the month or the month has gaps that depend on the calendar, so it counts
+as at least a day: every sub-daily schedule is warned about. The default
+`* * * * *` never warns. Every minute leaves about 10 000 completed job rows a week, which
 Oban prunes after 7 days. `false` (also `off`, `no`, `0` or blank) turns every
 schedule off, and the Backups page says so; an unparseable value does the same
 and warns on stderr at boot, and the Schedule tab says it isn't a valid cron

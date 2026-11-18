@@ -12,10 +12,21 @@ defmodule KilnCMS.Backups.Schedule.Changes.SyncHolds do
   does not stop the insert (#2932): it may have read the schedules before
   this change, so the new job queues behind it, waits for the backup lock it
   holds, and reads the committed change. If an in-app backup holds the lock
-  instead, the sync is `:busy` and the backup's finish step syncs the markers
-  with the new rules if it succeeds (otherwise the next slot does). A
+  instead, the job snoozes until the backup releases it, then syncs, however
+  the backup ended (#2985, `MarkerSyncWorker.schedule_change_job/0`). A
   failed insert is logged and never fails the action: the next slot or
   backup syncs the markers anyway.
+
+  An insert that conflicts with a waiting job flags that job (Oban's
+  `replace`), unless two inserts race for Oban's unique lock: then the one
+  that loses reports a conflict without having looked at the waiting job,
+  which may be an unflagged one that gives up on `:busy`. So on a conflict
+  this checks that a flagged job without a directory is waiting
+  (`MarkerSyncWorker.flagged_waiting?/0`) and, when none is, inserts once
+  more. What is left is that second insert losing the same race, or the
+  waiting job starting between the check and the insert; the change then
+  reaches the holds at the chain's successful finish or the next slot, as
+  before #2985.
   """
   use Ash.Resource.Change
 
@@ -40,7 +51,8 @@ defmodule KilnCMS.Backups.Schedule.Changes.SyncHolds do
 
   defp enqueue do
     if MarkerSyncWorker.enabled?() do
-      case %{} |> MarkerSyncWorker.new() |> Oban.insert() do
+      case insert() do
+        {:ok, %{conflict?: true}} -> unless MarkerSyncWorker.flagged_waiting?(), do: retry()
         {:ok, _job} -> :ok
         {:error, reason} -> not_queued(reason)
       end
@@ -49,6 +61,15 @@ defmodule KilnCMS.Backups.Schedule.Changes.SyncHolds do
     # The schedule change has committed: a database error inserting the job
     # must not make the caller think it didn't.
     error -> not_queued(error.__struct__)
+  end
+
+  defp insert, do: Oban.insert(MarkerSyncWorker.schedule_change_job())
+
+  defp retry do
+    case insert() do
+      {:ok, _job} -> :ok
+      {:error, reason} -> not_queued(reason)
+    end
   end
 
   defp not_queued(reason) do

@@ -265,6 +265,7 @@ msgstr[1] ""
 
 #: lib/kiln_cms_web/components/backup_components.ex
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -363,6 +364,7 @@ msgstr[1] ""
 
 #: lib/kiln_cms_web/components/backup_components.ex
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
 #: lib/kiln_cms_web/live/content_editor/shared.ex
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -2664,6 +2666,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "About lanes"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "About sub-daily schedules"
 msgstr ""
 
 #: lib/kiln_cms_web/live/task_live.ex
@@ -6894,6 +6901,16 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
+msgid "Couldn't check this server's backup status in time, so the schedules can't be shown. Reload the page to try again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't check this server's backup status in time, so this list may be out of date."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
 msgid "Couldn't check when the scheduler last ran."
 msgstr ""
 
@@ -7117,6 +7134,7 @@ msgid "Couldn't read the backup destinations. Try again in a moment."
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't read this server's backup status. Reload the page to try again."
 msgstr ""
@@ -18146,6 +18164,11 @@ msgstr ""
 msgid "Reading the library…"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reading the schedules…"
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Reading this server's backup status…"
@@ -24174,6 +24197,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
+msgid "The scheduler (KILN_BACKUP_SCHEDULER_CRON) can go %{gap} between runs, longer than this schedule's interval, so some of its backups are skipped: only the latest one due runs."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
 msgid "The scheduler hasn't run since %{when}. Check that background jobs are running."
 msgstr ""
 
@@ -30117,6 +30145,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "other"
 msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "over %{count} hour"
+msgid_plural "over %{count} hours"
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format

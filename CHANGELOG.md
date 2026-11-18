@@ -60,6 +60,11 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Fixed
+
+- **Backups → Schedule: a warning when `KILN_BACKUP_SCHEDULER_CRON` ticks less often than a schedule runs; the tab no longer freezes on a hung backup directory; and a keep-days change made while a backup runs reaches the `.hold` markers when it ends, even if it failed.**
+  ([#3112](https://github.com/The-Verscienta/kiln_cms/pull/3112) · [long form](docs/changelog/unreleased.md#backup-schedule-tab-followups))
+
 ## [1.11.0] - 2026-11-18
 
 Long form: [docs/changelog/v1.11.0.md](docs/changelog/v1.11.0.md) —
@@ -434,6 +439,7 @@ What's new, with examples and migration steps: [docs/whats-new/v1.11.md](docs/wh
 
 - **`restore.sh` no longer fails a multi-part media restore at random with "… is not listed in … — nothing was extracted" (a broken pipe under `pipefail` made a listed part read as missing).**
   ([#3110](https://github.com/The-Verscienta/kiln_cms/pull/3110) · [long form](docs/changelog/v1.11.0.md#restore-sigpipe))
+
 
 ### Security
 

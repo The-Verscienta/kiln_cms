@@ -67,7 +67,19 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
     conn = log_in(conn, user)
     conn = if locale, do: Plug.Conn.put_session(conn, "locale", locale), else: conn
     {:ok, lv, _html} = live(conn, ~p"/editor/backups/schedules")
-    lv
+    settle(lv)
+  end
+
+  # `Backups.status/0` is read in the background (#2986), on mount and after
+  # each write: wait for the read to land.
+  # A read that lands after a reload was asked for starts one more from
+  # `handle_async/3`, so this waits until no read is running.
+  defp settle(lv) do
+    render_async(lv, 2_000)
+
+    if :sys.get_state(lv.pid).socket.assigns.status_running?,
+      do: settle(lv),
+      else: lv
   end
 
   defp put_backups(key, value) do
@@ -297,6 +309,27 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       end
     end
 
+    # #2986: a status read the page started while they were an admin lands
+    # after they stopped being one. Nothing of it is applied.
+    test "the background status read and its timeout give them nothing", %{sockets: sockets} do
+      status = Backups.status()
+
+      for socket <- sockets do
+        for reply <- [
+              BackupScheduleLive.handle_async(:status, {:ok, status}, socket),
+              BackupScheduleLive.handle_async(:status, {:exit, :boom}, socket),
+              BackupScheduleLive.handle_info({:status_timeout, make_ref()}, socket)
+            ] do
+          assert_denied(reply)
+          {:noreply, denied} = reply
+
+          for key <- [:status, :entries, :runs, :stale_tick, :status_state] do
+            refute Map.has_key?(denied.assigns, key)
+          end
+        end
+      end
+    end
+
     test "a connected page whose admin lost the role is sent away on the next click", %{
       conn: conn,
       schedule: s
@@ -347,6 +380,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       |> render_submit()
 
       assert render(lv) =~ "Schedule saved."
+      settle(lv)
       refute has_element?(lv, "#schedule-form")
 
       assert [s] = all_schedules()
@@ -387,6 +421,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       |> render_submit()
 
       assert render(lv) =~ "Schedule saved."
+      settle(lv)
       assert stored(s).interval == :monthly
     end
 
@@ -397,11 +432,13 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
 
       lv |> element("#backup-schedule-#{s.id} [data-role=toggle]", "Pause") |> render_click()
       assert render(lv) =~ "Schedule paused."
+      settle(lv)
       refute stored(s).enabled
       assert has_element?(lv, "#backup-schedule-#{s.id} [data-role=paused]", "Paused")
 
       lv |> element("#backup-schedule-#{s.id} [data-role=toggle]", "Resume") |> render_click()
       assert render(lv) =~ "Schedule resumed."
+      settle(lv)
       assert stored(s).enabled
 
       assert has_element?(
@@ -411,6 +448,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
 
       lv |> element("#backup-schedule-#{s.id} [data-role=delete]") |> render_click()
       assert render(lv) =~ "Schedule deleted."
+      settle(lv)
       assert all_schedules() == []
       refute has_element?(lv, "#backup-schedule-#{s.id}")
     end
@@ -481,6 +519,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       |> render_submit()
 
       assert render(lv) =~ "Schedule saved."
+      settle(lv)
       assert [s] = all_schedules()
       assert {s.keep_count, s.keep_days} == {7, 30}
       assert [created] = events(:backup_schedule_created)
@@ -501,6 +540,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       |> render_submit()
 
       assert render(lv) =~ "Schedule saved."
+      settle(lv)
       assert {nil, nil} == {stored(s).keep_count, stored(s).keep_days}
 
       assert [changed] = events(:backup_schedule_changed)
@@ -687,6 +727,8 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
         assert render_click(lv, event, %{"id" => s.id}) =~ "That schedule no longer exists."
       end
 
+      settle(lv)
+
       refute has_element?(lv, "#backup-schedule-#{s.id}")
     end
 
@@ -711,6 +753,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       html = lv |> form("#schedule-form", schedule: form_params(%{})) |> render_submit()
 
       assert html =~ "That schedule no longer exists."
+      settle(lv)
       refute has_element?(lv, "#schedule-form")
       assert all_schedules() == []
     end
@@ -739,6 +782,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
         |> render_submit()
 
       assert html =~ "This schedule changed since you opened it"
+      settle(lv)
       assert stored(s).time_of_day == ~T[05:00:00]
       assert stored(s).keep_days == nil
 
@@ -767,6 +811,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       |> render_submit()
 
       assert render(lv) =~ "Schedule saved."
+      settle(lv)
       refute has_element?(lv, panel)
       refute has_element?(lv, "#schedule-form")
       assert stored(s).time_of_day == ~T[03:30:00]
@@ -833,6 +878,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
         |> render_submit()
 
       assert html =~ "This schedule changed since you opened it"
+      settle(lv)
       after_save = stored(s)
       refute after_save.enabled
       assert after_save.interval == :daily
@@ -868,6 +914,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       |> render_submit()
 
       assert render(lv) =~ "Schedule saved."
+      settle(lv)
       assert stored(s).interval == :monthly
     end
 
@@ -1059,6 +1106,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       |> render_submit()
 
       assert render(lv) =~ "Schedule saved."
+      settle(lv)
       assert [%{interval: :every_2h, keep_days: 2} = s] = all_schedules()
 
       assert has_element?(
@@ -1085,6 +1133,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       |> render_submit()
 
       assert render(lv) =~ "Schedule saved."
+      settle(lv)
       assert %{interval: :every_12h, keep_days: 3} = stored(s)
     end
 
@@ -1115,6 +1164,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
 
       lv |> element("#backup-schedule-#{s.id} [data-role=toggle]") |> render_click()
       assert stored(s).enabled
+      settle(lv)
 
       lv |> element("#backup-schedule-#{s.id} [data-role=edit]") |> render_click()
       assert has_element?(lv, "#schedule-form")
@@ -1133,6 +1183,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       |> render_submit()
 
       assert render(lv) =~ "Schedule saved."
+      settle(lv)
       assert %{interval: :every_2h, keep_days: 3} = stored(s)
       refute has_element?(lv, "#backup-schedule-#{s.id} [data-role=needs-keep-days]")
 
@@ -1624,6 +1675,234 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
       lv = mount(conn, admin)
       assert has_element?(lv, "#schedule-tick-unknown", "Couldn't check")
       refute has_element?(lv, "#schedule-stale-tick")
+    end
+  end
+
+  describe "a scheduler that ticks less often than a schedule (#2983)" do
+    setup do
+      admin = platform_admin()
+      s = schedule!(%{interval: :every_2h, keep_days: 3}, admin)
+      %{admin: admin, s: s}
+    end
+
+    test "every six hours warns on a two-hourly schedule's card and in its form", %{
+      conn: conn,
+      admin: admin,
+      s: s
+    } do
+      put_cron("0 */6 * * *")
+      daily = schedule!(%{}, admin)
+      lv = mount(conn, admin)
+
+      assert has_element?(
+               lv,
+               ~s|#backup-schedule-#{s.id} [data-role="tick-coarse"]|,
+               "can go 6 hours between runs"
+             )
+
+      refute has_element?(lv, ~s|#backup-schedule-#{daily.id} [data-role="tick-coarse"]|)
+
+      lv |> element("#schedule-new") |> render_click()
+      preview_of(lv, %{"interval" => "every_4h", "keep_days" => "3"})
+
+      assert has_element?(
+               lv,
+               ~s|#schedule-preview [data-role="tick-coarse"]|,
+               "some of its backups are skipped"
+             )
+
+      preview_of(lv, %{"interval" => "every_8h", "keep_days" => "3"})
+      refute has_element?(lv, ~s|#schedule-preview [data-role="tick-coarse"]|)
+    end
+
+    test "a weekday-only scheduler cron warns on a daily schedule", %{conn: conn, admin: admin} do
+      daily = schedule!(%{}, admin)
+
+      for {cron, gap} <- [{"*/5 * * * 1-5", "over 48 hours"}, {"0 3 * * 0", "7 days"}] do
+        put_cron(cron)
+        lv = mount(conn, admin)
+
+        assert has_element?(
+                 lv,
+                 ~s|#backup-schedule-#{daily.id} [data-role="tick-coarse"]|,
+                 "can go #{gap} between runs"
+               ),
+               cron
+      end
+    end
+
+    test "the default, every minute, never warns", %{conn: conn, admin: admin, s: s} do
+      put_cron("* * * * *")
+      lv = mount(conn, admin)
+
+      assert has_element?(lv, "#backup-schedule-#{s.id}")
+      refute has_element?(lv, ~s|[data-role="tick-coarse"]|)
+
+      lv |> element("#schedule-new") |> render_click()
+      preview_of(lv, %{"interval" => "every_2h", "keep_days" => "3"})
+      assert has_element?(lv, "#schedule-preview")
+      refute has_element?(lv, ~s|[data-role="tick-coarse"]|)
+    end
+
+    test "nor does a scheduler that is off", %{conn: conn, admin: admin} do
+      put_cron(false)
+      lv = mount(conn, admin)
+
+      assert has_element?(lv, "#schedule-scheduler-off")
+      refute has_element?(lv, ~s|[data-role="tick-coarse"]|)
+    end
+
+    test "the warning is translated", %{conn: conn, admin: admin, s: s} do
+      put_cron("0 */6 * * *")
+
+      for {locale, text} <- [
+            {"fr", "peut rester 6 heures sans s’exécuter"},
+            {"es", "puede pasar 6 horas entre ejecuciones"}
+          ] do
+        lv = mount(conn, admin, locale)
+
+        assert has_element?(
+                 lv,
+                 ~s|#backup-schedule-#{s.id} [data-role="tick-coarse"]|,
+                 text
+               )
+
+        refute has_element?(lv, ~s|#backup-schedule-#{s.id} [data-role="tick-coarse"]|, "hours")
+      end
+    end
+
+    test "the sub-daily keep days hint links to the guide", %{conn: conn, admin: admin} do
+      lv = mount(conn, admin)
+      lv |> element("#schedule-new") |> render_click()
+      refute has_element?(lv, "#schedule-keep-days-hint")
+
+      preview_of(lv, %{"interval" => "every_4h"})
+
+      assert has_element?(
+               lv,
+               "#schedule-keep #schedule-keep-days-hint",
+               "Required for a schedule that runs more often than daily."
+             )
+
+      assert has_element?(
+               lv,
+               ~s|#schedule-keep-days-hint a[href$="backups.md#back-up-more-often-than-daily"]|
+             )
+    end
+  end
+
+  describe "the status is read off the LiveView process (#2986)" do
+    setup do
+      on_exit(fn -> Application.delete_env(:kiln_cms, BackupScheduleLive) end)
+      :ok
+    end
+
+    # A `Backups.status/0` that waits for `:go`, telling the test it started.
+    defp blocking_reader do
+      test = self()
+
+      fn ->
+        send(test, {:status_read, self()})
+
+        receive do
+          :go -> Backups.status()
+        end
+      end
+    end
+
+    defp release(pid) do
+      ref = Process.monitor(pid)
+      send(pid, :go)
+      assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 2_000
+    end
+
+    test "a read that blocks: the tab renders, says it couldn't check in time, starts no " <>
+           "other, and shows the schedules when it comes",
+         %{conn: conn} do
+      admin = platform_admin()
+      s = schedule!(%{}, admin)
+
+      Application.put_env(:kiln_cms, BackupScheduleLive,
+        status_timeout_ms: 0,
+        status_reader: blocking_reader()
+      )
+
+      {:ok, lv, html} = conn |> log_in(admin) |> live(~p"/editor/backups/schedules")
+      assert_receive {:status_read, first}
+
+      # The mount's own render: the tab and its controls, the list pending.
+      assert html =~ "Reading the schedules…"
+      assert has_element?(lv, "#schedule-new")
+      assert has_element?(lv, "#backup-tab-schedule[aria-current=page]")
+
+      eventually(lv, "so the schedules can")
+
+      assert has_element?(lv, "#schedule-status-timeout", "Couldn't check this server's backup")
+      assert has_element?(lv, "#schedule-status-timeout", "can't be shown")
+      refute has_element?(lv, "#schedule-status-pending")
+      refute has_element?(lv, "#backup-schedule-#{s.id}")
+
+      # The form still opens and previews meanwhile, saying nothing of
+      # whether it would run here.
+      lv |> element("#schedule-new") |> render_click()
+      preview_of(lv, %{})
+      assert has_element?(lv, "#schedule-preview [data-role=cadence]")
+      refute has_element?(lv, "#schedule-preview [data-role=first]")
+      refute has_element?(lv, "#schedule-preview [data-role=wont-run]")
+      lv |> element("#schedule-form button", "Cancel") |> render_click()
+
+      # One at a time: the minute's refresh starts none while it hangs.
+      for _ <- 1..3, do: send(lv.pid, :refresh)
+      render(lv)
+      refute_received {:status_read, _pid}
+
+      release(first)
+      render(lv)
+      assert has_element?(lv, "#backup-schedule-#{s.id}")
+      refute has_element?(lv, "#schedule-status-timeout", "can't be shown")
+
+      # The refreshes asked meanwhile start one more read, not three.
+      assert_receive {:status_read, second}
+      release(second)
+      render(lv)
+      refute_received {:status_read, _pid}
+      refute has_element?(lv, "#schedule-status-timeout")
+    end
+
+    test "a read that times out after an earlier one: the list stays, marked out of date",
+         %{conn: conn} do
+      admin = platform_admin()
+      s = schedule!(%{}, admin)
+      lv = mount(conn, admin)
+      assert has_element?(lv, "#backup-schedule-#{s.id}")
+
+      Application.put_env(:kiln_cms, BackupScheduleLive,
+        status_timeout_ms: 0,
+        status_reader: blocking_reader()
+      )
+
+      send(lv.pid, :refresh)
+      assert_receive {:status_read, pending}
+
+      # The timer is sent, not run inline: wait for it to land.
+      eventually(lv, "may be out of date")
+      assert has_element?(lv, "#schedule-status-timeout", "may be out of date")
+      assert has_element?(lv, "#backup-schedule-#{s.id}")
+
+      release(pending)
+      render(lv)
+      refute has_element?(lv, "#schedule-status-timeout")
+    end
+
+    test "a read that crashes says so, with no schedules shown", %{conn: conn} do
+      admin = platform_admin()
+      schedule!(%{}, admin)
+      Application.put_env(:kiln_cms, BackupScheduleLive, status_reader: fn -> exit(:boom) end)
+
+      lv = mount(conn, admin)
+
+      assert has_element?(lv, "#schedule-status-failed", "Couldn't read this server's backup")
+      refute has_element?(lv, "#schedule-status-pending")
     end
   end
 end

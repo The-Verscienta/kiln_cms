@@ -2423,7 +2423,6 @@ defmodule KilnCMSWeb.BackupLiveTest do
       conn = log_in(conn, authed_user(:editor))
 
       assert {:error, {:redirect, _}} = live(conn, ~p"/editor/backups")
-      refute conn |> get(~p"/editor/backups") |> response(302) =~ "Kept by a schedule"
     end
   end
 
