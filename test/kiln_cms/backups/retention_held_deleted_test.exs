@@ -333,8 +333,17 @@ defmodule KilnCMS.Backups.RetentionHeldDeletedTest do
         File.write!(Path.join([ctx.dir, sub, Artifact.hold_name(stamp)]), "")
       end
 
-      assert {:ok, %{deleted: [], kept: []}} =
-               Retention.run(ctx.dir, notify: ctx.notify, before_unit: before_unit)
+      log =
+        capture_log([level: :warning], fn ->
+          assert {:ok, %{deleted: [], kept: kept}} =
+                   Retention.run(ctx.dir, notify: ctx.notify, before_unit: before_unit)
+
+          assert kept == [%{stamp: @old, kind: :db, reason: :still_there}]
+        end)
+
+      assert log =~
+               "Retention kept db backup #{@old}: its hold marker db/kiln-#{@old}.hold was " <>
+                 "still there right before the delete"
 
       assert File.exists?(Path.join([ctx.dir, "db", "kiln-db-#{@old}.dump"]))
     end

@@ -117,11 +117,15 @@ defmodule KilnCMS.Backups.PruneStatusTest do
       assert [%Notice{scope: "cron"}] = notices()
     end
 
-    test "no file says nothing, and logs nothing", %{dir: dir} do
+    test "no file clears the cron notice, and logs nothing about the file", %{dir: dir} do
+      Notices.retention({:local, dir}, {:skipped, {:policy, :invalid_policy}})
       Notices.retention({:cron, dir}, {:skipped, {:cron_prune, "r"}})
 
-      assert capture_log(fn -> assert :ok = PruneStatus.sync(dir) end) == ""
-      assert [%Notice{scope: "cron"}] = notices()
+      log = capture_log(fn -> assert :ok = PruneStatus.sync(dir) end)
+      refute log =~ PruneStatus.path(dir)
+
+      # The app's own notice is not cron's to clear.
+      assert [%Notice{scope: "local"}] = notices()
     end
 
     test "a malformed file is ignored with a warning, and leaves the notice", %{dir: dir} do
@@ -158,6 +162,15 @@ defmodule KilnCMS.Backups.PruneStatusTest do
       assert [%Notice{scope: "cron"}] = notices()
     end
 
+    test "the longest reason the script writes is applied, cut like any notice", %{dir: dir} do
+      status!(dir, %{"outcome" => "skipped", "reason" => String.duplicate("é", 500)})
+      assert byte_size(File.read!(PruneStatus.path(dir))) < 4096
+
+      PruneStatus.sync(dir)
+      assert [%Notice{outcome: :skipped, reason: reason}] = notices()
+      assert String.length(reason) <= 500
+    end
+
     test "fields a later script adds are ignored", %{dir: dir} do
       status!(dir, %{"version" => 2, "outcome" => "skipped", "reason" => "r", "new" => [1]})
       PruneStatus.sync(dir)
@@ -178,9 +191,9 @@ defmodule KilnCMS.Backups.PruneStatusOldFileTest do
   import ExUnit.CaptureLog
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Notice, Notices, PruneStatus}
+  alias KilnCMS.Backups.{Notices, PruneStatus}
 
-  test "a file older than eight days is ignored, and leaves the notice" do
+  test "a file older than eight days is ignored, and clears the cron notice" do
     dir = Path.join(System.tmp_dir!(), "kiln_prune_status_#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)
     on_exit(fn -> File.rm_rf!(dir) end)
@@ -198,9 +211,11 @@ defmodule KilnCMS.Backups.PruneStatusOldFileTest do
     )
 
     log = capture_log([level: :info], fn -> assert :ok = PruneStatus.sync(dir) end)
-    assert log =~ "Ignored #{PruneStatus.path(dir)}: written #{at}, more than 8 days ago"
 
-    assert [%Notice{scope: "cron", outcome: :skipped}] =
-             Backups.list_backup_notices!(actor: Backups.system())
+    assert log =~
+             "Ignored #{PruneStatus.path(dir)}: written #{at}, more than 8 days ago; " <>
+               "the cron prune's notice is cleared"
+
+    assert Backups.list_backup_notices!(actor: Backups.system()) == []
   end
 end

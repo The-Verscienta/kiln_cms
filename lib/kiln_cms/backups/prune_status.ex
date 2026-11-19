@@ -45,12 +45,15 @@ defmodule KilnCMS.Backups.PruneStatus do
   is, so reading the same file again changes nothing: the report is an
   upsert of the same row, the clear finds nothing left to clear.
 
-  A file that is missing says nothing (a host that never ran this release's
-  `backup.sh prune`). One that can't be read, is larger than 4096 bytes,
-  isn't the JSON above, or is dated more than five minutes ahead of this
-  node's clock is ignored with a warning; one older than eight days (cron
-  stopped pruning, which the backup's own staleness alarm covers) is ignored
-  with an info line. Ignoring leaves any notice as it was.
+  A file that is missing (a host that never ran this release's
+  `backup.sh prune`, or one that stopped and whose file was removed), or one
+  older than eight days (cron stopped pruning, which the backup's own
+  staleness alarm covers), clears the directory's cron notice: cron no
+  longer reports, so its last word must not stand for ever. The old file is
+  also said in an info line; a missing one says nothing. A file that can't
+  be read, is larger than 4096 bytes, isn't the JSON above, or is dated more
+  than five minutes ahead of this node's clock fails closed: it is ignored
+  with a warning and leaves any notice as it was.
   """
 
   alias KilnCMS.Backups
@@ -107,7 +110,7 @@ defmodule KilnCMS.Backups.PruneStatus do
 
     case read(dir) do
       :none ->
-        :ok
+        Notices.retention({:cron, dir}, :ok)
 
       {:ok, status} ->
         apply_status(dir, status, now)
@@ -131,8 +134,10 @@ defmodule KilnCMS.Backups.PruneStatus do
       DateTime.diff(now, at) > @max_age_s ->
         Logger.info(
           "Ignored #{path(dir)}: written #{DateTime.to_iso8601(at)}, more than " <>
-            "#{div(@max_age_s, 86_400)} days ago"
+            "#{div(@max_age_s, 86_400)} days ago; the cron prune's notice is cleared"
         )
+
+        Notices.retention({:cron, dir}, :ok)
 
       true ->
         Notices.retention({:cron, dir}, result(status), at: at)

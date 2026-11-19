@@ -144,7 +144,8 @@ defmodule KilnCMS.Backups.Retention do
   would leave a hold naming a unit that is gone; with no Run row to mark
   pruned, the next sync would report the app's own delete as one made
   outside the app. Right before each unit goes, a `.hold` of it still in
-  its own directory also keeps it (the backstop for the same case).
+  its own directory also keeps it (the backstop for the same case), with a
+  warning, and lists it in `kept` too.
   `backup.sh prune` never removes a hold, and keeps every unit that has
   one, so it has no such case.
 
@@ -400,8 +401,8 @@ defmodule KilnCMS.Backups.Retention do
       {:ok, stuck} ->
         {to_delete, kept} = withhold(plan.delete, stuck)
 
-        {deleted, units, stopped} =
-          apply_plan(
+        {deleted, units, stopped, held} =
+          delete_entries(
             dir,
             %{plan | delete: to_delete},
             Keyword.take(opts, [:before_unit, :discard])
@@ -409,7 +410,8 @@ defmodule KilnCMS.Backups.Retention do
 
         Recorder.mark_pruned(deleted)
         if stopped, do: stopped(deleted, stopped)
-        {:ok, %{deleted: deleted, units: units, plan: plan, stopped: stopped, kept: kept}}
+
+        {:ok, %{deleted: deleted, units: units, plan: plan, stopped: stopped, kept: kept ++ held}}
 
       {:error, :superseded} = superseded ->
         Logger.info("Backup retention skipped: the prune step no longer holds the backup lock")
@@ -761,6 +763,7 @@ defmodule KilnCMS.Backups.Retention do
   defp hold_reason({:remove, reason}), do: inspect(reason)
   defp hold_reason({:not_regular, type}), do: "a #{type}, not a regular file"
   defp hold_reason({:lstat, reason}), do: "couldn't read it: #{inspect(reason)}"
+  defp hold_reason(:still_there), do: "still there right before the delete"
   defp hold_reason(reason), do: inspect(reason)
 
   @doc false
@@ -1833,19 +1836,27 @@ defmodule KilnCMS.Backups.Retention do
   @spec apply_plan(Path.t(), plan(), keyword()) ::
           {[String.t()], non_neg_integer(), term() | nil}
   def apply_plan(dir, plan, opts \\ []) do
+    {deleted, units, stopped, _held} = delete_entries(dir, plan, opts)
+    {deleted, units, stopped}
+  end
+
+  # `apply_plan/3`, and the units the check right before the delete found a
+  # `.hold` on (`remove_unless_held/3`), as `run/2`'s `kept` lists them.
+  defp delete_entries(dir, plan, opts) do
     before_unit = Keyword.get(opts, :before_unit, fn _entry -> :ok end)
     discard = Keyword.get(opts, :discard)
 
-    {deleted, units, stopped} =
-      Enum.reduce_while(plan.delete, {[], 0, nil}, fn entry, {deleted, units, nil} ->
+    {deleted, units, stopped, held} =
+      Enum.reduce_while(plan.delete, {[], 0, nil, []}, fn entry, {deleted, units, nil, held} ->
         case remove_safely(dir, entry, before_unit, discard) do
-          {:ok, []} -> {:cont, {deleted, units, nil}}
-          {:ok, names} -> {:cont, {[names | deleted], units + 1, nil}}
-          {:error, reason} -> {:halt, {deleted, units, reason}}
+          {:ok, []} -> {:cont, {deleted, units, nil, held}}
+          {:ok, names} -> {:cont, {[names | deleted], units + 1, nil, held}}
+          {:held, unit} -> {:cont, {deleted, units, nil, [unit | held]}}
+          {:error, reason} -> {:halt, {deleted, units, reason, held}}
         end
       end)
 
-    {deleted |> Enum.reverse() |> List.flatten(), units, stopped}
+    {deleted |> Enum.reverse() |> List.flatten(), units, stopped, Enum.reverse(held)}
   end
 
   defp remove_safely(dir, entry, before_unit, discard) do
@@ -1853,6 +1864,7 @@ defmodule KilnCMS.Backups.Retention do
 
     case remove(dir, entry, discard) do
       {:error, :superseded} = superseded -> superseded
+      {:held, _unit} = held -> held
       names -> {:ok, names}
     end
   rescue
@@ -1874,12 +1886,18 @@ defmodule KilnCMS.Backups.Retention do
 
   # A `.hold` of the unit, in its own directory, still there (#3004): only one
   # whose removal failed can be, since the plan never deletes a unit it
-  # holds. `execute/3` leaves those out already; this is the backstop.
+  # holds. `execute/3` leaves those out already; this is the backstop, and
+  # its unit is listed in `kept` like theirs.
   # sobelow_skip ["Traversal.FileModule"]
   defp remove_unless_held(dir, entry, discard) do
     if present?(Path.join([dir, entry.sub, Artifact.hold_name(entry.stamp)])) do
-      Logger.info("Retention left #{label(entry)} in place: it has a .hold marker")
-      []
+      Logger.warning(
+        "Retention kept #{label(entry)}: its hold marker " <>
+          "#{entry.sub}/#{Artifact.hold_name(entry.stamp)} was still there right before " <>
+          "the delete. Remove it by hand if no schedule keeps the backup"
+      )
+
+      {:held, %{stamp: entry.stamp, kind: entry.kind, reason: :still_there}}
     else
       remove_files(dir, entry, discard)
     end

@@ -988,6 +988,85 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
       assert {:ok, %{"version" => 1, "outcome" => "ok"}} = Jason.decode(text)
     end
 
+    test "a prune stopped part-way writes skipped, with its exit status", ctx do
+      real_find = System.find_executable("find")
+      flag = Path.join(ctx.tmp, "killed")
+      files = set_files!(ctx, "20260101-000000") ++ set_files!(ctx, "20260201-000000")
+      age!(files, 400)
+      # A clean prune first, so the file is there to be replaced.
+      assert {_out, 0} = backup(ctx, "prune")
+      age!(set_files!(ctx, "20260115-000000"), 400)
+
+      # The first age check TERMs the script itself: the topmost ancestor
+      # running it.
+      stub!(ctx.bin, "find", """
+      #!/bin/sh
+      case " $* " in
+        *" -mtime "*)
+          if [ ! -e "#{flag}" ]; then
+            : > "#{flag}"
+            p=$PPID; top=""
+            while [ -n "$p" ] && [ "$p" -gt 1 ]; do
+              if ps -o args= -p "$p" 2>/dev/null | grep -F -q -- "#{@script}"; then top=$p; fi
+              p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+            done
+            [ -n "$top" ] && kill -TERM "$top"
+          fi
+          ;;
+      esac
+      exec #{real_find} "$@"
+      """)
+
+      assert {_out, 143} = backup(ctx, "prune")
+      assert File.exists?(flag)
+
+      assert {:ok, %{outcome: :skipped, reason: "prune stopped (exit 143)"}} =
+               prune_status(ctx)
+    end
+
+    # No path can make a reason this long on macOS (PATH_MAX is 1024), so
+    # write_prune_status runs on its own, with the helpers it calls, taken
+    # from the script as they are.
+    test "a long reason is cut to 1000 bytes, whole characters only", ctx do
+      functions =
+        ~S"""
+        sed -n '/^json_escape() {/,/^}/p; /^utf8_clean() {/,/^}/p; /^write_prune_status() {/,/^}/p' "$1"
+        """
+
+      # Odd: the cut at byte 1000 falls inside a two-byte character. Quotes
+      # and backslashes double when escaped.
+      reason = "x" <> String.duplicate("é", 600) <> String.duplicate(~S(\"), 400)
+
+      assert {_out, 0} =
+               System.cmd(
+                 "bash",
+                 [
+                   "-c",
+                   ~S"""
+                   set -euo pipefail
+                   eval "$(sh -c "$FUNCTIONS" sh "$SCRIPT")"
+                   PRUNE_STATUS_FILE=.kiln-prune-status.json
+                   write_prune_status skipped "$REASON" 1
+                   """
+                 ],
+                 env: [
+                   {"FUNCTIONS", functions},
+                   {"SCRIPT", @script},
+                   {"REASON", reason},
+                   {"BACKUP_DIR", ctx.backups},
+                   {"LC_ALL", "C"}
+                 ],
+                 stderr_to_stdout: true
+               )
+
+      assert File.stat!(status_file(ctx)).size < 4096
+      assert {:ok, %{outcome: :skipped, reason: cut}} = prune_status(ctx)
+      assert String.valid?(cut)
+      assert byte_size(cut) in 998..1000
+      assert String.starts_with?(reason, cut)
+      # That the app applies such a file: PruneStatusTest.
+    end
+
     test "prune removes its own status temporary file past the grace, and only that", ctx do
       gone = abandoned!(ctx, ".kiln-prune-status.json.4242-100042.tmp", 120)
 

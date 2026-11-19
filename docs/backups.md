@@ -598,8 +598,10 @@ couldn't be removed (…)", adds a `prune` line at warning level to the run's
 log, and shows a "Retention stopped part-way …: a stale hold marker it
 couldn't remove kept …" line on **Backups** and **Home**
 ([When retention is skipped or stops](#when-retention-is-skipped-or-stops)).
-Remove the entry by hand (or fix its permissions); the next in-app backup
-prunes the backup and clears the line. `backup.sh prune` never removes a
+A hold found still in place right before the delete keeps its backup the
+same way ("Retention kept … its hold marker … was still there right before
+the delete"). Remove the entry by hand (or fix its permissions); the next
+in-app backup prunes the backup and clears the line. `backup.sh prune` never removes a
 hold and keeps every backup that has one, so it keeps that backup too.
 
 **Turn it on.** Replace the host's copy of `scripts/backup.sh` (the one your
@@ -847,7 +849,8 @@ A line goes away:
   that directory. Nothing else clears it: a cron prune, a marker sync, or a
   retention dry run from the console doesn't. A cron prune's line is its
   own: it goes after the next clean `backup.sh prune` in that directory has
-  been read (within 15 minutes), and an in-app pass doesn't clear it. It is also left out while no
+  been read (within 15 minutes), or once the status file is gone or older
+  than eight days, and an in-app pass doesn't clear it. It is also left out while no
   live node (a backup heartbeat in the last day, or the node reading the
   status) reports that directory's id, so a directory nobody backs up to any
   more doesn't keep the alarm on. A directory without an id is always
@@ -898,17 +901,24 @@ renamed into place):
 ```
 
 `outcome` is `ok`, `skipped` (nothing was pruned, for the reasons above) or
-`partial` (it ran but warned: `reason` is the first warning, `warnings` how
-many there were). It holds no secret, only paths in `BACKUP_DIR`. The app's
+`partial` (it ran but warned: `reason` is the first warning, cut to 1000
+bytes, and `warnings` how many there were). A prune stopped part-way (a
+signal, or a command that failed) writes `skipped` with `prune stopped (exit N)`, `N` being the exit status.
+It holds no secret, only paths in `BACKUP_DIR`. The app's
 marker sync (`KilnCMS.Backups.MarkerSyncWorker`, every 15 minutes) reads it on
 each node's own backup directory and shows `skipped` and `partial` as a line on
 **Backups** and **Home** (above), dated by the prune, until a clean prune's
 `ok` is read. It never reads the file while a page loads. A file it can't
 use (not that JSON, larger than 4 KB, or dated ahead of the node's clock) is
 ignored with a warning in the server log ("Ignored …/.kiln-prune-status.json:
-…"), and one older than eight days with an info line; either leaves the line
-as it was. A host whose `backup.sh` predates #3003 writes no file, and nothing
-is shown for it. The app's own prune writes no such file: it records its
+…") and leaves the line as it was. A file older than eight days, or no file
+at all, clears the line: cron is no longer reporting on that directory, and
+the backup's own staleness alarm covers a cron that stopped (an old file is
+also logged at info level). A host whose `backup.sh` predates #3003 writes
+no file, and nothing is shown for it. To clear a line by hand once the
+problem is fixed, run `scripts/backup.sh prune` on the host (its `ok` is read
+within 15 minutes), or delete `$BACKUP_DIR/.kiln-prune-status.json` on a
+host that no longer prunes with cron. The app's own prune writes no such file: it records its
 outcome directly, as its own line, so neither prune clears the other's. A
 `.kiln-prune-status.json.<pid>-<random>.tmp` left by a prune stopped between
 its write and its rename is removed by the next prune once it is an hour old.

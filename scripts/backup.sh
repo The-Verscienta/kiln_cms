@@ -789,6 +789,9 @@ on_exit() {
     write_manifest false "${LAST_ERROR:-backup.sh exited ${status} - see the backup log}"
   fi
 
+  # A prune `all` was in the middle of (#3003).
+  prune_interrupted "$status"
+
   # Last: this run's stamp claim (claim_stamp), success or failure. Only the
   # directory this run made, and rmdir, which never removes anything inside.
   if [ -n "$CLAIM_DIR" ]; then
@@ -2441,9 +2444,13 @@ PRUNE_STATUS_FILE=".kiln-prune-status.json"
 
 write_prune_status() {
   # $1 = outcome, $2 = reason (may be empty), $3 = the number of warnings
-  local out="$BACKUP_DIR/$PRUNE_STATUS_FILE" tmp="" reason="null" _
+  local out="$BACKUP_DIR/$PRUNE_STATUS_FILE" tmp="" reason="null" r="${2:-}" _
   [ -d "$BACKUP_DIR" ] || return 0
-  [ -n "${2:-}" ] && reason="\"$(json_escape "$2")\""
+  # At most 1000 characters (bytes, in the C locale), so the file stays far
+  # below the 4 KiB the app reads even once escaped; json_escape's
+  # utf8_clean drops a multibyte character the cut split.
+  r="${r:0:1000}"
+  if [ -n "$r" ]; then reason="\"$(json_escape "$r")\""; fi
   for _ in 1 2 3 4 5; do
     tmp="${out}.$$-$((RANDOM + 100000)).tmp"
     if [ ! -e "$tmp" ] && [ ! -L "$tmp" ] && (set -C && : > "$tmp") 2>/dev/null; then
@@ -2461,6 +2468,27 @@ write_prune_status() {
   fi
   rm -f -- "$tmp"
   echo "warning: could not write $out" >&2
+}
+
+# A prune that stopped before it finished (a command that failed under
+# `set -e`, a signal): `skipped`, "prune stopped (exit <status>)", so the app
+# doesn't go on showing the outcome of the prune before it. Called from the
+# exit trap (on_exit for `all`, the one `prune` installs for itself) with the
+# exit status; does nothing unless a prune is in progress (PRUNE_WARNINGS is
+# set from cmd_prune's start until it has written its own status).
+prune_interrupted() {
+  [ -n "${PRUNE_WARNINGS:-}" ] || return 0
+  PRUNE_WARNINGS=""
+  write_prune_status skipped "prune stopped (exit ${1:-1})" 0 || true
+}
+
+# `prune` on its own has no on_exit: an exit trap that only records a prune
+# cut short, and signals turned into an exit so that trap runs.
+install_prune_traps() {
+  trap 'prune_interrupted "$?"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 }
 
 # A prune that deletes nothing at all: the warning, the status, and stop
@@ -2697,6 +2725,6 @@ case "${1:-}" in
   # the value `prune` would have used.
   all) WRITE_MANIFEST=1; read_keep_days; install_traps; claim_stamp; start_heartbeat; cmd_all ;;
   verify) cmd_verify ;;
-  prune) read_keep_days; cmd_prune ;;
+  prune) read_keep_days; install_prune_traps; cmd_prune ;;
   *) die "usage: $0 {db|media|all|verify|prune}" ;;
 esac

@@ -61,7 +61,8 @@ defmodule KilnCMS.Backups.Notices do
           {:local, Path.t()} | {:cron, Path.t()} | {:destination, String.t(), String.t() | nil}
 
   @typedoc "How the pass went."
-  @type result :: :ok | {:skipped, term()} | {:stopped, term(), non_neg_integer()}
+  @type result ::
+          :ok | {:skipped, term()} | {:stopped, term(), non_neg_integer() | nil}
 
   @typedoc "A held backup found deleted: its stamp and kind."
   @type unit :: %{stamp: String.t(), kind: :db | :media}
