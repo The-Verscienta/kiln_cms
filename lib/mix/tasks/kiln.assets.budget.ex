@@ -30,8 +30,8 @@ defmodule Mix.Tasks.Kiln.Assets.Budget do
       mix kiln.assets.budget                # both bundles
       mix kiln.assets.budget --only public  # public.js alone, no npm needed
 
-  `--only public` needs nothing but the esbuild binary (`mix esbuild.install
-  --if-missing`) and `deps/`; that is what CI runs. app.js also needs
+  `--only public` needs nothing but `deps/` and the esbuild binary, which
+  `mix esbuild.install --if-missing` fetches; that is what CI runs. app.js also needs
   `assets/node_modules` (`npm install --prefix assets`) and a compiled
   project, for the colocated hooks.
   """

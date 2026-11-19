@@ -137,7 +137,12 @@ jobs:
         # `js/challenge.js`, or a size over budget. `--only public`: app.js
         # needs `npm ci`, which this job does not run; public.js needs only
         # deps/ and the esbuild binary.
-        run: mix esbuild.install --if-missing && mix kiln.assets.budget --only public
+        # The esbuild binary comes from the npm registry when the cached _build
+        # lacks it (cold cache, version bump); retry_download.sh rides out a
+        # transient fetch failure, as in the Dockerfile.
+        run: |
+          sh rel/docker/retry_download.sh mix esbuild.install --if-missing
+          mix kiln.assets.budget --only public
 
       - name: Check the toolchain declarations agree
         # .tool-versions is the source of truth, and this job already reads it

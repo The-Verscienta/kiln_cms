@@ -242,7 +242,7 @@ defmodule KilnCMSWeb.JsBundleTest do
       end
     end
 
-    test "app.js when public.js was not built; only a hit is memoized" do
+    test "app.js when public.js was not built, and the answer is memoized" do
       Layouts.put_public_bundle_built(false)
       assert Layouts.js_bundle_path(%{js_bundle: :public}) =~ "/assets/js/app.js"
 
@@ -255,11 +255,8 @@ defmodule KilnCMSWeb.JsBundleTest do
         |> File.exists?()
 
       assert Layouts.public_bundle_built?() == built?
-      # A hit is kept for the life of the VM; a miss is looked up again next
-      # time, so a dev server that boots before its watcher wrote the file
-      # still picks it up.
-      assert :persistent_term.get({Layouts, :public_bundle_built?}, nil) ==
-               if(built?, do: true, else: nil)
+      # Without the code reloader (test, prod) the answer is kept, hit or miss.
+      assert :persistent_term.get({Layouts, :public_bundle_built?}) == built?
     end
   end
 end

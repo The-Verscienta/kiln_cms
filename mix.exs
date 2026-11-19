@@ -92,7 +92,9 @@ defmodule KilnCMS.MixProject do
       dialyzer: [
         # :excoveralls is `runtime: false`, so it is not in the PLT by default —
         # and `mix kiln.coverage.merge` (test/support) calls it directly.
-        plt_add_apps: [:mix, :ex_unit, :excoveralls],
+        # :esbuild is `runtime: Mix.env() == :dev`, so it is not in the test PLT
+        # either — and `mix kiln.assets.budget` (#2402) calls it directly.
+        plt_add_apps: [:mix, :ex_unit, :excoveralls, :esbuild],
         plt_local_path: "priv/plts",
         plt_core_path: "priv/plts",
         ignore_warnings: ".dialyzer_ignore.exs",

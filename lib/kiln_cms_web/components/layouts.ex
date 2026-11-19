@@ -76,11 +76,12 @@ defmodule KilnCMSWeb.Layouts do
   end
 
   @doc """
-  Whether `priv/static/assets/js/public.js` exists. Once it does, the answer is
-  kept in `:persistent_term`: a running release's build does not change, and
-  every delivered page asks. A miss is not kept, so a dev server that boots
-  before its esbuild watcher has written the file picks it up on a later
-  request instead of serving app.js until restart.
+  Whether `priv/static/assets/js/public.js` exists. Outside dev the answer,
+  hit or miss, is looked up once per VM and kept in `:persistent_term`: a
+  running release's build does not change, and every delivered page asks.
+  Under the code reloader it is looked up on every call, so a dev server that
+  boots before its esbuild watcher wrote the file, or whose assets were
+  cleaned, follows the disk instead of a stale answer.
   """
   @spec public_bundle_built?() :: boolean()
   def public_bundle_built? do
@@ -91,12 +92,18 @@ defmodule KilnCMSWeb.Layouts do
           |> Application.app_dir("priv/static/assets/js/public.js")
           |> File.exists?()
 
-        if built?, do: :persistent_term.put(@public_bundle_key, true)
+        unless code_reloading?(), do: :persistent_term.put(@public_bundle_key, built?)
         built?
 
       built? ->
         built?
     end
+  end
+
+  defp code_reloading? do
+    :kiln_cms
+    |> Application.get_env(KilnCMSWeb.Endpoint, [])
+    |> Keyword.get(:code_reloader, false)
   end
 
   @doc false
