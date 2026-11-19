@@ -492,6 +492,23 @@ defmodule KilnCMS.Backups.UploadsTest do
       assert why =~ "refused to abort"
     end
 
+    test "an abort that hangs is cut at its own bound, not the step's deadline (#2950)", %{
+      put: put,
+      store: store
+    } do
+      config = config(store, %{"abort_mode" => "sleep"})
+      seed_row(config, put, %{status: :abandoned})
+      step_deadline = System.monotonic_time(:millisecond) + :timer.hours(1)
+      started = System.monotonic_time(:millisecond)
+
+      assert %{aborted: 0, failed: 1} =
+               Uploads.sweep(config, key(config), step_deadline, abort_call_ms: 100)
+
+      assert System.monotonic_time(:millisecond) - started < 5_000
+      assert [%Upload{status: :abandoned, last_error: why}] = rows()
+      assert why =~ "timed out"
+    end
+
     test "purges closed uploads and a deleted destination's after 30 days, on any destination",
          %{put: put, store: store} do
       config = config(store)

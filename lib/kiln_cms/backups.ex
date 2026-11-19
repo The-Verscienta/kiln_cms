@@ -765,6 +765,17 @@ defmodule KilnCMS.Backups do
   def rclone_remote, do: config(:rclone_remote, nil)
 
   @doc """
+  Whether in-app backups prune `rclone_remote/0` (`BACKUP_RCLONE_REMOTE_PRUNE`,
+  default false, #2950): only the backups this backup directory's in-app
+  runs sent there, by the same keep rules as `BACKUP_DIR`, and never while a
+  stored destination could overlap it (`KilnCMS.Backups.Retention`, "On an
+  off-site destination"). `scripts/backup.sh` never reads it: cron never
+  prunes the remote.
+  """
+  @spec rclone_remote_prune?() :: boolean()
+  def rclone_remote_prune?, do: config(:rclone_remote_prune, false) == true
+
+  @doc """
   Local retention in days — the script's `BACKUP_KEEP_DAYS`. A backup older
   than this may be deleted unless a keep rule holds it (the newest verified and
   newest complete backup of each component, a recovery point, one in flight);
@@ -1190,7 +1201,8 @@ defmodule KilnCMS.Backups do
     end
   end
 
-  # `%{key => label}` of the destinations retention still runs on; nil when
+  # `%{key => label}` of the destinations retention still runs on, the env
+  # remote included while BACKUP_RCLONE_REMOTE_PRUNE is on (#2950); nil when
   # they can't be read or nothing needs them.
   defp pruned_destinations([]), do: nil
 
@@ -1199,12 +1211,19 @@ defmodule KilnCMS.Backups do
       {:ok, rows} ->
         for row <- rows,
             row.enabled and row.prune,
-            into: %{},
+            into: pruned_env(),
             do: {DestinationConfig.key(row), KilnCMS.Backups.Redact.text(row.name)}
 
       {:error, error} ->
         notices_unreadable(error)
         nil
+    end
+  end
+
+  defp pruned_env do
+    case rclone_remote_prune?() && KilnCMS.Backups.Destination.env_destination() do
+      %{"key" => key, "label" => label} -> %{key => label}
+      _off_or_unset -> %{}
     end
   end
 

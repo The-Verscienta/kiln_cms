@@ -531,6 +531,80 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
       refute has_element?(lv, "#backup-destinations-empty")
     end
 
+    test "the Prunes badge shows only where a pass would prune; otherwise why not (#2950)", %{
+      conn: conn
+    } do
+      pruned = fake!(%{name: "Pruned"})
+      unpruned = fake!(%{name: "Unpruned", prune: false})
+
+      lv = mount(conn)
+      pruned_row = "#backup-destination-#{pruned.id}"
+
+      assert has_element?(lv, "#{pruned_row} [data-role=prunes]", "Prunes its old backups")
+      refute has_element?(lv, "#{pruned_row} [data-role=prune-blocked]")
+
+      for role <- ~w(prunes prune-blocked) do
+        refute has_element?(lv, "#backup-destination-#{unpruned.id} [data-role=#{role}]")
+      end
+
+      # A plugin's location can't be told apart from the env remote: retention
+      # skips it, and the badge says so rather than "Prunes".
+      put_backups(rclone_remote: "offsite:kiln/backups")
+      lv = mount(conn)
+
+      refute has_element?(lv, "#{pruned_row} [data-role=prunes]")
+
+      assert has_element?(
+               lv,
+               "#{pruned_row} [data-role=prune-blocked]",
+               "Not pruned: it can't be compared with BACKUP_RCLONE_REMOTE"
+             )
+
+      refute has_element?(lv, "#backup-destination-#{unpruned.id} [data-role=prune-blocked]")
+    end
+
+    test "the env destination says its pruning is off by default", %{conn: conn} do
+      put_backups(rclone_remote: "offsite:kiln/backups")
+      lv = mount(conn)
+
+      assert has_element?(
+               lv,
+               "#backup-destination-env [data-role=env-prune]",
+               "The app doesn't prune it: BACKUP_RCLONE_REMOTE_PRUNE is off."
+             )
+
+      refute has_element?(lv, "#backup-destination-env [data-role=prunes]")
+    end
+
+    test "with BACKUP_RCLONE_REMOTE_PRUNE on, the env destination prunes, or says why not", %{
+      conn: conn
+    } do
+      put_backups(rclone_remote: "offsite:kiln/backups", rclone_remote_prune: true)
+      lv = mount(conn)
+
+      assert has_element?(lv, "#backup-destination-env [data-role=prunes]")
+
+      assert has_element?(
+               lv,
+               "#backup-destination-env [data-role=env-prune]",
+               "In-app backups delete the old backups they sent here"
+             )
+
+      # Any stored destination it can't be told apart from blocks it, a
+      # disabled one included.
+      fake!(%{enabled: false})
+      lv = mount(conn)
+
+      refute has_element?(lv, "#backup-destination-env [data-role=prunes]")
+
+      assert has_element?(
+               lv,
+               "#backup-destination-env [data-role=prune-blocked]",
+               "BACKUP_RCLONE_REMOTE_PRUNE is on, but nothing is pruned here: " <>
+                 "a destination's location can't be told"
+             )
+    end
+
     test "a connection-string env remote's credentials never reach the page", %{conn: conn} do
       put_backups(rclone_remote: ":s3,access_key_id=AKIAEXAMPLE,secret_access_key=hunter2:bucket")
       {:ok, _lv, html} = conn |> log_in(platform_admin()) |> live(@path)

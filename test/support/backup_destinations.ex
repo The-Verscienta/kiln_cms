@@ -329,7 +329,8 @@ defmodule KilnCMS.Test.BackupDestinations do
         first chunk's save, tells `"notify"`
         `{:resumable_fake, :blocked, name, self()}` and waits for `:continue`
         (or to be killed);
-      * `"abort_mode"` — `"fail"`: `abort_upload/3` refuses;
+      * `"abort_mode"` — `"fail"`: `abort_upload/3` refuses; `"sleep"`: it
+        sleeps 10 s first (#2950);
       * `"put_return"` — `"weird_ok"`: `put/3` answers `{:ok, :weird}`;
         `"deadline"`: `{:error, :deadline}`, as one that stopped at the
         step's deadline does (#3082);
@@ -407,6 +408,8 @@ defmodule KilnCMS.Test.BackupDestinations do
     def abort_upload(%{settings: settings}, %{name: name, checkpoint: checkpoint}, _opts) do
       id = checkpoint && checkpoint["upload_id"]
       tell(settings, :abort, %{name: name, upload_id: id})
+
+      if settings["abort_mode"] == "sleep", do: Process.sleep(10_000)
 
       if settings["abort_mode"] == "fail" do
         {:error, "the store refused to abort the upload"}

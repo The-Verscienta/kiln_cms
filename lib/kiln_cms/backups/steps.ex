@@ -2674,9 +2674,10 @@ defmodule KilnCMS.Backups.Steps do
   # Retention on the destination just reached (#2220, ADR 0064), when its
   # `prune` is on and its adapter can list and delete: only what this
   # installation recorded sending there is ever deleted
-  # (`Retention.run_on_destination/3`). Only a stored destination matches the
-  # first clause; the env destination (`BACKUP_RCLONE_REMOTE`) is never
-  # pruned, and `Retention` refuses any key but `"dest:<id>"` as well.
+  # (`Retention.run_on_destination/3`). The env destination
+  # (`BACKUP_RCLONE_REMOTE`) is pruned only while `BACKUP_RCLONE_REMOTE_PRUNE`
+  # is on (#2950), and then only of what this backup directory's in-app runs
+  # sent there; `Retention` refuses it as well when the switch is off.
   #
   # Whatever happens here, the destination's upload status stays as it is:
   # a pass that can't start deletes nothing and says so on the run. It runs
@@ -2706,6 +2707,15 @@ defmodule KilnCMS.Backups.Steps do
         {:error, reason} ->
           prune_skipped(rec, ctx, entry, reason)
       end
+    else
+      Notices.retention(notice_scope(entry), :ok)
+      rec
+    end
+  end
+
+  defp prune_destination(rec, ctx, %{entry: %{"source" => "env"} = entry} = dest, config) do
+    if Backups.rclone_remote_prune?() do
+      prune_on(rec, ctx, entry, config, dest.deadline)
     else
       Notices.retention(notice_scope(entry), :ok)
       rec
@@ -2755,7 +2765,7 @@ defmodule KilnCMS.Backups.Steps do
 
         rec
         |> log_pruned(label, result)
-        |> log_not_sent_here(label, result.unowned)
+        |> log_not_sent_here(entry, result.unowned)
         |> Recorder.put_run_destination(entry["key"], %{pruned: result.units})
 
       {:error, reason} ->
@@ -2815,9 +2825,11 @@ defmodule KilnCMS.Backups.Steps do
 
   # Old enough to go, but not this installation's to delete: said on every
   # run, so an admin sharing a bucket sees what is piling up there.
-  defp log_not_sent_here(rec, _label, []), do: rec
+  # On the env remote the record must be an in-app run of this backup
+  # directory (#2950): a cron-made backup there is left, and said so.
+  defp log_not_sent_here(rec, _entry, []), do: rec
 
-  defp log_not_sent_here(rec, label, unowned) do
+  defp log_not_sent_here(rec, entry, unowned) do
     shown =
       unowned
       |> Enum.map(&"#{&1.kind} #{&1.stamp}")
@@ -2825,12 +2837,17 @@ defmodule KilnCMS.Backups.Steps do
 
     more = if length(shown) > 10, do: ", and #{length(shown) - 10} more", else: ""
 
+    whose =
+      if entry["source"] == "env",
+        do: "no in-app backup of this backup directory sent there",
+        else: "this installation has no record of sending there"
+
     Recorder.log(
       rec,
       :warn,
       "offsite",
-      "Retention on #{label} left #{length(shown)} old backup(s) this installation has " <>
-        "no record of sending there: " <> Enum.join(Enum.take(shown, 10), ", ") <> more
+      "Retention on #{entry["label"]} left #{length(shown)} old backup(s) #{whose}: " <>
+        Enum.join(Enum.take(shown, 10), ", ") <> more
     )
   end
 

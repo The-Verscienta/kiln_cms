@@ -1,6 +1,9 @@
 # 0064. Retention on a backup destination deletes only what this installation sent there
 
-- **Status** — accepted (2026-11-15).
+- **Status** — accepted (2026-11-15); amended 2026-11-18 by
+  [#2950](https://github.com/The-Verscienta/kiln_cms/issues/2950)
+  (`BACKUP_RCLONE_REMOTE` may be pruned by explicit opt-in, and each
+  retention call has its own time limit, see "Amendment").
 - **References** — [#2220](https://github.com/The-Verscienta/kiln_cms/issues/2220)
   and the owner's approval of its decision E4 "all as proposed"
   (2026-11-15), with the critic's change 2 (where a destination writes is
@@ -58,8 +61,10 @@ earlier pass that stopped part-way). Anything else is left in place and
 named in the run's log: "Retention on NAS left 2 old backup(s) this
 installation has no record of sending there: db 20261101-031700, …".
 
-**`BACKUP_RCLONE_REMOTE` is never pruned by the app.** Only a `"dest:<id>"`
-key is accepted. Nothing changes for the env remote.
+**`BACKUP_RCLONE_REMOTE` is not pruned by the app unless the operator
+turns it on** (`BACKUP_RCLONE_REMOTE_PRUNE`, off by default; see
+"Amendment"). Without that switch only a `"dest:<id>"` key is accepted, and
+nothing changes for the env remote.
 
 **Where a destination writes is fixed, and destinations may not overlap.**
 Ownership is recorded against a key, not a place, so the key must never
@@ -79,7 +84,10 @@ come to mean another place:
   plugin's destination, whose settings mean nothing to Kiln, can't be
   compared with anything: with `BACKUP_RCLONE_REMOTE` set it is skipped
   ("can't confirm it doesn't overlap BACKUP_RCLONE_REMOTE"); without it, it
-  is pruned on the ownership rule alone.
+  is pruned on the ownership rule alone. Letting a plugin say where it
+  writes (an optional SDK callback) is a separate follow-up,
+  [#3118](https://github.com/The-Verscienta/kiln_cms/issues/3118); until
+  then a plugin's location stays unknown, and this rule fails closed.
 
 **It fails closed.** A retention policy that can't be resolved, a local
 backup directory that can't be listed, a destination listing that fails, a
@@ -120,10 +128,10 @@ under the other key, and is not deleted through this one.
 - **Upload the markers so a destination can "see" them.** It would make a
   file on a remote, writable by whoever else holds the bucket's keys, a
   reason to keep or not. Recovery points are decided on this host.
-- **Prune `BACKUP_RCLONE_REMOTE` too.** It changes what an operator who
-  configured cron and the env remote has relied on, with no switch they
-  asked for. An opt-in, under the same ownership rule, is a possible
-  follow-up.
+- **Prune `BACKUP_RCLONE_REMOTE` too, by default.** It changes what an
+  operator who configured cron and the env remote has relied on, with no
+  switch they asked for. The opt-in this was left for is the amendment
+  below.
 - **Let a destination's location be edited.** The key's ownership record
   would then license deleting, at the new place, what was sent to the old
   one.
@@ -139,9 +147,56 @@ under the other key, and is not deleted through this one.
   their runs, and counts the units on the run that pruned them
   (`RunDestination.pruned`).
 
+## Amendment (2026-11-18, #2950): pruning the env remote by opt-in, and a time limit per call
+
+The owner decided, on the issue, to build the opt-in this record
+left open, and to bound each retention call on its own.
+
+- **`BACKUP_RCLONE_REMOTE_PRUNE=true` lets in-app backups prune the env
+  remote.** Off by default, read only by the app (`config/runtime/prod/backups.exs`).
+  The in-app off-site step prunes the env destination right after it is
+  reached, as it does a stored one; with the switch off, any retention
+  notice left on the env remote is cleared. `scripts/backup.sh` never reads
+  the switch and never prunes the remote, so it does nothing on a
+  cron-only install.
+- **Ownership is narrower there.** Cron copies to the env remote under the
+  same key (`"rclone:<remote>"`) that in-app backups record, so a record
+  under that key alone would let the app delete cron's backups. A unit on
+  the env remote is deleted only when its Run is an in-app run
+  (`origin: :app`) that recorded the copy under the env key (`ok`, or
+  `pruned` by an earlier pass that stopped part-way) **and** whose `dir_id`
+  is this node's current `.kiln-dir-id`. An imported (cron) run, or a run
+  of another backup directory, never makes a file there deletable. A node
+  with no `.kiln-dir-id` deletes nothing.
+- **The overlap rule is stricter for the env remote than for a stored
+  destination.** It is pruned only when no stored destination, enabled or
+  not, could share its place: one whose location can't be told (a
+  plugin's), an S3 destination (a remote may name the same bucket under
+  any name), or one that overlaps it (`Destination.overlap?/2`) blocks it.
+  The check runs before every pass and is the one
+  `Retention.prune_blocker/3` applies; the Destinations tab shows the same
+  answer, so its **Prunes its old backups** badge, on the env row and on
+  each stored one, appears only where a pass would prune.
+- **How a local env remote compares.** A remote with no `name:` (a plain
+  path) is a local directory for the comparison, and so overlaps a Local
+  destination at, above or inside that path. A remote written through an
+  inline backend (`:local:/mnt/backups`) is compared by that backend name
+  like any named remote, so it is never matched against a Local
+  destination's path; the ownership rule still holds there, since a Local
+  destination's sends are recorded under its own key.
+- **Each `list` and `delete` call has its own bound** (10 minutes for a
+  listing, 60 seconds for a delete), or the step's deadline when that
+  comes first, passed as the call's `:deadline` and worked out right
+  before each call. A listing past its bound is a skip, as one that fails
+  is; a delete past its bound stops the pass. A delete stopped at its
+  bound may already have removed the file at the store; it is not marked
+  `pruned`, and the next pass no longer lists it, so nothing is lost. The
+  upload sweep's aborts are bounded the same way (60 seconds each).
+
 ## When to revisit
 
-- If pruning `BACKUP_RCLONE_REMOTE` is ever wanted, it takes this record's
-  ownership rule as is, behind an explicit switch.
+- If pruning `BACKUP_RCLONE_REMOTE` should apply to cron-made backups too,
+  cron would need its own record of which installation and directory sent
+  each file; until then they are left for the operator's lifecycle rule.
 - If a store can report who wrote an object, ownership could be read from
   the store as well as from the Run history.
