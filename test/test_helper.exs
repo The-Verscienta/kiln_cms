@@ -178,6 +178,12 @@ backup_scale_exclusion = [:backup_scale]
 #     mix test --only benchmark test/kiln_cms/accounts/throttle_store_sharded_benchmark_test.exs
 benchmark_exclusion = [:benchmark]
 
+# The exhaustive referrer-suppression search (#3123): thresholds 2-20, four to
+# six categories, totals to 40, 30 and 20. Slow, so it runs only when asked:
+#
+#     mix test --only slow_sweep test/kiln_cms/analytics/referrer_suppression_test.exs
+slow_sweep_exclusion = [:slow_sweep]
+
 # Not tests: rewrite the schema-export fixture and goldens, and the SwiftUI
 # reader example's models. Run them with `--only regenerate_schema_goldens` /
 # `--only regenerate_swiftui_models` (see their moduledocs).
@@ -218,7 +224,8 @@ else
         swiftc_exclusion ++
         kotlinc_exclusion ++
         regenerate_exclusion ++
-        backup_scale_exclusion ++ benchmark_exclusion ++ core_registry_exclusion
+        backup_scale_exclusion ++
+        benchmark_exclusion ++ slow_sweep_exclusion ++ core_registry_exclusion
   )
 end
 

@@ -204,9 +204,15 @@ defmodule KilnClientDeliveryTest do
       end)
 
       assert {:error, %Error{status: 503}} = KilnClient.sync_page()
+      assert Agent.get(counter, & &1) == 1
+
+      Agent.update(counter, fn _ -> 0 end)
+      assert {:error, %Error{status: 503}} = KilnClient.sync_page(nil, retries: 0)
+      assert Agent.get(counter, & &1) == 1
 
       Agent.update(counter, fn _ -> 0 end)
       assert {:ok, @page} = KilnClient.sync_page(nil, retries: 1, retry_delay_ms: 0)
+      assert Agent.get(counter, & &1) == 2
     end
   end
 

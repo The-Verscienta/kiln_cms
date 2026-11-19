@@ -234,8 +234,9 @@ Each refusal is `KilnCMS.Accounts.Errors.DemoAccountLocked` (forbidden-class):
 changed"*. It is a validation on each action
 (`KilnCMS.Accounts.Validations.NotDemoSharedAccount`), not a check in the
 settings page, so it holds for every caller, including the WebAuthn ceremony,
-which writes the passkey with `authorize?: false`. The settings page hides
-those forms and shows the same sentence in their place.
+which writes the passkey with `authorize?: false`. `/editor/settings`
+and `/account/two-factor` both hide those forms (the passkey and authenticator
+sections on the account page) and show the same sentence in their place.
 
 - **Admins are exempt.** The operator curates the demo as an admin, and can
   still repair the shared account from the console, their own account

@@ -384,6 +384,8 @@ still in its claim state, so an abandon during the run is not overwritten.
 `destroy` lands only on a release that is not mid-flight and never published.
 `KilnCMS.CMS.Releases.stale?/1` tells a caller that a refusal means "someone
 else moved it": re-read the release, don't retry.
+The rule, and why a held struct or a `lock_version` can't stand in for it, is
+[ADR 0074](decisions/0074-a-state-transition-is-a-compare-and-swap-on-its-from-states-and-a-triggers-action-filters-on-the-triggers-where.md).
 
 The two claims are separate actions. **Publish now** runs `start`, which
 accepts an `open` or `scheduled` release. The `:go_live` AshOban trigger runs

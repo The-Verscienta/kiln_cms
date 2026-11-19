@@ -624,4 +624,89 @@ defmodule KilnCMS.Experiments.LifecycleTest do
       assert remaining == []
     end
   end
+
+  # ADR 0074 (#3122): every transition is a compare-and-swap on its from-states.
+  # The state machine judges the struct the caller holds, so a second call from
+  # a struct loaded before the first passes the machine; only the filter on the
+  # UPDATE refuses it.
+  describe "a transition from a stale struct" do
+    setup ctx do
+      experiment = experiment!(ctx)
+      control = ExperimentFixtures.variant!(experiment, "Control", %{}, ctx.org_id, control: true)
+      treatment = ExperimentFixtures.variant!(experiment, "B", %{}, ctx.org_id, [])
+      %{draft: experiment, control: control, treatment: treatment}
+    end
+
+    test "a second :start is stale and changes nothing", ctx do
+      opts = [authorize?: false, tenant: ctx.org_id]
+      assert {:ok, first} = Experiments.start_experiment(ctx.draft, opts)
+
+      # `ctx.draft` still says :draft, so the machine says yes.
+      assert {:error, error} = Experiments.start_experiment(ctx.draft, opts)
+      assert stale_record?(error)
+
+      reread = Experiments.get_experiment!(ctx.draft.id, opts)
+      assert reread.state == :running
+      assert reread.started_at == first.started_at
+    end
+
+    test "a second :conclude keeps the first winner and notifies once", ctx do
+      opts = [authorize?: false, tenant: ctx.org_id]
+      {:ok, running} = Experiments.start_experiment(ctx.draft, opts)
+
+      endpoint =
+        CMS.create_webhook_endpoint!(
+          %{url: "https://receiver.test/hook", events: ["experiment.concluded"], active: true},
+          authorize?: false,
+          tenant: ctx.org_id
+        )
+
+      assert {:ok, first} = Experiments.conclude_experiment(running, ctx.treatment.id, opts)
+
+      assert {:error, error} = Experiments.conclude_experiment(running, ctx.control.id, opts)
+      assert stale_record?(error)
+
+      reread = Experiments.get_experiment!(ctx.draft.id, opts)
+      assert reread.state == :concluded
+      assert reread.winner_variant_id == ctx.treatment.id
+      assert reread.concluded_at == first.concluded_at
+
+      deliveries = Ash.read!(CMS.WebhookDelivery, authorize?: false, tenant: ctx.org_id)
+      assert [_one] = Enum.filter(deliveries, &(&1.endpoint_id == endpoint.id))
+    end
+
+    test "an :archive of a concluded experiment from a running struct still lands once", ctx do
+      opts = [authorize?: false, tenant: ctx.org_id]
+      {:ok, running} = Experiments.start_experiment(ctx.draft, opts)
+      assert {:ok, _} = Experiments.conclude_experiment(running, nil, opts)
+
+      # :concluded is among archive's from-states, so this is not stale.
+      assert {:ok, archived} = Experiments.archive_experiment(running, opts)
+      assert archived.state == :archived
+
+      # A second archive from the same struct is.
+      assert {:error, error} = Experiments.archive_experiment(running, opts)
+      assert stale_record?(error)
+    end
+
+    test "an editor is refused on a stale struct before staleness is reached", ctx do
+      opts = [authorize?: false, tenant: ctx.org_id]
+      {:ok, running} = Experiments.start_experiment(ctx.draft, opts)
+      assert {:ok, _} = Experiments.conclude_experiment(running, nil, opts)
+
+      editor =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: "lc-ed-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :editor
+        })
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Experiments.conclude_experiment(running, nil, actor: editor, tenant: ctx.org_id)
+    end
+  end
+
+  defp stale_record?(%{errors: errors}),
+    do: Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1))
 end

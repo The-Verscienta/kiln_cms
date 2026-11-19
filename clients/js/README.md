@@ -462,14 +462,14 @@ export async function POST(request: Request) {
 For tools _about_ the content — migrations, audit exports, launch dashboards —
 not for a delivery site. Anonymous calls are a 401 and a viewer's key a 404.
 
-| Method                                 | Endpoint                                                    | Notes                                                |
-| -------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------- |
-| `listRevisions(type, id, opts)`        | `GET /api/content/:type/:id/revisions`                      | newest first; `limit`, `cursor` (`meta.next_cursor`) |
-| `revision(type, id, versionId)`        | `GET /api/content/:type/:id/revisions/:version_id`          | the version's `changes` + full `snapshot`            |
-| `restoreRevision(type, id, versionId)` | `POST /api/content/:type/:id/revisions/:version_id/restore` | `:read_write` key; a read-only key is a 403          |
-| `releases(opts)`                       | `GET /api/json/releases`                                    | read-only; `include: ["items"]`, `filter: {state}`   |
-| `release(id, opts)`                    | `GET /api/json/releases/:id`                                | one release, `included` merged in                    |
-| `releaseItems(opts)`                   | `GET /api/json/release-items`                               | `filter: { release_id }`                             |
+| Method                                 | Endpoint                                                    | Notes                                                                                           |
+| -------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `listRevisions(type, id, opts)`        | `GET /api/content/:type/:id/revisions`                      | newest first; `limit`, `cursor` (`meta.next_cursor`)                                            |
+| `revision(type, id, versionId)`        | `GET /api/content/:type/:id/revisions/:version_id`          | the version's `changes` + full `snapshot`                                                       |
+| `restoreRevision(type, id, versionId)` | `POST /api/content/:type/:id/revisions/:version_id/restore` | `:read_write` key; a read-only key is a 403; no `apiKey` throws `KilnConfigError`, nothing sent |
+| `releases(opts)`                       | `GET /api/json/releases`                                    | read-only; `include: ["items"]`, `filter: {state}`                                              |
+| `release(id, opts)`                    | `GET /api/json/releases/:id`                                | one release, `included` merged in                                                               |
+| `releaseItems(opts)`                   | `GET /api/json/release-items`                               | `filter: { release_id }`                                                                        |
 
 ```ts
 const editorial = createClient({ baseUrl, apiKey: process.env.KILN_EDITOR_KEY });
@@ -586,17 +586,18 @@ Everything the client throws is a `KilnError` (`status`, `code`, the JSON:API
 (`status`, `url`, parsed `body` — unchanged from 0.1, so `isKilnHttpError(err)`
 still narrows) refined by status:
 
-| Class                 | When                                                                                                                             |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `KilnAuthError`       | 401 (no/invalid/expired key) · 403 (the key's owner lacks the right — a `:read` key writing, an editor publishing)               |
-| `KilnNotFoundError`   | 404                                                                                                                              |
-| `KilnValidationError` | 400 / 422 — `pointers` (`/data/attributes/slug`) and `fieldErrors()`. AshJsonApi answers most attribute errors with 400, not 422 |
-| `KilnConflictError`   | 409 — a transition from the wrong state (`code: "invalid_state_transition"`, `currentState`) or a lost race                      |
-| `KilnRateLimitError`  | 429 — wait `retryAfter` seconds                                                                                                  |
-| `KilnServerError`     | 5xx (a 503 may carry `retryAfter`)                                                                                               |
-| `KilnNetworkError`    | no response at all (DNS, refused, TLS); the original error is `cause`                                                            |
-| `KilnGraphQLError`    | `/gql` answered with top-level `errors`                                                                                          |
-| `KilnConfigError`     | refused client-side — a write with no `apiKey` (`code: "missing_api_key"`)                                                       |
+| Class                     | When                                                                                                                                                                                                |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KilnAuthError`           | 401 (no/invalid/expired key) · 403 (the key's owner lacks the right — a `:read` key writing, an editor publishing)                                                                                  |
+| `KilnNotFoundError`       | 404                                                                                                                                                                                                 |
+| `KilnValidationError`     | 400 / 422 — `pointers` (`/data/attributes/slug`) and `fieldErrors()`. AshJsonApi answers most attribute errors with 400, not 422                                                                    |
+| `KilnConflictError`       | 409 — a transition from the wrong state (`code: "invalid_state_transition"`, `currentState`) or a lost race                                                                                         |
+| `KilnRateLimitError`      | 429 — wait `retryAfter` seconds                                                                                                                                                                     |
+| `KilnServerError`         | 5xx (a 503 may carry `retryAfter`)                                                                                                                                                                  |
+| `KilnNetworkError`        | no response at all (DNS, refused, TLS), or the body broke off mid-read; the original error is `cause`                                                                                               |
+| `KilnUnexpectedBodyError` | a 2xx whose body isn't JSON (a proxy's, CDN's or captive portal's HTML page), `code: "unexpected_body"`; the first 1 KiB of the text is `body`, the `SyntaxError` is `cause`. Not a `KilnHttpError` |
+| `KilnGraphQLError`        | `/gql` answered with top-level `errors`                                                                                                                                                             |
+| `KilnConfigError`         | refused client-side — a write (`restoreRevision` included) with no `apiKey` (`code: "missing_api_key"`)                                                                                             |
 
 Aborts are not wrapped: a `signal` (or the client's timeout) rejects with the
 platform's `AbortError` / `TimeoutError`, exactly as `fetch` does. The API key

@@ -407,6 +407,31 @@ defmodule KilnCMSWeb.ExperimentsLiveTest do
       assert CMS.get_post!(post.id, actor: admin).title == title_before
     end
 
+    # ADR 0074 (#3122): the page holds the experiment as it was loaded. A
+    # conclude made elsewhere moves the row; a second conclude from the page
+    # must say so and reload, not overwrite the first result.
+    test "a conclude that lost a race reloads and says so", %{
+      conn: conn,
+      experiment: experiment
+    } do
+      ExperimentFixtures.variant!(experiment, "B", %{}, org_id(), [])
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/experiments/#{experiment.id}")
+      assert lv |> element("button", "Start") |> render_click() =~ "Experiment started."
+
+      # Someone else concludes it, behind the open page's back.
+      running = Experiments.get_experiment!(experiment.id, authorize?: false, tenant: org_id())
+
+      {:ok, _} =
+        Experiments.conclude_experiment(running, nil, authorize?: false, tenant: org_id())
+
+      # The page still holds the running struct.
+      html = render_submit(lv, "conclude", %{"winner_variant_id" => ""})
+
+      assert html =~ "This experiment changed since you opened it"
+      refute html =~ "Experiment concluded."
+    end
+
     test "delete removes a draft and returns to the list", %{conn: conn, experiment: experiment} do
       {:ok, lv, _html} = live(conn, ~p"/editor/experiments/#{experiment.id}")
 
