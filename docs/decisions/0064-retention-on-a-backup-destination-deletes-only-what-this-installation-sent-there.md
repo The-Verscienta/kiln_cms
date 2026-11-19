@@ -229,8 +229,10 @@ scrub purges both tables, but only a copy made through it.
   them: a database restored on another server, whose directory has a new
   id, inherits no adoption. A directory a live node reports is refused,
   and so is any adoption when the live nodes can't be read. The step
-  re-reads the row just before each pass, so an adoption added or removed
-  while a backup runs is obeyed by it. The env remote has no row and so no
+  re-reads the row just before each pass, and again before deleting each
+  unit an adopted directory sent (a unit of this directory needs no such
+  read), so an adoption added or removed while a backup runs is obeyed by
+  it, mid-pass included. The env remote has no row and so no
   adoption: there, a server move copies `.kiln-dir-id`.
 - **Pruning a destination needs a persistent `BACKUP_DIR`.** A directory
   that is recreated on each deploy gets a new id each time, and its earlier

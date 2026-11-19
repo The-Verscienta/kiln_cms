@@ -120,6 +120,25 @@ defmodule KilnCMS.Backups.DestinationAdoptionTest do
       assert {:ok, %{adoptions: []}} = adopt(row, %{release: [retired]}, admin)
     end
 
+    test "a release from a stale read still removes the entry, and the audit matches", %{
+      admin: admin,
+      retired: retired
+    } do
+      # Read before another admin adopted `retired`.
+      stale = destination!()
+      {:ok, _adopted} = adopt(stale, %{adopt: [retired]}, admin)
+
+      assert {:ok, %{adoptions: []}} = adopt(stale, %{release: [retired]}, admin)
+      assert Backups.get_backup_destination!(stale.id, actor: admin).adoptions == []
+
+      assert [_adopted, released] =
+               :backup_destination_adoptions_changed
+               |> events()
+               |> Enum.sort_by(& &1.inserted_at, DateTime)
+
+      assert %{"adopted" => "none", "removed" => ^retired} = released.metadata
+    end
+
     test "a backup directory a running server reports is refused, this node's own included", %{
       own: own,
       admin: admin

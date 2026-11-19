@@ -96,7 +96,11 @@ defmodule KilnCMS.Backups.DestinationConfig.Changes.Adopt do
 
     case check(adoptions) do
       :ok ->
-        changeset
+        # The locked value stands in for the one the caller read, so the
+        # write is compared with the row as it is: a list equal to a stale
+        # read (another admin adopted meanwhile, and this releases it) is
+        # still written, and one equal to the row is the no-op it is.
+        %{changeset | data: %{changeset.data | adoptions: before}}
         |> Ash.Changeset.force_change_attribute(:adoptions, adoptions)
         |> Ash.Changeset.set_context(%{adoption_changes: %{adopted: adopt, removed: removed}})
 

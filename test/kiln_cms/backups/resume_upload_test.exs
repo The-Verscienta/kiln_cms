@@ -112,8 +112,11 @@ defmodule KilnCMS.Backups.ResumeUploadTest do
   } do
     dest = resumable!(store, %{"stop_after_chunks" => 2})
 
-    # Left over from an earlier backup on the same destination: the sweep
-    # aborts it once the destination is reached, prune off or not.
+    # Left over from an earlier backup of this backup directory on the same
+    # destination: the sweep aborts it once the destination is reached,
+    # prune off or not.
+    {:ok, dir_id} = KilnCMS.Backups.DirId.local(dir)
+
     stale =
       Ash.Seed.seed!(Upload, %{
         destination_key: key(dest),
@@ -128,7 +131,8 @@ defmodule KilnCMS.Backups.ResumeUploadTest do
         owner_job_id: 1,
         owner_attempt: 1,
         attempts: 1,
-        bytes_done: 0
+        bytes_done: 0,
+        dir_id: dir_id
       })
 
     assert :ok = BackupChain.run()

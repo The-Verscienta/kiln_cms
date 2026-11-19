@@ -45,12 +45,13 @@ defmodule KilnCMS.Backups.Upload do
   ## Which backup directory opened it
 
   `dir_id` is the `.kiln-dir-id` of the backup directory whose step opened
-  the upload. Only a step of that directory takes it over, and only a node
-  with that directory sweeps it (`KilnCMS.Backups.Uploads`): a database
-  restored on another server carries the original server's rows, whose
-  store uploads are that server's to resume or abort. Nil on rows from
-  before it was recorded, which any directory's step or sweep may handle,
-  as before.
+  (or claimed) the upload. Only a step of that directory takes it over,
+  and only a node of that directory, or of one that adopted it on the
+  destination, sweeps it (`KilnCMS.Backups.Uploads`): a database restored on
+  another server carries the original server's rows, whose store uploads
+  are that server's to resume or abort. A row from before it was recorded
+  (nil) is taken over by no step and swept only once it has been untouched
+  for the idle period.
 
   `purge` deletes closed rows (`:completed`, `:aborted`) and the rows of a
   deleted destination once they are older than the cutoff it is given.
@@ -117,14 +118,15 @@ defmodule KilnCMS.Backups.Upload do
              )
     end
 
-    # What the sweep may abort on one destination: abandoned uploads, and
-    # open ones nobody has touched since `idle_before`, of the backup
-    # directory `dir_id` or of none (a row from before `dir_id` was
-    # recorded; with `dir_id` nil, only those). Oldest first, at most `limit`.
+    # What the sweep may abort on one destination: of the backup
+    # directories `dir_ids`, abandoned uploads and open ones nobody has
+    # touched since `idle_before`; of none (a row from before `dir_id` was
+    # recorded), only ones untouched since `idle_before`, open or abandoned.
+    # Oldest first, at most `limit`.
     read :owed do
       argument :destination_key, :string, allow_nil?: false
       argument :idle_before, :utc_datetime_usec, allow_nil?: false
-      argument :dir_id, :uuid
+      argument :dir_ids, {:array, :uuid}, allow_nil?: false, default: []
 
       argument :limit, :integer do
         allow_nil? false
@@ -134,8 +136,11 @@ defmodule KilnCMS.Backups.Upload do
 
       filter expr(
                destination_key == ^arg(:destination_key) and
-                 (status == :abandoned or (status == :open and updated_at < ^arg(:idle_before))) and
-                 (is_nil(dir_id) or (not is_nil(^arg(:dir_id)) and dir_id == ^arg(:dir_id)))
+                 ((dir_id in ^arg(:dir_ids) and
+                     (status == :abandoned or
+                        (status == :open and updated_at < ^arg(:idle_before)))) or
+                    (is_nil(dir_id) and status in [:open, :abandoned] and
+                       updated_at < ^arg(:idle_before)))
              )
 
       prepare build(sort: [updated_at: :asc, id: :asc])
@@ -149,6 +154,10 @@ defmodule KilnCMS.Backups.Upload do
       argument :job_id, :integer, allow_nil?: false
       argument :attempt, :integer, allow_nil?: false, constraints: [min: 0]
 
+      # The claiming step's backup directory, recorded on the row (kept when
+      # nil).
+      argument :dir_id, :uuid
+
       change filter(
                expr(
                  status == :open and
@@ -159,6 +168,11 @@ defmodule KilnCMS.Backups.Upload do
 
       change set_attribute(:owner_job_id, arg(:job_id))
       change set_attribute(:owner_attempt, arg(:attempt))
+
+      change atomic_update(
+               :dir_id,
+               expr(if is_nil(^arg(:dir_id)), do: dir_id, else: ^arg(:dir_id))
+             )
 
       # A step attempt counts once: its owner claiming the row again (#3083)
       # leaves `attempts` as it is. The comparison reads the row before this

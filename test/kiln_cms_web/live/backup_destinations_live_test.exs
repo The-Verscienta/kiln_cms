@@ -246,6 +246,38 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
       assert is_nil(stored(row.id).last_tested_at)
     end
 
+    test "a pending list of other backup directories is not applied after a demotion", %{
+      conn: conn
+    } do
+      admin = platform_admin()
+      test = self()
+
+      # The read of the running servers, in the page's task, waits until
+      # the admin has been demoted.
+      put_backups(
+        live_beats_reader: fn _within_s ->
+          send(test, {:reading, self()})
+
+          receive do
+            :go -> {:ok, []}
+          end
+        end
+      )
+
+      lv = mount(conn, admin)
+      assert_receive {:reading, task}
+
+      :sys.replace_state(lv.pid, fn state ->
+        update_in(
+          state.socket,
+          &Phoenix.Component.assign(&1, :current_user, %{admin | role: :editor})
+        )
+      end)
+
+      send(task, :go)
+      assert_redirect(lv, "/access-denied?needs=platform")
+    end
+
     test "a page whose admin lost the role can't adopt a backup directory", %{
       conn: conn,
       row: row

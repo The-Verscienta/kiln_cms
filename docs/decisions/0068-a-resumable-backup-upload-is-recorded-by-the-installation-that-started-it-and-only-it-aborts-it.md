@@ -109,13 +109,17 @@ Nothing ever lists the store's pending uploads to abort them.
 2026-11-19). The database holds the upload rows, so a database restored on
 another server brings the original server's rows along, open uploads
 included. Each row now records the `.kiln-dir-id` of the backup directory
-whose step opened it (`Upload.dir_id`). A step of another directory
-neither takes such a row over nor abandons it: its put of that file is sent
-whole and records nothing, since one file has at most one open row. The
-sweep on a node only aborts rows of its own directory, or rows that record
-none (opened before this was recorded, which behave as before); a node
-whose id can't be read sweeps only those. The original server's open
-uploads are left for that server to resume or abort, and the restored
+whose step opened it, or last claimed it (`Upload.dir_id`). A step of
+another directory neither takes such a row over nor abandons it: its put of
+that file is sent whole and records nothing, since one file has at most one
+open row. A row that records no directory (opened before this was
+recorded) could be any node's, so no step takes it over or abandons it on a
+changed file either; it ends by the idle rule alone (untouched for four
+days, open or abandoned). Otherwise the sweep on a node aborts rows of its
+own directory and of the directories the destination adopted for it, the
+set retention uses there (`DestinationConfig.owners/2`); a node whose id
+can't be read sweeps only idle rows that record none. The original server's
+open uploads are left for that server to resume or abort, and the restored
 copy never aborts them.
 
 **A file the destination already holds, with the same size and SHA-256, is

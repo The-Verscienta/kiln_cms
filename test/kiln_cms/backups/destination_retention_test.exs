@@ -411,6 +411,9 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
   # a database restored on another server carries the original server's
   # destinations and run history, and must not prune that server's backups.
   describe "run_on_destination/3: whose backups a stored destination prunes" do
+    defp stored_adoptions(row),
+      do: Backups.get_backup_destination!(row.id, actor: Backups.system()).adoptions
+
     defp adoption(dir_id, adopted_by),
       do: %{
         "dir_id" => dir_id,
@@ -505,6 +508,45 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
       for stamp <- [@a, @f, @b, @c] do
         assert [%{destinations: %{^key => %{"status" => "ok"}}}] = stored(stamp).artifacts
       end
+    end
+
+    test "each adopted directory's unit is checked against the row right before its delete: " <>
+           "an adoption removed after the pass read it deletes nothing more",
+         %{dir: dir, dir_id: dir_id} do
+      row = KilnCMS.Test.BackupDestinations.destination!()
+      key = "dest:" <> row.id
+      retired = Ecto.UUID.generate()
+      run!(@a, [key], :succeeded, %{dir_id: retired})
+      run!(@f, [key], :succeeded, %{dir_id: retired})
+      run!(@b, [key])
+      run!(@c, [key])
+
+      config = %{
+        fake(key, %{"entries" => Enum.flat_map([@a, @f, @b, @c], &listed/1)})
+        | id: row.id
+      }
+
+      # What the pass read when it started; the row no longer adopts it.
+      read_at_start = [adoption(retired, [dir_id])]
+
+      assert {:ok, %{deleted: deleted}} = prune(dir, config, adoptions: read_at_start)
+      assert deleted == dump_and_sidecar(@b)
+      assert deletes() == dump_and_sidecar(@b)
+
+      # Adopted on the row too: both go.
+      Backups.adopt_backup_directories!(row, %{adopt: [retired]},
+        actor: BackupSchedules.platform_admin()
+      )
+
+      config = %{
+        config
+        | settings: Map.put(config.settings, "entries", Enum.flat_map([@a, @f, @c], &listed/1))
+      }
+
+      assert {:ok, %{deleted: deleted}} =
+               prune(dir, config, adoptions: stored_adoptions(row))
+
+      assert Enum.sort(deleted) == Enum.sort(dump_and_sidecar(@a) ++ dump_and_sidecar(@f))
     end
 
     test "a backup directory with no .kiln-dir-id, or a malformed one, deletes nothing", %{

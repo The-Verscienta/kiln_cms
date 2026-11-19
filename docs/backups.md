@@ -4528,8 +4528,8 @@ prune these backups — only if that server is retired or this installation
 moved here.** next to a directory, and from the next pass this server's
 retention deletes that directory's old backups on that destination too, by
 the same keep rules. Untick it to stop; a pass already running reads the
-row again just before it prunes, so either change is obeyed by the backup
-in flight. Each change is in the instance security log
+row again just before it prunes, and again before deleting each backup an
+adopted directory sent, so either change is obeyed by the backup in flight. Each change is in the instance security log
 (`backup_destination_adoptions_changed`).
 
 - **An adoption counts only on the servers running when it was made.** It
@@ -4843,10 +4843,13 @@ than 30 days ago are deleted, and so is every row of a deleted destination
 once it is 30 days old.
 
 The sweep aborts only uploads that a step of this server's backup directory
-opened (or that record no directory, from before this was recorded). A
-database restored on another server carries the original server's upload
-rows; its backups neither resume nor abort those uploads, and send that
-file whole instead.
+opened or took over, or of a directory the destination adopted for this
+server ([above](#adopt-another-backup-directory)). An upload that records no
+directory (opened before this was recorded) is resumed by no backup, which
+sends that file whole instead, and is aborted by the sweep only once it has
+been untouched for four days. A database restored on another server carries
+the original server's upload rows; its backups neither resume nor abort
+those uploads, and send that file whole instead.
 
 **Time limits.**
 

@@ -231,7 +231,9 @@ defmodule KilnCMS.Backups.Retention do
        backup another backup directory sent (a database restored on another
        server keeps the original server's run history), is left and
        reported. A directory with no `.kiln-dir-id` deletes nothing.
-    5. **Delete.** Each unit is re-checked (`recheck/2`), then deleted one
+    5. **Delete.** Each unit is re-checked (`recheck/2`; a unit an adopted
+       directory sent, also against the destination's row as it is then),
+       then deleted one
        file at a time, data before the sidecar. The first delete that fails
        or runs past its bound stops the pass. The files deleted are marked
        `pruned` under that key on their runs (`Recorder.mark_pruned/2`).
@@ -1635,9 +1637,9 @@ defmodule KilnCMS.Backups.Retention do
     with {:ok, subject} <- prune_subject(config),
          :ok <- supported(config),
          :ok <- clear_to_prune(subject, config),
-         {:ok, owners} <- owners(dir, subject, opts),
+         {:ok, {current, owners}} <- owners(dir, subject, opts),
          {:ok, plan} <- prepare_destination(dir, config, owners, opts) do
-      execute_destination(dir, config, plan, opts)
+      execute_destination(dir, config, plan, Keyword.put(opts, :current_dir_id, current))
     end
   end
 
@@ -1780,7 +1782,7 @@ defmodule KilnCMS.Backups.Retention do
   # directory with no id has made no in-app backup, so nothing there is its.
   defp owners(dir, subject, opts) do
     case DirId.current(dir) do
-      {:ok, id} -> {:ok, owners_of(subject, id, opts)}
+      {:ok, id} -> {:ok, {id, owners_of(subject, id, opts)}}
       {:error, reason} -> {:error, {:dir_id, reason}}
     end
   end
@@ -1971,15 +1973,16 @@ defmodule KilnCMS.Backups.Retention do
 
   defp recorded_here?(_none, _key), do: false
 
-  # The deletes, each unit re-checked first (`recheck/2`), data before the
-  # sidecar. The first delete that fails stops the pass: a store refusing
+  # The deletes, each unit re-checked first (`recheck/2`, and on a stored
+  # destination `still_owned/3`), data before the sidecar. The first delete that fails stops the pass: a store refusing
   # one delete (or hanging on it) would only do so again.
   defp execute_destination(dir, config, plan, opts) do
     bounds = {opts[:deadline], delete_call_ms(opts)}
+    current = opts[:current_dir_id]
 
     {deleted, units, stopped} =
       Enum.reduce_while(plan.delete, {[], 0, nil}, fn entry, {deleted, units, nil} ->
-        case remove_remote_safely(dir, config, entry, bounds) do
+        case remove_remote_safely(dir, config, entry, {bounds, current}) do
           {:ok, []} -> {:cont, {deleted, units, nil}}
           {:ok, names} -> {:cont, {[names | deleted], units + 1, nil}}
           {:stop, [], reason} -> {:halt, {deleted, units, reason}}
@@ -2000,11 +2003,11 @@ defmodule KilnCMS.Backups.Retention do
      }}
   end
 
-  defp remove_remote_safely(dir, config, entry, bounds) do
-    case recheck(dir, entry.stamp) do
-      :ok ->
-        remove_remote(config, entry, bounds)
-
+  defp remove_remote_safely(dir, config, entry, {bounds, current}) do
+    with :ok <- recheck(dir, entry.stamp),
+         :ok <- still_owned(config, entry.stamp, current) do
+      remove_remote(config, entry, bounds)
+    else
       {:skip, why} ->
         Logger.info(
           "Retention on #{config.key} left #{label(entry)} in place: #{why} since it was planned"
@@ -2014,6 +2017,39 @@ defmodule KilnCMS.Backups.Retention do
     end
   rescue
     error -> {:stop, [], {:crashed, error.__struct__}}
+  end
+
+  # A unit another backup directory sent is deleted only while the stored
+  # destination still adopts that directory for this one: the row is read
+  # again right before each such unit, as `prune` is before the pass, so an
+  # adoption removed while a pass runs stops its further deletes. A unit of
+  # this directory needs no read of the row. The env remote adopts nothing.
+  defp still_owned(%Config{id: id, key: "dest:" <> _}, stamp, current)
+       when is_binary(id) and is_binary(current) do
+    case Backups.get_run_by_stamp(stamp, actor: Backups.system(), authorize_with: :error) do
+      {:ok, %{dir_id: dir_id}} when is_binary(dir_id) and dir_id != current ->
+        still_adopted(id, dir_id, current)
+
+      {:ok, _own_or_gone} ->
+        :ok
+
+      {:error, _error} ->
+        {:skip, :unreadable_run}
+    end
+  end
+
+  defp still_owned(_config, _stamp, _current), do: :ok
+
+  defp still_adopted(id, dir_id, current) do
+    case Backups.get_backup_destination(id, actor: Backups.system(), authorize_with: :error) do
+      {:ok, %{adoptions: adoptions}} ->
+        if dir_id in DestinationConfig.owners(current, adoptions),
+          do: :ok,
+          else: {:skip, :no_longer_adopted}
+
+      _gone_or_unreadable ->
+        {:skip, :unreadable_destination}
+    end
   end
 
   # Each delete gets its own bound (#2950), worked out right before it. One

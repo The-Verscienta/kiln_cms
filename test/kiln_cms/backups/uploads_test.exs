@@ -20,7 +20,17 @@ defmodule KilnCMS.Backups.UploadsTest do
   @moduletag :tmp_dir
   @moduletag :capture_log
 
+  # This node's backup directory, whose steps the uploads below are.
+  @dir_id "6f1e3b6a-2c1d-4b8e-9a57-0c3d5e7f9a11"
+
   setup %{tmp_dir: tmp_dir} do
+    original = Application.get_env(:kiln_cms, Backups, [])
+    on_exit(fn -> Application.put_env(:kiln_cms, Backups, original) end)
+    dir = Path.join(tmp_dir, "backups")
+    File.mkdir_p!(dir)
+    File.write!(DirId.path(dir), @dir_id)
+    Application.put_env(:kiln_cms, Backups, Keyword.put(original, :dir, dir))
+
     source = Path.join(tmp_dir, "kiln-db-20260101-000000.dump")
     body = :crypto.strong_rand_bytes(300)
     File.write!(source, body)
@@ -56,7 +66,8 @@ defmodule KilnCMS.Backups.UploadsTest do
       key: key(config),
       owner: %{job_id: job_id, attempt: attempt},
       deadline: System.monotonic_time(:millisecond) + 60_000,
-      stamp: "20260101-000000"
+      stamp: "20260101-000000",
+      dir_id: @dir_id
     }
   end
 
@@ -93,7 +104,8 @@ defmodule KilnCMS.Backups.UploadsTest do
           owner_job_id: 10,
           owner_attempt: 1,
           attempts: 1,
-          bytes_done: 0
+          bytes_done: 0,
+          dir_id: @dir_id
         },
         attrs
       )
@@ -549,10 +561,8 @@ defmodule KilnCMS.Backups.UploadsTest do
   # upload rows: only a step or a sweep of the backup directory that opened
   # an upload touches it.
   describe "another backup directory's uploads" do
-    setup %{tmp_dir: tmp_dir} do
-      dir = Path.join(tmp_dir, "backups")
-      {:ok, mine} = DirId.local(dir)
-      %{dir: dir, mine: mine, theirs: Ecto.UUID.generate()}
+    setup do
+      %{dir: Backups.dir(), mine: @dir_id, theirs: Ecto.UUID.generate()}
     end
 
     test "the first save records the step's backup directory", %{
@@ -605,45 +615,134 @@ defmodule KilnCMS.Backups.UploadsTest do
       assert %Upload{owner_job_id: 10, dir_id: ^theirs} = row(config, put)
     end
 
-    test "an open upload this directory started, or one that records none, is taken over", %{
+    test "an open upload this directory started is taken over, and keeps its directory", %{
       put: put,
       store: store,
       mine: mine
     } do
-      for dir_id <- [mine, nil] do
-        config = config(store)
-        seed_row(config, put, %{dir_id: dir_id, owner_job_id: 10, owner_attempt: 1})
-        target = Map.put(target(config, 11, 1), :dir_id, mine)
+      config = config(store)
+      seed_row(config, put, %{dir_id: mine, owner_job_id: 10, owner_attempt: 1})
 
-        assert {:ok, opts, %{resumable?: true}} = Uploads.handle(config, put, target)
-        assert %Resume{} = opts[:resume]
-        assert %Upload{owner_job_id: 11} = row(config, put)
-      end
+      assert {:ok, opts, %{resumable?: true}} = Uploads.handle(config, put, target(config, 11, 1))
+      assert %Resume{} = opts[:resume]
+      assert %Upload{owner_job_id: 11, dir_id: ^mine} = row(config, put)
     end
 
-    test "the sweep aborts its own directory's uploads and ones that record none, never " <>
-           "another's",
-         %{put: put, store: store, dir: dir, mine: mine, theirs: theirs} do
+    test "an open upload that records no directory is neither taken over nor abandoned, " <>
+           "even for a changed file",
+         %{put: put, store: store} do
+      for attrs <- [%{}, %{sha256: String.duplicate("0", 64)}] do
+        config = config(store)
+        seeded = seed_row(config, put, Map.merge(%{dir_id: nil}, attrs))
+
+        assert {:ok, opts, %{resumable?: false}} =
+                 Uploads.handle(config, put, target(config, 11, 1))
+
+        refute Keyword.has_key?(opts, :resume)
+
+        assert %Upload{id: id, owner_job_id: 10, status: :open, dir_id: nil} = row(config, put)
+        assert id == seeded.id
+      end
+
+      refute_received {:resumable_fake, :abort, _, _}
+    end
+
+    test "a claim records the claiming step's directory; without one the row keeps its own", %{
+      put: put,
+      store: store,
+      mine: mine
+    } do
+      config = config(store)
+      seeded = seed_row(config, put, %{dir_id: nil, owner_job_id: 10, owner_attempt: 1})
+
+      assert {:ok, %Upload{dir_id: nil}} =
+               Backups.claim_backup_upload(seeded, 10, 2, actor: Backups.system())
+
+      assert {:ok, %Upload{dir_id: ^mine}} =
+               Backups.claim_backup_upload(seeded, 11, 1, %{dir_id: mine},
+                 actor: Backups.system()
+               )
+    end
+
+    test "the sweep aborts its own directory's uploads, never another's", %{
+      put: put,
+      store: store,
+      dir: dir,
+      mine: mine,
+      theirs: theirs
+    } do
       config = config(store)
       own = seed_row(config, put, %{status: :abandoned, name: "kiln-db-a.dump", dir_id: mine})
-      legacy = seed_row(config, put, %{status: :abandoned, name: "kiln-db-b.dump"})
 
       other =
         seed_row(config, put, %{status: :abandoned, name: "kiln-db-c.dump", dir_id: theirs})
 
-      assert %{aborted: 2, failed: 0} = Uploads.sweep(config, key(config), deadline(), dir: dir)
+      assert %{aborted: 1, failed: 0} = Uploads.sweep(config, key(config), deadline(), dir: dir)
 
       statuses = Map.new(rows(), &{&1.id, &1.status})
       assert statuses[own.id] == :aborted
-      assert statuses[legacy.id] == :aborted
       assert statuses[other.id] == :abandoned
     end
 
-    test "a node whose backup-directory id can't be read sweeps only uploads that record none",
+    test "an upload that records no directory is swept only once idle for 4 days, open or " <>
+           "abandoned",
+         %{put: put, store: store} do
+      config = config(store)
+      recent = seed_row(config, put, %{status: :abandoned, name: "kiln-db-a.dump", dir_id: nil})
+      idle_open = seed_row(config, put, %{name: "kiln-db-b.dump", dir_id: nil})
+
+      idle_abandoned =
+        seed_row(config, put, %{status: :abandoned, name: "kiln-db-c.dump", dir_id: nil})
+
+      old = days_ago(4) |> DateTime.add(-60, :second)
+      touch!(idle_open, old)
+      touch!(idle_abandoned, old)
+
+      assert %{aborted: 2} = Uploads.sweep(config, key(config), deadline())
+
+      statuses = Map.new(rows(), &{&1.id, &1.status})
+      assert statuses[recent.id] == :abandoned
+      assert statuses[idle_open.id] == :aborted
+      assert statuses[idle_abandoned.id] == :aborted
+    end
+
+    test "the sweep covers a directory the destination adopted for this one, by the set " <>
+           "retention uses",
+         %{put: put, store: store, mine: mine, theirs: theirs} do
+      config = config(store)
+      elsewhere = Ecto.UUID.generate()
+
+      adopted =
+        seed_row(config, put, %{status: :abandoned, name: "kiln-db-a.dump", dir_id: theirs})
+
+      not_for_me =
+        seed_row(config, put, %{status: :abandoned, name: "kiln-db-b.dump", dir_id: elsewhere})
+
+      adoptions = [
+        %{"dir_id" => theirs, "adopted_by" => [mine], "adopted_at" => "2026-11-19T00:00:00Z"},
+        %{
+          "dir_id" => elsewhere,
+          "adopted_by" => [Ecto.UUID.generate()],
+          "adopted_at" => "2026-11-19T00:00:00Z"
+        }
+      ]
+
+      assert %{aborted: 1} =
+               Uploads.sweep(config, key(config), deadline(), adoptions: adoptions)
+
+      statuses = Map.new(rows(), &{&1.id, &1.status})
+      assert statuses[adopted.id] == :aborted
+      assert statuses[not_for_me.id] == :abandoned
+    end
+
+    test "a node whose backup-directory id can't be read sweeps only idle uploads that " <>
+           "record none",
          %{put: put, store: store, tmp_dir: tmp_dir, mine: mine} do
       config = config(store)
       own = seed_row(config, put, %{status: :abandoned, name: "kiln-db-a.dump", dir_id: mine})
-      legacy = seed_row(config, put, %{status: :abandoned, name: "kiln-db-b.dump"})
+      legacy = seed_row(config, put, %{status: :abandoned, name: "kiln-db-b.dump", dir_id: nil})
+      touch!(own, days_ago(5))
+      touch!(legacy, days_ago(5))
 
       assert %{aborted: 1} =
                Uploads.sweep(config, key(config), deadline(), dir: Path.join(tmp_dir, "none"))

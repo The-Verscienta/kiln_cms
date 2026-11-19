@@ -31,12 +31,15 @@ defmodule KilnCMS.Backups.Uploads do
   takes it over nor abandons it (its put is sent whole, recording nothing),
   and a sweep on a node with another directory leaves it, so a database
   restored on another server never resumes or aborts the original server's
-  uploads. A row from before `dir_id` was recorded is any directory's.
+  uploads. A row from before `dir_id` was recorded is taken over by no step
+  (nor abandoned on a changed file) and is swept only once idle for
+  four days; the sweep also covers the directories the destination
+  adopted for this node (`DestinationConfig.owners/2`).
   """
 
   alias Kiln.BackupDestination.{Config, Resume}
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, Destination, DirId, Upload}
+  alias KilnCMS.Backups.{Chain, Destination, DestinationConfig, DirId, Upload}
 
   require Logger
 
@@ -177,14 +180,14 @@ defmodule KilnCMS.Backups.Uploads do
     {:ok, [deadline: info.deadline], %{resumable?: false}}
   end
 
-  # A row is this directory's when it records this directory, or none (a row
-  # from before `dir_id` was recorded).
-  defp this_directory?(%Upload{dir_id: nil}, _dir_id), do: true
+  # A row is this directory's when it records this directory. One that
+  # records none (from before `dir_id` was recorded) could be any node's,
+  # so no step takes it over; the idle sweep is its end.
   defp this_directory?(%Upload{dir_id: dir_id}, dir_id) when is_binary(dir_id), do: true
   defp this_directory?(_row, _dir_id), do: false
 
   defp take_over(config, row, info) do
-    case claim(row, info.owner) do
+    case claim(row, info.owner, info.dir_id) do
       {:ok, row} ->
         if row.bytes == info.put.bytes and row.sha256 == info.put.sha256 do
           info = %{
@@ -343,7 +346,7 @@ defmodule KilnCMS.Backups.Uploads do
         {:error, "an earlier upload of a different version of #{row.name} is still open"}
 
       true ->
-        case claim(row, fields.owner) do
+        case claim(row, fields.owner, fields[:dir_id]) do
           {:ok, row} ->
             Process.put(cache_key(fields), row.id)
             write_checkpoint(fields, row.id, checkpoint)
@@ -540,7 +543,9 @@ defmodule KilnCMS.Backups.Uploads do
   abandoned for the next pass. The upload of the backup the lock holds is
   never touched, nor one another backup directory opened: only a row whose
   `dir_id` is this node's `.kiln-dir-id` (`opts[:dir]`'s, `BACKUP_DIR` by
-  default), or that records none, is swept.
+  default) or a directory the destination adopted for it (`opts[:adoptions]`,
+  the row's `adoptions`, by `DestinationConfig.owners/2`, the set retention
+  uses), and a row that records none once idle for #{@idle_days} days.
 
   Then, on every destination, deletes closed rows (and a deleted
   destination's) older than #{@purge_days} days, in one statement.
@@ -558,7 +563,7 @@ defmodule KilnCMS.Backups.Uploads do
 
     {aborted, failed} =
       if is_binary(key) and Destination.resumable?(config),
-        do: abort_owed(config, key, {deadline, abort_call_ms(opts)}, now, current_dir_id(opts)),
+        do: abort_owed(config, key, {deadline, abort_call_ms(opts)}, now, owners(opts)),
         else: {0, 0}
 
     purge(now)
@@ -573,21 +578,21 @@ defmodule KilnCMS.Backups.Uploads do
 
   defp abort_call_ms(opts), do: Keyword.get(opts, :abort_call_ms, @abort_call_ms)
 
-  # This node's backup-directory id; nil when it can't be read, so only rows
-  # that record no directory are swept.
-  defp current_dir_id(opts) do
+  # This node's backup directory and the ones adopted for it; none when its
+  # id can't be read, so only idle rows that record no directory are swept.
+  defp owners(opts) do
     case DirId.current(Keyword.get_lazy(opts, :dir, &Backups.dir/0)) do
-      {:ok, id} -> id
-      {:error, _reason} -> nil
+      {:ok, id} -> DestinationConfig.owners(id, Keyword.get(opts, :adoptions, []))
+      {:error, _reason} -> []
     end
   end
 
-  defp abort_owed(config, key, bounds, now, dir_id) do
+  defp abort_owed(config, key, bounds, now, dir_ids) do
     idle_before = DateTime.add(now, -@idle_days * 86_400, :second)
 
     with {:ok, held} <- Chain.fetch_held_stamp(),
          {:ok, rows} <-
-           Backups.list_owed_backup_uploads(key, idle_before, %{dir_id: dir_id},
+           Backups.list_owed_backup_uploads(key, idle_before, %{dir_ids: dir_ids},
              actor: Backups.system(),
              authorize_with: :error
            ) do
@@ -671,8 +676,10 @@ defmodule KilnCMS.Backups.Uploads do
     )
   end
 
-  defp claim(row, owner) do
-    case Backups.claim_backup_upload(row, owner.job_id, owner.attempt, actor: Backups.system()) do
+  defp claim(row, owner, dir_id) do
+    case Backups.claim_backup_upload(row, owner.job_id, owner.attempt, %{dir_id: dir_id},
+           actor: Backups.system()
+         ) do
       {:ok, row} -> {:ok, row}
       {:error, error} -> stale_or(error, error)
     end

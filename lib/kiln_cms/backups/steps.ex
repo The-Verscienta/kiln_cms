@@ -2730,8 +2730,9 @@ defmodule KilnCMS.Backups.Steps do
   # ones untouched for days, are aborted; old closed records go.
   defp sweep_uploads(rec, dest, config) do
     key = Destination.target_key(dest.entry, config)
+    adoptions = adoptions_of(dest.entry)
 
-    case Uploads.sweep(config, key, dest.deadline) do
+    case Uploads.sweep(config, key, dest.deadline, adoptions: adoptions) do
       %{aborted: 0, failed: 0} ->
         rec
 
@@ -2746,6 +2747,18 @@ defmodule KilnCMS.Backups.Steps do
         )
     end
   end
+
+  # The backup directories a stored destination adopted, read now, so the
+  # upload sweep covers their uploads as retention does their backups. A row
+  # that can't be read adopts nothing.
+  defp adoptions_of(%{"source" => "db", "id" => id}) when is_binary(id) do
+    case Backups.get_backup_destination(id, actor: Backups.system(), authorize_with: :error) do
+      {:ok, %{adoptions: adoptions}} when is_list(adoptions) -> adoptions
+      _gone_or_unreadable -> []
+    end
+  end
+
+  defp adoptions_of(_entry), do: []
 
   # The row as it is now: an admin who turned `prune` off, or stopped
   # adopting a backup directory, during the backup is obeyed. A row that
