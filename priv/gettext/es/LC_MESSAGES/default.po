@@ -24969,6 +24969,11 @@ msgstr "Este experimento no puede convertir: %{reason}."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
+msgid "This experiment changed since you opened it. It's been reloaded."
+msgstr "Este experimento cambió desde que lo abriste. Se ha vuelto a cargar."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
 msgid "This experiment concluded without a winner."
 msgstr "Este experimento concluyó sin ganadora."
 
