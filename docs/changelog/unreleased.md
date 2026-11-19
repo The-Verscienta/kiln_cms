@@ -7,6 +7,22 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="idna-punycode-length-advisory"></a>
+
+- **idna 8.0.0 fixes EEF-CVE-2026-117678: a long `xn--` label in an email address's domain no longer costs super-linear CPU when Swoosh encodes it to send mail.**
+  idna 7.1.0 and earlier decoded a punycode (`xn--`) label before checking
+  it against the 63-octet label limit, so one long label takes
+  super-linear CPU to reject. Kiln reaches idna through Swoosh, which
+  encodes the domain of every recipient address when it renders an email.
+  Some of those addresses come from people who aren't signed in (a
+  public form's autoresponder writes to the address the visitor typed),
+  so treat it as reachable. JSV also depends on idna, but only for its
+  `hostname` format check, and Kiln's field schemas treat `format` as an
+  annotation, so that path never runs. The advisory was published
+  2026-11-19 and affects idna 0.5.0 up to 7.1.0. Lock-only: idna 7.1.0 →
+  8.0.0, with jsv 0.26.2 → 0.28.0 and swoosh 1.26.3 → 1.30.0, the first
+  releases of each that accept idna 8. No other lock file carries idna.
+
 <a id="backup-local-retention-gaps"></a>
 
 - **Two local retention gaps (#3003, #3004).**
