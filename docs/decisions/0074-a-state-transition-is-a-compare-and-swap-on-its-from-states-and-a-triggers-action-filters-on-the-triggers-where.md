@@ -65,7 +65,7 @@ a trigger action the filter is the trigger's `where` copied verbatim, with
 - **The machine checks the struct, not the row.** `transition_state/2`'s
   non-atomic `change/3` compares against `changeset.data`. These actions use
   `require_atomic? false`, so the atomic version in
-  `AshStateMachine.BuiltinChanges.TransitionState` (which would put the
+  AshStateMachine's built-in `transition_state` change (which would put the
   from-state check in SQL) never runs. The filter supplies what the atomic
   path would have.
 - **`optimistic_lock(:lock_version)` does not move with the state.** The
@@ -110,7 +110,7 @@ applies": an `Ash.Error.Invalid` whose `errors` list is a single
 `Ash.Error.Changes.StaleRecord` (and the same for
 `AshOban.Errors.TriggerNoLongerApplies`, or a read that returns nothing). It
 returns `{:cancel, :trigger_no_longer_applies}`, so the job is canceled, not
-retried and not raised (`deps/ash_oban`, `AshOban.Transformers.DefineSchedulers`,
+retried and not raised (`deps/ash_oban`, its scheduler transformer (`define_schedulers.ex`),
 version 0.8.14 here). That is the answer wanted for a scheduled action:
 somebody decided differently, and re-running the job would undo their
 decision. Nothing fires on a canceled job, because the side effects of these

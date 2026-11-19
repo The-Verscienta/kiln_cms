@@ -8,7 +8,7 @@
   builds on [#2514](https://github.com/The-Verscienta/kiln_cms/issues/2514)
   (erase on reject) and [#2251](https://github.com/The-Verscienta/kiln_cms/issues/2251)
   (registration approval, [ADR 0024](0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md)).
-  The guides are [data-flows.md](../data-flows.md#erasure-gdpr-art-17--anonymization) and
+  The guides are [data-flows.md](../data-flows.md) and
   [account-administration.md](../account-administration.md#removing-an-account).
 - **Changelog** — Unreleased, under Fixed
   ([long form](../changelog/v1.11.0.md#erasure-demotes-site-memberships)),
