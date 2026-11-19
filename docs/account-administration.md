@@ -1694,6 +1694,8 @@ remove it. You need the platform admin role.
    and under that an **Erased** badge and the note "This account was erased.
    It holds no tier here and cannot be given one; the row is kept as a record
    until you remove it." The row has no **Edit** button.
+   Erasure keeps and demotes the row on purpose; the reasons are in
+   [ADR 0076](decisions/0076-an-erased-accounts-site-memberships-are-kept-and-demoted-in-place-not-deleted.md).
 3. Click the trash icon on the row (its label is "Remove" and the address),
    and confirm **Remove this member from the site?**. You see "Member
    removed." and the row is gone.

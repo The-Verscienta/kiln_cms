@@ -1,4 +1,4 @@
-# 0066. Every table reaching a staging clone is scrubbed or kept with a reason, and a plugin's undeclared table stops the scrub
+# 0073. Every table reaching a staging clone is scrubbed or kept with a reason, and a plugin's undeclared table stops the scrub
 
 - **Status** — accepted (2026-11-16).
 - **References** — [#2975](https://github.com/The-Verscienta/kiln_cms/issues/2975)

@@ -148,7 +148,7 @@ An overlay can add tables of its own: the Ash domains a plugin lists in
 plugin's. The core's test cannot see those, so the scrub checks them itself, against
 the database it is about to change. The rule is the core's: every table is purged,
 rewritten, or kept with a reason
-([ADR 0066](decisions/0066-every-table-reaching-a-staging-clone-is-scrubbed-or-kept-with-a-reason.md)).
+([ADR 0073](decisions/0073-every-table-reaching-a-staging-clone-is-scrubbed-or-kept-with-a-reason.md)).
 
 **The plugin declares what happens to each table**, in `staging_scrub/0` on its
 entry module (`kiln_plugin` 1.5):
