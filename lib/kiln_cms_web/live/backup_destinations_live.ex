@@ -37,8 +37,10 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
 
   ## The "Prunes" badge
 
-  A destination whose retention is on shows "Prunes its old backups" only
-  when a pass would prune it; otherwise it shows why not. Both come from
+  An enabled destination whose retention is on shows "Prunes its old
+  backups" only when a pass would prune it; otherwise it shows why not. A
+  disabled one shows neither: retention never runs there, and its Disabled
+  badge says so. Both come from
   `KilnCMS.Backups.Retention.prune_blocker/3`, worked out once per `load/1`
   over every row, the rule retention applies before each pass (#2950).
 
@@ -1086,10 +1088,14 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
         <.badge :if={not @row.enabled} variant="neutral">
           <span data-role="disabled">{gettext("Disabled")}</span>
         </.badge>
-        <.badge :if={@row.prune and is_nil(@blocker)} variant="outline">
+        <.badge :if={@row.enabled and @row.prune and is_nil(@blocker)} variant="outline">
           <span data-role="prunes">{gettext("Prunes its old backups")}</span>
         </.badge>
-        <.badge :if={@row.prune and @blocker} variant="warning" class="whitespace-normal">
+        <.badge
+          :if={@row.enabled and @row.prune and @blocker}
+          variant="warning"
+          class="whitespace-normal"
+        >
           <span data-role="prune-blocked">
             {gettext("Not pruned: %{reason}", reason: blocker_text(@blocker))}
           </span>

@@ -532,6 +532,58 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
     end
   end
 
+  # -- the env destination's notice in the status (#2950) ----------------------
+
+  describe "the env destination's retention notice" do
+    setup %{dir: dir} do
+      env_remote!("r2:kiln")
+      {:ok, dir_id} = DirId.local(dir)
+
+      KilnCMS.Backups.Notices.retention(
+        {:env, Destination.env_key("r2:kiln"), "r2:kiln", dir},
+        {:skipped, :destination_unknown}
+      )
+
+      %{dir_id: dir_id}
+    end
+
+    test "shows in the status while BACKUP_RCLONE_REMOTE_PRUNE is on", %{dir_id: dir_id} do
+      prune_env!(true)
+      key = Destination.env_key("r2:kiln")
+
+      assert [
+               %{
+                 scope: {:destination, ^key},
+                 label: "r2:kiln",
+                 outcome: :skipped,
+                 dir_id: ^dir_id
+               }
+             ] = Backups.status().retention
+    end
+
+    test "is hidden while it is off" do
+      prune_env!(false)
+      assert Backups.status().retention == []
+    end
+
+    test "is hidden when no live node has its backup directory", %{base: base} do
+      prune_env!(true)
+      # This node now writes to another directory, and no heartbeat names
+      # the old one.
+      other = Path.join(base, "elsewhere")
+      File.mkdir_p!(other)
+      DirId.local(other)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :dir, other)
+      )
+
+      assert Backups.status().retention == []
+    end
+  end
+
   # -- the shared rule (#2950) ----------------------------------------------
 
   describe "prune_blocker/3" do

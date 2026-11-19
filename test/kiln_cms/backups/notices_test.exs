@@ -109,6 +109,40 @@ defmodule KilnCMS.Backups.NoticesTest do
       assert notices() == []
     end
 
+    test "the env destination is scoped per backup directory: one directory's clean pass " <>
+           "leaves another's notice (#2950)",
+         %{dir: dir} do
+      a = Path.join(dir, "a")
+      b = Path.join(dir, "b")
+      for d <- [a, b], do: File.mkdir_p!(d)
+      a_id = with_dir_id(a)
+      b_id = with_dir_id(b)
+
+      Notices.retention({:env, "rclone:r2:kiln", "r2:kiln", a}, {:skipped, :destination_unknown})
+      Notices.retention({:env, "rclone:r2:kiln", "r2:kiln", b}, {:skipped, :destination_unknown})
+
+      assert [%Notice{dir_id: ^a_id, label: "r2:kiln"}, %Notice{dir_id: ^b_id}] =
+               Enum.sort_by(notices(), &(&1.dir_id != a_id))
+
+      a_scope = "rclone:r2:kiln@" <> a_id
+      assert Enum.any?(notices(), &(&1.scope == a_scope))
+      assert Notices.env_key_of(a_scope) == "rclone:r2:kiln"
+      assert Notices.env_key_of("rclone:user@host:kiln") == "rclone:user@host:kiln"
+
+      Notices.retention({:env, "rclone:r2:kiln", "r2:kiln", b}, :ok)
+      assert [%Notice{scope: ^a_scope}] = notices()
+    end
+
+    test "the env destination's clean pass also clears its bare key", %{dir: dir} do
+      # Written while the directory had no id.
+      Notices.retention({:env, "rclone:r2:kiln", "r2:kiln", dir}, {:skipped, :destination_s3})
+      assert [%Notice{scope: "rclone:r2:kiln", dir_id: nil}] = notices()
+
+      with_dir_id(dir)
+      Notices.retention({:env, "rclone:r2:kiln", "r2:kiln", dir}, :ok)
+      assert notices() == []
+    end
+
     test "inside a transaction that rolls back, nothing is written", %{dir: dir} do
       assert {:error, :rolled_back} =
                AfterCommit.deferring(fn ->

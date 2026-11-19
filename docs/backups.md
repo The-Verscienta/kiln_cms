@@ -4567,7 +4567,11 @@ there: …". Prune those yourself, or with a lifecycle rule.
   Each pass is then skipped with "Retention on r2:kiln skipped: …;
   nothing was deleted", and the env row on the Destinations tab says
   "BACKUP_RCLONE_REMOTE_PRUNE is on, but nothing is pruned here: …".
-  Delete or move that destination to let it run. A remote with no `name:`
+  Delete or move that destination to let it run. The headline line this
+  leaves is kept per backup directory, since what a pass may delete there
+  is: on servers with separate backup directories sharing one remote, one
+  server's clean pass doesn't clear another's line, and a line for a
+  directory no live server has any more isn't shown. A remote with no `name:`
   (a plain path) is compared as a directory, so it overlaps a **Directory
   on this server** destination at or around the same path; a remote named
   through an inline backend (`:local:/mnt/backups`) is compared by that

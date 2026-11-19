@@ -30,7 +30,11 @@ defmodule KilnCMS.Backups.Notices do
   A local directory is `"local:<dir id>"` when it has a `.kiln-dir-id`
   (`KilnCMS.Backups.DirId.current/1`), else `"local"`: directories without an
   id share that one row, since nothing else tells them apart. A stored
-  destination is `"dest:<id>"`, its key.
+  destination is `"dest:<id>"`, its key. The env destination
+  (`BACKUP_RCLONE_REMOTE`, pruned only with `BACKUP_RCLONE_REMOTE_PRUNE`,
+  #2950) is `"<its key>@<dir id>"`, since what a pass there may delete is
+  owned per backup directory: one directory's clean pass must not clear
+  another's notice. A clean pass clears the bare key as well.
 
   A clean local pass clears both `"local:<dir id>"` and `"local"`, so a
   notice written while the id couldn't be read doesn't outlive the problem.
@@ -56,9 +60,15 @@ defmodule KilnCMS.Backups.Notices do
   # for cron evidence.
   @held_deleted_days 8
 
-  @typedoc "Where retention ran: a local backup directory, or a stored destination."
+  @typedoc """
+  Where retention ran: a local backup directory, a stored destination, or
+  the env destination as pruned from one backup directory (#2950).
+  """
   @type scope ::
-          {:local, Path.t()} | {:cron, Path.t()} | {:destination, String.t(), String.t() | nil}
+          {:local, Path.t()}
+          | {:cron, Path.t()}
+          | {:destination, String.t(), String.t() | nil}
+          | {:env, String.t(), String.t() | nil, Path.t()}
 
   @typedoc "How the pass went."
   @type result ::
@@ -112,6 +122,26 @@ defmodule KilnCMS.Backups.Notices do
 
   def scope_key({:destination, key, _label}), do: {key, nil}
 
+  def scope_key({:env, key, _label, dir}) do
+    case DirId.current(dir) do
+      {:ok, id} -> {key <> "@" <> id, id}
+      {:error, _none_or_malformed} -> {key, nil}
+    end
+  end
+
+  @doc """
+  The env destination's key a notice scope (`scope_key/1` of an `{:env, …}`
+  scope) was made from: `"<key>@<dir id>"` gives `"<key>"`; any other scope
+  is itself.
+  """
+  @spec env_key_of(String.t()) :: String.t()
+  def env_key_of(scope) when is_binary(scope) do
+    case Regex.run(~r/\A(.+)@([0-9a-f-]{36})\z/, scope) do
+      [_, key, id] -> if DirId.valid?(id), do: key, else: scope
+      nil -> scope
+    end
+  end
+
   defp dir_scope_key(prefix, dir) do
     case DirId.current(dir) do
       {:ok, id} -> {prefix <> ":" <> id, id}
@@ -159,6 +189,15 @@ defmodule KilnCMS.Backups.Notices do
     end
   end
 
+  # The env destination's clean pass (#2950) likewise also clears its bare
+  # key, written while this directory's id couldn't be read.
+  defp clear_keys({:env, key, _label, _dir} = scope) do
+    case scope_key(scope) do
+      {^key, nil} -> [key]
+      {scoped, _dir_id} -> [scoped, key]
+    end
+  end
+
   defp clear_keys(scope), do: [scope |> scope_key() |> elem(0)]
 
   defp clear_retention(key, :ok) do
@@ -172,6 +211,7 @@ defmodule KilnCMS.Backups.Notices do
   end
 
   defp label({:destination, _key, label}), do: label
+  defp label({:env, _key, label, _dir}), do: label
   defp label({_local_or_cron, _dir}), do: nil
 
   defp write_held_deleted(dir, units) do

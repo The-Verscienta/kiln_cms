@@ -2701,14 +2701,14 @@ defmodule KilnCMS.Backups.Steps do
           prune_on(rec, ctx, entry, config, dest.deadline)
 
         {:ok, false} ->
-          Notices.retention(notice_scope(entry), :ok)
+          Notices.retention(notice_scope(ctx, entry), :ok)
           rec
 
         {:error, reason} ->
           prune_skipped(rec, ctx, entry, reason)
       end
     else
-      Notices.retention(notice_scope(entry), :ok)
+      Notices.retention(notice_scope(ctx, entry), :ok)
       rec
     end
   end
@@ -2717,7 +2717,7 @@ defmodule KilnCMS.Backups.Steps do
     if Backups.rclone_remote_prune?() do
       prune_on(rec, ctx, entry, config, dest.deadline)
     else
-      Notices.retention(notice_scope(entry), :ok)
+      Notices.retention(notice_scope(ctx, entry), :ok)
       rec
     end
   end
@@ -2786,12 +2786,12 @@ defmodule KilnCMS.Backups.Steps do
       reason: reason
     })
 
-    Notices.retention(notice_scope(entry), {:skipped, reason}, stamp: ctx.stamp)
+    Notices.retention(notice_scope(ctx, entry), {:skipped, reason}, stamp: ctx.stamp)
     Recorder.log(rec, :error, "offsite", message)
   end
 
   defp destination_pass(ctx, entry, %{stopped: nil}),
-    do: Notices.retention(notice_scope(entry), :ok, stamp: ctx.stamp)
+    do: Notices.retention(notice_scope(ctx, entry), :ok, stamp: ctx.stamp)
 
   defp destination_pass(ctx, entry, %{deleted: names, stopped: reason}) do
     :telemetry.execute(
@@ -2800,10 +2800,17 @@ defmodule KilnCMS.Backups.Steps do
       %{scope: :destination, destination: entry["key"], reason: reason}
     )
 
-    Notices.retention(notice_scope(entry), {:stopped, reason, length(names)}, stamp: ctx.stamp)
+    Notices.retention(notice_scope(ctx, entry), {:stopped, reason, length(names)},
+      stamp: ctx.stamp
+    )
   end
 
-  defp notice_scope(entry), do: {:destination, entry["key"], entry["label"]}
+  # The env destination's notice is per backup directory (#2950), as what a
+  # pass there may delete is: one directory's clean pass leaves another's.
+  defp notice_scope(ctx, %{"source" => "env"} = entry),
+    do: {:env, entry["key"], entry["label"], ctx.dir}
+
+  defp notice_scope(_ctx, entry), do: {:destination, entry["key"], entry["label"]}
 
   defp log_pruned(rec, _label, %{deleted: [], stopped: nil}), do: rec
 
