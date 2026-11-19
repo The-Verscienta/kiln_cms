@@ -71,6 +71,8 @@ and nothing happens. No webhook, artifact fire or email goes out, and the new
 date or expiry action stays. Called directly, as an overlay or a test might,
 the actions refuse a record that isn't due with a `StaleRecord`; use
 `:publish`, `:unpublish` or `:archive` to act now.
+Why each action repeats its trigger's condition, and why a canceled job is the
+right outcome: [ADR 0074](decisions/0074-a-state-transition-is-a-compare-and-swap-on-its-from-states-and-a-triggers-action-filters-on-the-triggers-where.md).
 
 ## Freshness: the cadence and the attestation
 

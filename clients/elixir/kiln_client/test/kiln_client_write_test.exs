@@ -242,10 +242,108 @@ defmodule KilnClientWriteTest do
       refute_received {:request, _, _, _, _}
     end
 
+    test "restore_revision/4 refuses with :no_api_key and sends nothing" do
+      stub()
+
+      for opts <- [[], [api_key: nil], [api_key: ""]] do
+        assert {:error, %Error{reason: :no_api_key, method: :post, path: path}} =
+                 KilnClient.restore_revision("page", "p1", "v1", opts)
+
+        assert path == "/api/content/page/p1/revisions/v1/restore"
+      end
+
+      refute_received {:request, _, _, _, _}
+    end
+
     test "reads still work without a key" do
       stub(200, %{"data" => []})
       assert {:ok, _} = KilnClient.list("posts")
       assert_received {:request, "GET", "/api/json/posts/published", %{"authorization" => []}, _}
+    end
+  end
+
+  describe "per-call keys on the editorial calls" do
+    setup do
+      Application.put_env(:kiln_client, :api_key, "kiln_configured")
+      on_exit(fn -> Application.delete_env(:kiln_client, :api_key) end)
+    end
+
+    test "restore_revision/4: the per-call key wins over the configured one" do
+      stub(200, %{"data" => %{"id" => "p1"}})
+
+      assert {:ok, %{"id" => "p1"}} =
+               KilnClient.restore_revision("page", "p1", "v1", api_key: @key)
+
+      assert_received {:request, "POST", "/api/content/page/p1/revisions/v1/restore",
+                       %{
+                         "authorization" => ["Bearer " <> @key],
+                         "accept" => ["application/json"]
+                       }, nil}
+    end
+
+    test "restore_revision/4 falls back to the configured key" do
+      stub(200, %{"data" => %{"id" => "p1"}})
+
+      assert {:ok, _} = KilnClient.restore_revision("page", "p1", "v1")
+
+      assert_received {:request, "POST", _, %{"authorization" => ["Bearer kiln_configured"]}, _}
+    end
+
+    test "editorial reads send the per-call key, else the configured one" do
+      stub(200, %{"data" => []})
+
+      assert {:ok, _} = KilnClient.list_revisions("page", "p1", api_key: @key)
+      assert_received {:request, "GET", _, %{"authorization" => ["Bearer " <> @key]}, _}
+
+      reads = [
+        &KilnClient.list_revisions("page", "p1", &1),
+        &KilnClient.list_releases/1,
+        &KilnClient.list_release_items/1
+      ]
+
+      for read <- reads do
+        assert {:ok, _} = read.([])
+
+        assert_received {:request, "GET", _, %{"authorization" => ["Bearer kiln_configured"]}, _}
+      end
+    end
+
+    # The writes' rule (`api_key/1`): an explicit "" is "no key", not "unset".
+    test "an editorial read with api_key: \"\" sends no key" do
+      stub(200, %{"data" => []})
+
+      assert {:ok, _} = KilnClient.list_releases(api_key: "")
+      assert_received {:request, "GET", "/api/json/releases", %{"authorization" => []}, _}
+    end
+
+    test "a delivery read ignores :api_key and sends the configured key" do
+      stub(200, %{"data" => []})
+
+      assert {:ok, _} = KilnClient.list("posts", api_key: @key)
+
+      assert_received {:request, "GET", _, %{"authorization" => ["Bearer kiln_configured"]}, _}
+    end
+  end
+
+  describe "a 2xx body that is not JSON" do
+    test "a write returns :unexpected_body; an empty body is still {:ok, nil}" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("text/html")
+        |> Plug.Conn.send_resp(200, "<html>portal</html>")
+      end)
+
+      assert {:error,
+              %Error{
+                reason: :unexpected_body,
+                status: 200,
+                method: :patch,
+                path: "/api/json/posts/p1",
+                body: "<html>portal</html>"
+              }} = KilnClient.update("posts", "p1", %{title: "x"}, api_key: @key)
+
+      stub(204, "")
+      assert :ok = KilnClient.delete("posts", "p1", api_key: @key)
     end
   end
 
@@ -407,6 +505,17 @@ defmodule KilnClientWriteTest do
       })
 
       assert {:error, %Error{reason: :graphql, code: "invalid_state_transition", data: nil}} =
+               KilnClient.graphql("{ a }")
+    end
+
+    test "a 2xx body that is not JSON is :unexpected_body, not an empty result" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("text/html")
+        |> Plug.Conn.send_resp(200, "<html>portal</html>")
+      end)
+
+      assert {:error, %Error{reason: :unexpected_body, status: 200, path: "/gql"}} =
                KilnClient.graphql("{ a }")
     end
 

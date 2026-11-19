@@ -47,6 +47,7 @@ import {
   KilnGraphQLError,
   KilnHttpError,
   KilnNetworkError,
+  KilnUnexpectedBodyError,
   httpError,
   parseRetryAfter,
 } from "./errors.js";
@@ -937,7 +938,11 @@ export class KilnClient {
 
   private mediaItem(doc: unknown): MediaItem {
     const [item] = flattenDocument<MediaItem>(doc).items;
-    if (item === undefined) throw new Error("Kiln returned no media item");
+    if (item === undefined) {
+      throw new KilnError("Kiln answered a media request with no media item", {
+        code: "empty_response",
+      });
+    }
     const meta = (doc as { data?: { meta?: { processing?: boolean } } }).data?.meta;
     return meta?.processing === undefined ? item : { ...item, processing: meta.processing };
   }
@@ -996,6 +1001,10 @@ export class KilnClient {
    * `POST …/revisions/:version_id/restore`. Needs a `:read_write` key — a
    * read-only key throws `KilnHttpError` 403. Workflow state is untouched; the
    * restore is recorded as a new revision, returned as `revision`.
+   *
+   * A write, so like every other write it fails fast without a key: a client
+   * with no `apiKey` throws `KilnConfigError` (`missing_api_key`) and sends
+   * nothing.
    */
   async restoreRevision(
     type: string,
@@ -1004,6 +1013,7 @@ export class KilnClient {
     options: RequestOptions = {},
   ): Promise<RestoreResult> {
     const path = `${revisionsPath(type, id)}/${encodeURIComponent(versionId)}/restore`;
+    this.requireApiKey("POST", path);
     const body = await this.request(
       path,
       new URLSearchParams(),
@@ -1387,10 +1397,25 @@ export class KilnClient {
       throw httpError(response.status, url, await errorBody(response), retryAfter);
     }
 
+    // The body can still fail after the headers arrived (a connection cut
+    // mid-transfer). An abort stays the platform's error, as above.
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (error) {
+      if (isAbort(error)) throw error;
+      throw new KilnNetworkError(url, error);
+    }
+
     // A 204 (or any empty 2xx — a soft-delete may answer either way) has no
-    // document to parse.
-    const text = await response.text();
-    return text === "" ? null : JSON.parse(text);
+    // document to parse. Anything else that isn't JSON is not Kiln's answer
+    // (a proxy's or captive portal's page), and says so as a KilnError.
+    if (text === "") return null;
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      throw new KilnUnexpectedBodyError(response.status, url, text, error);
+    }
   }
 }
 

@@ -81,7 +81,7 @@ defmodule KilnCMSWeb.ExperimentLive do
         {:noreply, socket |> put_flash(:info, gettext("Experiment started.")) |> reload()}
 
       {:error, error} ->
-        {:noreply, put_flash(socket, :error, experiment_error(error))}
+        {:noreply, lifecycle_error(socket, error)}
     end
   end
 
@@ -101,7 +101,7 @@ defmodule KilnCMSWeb.ExperimentLive do
          |> reload()}
 
       {:error, error} ->
-        {:noreply, put_flash(socket, :error, experiment_error(error))}
+        {:noreply, lifecycle_error(socket, error)}
     end
   end
 
@@ -111,7 +111,7 @@ defmodule KilnCMSWeb.ExperimentLive do
         {:noreply, socket |> put_flash(:info, gettext("Experiment archived.")) |> reload()}
 
       {:error, error} ->
-        {:noreply, put_flash(socket, :error, experiment_error(error))}
+        {:noreply, lifecycle_error(socket, error)}
     end
   end
 
@@ -420,6 +420,23 @@ defmodule KilnCMSWeb.ExperimentLive do
 
   defp actor_opts(socket),
     do: [actor: socket.assigns.current_user, tenant: socket.assigns.current_org]
+
+  # A start, conclude or archive that lost a race (`StaleRecord`, or the
+  # machine's `NoMatchingTransition` when the struct was already out of date)
+  # is not a failed request: reload so the page shows where the experiment
+  # stands now, and say so (ADR 0074).
+  defp lifecycle_error(socket, error) do
+    if KilnCMS.CMS.Releases.stale?(error) do
+      socket
+      |> put_flash(
+        :error,
+        gettext("This experiment changed since you opened it. It's been reloaded.")
+      )
+      |> reload()
+    else
+      put_flash(socket, :error, experiment_error(error))
+    end
+  end
 
   # The generic `KilnCMSWeb.CoreComponents.ash_error_message/2` (#1080) covers
   # this write error-to-flash-sentence translation now; only the Forbidden

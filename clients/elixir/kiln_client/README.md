@@ -54,14 +54,42 @@ one request last, after the defaults and `req_options`. Use it to put a time
 limit on a call that must not hang:
 
 ```elixir
-KilnClient.semantic_search("posts", q, req: [receive_timeout: 1_500, retry: false])
+KilnClient.semantic_search("posts", q, req: [receive_timeout: 1_500])
 ```
 
 When the embedding backend is degraded, the semantic routes stall instead of
 failing: one production instance took about 70 s per call and still answered 200.
 If you have a keyword fallback, set a timeout on `semantic_search/3` and
-`search/2` well above their healthy latency, and turn retries off. Retrying a
-timeout only adds load to a backend that is already struggling.
+`search/2` well above their healthy latency. The call is not retried, so a
+timeout costs one request and doesn't add load to a backend that is already
+struggling.
+
+### Retries
+
+The client makes only its own retries, and every other request goes out once:
+
+| Call | Retries | Requests on a persistent 503 |
+|---|---|---|
+| `artifact/3` | a cold-cache 503, once after `:retry_delay_ms` (default 2000); `retry: false` turns it off | 2 (1 with `retry: false`) |
+| `sync/1`, `sync_page/2` | a 503 page while an artifact compiles, `:retries` times (default 3 for `sync/1`, 0 for `sync_page/2`) | `:retries` + 1 per page |
+| everything else | none | 1 |
+
+Req's own retry step is off (`retry: false`), so a `408`, `429`, `5xx` or a
+transport error (`:closed`, `:econnrefused`, `:timeout`) comes back as the
+error on the first attempt. That includes `:closed` from a pooled keep-alive
+connection the server had already dropped. To have Req retry reads, opt back
+in per call or for every request:
+
+```elixir
+KilnClient.list("posts", req: [retry: :safe_transient, max_retries: 2, retry_delay: 500])
+
+config :kiln_client, req_options: [retry: :safe_transient]
+```
+
+`:safe_transient` retries only `GET` and `HEAD`. Avoid `:transient` in
+`req_options`: it retries writes too, and a retried `create/3` or transition
+can run twice. Req's retries stack under the client's own, so with retries on,
+one `artifact/3` call can cost several requests per attempt.
 
 ## Published-only by default
 
@@ -315,27 +343,41 @@ pipeline — metadata stripping, size caps, variants. See Kiln's `docs/api.md` �
 For tools *about* the content — migrations, audit exports, launch dashboards —
 never a delivery site's key. Anonymous calls are a 401, a viewer's key a 404.
 
+Each of these calls takes the editor's key per call as `:api_key`, sent
+instead of the configured one, so the configured key can stay a `:viewer`
+delivery key. Without the option they send the configured key, and
+`api_key: ""` sends none.
+
 ```elixir
+editor = [api_key: System.fetch_env!("KILN_EDITOR_KEY")]   # editor, :read_write
+
 # A document's version history, newest first (by id, not slug)
 {:ok, %{"data" => revisions, "meta" => %{"next_cursor" => cursor}}} =
-  KilnClient.list_revisions("post", post_id, limit: 50)
+  KilnClient.list_revisions("post", post_id, [limit: 50] ++ editor)
 
 # One revision's changes + the full document as it stood then
-{:ok, %{"snapshot" => snapshot}} = KilnClient.revision("post", post_id, version_id)
+{:ok, %{"snapshot" => snapshot}} = KilnClient.revision("post", post_id, version_id, editor)
 
 # Revert the content to it (a :read_write key; a read-only key gets a 403)
-{:ok, %{"revision" => new_revision}} = KilnClient.restore_revision("post", post_id, version_id)
+{:ok, %{"revision" => new_revision}} =
+  KilnClient.restore_revision("post", post_id, version_id, editor)
 
 # Content releases (read-only) and what each will publish or take down
 {:ok, %{items: releases, included: included}} =
-  KilnClient.list_releases(filter: %{state: "scheduled"}, include: ["items"])
+  KilnClient.list_releases([filter: %{state: "scheduled"}, include: ["items"]] ++ editor)
 
-{:ok, release} = KilnClient.release(release_id, include: ["items"])
-{:ok, %{items: items}} = KilnClient.list_release_items(filter: %{release_id: release_id})
+{:ok, release} = KilnClient.release(release_id, [include: ["items"]] ++ editor)
+
+{:ok, %{items: items}} =
+  KilnClient.list_release_items([filter: %{release_id: release_id}] ++ editor)
 ```
 
 `list_revisions/3`, `revision/4` and `restore_revision/4` take the **singular**
 type name and the document's id, not its slug.
+
+`restore_revision/4` is a write: with no key passed or configured it returns
+`{:error, %KilnClient.Error{reason: :no_api_key}}` without sending anything,
+as `create/3` does.
 
 ## Writing content
 
@@ -443,7 +485,7 @@ writes alike. Branch on `:reason`:
 
 | `:reason` | When |
 |---|---|
-| `:no_api_key` | a write with no key configured or passed — nothing was sent |
+| `:no_api_key` | a write (`restore_revision/4` included) with no key configured or passed — nothing was sent |
 | `:unauthorized` / `:forbidden` | 401 (no/invalid/expired key) / 403 (the key's owner lacks the right) |
 | `:not_found` | 404, or `one/3` matched nothing (reported as 404 too) |
 | `:validation` | 400 / 422 — `KilnClient.Error.pointers/1`, `field_errors/1`. AshJsonApi answers most attribute errors with 400, not 422 |
@@ -453,7 +495,7 @@ writes alike. Branch on `:reason`:
 | `:transport` | no response (DNS, refused, TLS, timeout); the exception is in `:exception` |
 | `:graphql` | `/gql` answered with top-level `errors` |
 | `:storage_refused` | a direct upload's `PUT` to object storage answered non-2xx (e.g. a stale presigned URL); the store's raw body is in `:body` |
-| `:unexpected_body` | a 2xx whose body isn't the expected shape (a media write with no `data` resource); the decoded body is in `:body` |
+| `:unexpected_body` | a 2xx whose body isn't the expected shape: a media write with no `data` resource (the decoded body is in `:body`), or a body that isn't JSON at all, such as a captive portal's or a CDN's HTML page (its first 1 KiB is in `:body`) |
 | `:http` | any other status |
 
 Every error also carries `:status`, `:code` (the first error's) and `:errors`

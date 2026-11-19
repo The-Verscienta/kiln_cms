@@ -16946,11 +16946,6 @@ msgstr ""
 msgid "Passed the human-verification check."
 msgstr ""
 
-#: lib/kiln_cms_web/live/two_factor_setup_live.ex
-#, elixir-autogen, elixir-format
-msgid "Passkey"
-msgstr ""
-
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Passkey added"
@@ -16990,6 +16985,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Passkeys"
 msgstr ""
@@ -24969,6 +24965,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "This experiment cannot convert: %{reason}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "This experiment changed since you opened it. It's been reloaded."
 msgstr ""
 
 #: lib/kiln_cms_web/live/experiment_live.ex
