@@ -60,6 +60,11 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **`GET /api/security/plugin-health`: each installed plugin's health as JSON for monitoring, read from the server's cache and never asking hex.pm; platform administrators only, behind the host site's admin allowlist.**
+  ([long form](docs/changelog/unreleased.md#plugin-health-api))
+
 ### Fixed
 
 - **Backups: `BACKUP_RCLONE_REMOTE_PRUNE=true` lets in-app backups prune the env remote (only what this backup directory's in-app runs sent there); each retention list/delete call gets its own time limit; the Destinations "Prunes" badge shows only when pruning can run.**

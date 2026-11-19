@@ -104,6 +104,40 @@ The answer is cached on each server for 24 hours (15 minutes after a request
 failed) and is lost when the server restarts, so a new deploy asks again the
 first time a platform administrator opens System or this page.
 
+### Monitor each plugin from a script
+
+`GET /api/security/plugin-health` (#2571) answers the same check as JSON, one
+entry per plugin, for a monitor that should alert on the plugin rather than
+on the **Installed plugins** line. The request, every field and every status
+code are in the API guide:
+[Plugin health (monitoring)](api.md#plugin-health-monitoring). In short:
+
+1. Mint a **Read-only** API key under **Operations → API keys**
+   (`/editor/api-keys`), owned by a **platform administrator**. A site
+   administrator's key is refused, and so is a drafts-only (`draft_write`)
+   key.
+2. If the site whose host you call has an [admin allowlist](admin-allowlist.md),
+   add the monitor's network to it.
+3. Call it:
+
+   ```bash
+   curl -s https://cms.example.com/api/security/plugin-health \
+     -H "authorization: Bearer $KILN_API_KEY"
+   ```
+
+   Each plugin's `overall` is its badge in the table above: `fail` is red,
+   `warn` amber, `unverifiable` **Can't verify**, `not_applicable` **Built
+   from this project**. Alert at once on `counts.fail` above zero, and key
+   plugins on `id`, not `name`.
+
+The endpoint reads only what the server already has. It never asks hex.pm
+or the notices feed, so on a server with nothing cached (after a deploy, or
+on a server no platform administrator has visited) it answers
+`"state": "not_checked"` with an empty `plugins` list. Opening System or this
+page, or a platform administrator's call to
+[`GET /api/security/posture`](#monitor-the-posture-from-a-script), fills that
+server's cache. Each server has its own.
+
 ### From the command line
 
 `mix kiln.plugins.list --health` runs the same check from the project and

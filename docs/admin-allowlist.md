@@ -27,8 +27,8 @@ either.
 | The console's downloads: the content, fields, translations, forms entries, analytics, governance and security-log exports, and `/editor/account/export.json` | `/account` (a reader's own settings page), `/account/two-factor` (the two-step sign-in setup page) and `/sign-out` |
 | `/setup` (the first-run wizard) | Media downloads, transforms and streams (`/media/:id/...`), `/uploads/*` and static assets |
 | † Every sign-in route, for **everyone**, members included: `/sign-in`, `/register`, password reset, magic links, passkeys, single sign-on (`/auth/*`), the two-factor prompt `/sign-in/verify` (and its passkey routes under `/sign-in/verify/passkey`), sign-in unlock links (`/sign-in/unlock`, `/auth/unlock/...`), account confirmation and invitations (`/auth/invite/...`) | `/preview/...` links (token preview) |
-| † Headless sign-in: `POST /api/auth/sign_in` and `/api/auth/sign_in/verify` | JSON:API, `/gql` and REST with an API key or a token already issued; MCP with an API key; `/ws/bridge` with an API key or a preview token; `/ws/gql` with a token already issued (it takes no API key). The security posture endpoint is the exception (left) |
-| The security posture for monitoring, `GET /api/security/posture`, with any credential, API keys included (#2521) | |
+| † Headless sign-in: `POST /api/auth/sign_in` and `/api/auth/sign_in/verify` | JSON:API, `/gql` and REST with an API key or a token already issued; MCP with an API key; `/ws/bridge` with an API key or a preview token; `/ws/gql` with a token already issued (it takes no API key). The two monitoring endpoints are the exception (left) |
+| The monitoring endpoints, `GET /api/security/posture` (#2521) and `GET /api/security/plugin-health` (#2571), with any credential, API keys included | |
 | Opening a console page's live connection (LiveView), and pages already open when the list changes; † the same for a sign-in page | `/up` and `/ready` health checks |
 | The collaborative-editing socket, `/ws/collab` | |
 
@@ -43,11 +43,21 @@ Consequences to plan for before you turn it on:
   `POST /api/auth/sign_in` from the user's device only works from listed
   networks. A front end that signs in from its own server needs that server's
   address on the list. Tokens already issued and API keys keep working
-  anywhere, except on the security posture endpoint below.
-- **Posture monitors need a listed network.** `GET /api/security/posture`
+  anywhere, except on the two monitoring endpoints below.
+- **Monitors need a listed network.** `GET /api/security/posture`
   ([monitoring](api.md#security-posture-monitoring)) is a map of what is off
-  on the site, so it is gated like the console, even for an API key. Add the
-  monitor's outgoing address to the list.
+  on the site, and `GET /api/security/plugin-health`
+  ([monitoring](api.md#plugin-health-monitoring)) lists the installed plugins
+  and what is wrong with them, so both are gated like the console, even for an
+  API key. Add the monitor's outgoing address to the list.
+- **Plugin health is the installation's, the list is the site's.** The
+  plugin health report is the same on every site's host, but the only network
+  gate in front of it is the allowlist of the site whose host the request
+  uses, as for the posture's installation checks and **System → Plugins**. A
+  platform administrator's key called on the host of a site with no list
+  answers from any network. If you rely on the list to keep that report in,
+  call it only on a site that has one, and turn one on for every site whose
+  host a platform administrator could use.
 
 The gate runs after the site's [block list](ip-blocking.md): an address that is
 both blocked and allowlisted is blocked.
@@ -117,8 +127,8 @@ With it off:
 - Every sign-in route (the † rows above) and the headless
   `POST /api/auth/sign_in` and `/api/auth/sign_in/verify` answer from any
   network. The two always follow the same setting.
-- The console, `/setup`, `/ws/collab` and `GET /api/security/posture` are
-  still refused from outside the list. An admin who signs in from elsewhere is
+- The console, `/setup`, `/ws/collab`, `GET /api/security/posture` and
+  `GET /api/security/plugin-health` are still refused from outside the list. An admin who signs in from elsewhere is
   signed in, and the console still answers "Not available from this network".
 - Console pages that are open keep their live connection only while their
   address is listed, as before. Sign-in pages that are open are not sent away
@@ -224,7 +234,7 @@ default.
   link.
 - **A page that was already open:** it is sent to `/editor` by a full page
   load, which gets the page above.
-- **The headless sign-in and the security posture endpoint:** `403` in the
+- **The headless sign-in and the two monitoring endpoints:** `403` in the
   API's error format, with `cache-control: no-store`:
 
   ```json
@@ -249,8 +259,8 @@ default.
 The allowlist **fails closed**. If a node cannot read a site's list (the
 database is down or overloaded), the console and sign-in pages answer `503`
 "Temporarily unavailable" ("Sign-in is temporarily unavailable. Try again in a
-minute.", with `retry-after: 30`), the headless sign-in and the security
-posture endpoint answer `503` `temporarily_unavailable` (detail "Temporarily
+minute.", with `retry-after: 30`), the headless sign-in and the two
+monitoring endpoints answer `503` `temporarily_unavailable` (detail "Temporarily
 unavailable", also with `retry-after: 30`), and live connections are refused. A list that
 disappears under load would turn the control off exactly when it is needed;
 the console and sign-in cannot work without the database anyway. The public
@@ -392,7 +402,7 @@ production build; in development set the same thing from IEx.
 | A member says they cannot sign in any more | Member sign-in is restricted too. Add their network, or clear **Also restrict sign-in** (see "Let members sign in from anywhere"). |
 | A mobile app or a site front end gets `403` `network_not_allowed` from `/api/auth/sign_in` | Headless sign-in is restricted too. Clear **Also restrict sign-in**, or add the app's network. |
 | An admin signs in from home and the console says "Not available from this network" | Expected with **Also restrict sign-in** off: sign-in is open, the console is not. |
-| A security monitor gets `403` `network_not_allowed` from `/api/security/posture` | The posture endpoint is restricted too, whatever the key. Add the monitor's network to the list. |
+| A security monitor gets `403` `network_not_allowed` from `/api/security/posture` or `/api/security/plugin-health` | Both monitoring endpoints are restricted too, whatever the key. Add the monitor's network to the list of the site whose host it calls. |
 | "This needs the running application ... Run it against the live node with `bin/kiln_cms rpc '...'`, not `bin/kiln_cms eval`." | You used `eval`. Use `rpc` against the running release. |
 | `rpc` says "No organization with slug ..." | The `org:` slug is wrong. Leave it out for the default site. |
 
