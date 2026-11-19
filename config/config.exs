@@ -996,6 +996,20 @@ config :esbuild,
     env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
   ]
 
+# The script for signed-out content pages (#2402): `assets/js/public.js`, picked
+# over app.js by `KilnCMSWeb.Layouts.js_bundle_path/1`. A profile of its own,
+# not a second entry in `kiln_cms`: with `--splitting` the two would share a
+# chunk, one more request on every page. No splitting here either; it is one
+# small file. After the profiles above for the same reason as
+# `kiln_challenge_embed`: the docs' line anchors into this file stay put.
+config :esbuild,
+  kiln_public: [
+    args:
+      ~w(js/public.js --bundle --format=esm --target=es2022 --outdir=../priv/static/assets/js),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
+  ]
+
 # Error tracking (Sentry). The DSN is only set in config/runtime.exs from the
 # SENTRY_DSN env var, so with no DSN every capture is a no-op — dev, test, and
 # precommit never reach out to Sentry. Transport uses the default Finch client

@@ -1092,12 +1092,14 @@ defmodule KilnCMS.MixProject do
         "compile",
         "tailwind kiln_cms",
         "esbuild kiln_cms",
-        "esbuild kiln_challenge_embed"
+        "esbuild kiln_challenge_embed",
+        "esbuild kiln_public"
       ],
       "assets.deploy": [
         "tailwind kiln_cms --minify",
         "esbuild kiln_cms --minify",
         "esbuild kiln_challenge_embed --minify",
+        "esbuild kiln_public --minify",
         "phx.digest"
       ],
       precommit:

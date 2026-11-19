@@ -172,8 +172,9 @@ defmodule KilnCMSWeb.ChallengeComponents do
 
   These pages are dead renders, so there is no hook: the element is marked
   `data-kiln-challenge` and `mountAll` in `assets/js/challenge.js` mounts it —
-  from app.js on the site's own pages, from `challenge_static.js` (a
-  `<script type="module" src>`, never inline) inside the embed. The token goes
+  from `public.js` (or app.js, #2402) on the site's own pages, from
+  `challenge_static.js` (a `<script type="module" src>`, never inline) inside
+  the embed. The token goes
   in `KilnCMS.Forms.challenge_field/0`, always empty when rendered: a refused
   submission comes back with a fresh widget, not the spent token.
 

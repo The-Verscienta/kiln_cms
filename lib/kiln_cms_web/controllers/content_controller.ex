@@ -47,6 +47,7 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMSWeb.EventIndex
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.Plugs.ChallengeCsp
+  alias KilnCMSWeb.Plugs.PublicJsBundle
   alias KilnCMSWeb.Plugs.UrlLocale
   alias KilnCMSWeb.SharedCache
   alias KilnCMSWeb.StructuredData
@@ -56,6 +57,12 @@ defmodule KilnCMSWeb.ContentController do
   # (#2595): most are `public` and shared-cacheable under that URL. See
   # `KilnCMSWeb.Plugs.UrlLocale`.
   plug UrlLocale
+
+  # Every page here is a dead render in `Layouts.public` — the stock home it
+  # falls through to included — so it loads `public.js`, not app.js (#2402).
+  # Here and not in the `:delivery` pipeline, which also serves LiveViews:
+  # see `KilnCMSWeb.Plugs.PublicJsBundle`.
+  plug PublicJsBundle
 
   # The site root. A site whose Home page (slug `home`, see
   # `KilnCMS.CMS.StarterContent`) is published serves it here, through the
