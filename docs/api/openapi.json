@@ -33093,6 +33093,34 @@
                         "type": "integer"
                       },
                       "description": "How many plugins have each `overall`: `fail`, `warn`, `unknown`, `unverifiable`, `not_applicable`, `ok` today, every one present",
+                      "properties": {
+                        "fail": {
+                          "type": "integer"
+                        },
+                        "not_applicable": {
+                          "type": "integer"
+                        },
+                        "ok": {
+                          "type": "integer"
+                        },
+                        "unknown": {
+                          "type": "integer"
+                        },
+                        "unverifiable": {
+                          "type": "integer"
+                        },
+                        "warn": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "fail",
+                        "warn",
+                        "unknown",
+                        "unverifiable",
+                        "not_applicable",
+                        "ok"
+                      ],
                       "type": "object"
                     },
                     "notices": {

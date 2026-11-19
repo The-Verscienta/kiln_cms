@@ -1106,6 +1106,12 @@ defmodule KilnCMSWeb.OpenApi do
           description:
             "How many plugins have each `overall`: `fail`, `warn`, `unknown`, " <>
               "`unverifiable`, `not_applicable`, `ok` today, every one present",
+          required: [:fail, :warn, :unknown, :unverifiable, :not_applicable, :ok],
+          properties:
+            Map.new(
+              [:fail, :warn, :unknown, :unverifiable, :not_applicable, :ok],
+              &{&1, %OpenApiSpex.Schema{type: :integer}}
+            ),
           additionalProperties: %OpenApiSpex.Schema{type: :integer}
         },
         plugins: %OpenApiSpex.Schema{
