@@ -27105,6 +27105,11 @@ msgstr ""
 msgid "Waiting: the server that checked can't run backups (%{reason}); another server can take it."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Waiting: this backup's record couldn't be read"
+msgstr ""
+
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
 msgid "Waiting: this window is asked for again each minute."

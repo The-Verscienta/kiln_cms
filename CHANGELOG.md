@@ -62,6 +62,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A hung backup directory no longer stops a node's heartbeat while it records another node's interrupted backup; a restarted node keeps its last directory id for 180 s; a resume waiting on a backup record that can't be read says so; and a heartbeat restart no longer leaves its own paused queue paused.**
+  ([#3116](https://github.com/The-Verscienta/kiln_cms/pull/3116) · [long form](docs/changelog/unreleased.md#backup-heartbeat-lock-gaps))
+
 - **Backups History: the "couldn't check" chips explain themselves, a media set whose missing parts were copied off-site says which ones, and Home's red backup strip shows the schedule and cron lines only when a backup is actually overdue.**
   ([#3114](https://github.com/The-Verscienta/kiln_cms/pull/3114) · [long form](docs/changelog/unreleased.md#backup-history-home-polish))
 

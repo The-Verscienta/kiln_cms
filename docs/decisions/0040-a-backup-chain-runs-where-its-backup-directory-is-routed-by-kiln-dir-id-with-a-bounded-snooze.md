@@ -151,8 +151,11 @@ before a later resume but not one taken mid-run of a run never resumed.
 Consequences: on a live source host whose `.work/<stamp>/` was moved away,
 the resume is now refused there instead of running from the copy. A copy
 resumes once the source host has been silent for 180 seconds; to use it
-sooner, stop the app on the source host. A restarted source host whose first
-id read hangs reports neither id, so a copy can resume beside it. During a
+sooner, stop the app on the source host. A restarted source host starts
+from the last id its own beat row holds when that row beat within 180
+seconds (#3091), so a first id read that hangs after a quick restart still
+reports the directory. One that was down for longer than that, and whose
+first read hangs, reports neither id, so a copy can resume beside it. During a
 rolling deploy, a node on an older release keeps the files-first rule. A
 deployment with one shared volume, where every node reads the same id, is
 unaffected. Every other rule above is unchanged.

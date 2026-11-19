@@ -359,6 +359,30 @@ defmodule KilnCMS.Backups.CancelResumeTest do
       set_job!(id, state: "available", meta: rebased, errors: elsewhere)
       assert waiting_for() == :files_server
     end
+
+    # #3091: a node with a copy that can't read the run waits too. A snooze
+    # leaves no reason on the job, so the run is read; between attempts the
+    # last error says it.
+    test "a start waiting because its run couldn't be read says so", ctx do
+      stamp = "20261101-010204"
+      failed_run!(ctx.dir, stamp)
+      waiting_for_files!(ctx, stamp)
+      id = lock().step_job_id
+
+      # Snoozing, with a run that records no directory: a start that read it
+      # wouldn't have waited.
+      set_run!(stamp, dir_id: nil)
+      assert waiting_for() == :run_unreadable
+
+      rebased = %{"snoozed" => 6, "affinity_base" => 6}
+      unreadable = [error_entry("{:error, :run_unreadable}")]
+
+      set_job!(id, state: "retryable", meta: rebased, errors: unreadable)
+      assert waiting_for() == :run_unreadable
+
+      set_job!(id, state: "available", meta: rebased, errors: unreadable)
+      assert waiting_for() == :run_unreadable
+    end
   end
 
   describe "refusals" do

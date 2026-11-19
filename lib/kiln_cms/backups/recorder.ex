@@ -742,6 +742,46 @@ defmodule KilnCMS.Backups.Recorder do
   end
 
   @doc """
+  Add to a run already failed as interrupted (#3078) what this accumulator
+  holds (components, artifacts, log, destinations), through the run's
+  `:record_interrupted` action: only a `failed` run of this chain whose
+  `updated_at` is still `failed_at`, the fail's own write. Never the status
+  or the error. `{:ok, rec}`, or `{:stale, rec}` when the write didn't land
+  (no run, written since, or refused, which is logged).
+  """
+  @spec record_interrupted(t(), DateTime.t()) :: {:ok, t()} | {:stale, t()}
+  def record_interrupted(%__MODULE__{run: nil} = rec, _failed_at), do: {:stale, rec}
+
+  def record_interrupted(%__MODULE__{run: %{updated_at: at}} = rec, failed_at) do
+    if DateTime.compare(at, failed_at) == :eq do
+      written =
+        write(rec, "record_interrupted", &Backups.record_run_interrupted/3, %{
+          failed_at: failed_at
+        })
+
+      if written.run == rec.run, do: {:stale, written}, else: {:ok, written}
+    else
+      {:stale, rec}
+    end
+  end
+
+  @doc """
+  `fail/2`, saying whether this write failed the run: `{:ok, rec}` with the
+  run as written, or `{:stale, rec}` (no run, not running, not this chain's,
+  or the write failed, with a warning).
+  """
+  @spec fail_written(t(), String.t()) :: {:ok, t()} | {:stale, t()}
+  def fail_written(%__MODULE__{run: nil} = rec, _error), do: {:stale, rec}
+
+  def fail_written(%__MODULE__{} = rec, error) do
+    failed = fail(rec, error)
+
+    if failed.run != rec.run and failed.run.status == :failed,
+      do: {:ok, failed},
+      else: {:stale, failed}
+  end
+
+  @doc """
   Mark `key` as `pruned` on the artifacts of OTHER runs whose files a
   retention pass just deleted there (`names` are file names): `"local"` for
   this host's backup directory (the default), or a destination's key for

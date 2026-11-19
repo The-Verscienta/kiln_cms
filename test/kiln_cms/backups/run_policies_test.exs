@@ -96,6 +96,13 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
       record_progress: fn actor -> Backups.record_run_progress(run!(), %{}, actor: actor) end,
       finish: fn actor -> Backups.finish_run(run!(), %{}, actor: actor) end,
       fail: fn actor -> Backups.fail_run(run!(), %{error: "x"}, actor: actor) end,
+      # A fresh failed run per call, pinned to its fail (#3078): the filter
+      # refuses anything else.
+      record_interrupted: fn actor ->
+        failed = Backups.fail_run!(run!(), %{error: "x"}, actor: Backups.system())
+
+        Backups.record_run_interrupted(failed, %{failed_at: failed.updated_at}, actor: actor)
+      end,
       mark_pruned: fn actor -> Backups.mark_run_pruned(run, %{artifacts: []}, actor: actor) end,
       # A fresh failed run per call: the guard refuses anything else, and a
       # refusal by the guard would hide whether the POLICY admitted the actor.
@@ -209,6 +216,61 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
 
         assert {:error, %Ash.Error.Forbidden{}} = Backups.cancel_run_resend(run, actor: actor)
       end
+    end
+  end
+
+  describe "record_interrupted (#3078)" do
+    defp failed!, do: Backups.fail_run!(run!(), %{error: "x"}, actor: Backups.system())
+
+    defp record_interrupted(run, failed_at),
+      do:
+        Backups.record_run_interrupted(
+          run,
+          %{
+            failed_at: failed_at,
+            log: [%{at: DateTime.utc_now(), level: :info, step: "x", message: "merged"}]
+          },
+          actor: Backups.system()
+        )
+
+    test "adds to the failed run as the fail left it, never the status or the error" do
+      failed = failed!()
+
+      assert {:ok, %{status: :failed, error: "x", log: [%{message: "merged"}]}} =
+               record_interrupted(failed, failed.updated_at)
+    end
+
+    test "refuses a running run, another chain's, a canceled one, and one written since" do
+      running = run!()
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               record_interrupted(running, running.updated_at)
+
+      # A resume re-opened it under its own chain.
+      failed = failed!()
+
+      Backups.resume_run!(failed, %{chain_id: Ash.UUID.generate()}, actor: Backups.system())
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               record_interrupted(failed, failed.updated_at)
+
+      canceled = failed!()
+
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          from(r in "backup_runs", where: r.id == type(^canceled.id, :binary_id)),
+          set: [status: "canceled"]
+        )
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               record_interrupted(canceled, canceled.updated_at)
+
+      # A note written after the fail (a refused resume).
+      noted = failed!()
+      Backups.note_run_resume_refused!(noted, "no files here", actor: Backups.system())
+
+      assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+               record_interrupted(noted, noted.updated_at)
     end
   end
 

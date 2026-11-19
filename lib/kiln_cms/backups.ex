@@ -101,6 +101,7 @@ defmodule KilnCMS.Backups do
       define :record_run_progress, action: :record_progress
       define :finish_run, action: :finish
       define :fail_run, action: :fail
+      define :record_run_interrupted, action: :record_interrupted
       define :resume_run, action: :resume
       define :note_run_resume_refused, action: :note_resume_refused, args: [:reason]
       define :import_run, action: :import
@@ -1992,8 +1993,9 @@ defmodule KilnCMS.Backups do
 
   `details: true` (the Backups page) adds `waiting_for` (#2816): what a
   resume's start step waits for before it re-opens its run, `:files_server`
-  (the server that has the run's files), `:cancel_settle` (the run's Cancel
-  to settle) or nil. It reads the start job and the run, so the
+  (the server that has the run's files), `:run_unreadable` (#3091: the run's
+  row, which says where its files are, couldn't be read), `:cancel_settle`
+  (the run's Cancel to settle) or nil. It reads the start job and the run, so the
   `await/2` poll leaves it out.
   """
   @spec in_flight(keyword()) :: map() | nil

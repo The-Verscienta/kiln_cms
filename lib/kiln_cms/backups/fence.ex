@@ -5,10 +5,11 @@ defmodule KilnCMS.Backups.Fence do
   heartbeat's last successful beat is `KilnCMS.Backups.Heartbeat.fence_after_ms/0`
   old.
 
-  The heartbeat's own tick also fences, but the tick does file I/O on
+  The heartbeat's own tick also fences, but the tick did file I/O on
   `BACKUP_DIR` (the backup-directory id, and the sweep's interrupted-run
-  cleanup). On a hard-mounted NFS export that hangs, that I/O blocks the tick,
-  and a fence inside the tick would never run. This process does no file or
+  cleanup; both now run in tasks of their own, #2848 and #3078), and its
+  database calls can still hang on a half-open connection. A fence inside a
+  blocked tick would never run. This process does no file or
   database I/O: it reads `KilnCMS.Backups.StepRegistry` and kills processes,
   every few seconds. The heartbeat tells it of each successful beat
   (`beat/1`); until the first one, the time this process started stands in.

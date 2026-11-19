@@ -953,8 +953,9 @@ defmodule KilnCMS.Backups.ChainTest do
       assert run.status == :failed
       assert run.error =~ "Interrupted"
 
-      # This node has the chain's directory and state: the failure manifest says so.
-      refute Manifest.read(dir).ok
+      # This node has the chain's directory and state: the failure manifest
+      # says so, the promoted backup's start not having run yet (#3078).
+      assert %Manifest{stamp: ^stamp, ok: false} = Manifest.read(dir)
       assert Backups.run_resumable?(run)
     end
 

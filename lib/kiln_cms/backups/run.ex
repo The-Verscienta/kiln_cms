@@ -192,6 +192,23 @@ defmodule KilnCMS.Backups.Run do
       change Normalize
     end
 
+    # A backup interrupted from outside its step (#3078) is failed from its
+    # row at once (`fail`); the record that runs later, on the node with its
+    # `state.json`, adds what a best-effort write missed: the accumulator's
+    # components, artifacts, log and destinations. Only on a `failed` run of
+    # the writer's own chain (`OwnChain`) that nothing has written since the
+    # fail (`failed_at`, its `updated_at` then), so a later note (a refused
+    # resume, a Cancel of one, retention's `pruned`) is never replaced; never
+    # the status or the error.
+    update :record_interrupted do
+      accept [:components, :artifacts, :log, :destinations]
+      argument :failed_at, :utc_datetime_usec, allow_nil?: false
+      require_atomic? false
+      change filter(expr(status == :failed and updated_at == ^arg(:failed_at)))
+      change OwnChain
+      change Normalize
+    end
+
     # A failed, canceled or interrupted in-app run picks up where it stopped
     # (#2218): back to `running`, with the old outcome cleared. The guard is
     # the `Resume` change: it refuses anything but a failed or canceled run or
@@ -378,6 +395,7 @@ defmodule KilnCMS.Backups.Run do
              :record_progress,
              :finish,
              :fail,
+             :record_interrupted,
              :resume,
              :note_resume_refused,
              :begin_resend,

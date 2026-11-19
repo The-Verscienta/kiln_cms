@@ -159,6 +159,15 @@ defmodule KilnCMS.Application do
       # reads above). Both before Oban.
       {Task.Supervisor, name: KilnCMS.Backups.MarkerSyncIO},
       KilnCMS.Backups.MarkerSyncAbandoned,
+      # What the backup lock sweep does after its commit when it interrupts a
+      # backup (#3078): one task at a time, so a hung BACKUP_DIR holds one,
+      # never the heartbeat or a request. Before Oban and the heartbeat.
+      {Task.Supervisor, name: KilnCMS.Backups.InterruptTasks},
+      KilnCMS.Backups.Interrupts,
+      # The directory queues this node's heartbeat paused (#3095), kept
+      # apart from it so a restarted heartbeat still resumes them. Before
+      # the heartbeat.
+      KilnCMS.Backups.DirQueues.Paused,
       # The self-fence's watchdog (#2848): kills this node's steps when the
       # heartbeat has not beaten for 90 s, even while a tick is stuck.
       backup_fence(),

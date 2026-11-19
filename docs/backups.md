@@ -1522,7 +1522,10 @@ attempts:
 
 **When a backup fails**, it writes a failure manifest (when its `state.json`
 is there to say what landed), marks the run `Failed`, releases the lock and
-starts the queued backup, if there is one. A backup the deployment cannot run
+starts the queued backup, if there is one. A backup interrupted from outside
+its step writes its failure manifest after the release, and only until the
+queued backup's start step has run
+([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)). A backup the deployment cannot run
 at all (`BACKUP_ENABLED=false`, no `pg_dump` in the image on the node that
 picked up the start step) is a `Skipped` row and leaves `manifest.json` alone,
 as before.
@@ -1719,7 +1722,8 @@ all that time. A platform admin can cancel it (#2816).
 
    | Strip label | The resume is waiting for |
    |---|---|
-   | "Waiting for the server that has this backup's files" | The node whose backup directory the run records or, for a copy of the backup's `.work/<stamp>/` on another host, the source host to stop beating for 180 seconds ([why](#several-nodes-and-the-backup-lock)). Other nodes keep putting the step back, or the start waits in that directory's own queue ([Which node runs a step](#which-node-runs-a-step)). Also shown while a node with a copy waits for the run's row to be readable. |
+   | "Waiting for the server that has this backup's files" | The node whose backup directory the run records or, for a copy of the backup's `.work/<stamp>/` on another host, the source host to stop beating for 180 seconds ([why](#several-nodes-and-the-backup-lock)). Other nodes keep putting the step back, or the start waits in that directory's own queue ([Which node runs a step](#which-node-runs-a-step)). |
+   | "Waiting: this backup's record couldn't be read" | The run's row to be readable on a node that has a copy of the backup's files: the row says where the files belong, so the copy waits rather than guess (#3091). Each attempt waits about 10 minutes, then fails with `:run_unreadable`; check the server log for "couldn't read where its files are". |
    | "Waiting for the canceled backup's step to stop" | The window after the backup's Cancel to pass. |
    | "Starting a resume" | Nothing the page can name: its start step is about to run, or is running. |
 
@@ -1843,6 +1847,68 @@ looks at the lock:
   lose the row of a step that is legitimately running. That step is left to
   the 90-second self-fence and the lock.
 
+**Recording an interrupted backup doesn't hold up the heartbeat (#3078).**
+Once a take-back with no attempts left, a step whose job ended, or a step
+stranded in a directory queue has released the lock, the run is failed at
+once, from what its row holds. What is left reads and writes `BACKUP_DIR`:
+the failure manifest, a re-send's work directory, and all of an interrupted
+`finish` step's record, since whether it had in fact finished is read from
+the manifest. That runs in a background task, so on a hung mount the
+heartbeat keeps beating, and a backup request that swept first doesn't wait
+on it. The tasks run one at a time, so a hung directory holds one blocked
+task, and up to 20 more wait behind it in order.
+
+- **A late record never touches a newer backup.** The failure manifest is
+  put in place, and a work directory removed, only while the lock is still
+  as the interrupt left it: free, or held by the backup it promoted from
+  the queue while that backup's start step hasn't run yet (and it isn't a
+  resume of the same backup). That is checked under the lock right before
+  the rename; the failure manifest is also skipped when `manifest.json`
+  already names a later backup. A backup that has used the lock since keeps
+  its files, and its own manifest. A finished backup whose `.work/<stamp>`
+  a late record wasn't allowed to remove keeps it until the sweep of work
+  directories older than three days; the `.good` and `.hold` markers keep
+  naming the newer backups meanwhile.
+- **The run gets what its row missed.** On the node with the backup's
+  `state.json`, the record adds what that file holds that a best-effort run
+  write missed (its files, log lines and destinations) to the failed run,
+  unless something wrote the run after it failed (a refused resume's note,
+  a Cancel, retention marking files pruned): that write stays, and the
+  log says the state wasn't added.
+- **A `finish` record that runs late may not be able to decide.** Whether
+  an interrupted `finish` had finished is read from `manifest.json`. When
+  that already names a later backup, the record can't tell: it leaves the
+  run as it is, with a warning, and the stale-run check fails it if it is
+  still `Running` (below).
+- **A node whose record hangs stops sweeping.** While one of its tasks has
+  run for more than a minute, its heartbeat skips the lock sweep (take-backs,
+  ended jobs, stranded steps). Another node's heartbeat sweeps instead, when
+  its own records aren't stuck too, and a backup request on any node still
+  sweeps first. On a shared `BACKUP_DIR` that hangs for every node, the
+  sweep then happens only when a backup is requested, until the directory
+  answers again.
+- **An interrupted `finish` whose record is dropped** (the wait is full)
+  reads `Running` until the stale-run check fails it as "Interrupted: the job
+  was killed or the node stopped", about 2 hours 15 minutes after its last
+  update. Only then can it be resumed. Any other step's run is already
+  failed; a dropped record only leaves its failure manifest unwritten, or a
+  re-send's work directory in place.
+
+| Log line | Level | Meaning |
+|---|---|---|
+| "Backup `<stamp>`: the interrupt record has taken more than 60 s (a hung BACKUP_DIR?). Records of other interrupted backups wait behind it, and this node's heartbeat skips the lock sweep." | warning | The directory isn't answering. Once per task. |
+| "Backup heartbeat: an interrupt record on this node has run for over a minute (a hung BACKUP_DIR?), so this node's heartbeat skips the backup lock sweep until it finishes; other nodes' heartbeats and backup requests still sweep" | warning | Once, when this node stops sweeping. |
+| "Backup heartbeat: the interrupt records here caught up; sweeping again" | info | Once, when it sweeps again. |
+| "Backup `<stamp>`: the interrupt record finished after N s" | info | That slow task finished. |
+| "Backup `<stamp>`: its failure manifest was not written: another backup has used the backup lock since it was interrupted, or the manifest names a later one" | info | The record ran late; the newer manifest stays. |
+| "Backup `<stamp>`: its work directory was left in place: another backup has used the backup lock since it was interrupted. The sweep of work directories older than three days removes it; the markers keep naming the newer backups meanwhile." | info | The record ran late; the newer backup's work directory stays (above). |
+| "Backup `<stamp>`: its finish was interrupted, and the manifest already names a later backup, so whether it had finished can't be told. Its run is left as it is; the stale-run check fails it if it is still running." | warning | A late `finish` record (above). |
+| "Backup `<stamp>`: dropped from the interrupt records, 20 are waiting behind one that has run for N s (a hung BACKUP_DIR?). …" | error for a `finish`, else warning | The wait is full. The rest of the line says what is left undone (above). |
+| "Backup `<stamp>`: the interrupt record crashed: …" | error | The task failed; the next one runs. |
+
+A resume's start, which has no stamp on the lock yet, is named "the resume
+of `<stamp>`" in these lines and in the take-back lines above.
+
 The same checks run before every backup request, so a stopped node's backup
 never makes a request queue behind it for good. The heartbeat is on by
 default (`config :kiln_cms, KilnCMS.Backups, heartbeat?: true`). Leave it on:
@@ -1929,9 +1995,12 @@ and either resumes the backup or refuses it as above. A source host whose id
 read is held up by a hung mount (beats report no id then, see
 [The backup-directory id read](#the-backup-directory-id-read-2848)) still
 counts as live: each beat also reports the last id it read, until a read
-finds no id file. One gap remains: a source host that restarts and whose
-first id read hangs reports no id at all, so a copy elsewhere can resume
-while it runs.
+finds no id file. A source host that restarts starts from the last id its
+previous beat reported, when that beat is under 180 seconds old (#3091), so
+a first read that hangs after a restart doesn't let a copy resume either.
+One gap remains: a source host that was down for more than 180 seconds, and
+whose first id read after it comes back hangs, reports no id, so a copy
+elsewhere can resume while it runs.
 
 The start waits, rather than trust the copy, in three more cases:
 
@@ -2052,12 +2121,12 @@ and only the nodes that read that id run it (#2845):
 - **A queue paused by something else stays paused.** The heartbeat resumes
   only a queue it paused itself. One paused by an operator, or by
   `Oban.pause_all_queues(Oban)` (the demo reset uses it), is left paused and not
-  advertised, so its jobs take the put-backs until it runs again. The
-  heartbeat also counts a queue it finds already paused when it starts as
-  paused by someone else, so after the heartbeat process itself crashes and
-  restarts, a queue it had paused stays paused until the app restarts on
-  that node. Its jobs are moved back to `backup_steps` after 5 minutes
-  ([below](#jobs-left-in-a-directory-queue)) and run from there.
+  advertised, so its jobs take the put-backs until it runs again. Which
+  queues the heartbeat paused is kept apart from the heartbeat process, in
+  a table that lives as long as the app on that node (#3095), so a
+  heartbeat that crashes and restarts still resumes its own pause when the
+  id comes back. A restart of the app clears the table along with the
+  queues themselves.
 - **The marker sync shares the queue**, one job at a time, so a sync for a
   directory can wait behind a long backup step there.
 
@@ -2118,8 +2187,8 @@ What the server log says:
 | Log line | Level | Meaning |
 |---|---|---|
 | "Backup step `<step>` of `<stamp>` waited 30 minutes for a server with its backup directory (id `<id>`), and none is running: the backup failed and the lock was released" | error | The second row, for a step. |
-| "Backup step `<step>` of `<stamp>` moved back to backup_steps: the servers with its backup directory (id `<id>`) don't run its queue" | warning | The first row ("of a starting backup" for a resume's start). Look for a paused queue, or the start warning above, on the node with that directory. |
-| "Backup step start of a starting backup moved back to backup_steps: no server with its backup directory (id `<id>`) is running" | warning | The second row, for a resume's start (which has no stamp of its own on the lock until it runs). |
+| "Backup step `<step>` of `<stamp>` moved back to backup_steps: the servers with its backup directory (id `<id>`) don't run its queue" | warning | The first row ("of the resume of `<stamp>`" for a resume's start, #3095). Look for a paused queue, or the start warning above, on the node with that directory. |
+| "Backup step start of the resume of `<stamp>` moved back to backup_steps: no server with its backup directory (id `<id>`) is running" | warning | The second row, for a resume's start. It names the stamp it resumes, since the lock has no stamp of its own until the start runs (#3095). |
 | "Backup step job `<id>` was left in `backup_dir_<id>` after its backup moved on: canceled" | warning | A stray job, cleaned up. |
 | "Backup stranded-step sweep skipped: couldn't read the node heartbeats (…)" | warning | Nothing was moved or failed this time; the next sweep tries again. |
 | "Backup stranded-step sweep failed: …" | warning | The sweep raised; the next one tries again. |
@@ -2195,8 +2264,9 @@ self-fence included. Now:
   this host is alive but its read is stuck
   ([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)).
   The marker sync routes by the current id only. A read that finds no id
-  file clears it, and a node that restarts has none until its first read
-  answers.
+  file clears it. A node that restarts takes it from its own last beat when
+  that beat is under 180 seconds old (#3091), and otherwise has none until
+  its first read answers.
 - **The beat always goes out.** A read that crashes, or that answers with
   something other than an id or an error, is logged and the beat reports no
   id.

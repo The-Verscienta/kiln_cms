@@ -541,3 +541,8 @@ config :kiln_cms, KilnCMS.Backups.Destination.S3,
   get_chunk_bytes: 1500
 
 config :kiln_cms, KilnCMS.Backups.Retry, base_ms: 1, cap_ms: 4, margin_ms: 1_000
+
+# What the lock sweep records after it interrupts a backup (#3078) runs in
+# the caller, so a test sees it once the sweep returns. The tests of the
+# hand-off itself switch it back to `KilnCMS.Backups.Interrupts`' task.
+config :kiln_cms, KilnCMS.Backups, interrupts: :inline

@@ -210,7 +210,34 @@ nodes could then write the same backup.
   its directory resume elsewhere
   ([ADR 0040](0040-a-backup-chain-runs-where-its-backup-directory-is-routed-by-kiln-dir-id-with-a-bounded-snooze.md),
   "Amendment (2026-11-17, #2817)"). The marker sync still routes by `dir_id`
-  only.
+  only. A restarted heartbeat takes `last_dir_id` from its own beat row when
+  that row beat within 180 seconds (#3091).
+- **The sweep's cleanup can no longer block the beat (#3078).** A reclaim
+  with no attempts left, a reap or the stranded-step sweep fails the run in
+  the caller, right after its commit, with no `BACKUP_DIR` I/O. What is left
+  (the failure manifest, a re-send's work directory, and all of an
+  interrupted finish, whose verdict needs its files) runs in a task under
+  `KilnCMS.Backups.InterruptTasks`, handed over by a cast to
+  `KilnCMS.Backups.Interrupts` that the tick never waits on; so does a
+  backup request's, which sweeps first. One task runs at a time, so a hung
+  directory holds one blocked process; up to 20 more wait in order, and one
+  past that is dropped with a line in the log (an error for a finish, whose
+  run then waits for the stale-run check). The task's writes are fenced by
+  the lock as the release left it (`Chain.released_fenced/3`): the failure
+  manifest is renamed into place, and a work directory moved into the trash,
+  under the lock and only while it is free at the release's epoch, or held at
+  that epoch by the backup the release promoted, before its start step has
+  run; the manifest is also skipped when it already names a later stamp
+  (read before the lock is taken). A late finish record whose manifest names
+  a later stamp can't decide the finish's verdict and leaves its run for the
+  stale-run check. On the node with the backup's `state.json`, the task adds
+  what that file holds to the failed run (`Run :record_interrupted`, system
+  only, own chain, and only while the run's `updated_at` is still the one
+  its fail left, so a later note is never replaced). While a task has run for over a
+  minute the node's heartbeat skips the lock sweep; another node's heartbeat
+  or any backup request still sweeps, and on a shared mount hung for every
+  node only requests do. The lock's release, the requeue and the promotion
+  stay in the sweep's transaction.
 
 The thresholds (90 and 180 seconds) and the reclaim are unchanged. Every
 other rule above is unchanged.

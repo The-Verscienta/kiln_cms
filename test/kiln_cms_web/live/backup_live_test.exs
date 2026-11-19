@@ -1510,6 +1510,47 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert %{chain: ^chain} = Backups.in_flight()
     end
 
+    # #3091: a node with the files that couldn't read the run waits; the
+    # strip says that, not that it waits for another server.
+    @tag :pg_tools
+    test "a resume waiting because its record couldn't be read says so", %{dir: dir} do
+      %{run: run} = waiting_resume!(dir, "20261103-121212")
+      # Snoozing with no recorded directory: only an unreadable run waits so.
+      set_run!(run.stamp, dir_id: nil)
+
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               ~s|#backup-in-flight [data-role="step"]|,
+               "Waiting: this backup's record couldn't be read"
+             )
+
+      assert has_element?(lv, @strip_why, "Why?")
+      assert has_element?(lv, @strip_cancel_resume)
+
+      # Between attempts, the last attempt's error says it.
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          Ecto.Query.from(j in Oban.Job, where: j.id == ^lock_row().step_job_id),
+          set: [
+            state: "retryable",
+            meta: %{"snoozed" => 20, "affinity_base" => 20},
+            errors: [%{"attempt" => 1, "at" => "now", "error" => "{:error, :run_unreadable}"}]
+          ]
+        )
+
+      send(lv.pid, :refresh)
+
+      assert has_element?(
+               lv,
+               ~s|#backup-in-flight [data-role="step"]|,
+               "Waiting: this backup's record couldn't be read"
+             )
+
+      assert has_element?(lv, @strip_why, "Why?")
+    end
+
     # Critic change 1: a stale `running` run that a resume is about to re-open
     # gets only the resume's Cancel; the plain one would leave the resume
     # holding the lock.
