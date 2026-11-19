@@ -4499,9 +4499,15 @@ this installation has no record of sending there: db 20261101-031700,
 media 20261101-031700". The reasoning is in
 [ADR 0064](decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md).
 
-It never runs on `BACKUP_RCLONE_REMOTE`, which the app has never pruned,
-nor on a destination whose adapter can't list and delete files (a plugin's
-says so). What it did is on the run's log:
+It never runs on a destination whose adapter can't list and delete files
+(a plugin's says so), and on `BACKUP_RCLONE_REMOTE` only when you turn it on
+([Pruning BACKUP_RCLONE_REMOTE](#pruning-backup_rclone_remote)). The
+Destinations tab shows **Prunes its old backups** on a row only when a pass
+there would prune; a row whose retention is ticked but can't run shows
+**Not pruned:** and why (it overlaps `BACKUP_RCLONE_REMOTE` or another
+destination, it can't be compared with `BACKUP_RCLONE_REMOTE`, or its
+adapter can't list and delete), the same check each pass makes. What it did
+is on the run's log:
 
 | Log line | Meaning |
 |---|---|
@@ -4509,8 +4515,8 @@ says so). What it did is on the run's log:
 | "Retention on NAS skipped: it overlaps BACKUP_RCLONE_REMOTE; nothing was deleted" | The destination is, contains or is inside the env remote, which changed since the destination was added. Point the two at separate places. |
 | "Retention on NAS skipped: it overlaps another backup destination; nothing was deleted" | Two destinations share a place. Delete one. |
 | "Retention on NAS skipped: can't confirm it doesn't overlap BACKUP_RCLONE_REMOTE; nothing was deleted" | A plugin's destination, whose location Kiln can't compare, or an S3 destination, which can't be compared with an rclone remote, while `BACKUP_RCLONE_REMOTE` is set ([Retention on an S3 bucket](#retention-on-an-s3-bucket)). Untick retention on it and prune it yourself, or unset the env remote. |
-| "Retention on NAS skipped: couldn't list the destination (…); nothing was deleted" | The listing failed. Nothing is deleted on a guess. |
-| "Retention on NAS removed … , then stopped: couldn't delete … (…)" | A delete failed; the pass stopped there. The next backup tries again. |
+| "Retention on NAS skipped: couldn't list the destination (…); nothing was deleted" | The listing failed, or took longer than 10 minutes ("… timed out after 10 min"). Nothing is deleted on a guess. |
+| "Retention on NAS removed … , then stopped: couldn't delete … (…)" | A delete failed, or took longer than 60 seconds; the pass stopped there. The next backup tries again. A delete stopped at its time limit may still have removed that file at the store: the next pass no longer lists it, so nothing is lost. |
 
 A skipped or stopped pass is also a line in the **Backups** page's
 headline and on **Home**'s red backup strip, "Retention on NAS was skipped
@@ -4526,6 +4532,54 @@ A failed or skipped pass doesn't change the destination's upload status:
 the backup reached it. A backup that later fails at another destination
 may already have pruned the destinations before it; only older backups
 the keep rules allowed deleting go.
+
+**Each listing and each delete has its own time limit** (#2950): 10
+minutes for the listing, 60 seconds for each delete, or the off-site
+step's own deadline when that comes first. A store that hangs on one call
+costs that destination's retention, not the rest of the backup. The
+server log has how long each listing took ("Retention on dest:…: the
+listing took 1234 ms", at the info level). The upload sweep's aborts of
+unfinished uploads ([Resumable uploads](#resumable-uploads)) have a
+60-second limit each in the same way.
+
+<a id="pruning-backup_rclone_remote"></a>
+
+#### Pruning BACKUP_RCLONE_REMOTE
+
+The app doesn't prune `BACKUP_RCLONE_REMOTE` unless you set
+`BACKUP_RCLONE_REMOTE_PRUNE=true` (#2950). With it on, each in-app backup
+prunes the env remote right after copying to it, by the same keep rules
+as above, deleting only backups that **an in-app backup of this server's
+backup directory** sent there: its History row was made by the app (not
+imported from a cron backup), records the copy to this remote, and was
+made in the backup directory whose `.kiln-dir-id` this server has now.
+Backups that `scripts/backup.sh` copied there, or that another server or
+installation sent, are left and named in the log: "Retention on r2:kiln
+left 3 old backup(s) no in-app backup of this backup directory sent
+there: …". Prune those yourself, or with a lifecycle rule.
+
+- **It does nothing on a cron-only install.** Only the app's own off-site
+  step reads the switch; `scripts/backup.sh` never prunes the remote.
+- **It is refused while any stored destination could share the remote's
+  place.** Every row on the Destinations tab counts, enabled or not: one
+  that overlaps the remote, an S3 destination (the remote could name the
+  same bucket), or a plugin's destination (whose location can't be told).
+  Each pass is then skipped with "Retention on r2:kiln skipped: …;
+  nothing was deleted", and the env row on the Destinations tab says
+  "BACKUP_RCLONE_REMOTE_PRUNE is on, but nothing is pruned here: …".
+  Delete or move that destination to let it run. The headline line this
+  leaves is kept per backup directory, since what a pass may delete there
+  is: on servers with separate backup directories sharing one remote, one
+  server's clean pass doesn't clear another's line, and a line for a
+  directory no live server has any more isn't shown. A remote with no `name:`
+  (a plain path) is compared as a directory, so it overlaps a **Directory
+  on this server** destination at or around the same path; a remote named
+  through an inline backend (`:local:/mnt/backups`) is compared by that
+  name, so point the two at places you know to be separate.
+- The env row on the Destinations tab says whether it is on: "The app
+  doesn't prune it: BACKUP_RCLONE_REMOTE_PRUNE is off", or, with a
+  **Prunes its old backups** badge, "In-app backups delete the old backups
+  they sent here".
 
 ### Keep destination credentials outside Kiln
 

@@ -100,6 +100,12 @@ backup_opts =
     remote -> Keyword.put(backup_opts, :rclone_remote, remote)
   end
 
+# Opt-in pruning of that remote by in-app backups (#2950, ADR 0064): only
+# what this backup directory's in-app runs sent there. App-only:
+# `scripts/backup.sh` never reads it, so cron never prunes the remote.
+backup_opts =
+  Keyword.put(backup_opts, :rclone_remote_prune, Env.flag("BACKUP_RCLONE_REMOTE_PRUNE", false))
+
 # Escape hatch for a connection `KilnCMS.Backups.database_url/0` can't
 # derive — a unix-socket repo, or one whose `DATABASE_URL` reaches the
 # database through something `pg_dump` can't use. Ordinary deployments never

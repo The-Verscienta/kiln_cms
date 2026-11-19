@@ -157,8 +157,10 @@ defmodule KilnCMSWeb.BackupComponents do
     %{id: "dest-" <> id, text: retention_text(n, n.label)}
   end
 
+  # The env destination's notices are one per backup directory (#2950).
   defp retention_line(%{scope: {:destination, key}} = n, _several_local?) do
-    %{id: "dest-" <> key, text: retention_text(n, n.label)}
+    id = if n[:dir_id], do: "dest-" <> key <> "-" <> n[:dir_id], else: "dest-" <> key
+    %{id: id, text: retention_text(n, n.label)}
   end
 
   defp local_line_id(nil), do: "local"

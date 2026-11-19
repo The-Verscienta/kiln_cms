@@ -409,7 +409,8 @@ defmodule KilnCMS.Backups.Destination do
   Where `config` writes, normalized for `overlap?/2`: `{:rclone, name,
   segments}`, `{:local, segments}` or `{:s3, host, port, bucket, segments}`
   for Kiln's own adapters, `:unknown` for a plugin's, whose settings mean
-  nothing here.
+  nothing here. Retention's `KilnCMS.Backups.Retention.prune_blocker/3`
+  decides from these whether a destination may be pruned.
   """
   @spec location(Config.t()) :: location()
   def location(%Config{kind: "rclone"} = config), do: Rclone.location(config)
@@ -630,6 +631,19 @@ defmodule KilnCMS.Backups.Destination do
       true ->
         Keyword.get(config, :default_call_timeout, @default_call_timeout)
     end
+  end
+
+  @doc """
+  The `:deadline` for one `call/4` that must not take a whole step (#2950):
+  whichever comes first of the step's `deadline` (a
+  `System.monotonic_time(:millisecond)` instant, or `nil` for none) and
+  `per_call_ms` from now. Worked out right before each call, so one hung
+  call costs at most `per_call_ms` of the step.
+  """
+  @spec call_deadline(integer() | nil, pos_integer()) :: integer()
+  def call_deadline(deadline, per_call_ms) when is_integer(per_call_ms) and per_call_ms > 0 do
+    own = System.monotonic_time(:millisecond) + per_call_ms
+    if is_integer(deadline), do: min(deadline, own), else: own
   end
 
   defp secret_env(%Config{secrets: secrets}) when is_map(secrets) do
