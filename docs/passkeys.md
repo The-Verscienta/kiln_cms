@@ -79,7 +79,7 @@ admins can use either page below; a reader uses `/account/two-factor`, since
 
 1. Open the page:
    - **Editors and admins:** `/editor/settings`, the **Passkeys** section.
-   - **Anyone:** `/account/two-factor`, the **Passkey** section. The page is
+   - **Anyone:** `/account/two-factor`, the **Passkeys** section. The page is
      served on the main host (`PHX_HOST`) and on console hosts; a site's own
      address redirects to the main host's page, where you sign in again.
 
@@ -159,7 +159,7 @@ Because every passkey added emails the owner, an account can hold at most
 **20** passkeys and add at most **5 in an hour** (#2247). Without the limits, a
 stolen session could flood the owner's inbox and the instance's mail quota.
 
-- At 20, the *Passkeys* section of `/editor/settings` and the *Passkey*
+- At 20, the *Passkeys* section of `/editor/settings` and the *Passkeys*
   section of `/account/two-factor` show "You have 20 passkeys, the most an
   account can hold. Remove one to add another." in place of the add form.
   Remove one with its trash button on the same page and the form comes back.

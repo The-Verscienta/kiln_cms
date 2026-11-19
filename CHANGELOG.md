@@ -62,8 +62,14 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Experiments: a second Start, Conclude or Archive from a stale page or struct is refused instead of overwriting the first (the console reloads with a notice; `mix kiln.experiment conclude` reports the error instead of crashing), and a test now fails when any state machine transition lacks a from-state filter.**
+  ([#3133](https://github.com/The-Verscienta/kiln_cms/pull/3133) · [long form](docs/changelog/unreleased.md#experiment-transition-compare-and-swap))
+
 - **Backups: `BACKUP_RCLONE_REMOTE_PRUNE=true` lets in-app backups prune the env remote (only what this backup directory's in-app runs sent there); each retention list/delete call gets its own time limit; the Destinations "Prunes" badge shows only when pruning can run.**
   ([#3119](https://github.com/The-Verscienta/kiln_cms/pull/3119) · [long form](docs/changelog/unreleased.md#backup-destination-retention-gaps))
+
+- **idna 8.0.0 fixes EEF-CVE-2026-117678: a long `xn--` label in an email address's domain no longer costs super-linear CPU when Swoosh encodes it to send mail.**
+  ([#3121](https://github.com/The-Verscienta/kiln_cms/pull/3121) · [long form](docs/changelog/unreleased.md#idna-punycode-length-advisory))
 
 - **A host `backup.sh prune` that skips or can't finish now shows on the Backups page and Home (it writes `.kiln-prune-status.json`), and the app no longer deletes a local backup whose stale hold marker it couldn't remove.**
   ([#3117](https://github.com/The-Verscienta/kiln_cms/pull/3117) · [long form](docs/changelog/unreleased.md#backup-local-retention-gaps))

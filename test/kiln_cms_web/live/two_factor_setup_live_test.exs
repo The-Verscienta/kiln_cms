@@ -467,6 +467,8 @@ defmodule KilnCMSWeb.TwoFactorSetupLiveTest do
 
       assert has_element?(view, "#two-factor-passkey #add-passkey-form")
       assert has_element?(view, "#two-factor-passkey #passkey-added-mail", @passkey_line)
+      # one title for the passkey list on both pages (#2919)
+      assert has_element?(view, "#two-factor-passkey h2", "Passkeys")
 
       for _ <- 1..Accounts.Passkey.max_per_account() do
         Ash.Seed.seed!(Accounts.Passkey, %{
