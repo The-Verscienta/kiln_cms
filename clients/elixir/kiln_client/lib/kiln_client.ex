@@ -8,7 +8,9 @@ defmodule KilnClient do
   transitions, soft-delete), the media upload API (`upload_media/2` and
   friends), the `/api/sync` delta API and a minimal `/gql` helper (see Kiln's `docs/json-api.md` and
   `docs/headless-consumer-guide.md`). The writes and the uploads need a read +
-  write key on an editor account; the reads need no key at all.
+  write key on an editor account; the delivery reads need no key at all. The
+  editorial reads (revisions and releases) need an editor's key, configured
+  or passed per call as `:api_key`.
 
   Extracted from the client Verscienta's production site hand-rolled and
   hardened against a live Kiln (kiln_cms#300); it encodes the safe defaults so
@@ -356,7 +358,8 @@ defmodule KilnClient do
   @doc """
   Fired artifact for a published record: pre-rendered content at
   `GET /api/content/:plural/:slug`. `:surface` is `"json"` (default),
-  `"json_ld"` or `"web"`; `:locale` selects a translation.
+  `"json_ld"` or `"web"`, each answering a map; `"llm"` answers the raw
+  Markdown as a binary. `:locale` selects a translation.
 
   `:as_of` reads the document as it was at that moment, reconstructed from
   its version history (`?as_of=`). It takes a `DateTime`, a `NaiveDateTime`
@@ -370,7 +373,8 @@ defmodule KilnClient do
   requests. Pass `retry: false` to fail fast on the first. Other errors are
   returned at once (see "Retries" in the module doc).
   """
-  @spec artifact(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  @spec artifact(String.t(), String.t(), keyword()) ::
+          {:ok, map() | String.t()} | {:error, Error.t()}
   def artifact(plural, slug, opts \\ []) do
     params =
       []
@@ -380,13 +384,17 @@ defmodule KilnClient do
 
     path = "/api/content/#{plural}/#{slug}"
 
-    case request(:get, path, params: params, req: opts[:req]) do
+    # The `llm` surface is the one read that answers text (`text/markdown`),
+    # so its binary body is the result rather than an `:unexpected_body`.
+    req_opts = [params: params, text_body: to_string(opts[:surface]) == "llm", req: opts[:req]]
+
+    case request(:get, path, req_opts) do
       {:error, %Error{status: 503}} = error ->
         if opts[:retry] == false do
           error
         else
           Process.sleep(Keyword.get(opts, :retry_delay_ms, 2_000))
-          request(:get, path, params: params, req: opts[:req])
+          request(:get, path, req_opts)
         end
 
       other ->
@@ -974,7 +982,8 @@ defmodule KilnClient do
   changed, never their values.
 
   Options: `:limit` (1–100, server default 20), `:cursor` (the previous
-  page's `meta.next_cursor`), `:req`.
+  page's `meta.next_cursor`), `:api_key` (an editor's key for this call,
+  sent instead of the configured one; `""` sends no key), `:req`.
 
   Returns `{:ok, %{"data" => [revision], "meta" => %{"limit" => n,
   "next_cursor" => cursor | nil}}}` — page until `next_cursor` is `nil`.
@@ -986,7 +995,11 @@ defmodule KilnClient do
       |> put_param(:limit, opts[:limit])
       |> put_param(:cursor, opts[:cursor])
 
-    request(:get, revisions_path(type, id), params: params, req: opts[:req])
+    request(:get, revisions_path(type, id),
+      params: params,
+      api_key: opts[:api_key],
+      req: opts[:req]
+    )
   end
 
   @doc """
@@ -994,13 +1007,15 @@ defmodule KilnClient do
   `"snapshot"` of the document as it stood at that revision (folded from
   every version up to it), alongside the list fields. Returns
   `{:ok, revision}`.
+
+  Options: `:api_key` (as for `list_revisions/3`), `:req`.
   """
   @spec revision(String.t(), String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, Error.t()}
   def revision(type, id, version_id, opts \\ []) do
     path = revisions_path(type, id) <> "/" <> segment(version_id)
 
-    case request(:get, path, req: opts[:req]) do
+    case request(:get, path, api_key: opts[:api_key], req: opts[:req]) do
       {:ok, %{"data" => revision}} -> {:ok, revision}
       other -> other
     end
@@ -1014,13 +1029,17 @@ defmodule KilnClient do
   `{:error, %KilnClient.Error{reason: :forbidden}}`. Workflow state is untouched; the
   restore is itself recorded as a new revision, returned under `"revision"`
   with `"id"`, `"type"`, `"state"` and `"restored_version_id"`.
+
+  A write like `create/3`: it takes the key per call (`:api_key`) or from
+  config, and returns `{:error, %KilnClient.Error{reason: :no_api_key}}`
+  without sending anything when there is none. Options: `:api_key`, `:req`.
   """
   @spec restore_revision(String.t(), String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, Error.t()}
   def restore_revision(type, id, version_id, opts \\ []) do
     path = revisions_path(type, id) <> "/" <> segment(version_id) <> "/restore"
 
-    case request(:post, path, req: opts[:req]) do
+    case write_request(:post, path, nil, accept: @json, api_key: opts[:api_key], req: opts[:req]) do
       {:ok, %{"data" => result}} -> {:ok, result}
       other -> other
     end
@@ -1032,16 +1051,18 @@ defmodule KilnClient do
 
   Takes `list/2`'s JSON:API options (`:filter` — e.g. `%{state: "scheduled"}`
   — `:sort`, `:include` — `["items"]` side-loads each release's contents —
-  `:fields`, `:limit`, `:offset`, `:count`, `:req`); there is no
-  `/published` feed here. Returns `{:ok, %{items:, included:, total:}}`.
+  `:fields`, `:limit`, `:offset`, `:count`, `:req`), plus `:api_key` (an
+  editor's key for this call, sent instead of the configured one; `""` sends
+  no key); there is no `/published` feed here. Returns
+  `{:ok, %{items:, included:, total:}}`.
   """
   @spec list_releases(keyword()) :: {:ok, list_result()} | {:error, Error.t()}
   def list_releases(opts \\ []), do: json_api_index("/api/json/releases", opts)
 
   @doc """
-  One release by id: `GET /api/json/releases/:id`. `:include` (`["items"]`)
-  and `:fields` as for `list_releases/1`; the included lookup is merged into
-  the result under `"included"`, as `one/3` does.
+  One release by id: `GET /api/json/releases/:id`. `:include` (`["items"]`),
+  `:fields` and `:api_key` as for `list_releases/1`; the included lookup is
+  merged into the result under `"included"`, as `one/3` does.
   """
   @spec release(String.t(), keyword()) :: {:ok, item()} | {:error, Error.t()}
   def release(id, opts \\ []) do
@@ -1050,7 +1071,11 @@ defmodule KilnClient do
       |> put_param(:include, join_list(opts[:include]))
       |> sparse_fields(opts[:fields])
 
-    case request(:get, "/api/json/releases/" <> segment(id), params: params, req: opts[:req]) do
+    case request(:get, "/api/json/releases/" <> segment(id),
+           params: params,
+           api_key: opts[:api_key],
+           req: opts[:req]
+         ) do
       {:ok, doc} ->
         %{items: [release | _], included: included} = flatten_doc(doc)
         {:ok, Map.put(release, "included", included)}
@@ -1069,7 +1094,11 @@ defmodule KilnClient do
   def list_release_items(opts \\ []), do: json_api_index("/api/json/release-items", opts)
 
   defp json_api_index(path, opts) do
-    case request(:get, path, params: query_params(opts), req: opts[:req]) do
+    case request(:get, path,
+           params: query_params(opts),
+           api_key: opts[:api_key],
+           req: opts[:req]
+         ) do
       {:ok, doc} -> {:ok, flatten_doc(doc)}
       {:error, reason} -> {:error, reason}
     end
@@ -1249,6 +1278,12 @@ defmodule KilnClient do
     ]
 
     case do_request(:post, "/gql", req_opts, api_key(opts)) do
+      # Not JSON at all (a captive portal's page): say so, rather than read
+      # it as an answer with no `data`.
+      {:ok, %Req.Response{status: status, body: body}}
+      when status in 200..299 and is_binary(body) ->
+        unexpected_body(status, body, :post, "/gql")
+
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
         graphql_result(body, status)
 
@@ -1466,14 +1501,29 @@ defmodule KilnClient do
   # or the bare exception). A 404 isn't logged: a missing slug is an expected
   # answer for a read, not a fault.
   #
+  # The key is `api_key/1`'s, as for the writes: a per-call `:api_key` (only
+  # the editorial reads pass one), else the configured key; a per-call `""`
+  # sends no key at all.
   # `anonymous: true` sends no key even when one is configured: a public form
   # submission is anonymous by design, and a key there would only leak the
   # credential to a route that ignores it.
+  #
+  # Every read answers JSON, which Req decodes to a map or list (its default
+  # decoders cover `application/json` and `application/vnd.api+json`). A 2xx
+  # whose body is still a non-empty binary came from something else — a
+  # captive portal's or a CDN's HTML page — and is `:unexpected_body`, unless
+  # the caller asked for text (`text_body: true`, the `llm` artifact surface).
   defp request(method, path, opts) do
     {anonymous?, opts} = Keyword.pop(opts, :anonymous, false)
-    key = if anonymous?, do: nil, else: Application.get_env(:kiln_client, :api_key)
+    {per_call_key, opts} = Keyword.pop(opts, :api_key)
+    {text_body?, opts} = Keyword.pop(opts, :text_body, false)
+    key = if anonymous?, do: nil, else: api_key(api_key: per_call_key)
 
     case do_request(method, path, opts, key) do
+      {:ok, %Req.Response{status: status, body: body}}
+      when status in 200..299 and is_binary(body) and body != "" and not text_body? ->
+        unexpected_body(status, body, method, path)
+
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
         {:ok, body}
 
@@ -1527,8 +1577,17 @@ defmodule KilnClient do
 
         case do_request(method, path, req_opts, key) do
           # A soft-delete may answer 200 with the record or an empty 204.
+          {:ok, %Req.Response{status: status, body: ""}} when status in 200..299 ->
+            {:ok, nil}
+
+          # Any other binary is a body Req did not decode as JSON (see
+          # `request/3`).
+          {:ok, %Req.Response{status: status, body: body}}
+          when status in 200..299 and is_binary(body) ->
+            unexpected_body(status, body, method, path)
+
           {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
-            {:ok, if(body == "", do: nil, else: body)}
+            {:ok, body}
 
           other ->
             to_error(other, method, path)
@@ -1545,6 +1604,50 @@ defmodule KilnClient do
   defp to_error({:error, exception}, method, path) do
     Logger.error("Kiln #{method} #{path} failed: #{inspect(exception)}")
     {:error, %Error{reason: :transport, exception: exception, method: method, path: path}}
+  end
+
+  # Enough of the body to tell what answered (a portal's login page, a CDN's
+  # error page) without carrying a whole HTML document around in the error.
+  @body_excerpt_bytes 1024
+
+  defp unexpected_body(status, body, method, path) do
+    Logger.warning("Kiln #{method} #{path} returned #{status} with a body that is not JSON")
+
+    {:error,
+     %Error{
+       reason: :unexpected_body,
+       status: status,
+       body: body_excerpt(body),
+       method: method,
+       path: path
+     }}
+  end
+
+  defp body_excerpt(body) when byte_size(body) <= @body_excerpt_bytes, do: body
+
+  defp body_excerpt(body) do
+    head = binary_part(body, 0, @body_excerpt_bytes)
+    drop_partial_char(head, head, 3)
+  end
+
+  # The cut may land inside a multi-byte UTF-8 character: drop up to three
+  # trailing bytes until the excerpt is valid. A body that is not UTF-8 at all
+  # keeps the plain byte cut.
+  defp drop_partial_char(excerpt, original, drops_left) do
+    cond do
+      String.valid?(excerpt) ->
+        excerpt
+
+      drops_left == 0 ->
+        original
+
+      true ->
+        drop_partial_char(
+          binary_part(excerpt, 0, byte_size(excerpt) - 1),
+          original,
+          drops_left - 1
+        )
+    end
   end
 
   defp put_present_opt(opts, _key, nil), do: opts

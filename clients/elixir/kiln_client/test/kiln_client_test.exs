@@ -422,9 +422,10 @@ defmodule KilnClientTest do
       assert_received {:request, "/api/content/page/p1/revisions/v2", _params}
     end
 
-    test "restore_revision/4 POSTs and returns the new revision" do
+    test "restore_revision/4 POSTs with the per-call key and returns the new revision" do
       Req.Test.stub(KilnClient, fn conn ->
         send(self(), {:method, conn.method, conn.request_path})
+        send(self(), {:auth, Plug.Conn.get_req_header(conn, "authorization")})
 
         Req.Test.json(conn, %{
           "data" => %{
@@ -439,9 +440,10 @@ defmodule KilnClientTest do
 
       assert {:ok,
               %{"restored_version_id" => "v1", "revision" => %{"action" => "restore_version"}}} =
-               KilnClient.restore_revision("page", "p1", "v1")
+               KilnClient.restore_revision("page", "p1", "v1", api_key: "kiln_writer")
 
       assert_received {:method, "POST", "/api/content/page/p1/revisions/v1/restore"}
+      assert_received {:auth, ["Bearer kiln_writer"]}
     end
 
     test "a read-only key's refusal comes back as a 403 error" do
@@ -452,7 +454,20 @@ defmodule KilnClientTest do
       end)
 
       assert {:error, %KilnClient.Error{reason: :forbidden, status: 403, code: "forbidden"}} =
-               KilnClient.restore_revision("page", "p1", "v1")
+               KilnClient.restore_revision("page", "p1", "v1", api_key: "kiln_read_only")
+    end
+
+    test "list_revisions/3 and revision/4 send a per-call key" do
+      Req.Test.stub(KilnClient, fn conn ->
+        send(self(), {:auth, conn.request_path, Plug.Conn.get_req_header(conn, "authorization")})
+        Req.Test.json(conn, %{"data" => @revision, "meta" => %{}})
+      end)
+
+      assert {:ok, _} = KilnClient.list_revisions("page", "p1", api_key: "kiln_editor")
+      assert {:ok, _} = KilnClient.revision("page", "p1", "v2", api_key: "kiln_editor")
+
+      assert_received {:auth, "/api/content/page/p1/revisions", ["Bearer kiln_editor"]}
+      assert_received {:auth, "/api/content/page/p1/revisions/v2", ["Bearer kiln_editor"]}
     end
   end
 
@@ -509,6 +524,94 @@ defmodule KilnClientTest do
       assert {:ok, %{items: []}} = KilnClient.list_release_items(filter: %{release_id: "r1"})
       assert_received {:request, "/api/json/release-items", params}
       assert params["filter"] == %{"release_id" => "r1"}
+    end
+
+    test "list_releases/1, release/2 and list_release_items/1 send a per-call key" do
+      Req.Test.stub(KilnClient, fn conn ->
+        send(self(), {:auth, conn.request_path, Plug.Conn.get_req_header(conn, "authorization")})
+
+        Req.Test.json(conn, %{"data" => %{"id" => "r1", "type" => "release", "attributes" => %{}}})
+      end)
+
+      assert {:ok, _} = KilnClient.list_releases(api_key: "kiln_editor")
+      assert {:ok, _} = KilnClient.release("r1", api_key: "kiln_editor")
+      assert {:ok, _} = KilnClient.list_release_items(api_key: "kiln_editor")
+
+      assert_received {:auth, "/api/json/releases", ["Bearer kiln_editor"]}
+      assert_received {:auth, "/api/json/releases/r1", ["Bearer kiln_editor"]}
+      assert_received {:auth, "/api/json/release-items", ["Bearer kiln_editor"]}
+    end
+  end
+
+  # #2734's twin of the JS client's #2735: a captive portal or CDN answering
+  # 200 with an HTML page is an error, not an empty or crashing result.
+  describe "a 2xx body that is not JSON" do
+    @portal "<!doctype html><html><body>Sign in to the Wi-Fi</body></html>"
+
+    defp stub_html(body \\ @portal) do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("text/html")
+        |> Plug.Conn.send_resp(200, body)
+      end)
+    end
+
+    test "list/2 returns :unexpected_body rather than an empty list" do
+      stub_html()
+
+      assert {:error,
+              %KilnClient.Error{
+                reason: :unexpected_body,
+                status: 200,
+                method: :get,
+                path: "/api/json/posts/published",
+                body: @portal
+              }} = KilnClient.list("posts")
+    end
+
+    test "sync/1 and release/2 return the error instead of crashing" do
+      stub_html()
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body, path: "/api/sync"}} =
+               KilnClient.sync(retries: 0)
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body, path: "/api/json/releases/r1"}} =
+               KilnClient.release("r1")
+    end
+
+    test "the body is cut to 1 KiB without splitting a UTF-8 character" do
+      # 1023 ASCII bytes, then a 2-byte "é" straddling the 1024-byte cut.
+      stub_html(String.duplicate("a", 1023) <> String.duplicate("é", 100))
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body, body: body}} =
+               KilnClient.list("posts")
+
+      assert body == String.duplicate("a", 1023)
+      assert String.valid?(body)
+    end
+
+    test "a JSON:API body is still decoded" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/vnd.api+json")
+        |> Plug.Conn.send_resp(200, ~s({"data":[{"id":"p1","type":"post","attributes":{}}]}))
+      end)
+
+      assert {:ok, %{items: [%{"id" => "p1"}]}} = KilnClient.list("posts")
+    end
+
+    test "artifact/3's llm surface is text by design" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("text/markdown")
+        |> Plug.Conn.send_resp(200, "# Hello")
+      end)
+
+      assert {:ok, "# Hello"} = KilnClient.artifact("posts", "hello", surface: "llm")
+      assert {:ok, "# Hello"} = KilnClient.artifact("posts", "hello", surface: :llm)
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body}} =
+               KilnClient.artifact("posts", "hello")
     end
   end
 
