@@ -10,6 +10,7 @@ export {
   KilnNotFoundError,
   KilnRateLimitError,
   KilnServerError,
+  KilnUnexpectedBodyError,
   KilnValidationError,
   isKilnError,
   isKilnHttpError,
