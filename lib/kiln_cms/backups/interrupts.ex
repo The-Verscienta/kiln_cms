@@ -13,9 +13,9 @@ defmodule KilnCMS.Backups.Interrupts do
   node stopped beating (and was then taken over) because of another node's
   step. Now the caller hands it here with `run/3`, a cast, and goes on: the
   heartbeat's tick, and a backup request that sweeps first, never wait on it.
-  The failure manifest is fenced by the lock as the release left it
-  (`Chain.released_rename/4`), so a record that runs late never writes over
-  a newer backup's manifest.
+  The failure manifest and a work directory's removal are fenced by the lock
+  as the release left it (`Chain.released_fenced/3`), so a record that runs
+  late never writes over a newer backup's manifest or removes its files.
 
   ## One at a time
 
@@ -29,7 +29,9 @@ defmodule KilnCMS.Backups.Interrupts do
   (`Backups.reconcile_stale_runs/1`, about 2 h 15 min after its last
   update) fails it, and only then can it be resumed. A task that has run
   for 60 s logs one warning, and a line when it ends; while one has, this
-  node's heartbeat leaves the lock sweep to the other nodes (`stalled?/0`).
+  node's heartbeat skips the lock sweep (`stalled?/0`). Another node's
+  heartbeat, and a backup request on any node, still sweep; on a shared
+  mount hung for every node, only requests do until it answers.
 
   A task that crashes is logged, and the next one starts. If this process
   restarts while a task runs, it finds that task under the supervisor and
@@ -172,7 +174,7 @@ defmodule KilnCMS.Backups.Interrupts do
     Logger.warning(
       "Backup #{running.label}: the interrupt record has taken more than " <>
         "#{div(slow_ms(), 1000)} s (a hung BACKUP_DIR?). Records of other interrupted " <>
-        "backups wait behind it, and this node leaves the lock sweep to the others."
+        "backups wait behind it, and this node's heartbeat skips the lock sweep."
     )
 
     {:noreply, %{state | running: %{running | slow?: true}}}

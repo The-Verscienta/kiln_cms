@@ -101,6 +101,7 @@ defmodule KilnCMS.Backups do
       define :record_run_progress, action: :record_progress
       define :finish_run, action: :finish
       define :fail_run, action: :fail
+      define :record_run_interrupted, action: :record_interrupted
       define :resume_run, action: :resume
       define :note_run_resume_refused, action: :note_resume_refused, args: [:reason]
       define :import_run, action: :import

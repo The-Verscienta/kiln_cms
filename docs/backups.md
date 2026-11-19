@@ -1522,7 +1522,10 @@ attempts:
 
 **When a backup fails**, it writes a failure manifest (when its `state.json`
 is there to say what landed), marks the run `Failed`, releases the lock and
-starts the queued backup, if there is one. A backup the deployment cannot run
+starts the queued backup, if there is one. A backup interrupted from outside
+its step writes its failure manifest after the release, and only until the
+queued backup's start step has run
+([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)). A backup the deployment cannot run
 at all (`BACKUP_ENABLED=false`, no `pg_dump` in the image on the node that
 picked up the start step) is a `Skipped` row and leaves `manifest.json` alone,
 as before.
@@ -1855,14 +1858,29 @@ heartbeat keeps beating, and a backup request that swept first doesn't wait
 on it. The tasks run one at a time, so a hung directory holds one blocked
 task, and up to 20 more wait behind it in order.
 
-- **A late failure manifest never replaces a newer one.** It is put in place
-  only while the lock is still as the interrupt left it (no backup has held
-  it since) and while `manifest.json` names no later backup, both checked
-  under the lock right before the file is renamed into place.
+- **A late record never touches a newer backup.** The failure manifest is
+  put in place, and a work directory removed, only while the lock is still
+  as the interrupt left it: free, or held by the backup it promoted from
+  the queue while that backup's start step hasn't run yet (and it isn't a
+  resume of the same backup). That is checked under the lock right before
+  the rename; the failure manifest is also skipped when `manifest.json`
+  already names a later backup. A backup that has used the lock since keeps
+  its files, and its own manifest.
+- **The run gets what its row missed.** On the node with the backup's
+  `state.json`, the record adds what that file holds that a best-effort run
+  write missed (its files, log lines and destinations) to the failed run.
+- **A `finish` record that runs late may not be able to decide.** Whether
+  an interrupted `finish` had finished is read from `manifest.json`. When
+  that already names a later backup, the record can't tell: it leaves the
+  run as it is, with a warning, and the stale-run check fails it if it is
+  still `Running` (below).
 - **A node whose record hangs stops sweeping.** While one of its tasks has
-  run for more than a minute, its heartbeat leaves the lock sweep (take-backs,
-  ended jobs, stranded steps) to the other nodes, which can still write their
-  records. A backup request on that node still sweeps first.
+  run for more than a minute, its heartbeat skips the lock sweep (take-backs,
+  ended jobs, stranded steps). Another node's heartbeat sweeps instead, when
+  its own records aren't stuck too, and a backup request on any node still
+  sweeps first. On a shared `BACKUP_DIR` that hangs for every node, the
+  sweep then happens only when a backup is requested, until the directory
+  answers again.
 - **An interrupted `finish` whose record is dropped** (the wait is full)
   reads `Running` until the stale-run check fails it as "Interrupted: the job
   was killed or the node stopped", about 2 hours 15 minutes after its last
@@ -1872,11 +1890,13 @@ task, and up to 20 more wait behind it in order.
 
 | Log line | Level | Meaning |
 |---|---|---|
-| "Backup `<stamp>`: the interrupt record has taken more than 60 s (a hung BACKUP_DIR?). Records of other interrupted backups wait behind it, and this node leaves the lock sweep to the others." | warning | The directory isn't answering. Once per task. |
-| "Backup heartbeat: an interrupt record on this node has run for over a minute (a hung BACKUP_DIR?), so this node leaves the backup lock sweep to the other nodes until it finishes" | warning | Once, when this node stops sweeping. |
+| "Backup `<stamp>`: the interrupt record has taken more than 60 s (a hung BACKUP_DIR?). Records of other interrupted backups wait behind it, and this node's heartbeat skips the lock sweep." | warning | The directory isn't answering. Once per task. |
+| "Backup heartbeat: an interrupt record on this node has run for over a minute (a hung BACKUP_DIR?), so this node's heartbeat skips the backup lock sweep until it finishes; other nodes' heartbeats and backup requests still sweep" | warning | Once, when this node stops sweeping. |
 | "Backup heartbeat: the interrupt records here caught up; sweeping again" | info | Once, when it sweeps again. |
 | "Backup `<stamp>`: the interrupt record finished after N s" | info | That slow task finished. |
 | "Backup `<stamp>`: its failure manifest was not written: another backup has used the backup lock since it was interrupted, or the manifest names a later one" | info | The record ran late; the newer manifest stays. |
+| "Backup `<stamp>`: its work directory was left in place: another backup has used the backup lock since it was interrupted" | info | The record ran late; the newer backup's work directory stays. |
+| "Backup `<stamp>`: its finish was interrupted, and the manifest already names a later backup, so whether it had finished can't be told. Its run is left as it is; the stale-run check fails it if it is still running." | warning | A late `finish` record (above). |
 | "Backup `<stamp>`: dropped from the interrupt records, 20 are waiting behind one that has run for N s (a hung BACKUP_DIR?). …" | error for a `finish`, else warning | The wait is full. The rest of the line says what is left undone (above). |
 | "Backup `<stamp>`: the interrupt record crashed: …" | error | The task failed; the next one runs. |
 

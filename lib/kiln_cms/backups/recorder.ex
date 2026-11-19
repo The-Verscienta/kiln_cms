@@ -742,6 +742,18 @@ defmodule KilnCMS.Backups.Recorder do
   end
 
   @doc """
+  Add to a run already failed as interrupted (#3078) what this accumulator
+  holds (components, artifacts, log, destinations), through the run's
+  `:record_interrupted` action: only a `failed` run of this chain. Never
+  the status or the error.
+  """
+  @spec record_interrupted(t()) :: t()
+  def record_interrupted(%__MODULE__{run: nil} = rec), do: rec
+
+  def record_interrupted(%__MODULE__{} = rec),
+    do: write(rec, "record_interrupted", &Backups.record_run_interrupted/3)
+
+  @doc """
   Mark `key` as `pruned` on the artifacts of OTHER runs whose files a
   retention pass just deleted there (`names` are file names): `"local"` for
   this host's backup directory (the default), or a destination's key for

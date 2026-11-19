@@ -51,6 +51,8 @@ defmodule KilnCMS.Backups.HeartbeatTest do
 
   defp beat_of(node), do: Backups.get_node_beat!(node, actor: Backups.system())
 
+  defp run_of(stamp), do: Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+
   # The start step, run; the lock now points at the dump step's job.
   defp at_dump do
     {:ok, %{status: :started, chain: chain}} = request()
@@ -109,13 +111,27 @@ defmodule KilnCMS.Backups.HeartbeatTest do
 
   # A dump step on a node gone for 10 minutes, with no attempts left, and a
   # scheduled backup queued behind it.
-  defp exhausted_on_gone_node! do
-    %{job: job} = dump = at_dump()
+  defp exhausted_on_gone_node!(at \\ &at_dump/0) do
+    %{job: job} = held = at.()
     {:ok, %{status: :queued}} = request(trigger: "schedule")
     Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id), set: [attempt: 3])
     executing!(Repo.get!(Oban.Job, job.id), "gone@node", 600)
     beat!("gone@node", Ash.UUID.generate(), 600)
-    dump
+    held
+  end
+
+  # The chain run step by step up to its finish step, not yet run.
+  defp at_finish do
+    {:ok, %{status: :started, chain: chain}} = request()
+    step_until!(:finish)
+    %{chain: chain, stamp: lock().stamp, job: current_job()}
+  end
+
+  defp step_until!(step) do
+    unless lock().step == step do
+      %{success: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+      step_until!(step)
+    end
   end
 
   describe "the beat" do
@@ -349,20 +365,80 @@ defmodule KilnCMS.Backups.HeartbeatTest do
     end
 
     # #3078: the reap goes through the task too; with the lock still as the
-    # reap left it, the failure manifest is written.
-    test "a reap's record runs in the task and writes the failure manifest", %{state: _state} do
+    # reap left it, the failure manifest is written, and what `state.json`
+    # holds that the run's row missed is added to the failed run.
+    test "a reap's record runs in the task, writes the failure manifest, fills in the run", %{
+      state: _state
+    } do
       blocking_interrupts!()
       %{stamp: stamp, job: job} = at_dump()
       Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id), set: [state: "discarded"])
+      # A best-effort Run write that missed: the row has no log of its own.
+      Repo.update_all(from(r in "backup_runs", where: r.stamp == ^stamp), set: [log: []])
 
       assert {:ok, {:orphaned, _}} = Chain.reap()
-      assert %{status: :failed} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+      assert %{status: :failed, log: [only]} = run_of(stamp)
+      assert only.message =~ "Interrupted"
       assert_receive {:interrupt, task, ^stamp}
       refute match?(%Manifest{stamp: ^stamp}, Manifest.read(Backups.dir()))
 
       send(task, :release)
       assert Interrupts.await_idle() == :ok
       assert %Manifest{stamp: ^stamp, ok: false} = Manifest.read(Backups.dir())
+
+      assert %{status: :failed, error: error, log: log} = run_of(stamp)
+      assert error =~ "Interrupted"
+      assert length(log) > 1
+      assert List.last(log).message =~ "Interrupted"
+    end
+
+    # #3078: the promoted backup's start has run and moved the lock on: it
+    # may be writing, so the late failure manifest is skipped.
+    test "a late record skips the failure manifest once the promoted backup has started", %{
+      state: state
+    } do
+      blocking_interrupts!()
+      %{stamp: stamp} = exhausted_on_gone_node!()
+      Heartbeat.tick(state)
+      assert_receive {:interrupt, task, ^stamp}
+
+      %{success: 1} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+      assert %{step: :dump} = lock()
+
+      send(task, :release)
+      assert Interrupts.await_idle() == :ok
+      refute match?(%Manifest{stamp: ^stamp}, Manifest.read(Backups.dir()))
+    end
+
+    # #3078: a finish record that runs after a newer backup succeeded can't
+    # read this one's verdict off the manifest; it leaves the run alone.
+    test "a late finish record after a newer backup's success leaves the run alone", %{
+      state: state
+    } do
+      blocking_interrupts!()
+      %{stamp: stamp} = exhausted_on_gone_node!(&at_finish/0)
+
+      tick_log = capture_log([level: :error], fn -> Heartbeat.tick(state) end)
+      refute tick_log =~ "the backup failed"
+      assert_receive {:interrupt, task, ^stamp}
+      assert %{status: :running} = run_of(stamp)
+
+      %{chain: promoted} = Backups.in_flight()
+      BackupChain.listen(fn -> BackupChain.drain() end)
+      assert BackupChain.settled(promoted) == :ok
+      assert %Manifest{stamp: newer, ok: true} = Manifest.read(Backups.dir())
+      assert newer > stamp
+
+      log =
+        capture_log([level: :warning], fn ->
+          send(task, :release)
+          assert Interrupts.await_idle() == :ok
+        end)
+
+      assert log =~ "the manifest already names a later backup"
+      refute log =~ "the backup failed"
+      assert %{status: :running} = run_of(stamp)
+      assert %Manifest{stamp: ^newer, ok: true} = Manifest.read(Backups.dir())
     end
 
     # #3078: while a record here hangs, this node leaves the sweep to others.
@@ -380,12 +456,12 @@ defmodule KilnCMS.Backups.HeartbeatTest do
       beat!("dead@node", Backups.boot_id(), 600)
 
       {state, log} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
-      assert log =~ "leaves the backup lock sweep to the other nodes"
+      assert log =~ "skips the backup lock sweep until it finishes"
       assert %{beat_ok?: true, sweep_skipped?: true} = state
       assert lock().step_job_id == job.id
 
       {state, again} = with_log([level: :warning], fn -> Heartbeat.tick(state) end)
-      refute again =~ "leaves the backup lock sweep"
+      refute again =~ "skips the backup lock sweep"
       assert lock().step_job_id == job.id
 
       send(task, :release)

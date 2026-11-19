@@ -35,8 +35,9 @@ defmodule KilnCMS.Backups.Heartbeat do
        touches `BACKUP_DIR`, so it runs in a task of
        `KilnCMS.Backups.Interrupts`, which the tick never waits on. While
        one of those has run for over a minute (`Interrupts.stalled?/0`),
-       the tick skips the lock sweep, logged once each way, and leaves it to
-       the other nodes (#3078).
+       the tick skips the lock sweep, logged once each way: another node's
+       heartbeat sweeps when its own records aren't stuck too, and a backup
+       request on any node still sweeps first (#3078).
     5. Hourly, prune the beats of nodes gone for a day.
 
   ## Self-fence
@@ -653,7 +654,9 @@ defmodule KilnCMS.Backups.Heartbeat do
   #
   # Skipped while an interrupt record here has run for over a minute
   # (`Interrupts.stalled?/0`, a hung BACKUP_DIR): this node would only queue
-  # the next one behind it, so the healthy nodes take the sweep (#3078).
+  # the next one behind it, so another node's heartbeat, or a backup request,
+  # sweeps instead. Nothing guarantees one does: on a shared mount hung for
+  # every node, only requests sweep until it answers (#3078).
   defp sweep(state) do
     state = sweep_lock(state, Interrupts.stalled?())
     sweep_marker_syncs()
@@ -664,8 +667,8 @@ defmodule KilnCMS.Backups.Heartbeat do
     unless state.sweep_skipped? do
       Logger.warning(
         "Backup heartbeat: an interrupt record on this node has run for over a minute " <>
-          "(a hung BACKUP_DIR?), so this node leaves the backup lock sweep to the other " <>
-          "nodes until it finishes"
+          "(a hung BACKUP_DIR?), so this node's heartbeat skips the backup lock sweep until " <>
+          "it finishes; other nodes' heartbeats and backup requests still sweep"
       )
     end
 

@@ -772,6 +772,50 @@ defmodule KilnCMS.Backups.ResendTest do
       assert Backups.in_flight() == nil
     end
 
+    # #3078: the stopped re-send's work directory goes in `Interrupts`' task.
+    # A new re-send of the same stamp that took the lock first keeps it.
+    test "a late record leaves the work directory of a new re-send of the stamp", ctx do
+      %{run: run, b: b} = partial!(ctx)
+      settings!(b, %{"put_mode" => "fail"}, ctx.admin)
+      parent = self()
+
+      backups_env(:interrupts, :async)
+
+      backups_env(:before_interrupt, fn label ->
+        send(parent, {:interrupt, self(), label})
+
+        receive do
+          :release -> :ok
+        end
+      end)
+
+      on_exit(fn ->
+        Enum.each(Task.Supervisor.children(KilnCMS.Backups.InterruptTasks), &send(&1, :release))
+        KilnCMS.Backups.Interrupts.await_idle()
+      end)
+
+      assert {:ok, %{chain: chain}} = Backups.resend_offsite(run.stamp, Backups.system())
+      %{success: _} = BackupChain.drain(with_recursion: false, with_scheduled: false)
+      work = work_dir(ctx.dir, run.stamp)
+      assert {:ok, %{"resend_chain" => ^chain}} = WorkState.read(work)
+
+      [job] = BackupChain.step_jobs(chain: chain)
+      :ok = Oban.cancel_job(job.id)
+      assert {:ok, {:orphaned, _}} = Chain.reap()
+      assert Enum.any?(run_of(run.stamp).log, &(&1.message =~ "Re-send stopped"))
+      stamp = run.stamp
+      assert_receive {:interrupt, task, ^stamp}
+
+      # A new re-send of the same stamp takes the lock before the record runs.
+      assert {:ok, %{chain: new_chain}} = Backups.resend_offsite(stamp, Backups.system())
+      assert %{chain: ^new_chain} = Backups.in_flight()
+
+      send(task, :release)
+      assert KilnCMS.Backups.Interrupts.await_idle() == :ok
+      assert File.dir?(work)
+      assert %{chain: ^new_chain} = Backups.in_flight()
+    end
+
     test "a step that crashes on its last attempt stops the re-send; no manifest", ctx do
       %{run: run, b: b} = partial!(ctx)
       settings!(b, %{}, ctx.admin)

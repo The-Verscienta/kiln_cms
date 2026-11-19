@@ -222,13 +222,21 @@ nodes could then write the same backup.
   backup request's, which sweeps first. One task runs at a time, so a hung
   directory holds one blocked process; up to 20 more wait in order, and one
   past that is dropped with a line in the log (an error for a finish, whose
-  run then waits for the stale-run check). A failure manifest written late is
-  fenced: it is renamed into place under the lock, only while the lock is
-  free at the epoch the release left and `manifest.json` names no later
-  stamp, so it never replaces a newer backup's. While a task has run for
-  over a minute the node's heartbeat skips the lock sweep and leaves it to
-  healthy nodes. The lock's release, the requeue and the promotion stay in
-  the sweep's transaction.
+  run then waits for the stale-run check). The task's writes are fenced by
+  the lock as the release left it (`Chain.released_fenced/3`): the failure
+  manifest is renamed into place, and a work directory moved into the trash,
+  under the lock and only while it is free at the release's epoch, or held at
+  that epoch by the backup the release promoted, before its start step has
+  run; the manifest is also skipped when it already names a later stamp
+  (read before the lock is taken). A late finish record whose manifest names
+  a later stamp can't decide the finish's verdict and leaves its run for the
+  stale-run check. On the node with the backup's `state.json`, the task adds
+  what that file holds to the failed run (`Run :record_interrupted`, system
+  only, own chain, `failed` runs only). While a task has run for over a
+  minute the node's heartbeat skips the lock sweep; another node's heartbeat
+  or any backup request still sweeps, and on a shared mount hung for every
+  node only requests do. The lock's release, the requeue and the promotion
+  stay in the sweep's transaction.
 
 The thresholds (90 and 180 seconds) and the reclaim are unchanged. Every
 other rule above is unchanged.

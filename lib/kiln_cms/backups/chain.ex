@@ -876,30 +876,32 @@ defmodule KilnCMS.Backups.Chain do
   @spec fenced_rename(map(), Path.t(), Path.t()) :: :ok | {:error, term()}
   def fenced_rename(lease, from, to), do: fenced(lease, fn -> File.rename(from, to) end)
 
-  @doc """
-  Rename `from` to `to`, the failure manifest of `stamp`, which a backup
-  interrupted from outside writes after the lock's release (#3078), only
-  while the lock is still as that release left it: free, at the epoch in
-  `released` (every `:hold`, `:move` and `:clear` moves it), and only while
-  the manifest in `to`'s directory names no later stamp (`scripts/backup.sh`
-  writes it without the lock). Both are checked under the lock, right before
-  the rename, so a record that runs late never writes over the manifest of a
-  backup that ran since. `{:error, :superseded}` otherwise, and `to` is left
-  as it was.
+  @typedoc """
+  The lock as an interrupt's release left it (#3078): its epoch after the
+  release and any promotion, and the promoted chain (nil when none was).
   """
-  # sobelow_skip ["Traversal.FileModule"]
-  @spec released_rename(%{epoch: integer()}, String.t(), Path.t(), Path.t()) ::
-          :ok | {:error, term()}
-  def released_rename(%{epoch: epoch}, stamp, from, to) do
-    result =
-      with_lock(fn
-        %{chain_id: nil, epoch: ^epoch} ->
-          if later_manifest?(Path.dirname(to), stamp),
-            do: {:ok, {:error, :superseded}},
-            else: {:ok, File.rename(from, to)}
+  @type released :: %{epoch: integer(), promoted: String.t() | nil}
 
-        _moved_on ->
-          {:ok, {:error, :superseded}}
+  @doc """
+  Run `fun` under the lock, only while it is still as the release of an
+  interrupted backup of `stamp` left it (`released`, #3078): free at that
+  epoch, or held at that epoch by the chain it promoted, which is still at
+  `:start` with no stamp and doesn't resume `stamp` (every `:hold`, `:move`
+  and `:clear` moves the epoch, so a backup that has started writing, or
+  any that has held the lock since, has moved it). How a record that runs
+  late writes the failure manifest or removes a work directory without
+  touching a backup that ran since. `{:error, :superseded}` otherwise, and
+  `fun` isn't run. Keep `fun` to a rename or two: it holds the lock
+  transaction.
+  """
+  @spec released_fenced(released(), String.t(), (-> :ok | {:error, term()})) ::
+          :ok | {:error, term()}
+  def released_fenced(released, stamp, fun) do
+    result =
+      with_lock(fn row ->
+        if released_holds?(row, released, stamp),
+          do: {:ok, fun.()},
+          else: {:ok, {:error, :superseded}}
       end)
 
     case result do
@@ -908,7 +910,39 @@ defmodule KilnCMS.Backups.Chain do
     end
   end
 
-  defp later_manifest?(dir, stamp) do
+  defp released_holds?(%{chain_id: nil, epoch: epoch}, %{epoch: epoch}, _stamp), do: true
+
+  defp released_holds?(
+         %{chain_id: chain, epoch: epoch, step: :start, stamp: nil} = row,
+         %{epoch: epoch, promoted: chain},
+         stamp
+       )
+       when is_binary(chain),
+       do: row.resume_stamp != stamp
+
+  defp released_holds?(_row, _released, _stamp), do: false
+
+  @doc """
+  Rename `from` to `to`, the failure manifest of `stamp` that a backup
+  interrupted from outside writes after the lock's release (#3078): only
+  under `released_fenced/3`, and only when the manifest in `to`'s directory
+  names no later stamp (`scripts/backup.sh` writes it without the lock). The
+  manifest is read before the lock is taken, so the lock transaction holds
+  only the rename. `{:error, :superseded}` otherwise, and `to` is left as it
+  was.
+  """
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec released_rename(released(), String.t(), Path.t(), Path.t()) :: :ok | {:error, term()}
+  def released_rename(released, stamp, from, to) do
+    if later_manifest?(Path.dirname(to), stamp),
+      do: {:error, :superseded},
+      else: released_fenced(released, stamp, fn -> File.rename(from, to) end)
+  end
+
+  @doc false
+  # Whether `dir`'s manifest names a stamp later than `stamp` (#3078).
+  @spec later_manifest?(Path.t(), String.t()) :: boolean()
+  def later_manifest?(dir, stamp) do
     case Manifest.read(dir) do
       %Manifest{stamp: later} when is_binary(later) -> later > stamp
       _none -> false
@@ -964,11 +998,17 @@ defmodule KilnCMS.Backups.Chain do
   """
   @spec release_in_txn(Lock.t()) :: {:ok, String.t() | nil} | {:error, term()}
   def release_in_txn(row) do
+    with {:ok, promoted, _row} <- release_row(row), do: {:ok, promoted}
+  end
+
+  # `release_in_txn/1`, with the row as it leaves it: what an interrupt's
+  # late file work is fenced by (`released_fenced/3`).
+  defp release_row(row) do
     row = write!(&Backups.clear_backup_lock!/3, row, %{})
 
     case row.waiting_requested_at do
       nil ->
-        {:ok, nil}
+        {:ok, nil, row}
 
       requested_at ->
         chain = Ash.UUID.generate()
@@ -985,8 +1025,7 @@ defmodule KilnCMS.Backups.Chain do
         args = start_args(chain, req, row.waiting_folds, requested_at)
 
         with {:ok, job} <- insert_step(args) do
-          hold!(row, chain, req.trigger, req.resume, job.id)
-          {:ok, chain}
+          {:ok, chain, hold!(row, chain, req.trigger, req.resume, job.id)}
         end
     end
   end
@@ -1234,8 +1273,8 @@ defmodule KilnCMS.Backups.Chain do
         {:ok, {:requeued, Map.put(info, :job_id, replacement.id)}}
       end
     else
-      with {:ok, promoted} <- release_in_txn(row) do
-        {:ok, {:interrupted, Map.put(info, :promoted, promoted)}}
+      with {:ok, info} <- release_interrupted(row, info) do
+        {:ok, {:interrupted, info}}
       end
     end
   end
@@ -1265,12 +1304,20 @@ defmodule KilnCMS.Backups.Chain do
       part: row.part,
       node: node,
       resume: row.resume_stamp,
-      phase: row.phase,
-      # The epoch `release_in_txn/1`'s `:clear` leaves (it moves it up by
-      # one): what an interrupt's failure manifest is fenced by (#3078). Read
-      # only after a release.
-      released: %{epoch: row.epoch + 1}
+      phase: row.phase
     }
+  end
+
+  # The release, for an interrupt: `info` with the promoted chain and the
+  # lock as the release left it (`released_fenced/3`).
+  defp release_interrupted(row, info) do
+    with {:ok, promoted, released} <- release_row(row) do
+      {:ok,
+       Map.merge(info, %{
+         promoted: promoted,
+         released: %{epoch: released.epoch, promoted: promoted}
+       })}
+    end
   end
 
   defp after_reclaim({:ok, {:requeued, info}} = result) do
@@ -1426,8 +1473,7 @@ defmodule KilnCMS.Backups.Chain do
     if still_waiting?(id, job.queue) do
       :ok = Oban.cancel_job(id)
 
-      with {:ok, promoted} <- release_in_txn(row) do
-        info = info(row, nil) |> Map.put(:queue, job.queue) |> Map.put(:promoted, promoted)
+      with {:ok, info} <- release_interrupted(row, Map.put(info(row, nil), :queue, job.queue)) do
         {:ok, {:interrupted, info}}
       end
     else
@@ -1518,10 +1564,8 @@ defmodule KilnCMS.Backups.Chain do
   defp describe(error), do: inspect(error, limit: 5)
 
   defp release_orphan(row) do
-    info = info(row, nil)
-
-    with {:ok, promoted} <- release_in_txn(row) do
-      {:ok, {:orphaned, Map.put(info, :promoted, promoted)}}
+    with {:ok, info} <- release_interrupted(row, info(row, nil)) do
+      {:ok, {:orphaned, info}}
     end
   end
 
@@ -1565,7 +1609,7 @@ defmodule KilnCMS.Backups.Chain do
         outcome =
           Steps.interrupt_finish(stamp, info.chain, info.dir_id, message, released: info.released)
 
-        if outcome != :finished, do: Logger.error(failed)
+        if outcome == :ok, do: Logger.error(failed)
       end,
       dropped:
         {:error,
@@ -1578,7 +1622,11 @@ defmodule KilnCMS.Backups.Chain do
        when is_binary(stamp) do
     Interrupts.run(
       subject(info),
-      fn -> Steps.resend_finished_from_outside(stamp, info.chain, info.dir_id) end,
+      fn ->
+        Steps.resend_finished_from_outside(stamp, info.chain, info.dir_id,
+          released: info.released
+        )
+      end,
       dropped: {:warning, "Its work directory and markers are left as they are."}
     )
   end
@@ -1591,7 +1639,9 @@ defmodule KilnCMS.Backups.Chain do
 
     Interrupts.run(
       subject(info),
-      fn -> Steps.resend_interrupted_files(stamp, info.chain, info.dir_id) end,
+      fn ->
+        Steps.resend_interrupted_files(stamp, info.chain, info.dir_id, released: info.released)
+      end,
       dropped: {:warning, "Its work directory is left in place."}
     )
   end
@@ -1606,7 +1656,10 @@ defmodule KilnCMS.Backups.Chain do
       Interrupts.run(
         subject(info),
         fn ->
-          Steps.interrupt_files(stamp, info.chain, info.dir_id, message, released: info.released)
+          Steps.interrupt_files(stamp, info.chain, info.dir_id, message,
+            released: info.released,
+            merge_run: true
+          )
         end,
         dropped: {:warning, "Its run is failed; its failure manifest is not written."}
       )
