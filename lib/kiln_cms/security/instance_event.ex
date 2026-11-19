@@ -58,6 +58,9 @@ defmodule KilnCMS.Security.InstanceEvent do
     :backup_destination_changed,
     :backup_destination_deleted,
     :backup_destination_tested,
+    # A platform admin let retention on a destination delete another backup
+    # directory's backups there, or stopped it (`:adopt_directories`).
+    :backup_destination_adoptions_changed,
     # A platform admin saved the platform's security alert settings (#2245):
     # which platform alert kinds are off (`KilnCMS.Security.PlatformAlertSettings`).
     :platform_alerts_changed
@@ -78,6 +81,8 @@ defmodule KilnCMS.Security.InstanceEvent do
     backup_destination_deleted: ~w(name kind enabled),
     # `node`: the node the Test ran on (a Local destination is that node's disk).
     backup_destination_tested: ~w(name kind ok node),
+    # `adopted` / `removed`: backup-directory ids, comma-joined, or "none".
+    backup_destination_adoptions_changed: ~w(name kind adopted removed),
     # `disabled_kinds`: the platform kinds off after the save, comma-joined,
     # or "none".
     platform_alerts_changed: ~w(disabled_kinds)

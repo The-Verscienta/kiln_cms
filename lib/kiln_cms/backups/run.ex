@@ -112,6 +112,24 @@ defmodule KilnCMS.Backups.Run do
       filter expr(status == :running)
     end
 
+    # The in-app runs that recorded reaching the destination `key` (`ok`),
+    # with the backup directory each ran in: what the Destinations tab lists
+    # as other backup directories' backups there. Newest first.
+    read :sent_to_destination do
+      argument :key, :string, allow_nil?: false
+
+      filter expr(
+               origin == :app and not is_nil(dir_id) and
+                 fragment(
+                   "EXISTS (SELECT 1 FROM unnest(?) AS d WHERE d->>'key' = ? AND d->>'status' = 'ok')",
+                   destinations,
+                   ^arg(:key)
+                 )
+             )
+
+      prepare build(sort: [started_at: :desc, id: :desc])
+    end
+
     read :by_stamp do
       get? true
       argument :stamp, :string, allow_nil?: false

@@ -42,6 +42,16 @@ defmodule KilnCMS.Backups.Upload do
     * `:completed` — the file arrived;
     * `:aborted` — its store upload was aborted.
 
+  ## Which backup directory opened it
+
+  `dir_id` is the `.kiln-dir-id` of the backup directory whose step opened
+  the upload. Only a step of that directory takes it over, and only a node
+  with that directory sweeps it (`KilnCMS.Backups.Uploads`): a database
+  restored on another server carries the original server's rows, whose
+  store uploads are that server's to resume or abort. Nil on rows from
+  before it was recorded, which any directory's step or sweep may handle,
+  as before.
+
   `purge` deletes closed rows (`:completed`, `:aborted`) and the rows of a
   deleted destination once they are older than the cutoff it is given.
 
@@ -85,7 +95,8 @@ defmodule KilnCMS.Backups.Upload do
         :checkpoint,
         :bytes_done,
         :owner_job_id,
-        :owner_attempt
+        :owner_attempt,
+        :dir_id
       ]
 
       change set_attribute(:status, :open)
@@ -107,11 +118,13 @@ defmodule KilnCMS.Backups.Upload do
     end
 
     # What the sweep may abort on one destination: abandoned uploads, and
-    # open ones nobody has touched since `idle_before`. Oldest first, at most
-    # `limit`.
+    # open ones nobody has touched since `idle_before`, of the backup
+    # directory `dir_id` or of none (a row from before `dir_id` was
+    # recorded; with `dir_id` nil, only those). Oldest first, at most `limit`.
     read :owed do
       argument :destination_key, :string, allow_nil?: false
       argument :idle_before, :utc_datetime_usec, allow_nil?: false
+      argument :dir_id, :uuid
 
       argument :limit, :integer do
         allow_nil? false
@@ -121,7 +134,8 @@ defmodule KilnCMS.Backups.Upload do
 
       filter expr(
                destination_key == ^arg(:destination_key) and
-                 (status == :abandoned or (status == :open and updated_at < ^arg(:idle_before)))
+                 (status == :abandoned or (status == :open and updated_at < ^arg(:idle_before))) and
+                 (is_nil(dir_id) or (not is_nil(^arg(:dir_id)) and dir_id == ^arg(:dir_id)))
              )
 
       prepare build(sort: [updated_at: :asc, id: :asc])
@@ -380,6 +394,10 @@ defmodule KilnCMS.Backups.Upload do
       constraints max_length: KilnCMS.Limits.line()
       public? true
     end
+
+    # The backup directory whose step opened it (see the moduledoc); nil on
+    # rows from before it was recorded.
+    attribute :dir_id, :uuid, public?: true
 
     timestamps()
   end

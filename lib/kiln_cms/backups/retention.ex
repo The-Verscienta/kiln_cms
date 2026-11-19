@@ -220,15 +220,17 @@ defmodule KilnCMS.Backups.Retention do
        destination's own units: its newest verified and newest complete unit
        of each kind are never deleted.
     4. **Ownership.** Of what the rules would delete, only a unit whose Run
-       records this installation sending it to THIS destination key (an
-       artifact of that kind, or one of its parts, with the key's status `ok`,
-       or `pruned` by an earlier pass that stopped part-way) is deleted
+       records sending it to THIS destination key (an artifact of that kind,
+       or one of its parts, with the key's status `ok`, or `pruned` by an
+       earlier pass that stopped part-way) is deleted, and only when that Run
+       is an in-app one (`origin: :app`) whose `dir_id` is this backup
+       directory's `.kiln-dir-id`, or, on a stored destination, a directory
+       the destination adopted for it (`DestinationConfig.owners/2`)
        (`destination_plan/5`). Anything else, such as another installation's
-       backup in a shared bucket, is left and reported. On the env
-       destination, which cron sends to under the same key, the Run must
-       also be an in-app one (`origin: :app`) whose `dir_id` is this backup
-       directory's `.kiln-dir-id`: a cron-made or imported backup is never
-       deleted there.
+       backup in a shared bucket, a cron-made or imported backup, or a
+       backup another backup directory sent (a database restored on another
+       server keeps the original server's run history), is left and
+       reported. A directory with no `.kiln-dir-id` deletes nothing.
     5. **Delete.** Each unit is re-checked (`recheck/2`), then deleted one
        file at a time, data before the sidecar. The first delete that fails
        or runs past its bound stops the pass. The files deleted are marked
@@ -247,7 +249,18 @@ defmodule KilnCMS.Backups.Retention do
   """
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Destination, DirId, Importer, Notices, Recorder, WorkState}
+
+  alias KilnCMS.Backups.{
+    Artifact,
+    Destination,
+    DestinationConfig,
+    DirId,
+    Importer,
+    Notices,
+    Recorder,
+    WorkState
+  }
+
   alias KilnCMS.Backups.Retention.Policy
 
   require Logger
@@ -1579,14 +1592,17 @@ defmodule KilnCMS.Backups.Retention do
   off-site destination"): a stored one, or the env destination
   (`BACKUP_RCLONE_REMOTE`) when `BACKUP_RCLONE_REMOTE_PRUNE` is on
   (`Backups.rclone_remote_prune?/0`, #2950). `dir` is this host's backup
-  directory, for its `.keep` markers, its `.work/` directories and, on the
-  env destination, its `.kiln-dir-id`.
+  directory, for its `.keep` markers, its `.work/` directories and its
+  `.kiln-dir-id`, whose backups (and the adopted directories') are the only
+  ones a pass deletes.
 
-  Returns `{:ok, %{deleted: names, units: count, unowned: entries, stopped:
-  nil | reason}}`: the file names deleted (already marked `pruned` on their
-  runs), how many units they came from, the units the keep rules would have
-  deleted but this installation has no record of sending there (left
-  alone), and why the deleting broke off, if it did. `{:error, reason}`
+  Returns `{:ok, %{deleted: names, units: count, unowned: entries,
+  other_directory: entries, stopped: nil | reason}}`: the file names
+  deleted (already marked `pruned` on their runs), how many units they came
+  from, the units the keep rules would have deleted but that are not this
+  backup directory's to delete (left alone), those of them an in-app backup
+  of another backup directory sent there, and why the deleting broke off,
+  if it did. `{:error, reason}`
   when it could not start, with nothing deleted: `{:error, :not_prunable}`
   for the env destination with the switch off (or any key that is neither),
   and `prune_blocker/3`'s reason when that names one (`:unsupported` for an
@@ -1595,6 +1611,8 @@ defmodule KilnCMS.Backups.Retention do
   Options:
 
     * `:policy` and `:now` - as for `run/2`;
+    * `:adoptions` - a stored destination's `adoptions`, read again for
+      this pass (`DestinationConfig.owners/2`); none by default;
     * `:deadline` - the step's deadline (a
       `System.monotonic_time(:millisecond)` instant). Each `list` and
       `delete` call is bounded by it and by its own limit, whichever comes
@@ -1609,6 +1627,7 @@ defmodule KilnCMS.Backups.Retention do
              deleted: [String.t()],
              units: non_neg_integer(),
              unowned: [entry()],
+             other_directory: [entry()],
              stopped: term() | nil
            }}
           | {:error, term()}
@@ -1616,8 +1635,8 @@ defmodule KilnCMS.Backups.Retention do
     with {:ok, subject} <- prune_subject(config),
          :ok <- supported(config),
          :ok <- clear_to_prune(subject, config),
-         {:ok, owner} <- owner(dir, subject),
-         {:ok, plan} <- prepare_destination(dir, config, owner, opts) do
+         {:ok, owners} <- owners(dir, subject, opts),
+         {:ok, plan} <- prepare_destination(dir, config, owners, opts) do
       execute_destination(dir, config, plan, opts)
     end
   end
@@ -1751,21 +1770,27 @@ defmodule KilnCMS.Backups.Retention do
     Enum.any?(rows, &(&1.id != id and Destination.overlap?(location, row_location(&1))))
   end
 
-  # Whose units the ownership rule (step 4) accepts. On a stored destination,
-  # any run that recorded sending there. On the env destination, which cron
-  # sends to under the same key, only an in-app run of THIS backup directory
-  # (#2950): `origin: :app` and its `dir_id` this directory's `.kiln-dir-id`.
-  # A directory with no id has made no in-app backup, so nothing there is its.
-  defp owner(_dir, %Config{}), do: {:ok, nil}
-
-  defp owner(dir, :env) do
+  # Whose units the ownership rule (step 4) accepts: in-app runs of THIS
+  # backup directory (`origin: :app` and its `dir_id` this directory's
+  # `.kiln-dir-id`), on the env destination (#2950), which cron sends to
+  # under the same key, and on a stored one, where a database restored on
+  # another server would otherwise find the original server's run history
+  # and delete what that server sent. A stored destination adds the
+  # directories it adopted for this one (`DestinationConfig.owners/2`). A
+  # directory with no id has made no in-app backup, so nothing there is its.
+  defp owners(dir, subject, opts) do
     case DirId.current(dir) do
-      {:ok, id} -> {:ok, id}
+      {:ok, id} -> {:ok, owners_of(subject, id, opts)}
       {:error, reason} -> {:error, {:dir_id, reason}}
     end
   end
 
-  defp prepare_destination(dir, config, owner, opts) do
+  defp owners_of(:env, id, _opts), do: [id]
+
+  defp owners_of(%Config{}, id, opts),
+    do: DestinationConfig.owners(id, Keyword.get(opts, :adoptions, []))
+
+  defp prepare_destination(dir, config, owners, opts) do
     now = Keyword.get_lazy(opts, :now, fn -> System.os_time(:second) end)
 
     with {:ok, policy} <- policy(opts),
@@ -1773,7 +1798,7 @@ defmodule KilnCMS.Backups.Retention do
          {:ok, listing} <- list_destination(config, opts),
          inventory = destination_inventory(config.key, listing, local, now),
          {:ok, runs} <- read_runs(stamps(inventory)) do
-      {:ok, destination_plan(inventory, runs, policy, now, dir_id: owner)}
+      {:ok, destination_plan(inventory, runs, policy, now, owners: owners)}
     end
   rescue
     error -> {:error, {:crashed, error.__struct__}}
@@ -1875,47 +1900,58 @@ defmodule KilnCMS.Backups.Retention do
   The plan for a destination's inventory (`destination_inventory/4`):
   `plan/4`'s keep rules, then the ownership filter. Pure.
 
-  Returns `%{delete: entries, keep: entries, unowned: entries}`. `delete`
-  holds only units whose Run records this installation sending them to the
-  inventory's key; `unowned` the units the rules would have deleted but that
-  have no such record (they are in `keep` too, with the reason
-  `{:not_sent_here, rule_reason}`).
+  Returns `%{delete: entries, keep: entries, unowned: entries,
+  other_directory: entries}`. `delete` holds only units whose Run is an
+  in-app one (`origin: :app`) of a backup directory in `opts[:owners]` and
+  records sending them to the inventory's key; `unowned` the units the
+  rules would have deleted but that have no such record (they are in `keep`
+  too, with the reason `{:not_sent_here, rule_reason}`); `other_directory`
+  those of `unowned` whose record is an in-app run of another backup
+  directory.
 
-  `opts[:dir_id]`, when set (the env destination, #2950), narrows that
-  record to an in-app run (`origin: :app`) whose `dir_id` is this one: cron
-  sends to the env remote under the same key, and its runs never make a
-  file there deletable.
+  `opts[:owners]` is the list of backup-directory ids whose runs may make a
+  unit deletable. Without it, or with `[]`, nothing is deleted: cron sends
+  to the env remote under the same key, and a database restored on another
+  server carries the original server's run history.
   """
   @spec destination_plan(inventory(), %{String.t() => map()}, Policy.t(), integer(), keyword()) ::
           %{
             delete: [entry()],
             keep: [entry()],
-            unowned: [entry()]
+            unowned: [entry()],
+            other_directory: [entry()]
           }
   def destination_plan(%{key: key} = inventory, runs, %Policy{} = policy, now, opts \\ []) do
     plan = plan(inventory, runs, policy, now)
-    dir_id = opts[:dir_id]
+    owners = Keyword.get(opts, :owners) || []
 
     {owned, unowned} =
-      Enum.split_with(plan.delete, &owned?(runs[&1.stamp], &1.kind, key, dir_id))
+      Enum.split_with(plan.delete, &owned?(runs[&1.stamp], &1.kind, key, owners))
 
     left = Enum.map(unowned, &%{&1 | reason: {:not_sent_here, &1.reason}})
 
     %{
       delete: owned,
       keep: Enum.sort_by(plan.keep ++ left, &{&1.stamp || "", &1.kind, &1.files}),
-      unowned: unowned
+      unowned: unowned,
+      other_directory: Enum.filter(unowned, &other_directory?(runs[&1.stamp], &1.kind, key))
     }
   end
 
   @sent_here ["ok", "pruned"]
 
-  defp owned?(run, kind, key, nil), do: sent_here?(run, kind, key)
+  defp owned?(%{origin: :app, dir_id: dir_id} = run, kind, key, owners)
+       when is_binary(dir_id) and owners != [],
+       do: dir_id in owners and sent_here?(run, kind, key)
 
-  defp owned?(%{origin: :app, dir_id: dir_id} = run, kind, key, dir_id) when is_binary(dir_id),
-    do: sent_here?(run, kind, key)
+  defp owned?(_run, _kind, _key, _owners), do: false
 
-  defp owned?(_run, _kind, _key, _dir_id), do: false
+  # Left only because another backup directory's in-app backup sent it.
+  defp other_directory?(%{origin: :app, dir_id: dir_id} = run, kind, key)
+       when is_binary(dir_id),
+       do: sent_here?(run, kind, key)
+
+  defp other_directory?(_run, _kind, _key), do: false
 
   # The Run of the stamp has an artifact of this kind that it recorded sent
   # to `key` (the artifact, or any of its parts), or pruned there by an
@@ -1954,7 +1990,14 @@ defmodule KilnCMS.Backups.Retention do
     deleted = deleted |> Enum.reverse() |> List.flatten()
     Recorder.mark_pruned(deleted, config.key)
 
-    {:ok, %{deleted: deleted, units: units, unowned: plan.unowned, stopped: stopped}}
+    {:ok,
+     %{
+       deleted: deleted,
+       units: units,
+       unowned: plan.unowned,
+       other_directory: plan.other_directory,
+       stopped: stopped
+     }}
   end
 
   defp remove_remote_safely(dir, config, entry, bounds) do

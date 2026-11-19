@@ -2215,7 +2215,8 @@ defmodule KilnCMS.Backups.Steps do
       key: sent_key,
       owner: Uploads.owner(ctx.lease),
       deadline: dest.deadline,
-      stamp: ctx.stamp
+      stamp: ctx.stamp,
+      dir_id: ctx.lease.dir_id
     }
 
     case put_files(ctx.dir, files, {config, target, ctx.lease}, sent) do
@@ -2672,12 +2673,12 @@ defmodule KilnCMS.Backups.Steps do
   end
 
   # Retention on the destination just reached (#2220, ADR 0064), when its
-  # `prune` is on and its adapter can list and delete: only what this
-  # installation recorded sending there is ever deleted
+  # `prune` is on and its adapter can list and delete: only what this backup
+  # directory's in-app runs (or, on a stored destination, a directory it
+  # adopted for this one) recorded sending there is ever deleted
   # (`Retention.run_on_destination/3`). The env destination
   # (`BACKUP_RCLONE_REMOTE`) is pruned only while `BACKUP_RCLONE_REMOTE_PRUNE`
-  # is on (#2950), and then only of what this backup directory's in-app runs
-  # sent there; `Retention` refuses it as well when the switch is off.
+  # is on (#2950); `Retention` refuses it as well when the switch is off.
   #
   # Whatever happens here, the destination's upload status stays as it is:
   # a pass that can't start deletes nothing and says so on the run. It runs
@@ -2697,8 +2698,8 @@ defmodule KilnCMS.Backups.Steps do
        when is_binary(id) do
     if Destination.supports?(config, [:list, :delete]) do
       case prune_enabled(id) do
-        {:ok, true} ->
-          prune_on(rec, ctx, entry, config, dest.deadline)
+        {:ok, {true, adoptions}} ->
+          prune_on(rec, ctx, entry, config, deadline: dest.deadline, adoptions: adoptions)
 
         {:ok, false} ->
           Notices.retention(notice_scope(ctx, entry), :ok)
@@ -2715,7 +2716,7 @@ defmodule KilnCMS.Backups.Steps do
 
   defp prune_destination(rec, ctx, %{entry: %{"source" => "env"} = entry} = dest, config) do
     if Backups.rclone_remote_prune?() do
-      prune_on(rec, ctx, entry, config, dest.deadline)
+      prune_on(rec, ctx, entry, config, deadline: dest.deadline)
     else
       Notices.retention(notice_scope(ctx, entry), :ok)
       rec
@@ -2746,26 +2747,29 @@ defmodule KilnCMS.Backups.Steps do
     end
   end
 
-  # The row as it is now: an admin who turned `prune` off during the backup
-  # is obeyed. A row that can't be read prunes nothing.
+  # The row as it is now: an admin who turned `prune` off, or stopped
+  # adopting a backup directory, during the backup is obeyed. A row that
+  # can't be read prunes nothing.
   defp prune_enabled(id) do
     case Backups.get_backup_destination(id, actor: Backups.system(), authorize_with: :error) do
-      {:ok, %{enabled: true, prune: true}} -> {:ok, true}
+      {:ok, %{enabled: true, prune: true} = row} -> {:ok, {true, row.adoptions || []}}
       {:ok, _off_disabled_or_gone} -> {:ok, false}
       {:error, error} -> {:error, {:read_destination, error.__struct__}}
     end
   end
 
-  defp prune_on(rec, ctx, entry, config, deadline) do
+  defp prune_on(rec, ctx, entry, config, opts) do
     label = entry["label"]
 
-    case Retention.run_on_destination(ctx.dir, config, deadline: deadline) do
+    case Retention.run_on_destination(ctx.dir, config, opts) do
       {:ok, result} ->
         destination_pass(ctx, entry, result)
+        {left, other_directory} = left_behind(entry, result)
 
         rec
         |> log_pruned(label, result)
-        |> log_not_sent_here(entry, result.unowned)
+        |> log_not_sent_here(entry, left)
+        |> log_other_directory(entry, other_directory)
         |> Recorder.put_run_destination(entry["key"], %{pruned: result.units})
 
       {:error, reason} ->
@@ -2830,10 +2834,10 @@ defmodule KilnCMS.Backups.Steps do
   defp removed_text(names, units),
     do: "removed #{length(names)} file(s) from #{units} backup(s)"
 
-  # Old enough to go, but not this installation's to delete: said on every
-  # run, so an admin sharing a bucket sees what is piling up there.
-  # On the env remote the record must be an in-app run of this backup
-  # directory (#2950): a cron-made backup there is left, and said so.
+  # Old enough to go, but not this backup directory's to delete: said on
+  # every run, so an admin sharing a bucket sees what is piling up there.
+  # The record must be an in-app run of this backup directory (#2950): a
+  # cron-made backup there is left, and said so.
   defp log_not_sent_here(rec, _entry, []), do: rec
 
   defp log_not_sent_here(rec, entry, unowned) do
@@ -2843,11 +2847,7 @@ defmodule KilnCMS.Backups.Steps do
       |> Enum.uniq()
 
     more = if length(shown) > 10, do: ", and #{length(shown) - 10} more", else: ""
-
-    whose =
-      if entry["source"] == "env",
-        do: "no in-app backup of this backup directory sent there",
-        else: "this installation has no record of sending there"
+    whose = "no in-app backup of this backup directory sent there"
 
     Recorder.log(
       rec,
@@ -2855,6 +2855,33 @@ defmodule KilnCMS.Backups.Steps do
       "offsite",
       "Retention on #{entry["label"]} left #{length(shown)} old backup(s) #{whose}: " <>
         Enum.join(Enum.take(shown, 10), ", ") <> more
+    )
+  end
+
+  # What a pass left that it would otherwise have deleted, as two lines: on
+  # a stored destination, another backup directory's backups apart, since
+  # its row can adopt that directory; on the env remote, which has no row,
+  # all in one.
+  defp left_behind(%{"source" => "env"}, result), do: {result.unowned, []}
+
+  defp left_behind(_entry, result),
+    do: {result.unowned -- result.other_directory, result.other_directory}
+
+  # Old enough to go, but sent by another backup directory's in-app backups
+  # (another server's, or the original server's when this database was
+  # restored on another server): kept unless the destination adopts that
+  # directory for this one, on its Destinations row.
+  defp log_other_directory(rec, _entry, []), do: rec
+
+  defp log_other_directory(rec, entry, kept) do
+    count = kept |> Enum.map(&{&1.kind, &1.stamp}) |> Enum.uniq() |> length()
+
+    Recorder.log(
+      rec,
+      :info,
+      "offsite",
+      "Retention on #{entry["label"]} kept #{count} backup(s) sent by another backup " <>
+        "directory (see Destinations)"
     )
   end
 

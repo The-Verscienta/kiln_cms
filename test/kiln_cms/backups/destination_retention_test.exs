@@ -88,7 +88,10 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
       File.rm_rf!(base)
     end)
 
-    %{base: base, dir: dir, key: "dest:" <> Ecto.UUID.generate()}
+    # The backup directory's id: only its in-app runs' backups are pruned.
+    {:ok, dir_id} = DirId.local(dir)
+
+    %{base: base, dir: dir, dir_id: dir_id, key: "dest:" <> Ecto.UUID.generate()}
   end
 
   # -- helpers ---------------------------------------------------------------
@@ -104,8 +107,11 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
   end
 
   # A finished app run of `stamp` whose dump was sent to each of `keys`;
-  # `attrs` go to its start (a `dir_id`, #2950).
+  # `attrs` go to its start. Its `dir_id` is the backup directory's own
+  # (created when there is none) unless `attrs` names another, or nil.
   defp run!(stamp, keys, status \\ :succeeded, attrs \\ %{}) do
+    attrs = Map.put_new_lazy(attrs, :dir_id, fn -> own_dir_id() end)
+
     {:ok, artifact} =
       Artifact.from_manifest(%{kind: "db", path: "db/kiln-db-#{stamp}.dump", verified: true})
 
@@ -153,6 +159,11 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
       },
       actor: Backups.system()
     )
+  end
+
+  defp own_dir_id do
+    {:ok, id} = DirId.local(Backups.dir())
+    id
   end
 
   defp stored(stamp), do: Backups.get_run_by_stamp!(stamp, actor: Backups.system())
@@ -395,6 +406,150 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
 
   # -- BACKUP_RCLONE_REMOTE, by opt-in (#2950) ----------------------------------
 
+  # A stored destination is pruned only of what in-app backups of this
+  # backup directory sent there, or of a directory it adopted for this one:
+  # a database restored on another server carries the original server's
+  # destinations and run history, and must not prune that server's backups.
+  describe "run_on_destination/3: whose backups a stored destination prunes" do
+    defp adoption(dir_id, adopted_by),
+      do: %{
+        "dir_id" => dir_id,
+        "adopted_by" => adopted_by,
+        "adopted_at" => "2026-11-19T00:00:00Z"
+      }
+
+    test "only this directory's in-app backups; another directory's, cron's and a run " <>
+           "with no directory are kept",
+         %{dir: dir, key: key} do
+      other = "20200105-000000"
+      no_dir = "20200108-000000"
+
+      run!(@a, [key])
+      run!(other, [key], :succeeded, %{dir_id: Ecto.UUID.generate()})
+      run!(no_dir, [key], :succeeded, %{dir_id: nil})
+      imported!(@f, key)
+      run!(@b, [key])
+
+      config = fake(key, %{"entries" => Enum.flat_map([@a, other, no_dir, @f, @b], &listed/1)})
+
+      assert {:ok, %{deleted: deleted, unowned: unowned, other_directory: elsewhere}} =
+               prune(dir, config)
+
+      assert deleted == dump_and_sidecar(@a)
+      assert deletes() == dump_and_sidecar(@a)
+      assert Enum.map(unowned, & &1.stamp) |> Enum.sort() == Enum.sort([other, no_dir, @f])
+      assert Enum.map(elsewhere, & &1.stamp) == [other]
+    end
+
+    test "a directory it adopted for this one is pruned too", %{
+      dir: dir,
+      dir_id: dir_id,
+      key: key
+    } do
+      retired = Ecto.UUID.generate()
+      run!(@a, [key], :succeeded, %{dir_id: retired})
+      run!(@b, [key])
+
+      config = fake(key, %{"entries" => listed(@a) ++ listed(@b)})
+
+      assert {:ok, %{deleted: [], other_directory: [%{stamp: @a}]}} = prune(dir, config)
+
+      assert {:ok, %{deleted: deleted, other_directory: []}} =
+               prune(dir, config, adoptions: [adoption(retired, [dir_id])])
+
+      assert deleted == dump_and_sidecar(@a)
+    end
+
+    test "an adoption made for another backup directory doesn't apply to this one", %{
+      dir: dir,
+      key: key
+    } do
+      retired = Ecto.UUID.generate()
+      run!(@a, [key], :succeeded, %{dir_id: retired})
+      run!(@b, [key])
+
+      config = fake(key, %{"entries" => listed(@a) ++ listed(@b)})
+      adoptions = [adoption(retired, [Ecto.UUID.generate()])]
+
+      assert {:ok, %{deleted: [], other_directory: [%{stamp: @a}]}} =
+               prune(dir, config, adoptions: adoptions)
+
+      assert deletes() == []
+    end
+
+    test "a database restored on another server deletes none of the original server's " <>
+           "backups, its adoptions included",
+         %{dir: dir, key: key} do
+      # The original server's directory, and one it had adopted.
+      production = Ecto.UUID.generate()
+      adopted_there = Ecto.UUID.generate()
+      newer = "20200401-000000"
+
+      run!(@a, [key], :succeeded, %{dir_id: production})
+      run!(@f, [key], :succeeded, %{dir_id: adopted_there})
+      run!(@b, [key], :succeeded, %{dir_id: production})
+      run!(@c, [key], :succeeded, %{dir_id: production})
+      run!(newer, [key], :succeeded, %{dir_id: production})
+
+      config = fake(key, %{"entries" => Enum.flat_map([@a, @f, @b, @c, newer], &listed/1)})
+      adoptions = [adoption(adopted_there, [production])]
+
+      # This server's directory has an id of its own (the setup's).
+      assert {:ok, %{deleted: [], units: 0, other_directory: elsewhere}} =
+               prune(dir, config, adoptions: adoptions)
+
+      # All but the newest, which the keep rules hold anyway.
+      assert Enum.map(elsewhere, & &1.stamp) |> Enum.sort() == Enum.sort([@a, @f, @b, @c])
+      assert deletes() == []
+
+      for stamp <- [@a, @f, @b, @c] do
+        assert [%{destinations: %{^key => %{"status" => "ok"}}}] = stored(stamp).artifacts
+      end
+    end
+
+    test "a backup directory with no .kiln-dir-id, or a malformed one, deletes nothing", %{
+      dir: dir,
+      key: key
+    } do
+      run!(@a, [key])
+      run!(@b, [key])
+      config = fake(key, %{"entries" => listed(@a) ++ listed(@b)})
+
+      File.write!(DirId.path(dir), "not an id\n")
+      assert {:error, {:dir_id, :malformed_dir_id} = reason} = prune(dir, config)
+      assert Retention.describe(reason) =~ "couldn't read the backup directory's id"
+
+      File.rm!(DirId.path(dir))
+      assert {:error, {:dir_id, :enoent}} = prune(dir, config)
+
+      refute_received {:fake_destination, :list, _, _}
+      assert deletes() == []
+    end
+  end
+
+  describe "destination_plan/5" do
+    test "with no owners, nothing is deleted", %{dir: dir, dir_id: dir_id, key: key} do
+      run!(@a, [key])
+      run!(@b, [key])
+      {:ok, local} = Retention.scan(dir)
+
+      inventory =
+        Retention.destination_inventory(key, listed(@a) ++ listed(@b), local, @now)
+
+      runs = Map.new([@a, @b], &{&1, stored(&1)})
+      policy = Policy.legacy(14)
+
+      for opts <- [[], [owners: nil], [owners: []]] do
+        plan = Retention.destination_plan(inventory, runs, policy, @now, opts)
+        assert plan.delete == []
+        assert [%{stamp: @a}] = plan.unowned
+      end
+
+      assert %{delete: [%{stamp: @a}]} =
+               Retention.destination_plan(inventory, runs, policy, @now, owners: [dir_id])
+    end
+  end
+
   describe "run_on_destination/3 on BACKUP_RCLONE_REMOTE_PRUNE" do
     setup %{dir: dir} do
       env_remote!("r2:kiln")
@@ -419,7 +574,7 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
       # An in-app run of another backup directory.
       run!(other_dir, [env_key], :succeeded, %{dir_id: Ecto.UUID.generate()})
       # An in-app run that recorded no directory.
-      run!(no_dir, [env_key])
+      run!(no_dir, [env_key], :succeeded, %{dir_id: nil})
       run!(@b, [env_key], :succeeded, %{dir_id: dir_id})
 
       config =
@@ -857,6 +1012,85 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
       assert Enum.any?(messages, &(&1 =~ "Retention on Disk left 1 old backup(s)" and &1 =~ @f))
 
       assert [%{destinations: %{^key => %{"status" => "pruned"}}}] = stored(@a).artifacts
+    end
+
+    # A backup chain whose start step runs, then `between`, then the rest:
+    # what a change made while a backup runs meets.
+    defp run_with(between) do
+      BackupChain.listen(fn ->
+        {:ok, %{status: :started, chain: chain}} =
+          Backups.request([trigger: "manual"], Backups.system())
+
+        BackupChain.drain(with_recursion: false)
+        assert [%{status: :pending}] = current_run().destinations
+        between.()
+        BackupChain.drain()
+        BackupChain.settled(chain)
+      end)
+    end
+
+    @tag :tmp_dir
+    test "keeps another backup directory's backups, and says so", %{tmp_dir: tmp_dir} do
+      {row, path} = local!(tmp_dir)
+      key = "dest:" <> row.id
+      run!(@a, [key], :succeeded, %{dir_id: Ecto.UUID.generate()})
+      run!(@b, [key])
+      seed(path, [@a, @b])
+
+      assert :ok = BackupChain.run()
+      run = current_run()
+
+      assert present?(path, @a)
+      assert %{status: :ok, pruned: 0} = Enum.find(run.destinations, &(&1.key == key))
+
+      messages = Enum.map(run.log, & &1.message)
+
+      assert ("Retention on Disk kept 1 backup(s) sent by another backup directory " <>
+                "(see Destinations)") in messages
+
+      refute Enum.any?(messages, &(&1 =~ "Retention on Disk left"))
+    end
+
+    @tag :tmp_dir
+    test "an adoption made while a backup runs is obeyed by its pass", %{tmp_dir: tmp_dir} do
+      {row, path} = local!(tmp_dir)
+      key = "dest:" <> row.id
+      retired = Ecto.UUID.generate()
+      run!(@a, [key], :succeeded, %{dir_id: retired})
+      run!(@b, [key])
+      seed(path, [@a, @b])
+
+      assert :ok =
+               run_with(fn ->
+                 Backups.adopt_backup_directories!(row, %{adopt: [retired]},
+                   actor: BackupSchedules.platform_admin()
+                 )
+               end)
+
+      refute present?(path, @a)
+      assert present?(path, @b)
+      assert %{pruned: 1} = Enum.find(current_run().destinations, &(&1.key == key))
+    end
+
+    @tag :tmp_dir
+    test "an adoption removed while a backup runs is obeyed by its pass", %{tmp_dir: tmp_dir} do
+      {row, path} = local!(tmp_dir)
+      key = "dest:" <> row.id
+      retired = Ecto.UUID.generate()
+      admin = BackupSchedules.platform_admin()
+      run!(@a, [key], :succeeded, %{dir_id: retired})
+      run!(@b, [key])
+      seed(path, [@a, @b])
+
+      row = Backups.adopt_backup_directories!(row, %{adopt: [retired]}, actor: admin)
+
+      assert :ok =
+               run_with(fn ->
+                 Backups.adopt_backup_directories!(row, %{release: [retired]}, actor: admin)
+               end)
+
+      assert present?(path, @a)
+      assert %{pruned: 0} = Enum.find(current_run().destinations, &(&1.key == key))
     end
 
     @tag :tmp_dir

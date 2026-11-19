@@ -3,7 +3,9 @@
 - **Status** — accepted (2026-11-15); amended 2026-11-18 by
   [#2950](https://github.com/The-Verscienta/kiln_cms/issues/2950)
   (`BACKUP_RCLONE_REMOTE` may be pruned by explicit opt-in, and each
-  retention call has its own time limit, see "Amendment").
+  retention call has its own time limit, see "Amendment"); amended
+  2026-11-19 (a stored destination too prunes only this backup directory's
+  backups, plus the directories it adopted, see "Amendment (2026-11-19)").
 - **References** — [#2220](https://github.com/The-Verscienta/kiln_cms/issues/2220)
   and the owner's approval of its decision E4 "all as proposed"
   (2026-11-15), with the critic's change 2 (where a destination writes is
@@ -192,6 +194,55 @@ left open, and to bound each retention call on its own.
   bound may already have removed the file at the store; it is not marked
   `pruned`, and the next pass no longer lists it, so nothing is lost. The
   upload sweep's aborts are bounded the same way (60 seconds each).
+
+## Amendment (2026-11-19): a stored destination prunes only this backup directory's backups, and the ones it adopted
+
+The destination rows and the run history live in the database, so a
+database restored on another server brings both along. Under the rule
+above, that server's in-app backups would then delete, on every stored
+destination, what the original server sent there, since each of those
+backups has a Run recording it under the destination's key. The staging
+scrub purges both tables, but only a copy made through it.
+
+- **A stored destination uses the env remote's rule.** A unit is deleted
+  only when its Run is an in-app one (`origin: :app`) that recorded sending
+  it under the destination's key (`ok`, or `pruned` by an earlier pass)
+  **and** whose `dir_id` is this node's current `.kiln-dir-id`, or one the
+  destination adopted for it (below). A Run with no `dir_id`, an imported
+  one, or one of another backup directory never makes a file deletable; a
+  node with no readable `.kiln-dir-id` deletes nothing and the pass is
+  skipped ("couldn't read the backup directory's id"). Every Run that can
+  have reached a stored destination records its `dir_id` (the start step
+  sets it from the lease), so no existing backup there loses its owner.
+  Cron never sends to a stored destination.
+- **`destination_plan/5` takes the owners as a list.** With none (`nil` or
+  `[]`) nothing is deleted. Units left only because another directory's
+  in-app backup sent them are reported apart, as one line on the run:
+  "Retention on NAS kept 3 backup(s) sent by another backup directory (see
+  Destinations)".
+- **Adopting another directory.** A platform admin may tick, on a
+  destination's row, a directory whose in-app backups reached it and that
+  no live node reports (`DestinationConfig` `:adopt_directories`, its own
+  action and audit event, `backup_destination_adoptions_changed`). The
+  entry records the backup directories every live node reported then
+  (`adopted_by`), and counts only on a node whose `.kiln-dir-id` is one of
+  them: a database restored on another server, whose directory has a new
+  id, inherits no adoption. A directory a live node reports is refused,
+  and so is any adoption when the live nodes can't be read. The step
+  re-reads the row just before each pass, so an adoption added or removed
+  while a backup runs is obeyed by it. The env remote has no row and so no
+  adoption: there, a server move copies `.kiln-dir-id`.
+- **Pruning a destination needs a persistent `BACKUP_DIR`.** A directory
+  that is recreated on each deploy gets a new id each time, and its earlier
+  backups become another directory's: kept until adopted. On a server
+  move, the old server is retired first, then its `.kiln-dir-id` is copied
+  to the new one or the old directory is adopted.
+
+Rejected: relying on the staging scrub (it covers only copies made through
+it); turning pruning off when "the host" changes (there is no stable host
+identity; the backup directory's id is the one Kiln already has); an
+instance-wide adoption setting (there is no backups settings resource, and
+the row is where its effect shows).
 
 ## When to revisit
 

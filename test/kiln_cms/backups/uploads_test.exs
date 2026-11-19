@@ -13,7 +13,7 @@ defmodule KilnCMS.Backups.UploadsTest do
 
   alias Kiln.BackupDestination.{Config, Resume}
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Destination, Upload, Uploads}
+  alias KilnCMS.Backups.{Destination, DirId, Upload, Uploads}
   alias KilnCMS.Repo
   alias KilnCMS.Test.BackupDestinations.ResumableFake
 
@@ -542,6 +542,115 @@ defmodule KilnCMS.Backups.UploadsTest do
       Uploads.sweep(config, key(config), deadline())
       dest = config.key
       assert_received {:swept, %{aborted: 0, failed: 0}, %{destination: ^dest}}
+    end
+  end
+
+  # A database restored on another server carries the original server's
+  # upload rows: only a step or a sweep of the backup directory that opened
+  # an upload touches it.
+  describe "another backup directory's uploads" do
+    setup %{tmp_dir: tmp_dir} do
+      dir = Path.join(tmp_dir, "backups")
+      {:ok, mine} = DirId.local(dir)
+      %{dir: dir, mine: mine, theirs: Ecto.UUID.generate()}
+    end
+
+    test "the first save records the step's backup directory", %{
+      put: put,
+      store: store,
+      mine: mine
+    } do
+      config = config(store)
+      target = Map.put(target(config, 5, 1), :dir_id, mine)
+
+      assert {:ok, opts, _info} = Uploads.handle(config, put, target)
+      assert :ok = opts[:resume].save.(%{upload_id: "u1", offset: 0})
+      assert %Upload{dir_id: ^mine} = row(config, put)
+    end
+
+    test "an open upload another directory started is left, and the file is sent whole", %{
+      put: put,
+      store: store,
+      mine: mine,
+      theirs: theirs
+    } do
+      config = config(store)
+      seeded = seed_row(config, put, %{dir_id: theirs, owner_job_id: 10, owner_attempt: 1})
+      target = Map.put(target(config, 11, 1), :dir_id, mine)
+
+      assert {:ok, opts, %{resumable?: false}} = Uploads.handle(config, put, target)
+      refute Keyword.has_key?(opts, :resume)
+
+      assert %Upload{id: id, owner_job_id: 10, owner_attempt: 1, status: :open} =
+               row(config, put)
+
+      assert id == seeded.id
+      refute_received {:resumable_fake, :abort, _, _}
+    end
+
+    test "a first save that finds another directory's upload just opened leaves it", %{
+      put: put,
+      store: store,
+      mine: mine,
+      theirs: theirs
+    } do
+      config = config(store)
+      target = Map.put(target(config, 11, 1), :dir_id, mine)
+      assert {:ok, opts, _info} = Uploads.handle(config, put, target)
+
+      seed_row(config, put, %{dir_id: theirs, owner_job_id: 10, owner_attempt: 1})
+
+      assert {:error, message} = opts[:resume].save.(%{upload_id: "u1", offset: 0})
+      assert message =~ "another backup directory's upload"
+      assert %Upload{owner_job_id: 10, dir_id: ^theirs} = row(config, put)
+    end
+
+    test "an open upload this directory started, or one that records none, is taken over", %{
+      put: put,
+      store: store,
+      mine: mine
+    } do
+      for dir_id <- [mine, nil] do
+        config = config(store)
+        seed_row(config, put, %{dir_id: dir_id, owner_job_id: 10, owner_attempt: 1})
+        target = Map.put(target(config, 11, 1), :dir_id, mine)
+
+        assert {:ok, opts, %{resumable?: true}} = Uploads.handle(config, put, target)
+        assert %Resume{} = opts[:resume]
+        assert %Upload{owner_job_id: 11} = row(config, put)
+      end
+    end
+
+    test "the sweep aborts its own directory's uploads and ones that record none, never " <>
+           "another's",
+         %{put: put, store: store, dir: dir, mine: mine, theirs: theirs} do
+      config = config(store)
+      own = seed_row(config, put, %{status: :abandoned, name: "kiln-db-a.dump", dir_id: mine})
+      legacy = seed_row(config, put, %{status: :abandoned, name: "kiln-db-b.dump"})
+
+      other =
+        seed_row(config, put, %{status: :abandoned, name: "kiln-db-c.dump", dir_id: theirs})
+
+      assert %{aborted: 2, failed: 0} = Uploads.sweep(config, key(config), deadline(), dir: dir)
+
+      statuses = Map.new(rows(), &{&1.id, &1.status})
+      assert statuses[own.id] == :aborted
+      assert statuses[legacy.id] == :aborted
+      assert statuses[other.id] == :abandoned
+    end
+
+    test "a node whose backup-directory id can't be read sweeps only uploads that record none",
+         %{put: put, store: store, tmp_dir: tmp_dir, mine: mine} do
+      config = config(store)
+      own = seed_row(config, put, %{status: :abandoned, name: "kiln-db-a.dump", dir_id: mine})
+      legacy = seed_row(config, put, %{status: :abandoned, name: "kiln-db-b.dump"})
+
+      assert %{aborted: 1} =
+               Uploads.sweep(config, key(config), deadline(), dir: Path.join(tmp_dir, "none"))
+
+      statuses = Map.new(rows(), &{&1.id, &1.status})
+      assert statuses[own.id] == :abandoned
+      assert statuses[legacy.id] == :aborted
     end
   end
 
