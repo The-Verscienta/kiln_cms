@@ -24973,6 +24973,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
+msgid "This experiment changed since you opened it. It's been reloaded."
+msgstr ""
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
 msgid "This experiment concluded without a winner."
 msgstr ""
 

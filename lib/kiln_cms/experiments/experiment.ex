@@ -108,6 +108,11 @@ defmodule KilnCMS.Experiments.Experiment do
       # every arm, and reports 0.0% forever — while looking fine.
       validate KilnCMS.Experiments.Validations.GoalConfigured
 
+      # Compare-and-swap (ADR 0074, #3122): the state machine judges only the
+      # struct the caller holds, so a second `:start` from a struct loaded
+      # while the row was still a draft would pass it. The filter puts the
+      # from-state in the UPDATE's WHERE; the loser gets a `StaleRecord`.
+      change filter(expr(state == :draft))
       change transition_state(:running)
       change set_attribute(:started_at, &DateTime.utc_now/0)
       change KilnCMS.Experiments.Changes.RequireVariants
@@ -123,6 +128,9 @@ defmodule KilnCMS.Experiments.Experiment do
       # the row it writes cannot be corrected afterwards by any action here.
       validate KilnCMS.Experiments.Validations.WinnerIsAVariant
 
+      # Compare-and-swap (ADR 0074, #3122): without it a second `:conclude`
+      # from a stale struct overwrites `winner_variant_id` and notifies again.
+      change filter(expr(state == :running))
       change transition_state(:concluded)
       change set_attribute(:concluded_at, &DateTime.utc_now/0)
       change set_attribute(:winner_variant_id, arg(:winner_variant_id))
@@ -132,6 +140,9 @@ defmodule KilnCMS.Experiments.Experiment do
     update :archive do
       require_atomic? false
       accept []
+      # Compare-and-swap (ADR 0074, #3122); the from-states are the
+      # `transitions` block's, so only an already-archived row is refused.
+      change filter(expr(state in [:draft, :running, :concluded]))
       change transition_state(:archived)
     end
 
