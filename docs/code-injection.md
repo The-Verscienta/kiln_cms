@@ -143,6 +143,10 @@ Connections: `https://plausible.io`
   response.
 - **Per-content injection.** Deliberately out of scope; that is what blocks are
   for.
+- **Kiln's own scripts.** Most delivered pages load the small `public.js`,
+  not `app.js` (#2402), so a snippet there finds no `window.liveSocket` or
+  any other `app.js` global. A snippet should depend only on what it loads
+  itself. See [Which script a page loads](frontend-assets.md#which-script-a-page-loads).
 
 ## Turning it off
 

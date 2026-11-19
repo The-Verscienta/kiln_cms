@@ -60,6 +60,16 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Custom asset builds and overlay Dockerfiles that don't run `mix assets.deploy`: also run `mix esbuild kiln_public --minify` before `phx.digest`. Without it signed-out pages fall back to app.js and keep working. No migration; rolling back is safe.**
+  ([long form](docs/changelog/unreleased.md#public-js-bundle-upgrade))
+
+### Changed
+
+- **Signed-out content pages load a 2.5 KB (gzipped) `public.js` instead of the 81 KB app.js and its chunks; `mix kiln.assets.budget` keeps it free of LiveView and console code.**
+  ([long form](docs/changelog/unreleased.md#public-js-bundle))
+
 ### Fixed
 
 - **A host `backup.sh prune` that skips or can't finish now shows on the Backups page and Home (it writes `.kiln-prune-status.json`), and the app no longer deletes a local backup whose stale hold marker it couldn't remove.**

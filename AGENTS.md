@@ -48,7 +48,8 @@ custom classes must fully style the input
 - **Always use and maintain this import syntax** in the app.css file for projects generated with `phx.new`
 - **Never** use `@apply` when writing raw css
 - **Always** manually write your own tailwind-based components instead of using daisyUI for a unique, world-class design
-- Out of the box **only the app.js and app.css bundles are supported**
+- Out of the box **only the app.js, public.js (signed-out content pages) and app.css bundles are supported**
+  - `public.js` stays free of LiveView, the Phoenix socket and console code: it is what delivered pages load instead of app.js, and `mix kiln.assets.budget` fails a build that pulls any of them in. See `docs/frontend-assets.md`, "Which script a page loads"
   - You cannot reference an external vendor'd script `src` or link `href` in the layouts
   - You must import the vendor deps into app.js and app.css to use them
   - **Never write inline <script>custom js</script> tags within templates**
