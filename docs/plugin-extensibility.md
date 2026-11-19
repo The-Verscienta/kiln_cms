@@ -760,7 +760,7 @@ know what a plugin's own tables hold, so the plugin says, in
 `staging_scrub/0` (`kiln_plugin` 1.5; require `{:kiln_plugin, "~> 1.5"}`).
 **A table the plugin leaves out stops the scrub**, with nothing changed,
 until it is declared
-([ADR 0066](decisions/0066-every-table-reaching-a-staging-clone-is-scrubbed-or-kept-with-a-reason.md)).
+([ADR 0073](decisions/0073-every-table-reaching-a-staging-clone-is-scrubbed-or-kept-with-a-reason.md)).
 
 This is for overlays only. The tables in question are those of the Ash
 domains in `domains/0`, and a dependency plugin can't have any (its domains

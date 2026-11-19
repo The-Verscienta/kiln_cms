@@ -57,7 +57,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_PROVENANCE_ENABLED TENANT_STRICT_HOST API_DOCS_ENABLED
             GRAPHQL_INTROSPECTION_ENABLED KILN_API_REJECT_INVALID_BEARER
             BACKUP_ENABLED OEMBED_ENABLED BACKUP_MEDIA_PART_MB BACKUP_MEDIA_EXCLUDE
-            BACKUP_LOCK_WAIT_SECONDS
+            BACKUP_LOCK_WAIT_SECONDS BACKUP_RCLONE_REMOTE_PRUNE
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
             BRAND_PRIMARY_COLOR ASK_RERANK SEARCH_CHUNK_LONG_DOCUMENTS
@@ -1081,6 +1081,35 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
                  |> get_in([:kiln_cms, :config_warnings])
                  |> Enum.find(&(elem(&1, 0) == "BACKUP_LOCK_WAIT_SECONDS"))
       end
+    end
+  end
+
+  describe "BACKUP_RCLONE_REMOTE_PRUNE (#2950)" do
+    @remote_prune_path [:kiln_cms, KilnCMS.Backups, :rclone_remote_prune]
+
+    test "unset or blank is off: the app never prunes the env remote unasked" do
+      for value <- [nil, "", "  "] do
+        {config, stderr} = eval_io(%{"BACKUP_RCLONE_REMOTE_PRUNE" => value}, :prod)
+        assert get_in(config, @remote_prune_path) == false
+        refute stderr =~ "BACKUP_RCLONE_REMOTE_PRUNE"
+      end
+    end
+
+    test "an on-spelling turns it on, an off-spelling keeps it off" do
+      for value <- ["true", "1", "yes", "on"] do
+        assert get_in(eval(%{"BACKUP_RCLONE_REMOTE_PRUNE" => value}), @remote_prune_path) == true
+      end
+
+      for value <- ["false", "0", "no", "off"] do
+        assert get_in(eval(%{"BACKUP_RCLONE_REMOTE_PRUNE" => value}), @remote_prune_path) ==
+                 false
+      end
+    end
+
+    test "an unrecognized value keeps it off and warns" do
+      {config, stderr} = eval_io(%{"BACKUP_RCLONE_REMOTE_PRUNE" => "prune"}, :prod)
+      assert get_in(config, @remote_prune_path) == false
+      assert stderr =~ "BACKUP_RCLONE_REMOTE_PRUNE"
     end
   end
 

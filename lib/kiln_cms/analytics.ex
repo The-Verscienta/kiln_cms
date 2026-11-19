@@ -244,18 +244,24 @@ defmodule KilnCMS.Analytics do
   arrangements of `2, 1, 1, 1, 0`, and each category then takes 0, 1 or 2
   across the 21 candidates.
 
-  This rule was **found by enumeration, not derived**. Searches run outside
-  the test suite while it was written (thresholds 2–20, view totals up to 50,
-  with five categories, and with four or six) found no all-hidden publication
-  that leaves any category a single value, and no partial publication that
-  leaves a suppressed category a single *nonzero* value. With three categories
-  it would not hold (`2, 2, 2` at a threshold of 3 is pinned), so a change to
-  `referrer_sources/0` means re-running a search that wide.
+  This rule was **found by enumeration, not derived**. Searches while it was
+  written (thresholds 2–20, view totals up to 50, with five categories, and
+  with four or six) found no all-hidden publication that leaves any category a
+  single value, and no partial publication that leaves a suppressed category a
+  single *nonzero* value. With three categories it would not hold (`2, 2, 2`
+  at a threshold of 3 is pinned), so a change to `referrer_sources/0` means
+  re-running a search that wide. The committed sweep (`slow_sweep` tag, see
+  the referrer suppression test) covers thresholds 2–20 with four to six
+  categories, bounded at view totals of 40, 30 and 20 for four, five and six
+  categories; the original search went to 50.
   `test/kiln_cms/analytics/referrer_suppression_test.exs` checks the same
   property over `referrer_sources/0` for thresholds 2, 3, 5 and 10 and totals
-  up to the threshold plus four. That bound caps the test's cost; it is not
-  where the tightest classes sit (at a threshold of 10 they sit below it), and
-  totals above it rest on the wider search, not on the test.
+  up to the threshold plus four. That bound caps the default run's cost; it is
+  not where the tightest classes sit (at a threshold of 10 they sit below it).
+  The wide search is in the same file behind a tag, through
+  `suppress_referrer_group/2`, and is re-run with:
+
+      mix test --only slow_sweep test/kiln_cms/analytics/referrer_suppression_test.exs
 
   The cost falls on tiny days: simulating item-days that average one to ten
   views over a typical mix of sources, 0.1–4.1% of them move from a partial
@@ -291,9 +297,22 @@ defmodule KilnCMS.Analytics do
   """
   @spec suppress_referrer_group(%{optional(atom()) => non_neg_integer()}) ::
           [{atom(), non_neg_integer(), non_neg_integer() | String.t()}]
-  def suppress_referrer_group(totals) do
+  def suppress_referrer_group(totals), do: suppress_referrer_group(totals, referrer_sources())
+
+  @doc """
+  `suppress_referrer_group/1` over an explicit category list instead of
+  `referrer_sources/0`.
+
+  Nothing publishes through this arity: the dashboard and the export call
+  `suppress_referrer_group/1`, which is this function with the live list. It
+  exists so the exhaustive search described there can vary the number of
+  categories without changing the schema (#3123).
+  """
+  @spec suppress_referrer_group(%{optional(atom()) => non_neg_integer()}, [atom()]) ::
+          [{atom(), non_neg_integer(), non_neg_integer() | String.t()}]
+  def suppress_referrer_group(totals, sources) do
     threshold = low_count_threshold()
-    raw = Enum.map(referrer_sources(), fn source -> {source, Map.get(totals, source, 0)} end)
+    raw = Enum.map(sources, fn source -> {source, Map.get(totals, source, 0)} end)
     natural = for {source, hits} <- raw, hits > 0 and hits < threshold, do: source
 
     cond do

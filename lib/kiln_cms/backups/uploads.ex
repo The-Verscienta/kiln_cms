@@ -51,6 +51,10 @@ defmodule KilnCMS.Backups.Uploads do
   # The sweep stops starting aborts this close to the deadline.
   @sweep_margin_ms :timer.seconds(30)
 
+  # The bound on each of the sweep's aborts (#2950), and the step's deadline
+  # when that comes first: one hung abort costs the sweep, not the step.
+  @abort_call_ms :timer.seconds(60)
+
   @typedoc "The step an upload is owned by: its Oban job id and attempt."
   @type owner :: %{job_id: integer(), attempt: non_neg_integer()}
 
@@ -493,7 +497,8 @@ defmodule KilnCMS.Backups.Uploads do
   After `config`'s destination was reached, whatever its `prune`: aborts the
   uploads recorded under `key` (`KilnCMS.Backups.Destination.target_key/2`) that were
   abandoned, or left open and untouched for #{@idle_days} days, at most
-  #{@sweep_batch} per pass and none past `deadline`. Each is marked aborted
+  #{@sweep_batch} per pass and none past `deadline`, each abort bounded by
+  #{div(@abort_call_ms, 1000)} seconds as well (#2950). Each is marked aborted
   once the store says it is gone; one that can't be aborted is kept
   abandoned for the next pass. The upload of the backup the lock holds is
   never touched.
@@ -501,7 +506,8 @@ defmodule KilnCMS.Backups.Uploads do
   Then, on every destination, deletes closed rows (and a deleted
   destination's) older than #{@purge_days} days, in one statement.
 
-  `opts[:now]` replaces the clock (tests). Returns what it did, also as the
+  `opts[:now]` replaces the clock and `opts[:abort_call_ms]` the bound on
+  each abort (tests). Returns what it did, also as the
   `[:kiln_cms, :backups, :upload, :swept]` event.
   """
   @spec sweep(Config.t(), String.t() | nil, integer(), keyword()) :: %{
@@ -513,7 +519,7 @@ defmodule KilnCMS.Backups.Uploads do
 
     {aborted, failed} =
       if is_binary(key) and Destination.resumable?(config),
-        do: abort_owed(config, key, deadline, now),
+        do: abort_owed(config, key, {deadline, abort_call_ms(opts)}, now),
         else: {0, 0}
 
     purge(now)
@@ -526,7 +532,9 @@ defmodule KilnCMS.Backups.Uploads do
     result
   end
 
-  defp abort_owed(config, key, deadline, now) do
+  defp abort_call_ms(opts), do: Keyword.get(opts, :abort_call_ms, @abort_call_ms)
+
+  defp abort_owed(config, key, bounds, now) do
     idle_before = DateTime.add(now, -@idle_days * 86_400, :second)
 
     with {:ok, held} <- Chain.fetch_held_stamp(),
@@ -537,7 +545,7 @@ defmodule KilnCMS.Backups.Uploads do
            ) do
       rows
       |> Enum.reject(&(held != nil and &1.stamp == held))
-      |> Enum.reduce_while({0, 0}, &sweep_next(config, &1, deadline, &2))
+      |> Enum.reduce_while({0, 0}, &sweep_next(config, &1, bounds, &2))
     else
       {:error, error} ->
         Logger.warning(
@@ -549,11 +557,11 @@ defmodule KilnCMS.Backups.Uploads do
   end
 
   # One row, unless the deadline is near.
-  defp sweep_next(config, row, deadline, {aborted, failed} = counts) do
+  defp sweep_next(config, row, {deadline, _per_call} = bounds, {aborted, failed} = counts) do
     if System.monotonic_time(:millisecond) > deadline - @sweep_margin_ms do
       {:halt, counts}
     else
-      case sweep_one(config, row, deadline) do
+      case sweep_one(config, row, bounds) do
         :aborted -> {:cont, {aborted + 1, failed}}
         :failed -> {:cont, {aborted, failed + 1}}
         :skipped -> {:cont, counts}
@@ -561,8 +569,8 @@ defmodule KilnCMS.Backups.Uploads do
     end
   end
 
-  defp sweep_one(config, row, deadline) do
-    case abort(config, row, deadline) do
+  defp sweep_one(config, row, {deadline, per_call_ms}) do
+    case abort(config, row, Destination.call_deadline(deadline, per_call_ms)) do
       :ok ->
         case mark_aborted(row) do
           {:ok, _row} -> :aborted

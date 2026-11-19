@@ -7,7 +7,72 @@ tagged `kiln_client-vX.Y.Z` in the
 
 ## Unreleased
 
+### Changed (breaking)
+
+- **Req's own retries are off (kiln_cms#2730).** Req retries a `GET` or
+  `HEAD` by default (`retry: :safe_transient`), so every read was retried
+  underneath the client's own loops: one cold-cache 503 on `artifact/3` cost
+  up to 8 requests over about 16 seconds, and still 4 with `retry: false`.
+  The client now sets `retry: false` on every request, and its own retries
+  are the only ones:
+
+  | Call | Requests on a persistent 503 |
+  |---|---|
+  | `artifact/3` | 2 (1 with `retry: false`) |
+  | `sync/1`, `sync_page/2` | `:retries` + 1 per page (default `:retries`: 3 for `sync/1`, 0 for `sync_page/2`) |
+  | every other read | 1 |
+
+  These answers from a read are no longer retried silently, and come back as
+  the error on the first attempt: `408`, `429`, `500`, `502`, `503`, `504`,
+  and the transport errors `:closed`, `:econnrefused` and `:timeout`. The
+  `:closed` case includes a pooled keep-alive connection the server had
+  already closed, which Req used to retry and which now
+  returns `{:error, %KilnClient.Error{reason: :transport}}`. Writes are
+  unchanged: Req never retried them.
+
+  To have Req retry again, opt back in per call or for every request:
+
+  ```elixir
+  KilnClient.list("posts", req: [retry: :safe_transient, max_retries: 2, retry_delay: 500])
+
+  config :kiln_client, req_options: [retry: :safe_transient]
+  ```
+
+  `:safe_transient` retries only `GET` and `HEAD`; `:transient` also retries
+  writes, which is not safe for `create/3` or a transition. Passing
+  `retry: false` in `:req`, as earlier README examples did, is now redundant.
+
+- **`restore_revision/4` is a write (kiln_cms#2734).** It takes the key per
+  call (`:api_key`) or from config, as `create/3` does. With neither it
+  returns `{:error, %KilnClient.Error{reason: :no_api_key}}` and sends
+  nothing; it used to send an anonymous `POST` and return `reason:
+  :unauthorized` from the server's 401. It now asks for `application/json`,
+  and its errors, a 404 included, are logged at warning level like every
+  other write's.
+
+### Added
+
+- **Editorial reads take a per-call `:api_key` (kiln_cms#2734).**
+  `list_revisions/3`, `revision/4`, `list_releases/1`, `release/2` and
+  `list_release_items/1` send the `:api_key` passed to them instead of the
+  configured one, so an application can keep a `:viewer` key in config for
+  delivery and pass an editor's key only on these calls. The rule is the
+  writes' rule: `api_key: ""` sends no key at all, and without the option the
+  configured key is sent. The delivery reads (`list/2`, `one/3`, the searches
+  and the rest) still take no `:api_key`.
+
 ### Fixed
+
+- **A 2xx answer that isn't JSON is an error (kiln_cms#2735).** A captive
+  portal, a CDN error page or a proxy answering `200 text/html` in Kiln's
+  place used to be read as Kiln's answer: `list/2` returned
+  `{:ok, %{items: []}}`, `graphql/3` returned `{:ok, %{}}`, and `sync/1` and
+  `release/2` crashed. Reads, writes and `graphql/3` now return
+  `{:error, %KilnClient.Error{reason: :unexpected_body}}` with `:status`,
+  `:method`, `:path`, and the first 1 KiB of the body in `:body` (cut on a
+  UTF-8 character boundary), and log a warning. An empty 2xx from a write is
+  still `{:ok, nil}`. `artifact/3` with `surface: "llm"` returns its Markdown
+  as a binary, as before; its spec and doc now say so.
 
 - **`by_ids/3` keeps the caller's `:filter`.** It replaced the filter with
   the id list, so `by_ids("entries", ids, filter: %{locale: "fr"})` returned

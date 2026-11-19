@@ -12,7 +12,10 @@
  *     │  ├─ KilnConflictError      409 — wrong-state transition or a lost race
  *     │  ├─ KilnRateLimitError     429 — `retryAfter` seconds
  *     │  └─ KilnServerError        5xx
- *     ├─ KilnNetworkError          fetch itself failed (DNS, refused, TLS…)
+ *     ├─ KilnNetworkError          fetch itself failed (DNS, refused, TLS…), or
+ *     │                            the body stream broke off mid-read
+ *     ├─ KilnUnexpectedBodyError   a 2xx whose body is not JSON (a proxy's or
+ *     │                            captive portal's HTML page) — not an HTTP error
  *     ├─ KilnGraphQLError          `/gql` answered with `errors`
  *     └─ KilnConfigError           refused client-side (a write with no API key)
  *
@@ -178,7 +181,10 @@ export class KilnServerError extends KilnHttpError {
   override name = "KilnServerError";
 }
 
-/** The request never produced a response (DNS, connection refused, TLS…). */
+/**
+ * The request never produced a response (DNS, connection refused, TLS…), or a
+ * 2xx response's body stream failed before it was fully read.
+ */
 export class KilnNetworkError extends KilnError {
   readonly url: string;
 
@@ -188,6 +194,43 @@ export class KilnNetworkError extends KilnError {
     this.name = "KilnNetworkError";
     this.url = url;
   }
+}
+
+/**
+ * A 2xx response whose body is not JSON: typically a CDN, proxy or captive
+ * portal answering `200 text/html` in Kiln's place. It is not a
+ * `KilnHttpError` — that class means a non-2xx answer — so `status` is the
+ * 2xx status received. `body` holds the start of the raw text (at most 1 KiB),
+ * kept out of `message` so an HTML page never lands in a log line whole;
+ * `cause` is the `SyntaxError` from parsing it.
+ */
+export class KilnUnexpectedBodyError extends KilnError {
+  declare readonly status: number;
+  readonly url: string;
+  /** The raw body text, truncated to its first 1 KiB (UTF-8). */
+  readonly body: string;
+
+  constructor(status: number, url: string, body: string, cause: unknown) {
+    super(`Kiln answered ${status} ${url} with a body that is not JSON`, {
+      status,
+      code: "unexpected_body",
+      cause,
+    });
+    this.name = "KilnUnexpectedBodyError";
+    this.url = url;
+    this.body = truncate(body, UNEXPECTED_BODY_LIMIT);
+  }
+}
+
+const UNEXPECTED_BODY_LIMIT = 1024;
+
+// The first `limit` bytes of `text` as UTF-8, never splitting a character: a
+// streaming decode holds back an incomplete trailing sequence instead of
+// emitting U+FFFD for it.
+function truncate(text: string, limit: number): string {
+  const bytes = new TextEncoder().encode(text);
+  if (bytes.length <= limit) return text;
+  return new TextDecoder().decode(bytes.subarray(0, limit), { stream: true });
 }
 
 /**

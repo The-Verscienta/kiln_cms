@@ -214,18 +214,24 @@ defmodule Mix.Tasks.Kiln.Experiment do
     experiment = find(org_id, name) || Mix.raise("No experiment named #{inspect(name)}.")
     winner = winner_id(experiment, opts[:winner])
 
-    {:ok, concluded} =
-      Experiments.conclude_experiment(experiment, winner, actor: operator(), tenant: org_id)
+    case Experiments.conclude_experiment(experiment, winner,
+           actor: operator(),
+           tenant: org_id
+         ) do
+      {:ok, concluded} ->
+        Mix.shell().info("#{concluded.name} concluded.")
 
-    Mix.shell().info("#{concluded.name} concluded.")
+        # Concluding records a result; it does not edit the document. Promoting
+        # the winner is a separate, deliberate act — see the resource's moduledoc.
+        if winner do
+          Mix.shell().info(
+            "Winner recorded. The document is unchanged — promote the winning patch " <>
+              "through the editor when you are ready."
+          )
+        end
 
-    # Concluding records a result; it does not edit the document. Promoting the
-    # winner is a separate, deliberate act — see the resource's moduledoc.
-    if winner do
-      Mix.shell().info(
-        "Winner recorded. The document is unchanged — promote the winning patch " <>
-          "through the editor when you are ready."
-      )
+      {:error, error} ->
+        Mix.raise("Could not conclude: #{describe(error)}")
     end
   end
 

@@ -4653,6 +4653,11 @@ msgstr "En attente d'approbation"
 msgid "BACKUP_RCLONE_REMOTE is no longer set on this server."
 msgstr "BACKUP_RCLONE_REMOTE n’est plus défini sur ce serveur."
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "BACKUP_RCLONE_REMOTE_PRUNE is on, but nothing is pruned here: %{reason}"
+msgstr "BACKUP_RCLONE_REMOTE_PRUNE est activé, mais rien n'est purgé ici : %{reason}"
+
 #: lib/kiln_cms_web/controllers/form_html.ex
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -9838,8 +9843,8 @@ msgstr "Tous les administrateurs et éditeurs utilisent une application d'authen
 
 #: lib/kiln_cms_web/live/backup_destinations_live.ex
 #, elixir-autogen, elixir-format
-msgid "Every backup is sent here first, by in-app backups and cron alike. The app never prunes it."
-msgstr "Chaque sauvegarde est d'abord envoyée ici, qu'elle vienne de l'application ou de cron. L'application ne la purge jamais."
+msgid "Every backup is sent here first, by in-app backups and cron alike."
+msgstr "Chaque sauvegarde est d'abord envoyée ici, qu'elle vienne de l'application ou de cron."
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -12112,6 +12117,11 @@ msgstr "Les sauvegardes depuis l'application sont désactivées (BACKUP_ENABLED)
 #, elixir-autogen, elixir-format
 msgid "In-app backups can't run here, so schedules are skipped: %{reason}"
 msgstr "Les sauvegardes intégrées ne peuvent pas s'exécuter ici, les planifications sont donc ignorées : %{reason}"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "In-app backups delete the old backups they sent here, by the same rules as on this server (BACKUP_RCLONE_REMOTE_PRUNE). Cron never prunes it."
+msgstr "Les sauvegardes de l'application suppriment les anciennes sauvegardes qu'elles ont envoyées ici, selon les mêmes règles que sur ce serveur (BACKUP_RCLONE_REMOTE_PRUNE). Cron ne la purge jamais."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -15551,6 +15561,11 @@ msgstr "Pas hors site"
 msgid "Not on Hex"
 msgstr "Absent de Hex"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not pruned: %{reason}"
+msgstr "Non purgée : %{reason}"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not public while inactive."
@@ -16931,11 +16946,6 @@ msgstr "Partiellement hors site"
 msgid "Passed the human-verification check."
 msgstr "A passé la vérification humaine."
 
-#: lib/kiln_cms_web/live/two_factor_setup_live.ex
-#, elixir-autogen, elixir-format
-msgid "Passkey"
-msgstr "Clé d'accès"
-
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Passkey added"
@@ -16975,6 +16985,7 @@ msgstr "La connexion par clé d'accès a échoué. Utilisez une autre méthode."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Passkeys"
 msgstr "Clés d'accès"
@@ -23529,6 +23540,11 @@ msgstr "La liste des réseaux autorisés n’a pas pu être enregistrée."
 msgid "The app couldn't read this server's backup directory, or one of these files in it (permissions, an I/O error or a stale network mount), or its read of the directory failed outright, so it claims nothing about these files."
 msgstr "L’application n’a pas pu lire le répertoire de sauvegarde de ce serveur, ou l’un de ces fichiers qu’il contient (permissions, erreur d’E/S ou montage réseau périmé), ou sa lecture du répertoire a complètement échoué : elle n’affirme donc rien sur ces fichiers."
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "The app doesn't prune it: BACKUP_RCLONE_REMOTE_PRUNE is off. Cron never prunes it."
+msgstr "L'application ne la purge pas : BACKUP_RCLONE_REMOTE_PRUNE est désactivé. Cron ne la purge jamais."
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
 msgid "The app icon must be a PNG or JPEG image."
@@ -24950,6 +24966,11 @@ msgstr "Cette modification touche un champ que votre site marque comme important
 #, elixir-autogen, elixir-format
 msgid "This experiment cannot convert: %{reason}."
 msgstr "Cette expérience ne peut pas convertir : %{reason}."
+
+#: lib/kiln_cms_web/live/experiment_live.ex
+#, elixir-autogen, elixir-format
+msgid "This experiment changed since you opened it. It's been reloaded."
+msgstr "Cette expérience a changé depuis que vous l’avez ouverte. Elle a été rechargée."
 
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
@@ -28608,6 +28629,11 @@ msgstr "un champ de cases à cocher doit lister au moins une option"
 msgid "a date an editor suggested. Nothing is published until an admin confirms it and it becomes a scheduled publish."
 msgstr "une date proposée par un éditeur. Rien n’est publié tant qu’un administrateur ne l’a pas confirmée et qu’elle n’est pas devenue une publication programmée."
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "a destination's location can't be told"
+msgstr "l'emplacement d'une destination est inconnu"
+
 #: lib/kiln_cms/cms/computed.ex
 #, elixir-autogen, elixir-format
 msgid "a divided by b. Empty when b is zero."
@@ -28727,6 +28753,11 @@ msgstr "tous les abonnés confirmés"
 #, elixir-autogen, elixir-format
 msgid "also searches"
 msgstr "recherche aussi"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "an S3 destination can't be compared with it"
+msgstr "une destination S3 ne peut pas lui être comparée"
 
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format
@@ -29718,10 +29749,35 @@ msgstr "est utilisé dans les conditions de %{fields} ; supprimez d'abord ces co
 msgid "isn't a valid template: %{message}"
 msgstr "n’est pas un modèle valide : %{message}"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "it can't be compared with BACKUP_RCLONE_REMOTE"
+msgstr "elle ne peut pas être comparée à BACKUP_RCLONE_REMOTE"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "it can't be pruned"
+msgstr "elle ne peut pas être purgée"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "it overlaps BACKUP_RCLONE_REMOTE"
+msgstr "elle chevauche BACKUP_RCLONE_REMOTE"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "it overlaps another destination"
+msgstr "elle chevauche une autre destination"
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "items in the library"
 msgstr "éléments dans la bibliothèque"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "its adapter can't list and delete"
+msgstr "son adaptateur ne sait pas lister et supprimer"
 
 #: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
@@ -30592,6 +30648,11 @@ msgstr "texte"
 #, elixir-autogen, elixir-format
 msgid "the XML could not be parsed"
 msgstr "le XML n'a pas pu être analysé"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "the destinations couldn't be read"
+msgstr "les destinations n'ont pas pu être lues"
 
 #: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format

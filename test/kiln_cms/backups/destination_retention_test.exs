@@ -14,7 +14,8 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
 
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Retention}
+  alias KilnCMS.Backups.{Artifact, Destination, DirId, Retention}
+  alias KilnCMS.Backups.Destination.Rclone
   alias KilnCMS.Backups.Retention.Policy
   alias KilnCMS.Test.{BackupChain, BackupSchedules}
 
@@ -102,8 +103,9 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
     ]
   end
 
-  # A finished app run of `stamp` whose dump was sent to each of `keys`.
-  defp run!(stamp, keys, status \\ :succeeded) do
+  # A finished app run of `stamp` whose dump was sent to each of `keys`;
+  # `attrs` go to its start (a `dir_id`, #2950).
+  defp run!(stamp, keys, status \\ :succeeded, attrs \\ %{}) do
     {:ok, artifact} =
       Artifact.from_manifest(%{kind: "db", path: "db/kiln-db-#{stamp}.dump", verified: true})
 
@@ -112,7 +114,10 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
 
     run =
       Backups.start_run!(
-        %{stamp: stamp, trigger: "manual", started_at: ~U[2020-01-01 00:00:00Z]},
+        Map.merge(
+          %{stamp: stamp, trigger: "manual", started_at: ~U[2020-01-01 00:00:00Z]},
+          attrs
+        ),
         actor: Backups.system()
       )
 
@@ -126,6 +131,28 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
       :running ->
         Backups.record_run_progress!(run, %{artifacts: [artifact]}, actor: Backups.system())
     end
+  end
+
+  # A cron-made run of `stamp`, imported, whose dump cron sent to `key`.
+  defp imported!(stamp, key) do
+    {:ok, artifact} =
+      Artifact.from_manifest(%{kind: "db", path: "db/kiln-db-#{stamp}.dump", verified: true})
+
+    artifact = Map.update!(artifact, :destinations, &Map.put(&1, key, %{"status" => "ok"}))
+    at = ~U[2020-01-01 00:00:00Z]
+
+    Backups.import_run!(
+      %{
+        stamp: stamp,
+        trigger: "cron",
+        status: :succeeded,
+        components: [:db],
+        started_at: at,
+        finished_at: at,
+        artifacts: [artifact]
+      },
+      actor: Backups.system()
+    )
   end
 
   defp stored(stamp), do: Backups.get_run_by_stamp!(stamp, actor: Backups.system())
@@ -284,8 +311,14 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
           "entries" => listed(@a) ++ listed(@f) ++ listed(@b)
         })
 
+      # The step has an hour left; the delete's own bound stops it (#2950).
+      step_deadline = System.monotonic_time(:millisecond) + :timer.hours(1)
+      started = System.monotonic_time(:millisecond)
+
       assert {:ok, %{deleted: [], units: 0, stopped: {:delete, name, reason}}} =
-               prune(dir, config, timeout: 100)
+               prune(dir, config, deadline: step_deadline, delete_call_ms: 100)
+
+      assert System.monotonic_time(:millisecond) - started < 4_000
 
       assert name == "kiln-db-#{@a}.dump"
       assert KilnCMS.Backups.Destination.timed_out?(reason)
@@ -308,16 +341,326 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
       refute_received {:bare, _}
     end
 
-    test "the env destination is never pruned", %{dir: dir} do
-      env_key = "rclone:r2:kiln"
-      run!(@a, [env_key])
-      run!(@b, [env_key])
+    test "a listing that hangs is cut at its own bound, long before the step's deadline " <>
+           "(#2950)",
+         %{dir: dir, key: key} do
+      run!(@a, [key])
+
+      config =
+        fake(key, %{
+          "list_mode" => "sleep",
+          "sleep_ms" => 10_000,
+          "entries" => listed(@a) ++ listed(@b)
+        })
+
+      step_deadline = System.monotonic_time(:millisecond) + :timer.hours(1)
+      started = System.monotonic_time(:millisecond)
+
+      assert {:error, {:list, reason}} =
+               prune(dir, config, deadline: step_deadline, list_call_ms: 100)
+
+      assert KilnCMS.Backups.Destination.timed_out?(reason)
+      assert System.monotonic_time(:millisecond) - started < 5_000
+      assert deletes() == []
+    end
+
+    test "the step's deadline still bounds a call when it comes before the call's own",
+         %{dir: dir, key: key} do
+      config = fake(key, %{"list_mode" => "sleep", "sleep_ms" => 10_000})
+      started = System.monotonic_time(:millisecond)
+
+      assert {:error, {:list, reason}} =
+               prune(dir, config, deadline: System.monotonic_time(:millisecond) + 100)
+
+      assert KilnCMS.Backups.Destination.timed_out?(reason)
+      assert System.monotonic_time(:millisecond) - started < 5_000
+    end
+
+    test "the env destination is not pruned while BACKUP_RCLONE_REMOTE_PRUNE is off", %{
+      dir: dir
+    } do
+      env_remote!("r2:kiln")
+      env_key = Destination.env_key("r2:kiln")
+      {:ok, dir_id} = DirId.local(dir)
+      run!(@a, [env_key], :succeeded, %{dir_id: dir_id})
+      run!(@b, [env_key], :succeeded, %{dir_id: dir_id})
 
       config = fake(env_key, %{"entries" => listed(@a) ++ listed(@b)})
 
       assert {:error, :not_prunable} = prune(dir, config)
       refute_received {:fake_destination, :list, _, _}
       assert deletes() == []
+    end
+  end
+
+  # -- BACKUP_RCLONE_REMOTE, by opt-in (#2950) ----------------------------------
+
+  describe "run_on_destination/3 on BACKUP_RCLONE_REMOTE_PRUNE" do
+    setup %{dir: dir} do
+      env_remote!("r2:kiln")
+      prune_env!(true)
+      {:ok, dir_id} = DirId.local(dir)
+      env_key = Destination.env_key("r2:kiln")
+      %{dir_id: dir_id, env_key: env_key}
+    end
+
+    test "deletes only what an in-app run of this backup directory sent there", %{
+      dir: dir,
+      dir_id: dir_id,
+      env_key: env_key
+    } do
+      other_dir = "20200105-000000"
+      no_dir = "20200108-000000"
+      foreign = "20200110-000000"
+
+      run!(@a, [env_key], :succeeded, %{dir_id: dir_id})
+      # Cron's copy, recorded under the same key.
+      imported!(@f, env_key)
+      # An in-app run of another backup directory.
+      run!(other_dir, [env_key], :succeeded, %{dir_id: Ecto.UUID.generate()})
+      # An in-app run that recorded no directory.
+      run!(no_dir, [env_key])
+      run!(@b, [env_key], :succeeded, %{dir_id: dir_id})
+
+      config =
+        fake(env_key, %{
+          "entries" => Enum.flat_map([@a, other_dir, no_dir, foreign, @f, @b], &listed/1)
+        })
+
+      assert {:ok, %{deleted: deleted, units: 1, unowned: unowned, stopped: nil}} =
+               prune(dir, config)
+
+      assert deleted == dump_and_sidecar(@a)
+      assert deletes() == dump_and_sidecar(@a)
+
+      assert Enum.map(unowned, & &1.stamp) |> Enum.sort() ==
+               Enum.sort([other_dir, no_dir, foreign, @f])
+
+      assert [%{destinations: %{^env_key => %{"status" => "pruned"}}}] = stored(@a).artifacts
+      assert [%{destinations: %{^env_key => %{"status" => "ok"}}}] = stored(@f).artifacts
+    end
+
+    test "a backup directory with no .kiln-dir-id deletes nothing", %{
+      dir: dir,
+      dir_id: dir_id,
+      env_key: env_key
+    } do
+      run!(@a, [env_key], :succeeded, %{dir_id: dir_id})
+      run!(@b, [env_key], :succeeded, %{dir_id: dir_id})
+      File.rm!(DirId.path(dir))
+
+      config = fake(env_key, %{"entries" => listed(@a) ++ listed(@b)})
+
+      assert {:error, {:dir_id, :enoent} = reason} = prune(dir, config)
+      assert Retention.describe(reason) =~ "couldn't read the backup directory's id"
+      refute_received {:fake_destination, :list, _, _}
+    end
+
+    test "a config resolved for another remote is not the env destination", %{dir: dir} do
+      config = fake(Destination.env_key("r2:elsewhere"), %{})
+
+      assert {:error, :not_prunable} = prune(dir, config)
+      refute_received {:fake_destination, :list, _, _}
+    end
+
+    test "a plugin's stored destination, even a disabled one, blocks it; nothing is listed", %{
+      dir: dir,
+      dir_id: dir_id,
+      env_key: env_key
+    } do
+      run!(@a, [env_key], :succeeded, %{dir_id: dir_id})
+      run!(@b, [env_key], :succeeded, %{dir_id: dir_id})
+      KilnCMS.Test.BackupDestinations.destination!(%{enabled: false})
+
+      config = fake(env_key, %{"entries" => listed(@a) ++ listed(@b)})
+
+      assert {:error, :destination_unknown = reason} = prune(dir, config)
+      assert Retention.describe(reason) =~ "can't be told"
+      refute_received {:fake_destination, :list, _, _}
+      assert deletes() == []
+    end
+
+    test "an S3 destination blocks it", %{dir: dir, env_key: env_key} do
+      KilnCMS.Test.BackupDestinations.destination!(%{
+        kind: "s3",
+        settings: %{"endpoint" => "https://s3.test", "region" => "auto", "bucket" => "kiln"},
+        secrets: %{"access_key_id" => "AKIDTEST", "secret_access_key" => "s3-secret-test"}
+      })
+
+      assert {:error, :destination_s3 = reason} = prune(dir, fake(env_key, %{}))
+
+      assert Retention.describe(reason) ==
+               "an S3 backup destination can't be compared with BACKUP_RCLONE_REMOTE"
+
+      refute_received {:fake_destination, :list, _, _}
+    end
+
+    @tag :tmp_dir
+    test "a destination that overlaps it blocks it; one beside it doesn't", %{
+      dir: dir,
+      tmp_dir: tmp_dir
+    } do
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :local_destination_roots, [
+          tmp_dir
+        ])
+      )
+
+      site = Path.join(tmp_dir, "site")
+      File.mkdir_p!(site)
+
+      Backups.create_backup_destination!(
+        %{name: "Disk", kind: "local", settings: %{"path" => site}},
+        actor: BackupSchedules.platform_admin()
+      )
+
+      # A plain path is a local directory to rclone, compared as one.
+      beside = Path.join(tmp_dir, "remote")
+      env_remote!(beside)
+      assert {:ok, %{deleted: []}} = prune(dir, fake(Destination.env_key(beside), %{}))
+      assert_received {:fake_destination, :list, _, _}
+
+      # The env remote moved over the stored destination since it was saved.
+      env_remote!(tmp_dir)
+
+      assert {:error, :destination_overlap} =
+               prune(dir, fake(Destination.env_key(tmp_dir), %{}))
+
+      refute_received {:fake_destination, :list, _, _}
+    end
+  end
+
+  # -- the env destination's notice in the status (#2950) ----------------------
+
+  describe "the env destination's retention notice" do
+    setup %{dir: dir} do
+      env_remote!("r2:kiln")
+      {:ok, dir_id} = DirId.local(dir)
+
+      KilnCMS.Backups.Notices.retention(
+        {:env, Destination.env_key("r2:kiln"), "r2:kiln", dir},
+        {:skipped, :destination_unknown}
+      )
+
+      %{dir_id: dir_id}
+    end
+
+    test "shows in the status while BACKUP_RCLONE_REMOTE_PRUNE is on", %{dir_id: dir_id} do
+      prune_env!(true)
+      key = Destination.env_key("r2:kiln")
+
+      assert [
+               %{
+                 scope: {:destination, ^key},
+                 label: "r2:kiln",
+                 outcome: :skipped,
+                 dir_id: ^dir_id
+               }
+             ] = Backups.status().retention
+    end
+
+    test "is hidden while it is off" do
+      prune_env!(false)
+      assert Backups.status().retention == []
+    end
+
+    test "is hidden when no live node has its backup directory", %{base: base} do
+      prune_env!(true)
+      # This node now writes to another directory, and no heartbeat names
+      # the old one.
+      other = Path.join(base, "elsewhere")
+      File.mkdir_p!(other)
+      DirId.local(other)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :dir, other)
+      )
+
+      assert Backups.status().retention == []
+    end
+  end
+
+  # -- the shared rule (#2950) ----------------------------------------------
+
+  describe "prune_blocker/3" do
+    defp row(kind, settings), do: %{id: Ecto.UUID.generate(), kind: kind, settings: settings}
+
+    defp stored_config(%{id: id, kind: kind, settings: settings}),
+      do: %Config{id: id, key: "dest:" <> id, kind: kind, settings: settings}
+
+    @env {:rclone, "r2", ["kiln"]}
+    @s3 %{"endpoint" => "https://s3.test", "region" => "auto", "bucket" => "kiln"}
+
+    test "the env destination: clear with no rows, or rows that can be told apart from it" do
+      assert Retention.prune_blocker(:env, [], @env) == nil
+
+      rows = [
+        row("rclone", %{"remote_name" => "r2", "path" => "other"}),
+        row("rclone", %{"remote_name" => "b2", "path" => "kiln"}),
+        row("local", %{"path" => "/mnt/nas/kiln"})
+      ]
+
+      assert Retention.prune_blocker(:env, rows, @env) == nil
+    end
+
+    test "the env destination: blocked by any row it can't be told apart from" do
+      assert Retention.prune_blocker(:env, [row("fake", %{})], @env) == :destination_unknown
+      assert Retention.prune_blocker(:env, [row("s3", @s3)], @env) == :destination_s3
+
+      inside = row("rclone", %{"remote_name" => "r2", "path" => "kiln/site"})
+      assert Retention.prune_blocker(:env, [inside], @env) == :destination_overlap
+
+      above = row("rclone", %{"remote_name" => "r2", "path" => ""})
+      assert Retention.prune_blocker(:env, [above], @env) == :destination_overlap
+
+      assert Retention.prune_blocker(:env, [], nil) == :not_prunable
+    end
+
+    test "a local env remote: a plain path is compared as a directory, an inline :local: " <>
+           "backend by its name" do
+      local = row("local", %{"path" => "/mnt/backups/kiln"})
+
+      assert Retention.prune_blocker(:env, [local], Rclone.location("/mnt/backups")) ==
+               :destination_overlap
+
+      assert Retention.prune_blocker(:env, [local], Rclone.location(":local:/mnt/backups")) ==
+               nil
+    end
+
+    test "a stored destination: clear, or why not" do
+      own = row("rclone", %{"remote_name" => "r2", "path" => "site"})
+      config = stored_config(own)
+
+      assert Retention.prune_blocker(config, [own], nil) == nil
+      assert Retention.prune_blocker(config, [own], @env) == nil
+
+      assert Retention.prune_blocker(config, [own], {:rclone, "r2", []}) == :env_overlap
+
+      inner = row("rclone", %{"remote_name" => "r2", "path" => "site/inner"})
+      assert Retention.prune_blocker(config, [own, inner], nil) == :destination_overlap
+
+      # A plugin's row overlaps nothing that can be told.
+      assert Retention.prune_blocker(config, [own, row("fake", %{})], nil) == nil
+
+      fake = row("fake", %{})
+      assert Retention.prune_blocker(stored_config(fake), [fake], nil) == nil
+      assert Retention.prune_blocker(stored_config(fake), [fake], @env) == :env_overlap_unknown
+
+      s3 = row("s3", @s3)
+      assert Retention.prune_blocker(stored_config(s3), [s3], @env) == :env_overlap_unknown
+    end
+
+    test "a stored destination whose adapter can't list and delete" do
+      Application.put_env(:kiln_cms, KilnCMS.Backups.Destination,
+        extra_adapters: [KilnCMS.Test.BackupDestinations.Fake, Bare]
+      )
+
+      bare = row("bare_test", %{})
+      assert Retention.prune_blocker(stored_config(bare), [bare], nil) == :unsupported
     end
   end
 
@@ -329,6 +672,14 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
         :kiln_cms,
         KilnCMS.Backups,
         Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :rclone_remote, remote)
+      )
+    end
+
+    defp prune_env!(on?) do
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(Application.get_env(:kiln_cms, KilnCMS.Backups), :rclone_remote_prune, on?)
       )
     end
 
@@ -583,15 +934,33 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
     end
 
     # An rclone that logs its argv to the returned path and succeeds, with
-    # `BACKUP_RCLONE_REMOTE` set to `r2:kiln`.
-    defp env_rclone!(base) do
+    # `BACKUP_RCLONE_REMOTE` set to `r2:kiln`. Its `lsjson` of `db/` lists
+    # the dumps and sidecars of `stamps`, 400 days old (#2950).
+    defp env_rclone!(base, stamps \\ []) do
       bin = Path.join(base, "bin")
       log = Path.join(base, "rclone.log")
+      listing = Path.join(base, "db.json")
       File.mkdir_p!(bin)
+
+      modified =
+        (System.os_time(:second) - 400 * @day) |> DateTime.from_unix!() |> DateTime.to_iso8601()
+
+      File.write!(
+        listing,
+        Jason.encode!(
+          for stamp <- stamps, name <- dump_and_sidecar(stamp) do
+            %{"Name" => name, "Size" => 10, "ModTime" => modified, "IsDir" => false}
+          end
+        )
+      )
 
       File.write!(Path.join(bin, "rclone"), """
       #!/bin/sh
       echo "$*" >> "#{log}"
+      case "$1 $3" in
+        "lsjson "*/db) cat "#{listing}" ;;
+        "lsjson "*) echo "[]" ;;
+      esac
       exit 0
       """)
 
@@ -670,12 +1039,25 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
              )
     end
 
-    test "the env destination is never listed or pruned, even with an old unit recorded on its key",
-         %{base: base} do
-      log = env_rclone!(base)
+    test "with BACKUP_RCLONE_REMOTE_PRUNE off, the env destination is never listed or pruned, " <>
+           "and an old notice there is cleared",
+         %{base: base, dir: dir} do
+      log = env_rclone!(base, [@a, @b])
+      {:ok, dir_id} = DirId.local(dir)
 
-      run!(@a, ["rclone:r2:kiln"])
-      run!(@b, ["rclone:r2:kiln"])
+      run!(@a, ["rclone:r2:kiln"], :succeeded, %{dir_id: dir_id})
+      run!(@b, ["rclone:r2:kiln"], :succeeded, %{dir_id: dir_id})
+
+      Backups.report_backup_notice!(
+        %{
+          kind: :retention,
+          scope: "rclone:r2:kiln",
+          outcome: :skipped,
+          reason: "x",
+          at: DateTime.utc_now()
+        },
+        actor: Backups.system()
+      )
 
       assert :ok = BackupChain.run()
 
@@ -683,6 +1065,80 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
       assert calls != []
       assert Enum.all?(calls, &String.starts_with?(&1, "copy "))
       assert [%{destinations: %{"rclone:r2:kiln" => %{"status" => "ok"}}}] = stored(@a).artifacts
+      assert Backups.list_backup_notices!(actor: Backups.system()) == []
+    end
+
+    test "with BACKUP_RCLONE_REMOTE_PRUNE on, the env destination is pruned of what this " <>
+           "backup directory's in-app runs sent there, and nothing else",
+         %{base: base, dir: dir} do
+      log = env_rclone!(base, [@a, @f, @b])
+      prune_env!(true)
+      {:ok, dir_id} = DirId.local(dir)
+
+      run!(@a, ["rclone:r2:kiln"], :succeeded, %{dir_id: dir_id})
+      imported!(@f, "rclone:r2:kiln")
+      run!(@b, ["rclone:r2:kiln"], :succeeded, %{dir_id: dir_id})
+
+      assert :ok = BackupChain.run()
+      run = current_run()
+
+      deleted =
+        log
+        |> File.read!()
+        |> String.split("\n", trim: true)
+        |> Enum.filter(&String.starts_with?(&1, "deletefile "))
+
+      assert deleted == Enum.map(dump_and_sidecar(@a), &"deletefile r2:kiln/db/#{&1} -q")
+
+      assert %{status: :ok, pruned: 1} =
+               Enum.find(run.destinations, &(&1.key == "rclone:r2:kiln"))
+
+      messages = Enum.map(run.log, & &1.message)
+      assert "Retention on r2:kiln removed 2 file(s) from 1 backup(s)" in messages
+
+      assert Enum.any?(
+               messages,
+               &(&1 =~ "Retention on r2:kiln left 1 old backup(s) no in-app backup of this " and
+                   &1 =~ @f)
+             )
+
+      assert [%{destinations: %{"rclone:r2:kiln" => %{"status" => "pruned"}}}] =
+               stored(@a).artifacts
+
+      assert [%{destinations: %{"rclone:r2:kiln" => %{"status" => "ok"}}}] = stored(@f).artifacts
+      assert Backups.status().retention == []
+    end
+
+    test "with BACKUP_RCLONE_REMOTE_PRUNE on, a stored destination it can't be told apart " <>
+           "from skips it, with a notice, and nothing is listed",
+         %{base: base, dir: dir} do
+      log = env_rclone!(base, [@a, @b])
+      prune_env!(true)
+      {:ok, dir_id} = DirId.local(dir)
+      run!(@a, ["rclone:r2:kiln"], :succeeded, %{dir_id: dir_id})
+      run!(@b, ["rclone:r2:kiln"], :succeeded, %{dir_id: dir_id})
+
+      # Disabled: never sent to, but its files may still be there.
+      KilnCMS.Test.BackupDestinations.destination!(%{enabled: false})
+
+      assert :ok = BackupChain.run()
+      run = current_run()
+
+      calls = log |> File.read!() |> String.split("\n", trim: true)
+      assert Enum.all?(calls, &String.starts_with?(&1, "copy "))
+
+      assert %{status: :ok, pruned: 0} =
+               Enum.find(run.destinations, &(&1.key == "rclone:r2:kiln"))
+
+      assert Enum.any?(
+               run.log,
+               &(&1.level == :error and
+                   &1.message =~ "Retention on r2:kiln skipped: a stored backup destination's" and
+                   &1.message =~ "nothing was deleted")
+             )
+
+      assert [%{scope: {:destination, "rclone:r2:kiln"}, outcome: :skipped}] =
+               Backups.status().retention
     end
   end
 end

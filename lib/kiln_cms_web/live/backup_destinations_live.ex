@@ -31,7 +31,18 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   (decision E2). Its **Test** (#2952) runs the same check as a stored Rclone
   destination's (`Backups.test_env_destination/1`); the result, scrubbed of
   the remote's credentials, is shown on the row for this page only, since
-  the env destination has no row to record it on.
+  the env destination has no row to record it on. The row says whether the
+  app prunes it (`BACKUP_RCLONE_REMOTE_PRUNE`, #2950), and when that is on
+  but a stored destination keeps it from running, why.
+
+  ## The "Prunes" badge
+
+  An enabled destination whose retention is on shows "Prunes its old
+  backups" only when a pass would prune it; otherwise it shows why not. A
+  disabled one shows neither: retention never runs there, and its Disabled
+  badge says so. Both come from
+  `KilnCMS.Backups.Retention.prune_blocker/3`, worked out once per `load/1`
+  over every row, the rule retention applies before each pass (#2950).
 
   ## The form
 
@@ -68,8 +79,9 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
 
   import KilnCMSWeb.BackupComponents, only: [tabs: 1]
 
+  alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Destination, DestinationConfig}
+  alias KilnCMS.Backups.{Destination, DestinationConfig, Retention}
   alias KilnCMS.Backups.Destination.{Local, Rclone, S3}
   alias KilnCMS.Backups.DestinationConfig.Fields
 
@@ -633,15 +645,48 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
         {:error, _error} -> :unreadable
       end
 
+    env = Destination.env_destination()
+    env_location = Destination.env_location()
+
     socket
     |> assign(:destinations, rows)
-    |> assign(:env, Destination.env_destination())
+    |> assign(:env, env)
+    |> assign(:blockers, prune_blockers(rows, env_location))
+    |> assign(:env_prune, env_prune(env, rows, env_location))
     |> assign(
       :can_test_env?,
       Backups.can_create_backup_destination?(socket.assigns.current_user, %{})
     )
     |> assign(:adapters, offered_adapters())
     |> assign(:local_available?, Local.available?())
+  end
+
+  # Why each stored destination whose `prune` is on would not be pruned, by
+  # id (#2950): the rule retention applies before every pass
+  # (`Retention.prune_blocker/3`), so the "Prunes" badge shows only where a
+  # pass would prune.
+  defp prune_blockers(rows, env_location) when is_list(rows) do
+    Map.new(rows, fn row ->
+      config = %Config{id: row.id, key: "dest:" <> row.id, kind: row.kind, settings: row.settings}
+      {row.id, Retention.prune_blocker(config, rows, env_location)}
+    end)
+  end
+
+  defp prune_blockers(:unreadable, _env_location), do: %{}
+
+  # The env destination's pruning (#2950): `:off` unless
+  # BACKUP_RCLONE_REMOTE_PRUNE is on, then `:on`, or `{:blocked, reason}` by
+  # the same rule retention applies. Rows that can't be read block it, as
+  # they do the pass.
+  defp env_prune(nil, _rows, _env_location), do: :off
+
+  defp env_prune(_env, rows, env_location) do
+    cond do
+      not Backups.rclone_remote_prune?() -> :off
+      rows == :unreadable -> {:blocked, :unreadable}
+      reason = Retention.prune_blocker(:env, rows, env_location) -> {:blocked, reason}
+      true -> :on
+    end
   end
 
   defp read_destinations(user) do
@@ -789,6 +834,24 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
 
   defp stamp(%DateTime{} = at), do: Calendar.strftime(at, "%Y-%m-%d %H:%M UTC")
 
+  # Short: why pruning, where it is on, doesn't run (`Retention.prune_blocker/3`).
+  defp blocker_text(:unsupported), do: gettext("its adapter can't list and delete")
+  defp blocker_text(:env_overlap), do: gettext("it overlaps BACKUP_RCLONE_REMOTE")
+
+  defp blocker_text(:env_overlap_unknown),
+    do: gettext("it can't be compared with BACKUP_RCLONE_REMOTE")
+
+  defp blocker_text(:destination_overlap), do: gettext("it overlaps another destination")
+
+  defp blocker_text(:destination_unknown),
+    do: gettext("a destination's location can't be told")
+
+  defp blocker_text(:destination_s3),
+    do: gettext("an S3 destination can't be compared with it")
+
+  defp blocker_text(:unreadable), do: gettext("the destinations couldn't be read")
+  defp blocker_text(_other), do: gettext("it can't be pruned")
+
   defp delete_confirm(%DestinationConfig{name: name}),
     do:
       gettext(
@@ -910,11 +973,31 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
                     {gettext("From BACKUP_RCLONE_REMOTE — change it in the server's environment")}
                   </span>
                 </.badge>
+                <.badge :if={@env_prune == :on} variant="outline">
+                  <span data-role="prunes">{gettext("Prunes its old backups")}</span>
+                </.badge>
               </div>
               <p class="text-xs text-base-content/70">
-                {gettext(
-                  "Every backup is sent here first, by in-app backups and cron alike. The app never prunes it."
-                )}
+                {gettext("Every backup is sent here first, by in-app backups and cron alike.")}
+              </p>
+              <p data-role="env-prune" class="text-xs text-base-content/70">
+                <%= case @env_prune do %>
+                  <% :off -> %>
+                    {gettext(
+                      "The app doesn't prune it: BACKUP_RCLONE_REMOTE_PRUNE is off. Cron never prunes it."
+                    )}
+                  <% :on -> %>
+                    {gettext(
+                      "In-app backups delete the old backups they sent here, by the same rules as on this server (BACKUP_RCLONE_REMOTE_PRUNE). Cron never prunes it."
+                    )}
+                  <% {:blocked, reason} -> %>
+                    <span data-role="prune-blocked" class="text-warning-ink">
+                      {gettext(
+                        "BACKUP_RCLONE_REMOTE_PRUNE is on, but nothing is pruned here: %{reason}",
+                        reason: blocker_text(reason)
+                      )}
+                    </span>
+                <% end %>
               </p>
               <p :if={@env_test} data-role="last-test" class="text-xs">
                 <span :if={@env_test.ok} class="text-success-ink">
@@ -960,6 +1043,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
               first?={index == 0}
               last?={index == length(@rows) - 1}
               testing?={MapSet.member?(@testing, row.id)}
+              blocker={Map.get(@blockers, row.id)}
               form_open?={@editing != nil}
               user={@current_user}
             />
@@ -981,6 +1065,11 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   attr :first?, :boolean, required: true
   attr :last?, :boolean, required: true
   attr :testing?, :boolean, required: true
+
+  attr :blocker, :atom,
+    default: nil,
+    doc: "why its pruning can't run (`Retention.prune_blocker/3`)"
+
   attr :form_open?, :boolean, required: true
   attr :user, :any, required: true
 
@@ -988,10 +1077,6 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
     assigns =
       assigns
       |> assign(:location, location_text(assigns.row))
-      |> assign(
-        :prunes?,
-        assigns.row.prune and Destination.supports?(assigns.row.kind, [:list, :delete])
-      )
       |> assign(:can_update?, Backups.can_update_backup_destination?(assigns.user, assigns.row))
       |> assign(:can_destroy?, Backups.can_destroy_backup_destination?(assigns.user, assigns.row))
 
@@ -1003,7 +1088,18 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
         <.badge :if={not @row.enabled} variant="neutral">
           <span data-role="disabled">{gettext("Disabled")}</span>
         </.badge>
-        <.badge :if={@prunes?} variant="outline">{gettext("Prunes its old backups")}</.badge>
+        <.badge :if={@row.enabled and @row.prune and is_nil(@blocker)} variant="outline">
+          <span data-role="prunes">{gettext("Prunes its old backups")}</span>
+        </.badge>
+        <.badge
+          :if={@row.enabled and @row.prune and @blocker}
+          variant="warning"
+          class="whitespace-normal"
+        >
+          <span data-role="prune-blocked">
+            {gettext("Not pruned: %{reason}", reason: blocker_text(@blocker))}
+          </span>
+        </.badge>
       </div>
 
       <p :if={@location} data-role="location" class="font-mono text-xs text-base-content/70">

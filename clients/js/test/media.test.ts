@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { createClient, isKilnHttpError, KilnConfigError } from "../src/index.js";
+import {
+  createClient,
+  isKilnError,
+  isKilnHttpError,
+  KilnConfigError,
+  type KilnError,
+} from "../src/index.js";
 import { stubFetch } from "./helpers.js";
 
 function client(stub: { fetchImpl: typeof globalThis.fetch }) {
@@ -86,6 +92,23 @@ describe("uploadMedia", () => {
 
     expect(isKilnHttpError(error)).toBe(true);
     expect(error).toMatchObject({ status: 403, body: { errors: [{ code: "forbidden" }] } });
+  });
+
+  it("throws KilnError empty_response when the answer carries no media item", async () => {
+    for (const answer of [
+      { status: 201, body: { data: [] } },
+      { status: 204, text: "" },
+    ]) {
+      const stub = stubFetch(answer);
+
+      const error = await client(stub)
+        .uploadMedia(new Blob(["x"]))
+        .catch((caught: unknown) => caught);
+
+      expect(isKilnError(error)).toBe(true);
+      expect(isKilnHttpError(error)).toBe(false);
+      expect((error as KilnError).code).toBe("empty_response");
+    }
   });
 });
 

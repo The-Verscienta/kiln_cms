@@ -306,6 +306,22 @@ defmodule KilnCMS.Backups.DestinationTest do
       assert Destination.call_timeout() == 300
     end
 
+    test "call_deadline/2: the step's deadline or the call's own bound, whichever is first " <>
+           "(#2950)" do
+      now = System.monotonic_time(:millisecond)
+
+      # A far step deadline: the call's own bound.
+      own = Destination.call_deadline(now + :timer.hours(1), 100)
+      assert own >= now + 100 and own < now + :timer.seconds(5)
+
+      # A near one: the step's.
+      assert Destination.call_deadline(now + 50, :timer.minutes(10)) == now + 50
+
+      # No step deadline: the call's own bound alone.
+      alone = Destination.call_deadline(nil, 100)
+      assert alone >= now + 100 and alone < now + :timer.seconds(5)
+    end
+
     test "a caller that is killed (a canceled backup) takes the adapter's process with it" do
       test = self()
       config = fake_config(%{"mode" => "sleep", "sleep_ms" => 60_000})

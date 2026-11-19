@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   createClient,
   flattenDocument,
+  isKilnError,
   isKilnHttpError,
+  KilnConfigError,
+  KilnHttpError,
+  KilnNetworkError,
+  KilnUnexpectedBodyError,
   refKey,
   resolve,
-  type KilnHttpError,
 } from "../src/index.js";
 import { emptyDoc, stubFetch } from "./helpers.js";
 
@@ -399,9 +403,27 @@ describe("revisions", () => {
 
   it("surfaces a read-only key's refusal as KilnHttpError 403", async () => {
     const stub = stubFetch({ status: 403, body: { errors: [{ code: "forbidden" }] } });
-    await expect(client(stub).restoreRevision("page", "p1", "v1")).rejects.toMatchObject({
+    await expect(
+      client(stub, "read-key").restoreRevision("page", "p1", "v1"),
+    ).rejects.toMatchObject({
       status: 403,
     });
+  });
+
+  it("refuses a restore client-side without a key, sending nothing", async () => {
+    for (const apiKey of [undefined, ""]) {
+      const stub = stubFetch({ body: { data: {} } });
+      const error = await client(stub, apiKey)
+        .restoreRevision("page", "p1", "v1")
+        .then(
+          () => null,
+          (caught: unknown) => caught,
+        );
+
+      expect(error).toBeInstanceOf(KilnConfigError);
+      expect((error as KilnConfigError).code).toBe("missing_api_key");
+      expect(stub.calls).toHaveLength(0);
+    }
   });
 });
 
@@ -646,7 +668,92 @@ describe("transport", () => {
     const stub = stubFetch({ status: 500, text: "boom" });
     await expect(client(stub).list("posts")).rejects.toMatchObject({ body: "boom" });
   });
+
+  it("throws KilnUnexpectedBodyError for a 2xx body that is not JSON", async () => {
+    const page = `<!doctype html><html><body>Sign in to the Wi-Fi${"x".repeat(4096)}</body></html>`;
+    const stub = stubFetch({ text: page, headers: { "content-type": "text/html" } });
+
+    const error = await client(stub)
+      .list("posts")
+      .then(
+        () => null,
+        (caught: unknown) => caught,
+      );
+
+    expect(error).toBeInstanceOf(KilnUnexpectedBodyError);
+    expect(isKilnError(error)).toBe(true);
+    expect(error).not.toBeInstanceOf(KilnHttpError);
+    expect(isKilnHttpError(error)).toBe(false);
+    const unexpected = error as KilnUnexpectedBodyError;
+    expect(unexpected.status).toBe(200);
+    expect(unexpected.code).toBe("unexpected_body");
+    expect(unexpected.url).toContain("https://cms.example.com/api/json/posts/published");
+    expect(unexpected.body).toBe(page.slice(0, 1024));
+    expect(unexpected.message).not.toContain("<html>");
+    expect(unexpected.message).not.toContain("Wi-Fi");
+    expect(unexpected.cause).toBeInstanceOf(SyntaxError);
+  });
+
+  it("caps the kept body at 1 KiB of UTF-8 without splitting a character", async () => {
+    // "é" is two bytes: 1 KiB holds 512 of them, and an odd cut never leaves half.
+    const stub = stubFetch({ text: `<${"é".repeat(2000)}` });
+
+    const error = await client(stub)
+      .list("posts")
+      .catch((caught: unknown) => caught);
+
+    const body = (error as KilnUnexpectedBodyError).body;
+    expect(new TextEncoder().encode(body).length).toBeLessThanOrEqual(1024);
+    expect(body).toBe(`<${"é".repeat(511)}`);
+  });
+
+  it("still resolves an empty 2xx body as null", async () => {
+    const stub = stubFetch({ status: 200, text: "" });
+    await expect(client(stub).search("cats")).resolves.toBeNull();
+  });
+
+  it("wraps a body stream that fails mid-read as KilnNetworkError", async () => {
+    const broken = new Error("socket hang up");
+    const kiln = createClient({
+      baseUrl: "https://cms.example.com",
+      fetch: async () => new Response(failingStream(broken), { status: 200 }),
+    });
+
+    const error = await kiln.list("posts").catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(KilnNetworkError);
+    expect((error as KilnNetworkError).url).toContain("/api/json/posts/published");
+    expect((error as KilnNetworkError).cause).toBe(broken);
+  });
+
+  it("lets an abort while reading the body through unwrapped", async () => {
+    const abort = new DOMException("The operation was aborted.", "AbortError");
+    const kiln = createClient({
+      baseUrl: "https://cms.example.com",
+      fetch: async () => new Response(failingStream(abort), { status: 200 }),
+    });
+
+    const error = await kiln.list("posts").catch((caught: unknown) => caught);
+
+    expect(error).toBe(abort);
+    expect(isKilnError(error)).toBe(false);
+  });
 });
+
+// A body that sends one chunk of a JSON document, then fails with `reason`.
+function failingStream(reason: unknown): ReadableStream<Uint8Array> {
+  let sent = false;
+  return new ReadableStream({
+    pull(controller) {
+      if (sent) {
+        controller.error(reason);
+        return;
+      }
+      sent = true;
+      controller.enqueue(new TextEncoder().encode('{"data": ['));
+    },
+  });
+}
 
 describe("sync", () => {
   const upsert = {
