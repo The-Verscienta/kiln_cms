@@ -16931,11 +16931,6 @@ msgstr "Parcialmente fuera del servidor"
 msgid "Passed the human-verification check."
 msgstr "Superó la comprobación de verificación humana."
 
-#: lib/kiln_cms_web/live/two_factor_setup_live.ex
-#, elixir-autogen, elixir-format
-msgid "Passkey"
-msgstr "Clave de acceso"
-
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Passkey added"
@@ -16975,6 +16970,7 @@ msgstr "No se pudo iniciar sesión con la clave de acceso. Use otro método."
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
+#: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Passkeys"
 msgstr "Claves de acceso"

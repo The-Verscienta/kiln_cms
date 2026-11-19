@@ -693,7 +693,7 @@ not reach your second factors.
    authentication is now on." and shows ten recovery codes once: save them,
    then click **I've saved them**.
 
-   Or add a passkey under **Passkey** (on the main host, and on a console
+   Or add a passkey under **Passkeys** (on the main host, and on a console
    host when passkeys work there): name it
    if you like, click **Add a passkey** and confirm on your device. The page
    says "Passkey added — you can sign in with it now." A passkey has no
@@ -706,7 +706,7 @@ not reach your second factors.
 
 The owner of the account is emailed for every factor added, as always
 ([We email you when a second factor is added](#we-email-you-when-a-second-factor-is-added)).
-Under **Passkey**, the page lists the passkeys you already have, each with a
+Under **Passkeys**, the page lists the passkeys you already have, each with a
 trash button that removes it ([Remove a passkey](passkeys.md#remove-a-passkey)).
 The page also has **Sign out**. A reader held on a site that requires
 everyone also sees **Your membership and data**, with **Manage billing** (when
@@ -930,6 +930,8 @@ affected: those are how a lost or stolen factor is cleared.
 If the setting cannot be read (a database error), the site is treated as
 requiring nothing until it can be, rather than holding every account; see
 [ADR 0030](decisions/0030-the-second-factor-requirement-fails-open-and-only-a-freshly-verified-admin-changes-it.md).
+The email proof, by contrast, is judged against every site that holds the
+account and fails closed: [ADR 0078](decisions/0078-the-second-factor-email-proof-is-judged-against-every-site-that-holds-the-account-and-fails-closed-without-the-pages-context.md).
 
 ### Turn the requirement off from the server
 
