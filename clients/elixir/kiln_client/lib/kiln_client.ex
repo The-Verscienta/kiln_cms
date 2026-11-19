@@ -52,9 +52,12 @@ defmodule KilnClient do
   first attempt. To have Req retry, opt back in per call or for every
   request:
 
-      KilnClient.list("posts", req: [retry: :transient, max_retries: 2])
+      KilnClient.list("posts", req: [retry: :safe_transient, max_retries: 2])
 
       config :kiln_client, req_options: [retry: :safe_transient]
+
+  `:safe_transient` retries only `GET` and `HEAD`; `:transient` retries the
+  writes too, where a retried `create/3` or transition can run twice.
 
   ## Published-only by default
 
