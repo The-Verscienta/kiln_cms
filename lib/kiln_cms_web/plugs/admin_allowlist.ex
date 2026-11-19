@@ -1,14 +1,15 @@
 defmodule KilnCMSWeb.Plugs.AdminAllowlist do
   @moduledoc """
   The HTTP gate of a site's admin allowlist (#2248): refuses a request to the
-  console, `/setup`, a sign-in route or the security posture
-  (`GET /api/security/posture`, #2521) from an address the site has not
-  listed. The socket half is `KilnCMSWeb.AdminAllowlist`; the list is
-  `KilnCMS.Security.AdminAllowlist`.
+  console, `/setup`, a sign-in route or a monitoring endpoint
+  (`GET /api/security/posture`, #2521; `GET /api/security/plugin-health`,
+  #2571) from an address the site has not listed. The socket half is
+  `KilnCMSWeb.AdminAllowlist`; the list is `KilnCMS.Security.AdminAllowlist`.
 
   It is a router pipeline, not an endpoint plug with path prefixes, in four
   flavors: `:admin_allowlist` (the console and `/setup`, HTML),
-  `:admin_allowlist_api` (`GET /api/security/posture`, JSON),
+  `:admin_allowlist_api` (`GET /api/security/posture` and
+  `GET /api/security/plugin-health`, JSON),
   `:sign_in_allowlist` (the sign-in family, HTML) and `:sign_in_allowlist_api`
   (`POST /api/auth/sign_in*`, JSON). The sign-in pair asks for the `:sign_in`
   surface, which the site can open while its console stays behind the list

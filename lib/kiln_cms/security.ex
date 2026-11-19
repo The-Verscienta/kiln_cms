@@ -12,7 +12,9 @@ defmodule KilnCMS.Security do
 
   It also holds `KilnCMS.Security.PostureReport` (#2252): the Security
   posture page's action and monitoring's detail-free snapshot of it (#2521),
-  which read settings and store nothing.
+  which read settings and store nothing, and
+  `KilnCMS.Security.PluginHealthReport` (#2571): the installed plugins'
+  cached health for monitoring, platform administrators only.
 
   `KilnCMS.Security.IpBlocklist` and `KilnCMS.Security.Cidr` live in the same
   namespace but are unrelated to this domain.
@@ -83,6 +85,12 @@ defmodule KilnCMS.Security do
     resource KilnCMS.Security.PostureReport do
       define :run_posture, action: :run
       define :posture_snapshot, action: :snapshot
+    end
+
+    # The installed plugins' cached health for `GET /api/security/plugin-health`
+    # (#2571): platform admins only, never makes a request.
+    resource KilnCMS.Security.PluginHealthReport do
+      define :cached_plugin_health, action: :cached
     end
   end
 
