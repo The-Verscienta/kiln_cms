@@ -10,7 +10,7 @@
   (registration approval, [ADR 0024](0024-a-registration-awaiting-approval-is-a-membership-that-grants-nothing.md)).
   The guides are [data-flows.md](../data-flows.md) and
   [account-administration.md](../account-administration.md#removing-an-account).
-- **Changelog** — Unreleased, under Fixed
+- **Changelog** — v1.11.0, under Fixed
   ([long form](../changelog/v1.11.0.md#erasure-demotes-site-memberships)),
   with the backfill under Upgrade notes
   ([long form](../changelog/v1.11.0.md#erasure-backfill-memberships-upgrade)).

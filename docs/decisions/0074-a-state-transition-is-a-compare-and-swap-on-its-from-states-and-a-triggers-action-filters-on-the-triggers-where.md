@@ -150,8 +150,8 @@ answer, and a caller should not tell them apart.
 
 ## Where the rule holds, and where it does not
 
-`AshStateMachine` is used by four resources (`rg "AshStateMachine" lib`; two
-other files only mention it in comments or as an error type):
+`AshStateMachine` is used by three resources. The other files `rg "AshStateMachine" lib`
+returns are error and message modules, helper modules and comments:
 
 - **`KilnCMS.CMS.Content`** (the `state_machine` block is in the macro that
   every content type is built from). Holds. All ten transition actions
