@@ -788,7 +788,7 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
       sent!(row, own, "20261103-030000")
 
       lv = mount(conn)
-      render_async(lv)
+      render_async(lv, 2_000)
 
       form = "#adopt-#{row.id}-#{retired}"
       assert has_element?(lv, "#other-dirs-#{row.id} summary", "(1)")
@@ -811,7 +811,7 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
 
       assert [_] = events(:backup_destination_adoptions_changed)
 
-      render_async(lv)
+      render_async(lv, 2_000)
       assert has_element?(lv, "#{form} input[type=checkbox][checked]")
 
       lv
@@ -830,7 +830,7 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
       sent!(row, peer, "20261101-030000")
 
       lv = mount(conn)
-      render_async(lv)
+      render_async(lv, 2_000)
 
       refute has_element?(lv, "#other-dirs-#{row.id}")
 
@@ -847,7 +847,7 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
       put_backups(live_beats_reader: fn _ -> {:error, :connection_refused} end)
 
       lv = mount(conn)
-      render_async(lv)
+      render_async(lv, 2_000)
 
       assert has_element?(
                lv,
@@ -859,7 +859,7 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
     test "a destination with no other directory's backups shows no list", %{conn: conn} do
       row = fake!()
       lv = mount(conn)
-      render_async(lv)
+      render_async(lv, 2_000)
       refute has_element?(lv, "#other-dirs-#{row.id}")
     end
   end
