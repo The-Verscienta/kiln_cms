@@ -44,6 +44,8 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
 
   defp published(totals), do: Analytics.suppress_referrer_group(totals)
 
+  defp published(totals, sources), do: Analytics.suppress_referrer_group(totals, sources)
+
   defp suppressed?(rows), do: Enum.any?(rows, fn {_s, _h, display} -> is_binary(display) end)
 
   defp displays(rows), do: Enum.map(rows, fn {source, _hits, display} -> {source, display} end)
@@ -307,6 +309,69 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
     end
   end
 
+  describe "suppress_referrer_group/2 (#3123)" do
+    # The explicit-list arity is a test seam; the live one must be it with
+    # `referrer_sources/0`, or the sweep below would be checking another function.
+    test "the live arity publishes exactly what /2 does over the live list" do
+      for threshold <- [2, 3, 5, 10], total <- 0..12, breakdown <- breakdowns(total) do
+        put_threshold(threshold)
+
+        assert Analytics.suppress_referrer_group(breakdown) ==
+                 Analytics.suppress_referrer_group(breakdown, Analytics.referrer_sources())
+      end
+    end
+  end
+
+  # The wide search behind the #2981 rule (#3123): thresholds 2-20, view totals
+  # up to 20-40 (by width) and four to six categories, through `suppress_referrer_group/2`
+  # with a generated category list. Excluded by default (`:slow_sweep`, see
+  # test_helper.exs); run it with
+  #
+  #     mix test --only slow_sweep test/kiln_cms/analytics/referrer_suppression_test.exs
+  #
+  # after any change to the algorithm or to `referrer_sources/0`.
+  describe "the wide sweep (#3123)" do
+    @describetag :slow_sweep
+    @describetag timeout: :infinity
+
+    # {categories, largest view total}. The cost is the number of breakdowns,
+    # C(total + width - 1, width - 1) summed over totals, times 19 thresholds:
+    # width 5 to a total of 50 is 3.5M per threshold, about an hour, so the
+    # wider the categories the lower the bound. The tightest classes sit at
+    # totals near the category count and the threshold, well inside these.
+    @sweep [{4, 40}, {5, 30}, {6, 20}]
+
+    test "no all-hidden or partial publication leaves a category pinned" do
+      for {width, max_total} <- @sweep, threshold <- 2..20 do
+        put_threshold(threshold)
+        sources = sweep_sources(width)
+
+        for total <- 0..max_total do
+          total
+          |> breakdowns(sources)
+          |> Enum.group_by(&displays(published(&1, sources)))
+          |> Enum.each(fn {form, members} -> check_class(form, members, threshold, total) end)
+        end
+      end
+    end
+
+    # The criterion has to be able to fail, or the sweep above proves nothing:
+    # three categories at a threshold of 3 is where the rule does not hold.
+    test "three categories at a threshold of 3 still fail it" do
+      put_threshold(3)
+      sources = sweep_sources(3)
+
+      form = displays(published(%{s1: 2, s2: 2, s3: 2}, sources))
+      members = Enum.filter(breakdowns(6, sources), &(displays(published(&1, sources)) == form))
+
+      assert_raise ExUnit.AssertionError, ~r/pins/, fn ->
+        check_class(form, members, 3, 6)
+      end
+    end
+  end
+
+  defp sweep_sources(width), do: for(n <- 1..width, do: :"s#{n}")
+
   describe "what is still published" do
     # The cost has to be bounded, or "suppress everything" would pass every
     # test above and make the feature pointless.
@@ -395,10 +460,10 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
 
   # Every breakdown of `total` over `Analytics.referrer_sources/0`, as totals
   # maps — so a change to the category list re-runs the #2981 sweep over it.
-  defp breakdowns(total) do
+  defp breakdowns(total, sources \\ Analytics.referrer_sources()) do
     total
-    |> compositions(length(Analytics.referrer_sources()))
-    |> Enum.map(&Map.new(Enum.zip(Analytics.referrer_sources(), &1)))
+    |> compositions(length(sources))
+    |> Enum.map(&Map.new(Enum.zip(sources, &1)))
   end
 
   defp compositions(total, 1), do: [[total]]
@@ -408,7 +473,7 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
   end
 
   defp values_by_category(members) do
-    Map.new(Analytics.referrer_sources(), fn source ->
+    Map.new(members |> hd() |> Map.keys(), fn source ->
       {source, members |> Enum.map(&Map.fetch!(&1, source)) |> Enum.uniq() |> Enum.sort()}
     end)
   end
