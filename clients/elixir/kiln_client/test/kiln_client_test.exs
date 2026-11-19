@@ -17,6 +17,24 @@ defmodule KilnClientTest do
 
   defp empty_doc, do: %{"data" => []}
 
+  # Answers every request with `status` and counts them, so a test can prove
+  # how many requests one call made (#2730: Req's own retry stays off).
+  defp stub_status(status, body \\ "{}") do
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+    Req.Test.stub(KilnClient, fn conn ->
+      Agent.update(counter, &(&1 + 1))
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.send_resp(status, body)
+    end)
+
+    counter
+  end
+
+  defp requests(counter), do: Agent.get(counter, & &1)
+
   describe "list/2" do
     test "reads the /published feed by default and flattens the document" do
       stub_doc(%{
@@ -295,15 +313,22 @@ defmodule KilnClientTest do
       assert_received {:request, "/api/content/posts/hello", %{"surface" => "json"}}
     end
 
+    test "a persistent 503 costs exactly two requests" do
+      counter = stub_status(503)
+
+      assert {:error, %KilnClient.Error{reason: :server, status: 503}} =
+               KilnClient.artifact("posts", "hello", retry_delay_ms: 0)
+
+      assert requests(counter) == 2
+    end
+
     test "retry: false fails fast on 503" do
-      Req.Test.stub(KilnClient, fn conn ->
-        conn
-        |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.send_resp(503, "{}")
-      end)
+      counter = stub_status(503)
 
       assert {:error, %KilnClient.Error{reason: :server, status: 503}} =
                KilnClient.artifact("posts", "hello", retry: false)
+
+      assert requests(counter) == 1
     end
   end
 
@@ -397,9 +422,10 @@ defmodule KilnClientTest do
       assert_received {:request, "/api/content/page/p1/revisions/v2", _params}
     end
 
-    test "restore_revision/4 POSTs and returns the new revision" do
+    test "restore_revision/4 POSTs with the per-call key and returns the new revision" do
       Req.Test.stub(KilnClient, fn conn ->
         send(self(), {:method, conn.method, conn.request_path})
+        send(self(), {:auth, Plug.Conn.get_req_header(conn, "authorization")})
 
         Req.Test.json(conn, %{
           "data" => %{
@@ -414,9 +440,10 @@ defmodule KilnClientTest do
 
       assert {:ok,
               %{"restored_version_id" => "v1", "revision" => %{"action" => "restore_version"}}} =
-               KilnClient.restore_revision("page", "p1", "v1")
+               KilnClient.restore_revision("page", "p1", "v1", api_key: "kiln_writer")
 
       assert_received {:method, "POST", "/api/content/page/p1/revisions/v1/restore"}
+      assert_received {:auth, ["Bearer kiln_writer"]}
     end
 
     test "a read-only key's refusal comes back as a 403 error" do
@@ -427,7 +454,20 @@ defmodule KilnClientTest do
       end)
 
       assert {:error, %KilnClient.Error{reason: :forbidden, status: 403, code: "forbidden"}} =
-               KilnClient.restore_revision("page", "p1", "v1")
+               KilnClient.restore_revision("page", "p1", "v1", api_key: "kiln_read_only")
+    end
+
+    test "list_revisions/3 and revision/4 send a per-call key" do
+      Req.Test.stub(KilnClient, fn conn ->
+        send(self(), {:auth, conn.request_path, Plug.Conn.get_req_header(conn, "authorization")})
+        Req.Test.json(conn, %{"data" => @revision, "meta" => %{}})
+      end)
+
+      assert {:ok, _} = KilnClient.list_revisions("page", "p1", api_key: "kiln_editor")
+      assert {:ok, _} = KilnClient.revision("page", "p1", "v2", api_key: "kiln_editor")
+
+      assert_received {:auth, "/api/content/page/p1/revisions", ["Bearer kiln_editor"]}
+      assert_received {:auth, "/api/content/page/p1/revisions/v2", ["Bearer kiln_editor"]}
     end
   end
 
@@ -484,6 +524,94 @@ defmodule KilnClientTest do
       assert {:ok, %{items: []}} = KilnClient.list_release_items(filter: %{release_id: "r1"})
       assert_received {:request, "/api/json/release-items", params}
       assert params["filter"] == %{"release_id" => "r1"}
+    end
+
+    test "list_releases/1, release/2 and list_release_items/1 send a per-call key" do
+      Req.Test.stub(KilnClient, fn conn ->
+        send(self(), {:auth, conn.request_path, Plug.Conn.get_req_header(conn, "authorization")})
+
+        Req.Test.json(conn, %{"data" => %{"id" => "r1", "type" => "release", "attributes" => %{}}})
+      end)
+
+      assert {:ok, _} = KilnClient.list_releases(api_key: "kiln_editor")
+      assert {:ok, _} = KilnClient.release("r1", api_key: "kiln_editor")
+      assert {:ok, _} = KilnClient.list_release_items(api_key: "kiln_editor")
+
+      assert_received {:auth, "/api/json/releases", ["Bearer kiln_editor"]}
+      assert_received {:auth, "/api/json/releases/r1", ["Bearer kiln_editor"]}
+      assert_received {:auth, "/api/json/release-items", ["Bearer kiln_editor"]}
+    end
+  end
+
+  # #2734's twin of the JS client's #2735: a captive portal or CDN answering
+  # 200 with an HTML page is an error, not an empty or crashing result.
+  describe "a 2xx body that is not JSON" do
+    @portal "<!doctype html><html><body>Sign in to the Wi-Fi</body></html>"
+
+    defp stub_html(body \\ @portal) do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("text/html")
+        |> Plug.Conn.send_resp(200, body)
+      end)
+    end
+
+    test "list/2 returns :unexpected_body rather than an empty list" do
+      stub_html()
+
+      assert {:error,
+              %KilnClient.Error{
+                reason: :unexpected_body,
+                status: 200,
+                method: :get,
+                path: "/api/json/posts/published",
+                body: @portal
+              }} = KilnClient.list("posts")
+    end
+
+    test "sync/1 and release/2 return the error instead of crashing" do
+      stub_html()
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body, path: "/api/sync"}} =
+               KilnClient.sync(retries: 0)
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body, path: "/api/json/releases/r1"}} =
+               KilnClient.release("r1")
+    end
+
+    test "the body is cut to 1 KiB without splitting a UTF-8 character" do
+      # 1023 ASCII bytes, then a 2-byte "é" straddling the 1024-byte cut.
+      stub_html(String.duplicate("a", 1023) <> String.duplicate("é", 100))
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body, body: body}} =
+               KilnClient.list("posts")
+
+      assert body == String.duplicate("a", 1023)
+      assert String.valid?(body)
+    end
+
+    test "a JSON:API body is still decoded" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/vnd.api+json")
+        |> Plug.Conn.send_resp(200, ~s({"data":[{"id":"p1","type":"post","attributes":{}}]}))
+      end)
+
+      assert {:ok, %{items: [%{"id" => "p1"}]}} = KilnClient.list("posts")
+    end
+
+    test "artifact/3's llm surface is text by design" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("text/markdown")
+        |> Plug.Conn.send_resp(200, "# Hello")
+      end)
+
+      assert {:ok, "# Hello"} = KilnClient.artifact("posts", "hello", surface: "llm")
+      assert {:ok, "# Hello"} = KilnClient.artifact("posts", "hello", surface: :llm)
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body}} =
+               KilnClient.artifact("posts", "hello")
     end
   end
 
@@ -544,17 +672,47 @@ defmodule KilnClientTest do
 
       assert {:error,
               %KilnClient.Error{reason: :rate_limited, retry_after: 7, code: "rate_limited"}} =
-               KilnClient.search("kiln", req: [retry: false])
+               KilnClient.search("kiln")
+    end
+
+    # #2730: Req's default `:safe_transient` retry used to resend every
+    # read on 408/429/5xx and transport errors, under the client's own 503
+    # loops. A plain read now goes out once.
+    for status <- [408, 429, 500, 503] do
+      test "a plain read answering #{status} makes exactly one request" do
+        counter = stub_status(unquote(status))
+
+        assert {:error, %KilnClient.Error{status: unquote(status)}} = KilnClient.list("posts")
+        assert requests(counter) == 1
+      end
+    end
+
+    test "a caller can opt back into Req's retry per call" do
+      counter = stub_status(503)
+
+      assert {:error, %KilnClient.Error{status: 503}} =
+               KilnClient.list("posts",
+                 req: [retry: :transient, retry_delay: 0, max_retries: 1]
+               )
+
+      assert requests(counter) == 2
     end
 
     test "a read with no response is a :transport error carrying the exception" do
-      Req.Test.stub(KilnClient, &Req.Test.transport_error(&1, :econnrefused))
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      Req.Test.stub(KilnClient, fn conn ->
+        Agent.update(counter, &(&1 + 1))
+        Req.Test.transport_error(conn, :econnrefused)
+      end)
 
       assert {:error,
               %KilnClient.Error{
                 reason: :transport,
                 exception: %Req.TransportError{reason: :econnrefused}
-              }} = KilnClient.list("posts", req: [retry: false])
+              }} = KilnClient.list("posts")
+
+      assert requests(counter) == 1
     end
 
     test "an invalid sync cursor is a :validation error with its code" do

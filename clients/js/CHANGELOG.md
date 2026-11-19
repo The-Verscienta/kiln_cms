@@ -7,6 +7,30 @@ tagged `client-js-vX.Y.Z` in the
 
 ## Unreleased
 
+- **Fix: a 2xx answer that isn't JSON throws `KilnUnexpectedBodyError`
+  (kiln_cms#2735).** A captive portal, a CDN error page or a proxy answering
+  `200 text/html` in Kiln's place made the client throw the raw `SyntaxError`
+  from `JSON.parse`. It now throws the new exported `KilnUnexpectedBodyError`,
+  a `KilnError` with `code: "unexpected_body"`, the 2xx `status`, `url`, the
+  first 1 KiB of the text in `body` (cut on a UTF-8 character boundary, kept
+  out of `message`) and the `SyntaxError` as `cause`. It is not a
+  `KilnHttpError`, which stays reserved for non-2xx answers, so
+  `isKilnHttpError(err)` is false for it. An empty 2xx still resolves to
+  `null`.
+- **Fix: a body that breaks off mid-read throws `KilnNetworkError`.** When
+  the connection dropped after the headers arrived, reading the body rejected
+  with the platform's own error. It is now a `KilnNetworkError` with that
+  error as `cause`. An abort (your `signal` or the client's timeout) is still
+  the platform's `AbortError` / `TimeoutError`.
+- **Fix: an empty media answer throws `KilnError`.** A media write (upload, import,
+  metadata update, direct-upload completion) whose answer had no media item
+  threw a plain `Error`; it now throws a `KilnError` with
+  `code: "empty_response"`, as the content writes already did.
+- **Fix: `restoreRevision` fails fast without a key (kiln_cms#2734).** A
+  client with no `apiKey` sent an anonymous `POST` and got a
+  `KilnAuthError` (401). Like every other write, it now throws
+  `KilnConfigError` (`code: "missing_api_key"`) without sending anything.
+
 - **Fix: `kiln-types` can no longer be made to emit code by the schema it
   reads.** The `x-kiln.artifact_format_version` went into a `//` comment
   unescaped, and `$defs` names into type names, so a line break or a `;` from
