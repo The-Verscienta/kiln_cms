@@ -430,6 +430,45 @@ defmodule KilnCMS.Backups.WorkerTest do
       assert Backups.list_backup_notices!(actor: Backups.system()) == []
     end
 
+    # #3004: a stale hold retention can't remove keeps its backup, which is
+    # a notice until a pass gets past it.
+    @tag :pg_tools
+    test "a backup kept by a stale hold it can't remove is a stop, until it is removed",
+         %{dir: dir} do
+      older = Path.join([dir, "db", "kiln-db-20190101-000000.dump"])
+      old = Path.join([dir, "db", "kiln-db-20200101-000000.dump"])
+      File.mkdir_p!(Path.dirname(old))
+      File.write!(older, "older")
+      File.write!(old, "old")
+      for f <- [older, old], do: File.touch!(f, System.os_time(:second) - 365 * 24 * 3600)
+      stuck = Path.join([dir, "db", Artifact.hold_name("20190101-000000")])
+      File.mkdir_p!(stuck)
+
+      assert :ok = BackupChain.run()
+      assert File.exists?(older)
+
+      reason =
+        "a stale hold marker it couldn't remove kept db backup 20190101-000000 " <>
+          "(db/kiln-20190101-000000.hold: a directory, not a regular file)"
+
+      assert [%{stamp: stamp, status: :succeeded}] = Enum.filter(runs(), &(&1.origin == :app))
+      assert %{log: log} = Backups.get_run_by_stamp!(stamp, actor: Backups.system())
+
+      assert Enum.any?(
+               log,
+               &(&1.step == "prune" and &1.level == :warn and
+                   &1.message == "Retention kept: " <> reason)
+             )
+
+      assert [%{scope: :local, outcome: :stopped, stamp: ^stamp, reason: ^reason}] =
+               Backups.status().retention
+
+      File.rm_rf!(stuck)
+      assert :ok = BackupChain.run()
+      refute File.exists?(older)
+      assert Backups.status().retention == []
+    end
+
     @tag :pg_tools
     test "a RECENT .partial survives — it may be a concurrent run's work", %{dir: dir} do
       partial = Path.join([dir, "db", "kiln-db-20200101-000000.dump.partial"])

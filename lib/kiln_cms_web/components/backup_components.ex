@@ -117,26 +117,40 @@ defmodule KilnCMSWeb.BackupComponents do
   The alarm lines for retention that was skipped or stopped part-way (#2487),
   one per place in `Backups.status/0`'s `retention`, as `%{id: id, text: text}`:
   `id` is `"local-<dir id>"` for a backup directory with a `.kiln-dir-id`,
-  `"local"` for one without, and `"dest-<id>"` for a destination. Each names
-  the backup whose prune it was by its date. When more than one backup
-  directory has a line (a cluster whose nodes back up to their own disks),
-  each local line also names its directory by the first eight characters of
-  its id. The reason stays English, as the run log says it. The Backups page
+  `"local"` for one without, `"cron-<dir id>"` or `"cron"` for the host's
+  `backup.sh prune` of one (#3003), and `"dest-<id>"` for a destination. Each
+  names the backup whose prune it was by its date (a cron prune's line by
+  when it ran). When more than one backup directory has a line (a cluster
+  whose nodes back up to their own disks), each local and cron line also
+  names its directory by the first eight characters of its id. The reason
+  stays English, as the run log or the cron log says it. The Backups page
   and the home strip both say them.
   """
   @spec retention_lines(map()) :: [%{id: String.t(), text: String.t()}]
   def retention_lines(%{retention: notices}) when is_list(notices) do
-    several_local? = Enum.count(notices, &(&1.scope == :local)) > 1
-    Enum.map(notices, &retention_line(&1, several_local?))
+    several_dirs? =
+      notices
+      |> Enum.filter(&(&1.scope in [:local, :cron]))
+      |> Enum.uniq_by(& &1[:dir_id])
+      |> length() > 1
+
+    Enum.map(notices, &retention_line(&1, several_dirs?))
   end
 
   def retention_lines(_status), do: []
 
-  defp retention_line(%{scope: :local} = n, several_local?) do
+  defp retention_line(%{scope: :local} = n, several_dirs?) do
     text = retention_text(n, nil)
-    text = if several_local?, do: with_directory(text, n[:dir_id]), else: text
+    text = if several_dirs?, do: with_directory(text, n[:dir_id]), else: text
 
     %{id: local_line_id(n[:dir_id]), text: text}
+  end
+
+  defp retention_line(%{scope: :cron} = n, several_dirs?) do
+    text = cron_retention_text(n)
+    text = if several_dirs?, do: with_directory(text, n[:dir_id]), else: text
+
+    %{id: cron_line_id(n[:dir_id]), text: text}
   end
 
   defp retention_line(%{scope: {:destination, "dest:" <> id}} = n, _several_local?) do
@@ -149,6 +163,9 @@ defmodule KilnCMSWeb.BackupComponents do
 
   defp local_line_id(nil), do: "local"
   defp local_line_id(dir_id), do: "local-" <> dir_id
+
+  defp cron_line_id(nil), do: "cron"
+  defp cron_line_id(dir_id), do: "cron-" <> dir_id
 
   defp with_directory(text, nil),
     do: gettext("%{line} (backup directory without an id)", line: text)
@@ -190,6 +207,23 @@ defmodule KilnCMSWeb.BackupComponents do
       gettext(
         "Retention on %{name} stopped part-way on the backup of %{date}: %{reason}. What it hadn't reached stays until this is fixed.",
         name: name,
+        date: retention_date(n),
+        reason: n.reason || "—"
+      )
+
+  # The host's `backup.sh prune` (#3003), dated by when it ran.
+  defp cron_retention_text(%{outcome: :skipped} = n),
+    do:
+      gettext(
+        "The host's backup.sh prune was skipped on %{date}: %{reason}. Nothing was deleted, so local backups will build up until this is fixed.",
+        date: retention_date(n),
+        reason: n.reason || "—"
+      )
+
+  defp cron_retention_text(%{outcome: :stopped} = n),
+    do:
+      gettext(
+        "The host's backup.sh prune on %{date} kept what it couldn't check or delete: %{reason}. Those backups stay until this is fixed.",
         date: retention_date(n),
         reason: n.reason || "—"
       )

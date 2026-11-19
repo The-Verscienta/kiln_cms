@@ -56,6 +56,14 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
   only in the slots its own node fetches the cron job. A node whose heartbeat
   stopped (the node is down) gets no job until it beats again.
 
+  ## The cron prune's status (#3003)
+
+  Before each sync of a directory, the job reads the status file the host's
+  `backup.sh prune` leaves there (`KilnCMS.Backups.PruneStatus`) and records
+  it as that directory's cron retention notice, so a cron prune that was
+  skipped shows on the Backups page and Home. It is part of the sync's
+  bounded I/O below, and runs whether or not the sync then gets the lock.
+
   ## A backup directory that hangs (#3079)
 
   Every file operation on the backup directory (reading its id, and the
@@ -184,7 +192,7 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
     ]
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, DirId, DirQueues, MarkerSyncAbandoned}
+  alias KilnCMS.Backups.{Chain, DirId, DirQueues, MarkerSyncAbandoned, PruneStatus}
 
   import Ecto.Query, only: [from: 2]
 
@@ -484,8 +492,12 @@ defmodule KilnCMS.Backups.MarkerSyncWorker do
     run_io(:sync, dir, sync_timeout_ms(), fn -> syncer.(dir) end)
   end
 
+  # The cron prune's status file first (#3003): it needs no lock, and a busy
+  # lock or a failed sync must not hold back what it says.
   defp sync(dir) do
     if File.dir?(dir) do
+      PruneStatus.sync(dir)
+
       case Chain.sync_last_good(dir) do
         {:ok, _last_good} -> :ok
         :busy -> :busy

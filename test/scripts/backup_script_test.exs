@@ -23,7 +23,7 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
   """
   use ExUnit.Case, async: false
 
-  alias KilnCMS.Backups.{Artifact, Checksum, MediaArchive, Preflight, Retention}
+  alias KilnCMS.Backups.{Artifact, Checksum, MediaArchive, Preflight, PruneStatus, Retention}
   alias KilnCMS.Backups.Retention.Policy
   alias KilnCMS.Test.ShellTools
 
@@ -914,6 +914,188 @@ defmodule KilnCMS.Scripts.BackupScriptTest do
         assert MapSet.member?(app_survivors, file) == should_survive?,
                "#{file} should #{if should_survive?, do: "survive", else: "go"}"
       end
+    end
+  end
+
+  # #3003: what a prune leaves for the app, which shows a skip on the Backups
+  # page and Home (KilnCMS.Backups.PruneStatus reads it).
+  describe "the prune status file (#3003)" do
+    defp prune_status(ctx), do: PruneStatus.read(ctx.backups)
+
+    defp status_file(ctx), do: Path.join(ctx.backups, PruneStatus.file_name())
+
+    test "a clean prune writes ok, which the app reads", ctx do
+      age!(set_files!(ctx, "20260101-000000"), 400)
+      set_files!(ctx, "20260301-000000")
+
+      assert {out, 0} = backup(ctx, "prune")
+      refute out =~ "warning:"
+
+      assert {:ok, %{outcome: :ok, reason: nil, warnings: 0, at: at}} = prune_status(ctx)
+      assert DateTime.diff(DateTime.utc_now(), at) in -5..120
+      assert File.ls!(ctx.backups) |> Enum.filter(&String.ends_with?(&1, ".tmp")) == []
+    end
+
+    test "a skipped prune writes skipped and its reason, and deletes nothing", ctx do
+      files = set_files!(ctx, "20260101-000000") ++ set_files!(ctx, "20260201-000000")
+      age!(files, 400)
+      File.write!(Path.join(ctx.backups, ".work"), "not a directory")
+
+      assert {out, 0} = backup(ctx, "prune")
+      assert out =~ "could not list #{ctx.backups}/.work — nothing was pruned"
+      assert Enum.all?(files, &File.exists?/1)
+
+      reason = "could not list #{ctx.backups}/.work"
+      assert {:ok, %{outcome: :skipped, reason: ^reason, warnings: 1}} = prune_status(ctx)
+
+      # Fixed: the next prune says so.
+      File.rm!(Path.join(ctx.backups, ".work"))
+      assert {_out, 0} = backup(ctx, "prune")
+      assert {:ok, %{outcome: :ok, reason: nil}} = prune_status(ctx)
+    end
+
+    test "a prune that couldn't remove a file is partial, with its first warning", ctx do
+      old = "20260101-000000"
+      dump = dump!(ctx, old)
+      age!([dump, Path.join(ctx.backups, "db/kiln-db-#{old}.sha256")], 400)
+      dump!(ctx, "20260301-000000")
+      db = Path.join(ctx.backups, "db")
+      File.chmod!(db, 0o555)
+      on_exit(fn -> File.chmod(db, 0o700) end)
+
+      assert {out, 0} = backup(ctx, "prune")
+      File.chmod!(db, 0o700)
+
+      if File.exists?(dump) do
+        assert out =~ "could not remove #{dump}"
+
+        assert {:ok, %{outcome: :partial, reason: reason, warnings: 1}} = prune_status(ctx)
+        assert reason =~ "could not remove #{dump}; kept the rest of db #{old}"
+      else
+        # Running as root: permissions don't bind, so there is nothing to test.
+        :ok
+      end
+    end
+
+    test "it replaces the one before it whole, and holds no environment value", ctx do
+      File.write!(status_file(ctx), String.duplicate("x", 10_000))
+
+      assert {_out, 0} =
+               backup(ctx, "prune", [{"DATABASE_URL", "postgres://u:s3cr3t@db/kiln"}])
+
+      text = File.read!(status_file(ctx))
+      refute text =~ "s3cr3t"
+      assert {:ok, %{"version" => 1, "outcome" => "ok"}} = Jason.decode(text)
+    end
+
+    test "a prune stopped part-way writes skipped, with its exit status", ctx do
+      real_find = System.find_executable("find")
+      flag = Path.join(ctx.tmp, "killed")
+      files = set_files!(ctx, "20260101-000000") ++ set_files!(ctx, "20260201-000000")
+      age!(files, 400)
+      # A clean prune first, so the file is there to be replaced.
+      assert {_out, 0} = backup(ctx, "prune")
+      age!(set_files!(ctx, "20260115-000000"), 400)
+
+      # The first age check TERMs the script itself: the topmost ancestor
+      # running it.
+      stub!(ctx.bin, "find", """
+      #!/bin/sh
+      case " $* " in
+        *" -mtime "*)
+          if [ ! -e "#{flag}" ]; then
+            : > "#{flag}"
+            p=$PPID; top=""
+            while [ -n "$p" ] && [ "$p" -gt 1 ]; do
+              if ps -o args= -p "$p" 2>/dev/null | grep -F -q -- "#{@script}"; then top=$p; fi
+              p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+            done
+            [ -n "$top" ] && kill -TERM "$top"
+          fi
+          ;;
+      esac
+      exec #{real_find} "$@"
+      """)
+
+      assert {_out, 143} = backup(ctx, "prune")
+      assert File.exists?(flag)
+
+      assert {:ok, %{outcome: :skipped, reason: "prune stopped (exit 143)"}} =
+               prune_status(ctx)
+    end
+
+    # No path can make a reason this long on macOS (PATH_MAX is 1024), so
+    # write_prune_status runs on its own, with the helpers it calls, taken
+    # from the script as they are.
+    test "a long reason is cut to 1000 bytes, whole characters only", ctx do
+      functions =
+        ~S"""
+        sed -n '/^json_escape() {/,/^}/p; /^utf8_clean() {/,/^}/p; /^write_prune_status() {/,/^}/p' "$1"
+        """
+
+      # Odd: the cut at byte 1000 falls inside a two-byte character. Quotes
+      # and backslashes double when escaped.
+      reason = "x" <> String.duplicate("é", 600) <> String.duplicate(~S(\"), 400)
+
+      assert {_out, 0} =
+               System.cmd(
+                 "bash",
+                 [
+                   "-c",
+                   ~S"""
+                   set -euo pipefail
+                   eval "$(sh -c "$FUNCTIONS" sh "$SCRIPT")"
+                   PRUNE_STATUS_FILE=.kiln-prune-status.json
+                   write_prune_status skipped "$REASON" 1
+                   """
+                 ],
+                 env: [
+                   {"FUNCTIONS", functions},
+                   {"SCRIPT", @script},
+                   {"REASON", reason},
+                   {"BACKUP_DIR", ctx.backups},
+                   {"LC_ALL", "C"}
+                 ],
+                 stderr_to_stdout: true
+               )
+
+      assert File.stat!(status_file(ctx)).size < 4096
+      assert {:ok, %{outcome: :skipped, reason: cut}} = prune_status(ctx)
+      assert String.valid?(cut)
+      assert byte_size(cut) in 998..1000
+      assert String.starts_with?(reason, cut)
+      # That the app applies such a file: PruneStatusTest.
+    end
+
+    test "prune removes its own status temporary file past the grace, and only that", ctx do
+      gone = abandoned!(ctx, ".kiln-prune-status.json.4242-100042.tmp", 120)
+
+      kept = [
+        abandoned!(ctx, ".kiln-prune-status.json.4243-100043.tmp", 10),
+        abandoned!(ctx, ".kiln-prune-status.json.tmp", 120),
+        abandoned!(ctx, ".kiln-prune-status.json.x-1.tmp", 120)
+      ]
+
+      assert {out, 0} = backup(ctx, "prune")
+      refute File.exists?(gone)
+      assert out =~ gone
+      for f <- kept, do: assert(File.exists?(f), f)
+    end
+
+    # bash 3.2 is what macOS ships as /bin/bash; CI builds it (KILN_BASH32).
+    unless ShellTools.bash32(),
+      do: @tag(skip: "needs bash 3.2 (/bin/bash on macOS, or KILN_BASH32)")
+
+    test "skipped and ok are written under bash 3.2 too", ctx do
+      bash = ShellTools.bash32()
+      File.write!(Path.join(ctx.backups, ".work"), "not a directory")
+
+      assert {_out, 0} = backup(ctx, "prune", [], bash)
+      assert {:ok, %{outcome: :skipped, warnings: 1}} = prune_status(ctx)
+
+      File.rm!(Path.join(ctx.backups, ".work"))
+      assert {_out, 0} = backup(ctx, "prune", [], bash)
+      assert {:ok, %{outcome: :ok, warnings: 0}} = prune_status(ctx)
     end
   end
 

@@ -4036,6 +4036,69 @@ defmodule KilnCMSWeb.BackupLiveTest do
       refute html =~ "overview-backup-warning"
     end
 
+    # #3003: the host's `backup.sh prune` leaves its outcome in the backup
+    # directory; the marker sync turns it into a line (`PruneStatus`).
+    test "a cron prune that skipped is a line here and on Home; a clean one clears it",
+         %{conn: conn, dir: dir} do
+      good_backup!()
+      status_path = KilnCMS.Backups.PruneStatus.path(dir)
+      at = DateTime.utc_now() |> DateTime.add(-3600) |> DateTime.truncate(:second)
+
+      File.write!(
+        status_path,
+        ~s({"version": 1, "at": "#{DateTime.to_iso8601(at)}", "outcome": "skipped", ) <>
+          ~s("reason": "could not list #{dir}/.work", "warnings": 1})
+      )
+
+      :ok = KilnCMS.Backups.PruneStatus.sync(dir)
+      date = Calendar.strftime(at, "%Y-%m-%d %H:%M UTC")
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-headline-retention-cron[data-role=retention-notice]",
+               "The host's backup.sh prune was skipped on #{date}: could not list " <>
+                 "#{dir}/.work. Nothing was deleted, so local backups will build up until " <>
+                 "this is fixed."
+             )
+
+      assert has_element?(lv, "#backup-retention-docs")
+      assert has_element?(lv, "section.border-error\\/30")
+
+      {:ok, home, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(
+               home,
+               "#overview-backup-warning [data-role=backup-headline]",
+               "The host's backup.sh prune was skipped on #{date}"
+             )
+
+      File.write!(
+        status_path,
+        ~s({"version": 1, "at": "#{DateTime.to_iso8601(DateTime.utc_now())}", "outcome": "ok"})
+      )
+
+      :ok = KilnCMS.Backups.PruneStatus.sync(dir)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+      refute has_element?(lv, "[data-role=retention-notice]")
+    end
+
+    test "a cron prune that left something in place says so", %{conn: conn} do
+      good_backup!()
+      notice!(%{scope: "cron", outcome: :stopped, stamp: nil, reason: "could not remove x"})
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-headline-retention-cron",
+               "kept what it couldn't check or delete: could not remove x. Those backups " <>
+                 "stay until this is fixed."
+             )
+    end
+
     test "Home: an org admin who is not a platform admin sees nothing", %{conn: conn} do
       good_backup!()
       notice!(%{})

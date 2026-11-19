@@ -27,7 +27,9 @@ defmodule KilnCMS.Backups.Notice do
   `scope` names the place: `"local:<dir id>"` for a backup directory with a
   `.kiln-dir-id` (`dir_id` set too), `"local"` for one without (every such
   directory shares the one row: a cluster whose directories have no id has
-  nothing else to tell them apart by), and `"dest:<id>"` for a stored
+  nothing else to tell them apart by), `"cron:<dir id>"` and `"cron"` the
+  same way for the host's `scripts/backup.sh prune` of that directory
+  (#3003, `KilnCMS.Backups.PruneStatus`), and `"dest:<id>"` for a stored
   off-site destination (`label` is its name as the run recorded it).
 
   `reason` is the English account `KilnCMS.Backups.Retention.describe/1`
