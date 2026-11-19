@@ -179,16 +179,15 @@ returns are error and message modules, helper modules and comments:
   by a different mechanism: the claim's row lock and the item write
   serialize, so an add either lands before the claim and ships with the
   release or is refused.
-- **`KilnCMS.Experiments.Experiment`**. **Does not hold.** `:start`,
-  `:conclude` and `:archive` have no filter. `:start` is protected from its
-  worst race (two running experiments on one document) by a partial unique
-  index, `content_experiments_one_running_per_document`, not by the
-  transition. `:conclude` and `:archive` pass on the struct alone, so a second
-  `:conclude` from a struct loaded before the first has the machine's yes and
-  nothing in the `UPDATE` refuses it: it would overwrite `winner_variant_id`
-  and run `KilnCMS.Experiments.Changes.NotifyConcluded` again. It has no trigger and
-  no concurrent writer other than people, which is why nobody has met it, but
-  the rule is not satisfied. Not changed in this record.
+- **`KilnCMS.Experiments.Experiment`**. **Holds since
+  [#3122](https://github.com/The-Verscienta/kiln_cms/issues/3122).** When this
+  record was written `:start`, `:conclude` and `:archive` had no filter: a
+  second `:conclude` from a struct loaded before the first had the machine's
+  yes and nothing in the `UPDATE` refused it, so it overwrote
+  `winner_variant_id` and ran `KilnCMS.Experiments.Changes.NotifyConcluded`
+  again (`:start` was protected from its worst race only by the partial unique
+  index `content_experiments_one_running_per_document`). #3122 added the
+  filters and the console reloads on the stale result. It has no trigger.
 - **`KilnCMS.CMS.VersionFields`** only mentions `AshStateMachine` in a comment
   about why a restore must not write `state`. It is not a state machine.
   `KilnCMS.CMS.Releases` is a module of release logic, not a resource; it
@@ -227,19 +226,15 @@ returns are error and message modules, helper modules and comments:
 - **`StaleRecord` does not say what the row is now.** It carries only the
   resource, so a caller that wants the current state must re-read, which the
   LiveViews do.
-- **No check enforces the rule.** A new transition action without a filter
-  passes compile and every existing test. See the follow-up below.
+- **A test enforces the existence of the filter, not its content.**
+  `test/kiln_cms/state_transition_filter_test.exs` (#3122) fails when a
+  transition action has no filter change. It cannot tell a filter that
+  matches the `transitions` block from a wrong one; review does that.
 - **The trigger half is not met everywhere.** `:purge` and `:destroy` on
   `KilnCMS.CMS.Content` filter on the row's trash state, not on the whole
   trigger `where`, as above.
 
 ## Follow-ups
 
-- A test over every resource with `AshStateMachine` that fails when a
-  transition action (an action named in a `transition ... from:` entry) has
-  no `Ash.Resource.Change` of `Ash.Resource.Change.Builtins.filter/1`, with a
-  reason-carrying allowlist for deliberate exceptions. It was left out of this
-  record's change on purpose. `Experiment`'s `:conclude` and `:archive` would
-  be the first findings: add filters, or allowlist them with a reason.
 - Whether the two non-transition trigger actions above should filter on the
-  whole `where`.
+  whole `where`: [#3132](https://github.com/The-Verscienta/kiln_cms/issues/3132).
