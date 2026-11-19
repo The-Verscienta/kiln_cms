@@ -184,20 +184,26 @@ defmodule KilnCMS.Backups.Retention do
 
   ## On an off-site destination (#2220, ADR 0064)
 
-  `run_on_destination/3` prunes one stored destination, right after a backup
-  finished sending to it (`KilnCMS.Backups.Steps`), when the destination's
-  `prune` is on and its adapter `supports/0` both `:list` and `:delete`. The
-  env destination (`BACKUP_RCLONE_REMOTE`) is never pruned: only a key of the
-  form `"dest:<id>"` is accepted.
+  `run_on_destination/3` prunes one destination, right after a backup
+  finished sending to it (`KilnCMS.Backups.Steps`), when its adapter
+  `supports/0` both `:list` and `:delete`, and pruning is turned on there:
+  a stored destination's `prune`, or, for the env destination
+  (`BACKUP_RCLONE_REMOTE`), `BACKUP_RCLONE_REMOTE_PRUNE` (#2950, off by
+  default). Only the in-app off-site step prunes the env remote;
+  `scripts/backup.sh` never does, so the switch does nothing on a
+  cron-only install.
 
     0. **Location.** Before anything is listed, where the destination writes
-       is checked again (`Destination.location/1`), since its row was saved
-       before the environment or the other rows were what they are now.
-       Nothing is pruned on a destination that is, contains or is inside
-       `BACKUP_RCLONE_REMOTE`, or another stored destination; nor on one
-       whose location can't be told (a plugin's kind) or can't be compared
-       with an rclone remote (an S3 bucket, #2221) while
-       `BACKUP_RCLONE_REMOTE` is set, since nothing can show the two apart.
+       is checked again (`prune_blocker/3`, the rule the Destinations tab's
+       badge shows too), since a row was saved before the environment or
+       the other rows were what they are now. Nothing is pruned on a stored
+       destination that is, contains or is inside `BACKUP_RCLONE_REMOTE`, or
+       another stored destination; nor on one whose location can't be told
+       (a plugin's kind) or can't be compared with an rclone remote (an S3
+       bucket, #2221) while `BACKUP_RCLONE_REMOTE` is set, since nothing can
+       show the two apart. The env remote is pruned only while every stored
+       destination, enabled or not, has a location that can be told, is not
+       an S3 bucket, and does not overlap it.
     1. **Inventory.** The destination's `list/1`, through
        `KilnCMS.Backups.Destination.call/4`, grouped into units as `scan/1`
        groups the local disk (`destination_inventory/4`). Only whole backup
@@ -217,12 +223,23 @@ defmodule KilnCMS.Backups.Retention do
        records this installation sending it to THIS destination key (an
        artifact of that kind, or one of its parts, with the key's status `ok`,
        or `pruned` by an earlier pass that stopped part-way) is deleted
-       (`destination_plan/4`). Anything else, such as another installation's
-       backup in a shared bucket, is left and reported.
+       (`destination_plan/5`). Anything else, such as another installation's
+       backup in a shared bucket, is left and reported. On the env
+       destination, which cron sends to under the same key, the Run must
+       also be an in-app one (`origin: :app`) whose `dir_id` is this backup
+       directory's `.kiln-dir-id`: a cron-made or imported backup is never
+       deleted there.
     5. **Delete.** Each unit is re-checked (`recheck/2`), then deleted one
        file at a time, data before the sidecar. The first delete that fails
        or runs past its bound stops the pass. The files deleted are marked
        `pruned` under that key on their runs (`Recorder.mark_pruned/2`).
+
+  Each `list` and each `delete` call has a bound of its own (10 minutes for
+  the listing, 60 seconds for a delete), and the step's deadline when that
+  comes first, so one hung call can't use up the whole off-site step
+  (#2950). A listing past its bound is a skip, as one that fails is; a
+  delete past its bound stops the pass, and the store may still have
+  removed that file (the next pass simply no longer lists it).
 
   It fails closed: a policy that can't be resolved, a local backup directory
   that can't be listed, a destination listing that fails, or a Run read that
@@ -230,7 +247,7 @@ defmodule KilnCMS.Backups.Retention do
   """
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Destination, Importer, Notices, Recorder, WorkState}
+  alias KilnCMS.Backups.{Artifact, Destination, DirId, Importer, Notices, Recorder, WorkState}
   alias KilnCMS.Backups.Retention.Policy
 
   require Logger
@@ -238,6 +255,12 @@ defmodule KilnCMS.Backups.Retention do
   @partial_grace_s 3600
   @day 86_400
   @log_units 10
+
+  # The bound on one `list` and on one `delete` of a destination's retention
+  # (#2950), each also bounded by the step's deadline. A listing of a large
+  # bucket takes minutes; one file's delete, seconds.
+  @list_call_ms :timer.minutes(10)
+  @delete_call_ms :timer.seconds(60)
   @subs ["db", "media"]
 
   @typedoc "One regular-or-not final file of a unit, as `scan/1` saw it."
@@ -521,7 +544,19 @@ defmodule KilnCMS.Backups.Retention do
     do: "can't confirm it doesn't overlap BACKUP_RCLONE_REMOTE"
 
   def describe(:destination_overlap), do: "it overlaps another backup destination"
-  def describe(:not_prunable), do: "this destination is never pruned by Kiln"
+
+  def describe(:destination_unknown),
+    do:
+      "a stored backup destination's location can't be told, so it can't be shown not to " <>
+        "overlap BACKUP_RCLONE_REMOTE"
+
+  def describe(:destination_s3),
+    do: "an S3 backup destination can't be compared with BACKUP_RCLONE_REMOTE"
+
+  def describe({:dir_id, reason}),
+    do: "couldn't read the backup directory's id (#{inspect(reason)})"
+
+  def describe(:not_prunable), do: "Kiln doesn't prune this destination"
   def describe(:unsupported), do: "its adapter can't list and delete files"
   def describe({:crashed, module}), do: "it crashed (#{inspect(module)})"
 
@@ -1145,7 +1180,8 @@ defmodule KilnCMS.Backups.Retention do
                :artifacts,
                :components,
                :scheduled_components,
-               :schedule_ids
+               :schedule_ids,
+               :dir_id
              ]
            ],
            actor: Backups.system(),
@@ -1539,25 +1575,33 @@ defmodule KilnCMS.Backups.Retention do
   ## Destinations (#2220)
 
   @doc """
-  Prune the stored destination `config`, after a backup sent to it (see "On
-  an off-site destination"). `dir` is this host's backup directory, for its
-  `.keep` markers and `.work/` directories.
+  Prune the destination `config`, after a backup sent to it (see "On an
+  off-site destination"): a stored one, or the env destination
+  (`BACKUP_RCLONE_REMOTE`) when `BACKUP_RCLONE_REMOTE_PRUNE` is on
+  (`Backups.rclone_remote_prune?/0`, #2950). `dir` is this host's backup
+  directory, for its `.keep` markers, its `.work/` directories and, on the
+  env destination, its `.kiln-dir-id`.
 
   Returns `{:ok, %{deleted: names, units: count, unowned: entries, stopped:
   nil | reason}}`: the file names deleted (already marked `pruned` on their
   runs), how many units they came from, the units the keep rules would have
   deleted but this installation has no record of sending there (left
   alone), and why the deleting broke off, if it did. `{:error, reason}`
-  when it could not start, with nothing deleted. The env destination
-  (any key but `"dest:<id>"`) is `{:error, :not_prunable}`, and an adapter
-  that can't list and delete is `{:error, :unsupported}`.
+  when it could not start, with nothing deleted: `{:error, :not_prunable}`
+  for the env destination with the switch off (or any key that is neither),
+  and `prune_blocker/3`'s reason when that names one (`:unsupported` for an
+  adapter that can't list and delete).
 
   Options:
 
     * `:policy` and `:now` - as for `run/2`;
-    * `:timeout` or `:deadline` - the bound on each `list` and `delete`
-      call, passed to `KilnCMS.Backups.Destination.call/4` (its own default
-      when both are absent). A backup step passes its `:deadline`.
+    * `:deadline` - the step's deadline (a
+      `System.monotonic_time(:millisecond)` instant). Each `list` and
+      `delete` call is bounded by it and by its own limit, whichever comes
+      first (`Destination.call_deadline/2`);
+    * `:list_call_ms` and `:delete_call_ms` - those limits (default
+      #{div(@list_call_ms, 60_000)} minutes for the listing,
+      #{div(@delete_call_ms, 1000)} seconds for each delete).
   """
   @spec run_on_destination(Path.t(), Config.t(), keyword()) ::
           {:ok,
@@ -1568,67 +1612,160 @@ defmodule KilnCMS.Backups.Retention do
              stopped: term() | nil
            }}
           | {:error, term()}
-  def run_on_destination(dir, config, opts \\ [])
-
-  def run_on_destination(dir, %Config{key: "dest:" <> _} = config, opts) do
-    if Destination.supports?(config, [:list, :delete]) do
-      with :ok <- clear_to_prune(config),
-           {:ok, plan} <- prepare_destination(dir, config, opts),
-           do: execute_destination(dir, config, plan, opts)
-    else
-      {:error, :unsupported}
+  def run_on_destination(dir, %Config{} = config, opts \\ []) do
+    with {:ok, subject} <- prune_subject(config),
+         :ok <- supported(config),
+         :ok <- clear_to_prune(subject, config),
+         {:ok, owner} <- owner(dir, subject),
+         {:ok, plan} <- prepare_destination(dir, config, owner, opts) do
+      execute_destination(dir, config, plan, opts)
     end
   end
 
-  def run_on_destination(_dir, %Config{}, _opts), do: {:error, :not_prunable}
+  # What is pruned: a stored destination as itself, the env destination as
+  # `:env` (where it writes is `Destination.env_location/0`), and only while
+  # its switch is on. Its key is the one `Destination.env_key/1` gives the
+  # remote set now, so a config resolved before the remote changed is not it.
+  defp prune_subject(%Config{key: "dest:" <> _} = config), do: {:ok, config}
+
+  defp prune_subject(%Config{id: nil, key: key}) do
+    remote = Backups.rclone_remote()
+
+    if is_binary(remote) and remote != "" and key == Destination.env_key(remote) and
+         Backups.rclone_remote_prune?(),
+       do: {:ok, :env},
+       else: {:error, :not_prunable}
+  end
+
+  defp prune_subject(%Config{}), do: {:error, :not_prunable}
+
+  defp supported(config) do
+    if Destination.supports?(config, [:list, :delete]), do: :ok, else: {:error, :unsupported}
+  end
 
   # Step 0 above. The overlap was refused when the row was created, but
   # `BACKUP_RCLONE_REMOTE` can have changed since, and a plugin's location
-  # was never known: retention must not reach files another destination,
-  # above all the env remote Kiln never prunes, was sent.
-  defp clear_to_prune(config) do
-    location = Destination.location(config)
-
-    with :ok <- clear_of_env(location, Destination.env_location()),
-         do: clear_of_others(location, config)
-  end
-
-  defp clear_of_env(_location, nil), do: :ok
-  defp clear_of_env(:unknown, _env), do: {:error, :env_overlap_unknown}
-
-  # An S3 bucket and an rclone remote can't be compared: the remote may name
-  # the same bucket under any name (#2221, decided conservative per ADR 0064).
-  defp clear_of_env({:s3, _host, _port, _bucket, _prefix}, _env),
-    do: {:error, :env_overlap_unknown}
-
-  defp clear_of_env(location, env) do
-    if Destination.overlap?(location, env), do: {:error, :env_overlap}, else: :ok
-  end
-
-  defp clear_of_others(:unknown, _config), do: :ok
-
-  # Every row, disabled ones too: a disabled destination's files are still
-  # there. Settings are enough for `Destination.location/1`.
-  defp clear_of_others(location, %Config{id: id}) do
+  # was never known: retention must not reach files another destination was
+  # sent. Every row, disabled ones too: a disabled destination's files are
+  # still there. Settings are enough for `Destination.location/1`.
+  defp clear_to_prune(subject, config) do
     case Backups.list_backup_destinations(actor: Backups.system(), authorize_with: :error) do
       {:ok, rows} ->
-        overlapping? =
-          Enum.any?(rows, fn row ->
-            row.id != id and
-              Destination.overlap?(
-                location,
-                Destination.location(%Config{kind: row.kind, settings: row.settings})
-              )
-          end)
-
-        if overlapping?, do: {:error, :destination_overlap}, else: :ok
+        case prune_blocker(subject_for(subject, config), rows, Destination.env_location()) do
+          nil -> :ok
+          reason -> {:error, reason}
+        end
 
       {:error, error} ->
         {:error, {:read_destination, error.__struct__}}
     end
   end
 
-  defp prepare_destination(dir, config, opts) do
+  defp subject_for(:env, _config), do: :env
+  defp subject_for(%Config{}, config), do: config
+
+  @typedoc """
+  Why a destination whose pruning is on is not pruned (`prune_blocker/3`).
+  """
+  @type prune_blocker ::
+          :unsupported
+          | :env_overlap
+          | :env_overlap_unknown
+          | :destination_overlap
+          | :destination_unknown
+          | :destination_s3
+          | :not_prunable
+
+  @doc """
+  Why pruning, where it is turned on, can't run on `subject`, or `nil` when
+  it can (#2950). The one rule both retention and the Destinations tab
+  apply, so the tab's "Prunes" badge shows only where a pass would prune.
+  Pure: the caller reads `rows`, every stored destination (enabled or not;
+  anything with `:id`, `:kind` and `:settings`), and passes
+  `Destination.env_location/0` as `env`.
+
+  For a stored destination's `%Config{}`:
+
+    * `:unsupported` - its adapter's `supports/0` lacks `:list` or `:delete`;
+    * `:env_overlap` - it is, contains or is inside `BACKUP_RCLONE_REMOTE`;
+    * `:env_overlap_unknown` - `BACKUP_RCLONE_REMOTE` is set and where it
+      writes can't be told (a plugin's kind) or can't be compared with an
+      rclone remote (an S3 bucket, #2221);
+    * `:destination_overlap` - it overlaps another stored destination (one
+      whose location can't be told overlaps nothing that can).
+
+  For `:env`, the env destination, which may share a place with any of them
+  unseen:
+
+    * `:not_prunable` - `BACKUP_RCLONE_REMOTE` is unset (`env` is `nil`);
+    * `:destination_unknown` - a stored destination's location can't be
+      told (a plugin's);
+    * `:destination_s3` - a stored destination is an S3 bucket, which the
+      remote may name under any name;
+    * `:destination_overlap` - a stored destination overlaps it.
+
+  Whether pruning is turned on at all (a row's `prune`,
+  `BACKUP_RCLONE_REMOTE_PRUNE`) is the caller's to check first.
+  """
+  @spec prune_blocker(Config.t() | :env, [map()], Destination.location() | nil) ::
+          prune_blocker() | nil
+  def prune_blocker(:env, _rows, nil), do: :not_prunable
+
+  def prune_blocker(:env, rows, env) when is_list(rows) do
+    Enum.find_value(rows, fn row -> env_row_blocker(row_location(row), env) end)
+  end
+
+  def prune_blocker(%Config{} = config, rows, env) when is_list(rows) do
+    location = Destination.location(config)
+
+    cond do
+      not Destination.supports?(config, [:list, :delete]) -> :unsupported
+      blocker = env_blocker(location, env) -> blocker
+      overlaps_another?(location, config.id, rows) -> :destination_overlap
+      true -> nil
+    end
+  end
+
+  defp row_location(row),
+    do: Destination.location(%Config{kind: row.kind, settings: row.settings})
+
+  defp env_row_blocker(:unknown, _env), do: :destination_unknown
+  defp env_row_blocker({:s3, _host, _port, _bucket, _prefix}, _env), do: :destination_s3
+
+  defp env_row_blocker(location, env),
+    do: if(Destination.overlap?(location, env), do: :destination_overlap)
+
+  defp env_blocker(_location, nil), do: nil
+  defp env_blocker(:unknown, _env), do: :env_overlap_unknown
+
+  # An S3 bucket and an rclone remote can't be compared: the remote may name
+  # the same bucket under any name (#2221, decided conservative per ADR 0064).
+  defp env_blocker({:s3, _host, _port, _bucket, _prefix}, _env), do: :env_overlap_unknown
+
+  defp env_blocker(location, env),
+    do: if(Destination.overlap?(location, env), do: :env_overlap)
+
+  defp overlaps_another?(:unknown, _id, _rows), do: false
+
+  defp overlaps_another?(location, id, rows) do
+    Enum.any?(rows, &(&1.id != id and Destination.overlap?(location, row_location(&1))))
+  end
+
+  # Whose units the ownership rule (step 4) accepts. On a stored destination,
+  # any run that recorded sending there. On the env destination, which cron
+  # sends to under the same key, only an in-app run of THIS backup directory
+  # (#2950): `origin: :app` and its `dir_id` this directory's `.kiln-dir-id`.
+  # A directory with no id has made no in-app backup, so nothing there is its.
+  defp owner(_dir, %Config{}), do: {:ok, nil}
+
+  defp owner(dir, :env) do
+    case DirId.current(dir) do
+      {:ok, id} -> {:ok, id}
+      {:error, reason} -> {:error, {:dir_id, reason}}
+    end
+  end
+
+  defp prepare_destination(dir, config, owner, opts) do
     now = Keyword.get_lazy(opts, :now, fn -> System.os_time(:second) end)
 
     with {:ok, policy} <- policy(opts),
@@ -1636,19 +1773,33 @@ defmodule KilnCMS.Backups.Retention do
          {:ok, listing} <- list_destination(config, opts),
          inventory = destination_inventory(config.key, listing, local, now),
          {:ok, runs} <- read_runs(stamps(inventory)) do
-      {:ok, destination_plan(inventory, runs, policy, now)}
+      {:ok, destination_plan(inventory, runs, policy, now, dir_id: owner)}
     end
   rescue
     error -> {:error, {:crashed, error.__struct__}}
   end
 
+  # A hung listing costs this destination's retention, never the whole step
+  # (#2950): it is a skip, as any listing that fails is.
   defp list_destination(config, opts) do
-    case Destination.call(config, :list, [], Keyword.take(opts, [:timeout, :deadline])) do
+    started = System.monotonic_time(:millisecond)
+    deadline = Destination.call_deadline(opts[:deadline], list_call_ms(opts))
+    result = Destination.call(config, :list, [], deadline: deadline)
+
+    Logger.info(
+      "Retention on #{config.key}: the listing took " <>
+        "#{System.monotonic_time(:millisecond) - started} ms"
+    )
+
+    case result do
       {:ok, listing} when is_list(listing) -> {:ok, listing}
       {:ok, _other} -> {:error, {:list, "the adapter's listing is not a list"}}
       {:error, reason} -> {:error, {:list, reason}}
     end
   end
+
+  defp list_call_ms(opts), do: Keyword.get(opts, :list_call_ms, @list_call_ms)
+  defp delete_call_ms(opts), do: Keyword.get(opts, :delete_call_ms, @delete_call_ms)
 
   @doc """
   The inventory of a destination keyed `key`, from its `list/1` output, with
@@ -1729,15 +1880,25 @@ defmodule KilnCMS.Backups.Retention do
   inventory's key; `unowned` the units the rules would have deleted but that
   have no such record (they are in `keep` too, with the reason
   `{:not_sent_here, rule_reason}`).
+
+  `opts[:dir_id]`, when set (the env destination, #2950), narrows that
+  record to an in-app run (`origin: :app`) whose `dir_id` is this one: cron
+  sends to the env remote under the same key, and its runs never make a
+  file there deletable.
   """
-  @spec destination_plan(inventory(), %{String.t() => map()}, Policy.t(), integer()) :: %{
-          delete: [entry()],
-          keep: [entry()],
-          unowned: [entry()]
-        }
-  def destination_plan(%{key: key} = inventory, runs, %Policy{} = policy, now) do
+  @spec destination_plan(inventory(), %{String.t() => map()}, Policy.t(), integer(), keyword()) ::
+          %{
+            delete: [entry()],
+            keep: [entry()],
+            unowned: [entry()]
+          }
+  def destination_plan(%{key: key} = inventory, runs, %Policy{} = policy, now, opts \\ []) do
     plan = plan(inventory, runs, policy, now)
-    {owned, unowned} = Enum.split_with(plan.delete, &sent_here?(runs[&1.stamp], &1.kind, key))
+    dir_id = opts[:dir_id]
+
+    {owned, unowned} =
+      Enum.split_with(plan.delete, &owned?(runs[&1.stamp], &1.kind, key, dir_id))
+
     left = Enum.map(unowned, &%{&1 | reason: {:not_sent_here, &1.reason}})
 
     %{
@@ -1748,6 +1909,13 @@ defmodule KilnCMS.Backups.Retention do
   end
 
   @sent_here ["ok", "pruned"]
+
+  defp owned?(run, kind, key, nil), do: sent_here?(run, kind, key)
+
+  defp owned?(%{origin: :app, dir_id: dir_id} = run, kind, key, dir_id) when is_binary(dir_id),
+    do: sent_here?(run, kind, key)
+
+  defp owned?(_run, _kind, _key, _dir_id), do: false
 
   # The Run of the stamp has an artifact of this kind that it recorded sent
   # to `key` (the artifact, or any of its parts), or pruned there by an
@@ -1771,11 +1939,11 @@ defmodule KilnCMS.Backups.Retention do
   # sidecar. The first delete that fails stops the pass: a store refusing
   # one delete (or hanging on it) would only do so again.
   defp execute_destination(dir, config, plan, opts) do
-    call_opts = Keyword.take(opts, [:timeout, :deadline])
+    bounds = {opts[:deadline], delete_call_ms(opts)}
 
     {deleted, units, stopped} =
       Enum.reduce_while(plan.delete, {[], 0, nil}, fn entry, {deleted, units, nil} ->
-        case remove_remote_safely(dir, config, entry, call_opts) do
+        case remove_remote_safely(dir, config, entry, bounds) do
           {:ok, []} -> {:cont, {deleted, units, nil}}
           {:ok, names} -> {:cont, {[names | deleted], units + 1, nil}}
           {:stop, [], reason} -> {:halt, {deleted, units, reason}}
@@ -1789,10 +1957,10 @@ defmodule KilnCMS.Backups.Retention do
     {:ok, %{deleted: deleted, units: units, unowned: plan.unowned, stopped: stopped}}
   end
 
-  defp remove_remote_safely(dir, config, entry, call_opts) do
+  defp remove_remote_safely(dir, config, entry, bounds) do
     case recheck(dir, entry.stamp) do
       :ok ->
-        remove_remote(config, entry, call_opts)
+        remove_remote(config, entry, bounds)
 
       {:skip, why} ->
         Logger.info(
@@ -1805,12 +1973,16 @@ defmodule KilnCMS.Backups.Retention do
     error -> {:stop, [], {:crashed, error.__struct__}}
   end
 
-  defp remove_remote(config, entry, call_opts) do
+  # Each delete gets its own bound (#2950), worked out right before it. One
+  # killed at the bound may still have removed the file: it is not marked
+  # pruned, and the next pass no longer lists it.
+  defp remove_remote(config, entry, {step_deadline, per_call_ms}) do
     result =
       Enum.reduce_while(entry.files, {:ok, []}, fn name, {:ok, removed} ->
         ref = %{subdir: entry.sub, name: name}
+        deadline = Destination.call_deadline(step_deadline, per_call_ms)
 
-        case Destination.call(config, :delete, [ref], call_opts) do
+        case Destination.call(config, :delete, [ref], deadline: deadline) do
           :ok -> {:cont, {:ok, [name | removed]}}
           {:error, reason} -> {:halt, {:stop, removed, {:delete, name, reason}}}
           other -> {:halt, {:stop, removed, {:delete, name, inspect(other)}}}

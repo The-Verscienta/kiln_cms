@@ -765,6 +765,17 @@ defmodule KilnCMS.Backups do
   def rclone_remote, do: config(:rclone_remote, nil)
 
   @doc """
+  Whether in-app backups prune `rclone_remote/0` (`BACKUP_RCLONE_REMOTE_PRUNE`,
+  default false, #2950): only the backups this backup directory's in-app
+  runs sent there, by the same keep rules as `BACKUP_DIR`, and never while a
+  stored destination could overlap it (`KilnCMS.Backups.Retention`, "On an
+  off-site destination"). `scripts/backup.sh` never reads it: cron never
+  prunes the remote.
+  """
+  @spec rclone_remote_prune?() :: boolean()
+  def rclone_remote_prune?, do: config(:rclone_remote_prune, false) == true
+
+  @doc """
   Local retention in days — the script's `BACKUP_KEEP_DAYS`. A backup older
   than this may be deleted unless a keep rule holds it (the newest verified and
   newest complete backup of each component, a recovery point, one in flight);
@@ -1127,25 +1138,38 @@ defmodule KilnCMS.Backups do
 
   defp retention_entries(notices) do
     {local, destination} = Enum.split_with(notices, &(dir_scope(&1.scope) != nil))
-    live_dirs = live_dir_ids(local)
+    # The env destination's notices carry a directory too (#2950).
+    live_dirs = live_dir_ids(notices)
     destinations = pruned_destinations(destination)
 
     # The app's own lines first, then cron's.
     local =
       for n <- Enum.sort_by(local, &(dir_scope(&1.scope) == :cron)),
-          is_nil(n.dir_id) or is_nil(live_dirs) or n.dir_id in live_dirs do
+          live_dir?(n, live_dirs) do
         retention_entry(n, dir_scope(n.scope), nil)
       end
 
+    # An env notice is `"<key>@<dir id>"` (#2950): the key decides whether it
+    # is still pruned, the directory whether a live node still has it.
     destination =
       for n <- destination,
-          is_nil(destinations) or Map.has_key?(destinations, n.scope) do
-        label = if destinations, do: Map.fetch!(destinations, n.scope), else: n.label
-        retention_entry(n, {:destination, n.scope}, label || n.label || n.scope)
+          key = KilnCMS.Backups.Notices.env_key_of(n.scope),
+          still_pruned?(key, destinations),
+          live_dir?(n, live_dirs) do
+        label = if destinations, do: Map.fetch!(destinations, key), else: n.label
+        retention_entry(n, {:destination, key}, label || n.label || key)
       end
 
     local ++ Enum.sort_by(destination, & &1.at, {:desc, DateTime})
   end
+
+  # A notice with no directory is always shown, as is every one when the
+  # live directories (or the pruned destinations) couldn't be read.
+  defp live_dir?(notice, live_dirs),
+    do: is_nil(notice.dir_id) or is_nil(live_dirs) or notice.dir_id in live_dirs
+
+  defp still_pruned?(_key, nil), do: true
+  defp still_pruned?(key, destinations), do: Map.has_key?(destinations, key)
 
   # A backup directory's scope: the app's own prune, or the host's cron prune
   # (#3003); nil for a destination's.
@@ -1171,8 +1195,8 @@ defmodule KilnCMS.Backups do
   # The directory ids live nodes report in their heartbeats over the last
   # day, and this node's own; nil (show everything) when they can't be read
   # or nothing needs them.
-  defp live_dir_ids(local) do
-    if Enum.any?(local, & &1.dir_id) do
+  defp live_dir_ids(notices) do
+    if Enum.any?(notices, & &1.dir_id) do
       case list_live_node_beats(86_400, actor: system(), authorize_with: :error) do
         {:ok, beats} ->
           own =
@@ -1190,7 +1214,8 @@ defmodule KilnCMS.Backups do
     end
   end
 
-  # `%{key => label}` of the destinations retention still runs on; nil when
+  # `%{key => label}` of the destinations retention still runs on, the env
+  # remote included while BACKUP_RCLONE_REMOTE_PRUNE is on (#2950); nil when
   # they can't be read or nothing needs them.
   defp pruned_destinations([]), do: nil
 
@@ -1199,12 +1224,19 @@ defmodule KilnCMS.Backups do
       {:ok, rows} ->
         for row <- rows,
             row.enabled and row.prune,
-            into: %{},
+            into: pruned_env(),
             do: {DestinationConfig.key(row), KilnCMS.Backups.Redact.text(row.name)}
 
       {:error, error} ->
         notices_unreadable(error)
         nil
+    end
+  end
+
+  defp pruned_env do
+    case rclone_remote_prune?() && KilnCMS.Backups.Destination.env_destination() do
+      %{"key" => key, "label" => label} -> %{key => label}
+      _off_or_unset -> %{}
     end
   end
 

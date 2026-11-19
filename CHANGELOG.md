@@ -62,6 +62,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Backups: `BACKUP_RCLONE_REMOTE_PRUNE=true` lets in-app backups prune the env remote (only what this backup directory's in-app runs sent there); each retention list/delete call gets its own time limit; the Destinations "Prunes" badge shows only when pruning can run.**
+  ([#3119](https://github.com/The-Verscienta/kiln_cms/pull/3119) · [long form](docs/changelog/unreleased.md#backup-destination-retention-gaps))
+
 - **idna 8.0.0 fixes EEF-CVE-2026-117678: a long `xn--` label in an email address's domain no longer costs super-linear CPU when Swoosh encodes it to send mail.**
   ([#3121](https://github.com/The-Verscienta/kiln_cms/pull/3121) · [long form](docs/changelog/unreleased.md#idna-punycode-length-advisory))
 
