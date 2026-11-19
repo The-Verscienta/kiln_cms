@@ -63,7 +63,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **idna 8.0.0 fixes EEF-CVE-2026-117678: a long `xn--` label in an email address's domain no longer costs super-linear CPU when Swoosh encodes it to send mail.**
-  ([long form](docs/changelog/unreleased.md#idna-punycode-length-advisory))
+  ([#3121](https://github.com/The-Verscienta/kiln_cms/pull/3121) · [long form](docs/changelog/unreleased.md#idna-punycode-length-advisory))
 
 - **A host `backup.sh prune` that skips or can't finish now shows on the Backups page and Home (it writes `.kiln-prune-status.json`), and the app no longer deletes a local backup whose stale hold marker it couldn't remove.**
   ([#3117](https://github.com/The-Verscienta/kiln_cms/pull/3117) · [long form](docs/changelog/unreleased.md#backup-local-retention-gaps))
