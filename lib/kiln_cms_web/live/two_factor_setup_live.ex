@@ -540,7 +540,7 @@ defmodule KilnCMSWeb.TwoFactorSetupLive do
           phx-hook="PasskeyEnroll"
           class="card card-pad space-y-3"
         >
-          <h2 class="text-lg font-medium">{gettext("Passkey")}</h2>
+          <h2 class="text-lg font-medium">{gettext("Passkeys")}</h2>
           <p class="text-sm text-base-content/70">
             {gettext(
               "Sign in with your device's fingerprint, face, or PIN. A passkey counts as two factors on its own."
