@@ -31,14 +31,28 @@ defmodule KilnClient do
   into that one request last (via `Req.merge/2`), after the defaults and the
   configured `req_options`. Use it to bound a call that must not hang:
 
-      KilnClient.semantic_search("posts", q, req: [receive_timeout: 1_500, retry: false])
+      KilnClient.semantic_search("posts", q, req: [receive_timeout: 1_500])
 
   A degraded embedding backend stalls the semantic routes without failing
   them (measured at ~70s per call on a production instance that still
   answered 200 — far too late to be useful). Callers with a keyword fallback
   should bound `semantic_search/3` and `search/2` well above their healthy
-  latency and skip retries: retrying a timeout only multiplies load on a
-  backend that is already struggling.
+  latency: retrying a timeout only multiplies load on a backend that is
+  already struggling.
+
+  ## Retries
+
+  The client's own retries are the only ones it makes: `artifact/3` retries
+  a cold-cache 503 once, and `sync/1` (or `sync_page/2` with `:retries`)
+  retries a 503 page. Every request otherwise goes out once — Req's own
+  retry step is off (`retry: false`), so a 408, 429, 5xx or transport error
+  (`:closed`, `:econnrefused`, `:timeout`) comes back as the error on the
+  first attempt. To have Req retry, opt back in per call or for every
+  request:
+
+      KilnClient.list("posts", req: [retry: :transient, max_retries: 2])
+
+      config :kiln_client, req_options: [retry: :safe_transient]
 
   ## Published-only by default
 
@@ -312,9 +326,9 @@ defmodule KilnClient do
   Hybrid (keyword + semantic) search at `/api/search`.
 
   Options: `:limit` (server caps at 25), `:locale`, `:category` (slug),
-  `:facets` (boolean), `:req` (worth a bound + `retry: false` here too — the
-  semantic leg stalls when the embedding backend degrades, see the module
-  doc). Returns the raw response map — sections under
+  `:facets` (boolean), `:req` (worth a `receive_timeout` bound here too —
+  the semantic leg stalls when the embedding backend degrades, see the
+  module doc). Returns the raw response map — sections under
   `"results"` (`"pages"`, `"posts"`, `"entries"`, `"categories"`, `"tags"`,
   `"tag_groups"`),
   plus `"facets"` when requested, and a `"suggestion"` ("did you mean") on
@@ -352,7 +366,9 @@ defmodule KilnClient do
   republished).
 
   A cold cache answers 503; this retries once after `:retry_delay_ms`
-  (default 2000) before giving up. Pass `retry: false` to fail fast.
+  (default 2000) before giving up, so a persistent 503 costs exactly two
+  requests. Pass `retry: false` to fail fast on the first. Other errors are
+  returned at once (see "Retries" in the module doc).
   """
   @spec artifact(String.t(), String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def artifact(plural, slug, opts \\ []) do
@@ -659,7 +675,9 @@ defmodule KilnClient do
   (`"json"` default) for a new sync — a cursor carries its own; `:limit`
   (items per page, max 500); `:retries` (default 3) and `:retry_delay_ms`
   (default 2000) for a page answering 503 while a just-published document's
-  artifact compiles; `:req`.
+  artifact compiles — a page is requested at most `:retries` + 1 times, and
+  any other error is returned at once (see "Retries" in the module doc);
+  `:req`.
 
   `{:error, %KilnClient.Error{code: "invalid_cursor"}}` (a 400, so `reason:
   :validation`) means the cursor can no longer be honoured (the server's secret was
@@ -1551,7 +1569,12 @@ defmodule KilnClient do
       method: method,
       url: base_url <> path,
       headers: [{"accept", @json_api}],
-      receive_timeout: 15_000
+      receive_timeout: 15_000,
+      # The client's own retries (`artifact/3`, `sync/1`) are the only ones:
+      # Req's default `:safe_transient` would retry every GET on 408/429/5xx
+      # and transport errors underneath them, multiplying requests and
+      # backoff. Callers opt back in via `req_options` or a per-call `:req`.
+      retry: false
     ]
     |> Keyword.merge(opts)
     |> maybe_auth(key)

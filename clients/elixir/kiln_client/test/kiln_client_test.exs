@@ -17,6 +17,24 @@ defmodule KilnClientTest do
 
   defp empty_doc, do: %{"data" => []}
 
+  # Answers every request with `status` and counts them, so a test can prove
+  # how many requests one call made (#2730: Req's own retry stays off).
+  defp stub_status(status, body \\ "{}") do
+    {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+    Req.Test.stub(KilnClient, fn conn ->
+      Agent.update(counter, &(&1 + 1))
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.send_resp(status, body)
+    end)
+
+    counter
+  end
+
+  defp requests(counter), do: Agent.get(counter, & &1)
+
   describe "list/2" do
     test "reads the /published feed by default and flattens the document" do
       stub_doc(%{
@@ -295,15 +313,22 @@ defmodule KilnClientTest do
       assert_received {:request, "/api/content/posts/hello", %{"surface" => "json"}}
     end
 
+    test "a persistent 503 costs exactly two requests" do
+      counter = stub_status(503)
+
+      assert {:error, %KilnClient.Error{reason: :server, status: 503}} =
+               KilnClient.artifact("posts", "hello", retry_delay_ms: 0)
+
+      assert requests(counter) == 2
+    end
+
     test "retry: false fails fast on 503" do
-      Req.Test.stub(KilnClient, fn conn ->
-        conn
-        |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.send_resp(503, "{}")
-      end)
+      counter = stub_status(503)
 
       assert {:error, %KilnClient.Error{reason: :server, status: 503}} =
                KilnClient.artifact("posts", "hello", retry: false)
+
+      assert requests(counter) == 1
     end
   end
 
@@ -544,17 +569,47 @@ defmodule KilnClientTest do
 
       assert {:error,
               %KilnClient.Error{reason: :rate_limited, retry_after: 7, code: "rate_limited"}} =
-               KilnClient.search("kiln", req: [retry: false])
+               KilnClient.search("kiln")
+    end
+
+    # #2730: Req's default `:safe_transient` retry used to resend every
+    # read on 408/429/5xx and transport errors, under the client's own 503
+    # loops. A plain read now goes out once.
+    for status <- [408, 429, 500, 503] do
+      test "a plain read answering #{status} makes exactly one request" do
+        counter = stub_status(unquote(status))
+
+        assert {:error, %KilnClient.Error{status: unquote(status)}} = KilnClient.list("posts")
+        assert requests(counter) == 1
+      end
+    end
+
+    test "a caller can opt back into Req's retry per call" do
+      counter = stub_status(503)
+
+      assert {:error, %KilnClient.Error{status: 503}} =
+               KilnClient.list("posts",
+                 req: [retry: :transient, retry_delay: 0, max_retries: 1]
+               )
+
+      assert requests(counter) == 2
     end
 
     test "a read with no response is a :transport error carrying the exception" do
-      Req.Test.stub(KilnClient, &Req.Test.transport_error(&1, :econnrefused))
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      Req.Test.stub(KilnClient, fn conn ->
+        Agent.update(counter, &(&1 + 1))
+        Req.Test.transport_error(conn, :econnrefused)
+      end)
 
       assert {:error,
               %KilnClient.Error{
                 reason: :transport,
                 exception: %Req.TransportError{reason: :econnrefused}
-              }} = KilnClient.list("posts", req: [retry: false])
+              }} = KilnClient.list("posts")
+
+      assert requests(counter) == 1
     end
 
     test "an invalid sync cursor is a :validation error with its code" do
