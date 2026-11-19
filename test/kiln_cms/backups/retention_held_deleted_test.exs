@@ -1,3 +1,10 @@
+defmodule KilnCMS.Backups.RetentionHeldDeletedTest.NoImport do
+  @moduledoc false
+  # The `:importer` seam: imports nothing, so a backup on disk stays
+  # unrecorded (no Run row), as one whose import keeps failing is.
+  def run(_dir), do: {:ok, %{imported: 0, pending: 0, skipped: 0, failed: 0, deferred: 0}}
+end
+
 defmodule KilnCMS.Backups.RetentionHeldDeletedTest do
   @moduledoc """
   A held backup deleted outside the app (#2931): at each hold sync, a unit a
@@ -242,6 +249,94 @@ defmodule KilnCMS.Backups.RetentionHeldDeletedTest do
       refute_received {:notified, _, _}
       refute_received {[:kiln_cms, :backups, :hold, :deleted_outside], _, _, _}
       assert File.dir?(Path.join([ctx.dir, "db", Artifact.hold_name(@older)]))
+    end
+  end
+
+  # #3004: a stale hold the sync can't remove keeps its unit for that pass.
+  describe "a stale hold that can't be removed" do
+    setup ctx do
+      config = Application.get_env(:kiln_cms, KilnCMS.Backups)
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.put(config, :importer, KilnCMS.Backups.RetentionHeldDeletedTest.NoImport)
+      )
+
+      newest(ctx.dir)
+      # Expired and unrecorded: the plan deletes it.
+      dump(ctx.dir, @old, 400)
+      :ok
+    end
+
+    test "keeps an unrecorded unit, says so, and it is never reported deleted outside",
+         ctx do
+      stuck = Path.join([ctx.dir, "db", Artifact.hold_name(@old)])
+      File.mkdir_p!(stuck)
+
+      log =
+        capture_log([level: :warning], fn ->
+          assert {:ok, %{deleted: deleted, stopped: nil, kept: kept}} =
+                   Retention.run(ctx.dir, notify: ctx.notify)
+
+          refute "kiln-db-#{@old}.dump" in deleted
+          assert kept == [%{stamp: @old, kind: :db, reason: {:not_regular, :directory}}]
+        end)
+
+      assert log =~
+               "Retention kept db backup #{@old}: its stale hold marker " <>
+                 "db/kiln-#{@old}.hold couldn't be removed (a directory, not a regular file)"
+
+      assert File.exists?(Path.join([ctx.dir, "db", "kiln-db-#{@old}.dump"]))
+      assert Backups.get_run_by_stamp!(@old, actor: Backups.system()) == nil
+
+      kept = [%{stamp: @old, kind: :db, reason: {:not_regular, :directory}}]
+
+      assert Retention.describe({:stale_holds, kept}) ==
+               "a stale hold marker it couldn't remove kept db backup #{@old} " <>
+                 "(db/kiln-#{@old}.hold: a directory, not a regular file)"
+
+      # Fixed by hand: the sync has nothing to report, and the next pass
+      # deletes the unit.
+      File.rm_rf!(stuck)
+      assert {:ok, _} = sync(ctx)
+      refute_received {:notified, _, _}
+
+      assert {:ok, %{deleted: deleted, kept: []}} = Retention.run(ctx.dir, notify: ctx.notify)
+      assert "kiln-db-#{@old}.dump" in deleted
+      assert {:ok, _} = sync(ctx)
+      refute_received {:notified, _, _}
+    end
+
+    test "a hold the user can't remove (permissions) keeps it too", ctx do
+      hold!(ctx.dir, "db", @old)
+      db = Path.join(ctx.dir, "db")
+      File.chmod!(db, 0o555)
+      on_exit(fn -> File.chmod(db, 0o755) end)
+
+      result = Retention.run(ctx.dir, notify: ctx.notify)
+      File.chmod!(db, 0o755)
+
+      if hold?(ctx.dir, "db", @old) do
+        assert {:ok, %{kept: [%{stamp: @old, kind: :db, reason: {:remove, :eacces}}]}} = result
+        assert File.exists?(Path.join([ctx.dir, "db", "kiln-db-#{@old}.dump"]))
+      else
+        # Running as root: permissions don't bind, so there is nothing to test.
+        :ok
+      end
+
+      refute_received {:notified, _, _}
+    end
+
+    test "a hold that appears before the delete keeps the unit (the backstop)", ctx do
+      before_unit = fn %{stamp: stamp, sub: sub} ->
+        File.write!(Path.join([ctx.dir, sub, Artifact.hold_name(stamp)]), "")
+      end
+
+      assert {:ok, %{deleted: [], kept: []}} =
+               Retention.run(ctx.dir, notify: ctx.notify, before_unit: before_unit)
+
+      assert File.exists?(Path.join([ctx.dir, "db", "kiln-db-#{@old}.dump"]))
     end
   end
 

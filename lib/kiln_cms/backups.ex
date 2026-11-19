@@ -680,10 +680,13 @@ defmodule KilnCMS.Backups do
 
   @typedoc """
   Retention that was skipped or stopped part-way over one place (#2487), as
-  `status/0`'s `retention` lists it. See `KilnCMS.Backups.Notice`.
+  `status/0`'s `retention` lists it: the app's own prune of a backup
+  directory (`:local`), the host's `backup.sh prune` of one (`:cron`,
+  #3003, `KilnCMS.Backups.PruneStatus`), or a destination. See
+  `KilnCMS.Backups.Notice`.
   """
   @type retention_notice :: %{
-          scope: :local | {:destination, String.t()},
+          scope: :local | :cron | {:destination, String.t()},
           label: String.t() | nil,
           outcome: :skipped | :stopped,
           reason: String.t() | nil,
@@ -1123,13 +1126,15 @@ defmodule KilnCMS.Backups do
   defp retention_entries([]), do: []
 
   defp retention_entries(notices) do
-    {local, destination} = Enum.split_with(notices, &local_scope?(&1.scope))
+    {local, destination} = Enum.split_with(notices, &(dir_scope(&1.scope) != nil))
     live_dirs = live_dir_ids(local)
     destinations = pruned_destinations(destination)
 
+    # The app's own lines first, then cron's.
     local =
-      for n <- local, is_nil(n.dir_id) or is_nil(live_dirs) or n.dir_id in live_dirs do
-        retention_entry(n, :local, nil)
+      for n <- Enum.sort_by(local, &(dir_scope(&1.scope) == :cron)),
+          is_nil(n.dir_id) or is_nil(live_dirs) or n.dir_id in live_dirs do
+        retention_entry(n, dir_scope(n.scope), nil)
       end
 
     destination =
@@ -1142,9 +1147,13 @@ defmodule KilnCMS.Backups do
     local ++ Enum.sort_by(destination, & &1.at, {:desc, DateTime})
   end
 
-  defp local_scope?("local"), do: true
-  defp local_scope?("local:" <> _id), do: true
-  defp local_scope?(_other), do: false
+  # A backup directory's scope: the app's own prune, or the host's cron prune
+  # (#3003); nil for a destination's.
+  defp dir_scope("local"), do: :local
+  defp dir_scope("local:" <> _id), do: :local
+  defp dir_scope("cron"), do: :cron
+  defp dir_scope("cron:" <> _id), do: :cron
+  defp dir_scope(_other), do: nil
 
   defp retention_entry(notice, scope, label) do
     %{

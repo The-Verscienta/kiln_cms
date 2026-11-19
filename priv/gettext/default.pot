@@ -23852,6 +23852,16 @@ msgstr ""
 msgid "The home page could not be created."
 msgstr ""
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "The host's backup.sh prune on %{date} kept what it couldn't check or delete: %{reason}. Those backups stay until this is fixed."
+msgstr ""
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "The host's backup.sh prune was skipped on %{date}: %{reason}. Nothing was deleted, so local backups will build up until this is fixed."
+msgstr ""
+
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
 msgid "The human-verification check could not load."

@@ -7,6 +7,24 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="backup-local-retention-gaps"></a>
+
+- **Two local retention gaps (#3003, #3004).**
+  `scripts/backup.sh prune` printed a skipped or partial prune to stderr
+  only, so it reached the cron log and nowhere else. It now writes
+  `$BACKUP_DIR/.kiln-prune-status.json` (when, outcome `ok`, `skipped` or
+  `partial`, and a short reason) at the end of every prune, and the app's
+  marker sync turns a skip into a retention notice on the Backups page and
+  Home ("The host's backup.sh prune was skipped on …"); the next clean
+  cron prune clears it. Cron's notice and the app's own prune notice are
+  kept apart, so neither clears the other. And the app deleted a local
+  backup even when it couldn't remove that backup's stale `.hold` marker
+  (for example a directory or a read-only file in its place), then later
+  reported its own delete as "deleted outside the app"; it now keeps the
+  backup, logs why, and shows a "Retention stopped part-way" notice until
+  the marker is fixed.
+  ([#3003](https://github.com/The-Verscienta/kiln_cms/issues/3003), [#3004](https://github.com/The-Verscienta/kiln_cms/issues/3004))
+
 <a id="backup-heartbeat-lock-gaps"></a>
 
 - **Heartbeat and lock gaps (#3078, #3091, #3095).**

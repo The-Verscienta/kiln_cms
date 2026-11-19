@@ -197,6 +197,35 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
     end
   end
 
+  # #3003: the host's `backup.sh prune` leaves its outcome in the directory.
+  describe "the cron prune's status file" do
+    test "becomes the directory's cron notice, also while a chain holds the lock",
+         %{dir: dir} do
+      cron_backup!(dir, @cron)
+      at = DateTime.utc_now() |> DateTime.add(-60) |> DateTime.truncate(:second)
+
+      File.write!(
+        Path.join(dir, ".kiln-prune-status.json"),
+        Jason.encode!(%{
+          version: 1,
+          at: DateTime.to_iso8601(at),
+          outcome: "skipped",
+          reason: "could not list #{dir}/.work",
+          warnings: 1
+        })
+      )
+
+      held_lock!()
+      assert :ok = perform_job(MarkerSyncWorker, %{})
+
+      assert [%{kind: :retention, scope: "cron", outcome: :skipped, at: noticed, reason: reason}] =
+               Backups.list_backup_notices!(actor: Backups.system())
+
+      assert DateTime.compare(noticed, at) == :eq
+      assert reason == "could not list #{dir}/.work"
+    end
+  end
+
   describe "fails closed" do
     test "an import that fails writes and removes no marker", %{dir: dir} do
       cron_backup!(dir, @cron)

@@ -2024,6 +2024,7 @@ defmodule KilnCMS.Backups.Steps do
           )
       end
 
+    rec = log_held_kept(rec, result)
     Notices.retention({:local, ctx.dir}, retention_outcome(result), stamp: ctx.stamp)
 
     # One `offsite` job per destination (#2220), part k for the k-th. With
@@ -2036,7 +2037,25 @@ defmodule KilnCMS.Backups.Steps do
   defp removed(names, units),
     do: "Retention removed #{length(names)} file(s) from #{units} backup(s)"
 
-  # A retention pass's result as `Notices.retention/3` takes it.
+  # Units kept because their stale `.hold` couldn't be removed (#3004).
+  defp log_held_kept(rec, {:ok, %{kept: [_ | _] = kept}}),
+    do:
+      Recorder.log(
+        rec,
+        :warn,
+        "prune",
+        "Retention kept: #{Retention.describe({:stale_holds, kept})}"
+      )
+
+  defp log_held_kept(rec, _result), do: rec
+
+  # A retention pass's result as `Notices.retention/3` takes it. A pass that
+  # kept units over a stale `.hold` it couldn't remove (#3004) is a stop, so
+  # the kept units show until a pass gets them out of the way; a real stop
+  # says more, and wins.
+  defp retention_outcome({:ok, %{stopped: nil, kept: [_ | _] = kept, deleted: names}}),
+    do: {:stopped, {:stale_holds, kept}, length(names)}
+
   defp retention_outcome({:ok, %{stopped: nil}}), do: :ok
 
   defp retention_outcome({:ok, %{deleted: names, stopped: reason}}),

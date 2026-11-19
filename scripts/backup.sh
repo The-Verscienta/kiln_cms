@@ -133,8 +133,18 @@ die() {
   exit 1
 }
 
+# While `prune` runs (#3003), each warning is also counted, and the first one
+# kept, for the status file it leaves (write_prune_status). A warning inside a
+# command substitution runs in a subshell and isn't counted.
+PRUNE_WARNINGS=""
+PRUNE_FIRST_WARNING=""
+
 warn() {
   echo "warning: $*" >&2
+  if [ -n "$PRUNE_WARNINGS" ]; then
+    PRUNE_WARNINGS=$((PRUNE_WARNINGS + 1))
+    [ -n "$PRUNE_FIRST_WARNING" ] || PRUNE_FIRST_WARNING="$*"
+  fi
 }
 
 require() {
@@ -2109,10 +2119,21 @@ cmd_verify() {
 #
 # Then the manifest temporary files at BACKUP_DIR's root that a writer stopped
 # between its write and its rename left behind (prune_manifest_partials), the
-# app's abandoned backup-directory id temporary files (prune_dir_id_temps), and
-# the files kept after their off-site copy was refused, once they are older
-# than KEEP_DAYS (prune_refused, #2484). Those are no unit's member, the one
-# kind of such file prune deletes.
+# app's abandoned backup-directory id temporary files and this script's
+# abandoned prune status temporary files (prune_dir_id_temps), and the files
+# kept after their off-site copy was refused, once they are older than
+# KEEP_DAYS (prune_refused, #2484). Those are no unit's member, the one kind
+# of such file prune deletes.
+#
+# Last, the status file (#3003): `$BACKUP_DIR/.kiln-prune-status.json`, which
+# says how this prune went, since its warnings otherwise reach only the cron
+# log (see write_prune_status). The app's marker sync reads it
+# (KilnCMS.Backups.PruneStatus) and shows a prune that was skipped or left
+# something in place on the Backups page and Home, until a clean prune here.
+# The app's own prune writes no such file: it records its outcome itself
+# (KilnCMS.Backups.Notices), as a notice of its own, so neither clears the
+# other's. A change to the file's name or fields updates PruneStatus and
+# test/scripts/backup_script_test.exs in the same pull request (ADR 0042).
 
 PART_NUM_ERE='(0[1-9]|[1-9][0-9]|[1-9][0-9]{2,})'
 
@@ -2375,13 +2396,16 @@ MANIFEST_PARTIAL_ERE='^manifest\.json\.[0-9]+(-[0-9]+)?\.partial$'
 # writes, links to `.kiln-dir-id` and removes in a moment, so one that old was
 # left by a node stopped in between. This script never writes one, but a host
 # that backs up only with cron gets them from each app node's heartbeat and
-# never runs the app's own sweep. Same rules as prune_manifest_partials: only
-# regular files of exactly that name, a file of unknown age is kept, each
-# removal is echoed, and a failure is warned about.
+# never runs the app's own sweep. Also this script's own prune status
+# temporary files, `.kiln-prune-status.json.<pid>-<random>.tmp`
+# (write_prune_status), left by a prune stopped between its write and its
+# rename. Same rules as prune_manifest_partials: only regular files of exactly
+# those names, a file of unknown age is kept, each removal is echoed, and a
+# failure is warned about.
 prune_dir_id_temps() {
   local path old
-  for path in "$BACKUP_DIR"/.kiln-dir-id.*.tmp; do
-    [[ "${path##*/}" =~ $DIR_ID_TEMP_ERE ]] || continue
+  for path in "$BACKUP_DIR"/.kiln-dir-id.*.tmp "$BACKUP_DIR"/.kiln-prune-status.json.*.tmp; do
+    [[ "${path##*/}" =~ $DIR_ID_TEMP_ERE ]] || [[ "${path##*/}" =~ $PRUNE_STATUS_TEMP_ERE ]] || continue
     if ! old="$(find "$path" -prune -type f -mmin "+${PARTIAL_GRACE_MIN}" -print)"; then
       warn "could not check the age of $path; kept it"
       continue
@@ -2396,6 +2420,56 @@ prune_dir_id_temps() {
 }
 
 DIR_ID_TEMP_ERE='^\.kiln-dir-id\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$'
+PRUNE_STATUS_TEMP_ERE='^\.kiln-prune-status\.json\.[0-9]+-[0-9]+\.tmp$'
+
+# The prune status file (#3003, KilnCMS.Backups.PruneStatus reads it):
+#
+#   {"version": 1, "at": "<UTC ISO 8601>", "outcome": "ok" | "skipped" | "partial",
+#    "reason": null | "<the first warning>", "warnings": <count>}
+#
+# `skipped`: nothing was pruned (a directory that can't be listed, a `date`
+# that can't count a day ahead); `reason` says why. `partial`: the prune ran,
+# but warned (a unit whose partials it couldn't look for, a file it couldn't
+# remove, ...); `reason` is the first warning and `warnings` how many there
+# were. `ok`: neither. It holds no secret: the warnings name paths in
+# BACKUP_DIR, never a connection string. Written to a temporary file of this
+# run's own (`.kiln-prune-status.json.<pid>-<random>.tmp`, created
+# exclusively) and renamed into place, so a reader never sees half of it.
+# Failing to write it is a warning on stderr and nothing more: the prune's own
+# outcome stands. Nothing is written when BACKUP_DIR doesn't exist.
+PRUNE_STATUS_FILE=".kiln-prune-status.json"
+
+write_prune_status() {
+  # $1 = outcome, $2 = reason (may be empty), $3 = the number of warnings
+  local out="$BACKUP_DIR/$PRUNE_STATUS_FILE" tmp="" reason="null" _
+  [ -d "$BACKUP_DIR" ] || return 0
+  [ -n "${2:-}" ] && reason="\"$(json_escape "$2")\""
+  for _ in 1 2 3 4 5; do
+    tmp="${out}.$$-$((RANDOM + 100000)).tmp"
+    if [ ! -e "$tmp" ] && [ ! -L "$tmp" ] && (set -C && : > "$tmp") 2>/dev/null; then
+      break
+    fi
+    tmp=""
+  done
+  if [ -z "$tmp" ]; then
+    echo "warning: could not write $out" >&2
+    return 0
+  fi
+  if printf '{"version": 1, "at": "%s", "outcome": "%s", "reason": %s, "warnings": %s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$reason" "${3:-0}" > "$tmp" && mv -f -- "$tmp" "$out"; then
+    return 0
+  fi
+  rm -f -- "$tmp"
+  echo "warning: could not write $out" >&2
+}
+
+# A prune that deletes nothing at all: the warning, the status, and stop
+# counting. $1 = why.
+prune_skipped() {
+  warn "$1 — nothing was pruned"
+  write_prune_status skipped "$1" "$PRUNE_WARNINGS"
+  PRUNE_WARNINGS=""
+}
 
 # The files kept after their off-site copy was refused (#2484, keep_refused),
 # in their own kind's directory ($1 = db names, $2 = media names):
@@ -2443,6 +2517,8 @@ cmd_prune() {
   echo "==> Pruning backups older than ${KEEP_DAYS} days"
   local kind dir names stamp members newest fresh name db_names="" media_names=""
   local work="$BACKUP_DIR/.work"
+  PRUNE_WARNINGS=0
+  PRUNE_FIRST_WARNING=""
 
   # Both listings first: a marker in either directory pins both components,
   # so a directory that can't be listed means nothing is deleted at all.
@@ -2451,7 +2527,7 @@ cmd_prune() {
     [ -d "$dir" ] || continue
     # shellcheck disable=SC2012 # every name is matched against a strict regex below
     if ! names="$(ls -1 "$dir")"; then
-      warn "could not list $dir — nothing was pruned"
+      prune_skipped "could not list $dir"
       return 0
     fi
     if [ "$kind" = db ]; then db_names="$names"; else media_names="$names"; fi
@@ -2466,13 +2542,13 @@ cmd_prune() {
   if [ -e "$work" ] || [ -L "$work" ]; then
     # shellcheck disable=SC2012 # names are only compared whole against a stamp
     if [ ! -d "$work" ] || ! PRUNE_WORK="$(ls -1 "$work")"; then
-      warn "could not list $work — nothing was pruned"
+      prune_skipped "could not list $work"
       return 0
     fi
   fi
 
   if ! PRUNE_FUTURE_LIMIT="$(future_limit)" || [ -z "$PRUNE_FUTURE_LIMIT" ]; then
-    warn "could not work out tomorrow's date with this date(1) — nothing was pruned"
+    prune_skipped "could not work out tomorrow's date with this date(1)"
     return 0
   fi
 
@@ -2512,6 +2588,13 @@ cmd_prune() {
       remove_unit "$dir" "$kind" "$stamp" "$members" || true
     done
   done
+
+  if [ "$PRUNE_WARNINGS" -eq 0 ]; then
+    write_prune_status ok "" 0
+  else
+    write_prune_status partial "$PRUNE_FIRST_WARNING" "$PRUNE_WARNINGS"
+  fi
+  PRUNE_WARNINGS=""
 }
 
 # --- this run's stamp (#2477) -----------------------------------------------

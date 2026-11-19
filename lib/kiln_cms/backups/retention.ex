@@ -133,6 +133,21 @@ defmodule KilnCMS.Backups.Retention do
   Schedule tab show. A unit the app pruned whose Run could not be marked
   (`Recorder.mark_pruned/2` is best-effort) is reported too.
 
+  ### A stale hold that can't be removed (#3004)
+
+  A `.hold` the plan no longer names whose removal fails (a permission
+  error, a busy file, an entry that is not a regular file) keeps its unit
+  for this pass of `run/2`: the unit is left out of the deletes, with a
+  warning naming it and the reason, and `run/2` lists it in `kept`. The
+  prune step turns that into a `:stopped` retention notice and a run log
+  line, so a stuck hold doesn't pin disk unseen. Deleting the unit anyway
+  would leave a hold naming a unit that is gone; with no Run row to mark
+  pruned, the next sync would report the app's own delete as one made
+  outside the app. Right before each unit goes, a `.hold` of it still in
+  its own directory also keeps it (the backstop for the same case).
+  `backup.sh prune` never removes a hold, and keeps every unit that has
+  one, so it has no such case.
+
   ## Fail closed, loudly
 
   Nothing is deleted unless the importer ran (`Importer.run/1`, first, so a
@@ -221,6 +236,7 @@ defmodule KilnCMS.Backups.Retention do
 
   @partial_grace_s 3600
   @day 86_400
+  @log_units 10
   @subs ["db", "media"]
 
   @typedoc "One regular-or-not final file of a unit, as `scan/1` saw it."
@@ -281,6 +297,12 @@ defmodule KilnCMS.Backups.Retention do
           holds: %{db: [String.t()], media: [String.t()]}
         }
 
+  @typedoc """
+  A unit the plan would delete, kept because its stale `.hold` couldn't be
+  removed (#3004): why, as the removal failed.
+  """
+  @type held_kept :: %{stamp: String.t(), kind: :db | :media, reason: term()}
+
   @doc """
   How long a `.partial` counts as a live writer's work: younger, and its unit
   is in flight; older, and the start step's partial sweep removes it once
@@ -291,10 +313,13 @@ defmodule KilnCMS.Backups.Retention do
 
   @doc """
   Import, plan, sync the last-good and hold markers and delete. Returns `{:ok, %{deleted: names, units: count,
-  plan: plan, stopped: nil | reason}}` — `names` are the file names removed,
-  already marked `pruned` on their runs; `stopped` is set when the deleting
-  itself broke off part-way (what was removed by then is still in `names`) —
-  or `{:error, reason}` when retention could not start, with nothing deleted.
+  plan: plan, stopped: nil | reason, kept: kept}}` — `names` are the file
+  names removed, already marked `pruned` on their runs; `stopped` is set when
+  the deleting itself broke off part-way (what was removed by then is still
+  in `names`); `kept` lists the units the plan would delete that were kept
+  because their stale `.hold` couldn't be removed (#3004, see "The hold
+  markers"), as `%{stamp, kind, reason}` — or `{:error, reason}` when
+  retention could not start, with nothing deleted.
 
   Options:
 
@@ -324,14 +349,15 @@ defmodule KilnCMS.Backups.Retention do
              deleted: [String.t()],
              units: non_neg_integer(),
              plan: plan(),
-             stopped: term() | nil
+             stopped: term() | nil,
+             kept: [held_kept()]
            }}
           | {:error, term()}
   def run(dir \\ Backups.dir(), opts \\ []) do
     case prepare(dir, opts) do
       {:ok, {plan, inventory, runs}} ->
         if Keyword.get(opts, :dry_run, false),
-          do: {:ok, %{deleted: [], units: 0, plan: plan, stopped: nil}},
+          do: {:ok, %{deleted: [], units: 0, plan: plan, stopped: nil, kept: []}},
           else: execute(dir, {plan, inventory, runs}, opts)
 
       {:error, reason} ->
@@ -361,6 +387,9 @@ defmodule KilnCMS.Backups.Retention do
   # Whatever was deleted is marked on its runs, even when the deleting stopped
   # part-way. The markers move first: nothing below deletes the newest
   # verified unit, and a cron prune that runs meanwhile sees the new one.
+  # A unit whose stale `.hold` the sync couldn't remove is left out of the
+  # deletes (#3004): deleting it would leave a hold naming a unit that is
+  # gone, which the next sync reports as deleted outside the app.
   defp execute(dir, {plan, inventory, runs}, opts) do
     markers = fn ->
       _ = sync(dir, plan.last_good, opts)
@@ -368,18 +397,48 @@ defmodule KilnCMS.Backups.Retention do
     end
 
     case under_lease(opts, markers) do
-      {:ok, _synced} ->
+      {:ok, stuck} ->
+        {to_delete, kept} = withhold(plan.delete, stuck)
+
         {deleted, units, stopped} =
-          apply_plan(dir, plan, Keyword.take(opts, [:before_unit, :discard]))
+          apply_plan(
+            dir,
+            %{plan | delete: to_delete},
+            Keyword.take(opts, [:before_unit, :discard])
+          )
 
         Recorder.mark_pruned(deleted)
         if stopped, do: stopped(deleted, stopped)
-        {:ok, %{deleted: deleted, units: units, plan: plan, stopped: stopped}}
+        {:ok, %{deleted: deleted, units: units, plan: plan, stopped: stopped, kept: kept}}
 
       {:error, :superseded} = superseded ->
         Logger.info("Backup retention skipped: the prune step no longer holds the backup lock")
         superseded
     end
+  end
+
+  # The plan's deletes without the units whose stale hold is stuck, and those
+  # units, each with a warning: a stuck hold must not pin disk unseen.
+  defp withhold(delete, stuck) when map_size(stuck) == 0, do: {delete, []}
+
+  defp withhold(delete, stuck) do
+    {kept, rest} =
+      Enum.split_with(delete, &Map.has_key?(stuck, {&1.stamp, &1.kind}))
+
+    kept =
+      for entry <- kept do
+        reason = Map.fetch!(stuck, {entry.stamp, entry.kind})
+
+        Logger.warning(
+          "Retention kept #{label(entry)}: its stale hold marker " <>
+            "#{entry.sub}/#{Artifact.hold_name(entry.stamp)} couldn't be removed " <>
+            "(#{hold_reason(reason)}). Remove it by hand so retention can delete the backup"
+        )
+
+        %{stamp: entry.stamp, kind: entry.kind, reason: reason}
+      end
+
+    {rest, kept}
   end
 
   # The marker sync, under the step's lease when it has one (#3041), as the
@@ -463,6 +522,24 @@ defmodule KilnCMS.Backups.Retention do
   def describe(:not_prunable), do: "this destination is never pruned by Kiln"
   def describe(:unsupported), do: "its adapter can't list and delete files"
   def describe({:crashed, module}), do: "it crashed (#{inspect(module)})"
+
+  def describe({:stale_holds, [%{stamp: stamp, kind: kind, reason: reason}]}),
+    do:
+      "a stale hold marker it couldn't remove kept #{kind} backup #{stamp} " <>
+        "(#{Artifact.subdir(kind)}/#{Artifact.hold_name(stamp)}: #{hold_reason(reason)})"
+
+  def describe({:stale_holds, kept}) when is_list(kept) do
+    named =
+      kept
+      |> Enum.take(@log_units)
+      |> Enum.map_join(", ", &"#{&1.kind} backup #{&1.stamp} (#{hold_reason(&1.reason)})")
+
+    more = if length(kept) > @log_units, do: " and #{length(kept) - @log_units} more", else: ""
+
+    "stale hold markers it couldn't remove kept #{length(kept)} backups: #{named}#{more}"
+  end
+
+  def describe({:cron_prune, text}) when is_binary(text), do: text
   def describe(:superseded), do: "this backup step no longer holds the backup lock"
   def describe(reason), do: inspect(reason)
 
@@ -623,6 +700,8 @@ defmodule KilnCMS.Backups.Retention do
   # reported (`[:kiln_cms, :backups, :hold, :failed]`) and stops nothing else.
   # The held units found deleted outside the app are worked out from the
   # scan's holds before any of that, and reported once their `.hold` is gone.
+  # Returns the stale holds that couldn't be removed, `%{{stamp, kind} =>
+  # reason}`, so a prune keeps their units (#3004).
   defp sync_holds(dir, holds, inventory, runs, opts) do
     create = Keyword.get(opts, :create_marker, &create_marker/1)
     gone = held_deleted_candidates(inventory, runs)
@@ -641,20 +720,24 @@ defmodule KilnCMS.Backups.Retention do
       end
     end
 
-    removed =
+    results =
       for kind <- [:db, :media],
-          stamp <- remove_stale_holds(dir, kind, MapSet.new(Map.get(holds, kind, []))),
-          into: MapSet.new(),
-          do: {stamp, kind}
+          {stamp, result} <- remove_stale_holds(dir, kind, MapSet.new(Map.get(holds, kind, []))),
+          do: {{stamp, kind}, result}
+
+    removed = for {unit, :ok} <- results, into: MapSet.new(), do: unit
 
     gone
     |> Enum.filter(&MapSet.member?(removed, {&1.stamp, &1.kind}))
     |> held_deleted(dir, opts)
 
-    :ok
+    for {unit, {:error, reason}} <- results, into: %{}, do: {unit, reason}
   end
 
-  # The stamps of the kind's stale `.hold` markers that are gone now.
+  # The kind's stale `.hold` markers, each with how its removal went: `:ok`
+  # (gone now) or `{:error, reason}`. A directory that can't be listed
+  # removes and names none; a unit there whose hold is still in place is
+  # kept anyway by the check right before its delete (`remove_unless_held/3`).
   # sobelow_skip ["Traversal.FileModule"]
   defp remove_stale_holds(dir, kind, keep) do
     sub = Artifact.subdir(kind)
@@ -664,8 +747,7 @@ defmodule KilnCMS.Backups.Retention do
         for name <- names,
             {:ok, stamp} <- [Artifact.parse_hold_name(name)],
             not MapSet.member?(keep, stamp),
-            remove_marker(Path.join([dir, sub, name]), "#{sub}/#{name}", :hold) == :ok,
-            do: stamp
+            do: {stamp, remove_marker(Path.join([dir, sub, name]), "#{sub}/#{name}", :hold)}
 
       {:error, :enoent} ->
         []
@@ -675,6 +757,11 @@ defmodule KilnCMS.Backups.Retention do
         []
     end
   end
+
+  defp hold_reason({:remove, reason}), do: inspect(reason)
+  defp hold_reason({:not_regular, type}), do: "a #{type}, not a regular file"
+  defp hold_reason({:lstat, reason}), do: "couldn't read it: #{inspect(reason)}"
+  defp hold_reason(reason), do: inspect(reason)
 
   @doc false
   # The held units deleted outside the app (#2931), pure: every
@@ -722,8 +809,6 @@ defmodule KilnCMS.Backups.Retention do
     do: get_in(destinations, ["local", "status"]) == "pruned"
 
   defp local_pruned?(_none), do: false
-
-  @log_units 10
 
   # The report: a warning naming up to ten, a
   # `[:kiln_cms, :backups, :hold, :deleted_outside]` event, and the notice
@@ -819,19 +904,19 @@ defmodule KilnCMS.Backups.Retention do
             )
 
             removal_failed(which, %{marker: label, reason: {:remove, reason}})
-            :error
+            {:error, {:remove, reason}}
         end
 
       {:ok, %{type: type}} ->
         Logger.warning("Left #{label} in place: a #{type}, not a regular file")
         removal_failed(which, %{marker: label, reason: {:not_regular, type}})
-        :error
+        {:error, {:not_regular, type}}
 
       {:error, :enoent} ->
         :ok
 
-      {:error, _unreadable} ->
-        :error
+      {:error, unreadable} ->
+        {:error, {:lstat, unreadable}}
     end
   end
 
@@ -1779,11 +1864,24 @@ defmodule KilnCMS.Backups.Retention do
   defp remove(dir, entry, discard) do
     case recheck(dir, entry.stamp) do
       :ok ->
-        remove_files(dir, entry, discard)
+        remove_unless_held(dir, entry, discard)
 
       {:skip, why} ->
         Logger.info("Retention left #{label(entry)} in place: #{why} since it was planned")
         []
+    end
+  end
+
+  # A `.hold` of the unit, in its own directory, still there (#3004): only one
+  # whose removal failed can be, since the plan never deletes a unit it
+  # holds. `execute/3` leaves those out already; this is the backstop.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp remove_unless_held(dir, entry, discard) do
+    if present?(Path.join([dir, entry.sub, Artifact.hold_name(entry.stamp)])) do
+      Logger.info("Retention left #{label(entry)} in place: it has a .hold marker")
+      []
+    else
+      remove_files(dir, entry, discard)
     end
   end
 

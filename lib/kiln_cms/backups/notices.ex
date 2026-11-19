@@ -5,7 +5,8 @@ defmodule KilnCMS.Backups.Notices do
 
     * `retention/3`, from the prune and off-site steps: a pass that was
       skipped or stopped part-way reports its place; a clean pass over the
-      same place clears it.
+      same place clears it. Also from `KilnCMS.Backups.PruneStatus`, for
+      the host's `backup.sh prune` (#3003).
     * `held_deleted/2`, from retention's hold sync: backups a schedule keeps
       that were deleted outside the app.
 
@@ -35,6 +36,12 @@ defmodule KilnCMS.Backups.Notices do
   notice written while the id couldn't be read doesn't outlive the problem.
   A local retention notice therefore clears only on the next in-app backup
   whose retention runs cleanly in that directory: nothing else looks at it.
+
+  The host's cron prune (`scripts/backup.sh prune`, read through
+  `KilnCMS.Backups.PruneStatus`) has a scope of its own per directory:
+  `"cron:<dir id>"`, or `"cron"` for a directory without an id, cleared the
+  same way (a clean cron prune clears both). It is not the in-app prune's
+  scope, so neither prune clears what the other reported.
   """
 
   require Ash.Query
@@ -50,7 +57,8 @@ defmodule KilnCMS.Backups.Notices do
   @held_deleted_days 8
 
   @typedoc "Where retention ran: a local backup directory, or a stored destination."
-  @type scope :: {:local, Path.t()} | {:destination, String.t(), String.t() | nil}
+  @type scope ::
+          {:local, Path.t()} | {:cron, Path.t()} | {:destination, String.t(), String.t() | nil}
 
   @typedoc "How the pass went."
   @type result :: :ok | {:skipped, term()} | {:stopped, term(), non_neg_integer()}
@@ -67,7 +75,8 @@ defmodule KilnCMS.Backups.Notices do
   notice; `{:skipped, reason}` and `{:stopped, reason, deleted}` report it,
   with `reason` as `KilnCMS.Backups.Retention.describe/1` words it.
 
-  Options: `:stamp`, the backup whose prune it was. Always `:ok`.
+  Options: `:stamp`, the backup whose prune it was; `:at`, when the pass
+  ran (default: now). Always `:ok`.
   """
   @spec retention(scope(), result(), keyword()) :: :ok
   def retention(scope, result, opts \\ []) do
@@ -97,14 +106,17 @@ defmodule KilnCMS.Backups.Notices do
   `{scope, dir_id}`.
   """
   @spec scope_key(scope()) :: {String.t(), String.t() | nil}
-  def scope_key({:local, dir}) do
-    case DirId.current(dir) do
-      {:ok, id} -> {"local:" <> id, id}
-      {:error, _none_or_malformed} -> {"local", nil}
-    end
-  end
+  def scope_key({:local, dir}), do: dir_scope_key("local", dir)
+  def scope_key({:cron, dir}), do: dir_scope_key("cron", dir)
 
   def scope_key({:destination, key, _label}), do: {key, nil}
+
+  defp dir_scope_key(prefix, dir) do
+    case DirId.current(dir) do
+      {:ok, id} -> {prefix <> ":" <> id, id}
+      {:error, _none_or_malformed} -> {prefix, nil}
+    end
+  end
 
   defp write_retention(scope, :ok, _opts) do
     scope |> clear_keys() |> Enum.reduce_while(:ok, &clear_retention/2)
@@ -130,16 +142,19 @@ defmodule KilnCMS.Backups.Notices do
       stamp: opts[:stamp],
       units: [],
       total: nil,
-      at: DateTime.utc_now()
+      at: opts[:at] || DateTime.utc_now()
     })
   end
 
   # A clean local pass also clears `"local"`: a notice written there while the
-  # directory's id couldn't be read would otherwise outlive the problem.
-  defp clear_keys({:local, _dir} = scope) do
+  # directory's id couldn't be read would otherwise outlive the problem. The
+  # same for a clean cron prune and `"cron"`.
+  defp clear_keys({place, _dir} = scope) when place in [:local, :cron] do
+    bare = Atom.to_string(place)
+
     case scope_key(scope) do
-      {"local", nil} -> ["local"]
-      {key, _dir_id} -> [key, "local"]
+      {^bare, nil} -> [bare]
+      {key, _dir_id} -> [key, bare]
     end
   end
 
@@ -156,7 +171,7 @@ defmodule KilnCMS.Backups.Notices do
   end
 
   defp label({:destination, _key, label}), do: label
-  defp label({:local, _dir}), do: nil
+  defp label({_local_or_cron, _dir}), do: nil
 
   defp write_held_deleted(dir, units) do
     {key, dir_id} = scope_key({:local, dir})
