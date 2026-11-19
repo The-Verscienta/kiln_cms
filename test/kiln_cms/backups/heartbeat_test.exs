@@ -120,6 +120,41 @@ defmodule KilnCMS.Backups.HeartbeatTest do
     held
   end
 
+  # A late interrupt record of the chain `at` builds, with the promoted
+  # backup either claiming its start (`claim`, called with the stamp while
+  # the record is blocked) or, with `claim` nil, resuming the interrupted
+  # stamp: the record changes neither `manifest.json` nor `.work/<stamp>`.
+  defp late_record_keeps!(state, at, claim) do
+    blocking_interrupts!()
+    build = if at == :at_finish, do: &at_finish/0, else: &at_dump/0
+    %{stamp: stamp} = exhausted_on_gone_node!(build)
+    work = Backups.work_dir(stamp)
+
+    # A finish that had written its ok manifest: the record would close the
+    # run and remove its work directory.
+    if at == :at_finish,
+      do:
+        :ok = Manifest.write(Backups.dir(), %Manifest{stamp: stamp, ok: true, trigger: "manual"})
+
+    if is_nil(claim) do
+      Repo.query!("UPDATE backup_locks SET waiting_resume_stamp = $1", [stamp])
+    end
+
+    manifest = File.read(Manifest.path(Backups.dir()))
+    Heartbeat.tick(state)
+    assert_receive {:interrupt, task, ^stamp}
+
+    if is_nil(claim),
+      do: assert(%{step: :start, stamp: nil, resume_stamp: ^stamp} = lock()),
+      else: claim.(stamp)
+
+    send(task, :release)
+    assert Interrupts.await_idle() == :ok
+
+    assert File.read(Manifest.path(Backups.dir())) == manifest
+    assert File.dir?(work)
+  end
+
   # The chain run step by step up to its finish step, not yet run.
   defp at_finish do
     {:ok, %{status: :started, chain: chain}} = request()
@@ -392,6 +427,36 @@ defmodule KilnCMS.Backups.HeartbeatTest do
       assert List.last(log).message =~ "Interrupted"
     end
 
+    # #3078: the merge is pinned to the fail's write: a note written on the
+    # run after it (a refused resume) is never replaced.
+    test "a note written on the run before the record runs survives it", %{state: _state} do
+      blocking_interrupts!()
+      %{stamp: stamp, job: job} = at_dump()
+      Repo.update_all(from(j in Oban.Job, where: j.id == ^job.id), set: [state: "discarded"])
+
+      assert {:ok, {:orphaned, _}} = Chain.reap()
+      assert_receive {:interrupt, task, ^stamp}
+
+      noted =
+        Backups.note_run_resume_refused!(run_of(stamp), "no files here", actor: Backups.system())
+
+      Logger.put_module_level(KilnCMS.Backups.Steps, :info)
+      on_exit(fn -> Logger.delete_module_level(KilnCMS.Backups.Steps) end)
+
+      log =
+        capture_log([level: :info], fn ->
+          send(task, :release)
+          assert Interrupts.await_idle() == :ok
+        end)
+
+      assert log =~ "Backup #{stamp}: what its state.json holds was not added to its run"
+      after_task = run_of(stamp)
+      assert after_task.error == noted.error
+      assert after_task.error =~ "Resume refused"
+      assert after_task.log == noted.log
+      assert after_task.updated_at == noted.updated_at
+    end
+
     # #3078: the promoted backup's start has run and moved the lock on: it
     # may be writing, so the late failure manifest is skipped.
     test "a late record skips the failure manifest once the promoted backup has started", %{
@@ -408,6 +473,28 @@ defmodule KilnCMS.Backups.HeartbeatTest do
       send(task, :release)
       assert Interrupts.await_idle() == :ok
       refute match?(%Manifest{stamp: ^stamp}, Manifest.read(Backups.dir()))
+    end
+
+    # #3078: the fence's two guards on a promoted backup. Each case runs a
+    # dump (the late record would write a failure manifest) and a finish
+    # whose manifest already says ok (it would remove `.work/<stamp>`).
+    for {at, label} <- [{:at_dump, "a dump"}, {:at_finish, "a finish"}] do
+      test "a late record of #{label} leaves everything once the promoted start claimed " <>
+             "a stamp",
+           %{state: state} do
+        late_record_keeps!(state, unquote(at), fn _stamp ->
+          # Claimed, not advanced: same epoch, the lock now has a stamp.
+          epoch = lock().epoch
+          {:ok, _lease} = Chain.begin_step(current_job())
+          assert %{step: :start, stamp: claimed, epoch: ^epoch} = lock()
+          assert is_binary(claimed)
+        end)
+      end
+
+      test "a late record of #{label} leaves everything when the promoted backup resumes it",
+           %{state: state} do
+        late_record_keeps!(state, unquote(at), nil)
+      end
     end
 
     # #3078: a finish record that runs after a newer backup succeeded can't

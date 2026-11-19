@@ -1647,10 +1647,10 @@ defmodule KilnCMS.Backups.Chain do
   end
 
   defp interrupted(info, message, failed) do
-    has_run? = now("Couldn't record the interrupted backup", fn -> fail_run(info, message) end)
+    failed_run = now("Couldn't record the interrupted backup", fn -> fail_run(info, message) end)
     Logger.error(failed)
 
-    if has_run? == true do
+    with {:run, failed_at} <- failed_run do
       stamp = info.resume || info.stamp
 
       Interrupts.run(
@@ -1658,7 +1658,7 @@ defmodule KilnCMS.Backups.Chain do
         fn ->
           Steps.interrupt_files(stamp, info.chain, info.dir_id, message,
             released: info.released,
-            merge_run: true
+            merge_run: failed_at
           )
         end,
         dropped: {:warning, "Its run is failed; its failure manifest is not written."}
@@ -1666,24 +1666,26 @@ defmodule KilnCMS.Backups.Chain do
     end
   end
 
-  # The run's part, in the caller: whether there is a run of this chain to
-  # write the files of.
+  # The run's part, in the caller: `{:run, failed_at}` when there is a run
+  # of this chain to write the files of, `failed_at` the `updated_at` this
+  # fail left it at (nil when it didn't write it), which pins the later
+  # merge of `state.json`'s accumulator; `:none` otherwise.
   defp fail_run(%{resume: stamp} = info, message) when is_binary(stamp) do
     if Recorder.from_run(stamp, info.chain).run do
-      Steps.interrupt_run(stamp, info.chain, message)
-      true
+      {:run, failed_at(Steps.interrupt_run(stamp, info.chain, message))}
     else
       Steps.resume_refused(stamp, info.chain, {:interrupted, message})
-      false
+      :none
     end
   end
 
-  defp fail_run(%{stamp: nil}, _message), do: false
+  defp fail_run(%{stamp: nil}, _message), do: :none
 
-  defp fail_run(info, message) do
-    Steps.interrupt_run(info.stamp, info.chain, message)
-    true
-  end
+  defp fail_run(info, message),
+    do: {:run, failed_at(Steps.interrupt_run(info.stamp, info.chain, message))}
+
+  defp failed_at({:ok, at}), do: at
+  defp failed_at(:not_written), do: nil
 
   # Best-effort: an error here is logged, and never undoes the release or
   # stops the sweep that made it.

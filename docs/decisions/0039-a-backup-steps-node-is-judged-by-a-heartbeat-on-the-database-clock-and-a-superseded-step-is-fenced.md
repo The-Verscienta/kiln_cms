@@ -232,7 +232,8 @@ nodes could then write the same backup.
   a later stamp can't decide the finish's verdict and leaves its run for the
   stale-run check. On the node with the backup's `state.json`, the task adds
   what that file holds to the failed run (`Run :record_interrupted`, system
-  only, own chain, `failed` runs only). While a task has run for over a
+  only, own chain, and only while the run's `updated_at` is still the one
+  its fail left, so a later note is never replaced). While a task has run for over a
   minute the node's heartbeat skips the lock sweep; another node's heartbeat
   or any backup request still sweeps, and on a shared mount hung for every
   node only requests do. The lock's release, the requeue and the promotion

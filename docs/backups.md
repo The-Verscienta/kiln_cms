@@ -1865,10 +1865,16 @@ task, and up to 20 more wait behind it in order.
   resume of the same backup). That is checked under the lock right before
   the rename; the failure manifest is also skipped when `manifest.json`
   already names a later backup. A backup that has used the lock since keeps
-  its files, and its own manifest.
+  its files, and its own manifest. A finished backup whose `.work/<stamp>`
+  a late record wasn't allowed to remove keeps it until the sweep of work
+  directories older than three days; the `.good` and `.hold` markers keep
+  naming the newer backups meanwhile.
 - **The run gets what its row missed.** On the node with the backup's
   `state.json`, the record adds what that file holds that a best-effort run
-  write missed (its files, log lines and destinations) to the failed run.
+  write missed (its files, log lines and destinations) to the failed run,
+  unless something wrote the run after it failed (a refused resume's note,
+  a Cancel, retention marking files pruned): that write stays, and the
+  log says the state wasn't added.
 - **A `finish` record that runs late may not be able to decide.** Whether
   an interrupted `finish` had finished is read from `manifest.json`. When
   that already names a later backup, the record can't tell: it leaves the
@@ -1895,7 +1901,7 @@ task, and up to 20 more wait behind it in order.
 | "Backup heartbeat: the interrupt records here caught up; sweeping again" | info | Once, when it sweeps again. |
 | "Backup `<stamp>`: the interrupt record finished after N s" | info | That slow task finished. |
 | "Backup `<stamp>`: its failure manifest was not written: another backup has used the backup lock since it was interrupted, or the manifest names a later one" | info | The record ran late; the newer manifest stays. |
-| "Backup `<stamp>`: its work directory was left in place: another backup has used the backup lock since it was interrupted" | info | The record ran late; the newer backup's work directory stays. |
+| "Backup `<stamp>`: its work directory was left in place: another backup has used the backup lock since it was interrupted. The sweep of work directories older than three days removes it; the markers keep naming the newer backups meanwhile." | info | The record ran late; the newer backup's work directory stays (above). |
 | "Backup `<stamp>`: its finish was interrupted, and the manifest already names a later backup, so whether it had finished can't be told. Its run is left as it is; the stale-run check fails it if it is still running." | warning | A late `finish` record (above). |
 | "Backup `<stamp>`: dropped from the interrupt records, 20 are waiting behind one that has run for N s (a hung BACKUP_DIR?). …" | error for a `finish`, else warning | The wait is full. The rest of the line says what is left undone (above). |
 | "Backup `<stamp>`: the interrupt record crashed: …" | error | The task failed; the next one runs. |

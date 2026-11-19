@@ -1193,16 +1193,23 @@ defmodule KilnCMS.Backups.Steps do
   The database part of `interrupt/5` (#3078): the Run of `stamp`, if it is
   still `chain`'s and running, failed with `message`, from what its row
   holds. No `BACKUP_DIR` I/O, so `Chain` runs it in the caller right after
-  the lock's commit.
+  the lock's commit. `{:ok, updated_at}` of the run as this write left it,
+  which pins the later merge (`interrupt_files/5`'s `merge_run:`), or
+  `:not_written`.
   """
-  @spec interrupt_run(String.t(), String.t(), String.t()) :: :ok
+  @spec interrupt_run(String.t(), String.t(), String.t()) ::
+          {:ok, DateTime.t()} | :not_written
   def interrupt_run(stamp, chain, message) do
-    stamp
-    |> Recorder.from_run(chain)
-    |> Recorder.log(:error, "interrupt", message)
-    |> Recorder.fail(message)
+    written =
+      stamp
+      |> Recorder.from_run(chain)
+      |> Recorder.log(:error, "interrupt", message)
+      |> Recorder.fail_written(message)
 
-    :ok
+    case written do
+      {:ok, %{run: %{updated_at: at}}} -> {:ok, at}
+      {:stale, _rec} -> :not_written
+    end
   end
 
   @doc """
@@ -1243,22 +1250,33 @@ defmodule KilnCMS.Backups.Steps do
         )
       end
 
-      if opts[:merge_run], do: merge_interrupted(stamp, chain, state, message)
+      with %DateTime{} = at <- opts[:merge_run],
+           do: merge_interrupted(stamp, chain, state, message, at)
+
       {:here, state}
     else
       _ -> :elsewhere
     end
   end
 
-  # The run was failed from its row (`interrupt_run/3`); `state.json`'s
-  # accumulator can hold what a best-effort Run write missed. Its artifacts,
-  # log and destinations go onto the failed run, with the interrupt's line,
-  # through `Recorder.record_interrupted/1` (this chain's failed run only).
-  defp merge_interrupted(stamp, chain, state, message) do
-    stamp
-    |> Recorder.load(chain, state["rec"])
-    |> Recorder.log(:error, "interrupt", message)
-    |> Recorder.record_interrupted()
+  # The run was failed from its row (`interrupt_run/3`), whose write left it
+  # at `failed_at`; `state.json`'s accumulator can hold what a best-effort
+  # Run write missed. Its artifacts, log and destinations go onto the failed
+  # run, with the interrupt's line, through `Recorder.record_interrupted/2`:
+  # this chain's failed run, and only while nothing has written it since.
+  defp merge_interrupted(stamp, chain, state, message, failed_at) do
+    written =
+      stamp
+      |> Recorder.load(chain, state["rec"])
+      |> Recorder.log(:error, "interrupt", message)
+      |> Recorder.record_interrupted(failed_at)
+
+    with {:stale, _rec} <- written do
+      Logger.info(
+        "Backup #{stamp}: what its state.json holds was not added to its run: the run " <>
+          "was written after it was failed as interrupted"
+      )
+    end
 
     :ok
   end
@@ -3699,7 +3717,8 @@ defmodule KilnCMS.Backups.Steps do
       if result == {:error, :superseded} do
         Logger.info(
           "Backup #{stamp}: its work directory was left in place: another backup has used " <>
-            "the backup lock since it was interrupted"
+            "the backup lock since it was interrupted. The sweep of work directories older " <>
+            "than three days removes it; the markers keep naming the newer backups meanwhile."
         )
       end
 

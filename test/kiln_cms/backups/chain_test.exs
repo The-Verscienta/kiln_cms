@@ -955,7 +955,7 @@ defmodule KilnCMS.Backups.ChainTest do
 
       # This node has the chain's directory and state: the failure manifest
       # says so, the promoted backup's start not having run yet (#3078).
-      refute Manifest.read(dir).ok
+      assert %Manifest{stamp: ^stamp, ok: false} = Manifest.read(dir)
       assert Backups.run_resumable?(run)
     end
 

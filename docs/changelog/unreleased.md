@@ -10,13 +10,16 @@ carries the reasoning.
 <a id="backup-heartbeat-lock-gaps"></a>
 
 - **Heartbeat and lock gaps (#3078, #3091, #3095).**
-  - **Recording an interrupted backup runs in the background.** When the
-    heartbeat (or a backup request) took over a stopped node's backup, it
-    recorded the failure and cleaned its work files in the heartbeat
-    process; on a hung `BACKUP_DIR` that stopped this node beating. The
-    lock is still released and the waiting request promoted at once; the
-    run's record follows in a background task, one at a time, and the run
-    reads Running until it lands.
+  - **Recording an interrupted backup no longer holds up the heartbeat.**
+    When the heartbeat (or a backup request) took over a stopped node's
+    backup, it recorded the failure and cleaned the backup's work files in
+    the heartbeat process; on a hung `BACKUP_DIR` that stopped this node
+    beating. The lock is still released and the waiting request promoted at
+    once, and the run is failed at once in the database; the file work (the
+    failure `manifest.json`, removing the work directory) follows in a
+    background task, one at a time, and only while no newer backup has used
+    the lock or written a later manifest. A node whose file work is stuck
+    stops taking over other nodes' backups until it recovers.
   - **A restarted node keeps its last backup-directory id** from its own
     beat for up to 180 seconds, so a node holding a copy of a backup's
     files no longer resumes it beside a source host whose first read after
