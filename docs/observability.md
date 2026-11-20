@@ -407,7 +407,11 @@ alert on the posture itself (a line turning **Fix now**), poll
 see [Monitor the posture from a script](security-posture.md#monitor-the-posture-from-a-script)
 and the [API guide](api.md#security-posture-monitoring). A run for that
 endpoint emits the same events, at most once per site and scope set every
-30 seconds on each node.
+30 seconds on each node. To alert on a particular plugin (a new security
+notice, a changed package on Hex), poll `GET /api/security/plugin-health`
+with a platform administrator's read-only key
+([API guide](api.md#plugin-health-monitoring)); it runs no check and emits
+none of these events.
 
 ## Security log and alerts
 
