@@ -164,13 +164,16 @@ defmodule KilnCMS.CMS.Taxonomy do
     defaults = if read_sort, do: [], else: [:read]
 
     # Every write dispatches its webhook (#1965). These three are the only write
-    # actions a taxonomy resource has, so they are the whole surface.
+    # actions a taxonomy resource has, so they are the whole surface. A rename
+    # also drops the site's delivery payloads (#2765): an SEO pattern can put
+    # the category's name in a page's `<title>`.
     update_action =
       if atomic_update? do
         quote do
           update :update do
             primary? true
             change {KilnCMS.CMS.Changes.NotifyTaxonomyWebhooks, event: "updated"}
+            change KilnCMS.CMS.Changes.BustTaxonomyPayloads
           end
         end
       else
@@ -179,6 +182,7 @@ defmodule KilnCMS.CMS.Taxonomy do
             primary? true
             require_atomic? false
             change {KilnCMS.CMS.Changes.NotifyTaxonomyWebhooks, event: "updated"}
+            change KilnCMS.CMS.Changes.BustTaxonomyPayloads
           end
         end
       end

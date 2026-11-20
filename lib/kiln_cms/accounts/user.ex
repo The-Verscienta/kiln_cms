@@ -274,6 +274,9 @@ defmodule KilnCMS.Accounts.User do
     # edit their own; admins can edit anyone's (via the policy bypass).
     update :update_profile do
       accept [:name]
+
+      # The name is the byline delivered pages show (#2765).
+      change KilnCMS.Accounts.Changes.BustAuthorPayloads
     end
 
     # The console sidebar preset (`KilnCMSWeb.ConsoleNav.sidebar/3`). Its own
@@ -461,6 +464,9 @@ defmodule KilnCMS.Accounts.User do
       # The erasure revokes tokens, which stops new connections; the live ones
       # had to be dropped too (#675).
       change {KilnCMS.Accounts.Changes.EvictSessions, reason: :anonymized}
+
+      # The scrubbed name was the byline of everything this user authored (#2765).
+      change KilnCMS.Accounts.Changes.BustAuthorPayloads
     end
 
     update :change_password do
@@ -991,6 +997,9 @@ defmodule KilnCMS.Accounts.User do
             Ash.Changeset.force_change_attribute(changeset, :name, nil)
         end
       end
+
+      # Declared after the name is set, which the hook reads (#2765).
+      change KilnCMS.Accounts.Changes.BustAuthorPayloads
 
       metadata :password_breach, :map do
         description "Set to `%{status: :breached}` when the new password is in a known breach and the site's policy allows it with a warning."

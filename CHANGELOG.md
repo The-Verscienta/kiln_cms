@@ -102,6 +102,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A revalidating browser or CDN no longer gets a `304` for a public page whose fragments, media, translations, inherited fields, bylines, author name, category or menu links changed: the HTML `ETag` now hashes the cached payload and the menus, and type, field and locale-settings saves move every page's tag.**
+  ([#3202](https://github.com/The-Verscienta/kiln_cms/pull/3202) · [long form](docs/changelog/unreleased.md#public-html-etag-render-inputs))
+
 - **Federation: a publish sends one signed POST per remote inbox (a `sharedInbox` reaches all its followers) instead of one per follower, settled against every follower there; the fan-out is one transaction, so a retry no longer re-sends to inboxes already queued.**
   ([#3195](https://github.com/The-Verscienta/kiln_cms/pull/3195) · [long form](docs/changelog/unreleased.md#federation-shared-inbox-dedup))
 
