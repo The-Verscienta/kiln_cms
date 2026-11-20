@@ -92,7 +92,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **Plugin health: System, Security posture and "Check plugins now" share one check per server, so hex.pm is asked once; a check stops at 75 s and caches what it got for 15 minutes instead of being killed with nothing stored.**
-  ([long form](docs/changelog/unreleased.md#plugin-check-single-flight))
+  ([#3183](https://github.com/The-Verscienta/kiln_cms/pull/3183) · [long form](docs/changelog/unreleased.md#plugin-check-single-flight))
 
 - **Billing webhooks: recording an event and enqueueing its job are now one transaction, so a failure leaves nothing recorded and the provider's retry starts clean; redelivering an unfinished event re-enqueues it, and a worker that crashes or stalls is retried or reclaimed after 10 minutes.**
   ([long form](docs/changelog/unreleased.md#billing-webhook-lost-events))
