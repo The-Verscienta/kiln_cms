@@ -68,7 +68,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Breaking
 
 - **`/ws/gql` reads an `authorization` connect param under `Bearer` in any case: a lowercase valid JWT connects as its user, and lowercase garbage or a bare `Bearer` is refused (`403`) instead of connecting anonymously (#2632).**
-  ([long form](docs/changelog/unreleased.md#ws-gql-bearer-scheme-any-case))
+  ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#ws-gql-bearer-scheme-any-case))
 
 ### Added
 
@@ -95,7 +95,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **A valid `bearer`/`BEARER <jwt>` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing [1.9.0's `401`](docs/changelog/v1.9.0.md#bearer-401-hardening); `/mcp` and `POST /api/keys/rotate` take a `kiln_` key under any case or in a later `Authorization` value, and `/metrics` its token under any case (#2632).**
-  ([long form](docs/changelog/unreleased.md#bearer-scheme-any-case))
+  ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#bearer-scheme-any-case))
 
 - **Accepting an invitation to the default site at a lower tier no longer demotes an account with no membership but a legacy editor or admin role: its tier is carried into a membership first and the accept reports it already a member. An admin's own Add is unchanged.**
   ([long form](docs/changelog/unreleased.md#invitation-keeps-legacy-tier))
