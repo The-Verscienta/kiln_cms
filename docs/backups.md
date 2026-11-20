@@ -4308,6 +4308,8 @@ since …") and recorded in the instance security log as **Backup server host
 key trusted**, with the key it replaced. Only a platform admin can check or
 trust a key; see [ADR 0079](decisions/0079-an-sftp-destinations-host-key-is-trusted-once-by-a-platform-admin-and-a-changed-key-fails-the-destination.md).
 
+<a id="when-the-servers-host-key-changes"></a>
+
 #### When the server's host key changes
 
 Every connection checks the server's key before logging in, and offers only
@@ -4333,6 +4335,8 @@ A server that no longer offers its trusted key's type at all fails with
 accepts …" and raises no alert. Check and trust its key again; if the check
 fails the same way, the server is too old to share an algorithm with Kiln,
 which refuses SHA-1.
+
+<a id="reach-an-sftp-server-on-your-own-network"></a>
 
 #### Reach an SFTP server on your own network
 

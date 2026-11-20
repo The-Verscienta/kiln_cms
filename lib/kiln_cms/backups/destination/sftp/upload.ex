@@ -68,6 +68,8 @@ defmodule KilnCMS.Backups.Destination.Sftp.Upload do
   Copies `file` (`Kiln.BackupDestination.file`) to `target` over `session`.
   See the moduledoc. `opts`: `:resume`, `:tag`, `:holds`, `:deadline`.
   """
+  # `send_file/5` here is this module's SFTP upload, not Plug's.
+  # sobelow_skip ["Traversal.SendFile"]
   @spec put(Session.t(), Target.t(), map(), keyword()) ::
           :ok | {:ok, :already_present} | {:error, term()}
   def put(session, target, %{subdir: subdir, name: name} = file, opts) do

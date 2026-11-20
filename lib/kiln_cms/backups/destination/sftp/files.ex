@@ -177,6 +177,8 @@ defmodule KilnCMS.Backups.Destination.Sftp.Files do
   `path`, a regular file (never a link), read whole into the local file
   `to` and hashed: `{:ok, sha256_hex}`.
   """
+  # `to` is the caller's local download path, not a remote or user-entered one.
+  # sobelow_skip ["Traversal.FileModule"]
   @spec download(Session.t(), String.t(), Path.t(), String.t()) ::
           {:ok, String.t()} | {:error, term()}
   def download(session, path, to, what) do
