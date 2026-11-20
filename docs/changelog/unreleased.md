@@ -5,6 +5,22 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Upgrade notes
+
+<a id="public-js-bundle-upgrade"></a>
+
+- **A custom asset build or overlay `Dockerfile` that does not run `mix assets.deploy` must also run `mix esbuild kiln_public --minify` before `phx.digest` (#2402).**
+  Signed-out content pages now load `public.js`, built by the new
+  `kiln_public` esbuild profile (see [Changed](#public-js-bundle)).
+  `mix assets.deploy`, which the stock `Dockerfile` runs, already includes
+  it, as does `mix assets.build`. A build that runs the esbuild profiles
+  itself and skips this one loses nothing but the saving: when
+  `priv/static/assets/js/public.js` is missing, every page loads `app.js`
+  as before, and public forms' human-verification widgets still mount.
+  Outside dev, whether `public.js` exists is checked once per VM, so a
+  release that gains it later picks it up only after a restart. No
+  migration and no configuration; rolling back is safe.
+
 ## Added
 
 <a id="plugin-health-api"></a>
@@ -64,12 +80,53 @@ carries the reasoning.
 - **A search the budget cuts now gives its running sections 100 ms to stop on their own before killing them, so a query that finishes in time keeps its database connection (#2614).**
   When `query_budget` ran out, every content section still running was killed at once. A section killed mid-query costs its connection: Postgrex cancels the query in Postgres (so, contrary to what #2614 suspected, nothing keeps running there), but DBConnection drops the connection and opens a new one, a TLS handshake and authentication against a remote database. Now, at `section_concurrency` above 1 (the default is 2), nothing new starts at the deadline and the running sections get `cut_grace` more milliseconds (`config :kiln_cms, KilnCMS.Search, cut_grace: 100` by default) to return. A section checks the deadline between its legs, so most return within one query; those are kept with every leg they finished, and only the ones still running after the grace are killed. The grace does not remove every reconnect: a query longer than the grace is still killed, and a section that was waiting for a connection at the deadline may get one during the grace. Two things readers see: a cut search may now answer up to `cut_grace` later than before (100 ms at the defaults), and a leg that finishes inside the grace is no longer listed under `incomplete`. The response shape and the meaning of `partial` and `incomplete` are unchanged. A new event, `[:kiln_cms, :search, :budget, :cut]` with `returned` and `killed`, is exported as `kiln_cms_search_budget_cut_returned` and `kiln_cms_search_budget_cut_killed` (see [observability.md](../observability.md#search-budget-cuts)). Set `cut_grace: 0` to kill at the deadline as before. A per-query `statement_timeout` was considered and rejected: it needs a transaction or a session `SET`/`RESET` on every checkout, round trips on every search to save a reconnect on the rare one the budget cuts. No migration; rolling back is safe.
 
+<a id="public-js-bundle"></a>
+
+- **Signed-out content pages load a small `public.js` instead of `app.js` (#2402).**
+  Every page used to load `app.js`: LiveView, the Phoenix socket, the
+  console's hooks, Sortable and topbar, 257,647 B minified and 80,526 B
+  gzipped across three requests, none of which a visitor reading a page
+  uses. Those pages now load `public.js`: 6,433 B minified and 2,505 B
+  gzipped in one request. It carries the human-verification mount for
+  public forms, the `data-method`/`data-confirm` helpers from
+  `phoenix_html`, and the ⌘K / Ctrl-K shortcut to the console's search
+  (now shared with `app.js` through `assets/js/search_shortcut.js`).
+  - **Which pages.** Those rendered by `ContentController` (delivered
+    pages and posts, the blog and event indexes, `/search`, the passphrase
+    lock page, the delivery 404 and the stock home page), `FormController`
+    (`/forms/<slug>`, its thank-you page and its refused re-render) and
+    `NewsletterController`. Each opts in with the new
+    `KilnCMSWeb.Plugs.PublicJsBundle`; `KilnCMSWeb.Layouts.js_bundle_path/1`
+    still answers `app.js` for any LiveView, for a page with a flash (its
+    close button needs LiveView), and when `public.js` was not built. The
+    console, sign-in and every other LiveView keep `app.js`.
+  - **Code-injection snippets.** A head or footer snippet on a page that
+    now loads `public.js` no longer runs alongside `app.js`, so one that
+    used `window.liveSocket` or another `app.js` global finds nothing.
+    That was never supported.
+  - **A budget gate.** `mix kiln.assets.budget [--only public|app]` builds
+    the bundles minified into `_build/asset_budget/` and fails when
+    `public.js` passes 12,000 B minified or 5,000 B gzipped, carries
+    LiveView, Phoenix, the colocated hooks, Sortable, topbar, the rich-text
+    editor, TipTap or Yjs, or loses `js/challenge.js`; and when `app.js`
+    loads TipTap, Yjs or the rich-text editor outside `import()`. `app.js`
+    sizes are printed, not gated. CI's required `build` job runs
+    `--only public`, which needs no npm.
+  - **Dev.** A third esbuild watcher builds `public.js`, and the dev
+    assets banner names it when it is missing.
+
+  See [Which script a page loads](../frontend-assets.md#which-script-a-page-loads).
+
 <a id="referrer-suppression-sweep"></a>
 
 - **The wide search behind the referrer-suppression rule is now a test you can re-run (#3123).**
   The "no all-hidden breakdown leaves a category a single value" rule (#2981) was found by a search run outside the suite, so a change to `referrer_sources/0` or to `KilnCMS.Analytics.suppress_referrer_group/1` had nothing wide to re-check against. The search is now in `test/kiln_cms/analytics/referrer_suppression_test.exs` behind the `slow_sweep` tag, which the default suite excludes. Run it with `mix test --only slow_sweep test/kiln_cms/analytics/referrer_suppression_test.exs` after touching either. It covers thresholds 2 to 20 with four, five and six categories, bounded at view totals of 40, 30 and 20; the original hand search went to 50, and the committed one does not re-run totals above these bounds. A second test in the sweep checks that the criterion can fail (three categories at a threshold of 3 still do). To let the sweep vary the number of categories, `suppress_referrer_group/2` takes an explicit category list; `/1` is `/2` over `referrer_sources/0`, and a default-suite test pins that. Nothing published changes: the dashboard and the export still call `/1`, and no setting or output differs. Operators have nothing to do. The decision record for the rule (ADR 0075) is on a separate open pull request.
 
 ## Fixed
+
+<a id="webhook-resolve-ladder-errors"></a>
+
+- **A provider webhook whose membership could not be looked up because of a database fault is now retried instead of dropped (#2754).** While resolving which membership an event concerns, any failed read other than a refusal was treated as "nothing we hold": the event ended `:ignored`, which is final and purgeable, so a transient fault could lose a payment event for good. Now such a failure ends the event `:failed` and Oban retries it (8 attempts, with backoff). Only a malformed identifier in the payload (a `membership_id` or `org_id` that is not a UUID) is still ignored, because a retry cannot change it. Separately, a metadata mismatch (the event's `user_id` differs from the owner of the membership its `membership_id` names) now halts the lookup: the event row is `:ignored` with the reason `metadata_mismatch` and nothing is written. Before, the lookup went on to the subscription and customer ids, which could write the very row the mismatch check had just refused. An org mismatch cannot occur, since the metadata lookup is filtered by that org. Also fixed: with strict tenancy on (the production default), the customer-id lookup raised `TenantRequired` while loading the tier and was swallowed as "no membership", so an event with no usable `membership_id` or subscription id never resolved by customer; it does now, and a customer holding several tiers is told apart by price id within each membership's own site. Operators: you may now see `failed` events in `/editor/billing` during a database incident, and they settle once the retry succeeds; `metadata_mismatch` is worth a look if it recurs. No migration and no config; rolling back is safe. See [Organizations](../memberships.md#organizations).
 
 <a id="billing-recheckout-keeps-live-membership"></a>
 

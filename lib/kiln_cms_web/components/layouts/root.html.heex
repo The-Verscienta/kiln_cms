@@ -156,8 +156,10 @@
           dark mode. Emits nothing for an unbranded site. --%>
     <Layouts.brand_tokens brand={Layouts.brand_or_unbranded(assigns)} />
     <%!-- type="module": the bundle is ESM (esbuild --splitting) so the TipTap
-          editor chunk loads on demand in the admin editor only. --%>
-    <script defer phx-track-static type="module" src={~p"/assets/js/app.js"}>
+          editor chunk loads on demand in the admin editor only. A signed-out
+          content page gets the small `public.js` instead (#2402) — see
+          `Layouts.js_bundle_path/1` for when. --%>
+    <script defer phx-track-static type="module" src={Layouts.js_bundle_path(assigns)}>
     </script>
     <script nonce={assigns[:csp_nonce]}>
       (() => {

@@ -60,6 +60,11 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Custom asset builds and overlay Dockerfiles that don't run `mix assets.deploy`: also run `mix esbuild kiln_public --minify` before `phx.digest`. Without it signed-out pages fall back to app.js and keep working. No migration; rolling back is safe.**
+  ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle-upgrade))
+
 ### Added
 
 - **`GET /api/security/plugin-health`: each installed plugin's health as JSON for monitoring, read from the server's cache and never asking hex.pm; platform administrators only, behind the host site's admin allowlist.**
@@ -70,10 +75,16 @@ Every summary line below that was shortened links to its own entry there.
 - **Search: when `query_budget` cuts a search, running sections get `cut_grace` (new, default 100 ms) to stop on their own before they are killed, so a query that finishes keeps its database connection; a cut search may answer up to that much later. New metrics `kiln_cms_search_budget_cut_returned`/`_killed`.**
   ([#3162](https://github.com/The-Verscienta/kiln_cms/pull/3162) · [long form](docs/changelog/unreleased.md#search-budget-cut-grace))
 
+- **Signed-out content pages load a 2.5 KB (gzipped) `public.js` instead of the 81 KB app.js and its chunks; `mix kiln.assets.budget` keeps it free of LiveView and console code.**
+  ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle))
+
 - **The exhaustive referrer-suppression search (thresholds 2–20, four to six categories, totals up to 40/30/20) is now a `slow_sweep` test you can re-run; `suppress_referrer_group/2` takes an explicit category list, and published output is unchanged.**
   ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/unreleased.md#referrer-suppression-sweep))
 
 ### Fixed
+
+- **Billing webhooks: a database fault while resolving an event's membership now fails the event and Oban retries it (8 attempts) instead of dropping it as `ignored`; a metadata mismatch halts the lookup as `ignored` (`metadata_mismatch`) with nothing written.**
+  ([long form](docs/changelog/unreleased.md#webhook-resolve-ladder-errors))
 
 - **Choosing "join" again on a tier you already hold no longer demotes an `active`, `past_due` or `comped` membership to `incomplete`; the member is sent to `/account` with a notice instead, and no second checkout is opened.**
   ([long form](docs/changelog/unreleased.md#billing-recheckout-keeps-live-membership))
