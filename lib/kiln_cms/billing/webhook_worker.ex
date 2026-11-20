@@ -65,7 +65,7 @@ defmodule KilnCMS.Billing.WebhookWorker do
   Called from `WebhookEvent`'s `:receive` inside its transaction, and by the
   receiver when a redelivery finds an unsettled row.
   """
-  @spec enqueue(%{id: Ecto.UUID.t()}) :: {:ok, Oban.Job.t()} | {:error, term()}
+  @spec enqueue(map()) :: {:ok, Oban.Job.t()} | {:error, term()}
   def enqueue(%{id: id}) do
     # `:billing_webhook_insert` is a test seam for forcing an enqueue failure;
     # unset in every real environment.
