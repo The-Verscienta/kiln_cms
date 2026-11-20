@@ -2923,4 +2923,57 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     |> Map.fetch!(:group_fields)
     |> Enum.map(& &1.id)
   end
+
+  # #2680: a list of a plugin type that no longer takes lists is held; the
+  # fields admin badges it, warns that a save narrows it, and only its own
+  # save (`narrow_held_list?`) does.
+  test "a held list is badged, warned about, and narrowed only by the admin's save", %{
+    conn: conn
+  } do
+    admin = authed_user(:admin)
+    name = "fdl_held_#{System.unique_integer([:positive])}"
+
+    field =
+      CMS.create_field_definition!(
+        %{content_type: :page, name: name, label: "Held", field_type: :rating},
+        actor: admin
+      )
+
+    KilnCMS.Repo.query!("UPDATE field_definitions SET multiple = true WHERE id = $1", [
+      Ecto.UUID.dump!(field.id)
+    ])
+
+    page =
+      CMS.create_page!(
+        %{title: "Held", slug: "fdl-held-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    KilnCMS.Repo.query!(
+      "UPDATE pages SET custom_fields = custom_fields || $1 WHERE id = $2",
+      [%{name => [3, 4]}, Ecto.UUID.dump!(page.id)]
+    )
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+    assert has_element?(lv, "#field-#{field.id}-held-list", "list (held)")
+
+    lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+    assert has_element?(
+             lv,
+             "#edit-field-multiple-#{field.id}-narrowing",
+             "This field's type no longer takes a list"
+           )
+
+    lv
+    |> form("#edit-field-#{field.id}", field_definition: %{label: "Rated"})
+    |> render_submit()
+
+    saved = CMS.get_field_definition!(field.id, authorize?: false)
+    refute saved.multiple
+    assert saved.label == "Rated"
+    assert CMS.get_page!(page.id, actor: admin).custom_fields[name] == 3
+    refute has_element?(lv, "#field-#{field.id}-held-list")
+  end
 end

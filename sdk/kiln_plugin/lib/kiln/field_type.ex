@@ -135,6 +135,43 @@ defmodule Kiln.FieldType do
   `c:input_hook/1` and render the difference there. `c:input_type/0` takes no
   definition, so a widget cannot change the HTML `type` of the input.
 
+  ## Lists
+
+  A field of a core scalar type (`:string`, `:integer`, `:date`, …) can be
+  made a list in the fields admin ("A list"). A plugin type opts into the
+  same by defining `c:multiple?/0` to return `true`:
+
+      @impl Kiln.FieldType
+      def multiple?, do: true
+
+  Its fields then get the list toggle and the item bounds, and a list field
+  stores a JSON array of items. The rules:
+
+    * `c:cast/2` runs **once per item**, with a definition whose `multiple` is
+      `false`, so it casts one value exactly as for a single field. An item's
+      cast result must be one string or one number; any other result (a map,
+      a list, a boolean) refuses the write.
+    * The type must be a **scalar**: `c:input_parts/1` must return `[]`. A
+      composite value is a repeating `:group` field's job.
+    * `c:json_schema/1` and `c:graphql_kind/1` describe **one item**. The host
+      wraps the item schema in an array (dropping `null` from it) and serves a
+      list of the GraphQL kind.
+    * The editor renders a generic list input whose item inputs use
+      `c:input_type/0` and `c:input_attrs/1`. `c:input_hook/1` is not attached
+      to a list field's item inputs. Pasting several lines adds one item per
+      line, except for a picker `c:input_type/0` (date, time, color, …).
+    * Repeated items are kept unless `c:unique_items?/0` returns `true`; then
+      items equal after `c:cast/2` are dropped, keeping the first.
+    * Both answers are read when KilnCMS compiles, not per request, and must
+      not depend on anything but the module itself.
+
+  A type that later stops taking lists does not lose data: a list field of
+  that type keeps its stored lists, which are served as they are but can't be
+  changed until an admin saves the field as a single value (keeping each
+  record's first item) or deletes it.
+
+  Added in `kiln_plugin` 1.6 (`{:kiln_plugin, "~> 1.6"}`).
+
   ## Built-in types
 
   `:geolocation`, `:computed`, `:datetime_range`, `:recurrence` and the format
@@ -344,6 +381,29 @@ defmodule Kiln.FieldType do
   """
   @callback widgets(definition :: struct()) :: [widget()]
 
+  @doc """
+  Whether a field of this type may hold a **list** of values (see "Lists"
+  above). Return `true` to opt in; the fields admin then offers "A list" for
+  it.
+
+  Optional, and not defaulted by `use Kiln.FieldType` (the host probes for it
+  with `function_exported?/3`): a type without it, or answering anything but
+  `true`, holds one value. Read once, when KilnCMS compiles. Added in
+  `kiln_plugin` 1.6.
+  """
+  @callback multiple?() :: boolean()
+
+  @doc """
+  Whether a list of this type drops **repeated** items: `true` keeps the first
+  of the items equal after `c:cast/2`, and the schema export marks the array
+  `uniqueItems`. Means nothing without `c:multiple?/0`.
+
+  Optional, and not defaulted by `use Kiln.FieldType`: a type without it keeps
+  repeats (a quantity may repeat on purpose). Read once, when KilnCMS
+  compiles. Added in `kiln_plugin` 1.6.
+  """
+  @callback unique_items?() :: boolean()
+
   @typedoc "A client hook for the field's editor widget: see `c:input_hook/1`."
   @type input_hook :: %{required(:hook) => String.t(), optional(:data) => map()}
 
@@ -468,6 +528,8 @@ defmodule Kiln.FieldType do
   # type without one answers its hook's events with an error.
   # `widgets/1` (kiln_cms#2284) is not defaulted either: the host probes for
   # it, and a default would have every type claim a choice of editor input.
+  # `multiple?/0` and `unique_items?/0` (kiln_cms#2680) are not defaulted
+  # either: the host probes for them, and a type without them holds one value.
   @optional_callbacks input_parts: 1,
                       tokens: 1,
                       json_schema: 1,
@@ -475,7 +537,9 @@ defmodule Kiln.FieldType do
                       description: 0,
                       input_hook: 1,
                       handle_input_event: 3,
-                      widgets: 1
+                      widgets: 1,
+                      multiple?: 0,
+                      unique_items?: 0
 
   @doc ~S"""
   `Float.parse/1`, made total — the numeric parse a custom field type's

@@ -145,8 +145,13 @@ defmodule KilnCMS.CMS.FieldWidgets do
     end
   end
 
-  defp entries(type, definition) when is_atom(type) and not is_nil(type),
-    do: type |> FieldTypes.get() |> plugin_entries(definition)
+  # A `multiple` field of a `Kiln.FieldType` (#2680) is the generic list
+  # input, which no widget of the type's single input shapes.
+  defp entries(type, definition) when is_atom(type) and not is_nil(type) do
+    if Map.get(definition, :multiple) == true,
+      do: [],
+      else: type |> FieldTypes.get() |> plugin_entries(definition)
+  end
 
   defp entries(_type, _definition), do: []
 

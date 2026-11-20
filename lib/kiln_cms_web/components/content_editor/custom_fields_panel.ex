@@ -22,6 +22,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
   import KilnCMSWeb.ContentEditor.Shared, only: [custom_field_errors: 2, custom_field_value: 2]
   import KilnCMSWeb.BlockComponents, only: [field_width_class: 1]
 
+  alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldWidgets
   alias KilnCMSWeb.ContentEditor.Conditional
   alias KilnCMSWeb.ContentEditor.FlexibleComponents
@@ -259,6 +260,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
       assigns
       |> assign(:state, state)
       |> assign(:input_definition, Conditional.seed(assigns.definition, state))
+      |> assign(:held?, FieldDefinition.held_list?(assigns.definition))
 
     ~H"""
     <Conditional.conditional
@@ -270,7 +272,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
       <fieldset
         disabled={
           Localization.locked?(@localization, {:custom, @definition.name}) or
-            @definition.name in @read_only
+            @definition.name in @read_only or @held?
         }
         class="contents"
       >
@@ -298,8 +300,13 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
           value={input_value(@form, @definition)}
           errors={custom_field_errors(@form, @definition.name)}
         />
+        <.held_list
+          :if={@held?}
+          definition={@definition}
+          value={custom_field_value(@form, @definition.name)}
+        />
         <.custom_field_input
-          :if={@definition.field_type not in [:reference, :flexible]}
+          :if={@definition.field_type not in [:reference, :flexible] and not @held?}
           definition={@input_definition}
           name={"#{@form.name}[custom_fields][#{@definition.name}]"}
           value={input_value(@form, @definition)}
@@ -325,6 +332,59 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
     </Conditional.conditional>
     """
   end
+
+  attr :definition, :map, required: true
+  attr :value, :any, default: nil
+
+  # A held list (#2680, `FieldDefinition.held_list?/1`): its type no longer
+  # takes a list, so the stored items are shown as text and nothing here is an
+  # input — the field's key is never posted, and the write keeps the stored
+  # list. Never the type's own single input: handed a list, its `value=` would
+  # render the items run together (and raise past a number above 255).
+  defp held_list(assigns) do
+    assigns = assign(assigns, :items, held_items(assigns.value))
+
+    ~H"""
+    <div
+      id={"custom-field-#{@definition.name}"}
+      role="group"
+      aria-labelledby={"custom-field-#{@definition.name}-label"}
+    >
+      <div class="mb-1 flex items-baseline justify-between gap-2">
+        <span id={"custom-field-#{@definition.name}-label"} class="text-sm font-medium">
+          {@definition.label}
+        </span>
+        <span :if={@items != []} class="text-xs tabular-nums text-base-content/60">
+          {ngettext("%{count} item", "%{count} items", length(@items))}
+        </span>
+      </div>
+      <ol
+        :if={@items != []}
+        id={"custom-field-#{@definition.name}-held-items"}
+        class="mb-1.5 space-y-1 rounded-lg border border-base-content/10 bg-base-200/40 px-3 py-2 text-sm"
+      >
+        <li :for={item <- @items} class="break-words">{item}</li>
+      </ol>
+      <p
+        id={"cf-held-list-#{@definition.name}"}
+        class="flex items-start gap-1 text-xs text-base-content/70"
+      >
+        <.icon name="hero-lock-closed" class="mt-px size-3.5 shrink-0" />
+        {gettext(
+          "This field's type no longer takes a list, so the list is kept as it is and can't be edited here. An admin can change the field in Fields."
+        )}
+      </p>
+    </div>
+    """
+  end
+
+  defp held_items(value) when is_list(value), do: Enum.map(value, &held_item/1)
+  defp held_items(nil), do: []
+  defp held_items(value), do: [held_item(value)]
+
+  defp held_item(item) when is_binary(item), do: item
+  defp held_item(item) when is_number(item) or is_boolean(item), do: to_string(item)
+  defp held_item(item), do: Jason.encode!(item)
 
   attr :id, :string, required: true
   attr :title, :string, required: true

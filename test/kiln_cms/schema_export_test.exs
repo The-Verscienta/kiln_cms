@@ -858,6 +858,82 @@ defmodule KilnCMS.SchemaExportTest do
     end
   end
 
+  describe "a list of a plugin field type (#2680)" do
+    setup %{actor: actor, org: org} do
+      for attrs <- [
+            %{name: "stars_list", field_type: :stars, multiple: true},
+            %{name: "tag_list", field_type: :tag, multiple: true},
+            %{name: "shapes", field_type: :shapeshifter, multiple: true}
+          ] do
+        CMS.create_field_definition!(
+          Map.merge(attrs, %{content_type: :page, label: attrs.name}),
+          actor: actor,
+          tenant: org
+        )
+      end
+
+      :ok
+    end
+
+    test "items are the type's json_schema/1 without null; uniqueItems as it says", %{org: org} do
+      fields = custom_fields(org, "content_page")["properties"]
+
+      assert fields["stars_list"]["type"] == ["array", "null"]
+
+      assert fields["stars_list"]["items"] == %{
+               "type" => "integer",
+               "minimum" => 1,
+               "maximum" => 5
+             }
+
+      refute Map.has_key?(fields["stars_list"], "uniqueItems")
+
+      # A string `"type"` (no null to drop) is kept as it is.
+      assert fields["tag_list"]["items"] == %{"type" => "string", "maxLength" => 40}
+      assert fields["tag_list"]["uniqueItems"] == true
+
+      # An `anyOf` loses its null member.
+      assert fields["shapes"]["items"] == %{
+               "anyOf" => [%{"type" => "string"}, %{"type" => "object"}]
+             }
+    end
+  end
+
+  describe "list_item_schema/1 (#2680)" do
+    test "drops null from a type list, unwrapping one left and dropping none" do
+      assert SchemaExport.list_item_schema(%{"type" => ["integer", "null"]}) ==
+               %{"type" => "integer"}
+
+      assert SchemaExport.list_item_schema(%{"type" => ["string", "number", "null"]}) ==
+               %{"type" => ["string", "number"]}
+
+      assert SchemaExport.list_item_schema(%{"type" => ["null"], "x" => 1}) == %{"x" => 1}
+    end
+
+    test "keeps a string type, and drops a lone null type" do
+      assert SchemaExport.list_item_schema(%{"type" => "string", "format" => "email"}) ==
+               %{"type" => "string", "format" => "email"}
+
+      assert SchemaExport.list_item_schema(%{"type" => "null"}) == %{}
+    end
+
+    test "with no type, an anyOf/oneOf loses its null members; one left is inlined" do
+      assert SchemaExport.list_item_schema(%{
+               "anyOf" => [%{"type" => "string", "maxLength" => 3}, %{"type" => "null"}],
+               "description" => "d"
+             }) == %{"type" => "string", "maxLength" => 3, "description" => "d"}
+
+      assert SchemaExport.list_item_schema(%{
+               "oneOf" => [%{"type" => "string"}, %{"type" => "integer"}, %{"type" => "null"}]
+             }) == %{"oneOf" => [%{"type" => "string"}, %{"type" => "integer"}]}
+    end
+
+    test "anything else is kept verbatim" do
+      assert SchemaExport.list_item_schema(%{"$ref" => "#/x"}) == %{"$ref" => "#/x"}
+      assert SchemaExport.list_item_schema(%{}) == %{}
+    end
+  end
+
   defp custom_fields(org, def_name) do
     SchemaExport.json_schema(org_id: org.id)["$defs"][def_name]["properties"]["custom_fields"]
   end

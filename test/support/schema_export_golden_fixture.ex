@@ -144,7 +144,8 @@ defmodule KilnCMS.SchemaExport.GoldenFixture do
       actor: actor
     )
 
-    # An admin-defined type (#2274) with a plugin field type and a core one.
+    # An admin-defined type (#2274) with a plugin field type and a core one,
+    # and a list of the plugin type (#2680).
     org_id = KilnCMS.Accounts.default_org_id()
 
     review =
@@ -153,9 +154,16 @@ defmodule KilnCMS.SchemaExport.GoldenFixture do
         tenant: org_id
       )
 
-    for {name, type} <- [{"score", :stars}, {"verdict", :string}] do
+    for {name, type, extra} <- [
+          {"score", :stars, %{}},
+          {"verdict", :string, %{}},
+          {"scores", :stars, %{multiple: true}}
+        ] do
       CMS.create_field_definition!(
-        %{type_definition_id: review.id, name: name, label: name, field_type: type},
+        Map.merge(
+          %{type_definition_id: review.id, name: name, label: name, field_type: type},
+          extra
+        ),
         actor: actor,
         tenant: org_id
       )

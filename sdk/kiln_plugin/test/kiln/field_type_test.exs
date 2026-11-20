@@ -71,6 +71,29 @@ defmodule Kiln.FieldTypeTest do
     end
   end
 
+  defmodule Listable do
+    use Kiln.FieldType
+    def cast(value, _definition), do: {:ok, value}
+    def multiple?, do: true
+    def unique_items?, do: true
+  end
+
+  describe "multiple?/0 and unique_items?/0" do
+    test "are optional and not defaulted by use Kiln.FieldType" do
+      optional = Kiln.FieldType.behaviour_info(:optional_callbacks)
+      assert {:multiple?, 0} in optional
+      assert {:unique_items?, 0} in optional
+
+      refute function_exported?(NoWidgets, :multiple?, 0)
+      refute function_exported?(NoWidgets, :unique_items?, 0)
+    end
+
+    test "a type opts in by defining them" do
+      assert Listable.multiple?()
+      assert Listable.unique_items?()
+    end
+  end
+
   describe "widget/2" do
     test "answers the stored widget while the type offers it" do
       assert Kiln.FieldType.widget(%{widget: "stars"}, Stars) == "stars"

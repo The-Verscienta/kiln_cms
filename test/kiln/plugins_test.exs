@@ -48,12 +48,15 @@ defmodule Kiln.PluginsTest do
 
     # Rating is the one with real behaviour; Tokenless and Exploding exist to
     # cover `type_token_definitions/1`'s probe and rescue branches (#804), which
-    # no CORE field type can reach. Lookup carries a client hook (#1918).
+    # no CORE field type can reach. Lookup carries a client hook (#1918). Tag
+    # and Shapeshifter take lists (#2680).
     assert manifest.field_types == [
              FixturePlugin.FieldTypes.Rating,
              FixturePlugin.FieldTypes.Tokenless,
              FixturePlugin.FieldTypes.Exploding,
-             FixturePlugin.FieldTypes.Lookup
+             FixturePlugin.FieldTypes.Lookup,
+             FixturePlugin.FieldTypes.Tag,
+             FixturePlugin.FieldTypes.Shapeshifter
            ]
 
     # The fixture declares neither, but both keys must be in the manifest: a
@@ -195,7 +198,7 @@ defmodule Kiln.PluginsTest do
       assert output =~ "Test fixture exercising every plugin seam."
       assert output =~ "https://example.com/fixture-plugin"
       # Contribution summary is pluralized and omits zero-count kinds.
-      assert output =~ "5 blocks, 4 field types, 1 image backend, 1 nav item, 1 admin route"
+      assert output =~ "5 blocks, 6 field types, 1 image backend, 1 nav item, 1 admin route"
       assert output =~ "6 plug routes"
     end
 
@@ -503,8 +506,8 @@ defmodule Kiln.PluginsTest do
     # #1909: the core overrides `kiln_plugin` so a plugin's Hex requirement
     # converges on the bundled copy, and Mix then checks no requirement on it.
     test "reads each dependency's kiln_plugin requirement from the resolved graph" do
-      # The real one: sdk/fixtures/dep_plugin/mix.exs declares "~> 1.5".
-      assert {:kiln_dep_fixture, "~> 1.5"} in Mix.Tasks.Kiln.Plugins.Doctor.sdk_requirements(
+      # The real one: sdk/fixtures/dep_plugin/mix.exs declares "~> 1.6".
+      assert {:kiln_dep_fixture, "~> 1.6"} in Mix.Tasks.Kiln.Plugins.Doctor.sdk_requirements(
                Mix.Tasks.Kiln.Plugins.Doctor.declared_deps()
              )
 
@@ -746,7 +749,9 @@ defmodule Kiln.PluginsTest do
 
       assert output =~ "note: undescribed has no summary/0"
       assert output =~ "note: placeholder has no summary/0"
-      refute output =~ "note: fixture_plugin"
+      # The fixture is described; its one note is about its hooked list type
+      # (#2680), asserted with the list checks.
+      refute output =~ "note: fixture_plugin has no summary"
       assert output =~ "3 plugin(s) OK"
     end
 
@@ -928,6 +933,108 @@ defmodule Kiln.PluginsTest do
       assert error.message =~ "raised while listing its widgets/1 (no widgets for you)"
       refute error.message =~ "empty_widgets_type"
       refute error.message =~ ":rating"
+    end
+
+    # #2680: a type's list capability is read at compile time, where a raise
+    # or a wrong shape quietly leaves it single-valued; this is where it is
+    # named instead.
+    test "flags a field type whose list capability is malformed or not a scalar" do
+      defmodule NotBooleanListType do
+        use Kiln.FieldType
+        def cast(value, _definition), do: {:ok, value}
+        def multiple?, do: :yes
+        def unique_items?, do: "sure"
+      end
+
+      defmodule RaisingListType do
+        use Kiln.FieldType
+        def cast(value, _definition), do: {:ok, value}
+        def multiple?, do: raise("no lists for you")
+      end
+
+      defmodule CompositeListType do
+        use Kiln.FieldType
+        def cast(value, _definition), do: {:ok, value}
+        def multiple?, do: true
+        def widgets(_definition), do: [:plain, :split]
+
+        def input_parts(%{widget: "split"}), do: [%{key: "a", label: "A"}]
+        def input_parts(_definition), do: []
+      end
+
+      defmodule MapCastListType do
+        use Kiln.FieldType
+        def cast(value, _definition), do: {:ok, %{"value" => value}}
+        def multiple?, do: true
+      end
+
+      defmodule ListPlugin do
+        use Kiln.Plugin
+        def name, do: "list_plugin"
+
+        def field_types,
+          do: [
+            NotBooleanListType,
+            RaisingListType,
+            CompositeListType,
+            MapCastListType,
+            KilnCMS.FixturePlugin.FieldTypes.Tag,
+            KilnCMS.FixturePlugin.FieldTypes.Shapeshifter
+          ]
+      end
+
+      problems =
+        Mix.Tasks.Kiln.Plugins.Doctor.field_type_list_problems(
+          [ListPlugin],
+          %{ListPlugin => ListPlugin.field_types()}
+        )
+        |> Enum.join("\n")
+
+      assert problems =~ "multiple?/0 returned :yes; expected true or false"
+      assert problems =~ ~s(unique_items?/0 returned "sure"; expected true or false)
+      assert problems =~ "raised while answering multiple?/0 (no lists for you)"
+      assert problems =~ ~s(its input_parts/1 is not [] for its "split" input)
+      assert problems =~ ~s(cast/2 of a sample value returned %{"value" => "sample"})
+      refute problems =~ ":tag"
+      refute problems =~ ":shapeshifter"
+    end
+
+    test "notes unique_items?/0 without multiple?/0, and a hooked list type, without failing" do
+      defmodule UniqueOnlyType do
+        use Kiln.FieldType
+        def cast(value, _definition), do: {:ok, value}
+        def unique_items?, do: true
+      end
+
+      defmodule NotesPlugin do
+        use Kiln.Plugin
+        def name, do: "notes_plugin"
+        def summary, do: "Notes."
+        def field_types, do: [UniqueOnlyType, KilnCMS.FixturePlugin.FieldTypes.Tag]
+      end
+
+      notes =
+        Mix.Tasks.Kiln.Plugins.Doctor.field_type_list_notes(
+          [NotesPlugin],
+          %{NotesPlugin => NotesPlugin.field_types()}
+        )
+
+      assert Enum.any?(notes, &(&1 =~ "unique_items?/0 but does not take lists"))
+      assert Enum.any?(notes, &(&1 =~ ":tag takes lists and has an input_hook/1"))
+
+      assert [] ==
+               Mix.Tasks.Kiln.Plugins.Doctor.field_type_list_problems(
+                 [NotesPlugin],
+                 %{NotesPlugin => NotesPlugin.field_types()}
+               )
+
+      Application.put_env(:kiln_cms, :plugins, [KilnCMS.FixturePlugin])
+
+      output =
+        ExUnit.CaptureIO.capture_io(fn -> assert Mix.Tasks.Kiln.Plugins.Doctor.run([]) == :ok end)
+
+      assert output =~ "note: fixture_plugin: field type :tag takes lists and has an input_hook/1"
+      assert output =~ "1 plugin(s) OK"
     end
 
     test "flags queue redefinitions and malformed paths" do

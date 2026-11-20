@@ -82,7 +82,7 @@ has to be a `projects/<name>/` overlay, which is compiled *inside* the core.
 | Contribution | As a dependency |
 | --- | --- |
 | Blocks (`blocks/0`) | Yes |
-| Field types (`field_types/0`) | Yes, except a colocated client hook (`input_hook/1`): Phoenix writes a dependency's colocated hooks under its own app name, which the core's `app.js` does not import. The optional `graphql_kind/1` (how the GraphQL API types the value) and `widgets/1` (a choice of editor input, read back with `Kiln.FieldType.widget/2`) are from 1.4 (`{:kiln_plugin, "~> 1.4"}`) |
+| Field types (`field_types/0`) | Yes, except a colocated client hook (`input_hook/1`): Phoenix writes a dependency's colocated hooks under its own app name, which the core's `app.js` does not import. The optional `graphql_kind/1` (how the GraphQL API types the value) and `widgets/1` (a choice of editor input, read back with `Kiln.FieldType.widget/2`) are from 1.4 (`{:kiln_plugin, "~> 1.4"}`). The optional `multiple?/0` (the type can hold a list) and `unique_items?/0` are from 1.6 (`{:kiln_plugin, "~> 1.6"}`) |
 | Spam checks (`spam_checks/0`) | Yes |
 | Image backends (`image_backends/0`) | Yes. The connection check, `check/0`, from 1.2 (`{:kiln_plugin, "~> 1.2"}`) |
 | Human-verification providers (`challenge_providers/0`, `Kiln.Challenge.Provider`) | Yes, from 1.4 (`{:kiln_plugin, "~> 1.4"}`). The provider verifies through the `:post` function the core hands it, so it needs no HTTP client of its own |

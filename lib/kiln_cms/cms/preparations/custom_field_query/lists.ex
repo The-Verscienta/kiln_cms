@@ -1,8 +1,11 @@
 defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Lists do
   @moduledoc """
   The `custom_filter` operators of a `multiple` scalar custom field (#2289): a
-  list of phrases or terms, numbers, dates, times, links, addresses, phone
-  numbers, colours or slugs (`KilnCMS.CMS.ScalarLists.types/0`).
+  list of phrases or terms, numbers, dates, times, links, email addresses,
+  phone numbers, colors or slugs, or of a plugin field type that takes lists
+  (#2680) (`KilnCMS.CMS.ScalarLists.types/0`). A held list
+  (`KilnCMS.CMS.FieldDefinition.held_list?/1`) never reaches here:
+  `CustomFieldQuery` refuses it first.
 
     * `eq` — the list contains the value; `in` / `has` — it contains any of
       the values; `has_all` — it contains every one of them.
@@ -15,7 +18,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Lists do
     * `null` stays `CustomFieldQuery`'s own.
 
   Every operand is cast as a single field of the item type would cast it
-  (`CustomFieldQuery.cast_value/3`), so `"10"` finds the number `10` on an
+  (`ApplyCustomFields.coerce_item/2`, a plugin type through its own `cast/2`,
+  else `CustomFieldQuery.cast_value/3`), so `"10"` finds the number `10` on an
   integer list and `10` finds `10.0` on a float list (jsonb compares numbers
   by value).
 

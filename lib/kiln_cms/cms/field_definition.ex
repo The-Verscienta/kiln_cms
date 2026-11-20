@@ -343,6 +343,41 @@ defmodule KilnCMS.CMS.FieldDefinition do
   def unknown_type?(_definition), do: false
 
   @doc """
+  Whether `definition` is a **held list** (#2680): a top-level `multiple`
+  field of a registered type that can no longer hold a list — a plugin type
+  whose `c:Kiln.FieldType.multiple?/0` stopped answering `true`, or a list
+  saved by a release whose types this one does not list
+  (`KilnCMS.CMS.Changes.ClearMultiple.list_types/0`).
+
+  Its stored lists are kept and served as they are, but a write may not change
+  them (`Changes.ApplyCustomFields`), filtering or sorting on it is refused
+  (`Preparations.CustomFieldQuery`), and the editor shows it read-only. Only an
+  admin saving the field in the fields admin narrows it to a single value
+  (`narrow_held_list?`; `Changes.ClearMultiple`), keeping each record's first
+  item. A field of an unknown type (`unknown_type?/1`) is held whole instead.
+
+      iex> KilnCMS.CMS.FieldDefinition.held_list?(%{field_type: :boolean, multiple: true})
+      true
+
+      iex> KilnCMS.CMS.FieldDefinition.held_list?(%{field_type: :integer, multiple: true})
+      false
+
+      iex> KilnCMS.CMS.FieldDefinition.held_list?(%{field_type: :boolean, multiple: false})
+      false
+
+      iex> KilnCMS.CMS.FieldDefinition.held_list?(%{field_type: :boolean, multiple: true, group_of_id: "x"})
+      false
+  """
+  @spec held_list?(t() | map()) :: boolean()
+  def held_list?(%{multiple: true, field_type: type} = definition)
+      when is_atom(type) and not is_nil(type) do
+    top_level?(definition) and not unknown_type?(definition) and
+      type not in KilnCMS.CMS.Changes.ClearMultiple.list_types()
+  end
+
+  def held_list?(_definition), do: false
+
+  @doc """
   The read `context` that includes rows of an unknown field type
   (`unknown_type?/1`), which every read leaves out otherwise
   (`Preparations.RegisteredFieldTypes`). Top-level only: a relationship the
@@ -510,6 +545,12 @@ defmodule KilnCMS.CMS.FieldDefinition do
       primary? true
       require_atomic? false
       argument :carry_section_layout?, :boolean, default: false, allow_nil?: false
+
+      # `narrow_held_list?` (#2680): a held list (`held_list?/1`) keeps
+      # `multiple` on every update but the fields admin's save, which passes
+      # it after warning that only each record's first item is kept
+      # (`Changes.ClearMultiple`).
+      argument :narrow_held_list?, :boolean, default: false, allow_nil?: false
     end
 
     # Moves computed fields whose formula calls `today()` to the site's new

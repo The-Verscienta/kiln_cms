@@ -1911,6 +1911,18 @@
                   "null"
                 ]
               },
+              "scores": {
+                "description": "The items, in the order the editor arranged them.",
+                "items": {
+                  "maximum": 5,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
               "verdict": {
                 "type": [
                   "string",

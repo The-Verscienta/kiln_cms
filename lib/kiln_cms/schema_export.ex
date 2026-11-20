@@ -614,8 +614,8 @@ defmodule KilnCMS.SchemaExport do
 
   # A link field or group sub-field has no section, so it reads no layout.
   defp custom_field_schema(definition, section_displays \\ %{}) do
-    definition.field_type
-    |> base_custom_field_schema(definition)
+    definition
+    |> value_schema()
     |> put_constraints(definition)
     |> put_target_types(definition)
     |> put_target_rules(definition)
@@ -816,16 +816,36 @@ defmodule KilnCMS.SchemaExport do
     end
   end
 
-  # A typed list (`multiple` `:integer`, `:date`, `:email`, … — #2289): an
-  # array whose items are the single field's schema without its `null`, so
-  # an item keeps the `format`/`pattern` the single value carries. Numbers
-  # keep repeats; every other type drops them, hence `uniqueItems` only there.
+  # A held list (#2680, `FieldDefinition.held_list?/1`): a list field whose
+  # type no longer takes lists. Its records still hold arrays, served as
+  # stored, so it is described as one — with unconstrained items, since what
+  # was stored need not match the type's single-value schema today — and
+  # `readOnly`, as a write that changes it is refused.
+  defp value_schema(definition) do
+    if FieldDefinition.held_list?(definition) do
+      %{
+        "type" => ["array", "null"],
+        "items" => %{},
+        "readOnly" => true,
+        "description" =>
+          "The items as stored. Read-only: the field's type no longer takes a list."
+      }
+    else
+      base_custom_field_schema(definition.field_type, definition)
+    end
+  end
+
+  # A typed list (`multiple` `:integer`, `:date`, `:email`, a plugin type that
+  # takes lists — #2289, #2680): an array whose items are the single field's
+  # schema without its `null` (`list_item_schema/1`), so an item keeps the
+  # `format`/`pattern` the single value carries. Core numbers keep repeats,
+  # and a plugin type keeps them unless its `unique_items?/0` says otherwise;
+  # `uniqueItems` marks the lists that drop them.
   defp base_custom_field_schema(type, %{multiple: true} = d) when type in @typed_lists do
     item =
       type
       |> base_custom_field_schema(Map.put(d, :multiple, false))
-      |> Map.update!("type", &List.delete(&1, "null"))
-      |> Map.update!("type", fn [only] -> only end)
+      |> list_item_schema()
 
     %{
       "type" => ["array", "null"],
@@ -1019,6 +1039,41 @@ defmodule KilnCMS.SchemaExport do
     |> put_bound("x-kiln-min-items", Map.get(d, :min_items))
     |> put_bound("x-kiln-max-items", Map.get(d, :max_items))
   end
+
+  # One item of a typed list: the single field's schema without its `null`.
+  # Total over what a plugin's `json_schema/1` may answer (#2680): a `"type"`
+  # list loses `"null"` (one left is unwrapped, none drops the key), a lone
+  # `"null"` type is dropped, and with no `"type"` an `anyOf`/`oneOf` loses its
+  # `null` members (one left is inlined). Anything else is kept verbatim.
+  @doc false
+  @spec list_item_schema(map()) :: map()
+  def list_item_schema(%{"type" => types} = schema) when is_list(types) do
+    case List.delete(types, "null") do
+      [] -> Map.delete(schema, "type")
+      [only] -> Map.put(schema, "type", only)
+      several -> Map.put(schema, "type", several)
+    end
+  end
+
+  def list_item_schema(%{"type" => "null"} = schema), do: Map.delete(schema, "type")
+  def list_item_schema(%{"type" => _type} = schema), do: schema
+
+  def list_item_schema(schema) when is_map(schema) do
+    case Enum.find(["anyOf", "oneOf"], &is_list(schema[&1])) do
+      nil -> schema
+      key -> without_null_members(schema, key)
+    end
+  end
+
+  defp without_null_members(schema, key) do
+    case Enum.reject(schema[key], &null_schema?/1) do
+      [only] when is_map(only) -> schema |> Map.delete(key) |> Map.merge(only)
+      members -> Map.put(schema, key, members)
+    end
+  end
+
+  defp null_schema?(%{"type" => "null"} = member), do: map_size(member) == 1
+  defp null_schema?(_member), do: false
 
   defp put_unique_items(schema, true), do: Map.put(schema, "uniqueItems", true)
   defp put_unique_items(schema, false), do: schema

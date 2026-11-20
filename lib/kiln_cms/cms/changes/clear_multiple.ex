@@ -4,8 +4,8 @@ defmodule KilnCMS.CMS.Changes.ClearMultiple do
   list — only a `:media` field (a gallery), a `:reference` field (a list of
   references), a `:group` (repeating rows) or a scalar list type
   (`KilnCMS.CMS.ScalarLists.types/0`: a `:select`'s terms, a `:string`'s
-  phrases, and lists of numbers, dates, times, links, addresses, phone
-  numbers, colours and slugs) can —
+  phrases, and lists of numbers, dates, times, links, email addresses, phone
+  numbers, colors, slugs and every plugin type that opts in) can —
   and clears the `min_items` / `max_items` bounds whenever the field is not
   `multiple`.
 
@@ -14,6 +14,14 @@ defmodule KilnCMS.CMS.Changes.ClearMultiple do
   one column, a group row to one value per key), so `multiple` is cleared on
   one. `allow_custom` (the open vocabulary) is cleared on anything that is not
   a multiple select.
+
+  A **held list** (`KilnCMS.CMS.FieldDefinition.held_list?/1`, #2680) is the
+  exception: a list field whose type stopped taking lists (a plugin type whose
+  `multiple?/0` no longer answers `true`). Clearing its flag would narrow every
+  stored list on a reorder, a rename elsewhere or a field sync, so an update
+  keeps `multiple` on it — unless the update passes `narrow_held_list?: true`,
+  which only the fields admin's save does, after warning that each record
+  keeps its first item.
 
   The same stance as `KilnCMS.CMS.Changes.ClearCompute`: the fields admin shows
   the single-or-list toggle only for those types, so switching an existing list
@@ -64,6 +72,9 @@ defmodule KilnCMS.CMS.Changes.ClearMultiple do
       list_capable?(changeset, type) ->
         changeset
 
+      keep_held?(changeset) ->
+        Ash.Changeset.force_change_attribute(changeset, :multiple, true)
+
       true ->
         Ash.Changeset.force_change_attribute(changeset, :multiple, false)
     end
@@ -71,6 +82,14 @@ defmodule KilnCMS.CMS.Changes.ClearMultiple do
 
   defp list_capable?(changeset, type),
     do: type in @list_types and not (type in @scalar_list_types and sub_field?(changeset))
+
+  # A held list stays one until an admin narrows it on purpose.
+  defp keep_held?(%{action_type: :update, data: data} = changeset),
+    do:
+      KilnCMS.CMS.FieldDefinition.held_list?(data) and
+        Ash.Changeset.get_argument(changeset, :narrow_held_list?) != true
+
+  defp keep_held?(_changeset), do: false
 
   defp item_type?(changeset),
     do: not is_nil(Ash.Changeset.get_attribute(changeset, :flex_of_id))

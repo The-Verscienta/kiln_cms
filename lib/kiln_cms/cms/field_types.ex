@@ -29,6 +29,48 @@ defmodule KilnCMS.CMS.FieldTypes do
       `input_attrs/1`; the fields admin labels them via `label/0`.
   """
 
+  defmodule Capability do
+    @moduledoc false
+
+    # The list capability (#2680) of one `Kiln.FieldType` module, as the
+    # registry below bakes it and `mix kiln.plugins.doctor` checks it. Plugin
+    # code: a raise answers "not list-capable".
+
+    @doc false
+    @spec list_capable?(module()) :: boolean()
+    def list_capable?(module), do: answers_true?(module, :multiple?) and scalar?(module)
+
+    @doc false
+    @spec unique_items?(module()) :: boolean()
+    def unique_items?(module), do: answers_true?(module, :unique_items?)
+
+    @doc false
+    # The definition the composite probe hands `input_parts/1`: a list field
+    # of the type, with the editor input given (or none).
+    @spec probe(module(), String.t() | nil) :: map()
+    def probe(module, widget \\ nil),
+      do: %{
+        name: "probe",
+        label: "Probe",
+        field_type: module.name(),
+        widget: widget,
+        multiple: true
+      }
+
+    defp answers_true?(module, callback) do
+      Code.ensure_loaded?(module) and function_exported?(module, callback, 0) and
+        apply(module, callback, []) == true
+    rescue
+      _exception -> false
+    end
+
+    defp scalar?(module) do
+      not function_exported?(module, :input_parts, 1) or module.input_parts(probe(module)) == []
+    rescue
+      _exception -> false
+    end
+  end
+
   # The built-in value types, coerced by `Changes.ApplyCustomFields` itself.
   # Kept JSON-native so values round-trip cleanly through the `custom_fields`
   # jsonb column (dates as ISO-8601 strings; `:media`/`:reference` as small
@@ -88,6 +130,23 @@ defmodule KilnCMS.CMS.FieldTypes do
   @builtin Map.new(@builtin_modules, &{&1.name(), &1})
   @plugin Map.new(Kiln.Plugins.field_types(), &{&1.name(), &1})
 
+  # The `Kiln.FieldType` modules that may hold a list (#2680), in registry
+  # order (built-in, then plugin): each exports `multiple?/0` answering exactly
+  # `true`, and is a scalar — its `input_parts/1` is `[]` (a composite value
+  # is a repeating `:group`'s job). Read once here, at compile time, so the
+  # guards built on `KilnCMS.CMS.ScalarLists.types/0` see plugin types too. A
+  # module whose answer raises is not list-capable; `mix kiln.plugins.doctor`
+  # reports it.
+  @list_modules Enum.filter(
+                  @builtin_modules ++ Kiln.Plugins.field_types(),
+                  &__MODULE__.Capability.list_capable?/1
+                )
+
+  @list_capable Enum.map(@list_modules, & &1.name())
+  @unique_items for module <- @list_modules,
+                    __MODULE__.Capability.unique_items?(module),
+                    do: module.name()
+
   @doc "The core field types (coerced by `ApplyCustomFields` itself)."
   @spec core() :: [atom()]
   def core, do: @core
@@ -106,6 +165,23 @@ defmodule KilnCMS.CMS.FieldTypes do
   @doc "Every registered field type: core, then built-in, then plugin types."
   @spec names() :: [atom()]
   def names, do: reserved() ++ Map.keys(@plugin)
+
+  @doc """
+  The `Kiln.FieldType` names that may hold a list (#2680): a built-in or
+  plugin type whose `c:Kiln.FieldType.multiple?/0` answers `true` and whose
+  value is a scalar (`c:Kiln.FieldType.input_parts/1` is `[]`). Built-in
+  first, then plugin, each in registry order. Decided at compile time.
+  """
+  @spec list_capable() :: [atom()]
+  def list_capable, do: @list_capable
+
+  @doc """
+  Whether a list of the `Kiln.FieldType` named `name` drops repeated items:
+  it is list-capable (`list_capable/0`) and its
+  `c:Kiln.FieldType.unique_items?/0` answers `true`. Decided at compile time.
+  """
+  @spec unique_items?(atom()) :: boolean()
+  def unique_items?(name), do: name in @unique_items
 
   @doc """
   The `Kiln.FieldType` module registered under `name`, or nil. Core types have
