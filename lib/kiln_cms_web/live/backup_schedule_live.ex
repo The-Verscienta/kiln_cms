@@ -108,14 +108,18 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   looks like more than the disk takes (`data-role="disk-warning"`,
   `disk_warning/3`): when the estimate is over 500 backups of each
   component, or when the estimate times the newest backup of each component
-  it covers (`Backups.status/0`'s `last_good` `bytes`) is more than the free
-  space in the backup directory. The free space is read with
-  `KilnCMS.Backups.Preflight.free_space/1` (`df`, bounded to 10 seconds) in
-  its own `start_async/3`, started beside each status read, only while
-  connected and one at a time, and not at all when
-  `BACKUP_FREE_SPACE_CHECK=false`. Until both are read, or when either
-  can't be (no backup of a covered component yet, `df` unreadable), only
-  the count half applies.
+  it covers (`Backups.status/0`'s `last_good` `bytes`) is more than the room
+  in the backup directory. The room is the free space plus the backups
+  already there, since the space the kept sets take now is space retention
+  hands back: compared with the free space alone, a schedule already holding
+  its sets would be counted twice. The free space is read with
+  `KilnCMS.Backups.Preflight.free_space/1` (`df`, bounded to 10 seconds) and
+  the backups with `Preflight.backups_bytes/1` (one listing of `db/` and
+  `media/`) in their own `start_async/3`, started beside each status read,
+  only while connected and one at a time, and not at all when
+  `BACKUP_FREE_SPACE_CHECK=false`. Until all of it is read, or when some
+  can't be (no backup of a covered component yet, `df` or a listing
+  unreadable), only the count half applies.
   """
   use KilnCMSWeb, :live_view
 
@@ -336,18 +340,18 @@ defmodule KilnCMSWeb.BackupScheduleLive do
       else: deny(socket)
   end
 
-  # The backup directory's free space, for the preview's disk warning
-  # (#2984). Unreadable or crashed: the size half of the warning is dropped
-  # until a later read lands.
+  # The backup directory's room, for the preview's disk warning (#2984).
+  # Unreadable or crashed: the size half of the warning is dropped until a
+  # later read lands.
   def handle_async(:free_space, result, socket) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
-      free =
+      room =
         case result do
-          {:ok, {:ok, bytes}} when is_integer(bytes) and bytes >= 0 -> bytes
+          {:ok, {:ok, %{free: _, held: _} = room}} -> room
           _unreadable -> nil
         end
 
-      {:noreply, assign(socket, free_space: free, free_space_running?: false)}
+      {:noreply, assign(socket, free_space: room, free_space_running?: false)}
     else
       deny(socket)
     end
@@ -678,25 +682,45 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   @doc false
   # The preview's disk warning (#2984), or nil: `estimate` backups of each
   # component, `set_bytes` the newest backup of each component the schedule
-  # covers summed (nil when one isn't known) and `free` the backup
-  # directory's free bytes (nil when unread). Over the free space wins, as it
-  # says the sizes; else over `@disk_warn_count` (500) backups warns on the count
-  # alone. Public for the tests.
-  @spec disk_warning(pos_integer(), non_neg_integer() | nil, non_neg_integer() | nil) ::
-          %{count: pos_integer(), size: non_neg_integer() | nil, free: non_neg_integer() | nil}
+  # covers summed (nil when one isn't known) and `room` the backup
+  # directory's free bytes and the bytes of the backups already in it (nil
+  # when unread). The sets the schedule keeps are compared with both: the
+  # space they take now is retention's to hand back, and free space alone
+  # would count a schedule already holding them twice. Over the room wins,
+  # as it says the sizes; else over `@disk_warn_count` (500) backups warns on
+  # the count alone. Public for the tests.
+  @spec disk_warning(
+          pos_integer(),
+          non_neg_integer() | nil,
+          %{free: non_neg_integer(), held: non_neg_integer()} | nil
+        ) ::
+          %{
+            count: pos_integer(),
+            size: non_neg_integer() | nil,
+            free: non_neg_integer() | nil,
+            held: non_neg_integer() | nil
+          }
           | nil
-  def disk_warning(estimate, set_bytes, free) do
+  def disk_warning(estimate, set_bytes, room) do
     size = if is_integer(set_bytes), do: estimate * set_bytes
 
-    cond do
-      is_integer(size) and is_integer(free) and size > free ->
-        %{count: estimate, size: size, free: free}
+    case room do
+      %{free: free, held: held} when is_integer(size) and size > free + held ->
+        %{count: estimate, size: size, free: free, held: held}
 
-      estimate > @disk_warn_count ->
-        %{count: estimate, size: nil, free: nil}
+      _fits_or_unknown when estimate > @disk_warn_count ->
+        %{count: estimate, size: nil, free: nil, held: nil}
 
-      true ->
+      _fits_or_unknown ->
         nil
+    end
+  end
+
+  # The room in `dir` (`disk_warning/3`), in the background task.
+  defp read_room(dir) do
+    with {:ok, free} <- Preflight.free_space(dir),
+         {:ok, held} <- Preflight.backups_bytes(dir) do
+      {:ok, %{free: free, held: held}}
     end
   end
 
@@ -725,13 +749,15 @@ defmodule KilnCMSWeb.BackupScheduleLive do
 
   defp preview_disk_warning(_preview, _status, _free), do: nil
 
-  defp disk_warning_text(%{count: count, size: size, free: free}) when is_integer(size) do
+  defp disk_warning_text(%{count: count, size: size, free: free, held: held})
+       when is_integer(size) do
     ngettext(
-      "This schedule keeps about %{count} backup of each component (about %{size}), more than the %{free} free in the backup directory.",
-      "This schedule keeps about %{count} backups of each component (about %{size}), more than the %{free} free in the backup directory.",
+      "This schedule keeps about %{count} backup of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there.",
+      "This schedule keeps about %{count} backups of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there.",
       count,
       size: Preflight.human(size, :up),
-      free: Preflight.human(free, :down)
+      free: Preflight.human(free, :down),
+      held: Preflight.human(held, :down)
     )
   end
 
@@ -799,8 +825,9 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   end
 
   # Beside each status read (connected only, as that is), one at a time: a
-  # `df` that hangs on a dead mount is bounded by `Preflight` and no other
-  # starts while it runs. Not at all with the free-space check turned off,
+  # `df` that hangs on a dead mount is bounded by `Preflight`, and a listing
+  # that hangs holds only this task, as the status read's manifest read
+  # does; no other starts while it runs. Not at all with the free-space check turned off,
   # which is how an operator says `df` misreports this disk.
   defp start_free_space_read(socket) do
     cond do
@@ -815,7 +842,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
 
         socket
         |> assign(:free_space_running?, true)
-        |> start_async(:free_space, fn -> Preflight.free_space(dir) end)
+        |> start_async(:free_space, fn -> read_room(dir) end)
     end
   end
 

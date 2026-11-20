@@ -3133,17 +3133,21 @@ stopping the save, when a schedule keeps more than 500 backups of each
 component: "This schedule keeps about 721 backups of each component. Check
 that the backup directory has room for them, or keep fewer." for every 2
 hours kept 60 days. It also warns when the estimate times the newest backup
-of each component the schedule covers is more than the free space in the
-backup directory: "This schedule keeps about 15 backups of each component
-(about 15.0 GB), more than the 10.0 GB free in the backup directory." The
-free space is read with `df` when the tab loads, after a change and on its
-minute refresh, in the background and for at most 10 seconds, as the
-free-space check before a backup reads it
-([Disk space](#media-backups-in-parts-2218)). The size half is left out
-until each covered component has a backup, when `df` can't be read, and
-when `BACKUP_FREE_SPACE_CHECK=false`. It errs toward warning: the estimate
-counts every set the schedule keeps, the ones already on the disk too,
-while the free space has those taken out.
+of each component the schedule covers is more than the room in the backup
+directory, its free space plus the backups already in `db/` and `media/`:
+"This schedule keeps about 15 backups of each component (about 15.0 GB),
+more than the backup directory has room for: 10.0 GB free and 0 KB in the
+backups already there." The backups already there count as room because
+retention hands their space back as new ones are made, so a schedule that
+already holds its sets on a disk with space to spare doesn't warn. Backups
+something else keeps (a recovery point, another schedule, host cron's) count
+as room too, so with those on the disk the warning can stay quiet when the
+disk is short. The free space is read with `df` and the backups by listing
+`db/` and `media/`, when the tab loads, after a change and on its minute
+refresh, in the background, `df` for at most 10 seconds as the free-space
+check before a backup reads it ([Disk space](#media-backups-in-parts-2218)).
+The size half is left out until each covered component has a backup, when
+`df` or a listing can't be read, and when `BACKUP_FREE_SPACE_CHECK=false`.
 
 **What can go wrong:**
 

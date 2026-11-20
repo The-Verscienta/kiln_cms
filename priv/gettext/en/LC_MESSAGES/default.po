@@ -25328,8 +25328,8 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
-msgid "This schedule keeps about %{count} backup of each component (about %{size}), more than the %{free} free in the backup directory."
-msgid_plural "This schedule keeps about %{count} backups of each component (about %{size}), more than the %{free} free in the backup directory."
+msgid "This schedule keeps about %{count} backup of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgid_plural "This schedule keeps about %{count} backups of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
 msgstr[0] ""
 msgstr[1] ""
 

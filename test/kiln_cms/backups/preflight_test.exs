@@ -131,6 +131,49 @@ defmodule KilnCMS.Backups.PreflightTest do
     end
   end
 
+  describe "backups_bytes/1 (#2984)" do
+    test "sums the finished backup files in db/ and media/, every part", %{tmp_dir: tmp} do
+      File.mkdir_p!(Path.join(tmp, "db"))
+      File.mkdir_p!(Path.join(tmp, "media"))
+      File.write!(Path.join([tmp, "db", "kiln-db-20261101-030000.dump"]), :binary.copy("a", 300))
+
+      File.write!(
+        Path.join([tmp, "media", "kiln-media-20261101-030000.part01.tar.gz"]),
+        :binary.copy("a", 50)
+      )
+
+      File.write!(
+        Path.join([tmp, "media", "kiln-media-20261101-030000.part02.tar.gz"]),
+        :binary.copy("a", 20)
+      )
+
+      # Not finished backups: in flight, a sidecar, a marker, anything else.
+      File.write!(
+        Path.join([tmp, "db", "kiln-db-20261102-030000.dump.partial"]),
+        :binary.copy("a", 999)
+      )
+
+      File.write!(Path.join([tmp, "media", "kiln-media-20261101-030000.sha256"]), "x")
+      File.write!(Path.join([tmp, "db", "kiln-20261101-030000.good"]), "")
+      File.write!(Path.join([tmp, "db", "notes.txt"]), :binary.copy("a", 999))
+      # A symlink named like a backup isn't one.
+      File.ln_s!(
+        Path.join([tmp, "db", "notes.txt"]),
+        Path.join([tmp, "db", "kiln-db-20261103-030000.dump"])
+      )
+
+      assert Preflight.backups_bytes(tmp) == {:ok, 370}
+    end
+
+    test "a subdirectory not made yet holds nothing; one that can't be listed is :error",
+         %{tmp_dir: tmp} do
+      assert Preflight.backups_bytes(tmp) == {:ok, 0}
+
+      File.write!(Path.join(tmp, "db"), "")
+      assert Preflight.backups_bytes(tmp) == :error
+    end
+  end
+
   describe "needed/1" do
     test "is the estimate plus 10% plus the configured margin" do
       assert Preflight.needed(0) == 256 * @mb

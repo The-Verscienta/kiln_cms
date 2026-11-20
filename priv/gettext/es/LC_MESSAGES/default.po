@@ -25328,10 +25328,10 @@ msgstr "Esta programación cambió desde que la abrió, así que no se guardó. 
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
-msgid "This schedule keeps about %{count} backup of each component (about %{size}), more than the %{free} free in the backup directory."
-msgid_plural "This schedule keeps about %{count} backups of each component (about %{size}), more than the %{free} free in the backup directory."
-msgstr[0] "Esta programación conserva unas %{count} copia de cada componente (unos %{size}), más que los %{free} libres en el directorio de copias."
-msgstr[1] "Esta programación conserva unas %{count} copias de cada componente (unos %{size}), más que los %{free} libres en el directorio de copias."
+msgid "This schedule keeps about %{count} backup of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgid_plural "This schedule keeps about %{count} backups of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgstr[0] "Esta programación conserva unas %{count} copia de cada componente (unos %{size}), más de lo que cabe en el directorio de copias: %{free} libres y %{held} en las copias que ya están allí."
+msgstr[1] "Esta programación conserva unas %{count} copias de cada componente (unos %{size}), más de lo que cabe en el directorio de copias: %{free} libres y %{held} en las copias que ya están allí."
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format

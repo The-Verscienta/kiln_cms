@@ -25328,10 +25328,10 @@ msgstr "Cette planification a changé depuis que vous l'avez ouverte : elle n'a 
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
-msgid "This schedule keeps about %{count} backup of each component (about %{size}), more than the %{free} free in the backup directory."
-msgid_plural "This schedule keeps about %{count} backups of each component (about %{size}), more than the %{free} free in the backup directory."
-msgstr[0] "Cette planification conserve environ %{count} sauvegarde de chaque composant (environ %{size}), plus que les %{free} libres dans le répertoire de sauvegarde."
-msgstr[1] "Cette planification conserve environ %{count} sauvegardes de chaque composant (environ %{size}), plus que les %{free} libres dans le répertoire de sauvegarde."
+msgid "This schedule keeps about %{count} backup of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgid_plural "This schedule keeps about %{count} backups of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgstr[0] "Cette planification conserve environ %{count} sauvegarde de chaque composant (environ %{size}), plus que la place dans le répertoire de sauvegarde : %{free} libres et %{held} dans les sauvegardes déjà présentes."
+msgstr[1] "Cette planification conserve environ %{count} sauvegardes de chaque composant (environ %{size}), plus que la place dans le répertoire de sauvegarde : %{free} libres et %{held} dans les sauvegardes déjà présentes."
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
