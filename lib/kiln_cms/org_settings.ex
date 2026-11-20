@@ -127,13 +127,31 @@ defmodule KilnCMS.OrgSettings do
   """
   @spec resolve(Ash.UUID.t(), opts()) :: term()
   def resolve(org_id, opts) when is_binary(org_id) do
+    fallback = Keyword.fetch!(opts, :fallback)
+
+    case fetch(org_id, opts) do
+      {:ok, value} -> value
+      :error -> fallback.()
+    end
+  end
+
+  @doc """
+  Like `resolve/2`, but says when the row could not be read instead of
+  answering the fallback: `{:ok, value}` from the same cache entry, or `:error`
+  (nothing cached). For a caller whose answer must not be the degraded one,
+  such as a response a shared cache would keep. `:fallback` is not used.
+  """
+  @spec fetch(Ash.UUID.t(), opts()) :: {:ok, term()} | :error
+  def fetch(org_id, opts) when is_binary(org_id) do
     cache_key = Keyword.fetch!(opts, :cache_key)
     ttl = Keyword.fetch!(opts, :ttl)
-    fallback = Keyword.fetch!(opts, :fallback)
 
     # `resolve_uncached/2` returns nil only on an infrastructure failure, which
     # the cache then declines to store — see the moduledoc.
-    KilnCMS.Cache.fetch(cache_key, ttl, fn -> resolve_uncached(org_id, opts) end) || fallback.()
+    case KilnCMS.Cache.fetch(cache_key, ttl, fn -> resolve_uncached(org_id, opts) end) do
+      nil -> :error
+      value -> {:ok, value}
+    end
   end
 
   @doc """

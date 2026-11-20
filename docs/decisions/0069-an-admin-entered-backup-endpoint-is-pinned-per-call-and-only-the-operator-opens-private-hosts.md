@@ -150,7 +150,9 @@ deadline, which then answers `{:error, :deadline}` with the progress saved.
   operator searching the docs for one finds it.
 - Two names for one store (`s3.amazonaws.com` and
   `s3.us-east-1.amazonaws.com`, a MinIO by name and by IP) are two stores
-  to the overlap check: it compares the endpoint as entered.
+  to the overlap check when saving: it compares the endpoint as entered.
+  Retention treats them as a possible overlap and prunes neither (#3088,
+  ADR 0064).
 
 ## When to revisit
 

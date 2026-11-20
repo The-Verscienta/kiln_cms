@@ -28817,6 +28817,11 @@ msgstr "et"
 msgid "and %{count} more"
 msgstr "et %{count} de plus"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "another S3 destination uses a bucket of the same name; the app can't tell whether it is the same store"
+msgstr "une autre destination S3 utilise un bucket du même nom ; l’application ne peut pas savoir s’il s’agit du même stockage"
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "answered"

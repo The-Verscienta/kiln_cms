@@ -128,6 +128,49 @@ defmodule KilnCMS.OrgSettingsTest do
     end
   end
 
+  # The non-degrading half (#2577): `GET /api/site` must never be answered, and
+  # then shared-cached, with the fallback.
+  describe "fetch/2" do
+    test "a value is {:ok, value}, from the same cache entry resolve/2 fills" do
+      key = key()
+      test_pid = self()
+
+      opts = [
+        cache_key: key,
+        ttl: @ttl,
+        read: fn _org ->
+          send(test_pid, :read)
+          {:ok, [%{value: 7}]}
+        end,
+        build: fn %{value: v} -> {:built, v} end,
+        fallback: fn -> :fallback end
+      ]
+
+      org = org_id()
+      assert OrgSettings.resolve(org, opts) == {:built, 7}
+      assert OrgSettings.fetch(org, opts) == {:ok, {:built, 7}}
+      assert_received :read
+      refute_received :read
+    end
+
+    test "a failed read is :error, never the fallback, and nothing is cached" do
+      key = key()
+
+      opts = [
+        cache_key: key,
+        ttl: @ttl,
+        read: fn _org -> raise Postgrex.Error, message: "relation does not exist" end,
+        build: fn _ -> :never end,
+        fallback: fn -> :fallback end,
+        label: "widget"
+      ]
+
+      log = capture_log(fn -> assert OrgSettings.fetch(org_id(), opts) == :error end)
+      assert log =~ "widget lookup failed"
+      assert KilnCMS.Cache.peek(key) == nil
+    end
+  end
+
   describe "the resource mixin" do
     # The nine the issue named. Discovered, not listed, by `Mixin.all/0`; this
     # pins that discovery finds all of them so a `use` line quietly removed

@@ -1030,13 +1030,16 @@ defmodule KilnCMSWeb.Router do
 
   # Hybrid search (keyword + semantic RRF, reranked when enabled) — not
   # expressible as one Ash action, so it gets a thin controller (roadmap #4).
-  # Its own scope for `:public_cache`: actorless (#1013), so its anonymous
+  # And the site's link-preview defaults (#2577): name, X handle, default share
+  # image, the values its public `<head>` already carries. Their own scope for
+  # `:public_cache`: both are actorless (#1013 for search), so the anonymous
   # answer is the same for everyone at this URL. Declared before the scope
   # below; the paths do not overlap.
   scope "/api", KilnCMSWeb do
     pipe_through [:api, :public_cache]
 
     get "/search", SearchApiController, :index
+    get "/site", SiteController, :show
   end
 
   # The reads that render a draft for a preview token (#1887), in their own

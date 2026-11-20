@@ -108,13 +108,30 @@ defmodule KilnCMS.Search do
   A reranker that has not finished by the deadline leaves its section in
   fused order.
 
-  The budget is checked between legs and enforced by killing the section's
-  task, so it holds at `section_concurrency/0` above 1. At 1 the sections run
-  in the caller's process, and a single leg already running is not
-  interrupted: a later leg simply does not start.
+  The budget is checked between legs, so a section stops at the next leg
+  after the deadline. At `section_concurrency/0` above 1 it is also
+  enforced: a section still running `cut_grace/0` after the deadline is
+  killed. At 1 the sections run in the caller's process, and a single leg
+  already running is not interrupted: a later leg simply does not start.
   """
   @spec query_budget() :: pos_integer() | :infinity
   def query_budget, do: cfg(:query_budget, 1_500)
+
+  @doc """
+  How long a sweep that `query_budget/0` cut waits for its running sections
+  to return on their own before killing them, in milliseconds. Default 100.
+
+  A section checks the deadline between its legs, so most stop within one
+  query of it. Killing one mid-query instead makes Postgrex cancel the query
+  and DBConnection reconnect: one new connection (a TLS handshake and
+  authentication against a remote database) for each section killed while
+  it held one (#2614). The grace spares that for every query that finishes
+  inside it; a query still running after it is killed as before. The cost
+  is the tail: a cut search may answer up to this long after the budget.
+  Only applies at `section_concurrency/0` above 1.
+  """
+  @spec cut_grace() :: non_neg_integer()
+  def cut_grace, do: cfg(:cut_grace, 100)
 
   @doc """
   How many budgeted rerank calls may be in the reranker at once, node-wide.
@@ -3166,7 +3183,11 @@ defmodule KilnCMS.Search do
         {key, run} ->
           {key, fn _sweep -> run.() end}
       end)
-      |> Budget.run(deadline, concurrency: section_concurrency(), stall_timeout: @section_timeout)
+      |> Budget.run(deadline,
+        concurrency: section_concurrency(),
+        stall_timeout: @section_timeout,
+        grace: cut_grace()
+      )
 
     {content, plain} =
       Enum.split_with(sections, &match?({_key, {:content, _resource, _opts}}, &1))

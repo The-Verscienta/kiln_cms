@@ -467,6 +467,69 @@ defmodule KilnCMS.Backups.DestinationTest do
       refute Destination.overlap?(Destination.location(s3(%{})), {:rclone, "r2", ["kiln"]})
     end
 
+    # #3088: one bucket answers to many hosts, so a bucket of the same name
+    # on another host or port may be the same place.
+    test "a bucket of the same name, prefixes nested, possibly overlaps whatever the host" do
+      site = Destination.location(s3(%{"prefix" => "site"}))
+      possible? = &Destination.possible_overlap?(site, Destination.location(s3(&1)))
+
+      # The same host: an exact overlap is a possible one too.
+      assert possible?.(%{"prefix" => "site/a"})
+      assert Destination.overlap?(site, Destination.location(s3(%{"prefix" => "site/a"})))
+
+      for endpoint <- [
+            # AWS's global and regional endpoints for one bucket.
+            "https://s3.amazonaws.com",
+            "https://s3.us-east-1.amazonaws.com",
+            # A MinIO by IP rather than by name.
+            "https://192.0.2.10",
+            # Another port.
+            "https://s3.test:9000"
+          ] do
+        other = Destination.location(s3(%{"endpoint" => endpoint, "prefix" => "site"}))
+
+        refute Destination.overlap?(site, other)
+        assert Destination.possible_overlap?(site, other)
+        assert Destination.possible_overlap?(other, site)
+      end
+
+      aws = Destination.location(s3(%{"endpoint" => "https://s3.amazonaws.com"}))
+
+      assert Destination.possible_overlap?(
+               aws,
+               Destination.location(s3(%{"endpoint" => "https://s3.us-east-1.amazonaws.com"}))
+             )
+    end
+
+    test "a different bucket, or prefixes side by side, is no possible overlap" do
+      site = Destination.location(s3(%{"prefix" => "site"}))
+      elsewhere = "https://s3.us-east-1.amazonaws.com"
+
+      refute Destination.possible_overlap?(
+               site,
+               Destination.location(s3(%{"endpoint" => elsewhere, "bucket" => "else"}))
+             )
+
+      refute Destination.possible_overlap?(
+               site,
+               Destination.location(s3(%{"endpoint" => elsewhere, "prefix" => "sites"}))
+             )
+
+      refute Destination.possible_overlap?(
+               site,
+               Destination.location(s3(%{"prefix" => "other/site"}))
+             )
+
+      refute Destination.possible_overlap?(site, {:rclone, "r2", ["kiln", "site"]})
+    end
+
+    test "other kinds possibly overlap only where they overlap" do
+      assert Destination.possible_overlap?({:local, ["a"]}, {:local, ["a", "b"]})
+      refute Destination.possible_overlap?({:local, ["a"]}, {:local, ["b"]})
+      refute Destination.possible_overlap?({:rclone, "r2", ["a"]}, {:rclone, "b2", ["a"]})
+      refute Destination.possible_overlap?(:unknown, :unknown)
+    end
+
     test "fix the endpoint, bucket and prefix once stored" do
       assert Destination.location_fields("s3") == ["endpoint", "bucket", "prefix"]
     end

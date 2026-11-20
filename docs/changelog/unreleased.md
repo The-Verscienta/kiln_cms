@@ -31,6 +31,50 @@ carries the reasoning.
 
   The size warning gives the estimated total, the free space and the space held by existing backups. Backups kept by something else also count as room, so a nearly full disk can still go unwarned. `keep_days` has no cap, and media stays allowed in sub-daily schedules.
 
+<a id="site-defaults-api"></a>
+
+- **A headless front end can read the site's link-preview defaults at
+  `GET /api/site` (#2577): its name, its X (Twitter) handle and its default
+  share image, with no credential.** A fired artifact's `social` object
+  carries only the document's own values
+  ([ADR 0061](../decisions/0061-site-level-values-stay-out-of-per-document-artifacts.md)),
+  so until now a front end had to copy the site's X handle and fallback image
+  into its own config by hand. Guides:
+  [Site defaults](../api.md#site-defaults) and
+  [Add the site-level tags](../headless-consumer-guide.md#add-the-site-level-tags).
+  - **The answer.** Exactly three keys, every one always present:
+    `site_name` (the site's name as its `<title>` carries it: Branding, else
+    `SITE_NAME`, else `KilnCMS`; a site nobody has branded answers the
+    deployment's default name), `twitter_site` (`@handle` or `null`, per
+    site only, with no operator default) and `social_image_url` (an absolute
+    URL on the site's own host, or a full URL passed through, or `null`;
+    the operator's branding config applies as it does on the pages). Each is
+    a value the site's public `<head>` already shows. Logo, favicon, colors,
+    theme and menus are left out on purpose.
+  - **Whose site.** The one the request's host names, as on every other
+    delivery surface; under strict host matching an unknown host is a `404`.
+  - **Caching.** Anonymous reads are `public, max-age=60,
+    stale-while-revalidate=60` with a weak `ETag` and `304`, like
+    `/api/search`; a valid credential gets the same body as
+    `private, no-store`, and an invalid one is a `401`. If the site's
+    Branding can't be read the answer is a `503` with `Retry-After: 2`,
+    never cached, rather than Kiln's stock defaults.
+  - **CDN purge on a Branding save.** With `KILN_CDN_PURGE_URL` set, the
+    first Branding save, **Reset to defaults**, and a save that changes the
+    site name, the X username or the default social image now purge the
+    site's CDN key, which drops every cached response for that site, not
+    just this one. A save that changes only the logo, favicon, color, theme
+    or menus doesn't, nor does the nightly app-icon re-check. A change of
+    `SITE_NAME`, the operator's branding config, or the site's domain or slug
+    is not purged and shows within two minutes.
+  - **The contract.** Listed as covered in the 1.x stability table; new keys
+    are additive only. REST only: no JSON:API resource, GraphQL field or MCP
+    tool. `site()` methods for `kiln_client` and `@kiln-cms/client` will
+    follow separately. In the OpenAPI document as `getSite`.
+  - **Upgrading.** No migration and no setting. On a deployment with
+    `KILN_CDN_PURGE_URL` set, expect a site-wide purge after a Branding save
+    that changes one of the three values.
+
 <a id="plugin-health-api"></a>
 
 - **Each installed plugin's health is available as JSON for monitoring, at
@@ -83,6 +127,11 @@ carries the reasoning.
 
 ## Changed
 
+<a id="search-budget-cut-grace"></a>
+
+- **A search the budget cuts now gives its running sections 100 ms to stop on their own before killing them, so a query that finishes in time keeps its database connection (#2614).**
+  When `query_budget` ran out, every content section still running was killed at once. A section killed mid-query costs its connection: Postgrex cancels the query in Postgres (so, contrary to what #2614 suspected, nothing keeps running there), but DBConnection drops the connection and opens a new one, a TLS handshake and authentication against a remote database. Now, at `section_concurrency` above 1 (the default is 2), nothing new starts at the deadline and the running sections get `cut_grace` more milliseconds (`config :kiln_cms, KilnCMS.Search, cut_grace: 100` by default) to return. A section checks the deadline between its legs, so most return within one query; those are kept with every leg they finished, and only the ones still running after the grace are killed. The grace does not remove every reconnect: a query longer than the grace is still killed, and a section that was waiting for a connection at the deadline may get one during the grace. Two things readers see: a cut search may now answer up to `cut_grace` later than before (100 ms at the defaults), and a leg that finishes inside the grace is no longer listed under `incomplete`. The response shape and the meaning of `partial` and `incomplete` are unchanged. A new event, `[:kiln_cms, :search, :budget, :cut]` with `returned` and `killed`, is exported as `kiln_cms_search_budget_cut_returned` and `kiln_cms_search_budget_cut_killed` (see [observability.md](../observability.md#search-budget-cuts)). Set `cut_grace: 0` to kill at the deadline as before. A per-query `statement_timeout` was considered and rejected: it needs a transaction or a session `SET`/`RESET` on every checkout, round trips on every search to save a reconnect on the rare one the budget cuts. No migration; rolling back is safe.
+
 <a id="public-js-bundle"></a>
 
 - **Signed-out content pages load a small `public.js` instead of `app.js` (#2402).**
@@ -126,6 +175,10 @@ carries the reasoning.
   The "no all-hidden breakdown leaves a category a single value" rule (#2981) was found by a search run outside the suite, so a change to `referrer_sources/0` or to `KilnCMS.Analytics.suppress_referrer_group/1` had nothing wide to re-check against. The search is now in `test/kiln_cms/analytics/referrer_suppression_test.exs` behind the `slow_sweep` tag, which the default suite excludes. Run it with `mix test --only slow_sweep test/kiln_cms/analytics/referrer_suppression_test.exs` after touching either. It covers thresholds 2 to 20 with four, five and six categories, bounded at view totals of 40, 30 and 20; the original hand search went to 50, and the committed one does not re-run totals above these bounds. A second test in the sweep checks that the criterion can fail (three categories at a threshold of 3 still do). To let the sweep vary the number of categories, `suppress_referrer_group/2` takes an explicit category list; `/1` is `/2` over `referrer_sources/0`, and a default-suite test pins that. Nothing published changes: the dashboard and the export still call `/1`, and no setting or output differs. Operators have nothing to do. The decision record for the rule (ADR 0075) is on a separate open pull request.
 
 ## Fixed
+
+<a id="backup-s3-same-bucket-overlap"></a>
+
+- **S3 destinations naming one bucket through different hosts (#3088).** Overlap between S3 destinations was compared by host, port and bucket. Two destinations reaching one bucket through different endpoint names each pruned it by their own keep rules, so one could delete a backup the other still counted on. Examples: `s3.amazonaws.com` and `s3.us-east-1.amazonaws.com`, R2 account and jurisdiction hosts, or a MinIO by name and by IP. Now two S3 destinations with the same bucket name and nested prefixes block pruning on both, whatever their host. Each row's badge reads "Not pruned: another S3 destination uses a bucket of the same name; the app can't tell whether it is the same store". Saving such a pair is still allowed; only an exact overlap is refused.
 
 <a id="webhook-resolve-ladder-errors"></a>
 
@@ -243,3 +296,10 @@ carries the reasoning.
     background with a 5-second limit, as the Backups page does, and says
     when it couldn't check in time.
   ([#2983](https://github.com/The-Verscienta/kiln_cms/issues/2983), [#2985](https://github.com/The-Verscienta/kiln_cms/issues/2985), [#2986](https://github.com/The-Verscienta/kiln_cms/issues/2986))
+
+## Upgrade notes
+
+<a id="backup-s3-same-bucket-overlap-upgrade"></a>
+
+- **Two S3 destinations on one bucket name stop pruning (#3088).** After the upgrade, an installation with two S3 destinations that name the same bucket, one prefix inside the other, on different hosts skips retention on both. Each pass leaves a "Retention on … skipped" notice, and the storage grows until you act. Give the two destinations prefixes side by side, or untick "Delete its old backups (retention)" on one of them if they really are separate stores.
+

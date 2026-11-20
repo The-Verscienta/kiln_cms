@@ -80,8 +80,14 @@ come to mean another place:
   and two destinations saved at the same moment are not checked against
   each other, **the overlap is checked again before every pass**. A destination that
   overlaps the env remote or another one is skipped ("it overlaps
-  BACKUP_RCLONE_REMOTE", "it overlaps another backup destination"). A
-  plugin's destination, whose settings mean nothing to Kiln, can't be
+  BACKUP_RCLONE_REMOTE", "it overlaps another backup destination"). Two S3
+  destinations naming a bucket of the same name, one prefix inside the
+  other, on different endpoint hosts or ports may be one bucket reached
+  through two names (AWS's global and regional hosts, a MinIO by name and
+  by IP), so neither is pruned
+  ([#3088](https://github.com/The-Verscienta/kiln_cms/issues/3088),
+  `Destination.possible_overlap?/2`); saving such a pair is still allowed,
+  since they may be two stores. A plugin's destination, whose settings mean nothing to Kiln, can't be
   compared with anything: with `BACKUP_RCLONE_REMOTE` set it is skipped
   ("can't confirm it doesn't overlap BACKUP_RCLONE_REMOTE"); without it, it
   is pruned on the ownership rule alone. Letting a plugin say where it
