@@ -19,6 +19,7 @@ defmodule KilnCMS.CMS.Validations.ReleaseWithinSizeLimit do
       config :kiln_cms, KilnCMS.CMS.Releases, max_items: 500
   """
   use Ash.Resource.Validation
+  use Gettext, backend: KilnCMSWeb.Gettext
 
   alias Ash.Error.Changes.InvalidChanges
   alias KilnCMS.CMS.Releases
@@ -40,7 +41,7 @@ defmodule KilnCMS.CMS.Validations.ReleaseWithinSizeLimit do
         {:error,
          InvalidChanges.exception(
            fields: [:release_id],
-           message: "release is full (#{cap} items); ship or split it"
+           message: gettext("release is full (%{cap} items); ship or split it", cap: cap)
          )}
 
       {:error, %Ash.Error.Forbidden{} = forbidden} ->
@@ -50,7 +51,7 @@ defmodule KilnCMS.CMS.Validations.ReleaseWithinSizeLimit do
         {:error,
          InvalidChanges.exception(
            fields: [:release_id],
-           message: "release size could not be checked"
+           message: gettext("release size could not be checked")
          )}
     end
   end
