@@ -119,6 +119,12 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="scoping-bare-org-id"></a>
+
+- **A member of a non-default site now sees that site's content-type scope on the content list's "New" buttons and the translations dashboard (#2599).** For a member whose membership on a non-default site lists `editable_types`, the content list's New buttons, the translations dashboard's Missing chips and its translation actions were decided by the default site's scope, so they could offer a type the member may not create on their own site, or hide one they may. They now follow the scope of the site being viewed. This was a display error only: the create and update policies already judged the right site, so nothing was allowed that should not have been, and a refused create still failed with the same error. No action is needed.
+
+  For developers, `KilnCMS.Accounts.Scoping.permitted?/4` and `explicitly_permits?/4` take their second argument as a bare org id, an `%Organization{}`, or any query, changeset, action input or plain map carrying `:tenant` or `:to_tenant`. `nil` or a tenant-less subject still means the default site. Any other shape (an integer, an atom, a list, a tuple) now raises `ArgumentError` instead of silently judging the default site. A bare id used to take that silent path, which is how this went unnoticed. Still open: `subject_org_id/1` (used by `effective_tier/2` and `field_grant/3`) and `audience_org_id/1` fall back to the default org for odd shapes; a follow-up will make those resolvers strict too.
+
 <a id="backup-s3-same-bucket-overlap"></a>
 
 - **S3 destinations naming one bucket through different hosts (#3088).** Overlap between S3 destinations was compared by host, port and bucket. Two destinations reaching one bucket through different endpoint names each pruned it by their own keep rules, so one could delete a backup the other still counted on. Examples: `s3.amazonaws.com` and `s3.us-east-1.amazonaws.com`, R2 account and jurisdiction hosts, or a MinIO by name and by IP. Now two S3 destinations with the same bucket name and nested prefixes block pruning on both, whatever their host. Each row's badge reads "Not pruned: another S3 destination uses a bucket of the same name; the app can't tell whether it is the same store". Saving such a pair is still allowed; only an exact overlap is refused.

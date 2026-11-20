@@ -80,6 +80,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Members of a non-default site: the content list's New buttons and the translations dashboard's Missing chips and actions now follow that site's content-type scope, not the default site's (display only; the policies were already correct). `Scoping.permitted?/4` and `explicitly_permits?/4` accept a bare org id and raise `ArgumentError` on shapes that name no org.**
+  ([long form](docs/changelog/unreleased.md#scoping-bare-org-id))
+
 - **Backups: two S3 destinations that name one bucket through different hosts (AWS global vs regional, R2 jurisdiction hosts, a MinIO by name and by IP) no longer both prune it; neither does, and the Destinations badge says why.**
   ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap))
 
