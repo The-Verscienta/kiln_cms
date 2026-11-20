@@ -176,6 +176,57 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="federation-shared-inbox-dedup"></a>
+
+- **A publish now sends one signed POST per remote inbox instead of one per follower, and a fan-out that fails part-way can be retried without re-sending (#2753).**
+  The fan-out wrote a ledger row and a delivery job for every follower, to the
+  follower's delivery inbox, which is the instance's `sharedInbox` when it
+  publishes one. 2,000 followers on one instance meant 2,000 identical signed
+  POSTs there per publish, which invites rate limiting, and the 429s that
+  followed counted against every one of those followers toward the drop
+  ceiling. The loop was not transactional either, so when it failed part-way
+  `AnnounceWorker` re-ran it and re-sent to everyone already queued.
+  - **One delivery per distinct inbox.** Followers are grouped by
+    `Follower.delivery_inbox/1` and each group gets one ledger row and one
+    POST. Everything the fan-out sends is addressed to the public and
+    followers collections, which is what a shared inbox fans out on, so the one
+    POST reaches every follower there. On `/editor/federation`, **Recent
+    deliveries** now shows one row per inbox.
+  - **Whose outcome it is.** A row's `follower_id` set means exactly that
+    follower (an inbox with one follower when the row was written, and every
+    `Accept`); `nil` means every follower whose deliveries go to the row's
+    `inbox_uri` when the delivery settles, including followers who arrived
+    after the row was written. A success resets all of them; a delivery that
+    exhausts its 12 attempts charges each one failure, in one atomic `UPDATE`,
+    and drops those it takes to `drop_follower_after`. Each follower is still
+    charged once per failed delivery, so a dead instance's followers are
+    dropped after the same number of publishes as before. A failed credit or
+    charge is now logged at warning.
+  - **All or nothing.** The ledger rows and delivery jobs are written in one
+    transaction (job inserts chunked at 500). A failure leaves nothing behind
+    and the calling worker retries from a clean start;
+    `KilnCMS.Federation.deliver_to_followers/5` returns `{:error, reason}`
+    instead of crashing on a `MatchError`. Residual window: a worker that dies
+    after the commit and before Oban records the job done fans out a second
+    time, one extra POST per inbox, carrying an activity id the receiver
+    already saw for a document activity. An `Accept`'s ledger row and job are
+    now written in one transaction as well; where it is sent is unchanged
+    (sending it to the follower's personal inbox is #3186).
+  - **For developers.** New `Follower` read action `:at_inbox` (code interface
+    `KilnCMS.Federation.followers_at_inbox/2`, argument `inbox_uri`), the
+    inverse of `delivery_inbox/1`, under the existing read policy (the
+    `:federation` and `:operator` system actors). `deliver_to_followers` gains
+    an `opts` argument (`:batch_size`, default 500) and its return type is now
+    `:ok | {:error, term()}`. `Follower`'s `:record_failure` and
+    `:record_success` are now atomic.
+  - **Known cost.** Settling a shared row reads the site's followers by inbox
+    with no index on the shared inbox column (#3187).
+  - **Upgrade and rollback.** No migration and no config. Rolling back is
+    possible, with one effect: the previous release's delivery worker does
+    nothing with a row whose `follower_id` is `nil`, so shared rows still queued
+    at rollback are delivered but credit or charge no follower. See
+    [One POST per inbox](../federation.md#one-post-per-inbox-2753).
+
 <a id="invitation-keeps-legacy-tier"></a>
 
 - **Accepting an invitation to the default site at a lower tier no longer demotes an account that has no membership but a legacy editor or admin role (#2574).**

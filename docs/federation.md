@@ -223,9 +223,9 @@ Activities are signed against the request's **real** host, which is also what
 
 ## Delivery
 
-One ledger row per activity per follower, with attempts, status and error
-recorded — the same shape outbound webhooks use, with two differences the
-fediverse forces:
+One ledger row per activity per **distinct inbox**, with attempts, status
+and error recorded — the same shape outbound webhooks use, with two
+differences the fediverse forces:
 
 - **more retries** (12, with backoff to six hours). A webhook receiver that is
   down is usually a bug someone is fixing; a fediverse instance that is down is
@@ -238,6 +238,55 @@ fediverse forces:
 
 Ledger rows are pruned after 30 days.
 
+### One POST per inbox (#2753)
+
+A follower on an instance that publishes a `sharedInbox` is delivered to
+there, and one POST to a shared inbox reaches every follower on that instance:
+everything the fan-out sends is addressed to the public collection and the
+site's followers collection, which is what a shared inbox fans out on. So
+`KilnCMS.Federation.deliver_to_followers/5` groups the deliverable followers by
+the inbox their deliveries go to (`Follower.delivery_inbox/1`: the shared inbox
+when it is set and not empty, otherwise the follower's own inbox) and writes
+one ledger row and one signed POST per group. 2,000 followers on one instance
+cost one request per publish, not 2,000 identical ones that invite the
+instance to rate-limit the site.
+
+The row's `follower_id` says whose bookkeeping its outcome lands on:
+
+- **set**: exactly that follower. An inbox only one follower used when the row
+  was written gets this, and so does every `Accept`.
+- **empty**: every follower whose deliveries go to the row's `inbox_uri` **when
+  the delivery settles** (`Follower`'s `:at_inbox` read). A follower who
+  arrived at that inbox after the row was written is counted too; it is the
+  same endpoint.
+
+A success resets the failure count and stamps "Last delivered" on everyone the
+row covers; a delivery that exhausts its retries adds one failure to each of
+them, in one atomic `UPDATE`, and drops those it takes to the ceiling. Each
+follower is still charged once per failed delivery, so a dead instance's
+followers are dropped after the same number of publishes as before.
+
+On `/editor/federation`, **Recent deliveries** therefore shows one row per
+inbox, not one per follower, and the **Followers** table's **Last delivered**
+and **Failures** columns are where the per-follower outcome still shows.
+
+The fan-out is all or nothing: the ledger rows and the delivery jobs are
+written in one transaction (job inserts in chunks of 500, so a large site's
+fan-out stays under Postgres's parameter limit). A failure part-way leaves
+nothing behind, and the job that asked for the fan-out (`AnnounceWorker` for a
+document's `Create`/`Update`/`Delete`, `ActorUpdateWorker` for a re-key)
+retries from a clean start instead of re-sending to every inbox an earlier
+attempt had already queued. The one gap: if the worker dies after the commit
+and before Oban records the job done, the retry fans out a second time: one
+extra POST per inbox. For a document activity it carries an id the receiver
+has already seen (the id is derived from the document and the verb); an actor
+`Update` gets a fresh id on each run. An `Accept`'s ledger row and its job are written in one
+transaction the same way.
+
+Matching a shared row to its followers reads the site's followers by inbox on
+every settle; there is no index on the shared inbox column yet
+([#3187](https://github.com/The-Verscienta/kiln_cms/issues/3187)).
+
 ## Managing it: `/editor/federation` (#967)
 
 Phase 2 of #491. The admin page shows the two halves of the gate (the
@@ -247,8 +296,8 @@ site's own switch), the handle and actor id, the editable profile
 was last delivered to and how many deliveries in a row have failed (a row at
 the drop ceiling is marked, and the header says how many followers a publish
 will actually reach — `Follower`'s `:deliverable` read, the same set
-`AnnounceWorker` fans out to), the recent delivery ledger with each failure's
-status and error, and the **block list**.
+`AnnounceWorker` fans out to), the recent delivery ledger (one row per inbox) with each
+failure's status and error, and the **block list**.
 
 **Blocks** are the durable answer to an abusive follower — a bare delete was
 not, because the next `Follow` upserted the row back. A block names an
@@ -308,4 +357,5 @@ key is unreadable"* instead of *"federation is not enabled"*.
   would make the sending server retry for days over something not built yet,
   which is a way to get an instance blocked.
 - No `sharedInbox` on our side. We *use* a remote server's when it publishes
-  one, so one POST reaches every follower there.
+  one, so one POST reaches every follower there (one ledger row per inbox
+  since #2753, see [One POST per inbox](#one-post-per-inbox-2753)).

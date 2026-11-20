@@ -89,6 +89,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Federation: a publish sends one signed POST per remote inbox (a `sharedInbox` reaches all its followers) instead of one per follower, settled against every follower there; the fan-out is one transaction, so a retry no longer re-sends to inboxes already queued.**
+  ([long form](docs/changelog/unreleased.md#federation-shared-inbox-dedup))
+
 - **Accepting an invitation to the default site at a lower tier no longer demotes an account with no membership but a legacy editor or admin role: its tier is carried into a membership first and the accept reports it already a member. An admin's own Add is unchanged.**
   ([long form](docs/changelog/unreleased.md#invitation-keeps-legacy-tier))
 
