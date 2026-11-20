@@ -7,6 +7,10 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="backup-s3-same-bucket-overlap-upgrade"></a>
+
+- **Two S3 destinations on one bucket name stop pruning (#3088).** After the upgrade, an installation with two S3 destinations that name the same bucket, one prefix inside the other, on different hosts skips retention on both. Each pass leaves a "Retention on … skipped" notice, and the storage grows until you act. Give the two destinations prefixes side by side, or untick "Delete its old backups (retention)" on one of them if they really are separate stores.
+
 <a id="backup-sftp-destination-upgrade"></a>
 
 - **The `sftp` destination kind is now Kiln's own (#2222).** `sftp` joins `local`, `rclone` and `s3` as a kind no plugin can register. Rows a plugin made under that kind no longer match Kiln's fields, so saves and backups to them fail until you delete them and add the destination again under **SFTP server**.
@@ -28,6 +32,43 @@ carries the reasoning.
   release that gains it later picks it up only after a restart. No
   migration and no configuration; rolling back is safe.
 
+## Breaking
+
+<a id="ws-gql-bearer-scheme-any-case"></a>
+
+- **`/ws/gql` reads an `authorization` connect param under a `Bearer` scheme in any case, so lowercase garbage and a bare `Bearer` are now refused instead of connecting anonymously (#2632).**
+  The GraphQL socket used to read an `Authorization` (or `authorization`)
+  connect param only when it started with exactly `Bearer `; any other
+  spelling was ignored and the socket connected as anonymous. It now reads
+  the scheme case-insensitively, as every HTTP surface does (see
+  [Fixed](#bearer-scheme-any-case)), which changes three answers:
+  - `bearer <valid jwt>` and `BEARER <valid jwt>` connect as the token's user
+    (they used to connect anonymously).
+  - `bearer <garbage>`, or an expired or revoked JWT under a lowercase
+    scheme, is refused like any token that does not verify: `connect/3`
+    answers `:error` and the handshake is a `403` (#2634). It used to connect
+    anonymously and read published content.
+  - A bare `Bearer` with no token, in any case, is refused too, matching the
+    `401` `/api` and `/gql` give it over HTTP. `Bearer` with no trailing space
+    used to connect anonymously.
+
+  The `token` connect param, which carries the JWT with no scheme, is
+  unchanged, as is a param under another scheme (`Basic …`), which still
+  connects anonymously. A client that sends a lowercase or empty bearer
+  should send a valid JWT or leave the param out.
+  `KILN_API_REJECT_INVALID_BEARER=false` still restores the anonymous connect
+  for a token that does not verify, and each refusal still emits
+  `[:kiln_cms, :api, :invalid_bearer]` with `surface: :graphql`. No migration;
+  rolling back restores the old reading.
+
+## Known issues
+
+<a id="plugin-health-tail-packages-unknown"></a>
+
+- **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check.**
+  A plugin check now stops at 75 seconds and does not ask about packages it hasn't reached ([plugin check single-flight](#plugin-check-single-flight)). Packages are asked in a fixed order, so the ones at the end are the ones left out each round, while the rest are re-checked every 15 minutes. Affects platform administrators reading System or Security posture on a deployment with enough Hex plugins that a round doesn't finish in time (roughly 13 or more at hex.pm's slowest). Workaround: none needed for the plugins that answered; for the rest, check the package on hex.pm by hand until hex.pm answers in time. Unknown is never shown as OK.
+  ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165))
+
 ## Added
 
 <a id="backup-sftp-destination"></a>
@@ -40,6 +81,20 @@ carries the reasoning.
   - **Uploads:** they resume after an interruption, in 128 KiB writes within OpenSSH's message limit, checked by size plus a read-back of the tail. The final rename uses `posix-rename` when the server offers it.
   - **Retention, rescan and safety:** list, get and delete work for retention and rescan. Symlinks are refused in the `db`/`media` folders and for backup files.
   - **More:** see ADR 0079 and the "Back up to an SFTP server" section of docs/backups.md.
+
+<a id="mcp-content-link-tools"></a>
+
+- **Content link tools on `/mcp` (#3191).** `read_content_links` (`ContentLink :read`), `create_content_link` (`:create_link`) and `update_content_link` (`:update_link`) let an LLM author link records with any `kind`, not only the `related_*_ids` the update tools already take. They follow the payload-link route's rules from R8 (#2014): a write is authorized as an edit of the link's source, `kind: reference` is refused, and a link is visible only when the key may read both ends. There is no destroy tool, as for every other `/mcp` tool.
+  AshAi lists a tool only if `Ash.can?` passes on a blank changeset, which `Checks.SourceUpdatable` could never pass without a source, so a source-less tool probe now passes that check, the same rule as `DraftWriteKey`'s. The write-key and editor policies still decide whether the tools are listed.
+  A project that replaces `config :kiln_cms, :mcp_tools` must add the three names to serve them.
+
+<a id="backup-schedule-disk-warning"></a>
+
+- **Schedule preview warns about runaway disk use (#2984).** A sub-daily schedule with a long `keep_days` can keep thousands of full backups. For example, every 2 hours for 60 days keeps 721 of each component. The preview now warns, without blocking the save, in two cases:
+  - when it would keep more than about 500 backups of each component;
+  - when the newest backup of each component it covers, times that count, is more than `BACKUP_DIR` has room for. Room is the free space, read with the same bounded `df` as the backup preflight, plus the finished backups already in `db/` and `media/`, which this schedule's retention can reuse. This check is skipped when `BACKUP_FREE_SPACE_CHECK=false`.
+
+  The size warning gives the estimated total, the free space and the space held by existing backups. Backups kept by something else also count as room, so a nearly full disk can still go unwarned. `keep_days` has no cap, and media stays allowed in sub-daily schedules.
 
 <a id="site-defaults-api"></a>
 
@@ -186,6 +241,103 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="bearer-scheme-any-case"></a>
+
+- **A valid JWT under `bearer` or `BEARER` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing the 1.9.0 note that made it a `401` (#2632).**
+  An HTTP authentication scheme is case-insensitive (RFC 7235). Since 1.9.0
+  the bearer check matched it that way, but AshAuthentication's JWT loader
+  reads only the exact `Bearer ` spelling, so a valid `bearer <jwt>` loaded
+  no user and was refused as an invalid token. The
+  [1.9.0 Breaking note](v1.9.0.md#bearer-401-hardening) documented that
+  refusal as intended; it no longer applies. A new plug,
+  `KilnCMSWeb.Plugs.LoadFromBearer`, replaces `:load_from_bearer` on the
+  `:api`, `:graphql` and `:feed` pipelines: it hands the loader a copy of the
+  request with each bearer value rewritten to `Bearer <token>` and puts the
+  caller's `authorization` headers back afterwards, so nothing downstream sees
+  a rewrite. The same reading, `KilnCMSWeb.BearerAuth.parse/1` (scheme in any
+  case, surrounding whitespace and any run of whitespace after the scheme
+  tolerated), now serves every surface that takes a bearer:
+  - **`/api/*`, `/gql`, `/api/feed`.** `bearer <jwt>`, `BEARER <jwt>` and
+    `  bearer   <jwt>` authenticate as the token's user. A token that does not
+    verify (garbage, expired, revoked) and a bare `Bearer` are still a `401`
+    in any case, and API keys were already accepted under any case.
+  - **Held accounts.** Because a lowercase JWT now loads its user, an account
+    its site holds for a second factor gets the specific
+    `403 second_factor_required` answer (and the `second_factor_required`
+    telemetry event) instead of the generic `401 invalid_token`, or an
+    anonymous read with `KILN_API_REJECT_INVALID_BEARER=false`.
+  - **`/mcp`.** A `kiln_` key under a lowercase scheme, or in a later
+    `Authorization` value (after a proxy's own), now authenticates; both were
+    a `401`. The key is found as on `/api`: the first `kiln_` key in any value
+    decides. The pipeline's new `KilnCMSWeb.Plugs.RequireApiKey` does this; a
+    JWT, garbage or a bare `bearer` is still a `401`. A key accepted this way
+    is also remembered for the rate-limit alert
+    (`KilnCMSWeb.Plugs.RememberApiKey`).
+  - **`POST /api/keys/rotate`.** Same as `/mcp`: `bearer kiln_…`, or the key
+    in a second `Authorization` value, now rotates; both were a `401`.
+  - **`/metrics`.** With `KILN_METRICS_TOKEN` set, the token is accepted under
+    any case of the scheme, with surrounding whitespace trimmed. It must still
+    be the only `Authorization` value, and is still compared in constant time.
+  - **`/ws/gql`.** See [Breaking](#ws-gql-bearer-scheme-any-case): lowercase
+    garbage there is now refused rather than anonymous.
+
+  A client that sent `bearer <jwt>` and handled the `401` by
+  re-authenticating will now simply succeed. No migration and no
+  configuration; rolling back restores the 1.11.0 answers.
+
+<a id="plugin-check-single-flight"></a>
+
+- **The plugin health check runs one round per server at a time, and a round that runs out of time still caches what it got (#2565).** System started its own check on a cold cache, apart from the background check Security posture starts, so two administrators opening System, or System and Security posture together, each sent hex.pm a full round of requests, each disclosing the installed plugins' names and versions. And with about 13 or more Hex plugins and a slow hex.pm, System's check outran its 90-second wait and was killed before it stored anything, so the 15-minute failure cache never applied: every later visit asked hex.pm again and showed Unknown.
+  - **One round per server.** Every round now runs in one supervised process per node. System, Security posture and **Check plugins now** all start it or join the one already running, and wait for its answer; hex.pm is asked once. Closing the page no longer stops the round. A press of **Check plugins now** while another round is in flight joins it instead of asking again; if that round wasn't a forced one, its security notices are the cached ones. A forced check right after a non-forced round still asks; the once-a-minute floor applies to back-to-back forced checks.
+  - **One time limit per round, 75 seconds.** It covers Hex and the notices feed together (before, System effectively allowed 90 s and Security posture's background check had no overall limit). A package not started by then is not asked at all, so fewer names reach hex.pm, and one still in flight is cut off; either reads Unknown, never OK. A page waits up to 90 seconds for the round; one that still has no answer reads every plugin Unknown.
+  - **A partial answer is cached for 15 minutes**, so the next page load doesn't ask again. That includes a forced check that replaces a complete 24-hour answer: its Unknowns stand for 15 minutes, as a failed request's always have. When the round cut off a notices request that never stored anything (it was waiting behind another request for the feed), the feed's timeout is cached for it too, so the Hex half is served.
+  - `mix kiln.plugins.list --health` runs its check inline, as before, through the new `inline: true` option of `Kiln.Plugins.Health.check/1`. `Kiln.Plugins.Health.warm/0` is now `warm/1` (an `:installed` option; `warm()` still works), and `Kiln.SecurityNotices.put_cache/1` is documented.
+
+  No migration and no config; rolling back is safe. See [Check your installed plugins](../security-posture.md#check-your-installed-plugins).
+
+<a id="invitation-keeps-legacy-tier"></a>
+
+- **Accepting an invitation to the default site at a lower tier no longer demotes an account that has no membership but a legacy editor or admin role (#2574).**
+  Such an account (created before site memberships; it shows as *legacy* on the
+  default site) was joined at the invited tier, so an editor invited as a
+  viewer became a viewer. Now its legacy tier is written to a default-site
+  membership first, with the audit event `role_granted` (`via: "legacy_carry"`),
+  its audiences, and a live temporary role with the same expiry, and the accept
+  reports the account as already a member (`:already_member`; the invitation is
+  used up and the page says nothing changed). An invitation at the same or a
+  higher tier is an ordinary join at the invited tier, with no carry row. Only
+  the standing role is protected: the comparison uses the account as re-read
+  under its lock, and a live temporary role is not counted. A custom role on a
+  swallowed lower-tier invitation is not applied (the account is reported as
+  already a member and `role_id` stays unset). New accounts created by an
+  invitation are unaffected. An admin's explicit **Add or invite** is unchanged
+  and still writes the tier picked, even below a legacy role. For operators: if
+  an editor or admin account was demoted this way before the fix, raise it
+  again on Team; nothing is migrated and rolling back is safe. Still open, as
+  #3178, #3179 and #3180: the console Add can still demote an unaffiliated legacy account,
+  approving a registration queued through site single sign-on can demote one
+  too, and a custom role on a swallowed invitation is not applied. See
+  [If the invitee is already a member](../account-administration.md#if-the-invitee-is-already-a-member).
+
+<a id="webhook-ordering-identity"></a>
+
+- **A late, retried or foreign provider webhook can no longer overwrite a membership with the wrong subscription's state (#2749).** Metadata resolves an event to a membership row, not to a subscription, so a delayed event could undo newer state and an event for an abandoned subscription could rewrite a paying row. Events are now checked before they are applied, and one that fails is acknowledged, writes nothing and ends `ignored` in `/editor/billing` with a reason. `other_subscription`: the membership is `active` or `past_due`, holds a subscription id, and the event is about a different one (logged at warning); a cancellation for a subscription other than the stored one is ignored on any row, so it never overwrites the stored id. `out_of_order`: the event's `created` is older than the last one applied for the same subscription; an equal stamp applies, except that an event that would not cancel never revives a `canceled` row. `comped_not_provider_managed`: a `comped` membership ignores every provider event, and comping a paying member does not cancel their provider subscription (#3156), so cancel it in the provider's dashboard. An event with no subscription id, or an entitling row with no stored one, is still applied. A row that does not entitle accepts a different subscription only when it is `incomplete`, when the state was fetched live at checkout, or when the event is strictly newer than the last one applied, so a late non-cancelling event for a canceled row's old subscription cannot revive it. Checkout completion applies state fetched live, is exempt from the ordering check, and is stamped with the checkout event's own `created`. `invoice.payment_failed` now also has its subscription id read from the newer Stripe shape (`parent.subscription_details.subscription`). The check repeats inside the write transaction under the row lock; a row that moved and an event now superseded settles as `ignored`, and if the row moved but the event still applies the write errors and Oban retries it. Residual window: Stripe's `created` has one-second resolution, so two different events in the same second delivered in the wrong order are not caught. Replaying an applied event still appends a second `reconciled` audit row (status unchanged). Operators: ignored events show in `/editor/billing` with the reason; a burst of `other_subscription` is worth a look. A new nullable column, `billing_memberships.last_provider_event_at` (expand-only, not exposed in the API), and no config. A node on the previous release does not stamp it, which only makes ordering more permissive, so rolling back is safe. See [Late, repeated and foreign events](../memberships.md#late-repeated-and-foreign-events).
+
+<a id="backup-history-cron-keep-days"></a>
+
+- **Imported cron rows judged by the prunes after them (#3113).** On a host where both `scripts/backup.sh` and the app back up, the latest `manifest.json` is often the app's. Cron's `keep_days` was then unknown, so every imported History row whose files were gone read "probably expired".
+  - Each imported run now records `keep_days` when a successful cron manifest covers it. A manifest without `components` is cron's; the trigger is not used. This adds one nullable column, through a migration that only adds.
+  - The History reads such a row as "expired" only when a cron run imported after it recorded a window that would have removed it. If later cron runs recorded windows and none would have removed it, the row reads "missing". If later runs exist but none recorded its window, the row reads "probably expired", and only once it is older than the keep days.
+  - `backup.sh` prunes with the `BACKUP_KEEP_DAYS` in force when the prune runs, so a changed setting is judged correctly.
+  - A cron run records its window only if an import runs while cron's manifest is still the latest. Imports run at an app backup's start, during marker sync and when History opens. Cron's separate `db` and `media` entries write no manifest, so they never record one.
+  - Rows imported before this change stay as they were.
+
+<a id="scoping-bare-org-id"></a>
+
+- **A member of a non-default site now sees that site's content-type scope on the content list's "New" buttons and the translations dashboard (#2599).** For a member whose membership on a non-default site lists `editable_types`, the content list's New buttons, the translations dashboard's Missing chips and its translation actions were decided by the default site's scope, so they could offer a type the member may not create on their own site, or hide one they may. They now follow the scope of the site being viewed. This was a display error only: the create and update policies already judged the right site, so nothing was allowed that should not have been, and a refused create still failed with the same error. No action is needed.
+
+  For developers, `KilnCMS.Accounts.Scoping.permitted?/4` and `explicitly_permits?/4` take their second argument as a bare org id, an `%Organization{}`, or any query, changeset, action input or plain map carrying `:tenant` or `:to_tenant`. `nil` or a tenant-less subject still means the default site. Any other shape (an integer, an atom, a list, a tuple) now raises `ArgumentError` instead of silently judging the default site. A bare id used to take that silent path, which is how this went unnoticed. Still open: `subject_org_id/1` (used by `effective_tier/2` and `field_grant/3`) and `audience_org_id/1` fall back to the default org for odd shapes; a follow-up will make those resolvers strict too.
+
 <a id="billing-webhook-lost-events"></a>
 
 - **A provider webhook can no longer be recorded without a job to process it (#2748).** The receiver inserted the event row and then enqueued its job as a second step, so a crash or enqueue failure between the two left a `received` row nothing would ever process, and the provider's redelivery was acked as a duplicate. Now `WebhookEvent`'s `:receive` inserts the row and the `WebhookWorker` job in one transaction: a `500` means nothing was recorded and the retry starts clean. A redelivery of a `received`, `failed` or stale `processing` event (claimed more than 10 minutes ago) re-enqueues its job and is then acked; a redelivery of a `processed` or `ignored` event, or of a freshly claimed one, is only acked. The worker has a 3-minute run timeout and rescues exceptions, exits and throws, so the event settles as `failed` and Oban retries. `:claim` can take over a `processing` event older than 10 minutes, in one atomic update. The job is unique on the event id while `available`, `scheduled` or `retryable`, but not `executing`: `Oban.Lifeline` rescues an orphaned executing job only after 180 minutes, and a redelivery must be able to enqueue meanwhile. A crash after the `200` is never redelivered by the provider; recovery there is the rescue, Oban's retry and the takeover. A taken-over event whose membership change had already committed appends a second `MembershipEvent` audit row; access is not granted twice, and ordering is #2749's. Still open, for the sweeper in #3159: a job that exhausts `max_attempts` leaves the event `failed`, a `processed` stamp that fails to save leaves it `processing`, and `received` rows recorded before this deploy have no job. No migration and no config. A rolling deploy is safe (an old node enqueues a non-unique job, which the claim catches), and rolling back is safe. See [Webhook delivery and recovery](../memberships.md#webhook-delivery-and-recovery).
@@ -310,10 +462,3 @@ carries the reasoning.
     background with a 5-second limit, as the Backups page does, and says
     when it couldn't check in time.
   ([#2983](https://github.com/The-Verscienta/kiln_cms/issues/2983), [#2985](https://github.com/The-Verscienta/kiln_cms/issues/2985), [#2986](https://github.com/The-Verscienta/kiln_cms/issues/2986))
-
-## Upgrade notes
-
-<a id="backup-s3-same-bucket-overlap-upgrade"></a>
-
-- **Two S3 destinations on one bucket name stop pruning (#3088).** After the upgrade, an installation with two S3 destinations that name the same bucket, one prefix inside the other, on different hosts skips retention on both. Each pass leaves a "Retention on … skipped" notice, and the storage grows until you act. Give the two destinations prefixes side by side, or untick "Delete its old backups (retention)" on one of them if they really are separate stores.
-

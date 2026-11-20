@@ -15,6 +15,11 @@ defmodule KilnCMS.Accounts.LegacyAffiliation do
     * any membership on another org leaves it `:foreign_org` on the default org,
       with no tier and no audiences.
 
+  An invitation to the default site is one more such writer (#2574): when the
+  invited tier is below the account's standing `User.role`, the carry is
+  written first (`KilnCMS.Accounts.Invitations.carry_legacy_tier/5`), so the
+  accept never lowers it.
+
   Every writer that may give an unaffiliated account its first membership calls
   `ensure_default_membership/2` **first**: `KilnCMS.Accounts.SiteAudiences` (the
   console's audience checkboxes, #1646) and `KilnCMS.Billing.Entitlements` (a

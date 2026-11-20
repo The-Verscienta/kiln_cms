@@ -40,6 +40,55 @@ defmodule KilnCMSWeb.GraphqlSocketTest do
     assert socket.assigns.absinthe.opts[:context].actor.id == signed_in.id
   end
 
+  # The scheme is case-insensitive over the socket too (#2632). Before, any
+  # value without the exact `Bearer ` prefix was ignored, so a lower-case
+  # valid JWT connected anonymously, and so did lower-case garbage.
+  describe "connect/3 with an Authorization param in any case" do
+    setup do
+      user =
+        Ash.Seed.seed!(User, %{
+          email: "socket-case-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt(@password),
+          confirmed_at: DateTime.utc_now(),
+          role: :editor
+        })
+
+      {:ok, signed_in} =
+        AshAuthentication.Strategy.action(
+          AshAuthentication.Info.strategy!(User, :password),
+          :sign_in,
+          %{"email" => user.email, "password" => @password},
+          []
+        )
+
+      %{user: user, token: signed_in.__metadata__.token}
+    end
+
+    test "a lower-case valid JWT connects as its user", %{user: user, token: token} do
+      for value <- ["bearer " <> token, "BEARER " <> token] do
+        assert {:ok, socket} =
+                 GraphqlSocket.connect(%{"Authorization" => value}, %Phoenix.Socket{}, %{})
+
+        assert socket.assigns.absinthe.opts[:context].actor.id == user.id
+      end
+    end
+
+    test "lower-case garbage and a bare scheme are refused, not anonymous" do
+      for value <- ["bearer garbage", "bearer", "Bearer", "BEARER  "] do
+        assert :error =
+                 GraphqlSocket.connect(%{"authorization" => value}, %Phoenix.Socket{}, %{}),
+               "#{inspect(value)} connected"
+      end
+    end
+
+    test "another scheme stays anonymous" do
+      assert {:ok, socket} =
+               GraphqlSocket.connect(%{"Authorization" => "Basic x"}, %Phoenix.Socket{}, %{})
+
+      assert socket.assigns.absinthe.opts[:context].actor == nil
+    end
+  end
+
   test "connect/3 allows anonymous connections with a nil actor" do
     assert {:ok, socket} = GraphqlSocket.connect(%{}, %Phoenix.Socket{}, %{})
     assert socket.assigns.absinthe.opts[:context].actor == nil

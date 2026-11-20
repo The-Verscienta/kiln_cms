@@ -47,7 +47,10 @@ defmodule KilnCMSWeb.BackupLive do
   `?run=<id>` (the Schedule tab's "Last scheduled run" link, #2875) opens the
   page that holds that run (`Backups.history_page_of/3`) and marks its row.
   Whether each run's files are still on disk is computed for the visible page
-  only, artifact by artifact (`Backups.Presence`, #2416).
+  only, artifact by artifact (`Backups.Presence`, #2416). An imported row's
+  absent file is judged by the cron prunes recorded after it (#3113): the
+  imported runs newer than the page's oldest imported row that carry
+  `keep_days`, read here as the admin before each disk read.
 
   ## What is on disk is read off the LiveView process (#2417)
 
@@ -166,7 +169,7 @@ defmodule KilnCMSWeb.BackupLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Destination, DiskView, Importer, Manifest, Markers, Resend}
+  alias KilnCMS.Backups.{Destination, DiskView, Importer, Manifest, Markers, Presence, Resend}
   alias KilnCMS.Backups.Run.Changes.{Cancel, CancelResend, CancelResume}
   alias KilnCMSWeb.Params
 
@@ -961,11 +964,34 @@ defmodule KilnCMSWeb.BackupLive do
   defp start_disk_read(socket) do
     runs = Enum.map(socket.assigns.runs, fn {run, _cancelable?} -> run end)
     {dir, reader, ref} = {backup_dir(), disk_view(), make_ref()}
+    prunes = cron_prunes(runs, socket.assigns.current_user)
     Process.send_after(self(), {:disk_timeout, ref}, disk_timeout_ms())
 
     socket
     |> update(:disk, &%{&1 | running?: true, dirty?: false, ref: ref})
-    |> start_async(:disk, fn -> reader.read(dir, runs, DateTime.utc_now()) end)
+    |> start_async(:disk, fn ->
+      reader.read(dir, runs, DateTime.utc_now(), cron_prunes: prunes)
+    end)
+  end
+
+  # The prunes cron recorded after the page's oldest imported row (#3113),
+  # read here because the disk read does no database reads: two bounded
+  # reads, as this admin, and only when the page has an imported row. A read
+  # that fails passes none, and the rows are judged as before #3113.
+  defp cron_prunes(runs, user) do
+    case for(%{origin: :imported, started_at: %DateTime{} = at} <- runs, do: at) do
+      [] ->
+        nil
+
+      starts ->
+        with {:ok, windows} <-
+               Backups.list_run_prune_windows(Enum.min(starts, DateTime), actor: user),
+             {:ok, newest} <- Backups.newest_imported_run(actor: user) do
+          Presence.cron_prunes(windows, newest && newest.started_at)
+        else
+          _refused -> nil
+        end
+    end
   end
 
   # Neither directory is known: what a read that timed out or crashed leaves.
@@ -2160,13 +2186,13 @@ defmodule KilnCMSWeb.BackupLive do
   defp presence_help_text(:expired),
     do:
       gettext(
-        "Cron's scripts/backup.sh prune removed these files: they are older than the BACKUP_KEEP_DAYS it records in manifest.json, and a newer backup of the same kind is on disk."
+        "Cron's scripts/backup.sh prune removed these files: a later cron backup recorded a BACKUP_KEEP_DAYS they are older than (or, if none ran since, the one in manifest.json), and a newer backup of the same kind is on disk."
       )
 
   defp presence_help_text(:probably_expired),
     do:
       gettext(
-        "Most likely removed by cron's scripts/backup.sh prune: they are older than this app's retention, and a newer backup of the same kind is on disk. Cron hasn't recorded its own BACKUP_KEEP_DAYS here, so this is an estimate."
+        "Most likely removed by cron's scripts/backup.sh prune: they are older than cron's last known retention (or this app's), and a newer backup of the same kind is on disk. The BACKUP_KEEP_DAYS cron pruned with since then isn't recorded here, so this is an estimate."
       )
 
   defp presence_class(state) when state in [:missing, :unknown], do: "text-warning-ink"

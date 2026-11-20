@@ -7698,8 +7698,8 @@ msgstr "Cette sauvegarde a été faite par scripts/backup.sh via cron, et l’ap
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Cron's scripts/backup.sh prune removed these files: they are older than the BACKUP_KEEP_DAYS it records in manifest.json, and a newer backup of the same kind is on disk."
-msgstr "scripts/backup.sh prune, lancé par cron, a supprimé ces fichiers : ils sont plus anciens que le BACKUP_KEEP_DAYS qu’il enregistre dans manifest.json, et une sauvegarde plus récente du même type est sur disque."
+msgid "Cron's scripts/backup.sh prune removed these files: a later cron backup recorded a BACKUP_KEEP_DAYS they are older than (or, if none ran since, the one in manifest.json), and a newer backup of the same kind is on disk."
+msgstr "scripts/backup.sh prune, lancé par cron, a supprimé ces fichiers : une sauvegarde cron ultérieure a enregistré un BACKUP_KEEP_DAYS qu’ils dépassent (ou, si aucune n’a eu lieu depuis, celui de manifest.json), et une sauvegarde plus récente du même type est sur disque."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -13987,8 +13987,8 @@ msgstr "Nombre maximal d'éléments de ce type"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Most likely removed by cron's scripts/backup.sh prune: they are older than this app's retention, and a newer backup of the same kind is on disk. Cron hasn't recorded its own BACKUP_KEEP_DAYS here, so this is an estimate."
-msgstr "Très probablement supprimés par scripts/backup.sh prune, lancé par cron : ils sont plus anciens que la rétention de cette application, et une sauvegarde plus récente du même type est sur disque. Cron n’a pas enregistré ici son propre BACKUP_KEEP_DAYS ; ce n’est donc qu’une estimation."
+msgid "Most likely removed by cron's scripts/backup.sh prune: they are older than cron's last known retention (or this app's), and a newer backup of the same kind is on disk. The BACKUP_KEEP_DAYS cron pruned with since then isn't recorded here, so this is an estimate."
+msgstr "Très probablement supprimés par scripts/backup.sh prune, lancé par cron : ils sont plus anciens que la dernière rétention connue de cron (ou celle de cette application), et une sauvegarde plus récente du même type est sur disque. Le BACKUP_KEEP_DAYS avec lequel cron a élagué depuis n’est pas enregistré ici ; ce n’est donc qu’une estimation."
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
@@ -25413,6 +25413,20 @@ msgstr "Cette planification ne peut pas être modifiée ici : elle peut seulemen
 #, elixir-autogen, elixir-format
 msgid "This schedule changed since you opened it, so it wasn't saved. The form now holds the stored values, with what you entered beside them: re-enter the changes you still want and save."
 msgstr "Cette planification a changé depuis que vous l'avez ouverte : elle n'a donc pas été enregistrée. Le formulaire contient maintenant les valeurs enregistrées, avec ce que vous avez saisi à côté : saisissez de nouveau les modifications que vous voulez garder, puis enregistrez."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "This schedule keeps about %{count} backup of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgid_plural "This schedule keeps about %{count} backups of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgstr[0] "Cette planification conserve environ %{count} sauvegarde de chaque composant (environ %{size}), plus que la place dans le répertoire de sauvegarde : %{free} libres et %{held} dans les sauvegardes déjà présentes."
+msgstr[1] "Cette planification conserve environ %{count} sauvegardes de chaque composant (environ %{size}), plus que la place dans le répertoire de sauvegarde : %{free} libres et %{held} dans les sauvegardes déjà présentes."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "This schedule keeps about %{count} backup of each component. Check that the backup directory has room for them, or keep fewer."
+msgid_plural "This schedule keeps about %{count} backups of each component. Check that the backup directory has room for them, or keep fewer."
+msgstr[0] "Cette planification conserve environ %{count} sauvegarde de chaque composant. Vérifiez que le répertoire de sauvegarde a la place de les contenir, ou conservez-en moins."
+msgstr[1] "Cette planification conserve environ %{count} sauvegardes de chaque composant. Vérifiez que le répertoire de sauvegarde a la place de les contenir, ou conservez-en moins."
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format

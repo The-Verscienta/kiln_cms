@@ -24,7 +24,8 @@ what the surface exposes and how writes are authorized.
 
 The endpoint is rate-limited to 60 documents a minute per client address, over
 `/gql` and `/ws/gql` together (the `:gql` bucket; see [Query cost](#query-cost)),
-and reads an optional bearer token (`load_from_bearer`). Anonymous requests are fully
+and reads an optional bearer token (`KilnCMSWeb.Plugs.LoadFromBearer`, which
+accepts the `Bearer` scheme in any case). Anonymous requests are fully
 supported — they simply run through the resource read policies, which already
 make **published content world-readable and everything else editor-only**. So an
 unauthenticated query can only ever see published content and world-readable
@@ -587,8 +588,10 @@ subscribers.
 ### Connecting with a token
 
 The `token` connection param (or `Authorization: "Bearer <jwt>"` as a
-connection param) takes a **user JWT only**. Leave it out to connect
-anonymously. A token that does not verify is **refused**, and the websocket
+connection param, the scheme in any case) takes a **user JWT only**. Leave it
+out to connect anonymously. An `Authorization` param under another scheme is
+ignored, so the socket connects anonymously; a bare `Bearer` with no token is
+refused (#2632). A token that does not verify is **refused**, and the websocket
 handshake answers `403` (#2634): an expired, revoked or garbled JWT, and a
 `kiln_` API key, which this socket has never accepted. Until this release those
 connected as anonymous and read only published content, so a client with a

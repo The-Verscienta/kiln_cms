@@ -382,6 +382,15 @@ defmodule KilnClientWriteTest do
               }} = KilnClient.restore_revision("post", "p1", "v1", api_key: @key)
     end
 
+    # #3151 left the write path's own check alone: a document with no
+    # resource is still `empty_response`, not `:unexpected_body`.
+    test "create/3 on a 200 {} is still empty_response" do
+      stub(200, %{})
+
+      assert {:error, %Error{reason: :http, code: "empty_response", body: %{}}} =
+               KilnClient.create("posts", %{title: "x"}, api_key: @key)
+    end
+
     test "delete/3 still returns :ok on an empty 200 or 204" do
       stub(200, "")
       assert :ok = KilnClient.delete("posts", "p1", api_key: @key)

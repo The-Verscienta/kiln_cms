@@ -7698,7 +7698,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Cron's scripts/backup.sh prune removed these files: they are older than the BACKUP_KEEP_DAYS it records in manifest.json, and a newer backup of the same kind is on disk."
+msgid "Cron's scripts/backup.sh prune removed these files: a later cron backup recorded a BACKUP_KEEP_DAYS they are older than (or, if none ran since, the one in manifest.json), and a newer backup of the same kind is on disk."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -13987,7 +13987,7 @@ msgstr "Most items of this kind"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Most likely removed by cron's scripts/backup.sh prune: they are older than this app's retention, and a newer backup of the same kind is on disk. Cron hasn't recorded its own BACKUP_KEEP_DAYS here, so this is an estimate."
+msgid "Most likely removed by cron's scripts/backup.sh prune: they are older than cron's last known retention (or this app's), and a newer backup of the same kind is on disk. The BACKUP_KEEP_DAYS cron pruned with since then isn't recorded here, so this is an estimate."
 msgstr ""
 
 #: lib/kiln_cms_web/live/analytics_live.ex
@@ -25413,6 +25413,20 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "This schedule changed since you opened it, so it wasn't saved. The form now holds the stored values, with what you entered beside them: re-enter the changes you still want and save."
 msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "This schedule keeps about %{count} backup of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgid_plural "This schedule keeps about %{count} backups of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "This schedule keeps about %{count} backup of each component. Check that the backup directory has room for them, or keep fewer."
+msgid_plural "This schedule keeps about %{count} backups of each component. Check that the backup directory has room for them, or keep fewer."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format

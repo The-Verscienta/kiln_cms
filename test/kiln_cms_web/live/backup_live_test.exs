@@ -2,12 +2,12 @@ defmodule KilnCMSWeb.BackupLiveTest.StallingDiskView do
   @moduledoc false
   # A `Backups.DiskView` that tells the test it started and waits for `:go`,
   # so a test decides when a disk read answers (#2417).
-  def read(dir, runs, now) do
+  def read(dir, runs, now, opts) do
     test = Application.fetch_env!(:kiln_cms, __MODULE__)
     send(test, {:disk_read, self(), Enum.map(runs, & &1.id)})
 
     receive do
-      :go -> KilnCMS.Backups.DiskView.read(dir, runs, now)
+      :go -> KilnCMS.Backups.DiskView.read(dir, runs, now, opts)
     end
   end
 end
@@ -16,7 +16,7 @@ defmodule KilnCMSWeb.BackupLiveTest.CrashingDiskView do
   @moduledoc false
   # A `Backups.DiskView` whose read crashes, so the page's disk state is
   # `:failed` (#2940).
-  def read(_dir, _runs, _now), do: raise("disk read crashed")
+  def read(_dir, _runs, _now, _opts), do: raise("disk read crashed")
 end
 
 defmodule KilnCMSWeb.BackupLiveTest do
@@ -543,16 +543,91 @@ defmodule KilnCMSWeb.BackupLiveTest do
       refute has_element?(lv, "#presence-help-#{pruned.id}")
       refute has_element?(lv, "#imported-help-#{pruned.id}")
 
-      # backup.sh's manifest records its BACKUP_KEEP_DAYS: now it is known.
+      # backup.sh's manifest records its BACKUP_KEEP_DAYS, but imported runs
+      # newer than this one recorded none: the prunes they ran used a window
+      # this side doesn't know, so it still only says probably (#3113).
       seed_manifest!(dir, keep_days: 14)
       {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-run-#{expired.id} [data-presence=probably_expired]",
+               "probably expired"
+             )
+    end
+
+    # A cron row long gone, with a newer dump on disk that has no row yet.
+    defp old_cron_row!(dir) do
+      write_artifact!(dir, "kiln-db-20260301-030000.dump")
+
+      Backups.import_run!(
+        %{
+          stamp: "20250101-030000",
+          trigger: "cron",
+          status: :succeeded,
+          components: [:db],
+          started_at: ~U[2025-01-01 03:00:00.000000Z],
+          artifacts: [%{kind: :db, name: "kiln-db-20250101-030000.dump", bytes: 5}]
+        },
+        actor: Backups.system()
+      )
+    end
+
+    # A later cron run that recorded the keep_days its prune ran with.
+    defp later_cron_run!(keep_days) do
+      Backups.import_run!(
+        %{
+          stamp: "20260301-030000",
+          trigger: "cron",
+          status: :succeeded,
+          components: [:db],
+          started_at: ~U[2026-03-01 03:00:00.000000Z],
+          finished_at: ~U[2026-03-01 03:05:00.000000Z],
+          keep_days: keep_days,
+          artifacts: [%{kind: :db, name: "kiln-db-20260301-030000.dump", bytes: 1}]
+        },
+        actor: Backups.system()
+      )
+    end
+
+    test "with no imported run after it, the latest cron manifest's keep days say expired",
+         %{conn: conn, dir: dir} do
+      expired = old_cron_row!(dir)
+      seed_manifest!(dir, keep_days: 14)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
       assert has_element?(lv, "#backup-run-#{expired.id} [data-presence=expired]", "expired")
-      assert has_element?(lv, "#presence-help-#{expired.id}", "BACKUP_KEEP_DAYS it records")
+      assert has_element?(lv, "#presence-help-#{expired.id}", "a later cron backup recorded")
 
       assert has_element?(
                lv,
                ~s|#presence-help-#{expired.id} a[href$="/docs/backups.md#backup-history-2217"]|
              )
+    end
+
+    test "a later cron run's keep days judge the row, whatever manifest.json is now (#3113)",
+         %{conn: conn, dir: dir} do
+      expired = old_cron_row!(dir)
+      later_cron_run!(7)
+      # The latest manifest is Kiln's: it says nothing of cron's window.
+      seed_manifest!(dir, keep_days: 14, components: ["db"], trigger: "manual")
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(lv, "#backup-run-#{expired.id} [data-presence=expired]", "expired")
+    end
+
+    test "a later cron prune whose window still kept the row leaves it missing (#3113)",
+         %{conn: conn, dir: dir} do
+      row = old_cron_row!(dir)
+      # 424 days between the row and the later run: a 500-day window kept it.
+      later_cron_run!(500)
+      seed_manifest!(dir, keep_days: 1)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(lv, "#backup-run-#{row.id} [data-presence=missing]", "missing")
     end
 
     test "cron-made backups on disk are imported and shown", %{conn: conn, dir: dir} do

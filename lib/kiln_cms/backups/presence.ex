@@ -51,11 +51,31 @@ defmodule KilnCMS.Backups.Presence do
       in the unit's own directory, means prune keeps it, so it is `:missing`;
     * prune never deletes the newest complete unit of a kind, so without a
       newer complete unit of the same kind in the listing it is `:missing`;
-    * otherwise its age (`finished_at`, else `started_at`) against cron's
-      `BACKUP_KEEP_DAYS`, which `backup.sh` writes into `manifest.json`
-      (`keep_days`): older than that plus a day is `:expired`, younger is
-      `:missing`. When no manifest of cron's says, the app's `keep_days`
-      stands in, and an older unit is only `:probably_expired`.
+    * otherwise its age (`finished_at`, else `started_at`, its `at`) is
+      judged by the prunes that ran after it (#3113). `backup.sh` prunes with
+      the `BACKUP_KEEP_DAYS` in force when the prune runs, and records it in
+      `manifest.json` (`keep_days`); the importer stores it on the imported
+      run of a succeeded `backup.sh all` (a run whose prune ran) as
+      `Run.keep_days`, when that run's manifest is the one it reads. So:
+      * when some imported run P started after this one recorded
+        `keep_days`, the unit is `:expired` if one such P would have removed
+        it (P's `finished_at` minus `at` is more than P's `keep_days` plus a
+        day), else `:missing`;
+      * when imported runs started after it but none recorded `keep_days`
+        (imported before #3113, or a `backup.sh db` or `media` entry, which
+        writes no manifest), it is `:probably_expired` once older than the
+        latest cron manifest's `keep_days` (else the app's) plus a day;
+      * with no imported run after it, its age now against the latest cron
+        manifest's `keep_days`: older than that plus a day is `:expired`,
+        younger is `:missing`. When no manifest of cron's says, the app's
+        `keep_days` stands in, and an older unit is only
+        `:probably_expired`.
+
+  A cron run records `keep_days` only if an import runs while its manifest is
+  the directory's latest (at a backup's start, each marker sync, a History
+  mount); one the next cron run overwrote first stays `nil`. The later
+  prunes are read by the caller (`KilnCMSWeb.BackupLive`) and passed in as
+  `cron_prunes/2`; without them every row is judged the last way.
 
   When a marker directory couldn't be listed, a marker can't be ruled out, so
   no unit is called expired. An app-made run is never expired: its prunes are
@@ -86,6 +106,16 @@ defmodule KilnCMS.Backups.Presence do
 
   @type t :: %{state: unit_state() | :mixed | :none, artifacts: [artifact_presence()]}
 
+  @typedoc """
+  The prunes cron recorded (#3113): for each imported run with `keep_days`,
+  its start and the instant before which its prune removed a unit; and the
+  start of the newest imported run, `nil` when there is none.
+  """
+  @type cron_prunes :: %{
+          cutoffs: [{DateTime.t(), DateTime.t()}],
+          newest_import: DateTime.t() | nil
+        }
+
   defmodule Context do
     @moduledoc """
     What `KilnCMS.Backups.Presence.for/2` judges against: one listing of the
@@ -102,6 +132,7 @@ defmodule KilnCMS.Backups.Presence do
             newest_complete: %{db: String.t() | nil, media: String.t() | nil},
             now: DateTime.t(),
             cron_keep_days: pos_integer() | nil,
+            cron_prunes: KilnCMS.Backups.Presence.cron_prunes() | nil,
             app_keep_days: pos_integer()
           }
 
@@ -113,7 +144,8 @@ defmodule KilnCMS.Backups.Presence do
       :newest_complete,
       :now,
       :app_keep_days,
-      cron_keep_days: nil
+      cron_keep_days: nil,
+      cron_prunes: nil
     ]
   end
 
@@ -127,7 +159,8 @@ defmodule KilnCMS.Backups.Presence do
   against.
 
   Options: `:now` (default `DateTime.utc_now/0`), `:cron_keep_days` (cron's
-  `BACKUP_KEEP_DAYS` as its manifest recorded it, default `nil`: unknown) and
+  `BACKUP_KEEP_DAYS` as its manifest recorded it, default `nil`: unknown),
+  `:cron_prunes` (`cron_prunes/2`, default `nil`: not read) and
   `:app_keep_days` (default `KilnCMS.Backups.keep_days/0`).
   """
   @spec context(Path.t(), keyword()) :: Context.t()
@@ -148,8 +181,27 @@ defmodule KilnCMS.Backups.Presence do
       newest_complete: Map.new(@kinds, &{&1, newest_complete(&1, listing[&1], now)}),
       now: now,
       cron_keep_days: Keyword.get(opts, :cron_keep_days),
+      cron_prunes: Keyword.get(opts, :cron_prunes),
       app_keep_days: Keyword.get_lazy(opts, :app_keep_days, &Backups.keep_days/0)
     }
+  end
+
+  @doc """
+  The later prunes `for/2` judges an imported row by (#3113), from `windows`
+  (imported runs with `keep_days`, as `KilnCMS.Backups.list_run_prune_windows/2`
+  reads them) and `newest_import`, the start of the newest imported run
+  (`nil` for none). A run P removes a unit whose `at` is before
+  `P.finished_at - (P.keep_days + 1) days`.
+  """
+  @spec cron_prunes([Run.t()], DateTime.t() | nil) :: cron_prunes()
+  def cron_prunes(windows, newest_import) when is_list(windows) do
+    cutoffs =
+      for %Run{keep_days: days, started_at: %DateTime{} = started} = run <- windows,
+          is_integer(days) and days > 0 do
+        {started, DateTime.add(run.finished_at || started, -(days + 1) * 86_400, :second)}
+      end
+
+    %{cutoffs: cutoffs, newest_import: newest_import}
   end
 
   @doc "The presence of `run`'s files, judged against `context` (see the moduledoc)."
@@ -306,10 +358,47 @@ defmodule KilnCMS.Backups.Presence do
       # Prune never deletes the newest complete unit of a kind.
       not (is_binary(newest) and newest > run.stamp) -> :missing
       not match?(%DateTime{}, at) -> :missing
-      is_integer(context.cron_keep_days) -> aged(at, context.cron_keep_days, :expired, context)
-      true -> aged(at, context.app_keep_days, :probably_expired, context)
+      true -> by_prunes(at, run, context)
     end
   end
+
+  # The prunes that ran after `run` decide (#3113); with none, its age now
+  # against the latest cron manifest's window, else the app's.
+  defp by_prunes(at, run, context) do
+    case later_prunes(run, context.cron_prunes) do
+      {:known, cutoffs} ->
+        if Enum.any?(cutoffs, &(DateTime.compare(at, &1) == :lt)), do: :expired, else: :missing
+
+      :unknown ->
+        aged(at, context.cron_keep_days || context.app_keep_days, :probably_expired, context)
+
+      :none ->
+        latest_window(at, context)
+    end
+  end
+
+  defp latest_window(at, %Context{cron_keep_days: days} = context) when is_integer(days),
+    do: aged(at, days, :expired, context)
+
+  defp latest_window(at, context), do: aged(at, context.app_keep_days, :probably_expired, context)
+
+  # `{:known, cutoffs}` of the imported runs with `keep_days` that started
+  # after `run`; `:unknown` when imported runs started after it but none
+  # recorded one; `:none` when none did, or the prunes weren't read.
+  defp later_prunes(%Run{started_at: %DateTime{} = started}, %{} = prunes) do
+    later = for {at, cutoff} <- prunes.cutoffs, DateTime.after?(at, started), do: cutoff
+
+    cond do
+      later != [] -> {:known, later}
+      later_import?(prunes.newest_import, started) -> :unknown
+      true -> :none
+    end
+  end
+
+  defp later_prunes(_run, _not_read), do: :none
+
+  defp later_import?(%DateTime{} = newest, started), do: DateTime.after?(newest, started)
+  defp later_import?(_none, _started), do: false
 
   defp aged(at, keep_days, state, context) do
     if DateTime.diff(context.now, at, :second) > (keep_days + 1) * 86_400,

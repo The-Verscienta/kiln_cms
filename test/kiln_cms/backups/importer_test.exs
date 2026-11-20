@@ -276,6 +276,75 @@ defmodule KilnCMS.Backups.ImporterTest do
     end
   end
 
+  describe "cron's keep_days on the imported run (#3113)" do
+    defp covering(stamp, attrs) do
+      Keyword.merge(
+        [
+          trigger: "cron",
+          ok: true,
+          started_at: ~U[2026-08-01 03:17:00Z],
+          finished_at: ~U[2026-08-01 03:18:42Z],
+          keep_days: 7,
+          artifacts: [
+            %{kind: "db", path: "db/kiln-db-#{stamp}.dump", bytes: 5, verified: true}
+          ]
+        ],
+        attrs
+      )
+    end
+
+    test "a covering manifest of cron's records its keep_days", %{dir: dir} do
+      put(dir, :db, "20260801-031700")
+      manifest!(dir, covering("20260801-031700", []))
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert run!("20260801-031700").keep_days == 7
+    end
+
+    test "a covering manifest of Kiln's (components set) records none", %{dir: dir} do
+      put(dir, :db, "20260801-031700")
+      manifest!(dir, covering("20260801-031700", components: ["db"]))
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert run!("20260801-031700").keep_days == nil
+    end
+
+    test "a failed cron manifest records none: its prune may not have run", %{dir: dir} do
+      put(dir, :db, "20260801-031700")
+      manifest!(dir, covering("20260801-031700", ok: false, error: "media failed"))
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert run!("20260801-031700").keep_days == nil
+    end
+
+    test "a stamp the manifest doesn't cover records none", %{dir: dir} do
+      put(dir, :db, "20260731-031700", age: 60)
+      put(dir, :db, "20260801-031700")
+      manifest!(dir, covering("20260801-031700", []))
+
+      assert {:ok, %{imported: 2}} = Importer.run()
+      assert run!("20260731-031700").keep_days == nil
+      assert run!("20260801-031700").keep_days == 7
+    end
+
+    test "no manifest records none", %{dir: dir} do
+      put(dir, :db, "20260801-031700")
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert run!("20260801-031700").keep_days == nil
+    end
+
+    test "a row imported before is never updated with it", %{dir: dir} do
+      put(dir, :db, "20260801-031700")
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert run!("20260801-031700").keep_days == nil
+
+      manifest!(dir, covering("20260801-031700", []))
+      assert {:ok, %{imported: 0}} = Importer.run()
+      assert run!("20260801-031700").keep_days == nil
+    end
+  end
+
   describe "files only" do
     test "become a succeeded, unverified, imported run", %{dir: dir} do
       path = put(dir, :db, "20260801-031700")

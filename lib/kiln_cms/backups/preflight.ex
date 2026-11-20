@@ -127,6 +127,18 @@ defmodule KilnCMS.Backups.Preflight do
   end
 
   @doc """
+  The free bytes on the file system holding `path` (its nearest existing
+  directory), read as `check/3` reads them: `df -Pk`, bounded to 10 seconds,
+  or the `free_space` function in tests. `:error` when it can't be read.
+  Doesn't log and doesn't look at `enabled?/0`; the caller decides both.
+
+  The Schedule tab's preview reads it, off the LiveView process, for its
+  disk warning (#2984).
+  """
+  @spec free_space(Path.t()) :: {:ok, non_neg_integer()} | :error
+  def free_space(path) when is_binary(path), do: path |> existing() |> free_bytes()
+
+  @doc """
   Whether the check runs (`free_space_check`, `BACKUP_FREE_SPACE_CHECK`;
   default on). Only `false` turns it off.
   """
@@ -183,6 +195,38 @@ defmodule KilnCMS.Backups.Preflight do
       [{stamp, name}]
     else
       _other -> []
+    end
+  end
+
+  @doc """
+  The bytes of the finished backup files in `dir`'s `db/` and `media/` (every
+  part of a media set; not `.partial` files, sidecars or markers): the space
+  a schedule's own retention can hand back to the next backups, which the
+  Schedule tab's disk warning adds to the free space (#2984). One listing of
+  each subdirectory and an `lstat` per backup file, no walk. A subdirectory
+  that doesn't exist yet holds 0; `:error` when one can't be listed.
+  """
+  # `dir` is the backup directory, never request input; only listed names
+  # that parse as backup files are stat'ed.
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec backups_bytes(Path.t()) :: {:ok, non_neg_integer()} | :error
+  def backups_bytes(dir) when is_binary(dir) do
+    Enum.reduce_while([:db, :media], {:ok, 0}, fn kind, {:ok, sum} ->
+      sub = Path.join(dir, Artifact.subdir(kind))
+
+      case File.ls(sub) do
+        {:ok, names} -> {:cont, {:ok, sum + finished_bytes(sub, names)}}
+        {:error, :enoent} -> {:cont, {:ok, sum}}
+        {:error, _reason} -> {:halt, :error}
+      end
+    end)
+  end
+
+  defp finished_bytes(sub, names) do
+    for name <- names,
+        match?({:ok, %{partial?: false}}, Artifact.parse_file(name)),
+        reduce: 0 do
+      sum -> sum + (regular_size(Path.join(sub, name)) || 0)
     end
   end
 

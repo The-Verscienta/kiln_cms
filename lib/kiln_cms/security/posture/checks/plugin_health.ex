@@ -3,8 +3,10 @@ defmodule KilnCMS.Security.Posture.Checks.PluginHealth do
   `core.plugin_health` (#2244): whether the installed plugins still check out
   (`Kiln.Plugins.Health`), read from its cache only (`Kiln.Plugins.Health.cached/1`),
   so the check never waits on the network. On a cold cache it asks
-  `Kiln.Plugins.Health.warm/0` to run the check in the background and answers
-  `:unknown` until the answer is cached.
+  `Kiln.Plugins.Health.warm/1` to run the check in the background and answers
+  `:unknown` until the answer is cached. That background check is the node's
+  one round (#2565): System opened meanwhile waits for it rather than asking
+  hex.pm again.
 
   The worst plugin decides:
 

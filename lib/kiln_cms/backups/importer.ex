@@ -23,7 +23,11 @@ defmodule KilnCMS.Backups.Importer do
   or the stamp's checksum sidecar supplies one),
   `succeeded` unless a file is zero bytes (`failed`, "empty artifact").
   `started_at` is the stamp read as UTC; `finished_at` is the newest file's
-  mtime. Components are inferred from the files.
+  mtime. Components are inferred from the files. `keep_days` (#3113) is the
+  `BACKUP_KEEP_DAYS` a covering manifest of cron's (`Manifest.cron?/1`)
+  recorded, only when that run succeeded (its prune ran), else `nil`;
+  `KilnCMS.Backups.Presence` judges older rows by it. A row is never
+  rewritten, so runs imported before #3113 keep `nil`.
 
   ## Safe to run at any time
 
@@ -504,9 +508,17 @@ defmodule KilnCMS.Backups.Importer do
         | interrupted_log(interrupted?, entry.partials, now)
       ],
       artifacts:
-        files |> Enum.map(&artifact_attrs(&1, manifest, digests)) |> Artifact.group_files()
+        files |> Enum.map(&artifact_attrs(&1, manifest, digests)) |> Artifact.group_files(),
+      keep_days: prune_keep_days(manifest)
     }
   end
+
+  # Cron's window when this run's prune ran (#3113): only a covering manifest
+  # of cron's (`Manifest.cron?/1`) that succeeded, since `backup.sh all`
+  # prunes as its last step before that manifest; a failed one may have
+  # stopped first. A Kiln manifest says nothing about cron's prune.
+  defp prune_keep_days(%Manifest{ok: true} = manifest), do: Manifest.cron_keep_days(manifest)
+  defp prune_keep_days(_none), do: nil
 
   defp outcome(true, _manifest, _problem, _empty?), do: {:failed, @interrupted}
   defp outcome(_, %Manifest{ok: false, error: error}, _problem, _empty?), do: {:failed, error}

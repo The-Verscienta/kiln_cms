@@ -121,6 +121,21 @@ defmodule KilnCMS.Backups.ManifestTest do
     end
   end
 
+  test "cron?/1 and cron_keep_days/1: backup.sh's manifest has no components (#3113)" do
+    cron = %Manifest{trigger: "cron", ok: true, keep_days: 7}
+    # The trigger is the operator's: a Kiln manifest named "cron" is still Kiln's.
+    kiln = %Manifest{trigger: "cron", ok: true, keep_days: 7, components: ["db"]}
+
+    assert Manifest.cron?(cron)
+    refute Manifest.cron?(kiln)
+    refute Manifest.cron?(nil)
+
+    assert Manifest.cron_keep_days(cron) == 7
+    assert Manifest.cron_keep_days(kiln) == nil
+    assert Manifest.cron_keep_days(%{cron | keep_days: nil}) == nil
+    assert Manifest.cron_keep_days(nil) == nil
+  end
+
   describe "stamp" do
     test "round-trips, and a manifest without it reads nil and writes no key", %{dir: dir} do
       :ok = Manifest.write(dir, %Manifest{stamp: "20261111-145226"})

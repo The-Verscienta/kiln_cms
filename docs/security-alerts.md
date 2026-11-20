@@ -842,7 +842,8 @@ ways.
   no side effect, so the scanner guard asking it raises nothing.
 - `KilnCMS.Security.ApiKeyTrip`: the node-local cache of verified keys
   (`remember/2`, called by `KilnCMSWeb.Plugs.ApiKeyAuth` and, on `/mcp`, by
-  `KilnCMSWeb.Plugs.RememberApiKey`) and `note/2`, called from the refusal
+  `KilnCMSWeb.Plugs.RememberApiKey` once `KilnCMSWeb.Plugs.RequireApiKey` has
+  verified the key) and `note/2`, called from the refusal
   branch of `KilnCMSWeb.Plugs.RateLimit` and
   `KilnCMSWeb.Plugs.GraphqlBatchLimit`. `buckets/0` lists the limits it
   covers. A new rate-limited API surface that should alert needs its bucket

@@ -62,16 +62,35 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Two S3 destinations on one bucket name now stop pruning.** If two S3 destinations name the same bucket with one prefix inside the other on different hosts, retention on both is skipped after the upgrade, with a notice on every pass, and their storage grows until you act. Give them prefixes side by side, or untick "Delete its old backups (retention)" on one of them.
+  ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap-upgrade))
+
 - **The destination kind `sftp` is now Kiln's own, and SFTP has its own private-host list.** A plugin destination of kind `sftp` is now answered by Kiln's adapter; delete such rows and add them again under **SFTP server**. List LAN SFTP servers in `BACKUP_SFTP_PRIVATE_HOSTS` (`BACKUP_S3_PRIVATE_HOSTS` doesn't count). Apply the `add_backup_destination_host_key` migration.
   ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#backup-sftp-destination-upgrade))
 
 - **Custom asset builds and overlay Dockerfiles that don't run `mix assets.deploy`: also run `mix esbuild kiln_public --minify` before `phx.digest`. Without it signed-out pages fall back to app.js and keep working. No migration; rolling back is safe.**
   ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle-upgrade))
 
+### Breaking
+
+- **`/ws/gql` reads an `authorization` connect param under `Bearer` in any case: a lowercase valid JWT connects as its user, and lowercase garbage or a bare `Bearer` is refused (`403`) instead of connecting anonymously (#2632).**
+  ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#ws-gql-bearer-scheme-any-case))
+
+### Known issues
+
+- **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check; check those on hex.pm by hand.**
+  ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/unreleased.md#plugin-health-tail-packages-unknown))
+
 ### Added
 
 - **Backups: a native SFTP destination.** Back up to any SSH server with a password or a key (Ed25519, ECDSA, RSA). A platform admin confirms the server's host key before it is used, and a changed key fails the destination and alerts platform admins. Uploads resume; retention and rescan work as for S3.
   ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#backup-sftp-destination))
+
+- **`/mcp` can read, create and update links between records: `read_content_links`, `create_content_link` and `update_content_link`, over the same payload-link actions as `/api/json/content-links`. Overlays that replace `:mcp_tools` must add them.**
+  ([#3191](https://github.com/The-Verscienta/kiln_cms/pull/3191) · [long form](docs/changelog/unreleased.md#mcp-content-link-tools))
+
+- **Backups → Schedule: the preview warns when a schedule would keep more than about 500 backups of each component, or more than the backup directory has room for (free space plus the backups already there); it never blocks the save.**
+  ([#3172](https://github.com/The-Verscienta/kiln_cms/pull/3172) · [long form](docs/changelog/unreleased.md#backup-schedule-disk-warning))
 
 - **`GET /api/site`: a site's name, X (Twitter) handle and default share image for a headless front end's link previews, public and shared-cacheable, with a CDN purge on a Branding save that changes them.**
   ([#3167](https://github.com/The-Verscienta/kiln_cms/pull/3167) · [long form](docs/changelog/unreleased.md#site-defaults-api))
@@ -91,6 +110,24 @@ Every summary line below that was shortened links to its own entry there.
   ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/unreleased.md#referrer-suppression-sweep))
 
 ### Fixed
+
+- **A valid `bearer`/`BEARER <jwt>` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing [1.9.0's `401`](docs/changelog/v1.9.0.md#bearer-401-hardening); `/mcp` and `POST /api/keys/rotate` take a `kiln_` key under any case or in a later `Authorization` value, and `/metrics` its token under any case (#2632).**
+  ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#bearer-scheme-any-case))
+
+- **Plugin health: System, Security posture and "Check plugins now" share one check per server, so hex.pm is asked once; a check stops at 75 s and caches what it got for 15 minutes instead of being killed with nothing stored.**
+  ([#3183](https://github.com/The-Verscienta/kiln_cms/pull/3183) · [long form](docs/changelog/unreleased.md#plugin-check-single-flight))
+
+- **Accepting an invitation to the default site at a lower tier no longer demotes an account with no membership but a legacy editor or admin role: its tier is carried into a membership first and the accept reports it already a member. An admin's own Add is unchanged.**
+  ([long form](docs/changelog/unreleased.md#invitation-keeps-legacy-tier))
+
+- **Billing webhooks: an event older than the last one applied, about a different subscription than the membership holds, or for a `comped` membership is now ignored (with a reason in `/editor/billing`) instead of overwriting it; new nullable column `last_provider_event_at`, rollback-safe.**
+  ([long form](docs/changelog/unreleased.md#webhook-ordering-identity))
+
+- **Backups History: on a host where both cron and the app back up, an imported row no longer reads "probably expired" just because the app wrote the latest manifest; it reads "expired" only when a later cron prune, by its own keep days, would have removed it.**
+  ([#3161](https://github.com/The-Verscienta/kiln_cms/pull/3161) · [long form](docs/changelog/unreleased.md#backup-history-cron-keep-days))
+
+- **Members of a non-default site: the content list's New buttons and the translations dashboard's Missing chips and actions now follow that site's content-type scope, not the default site's (display only; the policies were already correct). `Scoping.permitted?/4` and `explicitly_permits?/4` accept a bare org id and raise `ArgumentError` on shapes that name no org.**
+  ([long form](docs/changelog/unreleased.md#scoping-bare-org-id))
 
 - **Billing webhooks: recording an event and enqueueing its job are now one transaction, so a failure leaves nothing recorded and the provider's retry starts clean; redelivering an unfinished event re-enqueues it, and a worker that crashes or stalls is retried or reclaimed after 10 minutes.**
   ([long form](docs/changelog/unreleased.md#billing-webhook-lost-events))
@@ -124,11 +161,6 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Backups → Schedule: a warning when `KILN_BACKUP_SCHEDULER_CRON` ticks less often than a schedule runs; the tab no longer freezes on a hung backup directory; and a keep-days change made while a backup runs reaches the `.hold` markers when it ends, even if it failed.**
   ([#3112](https://github.com/The-Verscienta/kiln_cms/pull/3112) · [long form](docs/changelog/unreleased.md#backup-schedule-tab-followups))
-
-### Upgrade notes
-
-- **Two S3 destinations on one bucket name now stop pruning.** If two S3 destinations name the same bucket with one prefix inside the other on different hosts, retention on both is skipped after the upgrade, with a notice on every pass, and their storage grows until you act. Give them prefixes side by side, or untick "Delete its old backups (retention)" on one of them.
-  ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap-upgrade))
 
 ## [1.11.0] - 2026-11-18
 

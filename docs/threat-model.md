@@ -1749,7 +1749,19 @@ creates an account and grants a site tier.
   admin's edit between the page load and the click is what is judged; an equal
   or higher tier is refused before any write and the invitation is simply
   used up. The other grant axes are kept, and the invitee's sessions are
-  evicted after the commit. Because accepting can now raise, a pending
+  evicted after the commit. The rule also holds for an account with **no
+  membership** and a legacy `User.role` of `:editor` or `:admin` accepting a
+  lower-tier invitation to the default site (#2574): the legacy tier is carried
+  into a default-site membership first (`Invitations.carry_legacy_tier/5`,
+  audited as `:role_granted` with `via: "legacy_carry"`), judged on the user row
+  re-read under `AccountLock.share/1`, and the accept reports `:already_member`
+  rather than joining at the lower tier. Only the standing role is protected, so
+  a live temporary grant never makes an invitation a carry. An admin's explicit
+  Add (`AddOrInvite`) still writes the chosen tier, by design. Left open, each
+  tracked as #3178, #3179 and #3180: the console Add can still demote an unaffiliated legacy
+  account; `queue_registration` / `approve_registration` can demote a legacy
+  account queued through site single sign-on; and a custom role on a swallowed
+  invitation is silently not applied. Because accepting can now raise, a pending
   invitation would otherwise outlive a demotion: `OrgMembership` `:update`
   (when it changes `role` or `role_id`) and `:destroy` delete the pending
   invitation for the member's address on the membership's own site
@@ -2349,6 +2361,9 @@ cached, and the feed's `links.next` is followed only on its own
 origin),
 `Kiln.Plugins.Health` (hex.pm's package API for each plugin locked from
 hex.pm, and the security notices feed; on the same platform-admin triggers,
+one round per node at a time, which System, Security posture and **Check
+plugins now** join rather than repeat, and bounded at 75 s, a package not
+reached by then not asked;
 never on a read of `GET /api/security/plugin-health`, through `SafeFetch`, the feed's `links.next` followed only on its own origin
 and at most five pages; package names are checked against Hex's naming rule
 before they are put in a URL),
