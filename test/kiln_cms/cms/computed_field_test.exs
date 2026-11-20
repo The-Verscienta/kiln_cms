@@ -148,7 +148,7 @@ defmodule KilnCMS.CMS.ComputedFieldTest do
 
       price =
         CMS.create_field_definition!(
-          %{content_type: :page, name: "price", label: "Price", field_type: :float},
+          %{content_type: :page, name: "cf_price", label: "Price", field_type: :float},
           actor: actor
         )
 
@@ -158,7 +158,7 @@ defmodule KilnCMS.CMS.ComputedFieldTest do
           actor: actor
         )
 
-      total = define!(actor, "{{ round(sum(price, tax), 2) }}")
+      total = define!(actor, "{{ round(sum(cf_price, tax), 2) }}")
 
       page =
         CMS.create_page!(

@@ -75,6 +75,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Billing webhooks: recording an event and enqueueing its job are now one transaction, so a failure leaves nothing recorded and the provider's retry starts clean; redelivering an unfinished event re-enqueues it, and a worker that crashes or stalls is retried or reclaimed after 10 minutes.**
   ([long form](docs/changelog/unreleased.md#billing-webhook-lost-events))
 
+- **Billing webhooks: a database fault while resolving an event's membership now fails the event and Oban retries it (8 attempts) instead of dropping it as `ignored`; a metadata mismatch halts the lookup as `ignored` (`metadata_mismatch`) with nothing written.**
+  ([long form](docs/changelog/unreleased.md#webhook-resolve-ladder-errors))
+
 - **Choosing "join" again on a tier you already hold no longer demotes an `active`, `past_due` or `comped` membership to `incomplete`; the member is sent to `/account` with a notice instead, and no second checkout is opened.**
   ([long form](docs/changelog/unreleased.md#billing-recheckout-keeps-live-membership))
 

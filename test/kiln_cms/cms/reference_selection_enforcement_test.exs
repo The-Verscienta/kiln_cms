@@ -317,14 +317,14 @@ defmodule KilnCMS.CMS.ReferenceSelectionEnforcementTest do
       # The working copy leaves the held draft in place and changes a title;
       # promoting it re-runs the registry pass without the filter.
       CMS.create_field_definition!(
-        %{content_type: :post, name: "note", label: "Note", field_type: :string},
+        %{content_type: :post, name: "rse_note", label: "Note", field_type: :string},
         actor: ctx.admin
       )
 
       {:ok, saved} =
         CMS.save_post_working_copy(
           ctx.source,
-          %{fields: %{"custom_fields" => %{"note" => "Held note"}}},
+          %{fields: %{"custom_fields" => %{"rse_note" => "Held note"}}},
           actor: ctx.editor,
           tenant: ctx.source.org_id
         )

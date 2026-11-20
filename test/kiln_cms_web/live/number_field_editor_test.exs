@@ -47,7 +47,7 @@ defmodule KilnCMSWeb.NumberFieldEditorTest do
     admin = authed_admin()
 
     define!(admin, %{
-      name: "dose",
+      name: "nfe_dose",
       label: "Dose",
       field_type: :float,
       step: 0.5,
@@ -58,7 +58,7 @@ defmodule KilnCMSWeb.NumberFieldEditorTest do
     })
 
     define!(admin, %{
-      name: "level",
+      name: "nfe_level",
       label: "Level",
       field_type: :integer,
       required: true,
@@ -68,7 +68,7 @@ defmodule KilnCMSWeb.NumberFieldEditorTest do
     })
 
     define!(admin, %{
-      name: "price",
+      name: "nfe_price",
       label: "Price",
       field_type: :integer,
       step: 5,
@@ -77,7 +77,7 @@ defmodule KilnCMSWeb.NumberFieldEditorTest do
       position: 2
     })
 
-    define!(admin, %{name: "weight", label: "Weight", field_type: :float, position: 3})
+    define!(admin, %{name: "nfe_weight", label: "Weight", field_type: :float, position: 3})
 
     define!(admin, %{
       name: "sizes",
@@ -94,7 +94,7 @@ defmodule KilnCMSWeb.NumberFieldEditorTest do
         %{
           title: "Dosing",
           slug: "nfe-#{System.unique_integer([:positive])}",
-          custom_fields: %{"level" => 3, "sizes" => [10, 12]}
+          custom_fields: %{"nfe_level" => 3, "sizes" => [10, 12]}
         },
         actor: admin
       )
@@ -112,20 +112,20 @@ defmodule KilnCMSWeb.NumberFieldEditorTest do
 
   describe "the number input" do
     test "carries the step and draws the prefix and suffix beside it", %{lv: lv} do
-      assert has_element?(lv, ~s(#custom-field-price[type=number][step="5"]))
-      assert has_element?(lv, "#custom-field-price-prefix", "$")
-      assert has_element?(lv, "#custom-field-price-suffix", "USD")
+      assert has_element?(lv, ~s(#custom-field-nfe_price[type=number][step="5"]))
+      assert has_element?(lv, "#custom-field-nfe_price-prefix", "$")
+      assert has_element?(lv, "#custom-field-nfe_price-suffix", "USD")
 
       assert has_element?(
                lv,
-               ~s(#custom-field-price[aria-describedby~="custom-field-price-suffix"])
+               ~s(#custom-field-nfe_price[aria-describedby~="custom-field-nfe_price-suffix"])
              )
     end
 
     test "a float with no step keeps step any, and no units draws none", %{lv: lv} do
-      assert has_element?(lv, ~s(#custom-field-weight[step=any]))
-      refute has_element?(lv, "#custom-field-weight-prefix")
-      refute has_element?(lv, "#custom-field-weight-suffix")
+      assert has_element?(lv, ~s(#custom-field-nfe_weight[step=any]))
+      refute has_element?(lv, "#custom-field-nfe_weight-prefix")
+      refute has_element?(lv, "#custom-field-nfe_weight-suffix")
     end
 
     test "a list of numbers: each item takes the step and the suffix", %{lv: lv} do
@@ -139,17 +139,17 @@ defmodule KilnCMSWeb.NumberFieldEditorTest do
     test "a set value draws a range input with its bounds, step and readout", %{lv: lv} do
       assert has_element?(
                lv,
-               ~s(#custom-field-level[type=range][min="1"][max="5"][step="1"][value="3"])
+               ~s(#custom-field-nfe_level[type=range][min="1"][max="5"][step="1"][value="3"])
              )
 
-      assert has_element?(lv, "#custom-field-level-readout", "3")
+      assert has_element?(lv, "#custom-field-nfe_level-readout", "3")
     end
 
     test "a blank field draws a button, not an input that would submit its minimum", %{
       lv: lv
     } do
-      assert has_element?(lv, "#custom-field-dose[phx-click=number_field_set]", "Set a value")
-      refute has_element?(lv, "input#custom-field-dose")
+      assert has_element?(lv, "#custom-field-nfe_dose[phx-click=number_field_set]", "Set a value")
+      refute has_element?(lv, "input#custom-field-nfe_dose")
     end
 
     test "an unrelated edit writes no value for a blank slider field", ctx do
@@ -160,41 +160,41 @@ defmodule KilnCMSWeb.NumberFieldEditorTest do
       ctx.lv |> form("#page-editor") |> render_submit()
 
       assert CMS.get_page!(ctx.page.id, actor: ctx.admin).title == "Dosing, revised"
-      refute Map.has_key?(stored(ctx), "dose")
+      refute Map.has_key?(stored(ctx), "nfe_dose")
     end
 
     test "Set a value stores the minimum; Clear removes it again", ctx do
-      ctx.lv |> element("#custom-field-dose") |> render_click()
+      ctx.lv |> element("#custom-field-nfe_dose") |> render_click()
 
-      assert has_element?(ctx.lv, ~s(#custom-field-dose[type=range][value="0.0"][step="0.5"]))
-      assert has_element?(ctx.lv, "#custom-field-dose-readout", "0.0 mg")
-
-      ctx.lv |> form("#page-editor") |> render_submit()
-      assert stored(ctx)["dose"] == 0
-
-      ctx.lv |> element("#custom-field-dose-clear") |> render_click()
-      assert has_element?(ctx.lv, "#custom-field-dose[phx-click=number_field_set]")
+      assert has_element?(ctx.lv, ~s(#custom-field-nfe_dose[type=range][value="0.0"][step="0.5"]))
+      assert has_element?(ctx.lv, "#custom-field-nfe_dose-readout", "0.0 mg")
 
       ctx.lv |> form("#page-editor") |> render_submit()
-      refute Map.has_key?(stored(ctx), "dose")
+      assert stored(ctx)["nfe_dose"] == 0
+
+      ctx.lv |> element("#custom-field-nfe_dose-clear") |> render_click()
+      assert has_element?(ctx.lv, "#custom-field-nfe_dose[phx-click=number_field_set]")
+
+      ctx.lv |> form("#page-editor") |> render_submit()
+      refute Map.has_key?(stored(ctx), "nfe_dose")
     end
 
     test "a required field has no Clear", %{lv: lv} do
-      refute has_element?(lv, "#custom-field-level-clear")
-      refute has_element?(lv, "#custom-field-dose-clear")
+      refute has_element?(lv, "#custom-field-nfe_level-clear")
+      refute has_element?(lv, "#custom-field-nfe_dose-clear")
     end
 
     test "a forged clear of a required field, or of a field that is no slider, changes nothing",
          ctx do
-      render_hook(ctx.lv, "number_field_clear", %{"field" => "level"})
-      assert has_element?(ctx.lv, "#custom-field-level[type=range][value=\"3\"]")
+      render_hook(ctx.lv, "number_field_clear", %{"field" => "nfe_level"})
+      assert has_element?(ctx.lv, "#custom-field-nfe_level[type=range][value=\"3\"]")
 
-      render_hook(ctx.lv, "number_field_set", %{"field" => "price"})
+      render_hook(ctx.lv, "number_field_set", %{"field" => "nfe_price"})
       render_hook(ctx.lv, "number_field_set", %{"field" => "sizes"})
       render_hook(ctx.lv, "number_field_set", %{"field" => "no_such_field"})
       ctx.lv |> form("#page-editor") |> render_submit()
 
-      refute Map.has_key?(stored(ctx), "price")
+      refute Map.has_key?(stored(ctx), "nfe_price")
       assert stored(ctx)["sizes"] == [10, 12]
     end
 
@@ -203,7 +203,7 @@ defmodule KilnCMSWeb.NumberFieldEditorTest do
       level =
         :page
         |> CMS.field_definitions_for!(authorize?: false)
-        |> Enum.find(&(&1.name == "level"))
+        |> Enum.find(&(&1.name == "nfe_level"))
 
       CMS.update_field_definition!(level, %{validation: %{"min" => 1, "max" => 2}},
         actor: ctx.admin
@@ -212,8 +212,8 @@ defmodule KilnCMSWeb.NumberFieldEditorTest do
       {:ok, lv, _html} =
         build_conn_for(ctx.admin) |> live(~p"/editor/content/page/#{ctx.page.id}")
 
-      assert has_element?(lv, ~s(#custom-field-level[type=number][value="3"]))
-      refute has_element?(lv, "#custom-field-level[type=range]")
+      assert has_element?(lv, ~s(#custom-field-nfe_level[type=number][value="3"]))
+      refute has_element?(lv, "#custom-field-nfe_level[type=range]")
     end
   end
 

@@ -44,7 +44,12 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterFormTest do
   defp define!(admin, name, attrs) do
     CMS.create_field_definition!(
       Map.merge(
-        %{content_type: :page, name: name, label: String.capitalize(name), field_type: :string},
+        %{
+          content_type: :page,
+          name: name,
+          label: String.capitalize(String.replace_prefix(name, "elfff_", "")),
+          field_type: :string
+        },
         attrs
       ),
       actor: admin
@@ -88,15 +93,15 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterFormTest do
     admin = admin()
     prefix = "FFF#{uniq()}"
 
-    define!(admin, "price", %{field_type: :integer})
-    define!(admin, "weight", %{field_type: :float})
-    define!(admin, "note", %{field_type: :string})
+    define!(admin, "elfff_price", %{field_type: :integer})
+    define!(admin, "elfff_weight", %{field_type: :float})
+    define!(admin, "elfff_note", %{field_type: :string})
     define!(admin, "active", %{field_type: :boolean})
     define!(admin, "due", %{field_type: :date})
-    define!(admin, "owner", %{field_type: :user})
-    define!(admin, "shape", %{field_type: :group})
+    define!(admin, "elfff_owner", %{field_type: :user})
+    define!(admin, "elfff_shape", %{field_type: :group})
 
-    define!(admin, "color", %{
+    define!(admin, "elfff_color", %{
       field_type: :select,
       options: ["red", "blue"],
       option_labels: %{"red" => "Ruby"}
@@ -116,31 +121,31 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterFormTest do
       assert has_element?(lv, "#field-filters #field-filter-field")
 
       # Whatever is first offered, each pick re-renders the right control.
-      pick(lv, "price", "gte")
+      pick(lv, "elfff_price", "gte")
       assert has_element?(lv, "#field-filter-value[type=number][step='1']")
 
-      pick(lv, "weight", "lt")
+      pick(lv, "elfff_weight", "lt")
       assert has_element?(lv, "#field-filter-value[type=number][step=any]")
 
       pick(lv, "due", "gte")
       assert has_element?(lv, "#field-filter-value[type=date]")
 
-      pick(lv, "note", "contains")
+      pick(lv, "elfff_note", "contains")
       assert has_element?(lv, "#field-filter-value[type=text]")
 
-      pick(lv, "owner", "eq")
+      pick(lv, "elfff_owner", "eq")
       assert has_element?(lv, "#field-filter-value[type=text][placeholder]")
 
       pick(lv, "active", "eq")
       assert has_element?(lv, "select#field-filter-value option[value=true]")
       assert has_element?(lv, "select#field-filter-value option[value=false]")
 
-      pick(lv, "color", "eq")
+      pick(lv, "elfff_color", "eq")
       assert has_element?(lv, "select#field-filter-value option[value=red]", "Ruby")
       assert has_element?(lv, "select#field-filter-value option[value=blue]", "blue")
 
       # "Empty or not" asks empty/has-a-value whatever the field type.
-      pick(lv, "price", "null")
+      pick(lv, "elfff_price", "null")
       assert has_element?(lv, "select#field-filter-value option[value=true]")
     end
 
@@ -150,13 +155,13 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterFormTest do
       assert has_element?(lv, "#field-filter-op option[value=eq]")
       refute has_element?(lv, "#field-filter-op option[value=gt]")
 
-      pick(lv, "price", "eq")
+      pick(lv, "elfff_price", "eq")
       assert has_element?(lv, "#field-filter-op option[value=gt]")
     end
 
     test "fields that cannot be filtered are not offered", %{conn: conn, prefix: prefix} do
       lv = open(conn, prefix)
-      refute has_element?(lv, "#field-filter-field option[value=shape]")
+      refute has_element?(lv, "#field-filter-field option[value=elfff_shape]")
     end
 
     test "a forged draft falls back to the first field and op", %{conn: conn, prefix: prefix} do
@@ -181,12 +186,12 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterFormTest do
       conn: conn,
       prefix: prefix
     } do
-      cheap = a_page(prefix, %{"price" => 5})
-      dear = a_page(prefix, %{"price" => 50})
+      cheap = a_page(prefix, %{"elfff_price" => 5})
+      dear = a_page(prefix, %{"elfff_price" => 50})
       lv = open(conn, prefix)
       assert Enum.sort(ids(render(lv))) == Enum.sort([cheap.id, dear.id])
 
-      add(lv, "price", "gte", "10")
+      add(lv, "elfff_price", "gte", "10")
       assert_patch(lv)
 
       assert ids(render(lv)) == [dear.id]
@@ -201,11 +206,11 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterFormTest do
     end
 
     test "a select condition shows the option's label", %{conn: conn, prefix: prefix} do
-      red = a_page(prefix, %{"color" => "red"})
-      _blue = a_page(prefix, %{"color" => "blue"})
+      red = a_page(prefix, %{"elfff_color" => "red"})
+      _blue = a_page(prefix, %{"elfff_color" => "blue"})
       lv = open(conn, prefix)
 
-      add(lv, "color", "eq", "red")
+      add(lv, "elfff_color", "eq", "red")
       assert_patch(lv)
 
       assert ids(render(lv)) == [red.id]
@@ -213,14 +218,14 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterFormTest do
     end
 
     test "a boolean condition, and a second one beside it", %{conn: conn, prefix: prefix} do
-      on = a_page(prefix, %{"active" => true, "price" => 20})
-      _off = a_page(prefix, %{"active" => false, "price" => 20})
-      _cheap = a_page(prefix, %{"active" => true, "price" => 1})
+      on = a_page(prefix, %{"active" => true, "elfff_price" => 20})
+      _off = a_page(prefix, %{"active" => false, "elfff_price" => 20})
+      _cheap = a_page(prefix, %{"active" => true, "elfff_price" => 1})
       lv = open(conn, prefix)
 
       add(lv, "active", "eq", "true")
       assert_patch(lv)
-      add(lv, "price", "gt", "10")
+      add(lv, "elfff_price", "gt", "10")
       assert_patch(lv)
 
       assert ids(render(lv)) == [on.id]
@@ -230,10 +235,10 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterFormTest do
 
     test "an emptiness condition reads as a sentence", %{conn: conn, prefix: prefix} do
       bare = a_page(prefix, %{})
-      _priced = a_page(prefix, %{"price" => 3})
+      _priced = a_page(prefix, %{"elfff_price" => 3})
       lv = open(conn, prefix)
 
-      add(lv, "price", "null", "true")
+      add(lv, "elfff_price", "null", "true")
       assert_patch(lv)
 
       assert ids(render(lv)) == [bare.id]
@@ -241,14 +246,14 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterFormTest do
     end
 
     test "forged add_field_filter changes nothing and says so", %{conn: conn, prefix: prefix} do
-      a = a_page(prefix, %{"price" => 1})
+      a = a_page(prefix, %{"elfff_price" => 1})
       lv = open(conn, prefix)
 
       for {field, op, value} <- [
             {"ghost", "eq", "1"},
-            {"price", "contains", "1"},
-            {"price", "eq", "abc"},
-            {"shape", "eq", "1"}
+            {"elfff_price", "contains", "1"},
+            {"elfff_price", "eq", "abc"},
+            {"elfff_shape", "eq", "1"}
           ] do
         html =
           render_hook(lv, "add_field_filter", %{"field" => field, "op" => op, "value" => value})
@@ -261,24 +266,24 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterFormTest do
     end
 
     test "a fifth condition is refused out loud", %{conn: conn, prefix: prefix} do
-      a_page(prefix, %{"price" => 1})
+      a_page(prefix, %{"elfff_price" => 1})
       lv = open(conn, prefix)
 
       for op <- ~w(eq gt gte lt) do
-        add(lv, "price", op, "1")
+        add(lv, "elfff_price", op, "1")
         assert_patch(lv)
       end
 
-      html = add(lv, "weight", "gt", "1")
+      html = add(lv, "elfff_weight", "gt", "1")
       assert html =~ "at most"
       assert has_element?(lv, "#field-filter-chip-3")
       refute has_element?(lv, "#field-filter-chip-4")
     end
 
     test "changing the type drops the conditions", %{conn: conn, prefix: prefix} do
-      a_page(prefix, %{"price" => 1})
+      a_page(prefix, %{"elfff_price" => 1})
       lv = open(conn, prefix)
-      add(lv, "price", "eq", "1")
+      add(lv, "elfff_price", "eq", "1")
       assert_patch(lv)
       assert has_element?(lv, "#field-filter-chip-0")
 
@@ -293,25 +298,31 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterFormTest do
       conn: conn,
       prefix: prefix
     } do
-      low = a_page(prefix, %{"price" => 1})
-      high = a_page(prefix, %{"price" => 9})
-      lv = open(conn, prefix, %{"sort" => "-field:price"})
+      low = a_page(prefix, %{"elfff_price" => 1})
+      high = a_page(prefix, %{"elfff_price" => 9})
+      lv = open(conn, prefix, %{"sort" => "-field:elfff_price"})
 
-      assert has_element?(lv, "#field-sort option[value='field:price']", "Field: Price (↑)")
-      assert has_element?(lv, "#field-sort option[value='-field:price']", "Field: Price (↓)")
-      refute has_element?(lv, "#field-sort option[value='field:shape']")
-      refute has_element?(lv, "#field-sort option[value='field:owner']")
-      assert has_element?(lv, "#content-sort option[selected][value='-field:price']")
+      assert has_element?(lv, "#field-sort option[value='field:elfff_price']", "Field: Price (↑)")
+
+      assert has_element?(
+               lv,
+               "#field-sort option[value='-field:elfff_price']",
+               "Field: Price (↓)"
+             )
+
+      refute has_element?(lv, "#field-sort option[value='field:elfff_shape']")
+      refute has_element?(lv, "#field-sort option[value='field:elfff_owner']")
+      assert has_element?(lv, "#content-sort option[selected][value='-field:elfff_price']")
       assert ids(render(lv)) == [high.id, low.id]
 
       # Submitting the form with another facet must not reset the sort.
       lv |> form("#content-filter", %{"status" => "draft"}) |> render_change()
-      assert assert_patch(lv) =~ "sort=-field%3Aprice"
-      assert has_element?(lv, "#content-sort option[selected][value='-field:price']")
+      assert assert_patch(lv) =~ "sort=-field%3Aelfff_price"
+      assert has_element?(lv, "#content-sort option[selected][value='-field:elfff_price']")
       assert ids(render(lv)) == [high.id, low.id]
 
       # And choosing the other direction reorders.
-      lv |> form("#content-filter", %{"sort" => "field:price"}) |> render_change()
+      lv |> form("#content-filter", %{"sort" => "field:elfff_price"}) |> render_change()
       assert_patch(lv)
       assert ids(render(lv)) == [low.id, high.id]
     end
@@ -328,11 +339,12 @@ defmodule KilnCMSWeb.EditorLiveFieldFilterFormTest do
       admin: admin,
       prefix: prefix
     } do
-      price = CMS.field_definitions_for!(:page, actor: admin) |> Enum.find(&(&1.name == "price"))
+      price =
+        CMS.field_definitions_for!(:page, actor: admin) |> Enum.find(&(&1.name == "elfff_price"))
 
       view =
         CMS.create_saved_view!(
-          %{name: "Pricey", params: %{"type" => "page", "cf" => "price:gte:5"}},
+          %{name: "Pricey", params: %{"type" => "page", "cf" => "elfff_price:gte:5"}},
           actor: admin
         )
 

@@ -45,7 +45,7 @@ defmodule KilnCMS.CMS.FlexibleRetypeTest do
 
   setup do
     admin = user(:admin)
-    sections = def!(admin, %{content_type: :post, name: "sections", field_type: :flexible})
+    sections = def!(admin, %{content_type: :post, name: "fr_sections", field_type: :flexible})
     hero = item_type!(admin, sections, "hero")
     sub!(admin, hero, "headline")
     quote_type = item_type!(admin, sections, "quote")
@@ -60,7 +60,7 @@ defmodule KilnCMS.CMS.FlexibleRetypeTest do
           title: "P",
           slug: "flexr-#{System.unique_integer([:positive])}",
           custom_fields: %{
-            "sections" => [
+            "fr_sections" => [
               %{
                 "_type" => "hero",
                 "headline" => "A",
@@ -90,7 +90,7 @@ defmodule KilnCMS.CMS.FlexibleRetypeTest do
 
   describe "retyping" do
     test "a plain field cannot become flexible", %{admin: admin} do
-      plain = def!(admin, %{content_type: :post, name: "plain", field_type: :string})
+      plain = def!(admin, %{content_type: :post, name: "fr_plain", field_type: :string})
 
       assert {:error, error} =
                CMS.update_field_definition(plain, %{field_type: :flexible}, actor: admin)
@@ -146,7 +146,7 @@ defmodule KilnCMS.CMS.FlexibleRetypeTest do
     test "moves with the stored items", ctx do
       CMS.update_post!(
         ctx.post,
-        %{custom_fields: %{"sections" => [%{"_type" => "quote", "text" => "only"}]}},
+        %{custom_fields: %{"fr_sections" => [%{"_type" => "quote", "text" => "only"}]}},
         actor: ctx.admin
       )
 
@@ -165,11 +165,11 @@ defmodule KilnCMS.CMS.FlexibleRetypeTest do
                             context: %{warn_on_transaction_hooks?: false}
                           )
 
-                 assert [%{"_type" => "quote"}] = raw(ctx.post)["sections"]
+                 assert [%{"_type" => "quote"}] = raw(ctx.post)["fr_sections"]
                  KilnCMS.Repo.rollback(:undo)
                end)
 
-      assert length(raw(ctx.post)["sections"]) == 3
+      assert length(raw(ctx.post)["fr_sections"]) == 3
       assert CMS.get_field_definition!(ctx.hero.id, actor: ctx.admin)
     end
 
@@ -180,12 +180,12 @@ defmodule KilnCMS.CMS.FlexibleRetypeTest do
       :ok = CMS.destroy_field_definition(ctx.hero, %{purge_items?: true}, actor: ctx.admin)
 
       assert_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"id" => ctx.post.id})
-      assert [%{"_type" => "quote"}] = raw(ctx.post)["sections"]
+      assert [%{"_type" => "quote"}] = raw(ctx.post)["fr_sections"]
     end
 
     test "a refused destroy (no purge) leaves everything", ctx do
       assert {:error, _} = CMS.destroy_field_definition(ctx.hero, actor: ctx.admin)
-      assert length(raw(ctx.post)["sections"]) == 3
+      assert length(raw(ctx.post)["fr_sections"]) == 3
     end
 
     test "without purge_items? an empty type is destroyed and nothing is rewritten", ctx do
@@ -204,7 +204,7 @@ defmodule KilnCMS.CMS.FlexibleRetypeTest do
                %{"_type" => "banner", "headline" => "A"},
                %{"_type" => "banner", "headline" => "B"},
                %{"_type" => "quote"}
-             ] = raw(ctx.post)["sections"]
+             ] = raw(ctx.post)["fr_sections"]
 
       assert {:ok, 2} =
                FlexiblePath.count_stored(

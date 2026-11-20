@@ -75,25 +75,25 @@ defmodule KilnCMSWeb.ContentEditorLocalizationTest do
 
   test "a shared custom field is disabled on a translation and links to the source", %{conn: conn} do
     actor = admin()
-    field(actor, "price", :shared)
-    {en, fr} = document(actor, %{custom_fields: %{"price" => "10"}})
+    field(actor, "cel_price", :shared)
+    {en, fr} = document(actor, %{custom_fields: %{"cel_price" => "10"}})
 
     {lv, _html} = open_editor(conn, actor, fr)
 
-    assert has_element?(lv, "fieldset[disabled] input[name$='[custom_fields][price]']")
+    assert has_element?(lv, "fieldset[disabled] input[name$='[custom_fields][cel_price]']")
     assert has_element?(lv, "[data-localization=shared]", "Shared: edited in the EN version.")
     assert has_element?(lv, ~s(a[href="/editor/content/page/#{en.id}"]), "Open")
   end
 
   test "on the source the same field is editable and says it is shared", %{conn: conn} do
     actor = admin()
-    field(actor, "price", :shared)
-    {en, _fr} = document(actor, %{custom_fields: %{"price" => "10"}})
+    field(actor, "cel_price", :shared)
+    {en, _fr} = document(actor, %{custom_fields: %{"cel_price" => "10"}})
 
     {lv, _html} = open_editor(conn, actor, en)
 
-    refute has_element?(lv, "fieldset[disabled] input[name$='[custom_fields][price]']")
-    assert has_element?(lv, "input[name$='[custom_fields][price]']")
+    refute has_element?(lv, "fieldset[disabled] input[name$='[custom_fields][cel_price]']")
+    assert has_element?(lv, "input[name$='[custom_fields][cel_price]']")
     assert has_element?(lv, "[data-localization=shared]", "Shared with 1 other locale")
   end
 

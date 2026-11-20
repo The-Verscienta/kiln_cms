@@ -76,17 +76,23 @@ defmodule KilnCMSWeb.FieldSelectionAdminTest do
     admin = authed_user(:admin)
 
     CMS.create_field_definition!(
-      %{content_type: :page, name: "level", label: "Level", field_type: :integer},
+      %{content_type: :page, name: "fsa2_level", label: "Level", field_type: :integer},
       actor: admin
     )
 
     CMS.create_field_definition!(
-      %{content_type: :page, name: "featured", label: "Featured", field_type: :boolean},
+      %{content_type: :page, name: "fsa2_featured", label: "Featured", field_type: :boolean},
       actor: admin
     )
 
     CMS.create_field_definition!(
-      %{content_type: :page, name: "secret", label: "Secret", field_type: :string, private: true},
+      %{
+        content_type: :page,
+        name: "fsa2_secret",
+        label: "Secret",
+        field_type: :string,
+        private: true
+      },
       actor: admin
     )
 
@@ -142,8 +148,8 @@ defmodule KilnCMSWeb.FieldSelectionAdminTest do
             by_type: %{
               "page" => %{
                 fields: %{
-                  "level" => %{op: "in", value: "1, 2"},
-                  "featured" => %{op: "eq", value: "true"}
+                  "fsa2_level" => %{op: "in", value: "1, 2"},
+                  "fsa2_featured" => %{op: "eq", value: "true"}
                 }
               }
             }
@@ -154,7 +160,9 @@ defmodule KilnCMSWeb.FieldSelectionAdminTest do
 
       assert stored(field) == %{
                "by_type" => %{
-                 "page" => %{"fields" => %{"level" => %{"in" => [1, 2]}, "featured" => true}}
+                 "page" => %{
+                   "fields" => %{"fsa2_level" => %{"in" => [1, 2]}, "fsa2_featured" => true}
+                 }
                }
              }
     end
@@ -165,7 +173,7 @@ defmodule KilnCMSWeb.FieldSelectionAdminTest do
         "by_type" => %{
           "page" => %{
             "tags_any" => [ctx.tag.id],
-            "fields" => %{"level" => %{"not_eq" => 3}, "featured" => false}
+            "fields" => %{"fsa2_level" => %{"not_eq" => 3}, "fsa2_featured" => false}
           }
         }
       }
@@ -211,13 +219,13 @@ defmodule KilnCMSWeb.FieldSelectionAdminTest do
         lv
         |> form("#edit-field-#{id}",
           field_definition: %{
-            sel: %{by_type: %{"page" => %{fields: %{"level" => %{op: "eq", value: "high"}}}}}
+            sel: %{by_type: %{"page" => %{fields: %{"fsa2_level" => %{op: "eq", value: "high"}}}}}
           }
         )
         |> render_submit()
 
       assert html =~ "must be a whole number"
-      assert has_element?(lv, "#edit-field-rules-#{id}-selection p.text-error", "level")
+      assert has_element?(lv, "#edit-field-rules-#{id}-selection p.text-error", "fsa2_level")
       assert stored(field) == nil
     end
 
@@ -328,7 +336,7 @@ defmodule KilnCMSWeb.FieldSelectionAdminTest do
   end
 
   describe "FieldSelection.unpack/3" do
-    @catalog %{"page" => [%{name: "level", field_type: :integer}]}
+    @catalog %{"page" => [%{name: "fsa2_level", field_type: :integer}]}
 
     test "leaves params without the step alone" do
       assert FieldSelection.unpack(%{"label" => "x"}, ["page"], @catalog) == %{"label" => "x"}
@@ -350,7 +358,7 @@ defmodule KilnCMSWeb.FieldSelectionAdminTest do
           "_" => "1",
           "by_type" => %{
             "post" => %{"tags_any" => ["x"]},
-            "page" => %{"fields" => %{"level" => %{"op" => "eq", "value" => " "}}}
+            "page" => %{"fields" => %{"fsa2_level" => %{"op" => "eq", "value" => " "}}}
           }
         }
       }

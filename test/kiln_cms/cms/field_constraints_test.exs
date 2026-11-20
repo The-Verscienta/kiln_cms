@@ -138,7 +138,7 @@ defmodule KilnCMS.CMS.FieldConstraintsTest do
         def_(:integer, %{"min" => 1}, %{name: "amount", label: "Amount"})
       ]
 
-      %{group: %{name: "dosages", label: "Dosages", field_type: :group, group_fields: subs}}
+      %{group: %{name: "fc_dosages", label: "Dosages", field_type: :group, group_fields: subs}}
     end
 
     test "rows report sub-field paths", %{group: group} do
@@ -146,12 +146,12 @@ defmodule KilnCMS.CMS.FieldConstraintsTest do
 
       problems = FieldConstraints.check(group, rows)
 
-      assert paths(problems) == ["dosages[1].unit", "dosages[1].amount"]
-      assert ["Unit (dosages[1].unit) must be at most 2 characters long", _] = texts(problems)
+      assert paths(problems) == ["fc_dosages[1].unit", "fc_dosages[1].amount"]
+      assert ["Unit (fc_dosages[1].unit) must be at most 2 characters long", _] = texts(problems)
     end
 
     test "one object uses the group's own path", %{group: group} do
-      assert [{"dosages.unit", "Unit", _}] = FieldConstraints.check(group, %{"unit" => "gram"})
+      assert [{"fc_dosages.unit", "Unit", _}] = FieldConstraints.check(group, %{"unit" => "gram"})
     end
   end
 
@@ -282,7 +282,7 @@ defmodule KilnCMS.CMS.FieldConstraintsTest do
         CMS.create_field_definition!(
           %{
             content_type: :post,
-            name: "dosages",
+            name: "fc_dosages",
             label: "Dosages",
             field_type: :group,
             multiple: true
@@ -349,10 +349,10 @@ defmodule KilnCMS.CMS.FieldConstraintsTest do
 
     test "group rows report their path", %{admin: admin} do
       rows = [%{"unit" => "g"}, %{"unit" => "gram"}]
-      assert {:error, error} = post(admin, %{"dosages" => rows})
+      assert {:error, error} = post(admin, %{"fc_dosages" => rows})
 
       assert Exception.message(error) =~
-               "Unit (dosages[1].unit) must be at most 2 characters long"
+               "Unit (fc_dosages[1].unit) must be at most 2 characters long"
     end
 
     test "a stored value is grandfathered when a constraint tightens", %{
