@@ -223,7 +223,10 @@ defmodule KilnCMS.Billing.Membership do
       multitenancy :bypass
       argument :provider_customer_id, :string, allow_nil?: false
       filter expr(provider_customer_id == ^arg(:provider_customer_id))
-      prepare build(load: [:tier])
+      # Does NOT load `:tier`: a `belongs_to` load off a bypassed read raises
+      # `Ash.Error.Invalid.TenantRequired` under strict tenancy (see
+      # `:entitling_for_user`). `KilnCMS.Billing.Webhooks` reads the tier itself,
+      # tenanted by each row's own `org_id`.
     end
 
     # Memberships whose paid period lapsed without an update — we missed an

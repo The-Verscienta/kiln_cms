@@ -243,6 +243,23 @@ event metadata (verified against the stored membership), then the subscription i
 then the customer id disambiguated by price. Nothing resolvable is acknowledged
 and ignored rather than guessed.
 
+What each outcome does to the event row in `/editor/billing`:
+
+| Outcome | Event status | What happens next |
+|---|---|---|
+| Resolved | `processed` | Membership written. |
+| Nothing we hold matches, or the customer's tiers can't be told apart | `ignored` (`unresolvable`, `ambiguous_customer`) | Acknowledged, nothing written. Purged on the normal retention schedule. |
+| Metadata names a `membership_id` whose stored row belongs to a different user than the metadata `user_id` | `ignored` (`metadata_mismatch`) | Nothing written, and the ladder **stops**: it does not fall through to the subscription or customer lookups, which could name a different row. |
+| A malformed identifier in the payload (a `membership_id` or `org_id` that is not a UUID) | `ignored` | A retry cannot change it, so it is not retried. |
+| A lookup that failed for a reason that is not the event's fault: a database fault, a timeout, a refused read | `failed` | Oban retries (8 attempts, with backoff). A later attempt that succeeds settles the event; failed rows are not purged until you resolve them. |
+
+Before this, a database fault during resolution was recorded as `ignored`,
+which is final and purgeable, so a payment event could be dropped by a blip.
+A `metadata_mismatch` is a signature-verified event that contradicts our own
+record, so treat a burst of them as worth investigating. An event that names a
+different organization than the row it found cannot occur: the lookup is
+filtered by that organization.
+
 Because credentials are instance-wide, checkout stamps the organization onto both
 the checkout session **and** the subscription it creates: session metadata does
 not propagate to the subscription, and the subscription is what carries every

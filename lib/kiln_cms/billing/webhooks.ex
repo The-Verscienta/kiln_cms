@@ -20,13 +20,18 @@ defmodule KilnCMS.Billing.Webhooks do
      **not** propagate to the subscription object, which is why both are stamped.
      The loaded row is verified against the metadata: a signature-verified event
      whose metadata disagrees with our own record is a bug or an attack, so it is
-     refused rather than written.
+     refused rather than written, and a refusal **halts the ladder**: the
+     identifiers below it could name a different row, and falling through to them
+     would write exactly what the mismatch check just declined. A
+     `membership_id` that merely names nothing is different and still falls
+     through.
   2. **Subscription id** — `multitenancy :bypass` lookup, the sanctioned strict-
      tenancy exception.
   3. **Customer id** — may match several rows if the customer holds more than one
      tier, so it is disambiguated by the event's price id. Still ambiguous means
      ignored, never guessed.
-  4. Nothing resolves → `{:ignored, :unresolvable}`, which the receiver acks with a
+  4. Nothing resolves → `{:ignored, :unresolvable}` (a metadata mismatch answers
+     `{:ignored, :metadata_mismatch}`), which the receiver acks with a
      200. That is normal steady state: events for a customer created outside Kiln,
      or after a membership row was scrubbed. A 500 here would make the provider
      retry for days and eventually disable the endpoint.
@@ -39,6 +44,14 @@ defmodule KilnCMS.Billing.Webhooks do
   the event `:ignored` and a payment event would be dropped for good. A
   refusal instead comes back as `{:error, %Ash.Error.Forbidden{}}`, the
   worker marks the event `:failed`, and Oban retries.
+
+  The same goes for any other failed read (a dropped connection, a timeout, an
+  unexpected `Ash.Error.Unknown`, a missing tenant — a configuration fault, not
+  bad input): it is `{:error, reason}`, never "nothing we hold". The one carve-out
+  is a malformed identifier in the payload (`Ash.Error.Invalid` made only of
+  invalid-argument / invalid-filter-value errors, such as a non-UUID
+  `membership_id` or `org_id`). That is a property of the event, retrying cannot
+  change it, and a retry loop would last for days, so it resolves to nothing.
   """
   require Logger
 
@@ -47,15 +60,17 @@ defmodule KilnCMS.Billing.Webhooks do
   @doc """
   Find the membership a verified event concerns.
 
-  Returns `{:ok, membership}`, or `{:ignored, reason}` when the event does not
-  correspond to anything we hold.
+  Returns `{:ok, membership}`, `{:ignored, reason}` when the event does not
+  correspond to anything we hold (or contradicts what we hold), or
+  `{:error, reason}` when a lookup failed for a reason that is not the event's
+  fault, so the worker retries instead of dropping it.
   """
   @spec resolve(map()) ::
-          {:ok, struct()} | {:ignored, atom()} | {:error, Ash.Error.Forbidden.t()}
+          {:ok, struct()} | {:ignored, atom()} | {:error, Exception.t()}
   def resolve(event) do
     object = object(event)
 
-    with {:ignored, _reason} <- by_metadata(object),
+    with {:ignored, reason} when reason != :metadata_mismatch <- by_metadata(object),
          {:ignored, _reason} <- by_subscription(object),
          {:ignored, _reason} <- by_customer(object) do
       {:ignored, :unresolvable}
@@ -176,39 +191,73 @@ defmodule KilnCMS.Billing.Webhooks do
     # More than one tier for the same customer: pick by the event's price id, and
     # if that still doesn't single one out, refuse rather than guess.
     #
-    # Tiers are public (`MembershipTier`'s read is `authorize_if always()`), so
-    # the system actor needs no grant for this lookup; it runs as one anyway,
-    # so a policy added later applies and a refusal still surfaces as an error.
+    # Tiers are tenant-scoped, so each membership's tier is read under that row's
+    # own `org_id`; a tenant-less read raises `TenantRequired` under strict
+    # tenancy. Tiers are public (`MembershipTier`'s read is `authorize_if
+    # always()`), so the system actor needs no grant for this lookup; it runs as
+    # one anyway, so a policy added later applies and a refusal still surfaces as
+    # an error.
     with price_id when is_binary(price_id) <- price_id(object),
-         {:ok, tier} <-
-           Billing.tier_by_price(price_id,
-             actor: Billing.system(),
-             authorize_with: :error,
-             not_found_error?: false
-           ),
-         false <- is_nil(tier),
-         [membership] <- Enum.filter(memberships, &(&1.tier_id == tier.id)) do
+         {:ok, matching} <- matching_by_price(memberships, price_id),
+         [membership] <- matching do
       {:ok, membership}
     else
-      {:error, %Ash.Error.Forbidden{} = reason} ->
-        {:error, reason}
-
-      _other ->
-        Logger.warning(
-          "billing: #{length(memberships)} memberships match this customer and the " <>
-            "event does not single one out; ignoring."
-        )
-
-        {:ignored, :ambiguous_customer}
+      {:error, reason} -> refused_or(reason, :malformed) |> ambiguous_unless_error(memberships)
+      _other -> ambiguous(memberships)
     end
   end
 
-  # A refusal propagates, so the worker retries instead of dropping the event.
-  # Any other read error keeps its old meaning: a malformed id in a verified
-  # payload (an `Invalid` cast) still resolves to nothing rather than retrying
-  # for days.
-  defp refused_or(%Ash.Error.Forbidden{} = reason, _otherwise), do: {:error, reason}
-  defp refused_or(_reason, otherwise), do: otherwise
+  defp matching_by_price(memberships, price_id) do
+    memberships
+    |> Enum.group_by(& &1.org_id)
+    |> Enum.reduce_while({:ok, []}, fn {org_id, rows}, {:ok, acc} ->
+      case tier_by_price(price_id, org_id) do
+        {:ok, nil} -> {:cont, {:ok, acc}}
+        {:ok, tier} -> {:cont, {:ok, acc ++ Enum.filter(rows, &(&1.tier_id == tier.id))}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp tier_by_price(price_id, org_id) do
+    Billing.tier_by_price(price_id,
+      actor: Billing.system(),
+      authorize_with: :error,
+      tenant: org_id,
+      not_found_error?: false
+    )
+  end
+
+  # Lazy, so the "ignoring" log line is not written for a real error.
+  defp ambiguous_unless_error({:error, _reason} = error, _memberships), do: error
+  defp ambiguous_unless_error(:malformed, memberships), do: ambiguous(memberships)
+
+  defp ambiguous(memberships) do
+    Logger.warning(
+      "billing: #{length(memberships)} memberships match this customer and the " <>
+        "event does not single one out; ignoring."
+    )
+
+    {:ignored, :ambiguous_customer}
+  end
+
+  # Classify a failed read. Only a malformed identifier in the payload is
+  # "nothing we hold": Ash reports it as an `Invalid` made of nothing but
+  # invalid-argument / invalid-filter-value errors (observed for a non-UUID
+  # `membership_id`, a non-UUID tenant, and a non-string subscription/customer
+  # id). Anything else — a refusal, a database or connection fault, `Unknown`,
+  # `TenantRequired` (a configuration fault) — is `{:error, reason}`, so the
+  # worker marks the event `:failed` and Oban retries instead of dropping a
+  # payment event as `:ignored`.
+  defp refused_or(%Ash.Error.Invalid{errors: [_ | _] = errors} = reason, otherwise) do
+    if Enum.all?(errors, &malformed_input?/1), do: otherwise, else: {:error, reason}
+  end
+
+  defp refused_or(reason, _otherwise), do: {:error, reason}
+
+  defp malformed_input?(%Ash.Error.Query.InvalidArgument{}), do: true
+  defp malformed_input?(%Ash.Error.Query.InvalidFilterValue{}), do: true
+  defp malformed_input?(_error), do: false
 
   defp object(%{"data" => %{"object" => object}}) when is_map(object), do: object
   defp object(_event), do: %{}
