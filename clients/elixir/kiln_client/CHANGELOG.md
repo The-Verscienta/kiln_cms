@@ -50,6 +50,31 @@ tagged `kiln_client-vX.Y.Z` in the
   and its errors, a 404 included, are logged at warning level like every
   other write's.
 
+- **An empty 2xx body is `:unexpected_body`, except on `delete/3`
+  (kiln_cms#3129).** No route the client calls answers a 2xx with an empty
+  body, `delete/3`'s soft-delete aside, but the client took one as an
+  answer. A collection read (`list/2` and the like) returned an empty
+  collection, `one/3` returned `reason: :not_found`, the plain-JSON reads
+  and `artifact/3` with `surface: "llm"` returned `{:ok, ""}`, and `sync/1`
+  and `release/2` crashed. Among the writes, `mint_preview/3` and
+  `restore_revision/4` returned `{:ok, nil}`, `submit_form/3` returned
+  `{:ok, ""}`, and `create/3`, `update/4`, the transitions and
+  `update_media/3` returned `reason: :http, code: "empty_response"`. Every
+  read, `artifact/3`'s `llm` surface included, and every write but
+  `delete/3` now returns
+  `{:error, %KilnClient.Error{reason: :unexpected_body, body: ""}}`, with
+  `:status`, `:method` and `:path` set, and logs a warning that names the
+  empty body. `delete/3` still returns `:ok` on an empty 204 or 200.
+
+  The media upload functions (`upload_media/2`, `import_media/2`,
+  `begin_direct_upload/3`, `complete_direct_upload/2`) already returned
+  `:unexpected_body` on an empty body; that error now carries `body: ""` and
+  the status instead of `body: nil` and no status.
+
+  `sync/1` and `release/2` also return `:unexpected_body`, with the decoded
+  body in `:body`, on a 2xx JSON answer of the wrong shape (`null`, `{}`),
+  where they used to crash.
+
 ### Added
 
 - **Editorial reads take a per-call `:api_key` (kiln_cms#2734).**
@@ -70,9 +95,10 @@ tagged `kiln_client-vX.Y.Z` in the
   `release/2` crashed. Reads, writes and `graphql/3` now return
   `{:error, %KilnClient.Error{reason: :unexpected_body}}` with `:status`,
   `:method`, `:path`, and the first 1 KiB of the body in `:body` (cut on a
-  UTF-8 character boundary), and log a warning. An empty 2xx from a write is
-  still `{:ok, nil}`. `artifact/3` with `surface: "llm"` returns its Markdown
-  as a binary, as before; its spec and doc now say so.
+  UTF-8 character boundary), and log a warning. An empty 2xx is one too,
+  except on `delete/3` (kiln_cms#3129, under Changed). `artifact/3` with
+  `surface: "llm"` returns its Markdown as a binary, as before; its spec and
+  doc now say so.
 
 - **`by_ids/3` keeps the caller's `:filter`.** It replaced the filter with
   the id list, so `by_ids("entries", ids, filter: %{locale: "fr"})` returned
