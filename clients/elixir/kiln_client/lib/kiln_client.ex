@@ -170,7 +170,11 @@ defmodule KilnClient do
   """
   @spec list(String.t(), keyword()) :: {:ok, list_result()} | {:error, Error.t()}
   def list(plural, opts \\ []) do
-    case request(:get, list_path(plural, opts), params: query_params(opts), req: opts[:req]) do
+    case request(:get, list_path(plural, opts),
+           params: query_params(opts),
+           req: opts[:req],
+           expect: &json_api_doc?/1
+         ) do
       {:ok, doc} -> {:ok, flatten_doc(doc)}
       {:error, reason} -> {:error, reason}
     end
@@ -319,7 +323,7 @@ defmodule KilnClient do
       |> put_param(:include, join_list(opts[:include]))
       |> sparse_fields(opts[:fields])
 
-    case request(:get, path, params: params, req: opts[:req]) do
+    case request(:get, path, params: params, req: opts[:req], expect: &json_api_doc?/1) do
       {:ok, doc} -> {:ok, flatten_doc(doc)}
       {:error, reason} -> {:error, reason}
     end
@@ -355,7 +359,13 @@ defmodule KilnClient do
       |> put_param(:category, opts[:category])
       |> put_param(:facets, if(opts[:facets], do: "true"))
 
-    request(:get, "/api/search", params: params, req: opts[:req])
+    # Both of the controller's 200s (an empty query and a real one) carry the
+    # `"results"` section map.
+    request(:get, "/api/search",
+      params: params,
+      req: opts[:req],
+      expect: &match?(%{"results" => %{}}, &1)
+    )
   end
 
   @doc """
@@ -390,7 +400,15 @@ defmodule KilnClient do
     # The `llm` surface is the one read that answers text (`text/markdown`),
     # so its binary body is the result rather than an `:unexpected_body`.
     # An empty one still is (the server always writes the `# title` line).
-    req_opts = [params: params, text_body: to_string(opts[:surface]) == "llm", req: opts[:req]]
+    # Every other surface answers a JSON object.
+    llm? = to_string(opts[:surface]) == "llm"
+
+    req_opts = [
+      params: params,
+      text_body: llm?,
+      req: opts[:req],
+      expect: unless(llm?, do: &is_map/1)
+    ]
 
     case request(:get, path, req_opts) do
       {:error, %Error{status: 503}} = error ->
@@ -518,7 +536,7 @@ defmodule KilnClient do
   def resolve_path(path, opts \\ []) do
     params = locale_params([{"path", path}], opts)
 
-    case json_get("/api/resolve", params, opts) do
+    case json_get("/api/resolve", params, opts, &match?(%{"status" => _}, &1)) do
       {:error, %Error{status: 404, body: %{"status" => "not_found"} = verdict}} -> {:ok, verdict}
       other -> other
     end
@@ -634,9 +652,16 @@ defmodule KilnClient do
     )
   end
 
-  # A plain-JSON delivery read (not JSON:API): the raw body.
-  defp json_get(path, params, opts) do
-    request(:get, path, params: params, headers: [{"accept", @json}], req: opts[:req])
+  # A plain-JSON delivery read (not JSON:API): the raw body, which every one
+  # of these routes answers as a JSON object. `expect` narrows that for a
+  # read that promises particular keys.
+  defp json_get(path, params, opts, expect \\ &is_map/1) do
+    request(:get, path,
+      params: params,
+      headers: [{"accept", @json}],
+      req: opts[:req],
+      expect: expect
+    )
   end
 
   # The `?locale=` / `?fallback=` / `?fallback_locale=` trio every
@@ -726,14 +751,15 @@ defmodule KilnClient do
       {:ok, %{"items" => items, "cursor" => next}} ->
         {:ok, %{items: [items | acc] |> Enum.reverse() |> Enum.concat(), cursor: next}}
 
-      # JSON, but not a sync page (`null`, `{}`): an error, not a crash.
-      {:ok, other} ->
-        {:error, %Error{reason: :unexpected_body, body: other, method: :get, path: "/api/sync"}}
-
       {:error, _} = error ->
         error
     end
   end
+
+  # JSON, but not a sync page (`null`, `{}`) is `:unexpected_body`, not a
+  # crash in `sync_pages/3` or a page with no items for a `sync_page/2` caller.
+  defp sync_page?(%{"items" => items, "cursor" => _}) when is_list(items), do: true
+  defp sync_page?(_body), do: false
 
   defp fetch_sync_page(cursor, opts, retries) do
     params =
@@ -748,7 +774,7 @@ defmodule KilnClient do
       end
       |> put_param(:limit, opts[:limit])
 
-    case request(:get, "/api/sync", params: params, req: opts[:req]) do
+    case request(:get, "/api/sync", params: params, req: opts[:req], expect: &sync_page?/1) do
       {:error, %Error{status: 503}} when retries > 0 ->
         Process.sleep(Keyword.get(opts, :retry_delay_ms, 2_000))
         fetch_sync_page(cursor, opts, retries - 1)
@@ -1006,7 +1032,8 @@ defmodule KilnClient do
     request(:get, revisions_path(type, id),
       params: params,
       api_key: opts[:api_key],
-      req: opts[:req]
+      req: opts[:req],
+      expect: &match?(%{"data" => data} when is_list(data), &1)
     )
   end
 
@@ -1023,9 +1050,13 @@ defmodule KilnClient do
   def revision(type, id, version_id, opts \\ []) do
     path = revisions_path(type, id) <> "/" <> segment(version_id)
 
-    case request(:get, path, api_key: opts[:api_key], req: opts[:req]) do
+    case request(:get, path,
+           api_key: opts[:api_key],
+           req: opts[:req],
+           expect: &match?(%{"data" => %{}}, &1)
+         ) do
       {:ok, %{"data" => revision}} -> {:ok, revision}
-      other -> other
+      {:error, _} = error -> error
     end
   end
 
@@ -1047,9 +1078,14 @@ defmodule KilnClient do
   def restore_revision(type, id, version_id, opts \\ []) do
     path = revisions_path(type, id) <> "/" <> segment(version_id) <> "/restore"
 
-    case write_request(:post, path, nil, accept: @json, api_key: opts[:api_key], req: opts[:req]) do
+    case write_request(:post, path, nil,
+           accept: @json,
+           api_key: opts[:api_key],
+           req: opts[:req],
+           expect: &match?(%{"data" => %{}}, &1)
+         ) do
       {:ok, %{"data" => result}} -> {:ok, result}
-      other -> other
+      {:error, _} = error -> error
     end
   end
 
@@ -1079,27 +1115,17 @@ defmodule KilnClient do
       |> put_param(:include, join_list(opts[:include]))
       |> sparse_fields(opts[:fields])
 
+    # A single-resource document: anything else (`null`, `{}`, `"data":
+    # null`) is not a release, and an error rather than a crash.
     case request(:get, "/api/json/releases/" <> segment(id),
            params: params,
            api_key: opts[:api_key],
-           req: opts[:req]
+           req: opts[:req],
+           expect: &(json_api_doc?(&1) and match?(%{"data" => %{}}, &1))
          ) do
       {:ok, doc} ->
-        case flatten_doc(doc) do
-          %{items: [release | _], included: included} ->
-            {:ok, Map.put(release, "included", included)}
-
-          # JSON, but not a release document (`null`, `{}`): an error, not
-          # a crash.
-          _ ->
-            {:error,
-             %Error{
-               reason: :unexpected_body,
-               body: doc,
-               method: :get,
-               path: "/api/json/releases/" <> segment(id)
-             }}
-        end
+        %{items: [release], included: included} = flatten_doc(doc)
+        {:ok, Map.put(release, "included", included)}
 
       {:error, reason} ->
         {:error, reason}
@@ -1118,7 +1144,8 @@ defmodule KilnClient do
     case request(:get, path,
            params: query_params(opts),
            api_key: opts[:api_key],
-           req: opts[:req]
+           req: opts[:req],
+           expect: &json_api_doc?/1
          ) do
       {:ok, doc} -> {:ok, flatten_doc(doc)}
       {:error, reason} -> {:error, reason}
@@ -1388,6 +1415,14 @@ defmodule KilnClient do
 
   # --- internal: JSON:API document flattening ---
 
+  # A JSON:API document a read can flatten: an object whose `"data"` is
+  # `nil` (no resource), one resource, or a list of them. `null`, `{}`, a
+  # top-level list and `"data": "x"` or `[1]` are not: the first two used to
+  # pass for an empty collection, the others crashed `flatten_resource/1`.
+  defp json_api_doc?(%{"data" => data}) when is_nil(data) or is_map(data), do: true
+  defp json_api_doc?(%{"data" => data}) when is_list(data), do: Enum.all?(data, &is_map/1)
+  defp json_api_doc?(_body), do: false
+
   defp flatten_doc(%{"data" => data} = doc) do
     included =
       doc
@@ -1547,10 +1582,16 @@ defmodule KilnClient do
   # carries at least its `# title` line), so an empty one would otherwise
   # pass for an empty collection, or crash a caller matching on the document.
   # `graphql/3` treats an empty body the same way.
+  #
+  # `expect:` is the shape the read promises its caller, a predicate on the
+  # decoded body: a 2xx that fails it is `:unexpected_body` with the decoded
+  # body (`wrong_shape/4`), so `null` or `{}` never passes for an empty result
+  # or crashes the caller's match. Without it any 2xx body is returned.
   defp request(method, path, opts) do
     {anonymous?, opts} = Keyword.pop(opts, :anonymous, false)
     {per_call_key, opts} = Keyword.pop(opts, :api_key)
     {text_body?, opts} = Keyword.pop(opts, :text_body, false)
+    {expect, opts} = Keyword.pop(opts, :expect)
     key = if anonymous?, do: nil, else: api_key(api_key: per_call_key)
 
     case do_request(method, path, opts, key) do
@@ -1562,7 +1603,7 @@ defmodule KilnClient do
         unexpected_body(status, body, method, path)
 
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
-        {:ok, body}
+        expected(status, body, expect, method, path)
 
       {:ok, %Req.Response{status: 404, body: body, headers: headers}} ->
         {:error, Error.from_response(404, body, headers, method: method, path: path)}
@@ -1585,6 +1626,7 @@ defmodule KilnClient do
   # An empty 2xx is `{:ok, nil}` only with `empty_ok: true`, which only
   # `delete/3` passes (a soft-delete may answer an empty 204). Every other
   # write answers a document, so an empty body there is `:unexpected_body`.
+  # `expect:` checks the decoded body as `request/3`'s does.
   defp write_request(method, path, body, opts) do
     case api_key(opts) do
       nil ->
@@ -1627,7 +1669,7 @@ defmodule KilnClient do
             unexpected_body(status, body, method, path)
 
           {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
-            {:ok, body}
+            expected(status, body, opts[:expect], method, path)
 
           other ->
             to_error(other, method, path)
@@ -1659,6 +1701,29 @@ defmodule KilnClient do
        reason: :unexpected_body,
        status: status,
        body: body_excerpt(body),
+       method: method,
+       path: path
+     }}
+  end
+
+  defp expected(_status, body, nil, _method, _path), do: {:ok, body}
+
+  defp expected(status, body, expect, method, path) do
+    if expect.(body), do: {:ok, body}, else: wrong_shape(status, body, method, path)
+  end
+
+  # JSON, but not what the route promises. The decoded body goes in the error
+  # whole (it is data, not a page of HTML) and never in the log line.
+  defp wrong_shape(status, body, method, path) do
+    Logger.warning(
+      "Kiln #{method} #{path} returned #{status} with a JSON body of the wrong shape"
+    )
+
+    {:error,
+     %Error{
+       reason: :unexpected_body,
+       status: status,
+       body: body,
        method: method,
        path: path
      }}
