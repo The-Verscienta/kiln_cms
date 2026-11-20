@@ -229,6 +229,49 @@ seconds and treats a timeout as failure, so handling inline would be a latency b
 against an external API on a path whose failure mode is "the provider disables
 your endpoint".
 
+### Webhook delivery and recovery
+
+Recording an event and enqueueing its job are **one transaction**. If the
+enqueue fails, nothing is recorded: the receiver answers `500` and the
+provider's retry starts clean. A `received` event therefore always has a job.
+
+An event row moves through these statuses:
+
+| Event status | Meaning | If the provider redelivers it |
+|---|---|---|
+| `received` | recorded, job enqueued | acked after re-enqueueing its job (a job already waiting is not doubled) |
+| `processing` | a worker has claimed it | acked only, unless the claim is more than 10 minutes old, then re-enqueued |
+| `failed` | the last attempt errored | acked after re-enqueueing its job |
+| `processed`, `ignored` | settled | acked only |
+
+How the worker recovers on its own:
+
+- A run is limited to 3 minutes. An exception, exit or throw inside it is caught,
+  the event is settled as `failed`, and Oban retries (up to 8 attempts).
+- A claim older than 10 minutes can be taken over by a new job. The takeover is
+  one atomic update, so two jobs cannot both win it.
+- The job is unique on the event id while it is available, scheduled or
+  retryable, but not while executing. A node killed mid-run leaves its job
+  `executing` until `Oban.Lifeline` rescues it (180 minutes by default), so a
+  redelivery in the meantime can enqueue a fresh job.
+
+A crash **after** the `200` is never redelivered by the provider. Recovery there
+is the rescue above, Oban's retry and the 10-minute takeover.
+
+A taken-over event is applied again from the start. If the first run had already
+committed its membership change before dying, a second `MembershipEvent` row
+(audit trail) is appended for an unchanged status. Access is not granted twice,
+because entitlements are recomputed from current state. Ordering between events
+is a separate concern (#2749).
+
+Three windows are still open and wait for the sweeper in #3159: a job that uses
+all its attempts leaves the event `failed` until the provider redelivers it; a
+`processed` stamp that fails to save leaves the event `processing` (the
+10-minute takeover covers it only once something re-enqueues it); and `received`
+rows recorded before this change have no job. Upgrading needs no migration or
+config, and a rolling deploy is safe: an old node enqueues a non-unique job,
+which the claim then catches.
+
 **Diagnosing "the member paid but has no access"** starts with the recorded
 events: each one carries its status and, on failure, the reason. Every entitlement
 change also appears in the governance trail with the audience delta and the
