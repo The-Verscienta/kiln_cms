@@ -670,18 +670,20 @@ A malformed, expired or foreign JWT in `Authorization: Bearer …` is answered
 `/api` routes. On `/gql` the body is GraphQL-shaped:
 `{"errors":[{"message":…,"code":"invalid_token","extensions":{"code":"unauthenticated"}}]}`.
 The response is `Cache-Control: private, no-store` with `Vary: Authorization`.
-Send a JWT under the scheme exactly as `Bearer`: a JWT as `bearer …` and a bare
-`Bearer` are refused too, because the token loader reads only that spelling. An
-API key (`kiln_…`) is accepted under any case of the scheme. It used to be served as anonymous, so a client with a
-stale token read public content and took it for success; treat this `401` as
+The scheme is case-insensitive: `Bearer`, `bearer` and `BEARER` are the same,
+for a JWT and an API key (`kiln_…`) alike (#2632). A bare `Bearer` with no
+token is refused in any case. A bad token used to be served as anonymous, so a
+client with a stale token read public content and took it for success; treat this `401` as
 "re-authenticate", not as "forbidden". A request with no `Authorization` header
 is still anonymous, and a bad `kiln_` key was always a `401`.
 
 The GraphQL WebSocket `/ws/gql` follows the same rule at connect (#2634): a
 `token` connection param that does not verify is refused, and the handshake
 answers `403`, where it used to connect as anonymous. That includes a `kiln_`
-API key, which that socket never accepted: use `POST /gql` with a key. Connect
-with no `token` to read as the public.
+API key, which that socket never accepted: use `POST /gql` with a key. An
+`authorization` connect param is read under the scheme in any case, so
+`bearer <garbage>` and a bare `Bearer` are refused the same way (#2632).
+Connect with no `token` or `authorization` param to read as the public.
 
 A `403` with `code` (or `extensions.code`) `second_factor_required` is a
 different answer: the token is valid, but the site now requires its account to

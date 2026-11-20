@@ -225,6 +225,31 @@ defmodule KilnCMSWeb.ContentEditorReleaseTest do
     KilnCMS.DataCase.drain_oban()
   end
 
+  # The refusal text comes from the validation, so it follows the viewer's
+  # locale like the flash around it (#3074).
+  test "the went-live refusal is translated in the viewer's locale", %{conn: conn} do
+    admin = authed_user(:admin)
+    editor = authed_user(:editor)
+    rel = CMS.create_release!(%{name: "Going live in es"}, actor: admin)
+    page = page!(editor)
+
+    {:ok, lv, _html} =
+      conn
+      |> log_in(editor)
+      |> Plug.Conn.put_session("locale", "es")
+      |> live(~p"/editor/content/page/#{page.id}")
+
+    {:ok, _} = CMS.start_release(rel, %{}, actor: admin)
+
+    html = render_click(lv, "release_add")
+
+    assert html =~ "No se pudo añadir a ese lanzamiento: el lanzamiento ya no admite cambios"
+    refute html =~ "no longer open for changes"
+    assert [] = CMS.list_release_items_for!(rel.id, authorize?: false)
+
+    KilnCMS.DataCase.drain_oban()
+  end
+
   test "a type-scoped editor never reaches the panel for out-of-scope content", %{conn: conn} do
     # Containment is one level earlier than the panel: granular RBAC (#332)
     # already hides the record from this editor's read, so the editor route

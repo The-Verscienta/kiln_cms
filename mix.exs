@@ -896,7 +896,8 @@ defmodule KilnCMS.MixProject do
       {:hammer, "~> 7.0"},
       {:remote_ip, "~> 1.2"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
-      {:phoenix_live_view, "~> 1.2.0"},
+      # 1.2.14 is the floor: EEF-CVE-2026-126334 (#3190).
+      {:phoenix_live_view, "~> 1.2.14"},
       # Held below 0.1.14: that release needs `fine ~> 0.2.0`, and EXLA 1.0.0's
       # NIF does not compile against fine 0.2 (`try_decode` is not a member of
       # `fine::Decoder<xla::Shape>`) although its own requirement, `~> 0.1`,

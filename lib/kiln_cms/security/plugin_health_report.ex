@@ -7,7 +7,7 @@ defmodule KilnCMS.Security.PluginHealthReport do
     * `:cached` answers `Kiln.Plugins.Health.cached/0`: a
       `Kiln.Plugins.Health.Report`, or `nil` when this node holds no fresh
       check. It **never** makes a request and never starts one, not even in the
-      background (`Kiln.Plugins.Health.warm/0` is not called): reading health
+      background (`Kiln.Plugins.Health.warm/1` is not called): reading health
       must not tell hex.pm or the notices feed anything. A disabled check and
       a deployment with nothing to check answer a report, since neither needs
       a request.

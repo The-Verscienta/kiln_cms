@@ -21,7 +21,9 @@ draft-only by design.
 
 `/mcp` accepts **API keys only** (`Authorization: Bearer kiln_…`) — no JWT or
 anonymous access; anything else, a valid, expired or garbled JWT included, is a
-`401`. Mint keys at `/editor/api-keys` (admin-only). A key acts as its owning
+`401`. The scheme is case-insensitive, and the key need not be the first
+`Authorization` value (a proxy may add its own); if there is more than one key,
+the first decides (`KilnCMSWeb.Plugs.RequireApiKey`, #2632). Mint keys at `/editor/api-keys` (admin-only). A key acts as its owning
 user, bounded by its `access` scope. A site's
 [two-step sign-in requirement](two-factor-auth.md#requiring-two-step-sign-in-on-a-site)
 never applies to a key: it keeps working for an owner the site holds.
@@ -128,6 +130,21 @@ Authoring (require a write key + editor role): `create_page` / `update_page` /
 `read_type_definitions`), plus `create_tag` and `create_category`.
 `create_tag` takes an optional `tag_group_id` — discover the groups with
 `read_tag_groups`.
+
+Links: `read_content_links`, `create_content_link` and `update_content_link`
+read and write payload links between any two records, the same links
+`/api/json/content-links` writes ([json-api.md](json-api.md)). A link has a
+`kind` naming the relation and an optional `position`, `label` and
+`metadata`. Writing one is authorized as an edit of its **source** record, so
+an editor key may link from anything it may update. Filter
+`read_content_links` on `source_id` to see what a record already links to
+before adding more. A link is not part of its source's document, so one on a
+published record shows at once, with no version and no review. Two limits:
+
+- `kind: reference` is refused. Those edges mirror a reference custom field;
+  write the field instead.
+- There is no delete tool, as for every other resource here. A link created
+  in error is removed by a person, not by the model.
 
 > **Custom fields on a write.** `create_*` and `update_*` take
 > `custom_fields` under `input`, checked as a JSON:API write is

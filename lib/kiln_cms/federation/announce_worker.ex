@@ -15,6 +15,16 @@ defmodule KilnCMS.Federation.AnnounceWorker do
   record is published, `:public`, and in the default locale. A job that fails
   any of them returns `:ok` and does nothing — these are ordinary outcomes, not
   errors to retry.
+
+  ## Retrying is safe
+
+  The fan-out (`KilnCMS.Federation.deliver_to_followers/5`) writes its ledger
+  rows and delivery jobs in one transaction (#2753) and returns
+  `{:error, reason}` when it rolls back, which is this job's result — so a
+  retry re-sends to nobody an earlier attempt already queued. The one gap is a
+  crash after that commit and before Oban records the job done: the retry then
+  queues each inbox a second copy of an activity whose id the receiver has
+  already seen.
   """
   use Oban.Worker,
     queue: :federation,

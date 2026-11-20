@@ -158,7 +158,10 @@ config :kiln_cms,
     :update_entry,
     :submit_entry_for_review,
     :create_tag,
-    :create_category
+    :create_category,
+    :read_content_links,
+    :create_content_link,
+    :update_content_link
   ],
   # Default "from" address for transactional email (auth confirmation/reset).
   # Override per environment in runtime.exs for production.
