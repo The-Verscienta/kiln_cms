@@ -46,13 +46,46 @@ metric "headless API p95 under 50 ms" (#1546).
   that changes markup is not `304`ed to a client holding the old page. Nodes
   of one image agree; during a rolling deploy the tag flips between old and
   new nodes until it finishes. A markup change made only by runtime
-  configuration does not move it. The tag also folds the site's head
-  generation, which a save of branding, code injection, feed settings or a
-  menu moves on every node. A site with no such save since a node started
-  carries a token that node drew at random, so without sticky sessions two
-  nodes can tag one page differently until the next save, and a restart moves
-  the tag: extra `200`s, never a stale `304` (#2502). 404s send
-  `Cache-Control: no-store`. The in-BEAM cache is
+  configuration does not move it. Beyond the record's own columns, the tag
+  folds in everything else the page is built from, so a `304` only ever
+  validates the page that would be rendered now (#2765):
+  - **The cached delivery payload.** A hash of the whole payload: the blocks
+    with fragments expanded, media resolved (alt text, `srcset`, dimensions,
+    focal point) and forms embedded; the published sibling translations
+    behind the hreflang links and the language switcher; fields inherited
+    along a locale fallback chain; bylines; the author; and the category an
+    SEO pattern can name. None of these moves the page's `updated_at`; each
+    has a write that drops the payloads it affects, and the next build hashes
+    differently. That covers a fragment's republish, a media edit, a form edit,
+    a sibling translation's publish, a category rename (that site's
+    payloads, because the `[category]` SEO token can put the name in the
+    `<title>`) and a change to a user's display name (every site's payloads,
+    because it is the byline fallback and the JSON-LD `author`). A save that
+    leaves a name unchanged drops nothing, and neither does a tag or tag
+    group rename: no delivered page shows a tag. The hash is taken once when
+    the payload is built and stored with it, so a cache hit pays nothing for
+    it, and two builds of unchanged data hash the same, so a rebuild on its
+    own (a TTL expiry, a flush) does not move the tag. It covers more than
+    the page shows (whole sibling records, the author's record), which can
+    cost a `200` where a `304` would have done, never a stale `304`.
+  - **The header and footer menus**, as the page renders them. A menu item
+    that links to a page shows that page's current published path, and drops
+    out when the page is unpublished; neither touches the page the menu sits
+    on. Menu trees are cached for 5 minutes, so after a linked page is
+    renamed or unpublished, revalidations get a `200` once that entry
+    expires.
+  - **The site's head generation**, a token moved on every node by a save of
+    branding, code injection, feed settings or a menu; any write to a content
+    type or one of its fields (feed and calendar links and the type's label
+    come from the type registry, not the page); and a save of the site's
+    locale fallback settings (they decide the language switcher). Each such
+    save costs every page on the site one `200`; they are rare. A site with
+    no such save since a node started carries a token that node drew at
+    random, so without sticky sessions two nodes can tag one page
+    differently until the next save, and a restart moves the tag: extra
+    `200`s, never a stale `304` (#2502).
+
+  404s send `Cache-Control: no-store`. The in-BEAM cache is
   single-node, so a CDN in front is what absorbs a viral spike.
 - **Flushing by hand.** Invalidation is automatic and precise on writes, so a
   manual purge is not part of publishing. For the states precise invalidation
@@ -63,7 +96,13 @@ metric "headless API p95 under 50 ms" (#1546).
   site serving half-stale. They leave each site's `<head>` and menus
   generation tokens and its last-known admin allowlist in place, because those
   live in a store no flush or eviction reaches (#2502): moving a token back
-  would answer `304` to a browser holding a page with the old `<head>`. Every
+  would answer `304` to a browser holding a page with the old `<head>`. A
+  flush moves a page's `ETag` only when the rebuilt payload differs from the
+  one it replaced (#2765). Anything a block reads while the HTML renders,
+  after the payload is built, is not in the tag, so a browser or CDN
+  revalidating such a page still gets a `304` until something the tag covers
+  moves: a deploy that changes the build, or one of the saves that move the
+  head generation. Every
   request re-reads the database until the caches warm again, and on a
   multi-node deployment the purge reaches **every** node
   (#1138) — the count shown is from the node that served the request. On a

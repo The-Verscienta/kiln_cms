@@ -176,6 +176,25 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="public-html-etag-render-inputs"></a>
+
+- **A public page's `ETag` now covers everything the page is rendered from, so a revalidation can no longer get a `304` for a page that has changed (#2765).**
+  The HTML `ETag` hashed the record's own columns, its resolved SEO title and description, the site's head generation, the forms it renders, the chrome locale and the build. Much of what a page shows is not on its row: a republished fragment, an edited image's alt text, a newly published translation (the hreflang links and the language switcher), a field inherited along a locale fallback chain, a byline's person, the author's display name, a category named by an SEO pattern, and a menu link to another page. When one of those changed, the server rendered the new page but a browser or CDN sending `If-None-Match` still got a `304` and kept the old one.
+
+  The tag now also includes:
+  - **A hash of the whole cached delivery payload**: blocks with fragments, media and forms resolved, sibling translations (now sorted by locale, so two builds of the same data hash the same), inherited `:fallback` fields, bylines and the author. It is computed once when the payload is built and stored with it, so a cache hit does no extra work.
+  - **A hash of the header and footer menu trees** as the page renders them (two cache hits).
+
+  New writes that move the tag:
+  - Any write to a content type or one of its fields, and any save of the site's locale fallback settings, now moves the site's head generation, and with it every page's tag on that site. Feed and calendar links and the type's label come from the type registry, and the language switcher from the fallback chains. The type-registry move was added in #1208 and lost in #1227.
+  - Renaming a category drops that site's cached payloads, because the `[category]` SEO token puts its name in the `<title>`. Renaming a tag or tag group drops nothing, because no delivered page shows a tag.
+  - Changing a user's display name drops every site's cached payloads, because the name is the byline fallback and the JSON-LD `author` on any site the user wrote for. This covers a profile save, accepting an invitation over an unconfirmed account, and an erasure.
+  - Neither rename drop fires when a save leaves the name unchanged.
+
+  A menu link follows its target page's current published path, and drops out when the page is unpublished. Menu trees are cached for 5 minutes, so after a linked page is renamed or unpublished, pages carrying that menu revalidate to a `200` once the cache entry expires.
+
+  For operators: every public HTML `ETag` changes once on upgrade, as with any deploy that changes the build fingerprint, so clients and CDNs fetch each page once in full. There is no migration and no new configuration, and rolling back is safe. Still open: a page served at its path alias renders without its reference bylines and inherited `:fallback` fields (#3193). See [How the targets are met](../performance.md#how-the-targets-are-met).
+
 <a id="invitation-keeps-legacy-tier"></a>
 
 - **Accepting an invitation to the default site at a lower tier no longer demotes an account that has no membership but a legacy editor or admin role (#2574).**

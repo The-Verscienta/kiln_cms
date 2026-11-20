@@ -12,8 +12,9 @@ defmodule KilnCMS.Accounts.Changes.BustAuthorPayloads do
   A user can author on any site they belong to, and the name names no page, so
   every site's payloads go (`KilnCMS.Cache.bust_payloads/1` with `nil`), rather
   than only the sites they are a member of now: a former member's posts still
-  carry their name. Only when the stored name actually changed, which is rare: a profile save, accepting an
-  invitation over an unconfirmed account, an erasure.
+  carry their name. Only when the stored name actually changed, which is rare:
+  a profile save, accepting an invitation over an unconfirmed account, an
+  erasure.
 
   After the commit (`KilnCMS.AfterCommit`), so a page rebuilt between the bust
   and the commit cannot cache the old name again. The name is read off the

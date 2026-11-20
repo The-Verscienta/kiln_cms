@@ -89,6 +89,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A revalidating browser or CDN no longer gets a `304` for a public page whose fragments, media, translations, inherited fields, bylines, author name, category or menu links changed: the HTML `ETag` now hashes the cached payload and the menus, and type, field and locale-settings saves move every page's tag.**
+  ([long form](docs/changelog/unreleased.md#public-html-etag-render-inputs))
+
 - **Accepting an invitation to the default site at a lower tier no longer demotes an account with no membership but a legacy editor or admin role: its tier is carried into a membership first and the accept reports it already a member. An admin's own Add is unchanged.**
   ([long form](docs/changelog/unreleased.md#invitation-keeps-legacy-tier))
 
