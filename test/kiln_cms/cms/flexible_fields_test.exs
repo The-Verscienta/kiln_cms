@@ -297,7 +297,7 @@ defmodule KilnCMS.CMS.FlexibleFieldsTest do
   describe "item types" do
     test "the parent must be a flexible field", %{admin: admin} do
       text =
-        CMS.create_field_definition!(%{content_type: :post, name: "note", label: "N"},
+        CMS.create_field_definition!(%{content_type: :post, name: "ff_note", label: "N"},
           actor: admin
         )
 

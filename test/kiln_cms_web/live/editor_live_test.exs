@@ -602,7 +602,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
     test "an invalid custom-field value renders an inline error and flags the panel",
          %{conn: conn} do
       KilnCMS.CMS.create_field_definition!(
-        %{content_type: :page, name: "level", label: "Level", field_type: :integer},
+        %{content_type: :page, name: "el_level", label: "Level", field_type: :integer},
         actor: authed_user(:admin)
       )
 
@@ -612,21 +612,21 @@ defmodule KilnCMSWeb.EditorLiveTest do
         conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
 
       # The input is labelled via for/id (previously a bare sibling label).
-      assert html =~ ~s(for="custom-field-level")
-      assert html =~ ~s(id="custom-field-level")
+      assert html =~ ~s(for="custom-field-el_level")
+      assert html =~ ~s(id="custom-field-el_level")
 
       invalid =
         lv
-        |> form("#page-editor", form: %{custom_fields: %{level: "abc"}})
+        |> form("#page-editor", form: %{custom_fields: %{el_level: "abc"}})
         |> render_submit()
 
-      assert invalid =~ "Level (level) must be a whole number"
-      assert invalid =~ ~s(id="custom-field-level-errors")
+      assert invalid =~ "Level (el_level) must be a whole number"
+      assert invalid =~ ~s(id="custom-field-el_level-errors")
       assert invalid =~ ~s(aria-invalid="true")
       # The panel sits in the main column under the blocks, always visible, so
       # its own header flags the error — the Settings tab no longer raises a
       # dot for it.
-      assert has_element?(lv, "#custom-fields #custom-field-level")
+      assert has_element?(lv, "#custom-fields #custom-field-el_level")
       assert has_element?(lv, "#custom-fields header", "Needs attention")
       refute invalid =~ "This panel has validation errors"
     end

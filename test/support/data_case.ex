@@ -12,6 +12,26 @@ defmodule KilnCMS.DataCase do
   PostgreSQL, you can even run database tests asynchronously
   by setting `use KilnCMS.DataCase, async: true`, although
   this option is not recommended for other databases.
+
+  ## Shared unique keys and async tests (#2620, #3017)
+
+  An async test's sandbox transaction stays open, uncommitted, for the whole
+  test. Two async tests that insert the same unique key (a `FieldDefinition`
+  name on the same built-in type in the default org, a settings singleton, a
+  fixed email) therefore make the second INSERT wait on the first test's
+  transaction. It waits until that test ends, fails as `57014` at the 30 s
+  statement timeout, or, when two tests take two keys in opposite orders,
+  fails as `40P01` (deadlock). Nothing in a `FieldDefinition` create takes a
+  lock beyond its unique index, so this is a test-isolation problem, not a
+  product one.
+
+  The rule: in an async test, give every field name on `:post`/`:page` a prefix
+  of its own (`"fsa_notes"`, not `"notes"`), or make the module
+  `async: false`, which runs it after the async phase and so alone. To find a
+  collision, set `log_lock_waits` and a short `deadlock_timeout` on the test
+  database (`ALTER DATABASE ... SET log_lock_waits = on`) and read the
+  `CONTEXT: while inserting index tuple ... in relation "..."` lines in the
+  Postgres log.
   """
 
   use ExUnit.CaseTemplate

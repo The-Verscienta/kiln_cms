@@ -27882,6 +27882,11 @@ msgstr "Oui, abonnez-moi"
 msgid "Yes, unsubscribe"
 msgstr "Oui, me désabonner"
 
+#: lib/kiln_cms_web/controllers/billing_controller.ex
+#, elixir-autogen, elixir-format
+msgid "You already have this membership."
+msgstr "Vous avez déjà cet abonnement."
+
 #: lib/kiln_cms_web/live/inbox_live.ex
 #, elixir-autogen, elixir-format
 msgid "You are all caught up."

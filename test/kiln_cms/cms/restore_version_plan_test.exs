@@ -59,7 +59,7 @@ defmodule KilnCMS.CMS.RestoreVersionPlanTest do
 
   test "a draft: every restorable key previews as the restore leaves it" do
     admin = admin()
-    define_field!(admin, %{name: "price", label: "Price"})
+    define_field!(admin, %{name: "rvp_price", label: "Price"})
     define_field!(admin, %{name: "sale", label: "On sale", field_type: :boolean})
 
     page =
@@ -68,7 +68,7 @@ defmodule KilnCMS.CMS.RestoreVersionPlanTest do
           title: "Alpha",
           slug: slug(),
           blocks: [heading("Original")],
-          custom_fields: %{"price" => "9"}
+          custom_fields: %{"rvp_price" => "9"}
         },
         actor: admin
       )
@@ -82,7 +82,7 @@ defmodule KilnCMS.CMS.RestoreVersionPlanTest do
           title: "Beta",
           seo_title: "Added later",
           blocks: [heading("Changed")],
-          custom_fields: %{"price" => "19", "sale" => true}
+          custom_fields: %{"rvp_price" => "19", "sale" => true}
         },
         actor: admin
       )
@@ -101,7 +101,7 @@ defmodule KilnCMS.CMS.RestoreVersionPlanTest do
 
   test "a published record: the working copy is kept, and previews as restored" do
     admin = admin()
-    define_field!(admin, %{name: "price", label: "Price"})
+    define_field!(admin, %{name: "rvp_price", label: "Price"})
 
     page =
       CMS.create_page!(
@@ -109,7 +109,7 @@ defmodule KilnCMS.CMS.RestoreVersionPlanTest do
           title: "Live",
           slug: slug(),
           blocks: [heading("Body")],
-          custom_fields: %{"price" => "9"}
+          custom_fields: %{"rvp_price" => "9"}
         },
         actor: admin
       )
@@ -156,12 +156,12 @@ defmodule KilnCMS.CMS.RestoreVersionPlanTest do
 
   test "dropped keys name the retired key and exclude the kept ones" do
     admin = admin()
-    price = define_field!(admin, %{name: "price", label: "Price"})
+    price = define_field!(admin, %{name: "rvp_price", label: "Price"})
     define_field!(admin, %{name: "sale", label: "On sale", field_type: :boolean})
 
     page =
       CMS.create_page!(
-        %{title: "P", slug: slug(), custom_fields: %{"price" => "9", "sale" => true}},
+        %{title: "P", slug: slug(), custom_fields: %{"rvp_price" => "9", "sale" => true}},
         actor: admin
       )
 
@@ -171,8 +171,8 @@ defmodule KilnCMS.CMS.RestoreVersionPlanTest do
 
     plan = preview(page, create_version, admin)
 
-    assert plan.dropped == ["price"]
-    refute Map.has_key?(plan.custom_fields, "price")
+    assert plan.dropped == ["rvp_price"]
+    refute Map.has_key?(plan.custom_fields, "rvp_price")
     assert plan.custom_fields["sale"] == true
   end
 

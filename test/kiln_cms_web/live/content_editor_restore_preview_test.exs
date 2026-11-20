@@ -72,11 +72,11 @@ defmodule KilnCMSWeb.ContentEditorRestorePreviewTest do
   # since, and which gained `badge` after that version.
   defp page_with_history do
     admin = authed_user(:admin)
-    price = define_field!(admin, %{name: "price", label: "Price"})
+    price = define_field!(admin, %{name: "cerp_price", label: "Price"})
 
     page =
       CMS.create_page!(
-        %{title: "Original", slug: slug(), custom_fields: %{"price" => "9"}},
+        %{title: "Original", slug: slug(), custom_fields: %{"cerp_price" => "9"}},
         actor: admin
       )
 
@@ -87,7 +87,7 @@ defmodule KilnCMSWeb.ContentEditorRestorePreviewTest do
     page =
       CMS.update_page!(
         page,
-        %{title: "Revised", custom_fields: %{"price" => "9", "badge" => "new"}},
+        %{title: "Revised", custom_fields: %{"cerp_price" => "9", "badge" => "new"}},
         actor: admin
       )
 
@@ -121,7 +121,7 @@ defmodule KilnCMSWeb.ContentEditorRestorePreviewTest do
     html = lv |> element(restore_button(first.id)) |> render_click()
 
     # `price` has no definition any more: named raw, in the discard list.
-    assert has_element?(lv, ~s{#restore-preview-dropped [data-dropped-key="price"]})
+    assert has_element?(lv, ~s{#restore-preview-dropped [data-dropped-key="cerp_price"]})
     # `badge` was added after that version: the restore removes it, by label.
     assert has_element?(lv, ~s{#restore-preview-dialog [data-custom-field="badge"]})
     assert html =~ "Badge"
@@ -141,7 +141,7 @@ defmodule KilnCMSWeb.ContentEditorRestorePreviewTest do
     restored = CMS.get_page!(page.id, actor: admin)
     assert restored.title == "Original"
     refute Map.has_key?(restored.custom_fields, "badge")
-    refute Map.has_key?(restored.custom_fields, "price")
+    refute Map.has_key?(restored.custom_fields, "cerp_price")
   end
 
   test "cancelling writes nothing", %{conn: conn} do
@@ -203,18 +203,18 @@ defmodule KilnCMSWeb.ContentEditorRestorePreviewTest do
     lv = open_editor(conn, admin, page)
 
     lv |> element(restore_button(first.id)) |> render_click()
-    assert has_element?(lv, ~s{#restore-preview-dropped [data-dropped-key="price"]})
+    assert has_element?(lv, ~s{#restore-preview-dropped [data-dropped-key="cerp_price"]})
 
     # `price` is defined again after the preview was drawn, so the restore would
     # no longer discard it: what was agreed to is not what would happen.
-    define_field!(admin, %{name: "price", label: "Price"})
+    define_field!(admin, %{name: "cerp_price", label: "Price"})
 
     html = render_click(lv, "confirm_restore", %{"version_id" => first.id})
 
     assert html =~ "That version changed since the preview. Review it again."
     assert has_element?(lv, "#restore-preview-dialog")
     assert has_element?(lv, "#confirm-restore")
-    refute has_element?(lv, ~s{#restore-preview-dropped [data-dropped-key="price"]})
+    refute has_element?(lv, ~s{#restore-preview-dropped [data-dropped-key="cerp_price"]})
 
     unchanged = CMS.get_page!(page.id, actor: admin)
     assert unchanged.title == "Revised"

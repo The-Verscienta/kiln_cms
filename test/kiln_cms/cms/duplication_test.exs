@@ -35,7 +35,7 @@ defmodule KilnCMS.CMS.DuplicationTest do
 
     field =
       CMS.create_field_definition!(
-        %{content_type: :page, name: "region", label: "Region"},
+        %{content_type: :page, name: "d_region", label: "Region"},
         actor: actor
       )
 

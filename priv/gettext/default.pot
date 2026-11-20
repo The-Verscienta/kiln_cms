@@ -27882,6 +27882,11 @@ msgstr ""
 msgid "Yes, unsubscribe"
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/billing_controller.ex
+#, elixir-autogen, elixir-format
+msgid "You already have this membership."
+msgstr ""
+
 #: lib/kiln_cms_web/live/inbox_live.ex
 #, elixir-autogen, elixir-format
 msgid "You are all caught up."

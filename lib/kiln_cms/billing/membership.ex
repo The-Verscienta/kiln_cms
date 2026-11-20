@@ -86,6 +86,17 @@ defmodule KilnCMS.Billing.Membership do
       upsert_identity :one_per_user_and_tier
       upsert_fields [:status]
 
+      # Only an abandoned or ended row restarts. A re-click on a live one
+      # (`:active`, `:past_due`, `:comped`) must not demote it to `:incomplete`:
+      # that drops its audience and bypasses the audit trail (#2747). The
+      # condition is in the `ON CONFLICT ... DO UPDATE ... WHERE`, so it holds
+      # against a second tab racing the first, not just against a stale read.
+      # A refused upsert hands back the existing row (flagged
+      # `upsert_skipped`) rather than a StaleRecord error, so the caller
+      # branches on the row's status instead of matching error classes.
+      upsert_condition expr(status not in ^@entitling)
+      return_skipped_upsert? true
+
       # The account's row first, refusing an erased one (#2514): `user_id` has
       # no foreign key, so nothing else would make an erasure of a rejected
       # registration wait for this row, or this row for it.
@@ -223,7 +234,10 @@ defmodule KilnCMS.Billing.Membership do
       multitenancy :bypass
       argument :provider_customer_id, :string, allow_nil?: false
       filter expr(provider_customer_id == ^arg(:provider_customer_id))
-      prepare build(load: [:tier])
+      # Does NOT load `:tier`: a `belongs_to` load off a bypassed read raises
+      # `Ash.Error.Invalid.TenantRequired` under strict tenancy (see
+      # `:entitling_for_user`). `KilnCMS.Billing.Webhooks` reads the tier itself,
+      # tenanted by each row's own `org_id`.
     end
 
     # Memberships whose paid period lapsed without an update — we missed an
