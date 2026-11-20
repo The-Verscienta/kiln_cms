@@ -588,7 +588,8 @@ defmodule KilnCMS.Firing.Engine do
   #
   # Document-level only. The card type, `twitter:site` and the brand's fallback
   # image are SITE-level values (branding), so they stay out of a per-document
-  # artifact; a consumer supplies its own (`docs/decisions/0061-*`).
+  # artifact (`docs/decisions/0061-*`); a consumer reads the site's from
+  # `GET /api/site` (#2577, `KilnCMSWeb.SiteDefaults`) or supplies its own.
   defp put_social(body, document) do
     social =
       %{

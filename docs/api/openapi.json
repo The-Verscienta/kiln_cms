@@ -17378,7 +17378,7 @@
       "name": "KilnCMS",
       "url": "https://github.com/The-Verscienta/kiln_cms"
     },
-    "description": "The [JSON:API](https://jsonapi.org/)-compliant headless surface of\n**KilnCMS**: reads, search and — since #330 — writes, for the core content\ntypes **Page** and **Post**, admin-defined types through **Entry**\n(`/api/json/entries`, described by `/api/json/type-definitions`), the\n**MediaItem** library, and the taxonomy (**Tag**, **TagGroup**, **Category**)\nplus **Redirect**.\n\n## Authentication\n\nRequests are **anonymous by default** and resolved through each resource's read\npolicy, so an unauthenticated caller only ever sees **published** content — no\ncredentials are required for the public delivery use case.\n\nA credential widens that, as far as its account's role allows. Both kinds go\nin the same header:\n\n```\nAuthorization: Bearer <credential>\n```\n\n  * **API key** (`kiln_…`, the `apiKeyAuth` scheme) — minted at\n    `/editor/api-keys`, acting as the account that minted it and bounded by\n    the key's `access` scope. A `read` key reads what its account may read;\n    a `read_write` key may also **write**: create and update drafts, submit\n    for review, and — on an admin account — publish, unpublish, return to\n    draft and soft-delete. A `draft_write` key may only create drafts and\n    edit its own drafts (no review, publishing, deletes or media). The key\n    for server-to-server use.\n  * **User JWT** (the `bearerAuth` scheme) — an AshAuthentication token from\n    **`POST /api/auth/sign_in`** (documented below), with that user's role.\n\nEither credential also authenticates the GraphQL endpoint (`POST /gql`) and\nits WebSocket. See `docs/api.md` and, for the write routes, `docs/json-api.md`\n→ \"Writing\".\n\n## Content negotiation\n\nEvery request and response uses the JSON:API media type:\n\n```\nAccept: application/vnd.api+json\nContent-Type: application/vnd.api+json\n```\n\n## Filtering, sorting & pagination\n\nCollection routes accept `filter[<field>]=`, `sort=<field>` (prefix `-` for\ndescending) and the `page[...]` family (`page[limit]` defaults to 25, capped\nat 100; `page[offset]`, `page[after]`/`page[before]` keyset cursors,\n`page[count]=true`). Full reference: `docs/json-api.md`.\n\n## Beyond JSON:API\n\nThe JSON:API router is one of several headless surfaces. Those with an\noperation below are marked; the rest are in `docs/api.md`.\n\n  * **GraphQL** delivery, search and authoring at `POST /gql`\n    (`docs/headless-graphql-api.md`); its schema as SDL at\n    `GET /api/graphql/schema.graphql` (operation below).\n  * **Fired artifacts** — the rendered block tree — at\n    `GET /api/content/:type/:slug` (operation below).\n  * **Media upload** at `POST /api/media` (multipart), `POST /api/media/import-url`\n    and the presigned direct-upload pair under `/api/media/uploads`\n    (`docs/api.md` → \"Uploading media\"). Metadata edits are the JSON:API\n    `PATCH /api/json/media-items/{id}` below.\n  * **Search, resolve, menus, locales, forms, related, ask, provenance** under\n    `/api/*`.\n  * **Security posture** for monitoring at `GET /api/security/posture`\n    (operation below): a site administrator's checks as JSON, behind the\n    site's admin allowlist.\n  * **Plugin health** for monitoring at `GET /api/security/plugin-health`\n    (operation below): the installed plugins' cached health, for a platform\n    administrator, behind the site's admin allowlist.\n  * **MCP** for LLM authoring clients at `/mcp` (`docs/mcp.md`).\n  * **Outbound webhooks** (HMAC-signed) on publish/unpublish/update.\n  * **Signed preview URLs** for unpublished content at `GET /preview/:token`\n    (operation below).\n\n## This document\n\nA production build serves it only to a caller holding an API key, unless the\noperator turns the public documentation on (`API_DOCS_ENABLED`). The copy\ncommitted at `docs/api/openapi.json` describes the stock build.\n",
+    "description": "The [JSON:API](https://jsonapi.org/)-compliant headless surface of\n**KilnCMS**: reads, search and — since #330 — writes, for the core content\ntypes **Page** and **Post**, admin-defined types through **Entry**\n(`/api/json/entries`, described by `/api/json/type-definitions`), the\n**MediaItem** library, and the taxonomy (**Tag**, **TagGroup**, **Category**)\nplus **Redirect**.\n\n## Authentication\n\nRequests are **anonymous by default** and resolved through each resource's read\npolicy, so an unauthenticated caller only ever sees **published** content — no\ncredentials are required for the public delivery use case.\n\nA credential widens that, as far as its account's role allows. Both kinds go\nin the same header:\n\n```\nAuthorization: Bearer <credential>\n```\n\n  * **API key** (`kiln_…`, the `apiKeyAuth` scheme) — minted at\n    `/editor/api-keys`, acting as the account that minted it and bounded by\n    the key's `access` scope. A `read` key reads what its account may read;\n    a `read_write` key may also **write**: create and update drafts, submit\n    for review, and — on an admin account — publish, unpublish, return to\n    draft and soft-delete. A `draft_write` key may only create drafts and\n    edit its own drafts (no review, publishing, deletes or media). The key\n    for server-to-server use.\n  * **User JWT** (the `bearerAuth` scheme) — an AshAuthentication token from\n    **`POST /api/auth/sign_in`** (documented below), with that user's role.\n\nEither credential also authenticates the GraphQL endpoint (`POST /gql`) and\nits WebSocket. See `docs/api.md` and, for the write routes, `docs/json-api.md`\n→ \"Writing\".\n\n## Content negotiation\n\nEvery request and response uses the JSON:API media type:\n\n```\nAccept: application/vnd.api+json\nContent-Type: application/vnd.api+json\n```\n\n## Filtering, sorting & pagination\n\nCollection routes accept `filter[<field>]=`, `sort=<field>` (prefix `-` for\ndescending) and the `page[...]` family (`page[limit]` defaults to 25, capped\nat 100; `page[offset]`, `page[after]`/`page[before]` keyset cursors,\n`page[count]=true`). Full reference: `docs/json-api.md`.\n\n## Beyond JSON:API\n\nThe JSON:API router is one of several headless surfaces. Those with an\noperation below are marked; the rest are in `docs/api.md`.\n\n  * **GraphQL** delivery, search and authoring at `POST /gql`\n    (`docs/headless-graphql-api.md`); its schema as SDL at\n    `GET /api/graphql/schema.graphql` (operation below).\n  * **Fired artifacts** — the rendered block tree — at\n    `GET /api/content/:type/:slug` (operation below).\n  * **Media upload** at `POST /api/media` (multipart), `POST /api/media/import-url`\n    and the presigned direct-upload pair under `/api/media/uploads`\n    (`docs/api.md` → \"Uploading media\"). Metadata edits are the JSON:API\n    `PATCH /api/json/media-items/{id}` below.\n  * **Site defaults** for link previews at `GET /api/site` (operation\n    below): the site's name, X (Twitter) handle and default share image.\n  * **Search, resolve, menus, locales, forms, related, ask, provenance** under\n    `/api/*`.\n  * **Security posture** for monitoring at `GET /api/security/posture`\n    (operation below): a site administrator's checks as JSON, behind the\n    site's admin allowlist.\n  * **Plugin health** for monitoring at `GET /api/security/plugin-health`\n    (operation below): the installed plugins' cached health, for a platform\n    administrator, behind the site's admin allowlist.\n  * **MCP** for LLM authoring clients at `/mcp` (`docs/mcp.md`).\n  * **Outbound webhooks** (HMAC-signed) on publish/unpublish/update.\n  * **Signed preview URLs** for unpublished content at `GET /preview/:token`\n    (operation below).\n\n## This document\n\nA production build serves it only to a caller holding an API key, unless the\noperator turns the public documentation on (`API_DOCS_ENABLED`). The copy\ncommitted at `docs/api/openapi.json` describes the stock build.\n",
     "license": {
       "name": "MIT",
       "url": "https://github.com/The-Verscienta/kiln_cms/blob/main/LICENSE"
@@ -33748,6 +33748,116 @@
         "summary": "Read the site's security posture",
         "tags": [
           "Monitoring"
+        ]
+      }
+    },
+    "/api/site": {
+      "get": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "The site-level values a headless front end falls back to for its Open Graph and X (Twitter) card tags when a document's own `social` object has none: the values this site's own pages carry. Every key is always present. Public; a credential is accepted and changes nothing, but an invalid one is a 401. Anonymous responses are shared-cacheable for 60 seconds with an ETag, and a branding save purges the site's CDN key. A 503 with `Retry-After` means the site's branding could not be read.",
+        "operationId": "getSite",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "site_name": {
+                      "description": "The site's name, as its pages' `<title>` carries it. An unbranded site answers the operator's default name, or `KilnCMS`",
+                      "type": "string"
+                    },
+                    "social_image_url": {
+                      "description": "The default share image, an absolute http(s) URL on the site's own host (or a CDN's), or `null`",
+                      "format": "uri",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "twitter_site": {
+                      "description": "The site's X (Twitter) handle as `@handle`, or `null`",
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "site_name",
+                    "twitter_site",
+                    "social_image_url"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The site's link-preview defaults"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "An invalid credential (API key or bearer token)"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The site's branding could not be read (`temporarily_unavailable`) — retry after the `Retry-After` delay"
+          }
+        },
+        "security": [],
+        "summary": "Fetch the site's link-preview defaults",
+        "tags": [
+          "Delivery"
         ]
       }
     },
