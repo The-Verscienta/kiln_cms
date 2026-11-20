@@ -68,7 +68,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Added
 
 - **Backups → Schedule: the preview warns when a schedule would keep more than about 500 backups of each component, or more than the backup directory has room for (free space plus the backups already there); it never blocks the save.**
-  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#backup-schedule-disk-warning))
+  ([#3172](https://github.com/The-Verscienta/kiln_cms/pull/3172) · [long form](docs/changelog/unreleased.md#backup-schedule-disk-warning))
 
 - **`GET /api/security/plugin-health`: each installed plugin's health as JSON for monitoring, read from the server's cache and never asking hex.pm; platform administrators only, behind the host site's admin allowlist.**
   ([#3135](https://github.com/The-Verscienta/kiln_cms/pull/3135) · [long form](docs/changelog/unreleased.md#plugin-health-api))
