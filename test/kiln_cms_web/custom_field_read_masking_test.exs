@@ -153,7 +153,7 @@ defmodule KilnCMSWeb.CustomFieldReadMaskingTest do
     test "a single record, draft or live, leaves the canary out for the restricted editor", ctx do
       for doc <- [ctx.published, ctx.draft, ctx.held] do
         {200, body} = request(:get, "/api/json/posts/#{doc.id}", ctx.restricted_key)
-        refute body =~ "7f3a"
+        refute body =~ @canary
         # The rest of the record is untouched.
         assert body =~ "VISIBLE-NOTE"
         assert body =~ "GROUP-VISIBLE"
@@ -165,7 +165,7 @@ defmodule KilnCMSWeb.CustomFieldReadMaskingTest do
 
     test "the index leaves it out too", ctx do
       {200, body} = request(:get, "/api/json/posts", ctx.restricted_key)
-      refute body =~ "7f3a"
+      refute body =~ @canary
 
       {200, open} = request(:get, "/api/json/posts", ctx.open_key)
       assert open =~ @canary
@@ -253,7 +253,7 @@ defmodule KilnCMSWeb.CustomFieldReadMaskingTest do
     """
 
     test "a published record leaves the canary out for the restricted editor", ctx do
-      refute gql(@by_slug, %{"slug" => ctx.published.slug}, ctx.restricted) =~ "7f3a"
+      refute gql(@by_slug, %{"slug" => ctx.published.slug}, ctx.restricted) =~ @canary
       assert gql(@by_slug, %{"slug" => ctx.published.slug}, ctx.open) =~ @canary
     end
   end
@@ -272,7 +272,7 @@ defmodule KilnCMSWeb.CustomFieldReadMaskingTest do
       """
 
       hidden = gql(query, %{"slug" => ctx.published.slug}, ctx.restricted)
-      refute hidden =~ "7f3a"
+      refute hidden =~ @canary
       assert hidden =~ "VISIBLE-NOTE"
 
       assert gql(query, %{"slug" => ctx.published.slug}, ctx.open) =~ @canary
@@ -282,7 +282,7 @@ defmodule KilnCMSWeb.CustomFieldReadMaskingTest do
   describe "MCP" do
     test "read_posts leaves the canary out for the restricted editor", ctx do
       {200, body} = mcp(ctx.restricted_key, "read_posts", %{})
-      refute body =~ "7f3a"
+      refute body =~ @canary
       assert body =~ "VISIBLE-NOTE"
 
       {200, open} = mcp(ctx.open_key, "read_posts", %{})
@@ -294,8 +294,8 @@ defmodule KilnCMSWeb.CustomFieldReadMaskingTest do
     test "the record and its held working copy are masked", ctx do
       for doc <- [ctx.published, ctx.draft, ctx.held] do
         record = CMS.get_post!(doc.id, actor: ctx.restricted)
-        refute inspect(record.custom_fields) =~ "7f3a"
-        refute inspect(record.working_fields) =~ "7f3a"
+        refute inspect(record.custom_fields) =~ @canary
+        refute inspect(record.working_fields) =~ @canary
         assert record.custom_fields["notes"] == "VISIBLE-NOTE"
 
         open = CMS.get_post!(doc.id, actor: ctx.open)
@@ -318,7 +318,7 @@ defmodule KilnCMSWeb.CustomFieldReadMaskingTest do
     test "versions are masked, and the restricted editor's diff has the key on neither side",
          ctx do
       versions = CMS.list_post_versions!(actor: ctx.restricted, tenant: ctx.draft.org_id)
-      refute inspect(versions) =~ "7f3a"
+      refute inspect(versions) =~ @canary
       assert inspect(versions) =~ "VISIBLE-NOTE"
 
       open = CMS.list_post_versions!(actor: ctx.open, tenant: ctx.draft.org_id)
@@ -407,8 +407,8 @@ defmodule KilnCMSWeb.CustomFieldReadMaskingTest do
           tenant: record.org_id
         )
 
-      refute inspect(plan.custom_fields) =~ "7f3a"
-      refute inspect(plan.values) =~ "7f3a"
+      refute inspect(plan.custom_fields) =~ @canary
+      refute inspect(plan.values) =~ @canary
     end
   end
 
@@ -425,7 +425,7 @@ defmodule KilnCMSWeb.CustomFieldReadMaskingTest do
           }
         })
 
-      refute body =~ "7f3a"
+      refute body =~ @canary
       assert body =~ "EDITED-BY-RESTRICTED"
 
       after_write = CMS.get_post!(ctx.draft.id, actor: ctx.admin).custom_fields
@@ -451,7 +451,7 @@ defmodule KilnCMSWeb.CustomFieldReadMaskingTest do
           ctx.restricted
         )
 
-      refute out =~ "7f3a"
+      refute out =~ @canary
       assert out =~ "VIA-GQL"
       assert CMS.get_post!(ctx.draft.id, actor: ctx.admin).custom_fields["secret"] == @canary
     end
@@ -463,7 +463,7 @@ defmodule KilnCMSWeb.CustomFieldReadMaskingTest do
           input: %{custom_fields: %{"notes" => "VIA-MCP"}}
         })
 
-      refute body =~ "7f3a"
+      refute body =~ @canary
       assert body =~ "VIA-MCP"
       assert CMS.get_post!(ctx.draft.id, actor: ctx.admin).custom_fields["secret"] == @canary
     end
@@ -482,14 +482,14 @@ defmodule KilnCMSWeb.CustomFieldReadMaskingTest do
       updated =
         CMS.update_post!(ctx.draft, %{title: "Renamed"}, actor: ctx.restricted)
 
-      refute inspect(updated.custom_fields) =~ "7f3a"
+      refute inspect(updated.custom_fields) =~ @canary
       assert CMS.get_post!(ctx.draft.id, actor: ctx.admin).custom_fields["secret"] == @canary
 
       held =
         CMS.get_post!(ctx.held.id, actor: ctx.restricted)
         |> CMS.save_post_working_copy!(%{working_title: "Again"}, actor: ctx.restricted)
 
-      refute inspect(held.working_fields) =~ "7f3a"
+      refute inspect(held.working_fields) =~ @canary
 
       stored = CMS.get_post!(ctx.held.id, actor: ctx.admin)
       assert stored.working_fields["custom_fields"]["secret"] == "WC-" <> @canary
