@@ -216,7 +216,7 @@ defmodule KilnCMS.Search.Budget do
   # Nothing in flight with sections left over means the deadline passed
   # before they could start.
   defp await(%{running: running} = state) when map_size(running) == 0 do
-    if state.grace_until, do: cut_event(state.returned, 0)
+    if state.grace_until || state.returned > 0, do: cut_event(state.returned, 0)
 
     Enum.reduce(state.pending, state.outcomes, fn {key, _run}, acc ->
       Map.put(acc, key, {:cut, %{}})
@@ -259,10 +259,13 @@ defmodule KilnCMS.Search.Budget do
   defp wait(%{grace_until: nil, deadline: deadline}), do: remaining(deadline)
   defp wait(%{grace_until: grace_until}), do: remaining(grace_until)
 
-  # A section that answers once the grace has begun returned after the
-  # deadline.
-  defp returned(%{grace_until: nil, returned: returned}), do: returned
-  defp returned(%{returned: returned}), do: returned + 1
+  # A section that answers after the deadline returned late, whether the
+  # grace has begun or its reply was already in the mailbox when the deadline
+  # passed. Decided by the clock, not by `grace_until`, which is set only when
+  # the receive times out.
+  defp returned(%{deadline: deadline, returned: returned}) do
+    if past?(deadline), do: returned + 1, else: returned
+  end
 
   defp record_sent(state, key, leg, result) do
     Map.update!(state, :sent, fn sent ->

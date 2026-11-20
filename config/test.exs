@@ -489,7 +489,7 @@ config :kiln_cms, KilnCMS.Accounts.SignInUnlock, async: false
 #
 # `cut_grace` is 1 s, not production's 100 ms: a section the budget kills
 # while it holds a connection takes down the SQL sandbox owner's connection,
-# and every later read in the test fails (#2553, #2614). A loaded runner can
+# and every later read in the test fails (#2553). A loaded runner can
 # take that long to finish the query a section is in. The budget tests'
 # timing bounds leave room for it (budget 3 s + grace 1 s, under 6 s).
 config :kiln_cms, KilnCMS.Search, query_budget: 10_000, cut_grace: 1_000
