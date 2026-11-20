@@ -66,6 +66,15 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="backup-history-cron-keep-days"></a>
+
+- **Imported cron rows judged by the prunes after them (#3113).** On a host where both `scripts/backup.sh` and the app back up, the latest `manifest.json` is often the app's. Cron's `keep_days` was then unknown, so every imported History row whose files were gone read "probably expired".
+  - Each imported run now records `keep_days` when a successful cron manifest covers it. A manifest without `components` is cron's; the trigger is not used. This adds one nullable column, through a migration that only adds.
+  - The History reads such a row as "expired" only when a cron run imported after it recorded a window that would have removed it. If later cron runs recorded windows and none would have removed it, the row reads "missing". If later runs exist but none recorded its window, the row reads "probably expired", and only once it is older than the keep days.
+  - `backup.sh` prunes with the `BACKUP_KEEP_DAYS` in force when the prune runs, so a changed setting is judged correctly.
+  - A cron run records its window only if an import runs while cron's manifest is still the latest. Imports run at an app backup's start, during marker sync and when History opens. Cron's separate `db` and `media` entries write no manifest, so they never record one.
+  - Rows imported before this change stay as they were.
+
 <a id="experiment-transition-compare-and-swap"></a>
 
 - **A second Start, Conclude or Archive on an experiment from a stale page is now refused (#3122).** The state machine only checked the copy of the experiment the caller held, so two people (or a console tab and `mix kiln.experiment`) acting on the same experiment could both succeed: a second Conclude overwrote `winner_variant_id` and sent `experiment.concluded` again. `:start` now requires the stored state to be `draft`, `:conclude` requires `running`, and `:archive` requires `draft`, `running` or `concluded`, checked in the same UPDATE that writes the change, so the loser gets a stale-record error and nothing is written. In the console (Experiments), the losing click shows "This experiment changed since you opened it. It's been reloaded." and the page refreshes to the current state. `mix kiln.experiment conclude` now stops with "Could not conclude: …" and the reason instead of a `MatchError`. A new test fails when any AshStateMachine transition action in the app has no filter, so the next state machine gets the same guard. ADR 0074 records the rule. No migration and no config; rolling back is safe.
