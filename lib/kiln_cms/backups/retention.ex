@@ -545,6 +545,11 @@ defmodule KilnCMS.Backups.Retention do
 
   def describe(:destination_overlap), do: "it overlaps another backup destination"
 
+  def describe(:destination_overlap_possible),
+    do:
+      "another S3 backup destination uses a bucket of the same name; the app can't tell " <>
+        "whether it is the same store"
+
   def describe(:destination_unknown),
     do:
       "a stored backup destination's location can't be told, so it can't be shown not to " <>
@@ -1672,6 +1677,7 @@ defmodule KilnCMS.Backups.Retention do
           | :env_overlap
           | :env_overlap_unknown
           | :destination_overlap
+          | :destination_overlap_possible
           | :destination_unknown
           | :destination_s3
           | :not_prunable
@@ -1692,7 +1698,11 @@ defmodule KilnCMS.Backups.Retention do
       writes can't be told (a plugin's kind) or can't be compared with an
       rclone remote (an S3 bucket, #2221);
     * `:destination_overlap` - it overlaps another stored destination (one
-      whose location can't be told overlaps nothing that can).
+      whose location can't be told overlaps nothing that can);
+    * `:destination_overlap_possible` - another stored S3 destination names
+      a bucket of the same name, one prefix inside the other, on another
+      endpoint host or port: it may be the same bucket under another name
+      (`Destination.possible_overlap?/2`, #3088).
 
   For `:env`, the env destination, which may share a place with any of them
   unseen:
@@ -1719,10 +1729,20 @@ defmodule KilnCMS.Backups.Retention do
     location = Destination.location(config)
 
     cond do
-      not Destination.supports?(config, [:list, :delete]) -> :unsupported
-      blocker = env_blocker(location, env) -> blocker
-      overlaps_another?(location, config.id, rows) -> :destination_overlap
-      true -> nil
+      not Destination.supports?(config, [:list, :delete]) ->
+        :unsupported
+
+      blocker = env_blocker(location, env) ->
+        blocker
+
+      overlaps_another?(location, config.id, rows, &Destination.overlap?/2) ->
+        :destination_overlap
+
+      overlaps_another?(location, config.id, rows, &Destination.possible_overlap?/2) ->
+        :destination_overlap_possible
+
+      true ->
+        nil
     end
   end
 
@@ -1745,10 +1765,10 @@ defmodule KilnCMS.Backups.Retention do
   defp env_blocker(location, env),
     do: if(Destination.overlap?(location, env), do: :env_overlap)
 
-  defp overlaps_another?(:unknown, _id, _rows), do: false
+  defp overlaps_another?(:unknown, _id, _rows, _overlap?), do: false
 
-  defp overlaps_another?(location, id, rows) do
-    Enum.any?(rows, &(&1.id != id and Destination.overlap?(location, row_location(&1))))
+  defp overlaps_another?(location, id, rows, overlap?) do
+    Enum.any?(rows, &(&1.id != id and overlap?.(location, row_location(&1))))
   end
 
   # Whose units the ownership rule (step 4) accepts. On a stored destination,

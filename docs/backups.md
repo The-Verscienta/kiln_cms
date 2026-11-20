@@ -4174,13 +4174,20 @@ limits:
   ([ADR 0064](decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md)).
   Untick retention on the S3 destination and use a lifecycle rule, or unset
   `BACKUP_RCLONE_REMOTE`.
-- **Two S3 destinations overlap** only when they have the same endpoint host
-  and port (case and the default port ignored) and the same bucket, and one
-  prefix is inside the other. Such a destination can't be saved. Two names
-  for one store are not caught: `s3.amazonaws.com` and
-  `s3.us-east-1.amazonaws.com`, or a MinIO by name and by IP address, look
-  like two stores. **Don't point two destinations at one bucket** unless
-  their prefixes are separate.
+- **Two S3 destinations overlap** when they have the same endpoint host and
+  port (case and the default port ignored) and the same bucket, and one
+  prefix is inside the other. Such a destination can't be saved.
+- **A bucket of the same name on another host blocks retention on both.**
+  One bucket answers to many names: `s3.amazonaws.com` and
+  `s3.us-east-1.amazonaws.com`, an R2 account's jurisdiction hosts, a MinIO
+  by name and by IP address. Kiln can't tell those from two stores that
+  each hold a bucket of that name, so two S3 destinations with the same
+  bucket name and one prefix inside the other are not pruned, whatever
+  their hosts and ports ([#3088](https://github.com/The-Verscienta/kiln_cms/issues/3088)).
+  Such a destination can still be saved. The row shows **Not pruned:**
+  "another S3 destination uses a bucket of the same name; the app can't
+  tell whether it is the same store". Give the two separate prefixes, or
+  untick retention on both and use a lifecycle rule.
 - **A versioned bucket keeps what retention deletes.** A delete there adds a
   delete marker and keeps the old version, which still costs storage. Add a
   lifecycle rule that expires noncurrent versions, or use a bucket without
@@ -4505,8 +4512,9 @@ It never runs on a destination whose adapter can't list and delete files
 Destinations tab shows **Prunes its old backups** on a row only when a pass
 there would prune; a row whose retention is ticked but can't run shows
 **Not pruned:** and why (it overlaps `BACKUP_RCLONE_REMOTE` or another
-destination, it can't be compared with `BACKUP_RCLONE_REMOTE`, or its
-adapter can't list and delete), the same check each pass makes. What it did
+destination, another S3 destination uses a bucket of the same name, it
+can't be compared with `BACKUP_RCLONE_REMOTE`, or its adapter can't list
+and delete), the same check each pass makes. What it did
 is on the run's log:
 
 | Log line | Meaning |
@@ -4514,6 +4522,7 @@ is on the run's log:
 | "Retention on NAS removed 4 file(s) from 2 backup(s)" | Those backups were deleted there, and are marked `pruned` for that destination in History. |
 | "Retention on NAS skipped: it overlaps BACKUP_RCLONE_REMOTE; nothing was deleted" | The destination is, contains or is inside the env remote, which changed since the destination was added. Point the two at separate places. |
 | "Retention on NAS skipped: it overlaps another backup destination; nothing was deleted" | Two destinations share a place. Delete one. |
+| "Retention on Bucket skipped: another S3 backup destination uses a bucket of the same name; the app can't tell whether it is the same store; nothing was deleted" | Another S3 destination names a bucket of the same name on another endpoint host or port, with a prefix inside or around this one ([Retention on an S3 bucket](#retention-on-an-s3-bucket)). Give the two separate prefixes, or untick retention on both. |
 | "Retention on NAS skipped: can't confirm it doesn't overlap BACKUP_RCLONE_REMOTE; nothing was deleted" | A plugin's destination, whose location Kiln can't compare, or an S3 destination, which can't be compared with an rclone remote, while `BACKUP_RCLONE_REMOTE` is set ([Retention on an S3 bucket](#retention-on-an-s3-bucket)). Untick retention on it and prune it yourself, or unset the env remote. |
 | "Retention on NAS skipped: couldn't list the destination (…); nothing was deleted" | The listing failed, or took longer than 10 minutes ("… timed out after 10 min"). Nothing is deleted on a guess. |
 | "Retention on NAS removed … , then stopped: couldn't delete … (…)" | A delete failed, or took longer than 60 seconds; the pass stopped there. The next backup tries again. A delete stopped at its time limit may still have removed that file at the store: the next pass no longer lists it, so nothing is lost. |

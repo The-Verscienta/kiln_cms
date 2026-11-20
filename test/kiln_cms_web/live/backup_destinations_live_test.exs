@@ -566,6 +566,37 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
       refute has_element?(lv, "#backup-destination-#{disabled.id} [data-role=prune-blocked]")
     end
 
+    test "two S3 destinations with a bucket of the same name on different hosts are not " <>
+           "pruned (#3088)",
+         %{conn: conn} do
+      rows =
+        for endpoint <- ["https://s3.amazonaws.com", "https://s3.us-east-1.amazonaws.com"] do
+          fake!(%{
+            kind: "s3",
+            settings: %{
+              "endpoint" => endpoint,
+              "region" => "us-east-1",
+              "bucket" => "kiln",
+              "prefix" => "site"
+            },
+            secrets: %{"access_key_id" => "AKIDTEST", "secret_access_key" => "s3-secret-test"}
+          })
+        end
+
+      lv = mount(conn)
+
+      for row <- rows do
+        refute has_element?(lv, "#backup-destination-#{row.id} [data-role=prunes]")
+
+        assert has_element?(
+                 lv,
+                 "#backup-destination-#{row.id} [data-role=prune-blocked]",
+                 "Not pruned: another S3 destination uses a bucket of the same name; " <>
+                   "the app can't tell whether it is the same store"
+               )
+      end
+    end
+
     test "the env destination says its pruning is off by default", %{conn: conn} do
       put_backups(rclone_remote: "offsite:kiln/backups")
       lv = mount(conn)

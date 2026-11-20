@@ -28798,6 +28798,11 @@ msgstr ""
 msgid "and %{count} more"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "another S3 destination uses a bucket of the same name; the app can't tell whether it is the same store"
+msgstr ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "answered"

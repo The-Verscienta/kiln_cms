@@ -843,6 +843,12 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
 
   defp blocker_text(:destination_overlap), do: gettext("it overlaps another destination")
 
+  defp blocker_text(:destination_overlap_possible),
+    do:
+      gettext(
+        "another S3 destination uses a bucket of the same name; the app can't tell whether it is the same store"
+      )
+
   defp blocker_text(:destination_unknown),
     do: gettext("a destination's location can't be told")
 
