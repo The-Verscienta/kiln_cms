@@ -112,7 +112,8 @@ The `/gql` `401` body (#2318) is now GraphQL-shaped and keeps `code:
 "invalid_token"` beside `extensions.code: "unauthenticated"`, so a client that
 read the old envelope's `code` still matches; the case-insensitive scheme match
 also turns a `bearer <jwt>` that used to be served as anonymous into a `401`.
-Both go under Breaking in the release note.
+Both go under Breaking in the release note. (Superseded for a *valid* JWT by
+the 2026-11-20 amendment below: `bearer <jwt>` now authenticates.)
 
 This changes the "removed in the next release" wording in the release note
 above and in ADR 0012's table: removal is *planned* for the next release and
@@ -183,3 +184,29 @@ sites need no handler of their own.
   was counted after its last scrape.
 
 See [observability.md](../observability.md#refused-api-credentials).
+
+## Amendment (2026-11-20): a valid JWT under any case of the scheme authenticates (#2632)
+
+[#2632](https://github.com/The-Verscienta/kiln_cms/issues/2632). This
+supersedes the 2026-11-10 amendment's sentence that the case-insensitive
+scheme match turns `bearer <jwt>` into a `401`. That `401` came from
+AshAuthentication's JWT loader reading only the exact `Bearer ` spelling, not
+from this record's rule: a valid token is not a token that fails to verify.
+`KilnCMSWeb.Plugs.LoadFromBearer` now loads the user under any case of the
+scheme on `/api/*`, `/gql` and `/api/feed`, so `bearer <jwt>` and
+`BEARER <jwt>` authenticate. Everything this record refuses is still refused
+in any case: a token that does not verify, and a bare `Bearer`.
+
+Two surfaces outside `KilnCMSWeb.Plugs.ApiKeyAuth` follow:
+
+- **`/ws/gql`** reads an `authorization` connect param under the scheme in any
+  case. A lowercase valid JWT connects as its user; lowercase garbage and a
+  bare `Bearer`, which the socket used to ignore and connect anonymously, are
+  refused like any token that does not verify, under the same
+  `KILN_API_REJECT_INVALID_BEARER` escape hatch and telemetry. This goes under
+  **Breaking**, for the reason the 2026-11-13 amendment gives.
+- **`/mcp`** now authenticates with `KilnCMSWeb.Plugs.RequireApiKey` rather
+  than `AshAuthentication.Strategy.ApiKey.Plug` directly. It is still
+  key-only, and a JWT, garbage or a bare `Bearer` is still a `401`; a `kiln_`
+  key under a lowercase scheme or in a later `Authorization` value now
+  authenticates, as on `/api`.

@@ -83,7 +83,7 @@ defmodule KilnCMSWeb.Router do
     # Introspection is refused by the document pipeline (`KilnCMSWeb.GraphqlLimits`),
     # which replaced the `DisableGraphqlIntrospection` plug that stood here.
     plug KilnCMSWeb.Plugs.GraphqlBatchLimit, :gql
-    plug :load_from_bearer
+    plug KilnCMSWeb.Plugs.LoadFromBearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
     plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
@@ -142,7 +142,7 @@ defmodule KilnCMSWeb.Router do
   pipeline :api do
     plug :accepts, ["json"]
     plug KilnCMSWeb.Plugs.RateLimit, :api
-    plug :load_from_bearer
+    plug KilnCMSWeb.Plugs.LoadFromBearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
     plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
@@ -165,7 +165,7 @@ defmodule KilnCMSWeb.Router do
   pipeline :feed do
     plug KilnCMSWeb.FeedStream.JoinBudget
     plug KilnCMSWeb.Plugs.RateLimit, :api
-    plug :load_from_bearer
+    plug KilnCMSWeb.Plugs.LoadFromBearer
     plug :set_actor, :user
     plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
     plug KilnCMSWeb.Plugs.SecondFactorBearer
@@ -220,9 +220,7 @@ defmodule KilnCMSWeb.Router do
     plug :accepts, ["json"]
     plug KilnCMSWeb.Plugs.RateLimit, :api
 
-    plug AshAuthentication.Strategy.ApiKey.Plug,
-      resource: KilnCMS.Accounts.User,
-      required?: true
+    plug KilnCMSWeb.Plugs.RequireApiKey
 
     # The key that plug verified, remembered on this node so a later `:api`
     # refusal of it can alert (`KilnCMS.Security.ApiKeyTrip`).

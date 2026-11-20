@@ -21,7 +21,9 @@ draft-only by design.
 
 `/mcp` accepts **API keys only** (`Authorization: Bearer kiln_…`) — no JWT or
 anonymous access; anything else, a valid, expired or garbled JWT included, is a
-`401`. Mint keys at `/editor/api-keys` (admin-only). A key acts as its owning
+`401`. The scheme is case-insensitive, and the key need not be the first
+`Authorization` value (a proxy may add its own); if there is more than one key,
+the first decides (`KilnCMSWeb.Plugs.RequireApiKey`, #2632). Mint keys at `/editor/api-keys` (admin-only). A key acts as its owning
 user, bounded by its `access` scope. A site's
 [two-step sign-in requirement](two-factor-auth.md#requiring-two-step-sign-in-on-a-site)
 never applies to a key: it keeps working for an owner the site holds.

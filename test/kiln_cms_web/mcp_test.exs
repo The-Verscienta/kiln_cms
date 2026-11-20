@@ -50,6 +50,42 @@ defmodule KilnCMSWeb.McpTest do
     assert conn.status == 401
   end
 
+  # The scheme is case-insensitive (#2632), and the key may sit in any
+  # `authorization` value, as on `/api` (`ApiKeyAuth.presented_key/1`).
+  test "a key under a lower-case scheme, or in a second value, authenticates", %{conn: conn} do
+    plaintext = mint(user(:viewer), :read)
+
+    for values <- [
+          ["bearer #{plaintext}"],
+          ["BEARER   #{plaintext} "],
+          ["Basic dXNlcjpwYXNz", "bearer #{plaintext}"]
+        ] do
+      conn =
+        conn
+        |> recycle()
+        |> Map.update!(:req_headers, &(Enum.map(values, fn v -> {"authorization", v} end) ++ &1))
+        |> put_req_header("content-type", "application/json")
+        |> post(~p"/mcp", Jason.encode!(%{jsonrpc: "2.0", id: 1, method: "tools/list"}))
+
+      assert %{"result" => %{"tools" => [_ | _]}} = json_response(conn, 200)
+      # The normalized header the key plug saw is not left behind.
+      assert get_req_header(conn, "authorization") == values
+    end
+  end
+
+  test "a bare or lower-case non-key bearer is still a 401", %{conn: conn} do
+    for value <- ["bearer", "bearer not-a-kiln-key", "bearer kiln_bogus_x"] do
+      conn =
+        conn
+        |> recycle()
+        |> put_req_header("authorization", value)
+        |> put_req_header("content-type", "application/json")
+        |> post(~p"/mcp", Jason.encode!(%{jsonrpc: "2.0", id: 1, method: "tools/list"}))
+
+      assert conn.status == 401
+    end
+  end
+
   test "initialize handshake succeeds and issues a session id", %{conn: conn} do
     plaintext = mint(user(:viewer), :read)
 
