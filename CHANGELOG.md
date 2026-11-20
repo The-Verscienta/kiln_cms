@@ -63,12 +63,12 @@ Every summary line below that was shortened links to its own entry there.
 ### Upgrade notes
 
 - **Custom asset builds and overlay Dockerfiles that don't run `mix assets.deploy`: also run `mix esbuild kiln_public --minify` before `phx.digest`. Without it signed-out pages fall back to app.js and keep working. No migration; rolling back is safe.**
-  ([long form](docs/changelog/unreleased.md#public-js-bundle-upgrade))
+  ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle-upgrade))
 
 ### Changed
 
 - **Signed-out content pages load a 2.5 KB (gzipped) `public.js` instead of the 81 KB app.js and its chunks; `mix kiln.assets.budget` keeps it free of LiveView and console code.**
-  ([long form](docs/changelog/unreleased.md#public-js-bundle))
+  ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle))
 
 - **The exhaustive referrer-suppression search (thresholds 2–20, four to six categories, totals up to 40/30/20) is now a `slow_sweep` test you can re-run; `suppress_referrer_group/2` takes an explicit category list, and published output is unchanged.**
   ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/unreleased.md#referrer-suppression-sweep))
