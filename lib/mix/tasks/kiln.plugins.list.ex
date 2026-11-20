@@ -80,7 +80,9 @@ defmodule Mix.Tasks.Kiln.Plugins.List do
         )
       end
 
-      Health.check(force: true)
+      # Inline: without the application there is no task supervisor to run
+      # the node's shared check under, and nothing else to share it with.
+      Health.check(force: true, inline: true)
     after
       Application.put_env(:kiln_cms, Health, config)
     end

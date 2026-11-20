@@ -2361,6 +2361,9 @@ cached, and the feed's `links.next` is followed only on its own
 origin),
 `Kiln.Plugins.Health` (hex.pm's package API for each plugin locked from
 hex.pm, and the security notices feed; on the same platform-admin triggers,
+one round per node at a time, which System, Security posture and **Check
+plugins now** join rather than repeat, and bounded at 75 s, a package not
+reached by then not asked;
 never on a read of `GET /api/security/plugin-health`, through `SafeFetch`, the feed's `links.next` followed only on its own origin
 and at most five pages; package names are checked against Hex's naming rule
 before they are put in a URL),

@@ -65,6 +65,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Custom asset builds and overlay Dockerfiles that don't run `mix assets.deploy`: also run `mix esbuild kiln_public --minify` before `phx.digest`. Without it signed-out pages fall back to app.js and keep working. No migration; rolling back is safe.**
   ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle-upgrade))
 
+### Known issues
+
+- **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check; check those on hex.pm by hand.**
+  ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/unreleased.md#plugin-health-tail-packages-unknown))
+
 ### Added
 
 - **Backups → Schedule: the preview warns when a schedule would keep more than about 500 backups of each component, or more than the backup directory has room for (free space plus the backups already there); it never blocks the save.**
@@ -88,6 +93,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/unreleased.md#referrer-suppression-sweep))
 
 ### Fixed
+
+- **Plugin health: System, Security posture and "Check plugins now" share one check per server, so hex.pm is asked once; a check stops at 75 s and caches what it got for 15 minutes instead of being killed with nothing stored.**
+  ([#3183](https://github.com/The-Verscienta/kiln_cms/pull/3183) · [long form](docs/changelog/unreleased.md#plugin-check-single-flight))
 
 - **Accepting an invitation to the default site at a lower tier no longer demotes an account with no membership but a legacy editor or admin role: its tier is carried into a membership first and the accept reports it already a member. An admin's own Add is unchanged.**
   ([long form](docs/changelog/unreleased.md#invitation-keeps-legacy-tier))
