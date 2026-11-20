@@ -36,7 +36,7 @@ defmodule KilnCMSWeb.ReferenceLinksApiTest do
     CMS.create_field_definition!(
       %{
         content_type: :post,
-        name: "hero",
+        name: "rla_hero",
         label: "Hero",
         field_type: :reference,
         target_type: "page"
@@ -52,7 +52,7 @@ defmodule KilnCMSWeb.ReferenceLinksApiTest do
   defp post!(admin, page, publish?) do
     post =
       CMS.create_post!(
-        %{title: "Referrer", slug: slug(), custom_fields: %{"hero" => page.id}},
+        %{title: "Referrer", slug: slug(), custom_fields: %{"rla_hero" => page.id}},
         actor: admin
       )
 
@@ -67,7 +67,7 @@ defmodule KilnCMSWeb.ReferenceLinksApiTest do
 
     assert {200, body} = api_get("/api/json/posts/#{post.id}?include=content_links")
 
-    assert body["data"]["attributes"]["custom_fields"]["hero"] == %{
+    assert body["data"]["attributes"]["custom_fields"]["rla_hero"] == %{
              "id" => page.id,
              "type" => "page",
              "slug" => page.slug,
@@ -76,7 +76,7 @@ defmodule KilnCMSWeb.ReferenceLinksApiTest do
 
     assert [%{"attributes" => link}] = body["included"]
     assert link["kind"] == "reference"
-    assert link["field"] == "hero"
+    assert link["field"] == "rla_hero"
     assert link["source_type"] == "post"
     assert link["target_type"] == "page"
     assert link["target_id"] == page.id
@@ -90,6 +90,6 @@ defmodule KilnCMSWeb.ReferenceLinksApiTest do
 
     assert [%{"attributes" => link}] = body["included"]
     assert link["source_id"] == published.id
-    assert link["field"] == "hero"
+    assert link["field"] == "rla_hero"
   end
 end

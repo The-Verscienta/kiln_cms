@@ -44,11 +44,16 @@ defmodule KilnCMSWeb.CompositeFieldEditorTest do
     for {name, type} <- [
           {"band", :range},
           {"specs", :key_value},
-          {"source", :link},
+          {"cfe_source", :link},
           {"venue", :address}
         ] do
       CMS.create_field_definition!(
-        %{content_type: :page, name: name, label: String.capitalize(name), field_type: type},
+        %{
+          content_type: :page,
+          name: name,
+          label: String.capitalize(String.replace_prefix(name, "cfe_", "")),
+          field_type: type
+        },
         actor: admin
       )
     end
@@ -82,7 +87,7 @@ defmodule KilnCMSWeb.CompositeFieldEditorTest do
         %{
           "band" => %{"min" => 5, "max" => 9},
           "specs" => [%{"key" => "Weight", "value" => "2 kg"}],
-          "source" => %{"url" => "/about", "target" => "_blank"}
+          "cfe_source" => %{"url" => "/about", "target" => "_blank"}
         }
       )
 
@@ -91,7 +96,7 @@ defmodule KilnCMSWeb.CompositeFieldEditorTest do
 
     assert html =~ ~r/<textarea[^>]*id="custom-field-specs"/
     assert html =~ "Weight=2 kg"
-    assert html =~ ~r/<select[^>]*name="form\[custom_fields\]\[source\]\[target\]"/
+    assert html =~ ~r/<select[^>]*name="form\[custom_fields\]\[cfe_source\]\[target\]"/
     assert html =~ ~r/<option[^>]*value="_blank"[^>]*selected/
     assert html =~ ~r/<option[^>]*value=""/
   end
@@ -101,8 +106,8 @@ defmodule KilnCMSWeb.CompositeFieldEditorTest do
 
     assert html =~ ~r/id="custom-field-band-max-help"[^>]*>\s*The same kind as From/
     assert html =~ ~r/aria-describedby="custom-field-band-max-help"/
-    assert html =~ ~r/id="custom-field-source-rel-help"[^>]*>\s*Space-separated: noopener/
-    assert html =~ ~r/aria-describedby="custom-field-source-rel-help"/
+    assert html =~ ~r/id="custom-field-cfe_source-rel-help"[^>]*>\s*Space-separated: noopener/
+    assert html =~ ~r/aria-describedby="custom-field-cfe_source-rel-help"/
   end
 
   test "a failed save shows the message and keeps what was typed", %{conn: conn} do
@@ -111,7 +116,7 @@ defmodule KilnCMSWeb.CompositeFieldEditorTest do
     html =
       change(lv, %{
         "specs" => "no equals sign",
-        "source" => %{"url" => "javascript:alert(1)", "label" => "Click"},
+        "cfe_source" => %{"url" => "javascript:alert(1)", "label" => "Click"},
         "band" => %{"min" => "9", "max" => "1"}
       })
 
@@ -178,7 +183,7 @@ defmodule KilnCMSWeb.CompositeFieldEditorTest do
     lv |> form("#page-editor") |> render_submit()
 
     saved = CMS.get_page!(page.id, actor: admin)
-    for name <- ~w(band specs source), do: refute(Map.has_key?(saved.custom_fields, name))
+    for name <- ~w(band specs cfe_source), do: refute(Map.has_key?(saved.custom_fields, name))
   end
 
   test "good values are saved normalised, and clearing them removes the keys", %{conn: conn} do
@@ -191,7 +196,7 @@ defmodule KilnCMSWeb.CompositeFieldEditorTest do
         "custom_fields" => %{
           "band" => %{"min" => "2026-01-01", "max" => ""},
           "specs" => "Weight = 2 kg\nColour=red",
-          "source" => %{"url" => " https://example.com ", "target" => "_blank"}
+          "cfe_source" => %{"url" => " https://example.com ", "target" => "_blank"}
         }
       }
     })
@@ -203,7 +208,7 @@ defmodule KilnCMSWeb.CompositeFieldEditorTest do
     assert [%{"key" => "Weight", "value" => "2 kg"}, %{"key" => "Colour"}] =
              saved.custom_fields["specs"]
 
-    assert saved.custom_fields["source"] == %{
+    assert saved.custom_fields["cfe_source"] == %{
              "url" => "https://example.com",
              "target" => "_blank",
              "rel" => "noopener noreferrer"
@@ -215,13 +220,13 @@ defmodule KilnCMSWeb.CompositeFieldEditorTest do
         "custom_fields" => %{
           "band" => %{"min" => "", "max" => ""},
           "specs" => "",
-          "source" => %{"url" => "", "label" => "", "target" => "", "rel" => ""}
+          "cfe_source" => %{"url" => "", "label" => "", "target" => "", "rel" => ""}
         }
       }
     })
     |> render_submit()
 
     cleared = CMS.get_page!(page.id, actor: admin)
-    for name <- ~w(band specs source), do: refute(Map.has_key?(cleared.custom_fields, name))
+    for name <- ~w(band specs cfe_source), do: refute(Map.has_key?(cleared.custom_fields, name))
   end
 end

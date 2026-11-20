@@ -65,8 +65,8 @@ defmodule KilnCMSWeb.ReferencePickerTest do
     admin = authed_user(:admin)
 
     for {name, label, extra} <- [
-          {"see_also", "See also", %{multiple: true, max_items: 3}},
-          {"hero", "Hero page", %{}}
+          {"rp_see_also", "See also", %{multiple: true, max_items: 3}},
+          {"rp_hero", "Hero page", %{}}
         ] do
       CMS.create_field_definition!(
         Map.merge(
@@ -141,25 +141,25 @@ defmodule KilnCMSWeb.ReferencePickerTest do
     test "matches by title as the editor types, with each record's type and state", ctx do
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
 
-      search_input = "#custom-field-see_also-search"
+      search_input = "#custom-field-rp_see_also-search"
       assert has_element?(lv, "#{search_input}[role=combobox][aria-expanded=false]")
 
-      html = search(lv, "see_also", "#{ctx.word} a")
+      html = search(lv, "rp_see_also", "#{ctx.word} a")
 
       assert has_element?(lv, "#{search_input}[aria-expanded=true]")
-      assert option_ids(lv, "see_also") == [ctx.published.id]
+      assert option_ids(lv, "rp_see_also") == [ctx.published.id]
       assert html =~ "Page"
-      assert has_element?(lv, "#custom-field-see_also-opt-#{ctx.published.id}", "Published")
+      assert has_element?(lv, "#custom-field-rp_see_also-opt-#{ctx.published.id}", "Published")
 
-      search(lv, "see_also", ctx.word)
+      search(lv, "rp_see_also", ctx.word)
 
-      assert option_ids(lv, "see_also") == [ctx.published.id, ctx.draft.id, ctx.other.id]
-      assert has_element?(lv, "#custom-field-see_also-opt-#{ctx.draft.id}", "Draft")
+      assert option_ids(lv, "rp_see_also") == [ctx.published.id, ctx.draft.id, ctx.other.id]
+      assert has_element?(lv, "#custom-field-rp_see_also-opt-#{ctx.draft.id}", "Draft")
 
-      assert search(lv, "see_also", "#{ctx.word} nothing-like-this") =~ "No matches for"
+      assert search(lv, "rp_see_also", "#{ctx.word} nothing-like-this") =~ "No matches for"
 
-      lv |> element("#custom-field-see_also") |> render_hook("ref_close", %{})
-      refute has_element?(lv, "#custom-field-see_also-listbox")
+      lv |> element("#custom-field-rp_see_also") |> render_hook("ref_close", %{})
+      refute has_element?(lv, "#custom-field-rp_see_also-listbox")
     end
 
     test "pages through every match instead of capping the list", ctx do
@@ -167,21 +167,21 @@ defmodule KilnCMSWeb.ReferencePickerTest do
       for n <- 1..23, do: page!("#{batch} #{String.pad_leading("#{n}", 2, "0")}", ctx.admin)
 
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
-      search(lv, "see_also", batch)
+      search(lv, "rp_see_also", batch)
 
-      assert length(option_ids(lv, "see_also")) == 20
-      lv |> element("#custom-field-see_also-more") |> render_click()
+      assert length(option_ids(lv, "rp_see_also")) == 20
+      lv |> element("#custom-field-rp_see_also-more") |> render_click()
 
-      assert length(option_ids(lv, "see_also")) == 23
-      refute has_element?(lv, "#custom-field-see_also-more")
+      assert length(option_ids(lv, "rp_see_also")) == 23
+      refute has_element?(lv, "#custom-field-rp_see_also-more")
     end
 
     test "an empty search on focus lists the type's records", ctx do
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
-      lv |> element("#custom-field-see_also-search") |> render_focus()
+      lv |> element("#custom-field-rp_see_also-search") |> render_focus()
 
-      assert has_element?(lv, "#custom-field-see_also-listbox")
-      assert ctx.other.id in option_ids(lv, "see_also")
+      assert has_element?(lv, "#custom-field-rp_see_also-listbox")
+      assert ctx.other.id in option_ids(lv, "rp_see_also")
     end
   end
 
@@ -190,79 +190,79 @@ defmodule KilnCMSWeb.ReferencePickerTest do
       %{published: a, draft: b, other: c} = ctx
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
 
-      search(lv, "see_also", ctx.word)
-      pick(lv, "see_also", b.id)
-      pick(lv, "see_also", a.id)
+      search(lv, "rp_see_also", ctx.word)
+      pick(lv, "rp_see_also", b.id)
+      pick(lv, "rp_see_also", a.id)
 
-      assert list_ids(lv, "see_also") == [b.id, a.id]
+      assert list_ids(lv, "rp_see_also") == [b.id, a.id]
       # The list stays open for the next pick, without what is already picked.
-      assert option_ids(lv, "see_also") == [c.id]
-      search(lv, "see_also", ctx.word)
-      assert option_ids(lv, "see_also") == [c.id]
+      assert option_ids(lv, "rp_see_also") == [c.id]
+      search(lv, "rp_see_also", ctx.word)
+      assert option_ids(lv, "rp_see_also") == [c.id]
 
       # Rows show the title, type and state, and open the target's editor.
-      assert has_element?(lv, "#cf-ref-see_also-#{b.id}", "Draft")
+      assert has_element?(lv, "#cf-ref-rp_see_also-#{b.id}", "Draft")
 
       assert has_element?(
                lv,
-               ~s(#cf-ref-see_also-#{a.id} a[href="/editor/content/page/#{a.id}"][target=_blank])
+               ~s(#cf-ref-rp_see_also-#{a.id} a[href="/editor/content/page/#{a.id}"][target=_blank])
              )
 
       # Drag (the hook's `reorder`), then the keyboard path.
       lv
-      |> element("#custom-field-see_also")
+      |> element("#custom-field-rp_see_also")
       |> render_hook("ref_reorder", %{"order" => [a.id, b.id]})
 
-      assert list_ids(lv, "see_also") == [a.id, b.id]
+      assert list_ids(lv, "rp_see_also") == [a.id, b.id]
 
       lv
-      |> element("#cf-ref-see_also-#{b.id} button[phx-value-dir=up]")
+      |> element("#cf-ref-rp_see_also-#{b.id} button[phx-value-dir=up]")
       |> render_click()
 
-      assert list_ids(lv, "see_also") == [b.id, a.id]
+      assert list_ids(lv, "rp_see_also") == [b.id, a.id]
 
       save(lv)
-      saved = stored(ctx.post, ctx.admin)["see_also"]
+      saved = stored(ctx.post, ctx.admin)["rp_see_also"]
       assert Enum.map(saved, & &1["id"]) == [b.id, a.id]
       assert Enum.map(saved, & &1["title"]) == [b.title, a.title]
 
       # Removing every row clears the field.
-      lv |> element("#cf-ref-see_also-#{b.id} button[data-ref-remove]") |> render_click()
-      lv |> element("#cf-ref-see_also-#{a.id} button[data-ref-remove]") |> render_click()
-      assert list_ids(lv, "see_also") == []
+      lv |> element("#cf-ref-rp_see_also-#{b.id} button[data-ref-remove]") |> render_click()
+      lv |> element("#cf-ref-rp_see_also-#{a.id} button[data-ref-remove]") |> render_click()
+      assert list_ids(lv, "rp_see_also") == []
 
       save(lv)
-      refute Map.has_key?(stored(ctx.post, ctx.admin), "see_also")
+      refute Map.has_key?(stored(ctx.post, ctx.admin), "rp_see_also")
     end
 
     test "a dragged order can only reorder, never add or drop", ctx do
       %{published: a, draft: b, other: c} = ctx
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
 
-      search(lv, "see_also", ctx.word)
-      pick(lv, "see_also", a.id)
-      pick(lv, "see_also", b.id)
+      search(lv, "rp_see_also", ctx.word)
+      pick(lv, "rp_see_also", a.id)
+      pick(lv, "rp_see_also", b.id)
 
       lv
-      |> element("#custom-field-see_also")
+      |> element("#custom-field-rp_see_also")
       |> render_hook("ref_reorder", %{"order" => [c.id, b.id]})
 
-      assert list_ids(lv, "see_also") == [b.id, a.id]
+      assert list_ids(lv, "rp_see_also") == [b.id, a.id]
     end
 
     test "a full list stops offering more", ctx do
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
       extra = page!("#{ctx.word} Delta", ctx.admin, publish: true)
 
-      search(lv, "see_also", ctx.word)
-      for page <- [ctx.published, ctx.draft, ctx.other], do: pick(lv, "see_also", page.id)
+      search(lv, "rp_see_also", ctx.word)
+      for page <- [ctx.published, ctx.draft, ctx.other], do: pick(lv, "rp_see_also", page.id)
 
-      refute has_element?(lv, "#custom-field-see_also-search")
+      refute has_element?(lv, "#custom-field-rp_see_also-search")
       assert render(lv) =~ "3 of 3"
       assert render(lv) =~ "The limit is reached."
 
-      lv |> element("#custom-field-see_also") |> render_hook("ref_pick", %{"id" => extra.id})
-      assert length(list_ids(lv, "see_also")) == 3
+      lv |> element("#custom-field-rp_see_also") |> render_hook("ref_pick", %{"id" => extra.id})
+      assert length(list_ids(lv, "rp_see_also")) == 3
     end
   end
 
@@ -270,31 +270,34 @@ defmodule KilnCMSWeb.ReferencePickerTest do
     test "holds one record, replaced by removing and picking again", ctx do
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
 
-      assert single_value(lv, "hero") == [""]
-      search(lv, "hero", ctx.word)
-      pick(lv, "hero", ctx.other.id)
+      assert single_value(lv, "rp_hero") == [""]
+      search(lv, "rp_hero", ctx.word)
+      pick(lv, "rp_hero", ctx.other.id)
 
-      assert single_value(lv, "hero") == [ctx.other.id]
-      assert has_element?(lv, "#cf-ref-hero-#{ctx.other.id}", "Published")
-      refute has_element?(lv, "#custom-field-hero-search")
+      assert single_value(lv, "rp_hero") == [ctx.other.id]
+      assert has_element?(lv, "#cf-ref-rp_hero-#{ctx.other.id}", "Published")
+      refute has_element?(lv, "#custom-field-rp_hero-search")
       # No list controls on a single reference.
-      refute has_element?(lv, "#cf-ref-hero-#{ctx.other.id} button[phx-value-dir]")
+      refute has_element?(lv, "#cf-ref-rp_hero-#{ctx.other.id} button[phx-value-dir]")
 
       save(lv)
-      assert stored(ctx.post, ctx.admin)["hero"]["id"] == ctx.other.id
+      assert stored(ctx.post, ctx.admin)["rp_hero"]["id"] == ctx.other.id
 
-      lv |> element("#cf-ref-hero-#{ctx.other.id} button[data-ref-remove]") |> render_click()
-      assert single_value(lv, "hero") == [""]
-      assert has_element?(lv, "#custom-field-hero-search")
+      lv |> element("#cf-ref-rp_hero-#{ctx.other.id} button[data-ref-remove]") |> render_click()
+      assert single_value(lv, "rp_hero") == [""]
+      assert has_element?(lv, "#custom-field-rp_hero-search")
 
-      search(lv, "hero", ctx.word)
-      pick(lv, "hero", ctx.published.id)
+      search(lv, "rp_hero", ctx.word)
+      pick(lv, "rp_hero", ctx.published.id)
       save(lv)
-      assert stored(ctx.post, ctx.admin)["hero"]["id"] == ctx.published.id
+      assert stored(ctx.post, ctx.admin)["rp_hero"]["id"] == ctx.published.id
 
-      lv |> element("#cf-ref-hero-#{ctx.published.id} button[data-ref-remove]") |> render_click()
+      lv
+      |> element("#cf-ref-rp_hero-#{ctx.published.id} button[data-ref-remove]")
+      |> render_click()
+
       save(lv)
-      refute stored(ctx.post, ctx.admin)["hero"]
+      refute stored(ctx.post, ctx.admin)["rp_hero"]
     end
   end
 
@@ -305,32 +308,32 @@ defmodule KilnCMSWeb.ReferencePickerTest do
       restricted = authed_user(:editor, %{readable_types: ["post"]})
       lv = open_editor(ctx.conn, restricted, ctx.post)
 
-      html = search(lv, "see_also", ctx.word)
+      html = search(lv, "rp_see_also", ctx.word)
 
-      assert option_ids(lv, "see_also") == [ctx.published.id, ctx.other.id]
+      assert option_ids(lv, "rp_see_also") == [ctx.published.id, ctx.other.id]
       refute html =~ ctx.draft.title
 
       # Nor can a hand-made pick of it slip past the list.
       lv
-      |> element("#custom-field-see_also")
+      |> element("#custom-field-rp_see_also")
       |> render_hook("ref_pick", %{"id" => ctx.draft.id})
 
-      assert list_ids(lv, "see_also") == []
+      assert list_ids(lv, "rp_see_also") == []
     end
 
     test "a stored reference the editor can't read stays, marked unavailable", ctx do
       post =
-        CMS.update_post!(ctx.post, %{custom_fields: %{"see_also" => [ctx.draft.id]}},
+        CMS.update_post!(ctx.post, %{custom_fields: %{"rp_see_also" => [ctx.draft.id]}},
           actor: ctx.admin
         )
 
       restricted = authed_user(:editor, %{readable_types: ["post"]})
       lv = open_editor(ctx.conn, restricted, post)
 
-      assert list_ids(lv, "see_also") == [ctx.draft.id]
-      assert has_element?(lv, "#cf-ref-see_also-#{ctx.draft.id}", ctx.draft.title)
-      assert has_element?(lv, "#cf-ref-see_also-#{ctx.draft.id}", "Unavailable")
-      refute has_element?(lv, "#cf-ref-see_also-#{ctx.draft.id} a[target=_blank]")
+      assert list_ids(lv, "rp_see_also") == [ctx.draft.id]
+      assert has_element?(lv, "#cf-ref-rp_see_also-#{ctx.draft.id}", ctx.draft.title)
+      assert has_element?(lv, "#cf-ref-rp_see_also-#{ctx.draft.id}", "Unavailable")
+      refute has_element?(lv, "#cf-ref-rp_see_also-#{ctx.draft.id} a[target=_blank]")
     end
   end
 
@@ -352,20 +355,20 @@ defmodule KilnCMSWeb.ReferencePickerTest do
 
     test "creates a draft of the target type and adds it to the list", ctx do
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
-      search(lv, "see_also", ctx.word)
-      pick(lv, "see_also", ctx.published.id)
+      search(lv, "rp_see_also", ctx.word)
+      pick(lv, "rp_see_also", ctx.published.id)
 
-      assert has_element?(lv, new_button("see_also"), "Add new Page")
-      lv |> element(new_button("see_also")) |> render_click()
+      assert has_element?(lv, new_button("rp_see_also"), "Add new Page")
+      lv |> element(new_button("rp_see_also")) |> render_click()
 
-      assert has_element?(lv, new_form("see_also"), "New Page")
+      assert has_element?(lv, new_form("rp_see_also"), "New Page")
       # The search's list closes, and the menu gives way to the form.
-      refute has_element?(lv, "#custom-field-see_also-listbox")
-      refute has_element?(lv, new_button("see_also"))
+      refute has_element?(lv, "#custom-field-rp_see_also-listbox")
+      refute has_element?(lv, new_button("rp_see_also"))
 
       title = "#{ctx.word} Fresh"
-      fill_new(lv, "see_also", %{"title" => title})
-      html = create(lv, "see_also")
+      fill_new(lv, "rp_see_also", %{"title" => title})
+      html = create(lv, "rp_see_also")
 
       assert [created] = pages_titled(title, ctx.admin)
       assert created.state == :draft
@@ -373,37 +376,37 @@ defmodule KilnCMSWeb.ReferencePickerTest do
 
       # Connected after what was there, as a pick would be — a row with a
       # Draft badge and a link to open it.
-      assert list_ids(lv, "see_also") == [ctx.published.id, created.id]
-      assert has_element?(lv, "#cf-ref-see_also-#{created.id}", "Draft")
+      assert list_ids(lv, "rp_see_also") == [ctx.published.id, created.id]
+      assert has_element?(lv, "#cf-ref-rp_see_also-#{created.id}", "Draft")
 
       assert has_element?(
                lv,
-               ~s(#cf-ref-see_also-#{created.id} a[href="/editor/content/page/#{created.id}"])
+               ~s(#cf-ref-rp_see_also-#{created.id} a[href="/editor/content/page/#{created.id}"])
              )
 
-      refute has_element?(lv, new_form("see_also"))
-      assert has_element?(lv, new_button("see_also"))
+      refute has_element?(lv, new_form("rp_see_also"))
+      assert has_element?(lv, new_button("rp_see_also"))
 
       save(lv)
 
-      assert Enum.map(stored(ctx.post, ctx.admin)["see_also"], & &1["id"]) ==
+      assert Enum.map(stored(ctx.post, ctx.admin)["rp_see_also"], & &1["id"]) ==
                [ctx.published.id, created.id]
     end
 
     test "fills a single reference, which then offers nothing more", ctx do
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
 
-      lv |> element(new_button("hero")) |> render_click()
-      fill_new(lv, "hero", %{"title" => "#{ctx.word} Hero"})
-      create(lv, "hero")
+      lv |> element(new_button("rp_hero")) |> render_click()
+      fill_new(lv, "rp_hero", %{"title" => "#{ctx.word} Hero"})
+      create(lv, "rp_hero")
 
       assert [created] = pages_titled("#{ctx.word} Hero", ctx.admin)
-      assert single_value(lv, "hero") == [created.id]
-      refute has_element?(lv, new_button("hero"))
-      refute has_element?(lv, "#custom-field-hero-search")
+      assert single_value(lv, "rp_hero") == [created.id]
+      refute has_element?(lv, new_button("rp_hero"))
+      refute has_element?(lv, "#custom-field-rp_hero-search")
 
       save(lv)
-      assert stored(ctx.post, ctx.admin)["hero"]["id"] == created.id
+      assert stored(ctx.post, ctx.admin)["rp_hero"]["id"] == created.id
     end
 
     test "asks for a title and the type's required fields, and creates nothing until given",
@@ -411,7 +414,7 @@ defmodule KilnCMSWeb.ReferencePickerTest do
       CMS.create_field_definition!(
         %{
           content_type: :page,
-          name: "subtitle",
+          name: "rp_subtitle",
           label: "Subtitle",
           field_type: :string,
           required: true
@@ -423,7 +426,7 @@ defmodule KilnCMSWeb.ReferencePickerTest do
       CMS.create_field_definition!(
         %{
           content_type: :page,
-          name: "tier",
+          name: "rp_tier",
           label: "Tier",
           field_type: :select,
           options: ["gold", "silver"],
@@ -434,37 +437,41 @@ defmodule KilnCMSWeb.ReferencePickerTest do
       )
 
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
-      lv |> element(new_button("see_also")) |> render_click()
+      lv |> element(new_button("rp_see_also")) |> render_click()
 
-      assert has_element?(lv, "#{new_form("see_also")}-cf-subtitle")
-      refute has_element?(lv, "#{new_form("see_also")}-cf-tier")
+      assert has_element?(lv, "#{new_form("rp_see_also")}-cf-rp_subtitle")
+      refute has_element?(lv, "#{new_form("rp_see_also")}-cf-rp_tier")
 
-      assert create(lv, "see_also") =~ "Give it a title."
+      assert create(lv, "rp_see_also") =~ "Give it a title."
 
       title = "#{ctx.word} Needs more"
-      fill_new(lv, "see_also", %{"title" => title})
-      assert create(lv, "see_also") =~ "Subtitle (subtitle) is required"
+      fill_new(lv, "rp_see_also", %{"title" => title})
+      assert create(lv, "rp_see_also") =~ "Subtitle (rp_subtitle) is required"
       assert pages_titled(title, ctx.admin) == []
-      assert list_ids(lv, "see_also") == []
+      assert list_ids(lv, "rp_see_also") == []
 
-      fill_new(lv, "see_also", %{"title" => title, "custom_fields" => %{"subtitle" => "Sub"}})
-      create(lv, "see_also")
+      fill_new(lv, "rp_see_also", %{
+        "title" => title,
+        "custom_fields" => %{"rp_subtitle" => "Sub"}
+      })
+
+      create(lv, "rp_see_also")
 
       assert [created] = pages_titled(title, ctx.admin)
-      assert created.custom_fields["subtitle"] == "Sub"
-      assert created.custom_fields["tier"] == "silver"
-      assert list_ids(lv, "see_also") == [created.id]
+      assert created.custom_fields["rp_subtitle"] == "Sub"
+      assert created.custom_fields["rp_tier"] == "silver"
+      assert list_ids(lv, "rp_see_also") == [created.id]
     end
 
     test "cancel closes the form and creates nothing", ctx do
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
-      lv |> element(new_button("see_also")) |> render_click()
-      fill_new(lv, "see_also", %{"title" => "#{ctx.word} Never"})
+      lv |> element(new_button("rp_see_also")) |> render_click()
+      fill_new(lv, "rp_see_also", %{"title" => "#{ctx.word} Never"})
 
-      lv |> element("#{new_form("see_also")} button[data-ref-new-cancel]") |> render_click()
+      lv |> element("#{new_form("rp_see_also")} button[data-ref-new-cancel]") |> render_click()
 
-      refute has_element?(lv, new_form("see_also"))
-      assert has_element?(lv, new_button("see_also"))
+      refute has_element?(lv, new_form("rp_see_also"))
+      assert has_element?(lv, new_button("rp_see_also"))
       assert pages_titled("#{ctx.word} Never", ctx.admin) == []
     end
 
@@ -476,8 +483,8 @@ defmodule KilnCMSWeb.ReferencePickerTest do
 
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
 
-      assert has_element?(lv, "#custom-field-see_also-search")
-      refute has_element?(lv, new_button("see_also"))
+      assert has_element?(lv, "#custom-field-rp_see_also-search")
+      refute has_element?(lv, new_button("rp_see_also"))
     end
 
     test "creates an entry of an admin-defined target type", ctx do
@@ -489,7 +496,7 @@ defmodule KilnCMSWeb.ReferencePickerTest do
       CMS.create_field_definition!(
         %{
           content_type: :post,
-          name: "ingredients",
+          name: "rp_ingredients",
           label: "Ingredients",
           field_type: :reference,
           target_type: type.name,
@@ -499,9 +506,9 @@ defmodule KilnCMSWeb.ReferencePickerTest do
       )
 
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
-      lv |> element(new_button("ingredients", type.name)) |> render_click()
-      fill_new(lv, "ingredients", %{"title" => "#{ctx.word} Basil"})
-      create(lv, "ingredients")
+      lv |> element(new_button("rp_ingredients", type.name)) |> render_click()
+      fill_new(lv, "rp_ingredients", %{"title" => "#{ctx.word} Basil"})
+      create(lv, "rp_ingredients")
 
       assert [created] =
                KilnCMS.CMS.ContentTypes.list!(type.name,
@@ -511,53 +518,53 @@ defmodule KilnCMSWeb.ReferencePickerTest do
                )
 
       assert created.state == :draft
-      assert list_ids(lv, "ingredients") == [created.id]
+      assert list_ids(lv, "rp_ingredients") == [created.id]
 
       # Admin-defined types are authored under one `entry` grant.
       scoped = authed_user(:editor, %{editable_types: ["post"]})
       lv = open_editor(ctx.conn, scoped, ctx.post)
-      refute has_element?(lv, new_button("ingredients", type.name))
+      refute has_element?(lv, new_button("rp_ingredients", type.name))
     end
 
     test "is hidden from an editor who may not create the target type", ctx do
       scoped = authed_user(:editor, %{editable_types: ["post"]})
       lv = open_editor(ctx.conn, scoped, ctx.post)
 
-      assert has_element?(lv, "#custom-field-see_also-search")
-      refute has_element?(lv, new_button("see_also"))
+      assert has_element?(lv, "#custom-field-rp_see_also-search")
+      refute has_element?(lv, new_button("rp_see_also"))
 
       # Nor does a hand-sent event open the form or create anything.
-      lv |> element("#custom-field-see_also") |> render_hook("ref_new", %{"type" => "page"})
-      refute has_element?(lv, new_form("see_also"))
+      lv |> element("#custom-field-rp_see_also") |> render_hook("ref_new", %{"type" => "page"})
+      refute has_element?(lv, new_form("rp_see_also"))
 
       # An editor who may author pages is offered it.
       unscoped = authed_user(:editor)
       lv = open_editor(ctx.conn, unscoped, ctx.post)
-      assert has_element?(lv, new_button("see_also"), "Add new Page")
+      assert has_element?(lv, new_button("rp_see_also"), "Add new Page")
     end
 
     test "a full list offers no Add new, and a stale form can't overfill it", ctx do
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
-      search(lv, "see_also", ctx.word)
-      pick(lv, "see_also", ctx.published.id)
-      pick(lv, "see_also", ctx.draft.id)
+      search(lv, "rp_see_also", ctx.word)
+      pick(lv, "rp_see_also", ctx.published.id)
+      pick(lv, "rp_see_also", ctx.draft.id)
 
       # Open the form at two of three, then fill the list another way.
-      lv |> element(new_button("see_also")) |> render_click()
-      fill_new(lv, "see_also", %{"title" => "#{ctx.word} Overflow"})
-      search(lv, "see_also", ctx.word)
-      pick(lv, "see_also", ctx.other.id)
+      lv |> element(new_button("rp_see_also")) |> render_click()
+      fill_new(lv, "rp_see_also", %{"title" => "#{ctx.word} Overflow"})
+      search(lv, "rp_see_also", ctx.word)
+      pick(lv, "rp_see_also", ctx.other.id)
 
       assert render(lv) =~ "3 of 3"
-      refute has_element?(lv, new_button("see_also"))
-      refute has_element?(lv, new_form("see_also"))
+      refute has_element?(lv, new_button("rp_see_also"))
+      refute has_element?(lv, new_form("rp_see_also"))
 
-      lv |> element("#custom-field-see_also") |> render_hook("ref_new_create", %{})
-      lv |> element("#custom-field-see_also") |> render_hook("ref_new", %{"type" => "page"})
+      lv |> element("#custom-field-rp_see_also") |> render_hook("ref_new_create", %{})
+      lv |> element("#custom-field-rp_see_also") |> render_hook("ref_new", %{"type" => "page"})
 
-      refute has_element?(lv, new_form("see_also"))
+      refute has_element?(lv, new_form("rp_see_also"))
       assert pages_titled("#{ctx.word} Overflow", ctx.admin) == []
-      assert length(list_ids(lv, "see_also")) == 3
+      assert length(list_ids(lv, "rp_see_also")) == 3
     end
   end
 
@@ -566,7 +573,7 @@ defmodule KilnCMSWeb.ReferencePickerTest do
   # as `%{"id", "type"}` — so the saved snapshot keeps the type it was picked as.
   describe "several target types" do
     setup %{admin: admin, word: word} do
-      for {name, extra} <- [{"mixed", %{multiple: true}}, {"lead", %{}}] do
+      for {name, extra} <- [{"rp_mixed", %{multiple: true}}, {"rp_lead", %{}}] do
         CMS.create_field_definition!(
           Map.merge(
             %{
@@ -591,21 +598,21 @@ defmodule KilnCMSWeb.ReferencePickerTest do
     test "offers Add new for each allowed type, and connects what it creates by its type", ctx do
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
 
-      assert has_element?(lv, new_button("mixed", "page"), "Add new Page")
-      assert has_element?(lv, new_button("mixed", "post"), "Add new Post")
+      assert has_element?(lv, new_button("rp_mixed", "page"), "Add new Page")
+      assert has_element?(lv, new_button("rp_mixed", "post"), "Add new Post")
 
-      lv |> element(new_button("mixed", "post")) |> render_click()
-      assert has_element?(lv, new_form("mixed"), "New Post")
-      fill_new(lv, "mixed", %{"title" => "#{ctx.word} Echo"})
-      create(lv, "mixed")
+      lv |> element(new_button("rp_mixed", "post")) |> render_click()
+      assert has_element?(lv, new_form("rp_mixed"), "New Post")
+      fill_new(lv, "rp_mixed", %{"title" => "#{ctx.word} Echo"})
+      create(lv, "rp_mixed")
 
       [created] = CMS.list_posts!(actor: ctx.admin, query: [filter: [title: "#{ctx.word} Echo"]])
       assert created.state == :draft
-      assert list_ids(lv, "mixed") == ["post:#{created.id}"]
-      assert has_element?(lv, "#cf-ref-mixed-post-#{created.id}", "Draft")
+      assert list_ids(lv, "rp_mixed") == ["post:#{created.id}"]
+      assert has_element?(lv, "#cf-ref-rp_mixed-post-#{created.id}", "Draft")
 
       save(lv)
-      assert [%{"type" => "post", "id" => id}] = stored(ctx.post, ctx.admin)["mixed"]
+      assert [%{"type" => "post", "id" => id}] = stored(ctx.post, ctx.admin)["rp_mixed"]
       assert id == created.id
     end
 
@@ -614,8 +621,8 @@ defmodule KilnCMSWeb.ReferencePickerTest do
       page_key = "page:#{ctx.published.id}"
       post_key = "post:#{ctx.other_post.id}"
 
-      search(lv, "mixed", ctx.word)
-      options = option_ids(lv, "mixed")
+      search(lv, "rp_mixed", ctx.word)
+      options = option_ids(lv, "rp_mixed")
       assert page_key in options
       assert post_key in options
       assert "page:#{ctx.draft.id}" in options
@@ -628,46 +635,46 @@ defmodule KilnCMSWeb.ReferencePickerTest do
                post_key
              ]
 
-      assert lv |> element("#custom-field-mixed-opt-post-#{ctx.other_post.id}") |> render() =~
+      assert lv |> element("#custom-field-rp_mixed-opt-post-#{ctx.other_post.id}") |> render() =~
                "Post"
 
-      pick(lv, "mixed", "post-#{ctx.other_post.id}")
-      pick(lv, "mixed", "page-#{ctx.published.id}")
-      assert list_ids(lv, "mixed") == [post_key, page_key]
+      pick(lv, "rp_mixed", "post-#{ctx.other_post.id}")
+      pick(lv, "rp_mixed", "page-#{ctx.published.id}")
+      assert list_ids(lv, "rp_mixed") == [post_key, page_key]
 
       # A picked record leaves the results, by its own type.
-      search(lv, "mixed", ctx.word)
-      refute post_key in option_ids(lv, "mixed")
-      refute page_key in option_ids(lv, "mixed")
+      search(lv, "rp_mixed", ctx.word)
+      refute post_key in option_ids(lv, "rp_mixed")
+      refute page_key in option_ids(lv, "rp_mixed")
 
       # Reordering keeps each item's type.
       lv
-      |> element("#cf-ref-mixed-page-#{ctx.published.id} button[phx-value-dir=up]")
+      |> element("#cf-ref-rp_mixed-page-#{ctx.published.id} button[phx-value-dir=up]")
       |> render_click()
 
-      assert list_ids(lv, "mixed") == [page_key, post_key]
+      assert list_ids(lv, "rp_mixed") == [page_key, post_key]
 
-      search(lv, "lead", ctx.word)
-      pick(lv, "lead", "post-#{ctx.other_post.id}")
-      assert single_value(lv, "lead") == [post_key]
+      search(lv, "rp_lead", ctx.word)
+      pick(lv, "rp_lead", "post-#{ctx.other_post.id}")
+      assert single_value(lv, "rp_lead") == [post_key]
 
       save(lv)
 
       fields = stored(ctx.post, ctx.admin)
 
-      assert Enum.map(fields["mixed"], &{&1["type"], &1["id"]}) == [
+      assert Enum.map(fields["rp_mixed"], &{&1["type"], &1["id"]}) == [
                {"page", ctx.published.id},
                {"post", ctx.other_post.id}
              ]
 
-      assert %{"type" => "post", "id" => id} = fields["lead"]
+      assert %{"type" => "post", "id" => id} = fields["rp_lead"]
       assert id == ctx.other_post.id
 
       # Reopened, the stored snapshots render as typed rows again.
       lv = open_editor(ctx.conn, ctx.admin, ctx.post)
-      assert list_ids(lv, "mixed") == [page_key, post_key]
-      assert single_value(lv, "lead") == [post_key]
-      assert has_element?(lv, "#cf-ref-mixed-post-#{ctx.other_post.id}", "Post")
+      assert list_ids(lv, "rp_mixed") == [page_key, post_key]
+      assert single_value(lv, "rp_lead") == [post_key]
+      assert has_element?(lv, "#cf-ref-rp_mixed-post-#{ctx.other_post.id}", "Post")
     end
   end
 
@@ -681,7 +688,7 @@ defmodule KilnCMSWeb.ReferencePickerTest do
     CMS.create_field_definition!(
       %{
         content_type: :post,
-        name: "seat",
+        name: "rp_seat",
         label: "Seat",
         field_type: :reference,
         target_type: "page",
@@ -695,25 +702,25 @@ defmodule KilnCMSWeb.ReferencePickerTest do
 
     holder =
       CMS.create_post!(
-        %{title: "Holder", slug: "rp-#{uniq()}", custom_fields: %{"seat" => full.id}},
+        %{title: "Holder", slug: "rp-#{uniq()}", custom_fields: %{"rp_seat" => full.id}},
         actor: admin
       )
 
     post = CMS.create_post!(%{title: "Seeker", slug: "rp-#{uniq()}"}, actor: admin)
     lv = open_editor(conn, admin, post)
 
-    html = search(lv, "seat", word)
+    html = search(lv, "rp_seat", word)
     assert html =~ "Full — 1 of 1 connected"
-    assert has_element?(lv, "#custom-field-seat-opt-#{full.id}[aria-disabled=true]")
-    assert has_element?(lv, "#custom-field-seat-opt-#{free.id}[aria-disabled=false]")
+    assert has_element?(lv, "#custom-field-rp_seat-opt-#{full.id}[aria-disabled=true]")
+    assert has_element?(lv, "#custom-field-rp_seat-opt-#{free.id}[aria-disabled=false]")
 
     # A hand-sent pick of the full one changes nothing.
-    lv |> with_target("#custom-field-seat") |> render_click("ref_pick", %{"id" => full.id})
-    refute has_element?(lv, "#custom-field-seat input[type=hidden][value='#{full.id}']")
+    lv |> with_target("#custom-field-rp_seat") |> render_click("ref_pick", %{"id" => full.id})
+    refute has_element?(lv, "#custom-field-rp_seat input[type=hidden][value='#{full.id}']")
 
     # The record that holds the slot doesn't see its own target as full.
     lv = open_editor(conn, admin, holder)
-    lv |> element("#custom-field-seat button[phx-click=ref_remove]") |> render_click()
-    refute search(lv, "seat", word) =~ "Full — 1 of 1 connected"
+    lv |> element("#custom-field-rp_seat button[phx-click=ref_remove]") |> render_click()
+    refute search(lv, "rp_seat", word) =~ "Full — 1 of 1 connected"
   end
 end

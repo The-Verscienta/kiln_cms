@@ -65,7 +65,7 @@ defmodule KilnCMSWeb.FieldWidgetEditorTest do
     })
 
     define!(admin, %{
-      name: "size",
+      name: "fwe_size",
       label: "Size",
       field_type: :select,
       widget: "buttons",
@@ -87,7 +87,7 @@ defmodule KilnCMSWeb.FieldWidgetEditorTest do
     })
 
     define!(admin, %{
-      name: "code",
+      name: "fwe_code",
       label: "Code",
       field_type: :text,
       format: :plain,
@@ -104,7 +104,7 @@ defmodule KilnCMSWeb.FieldWidgetEditorTest do
           custom_fields: %{
             "season" => "summer",
             "flavours" => ["sour", "bitter"],
-            "code" => "RS-1"
+            "fwe_code" => "RS-1"
           }
         },
         actor: admin
@@ -208,7 +208,7 @@ defmodule KilnCMSWeb.FieldWidgetEditorTest do
 
     test "falls back to the dropdown past the option cap", ctx do
       define!(ctx.admin, %{
-        name: "region",
+        name: "fwe_region",
         label: "Region",
         field_type: :select,
         widget: "radios",
@@ -218,34 +218,34 @@ defmodule KilnCMSWeb.FieldWidgetEditorTest do
 
       {:ok, lv, _html} = live(ctx.conn, ~p"/editor/content/page/#{ctx.page.id}")
 
-      assert has_element?(lv, "select#custom-field-region")
-      refute has_element?(lv, "fieldset#custom-field-region")
+      assert has_element?(lv, "select#custom-field-fwe_region")
+      refute has_element?(lv, "fieldset#custom-field-fwe_region")
     end
   end
 
   describe "buttons" do
     test "the same radios, drawn as a segmented row; required, with no None", ctx do
-      group = "fieldset#custom-field-size[role=radiogroup][data-widget=buttons]"
+      group = "fieldset#custom-field-fwe_size[role=radiogroup][data-widget=buttons]"
       assert has_element?(ctx.lv, ~s(#{group}[aria-required="true"]))
       assert has_element?(ctx.lv, "#{group} > legend", "Size")
       assert has_element?(ctx.lv, ~s(#{group} input[type=hidden][value=""]))
 
       assert values_in(ctx.lv, "#{group} input[type=radio]") == ["s", "m", "l"]
-      refute has_element?(ctx.lv, "#custom-field-size-opt-none")
+      refute has_element?(ctx.lv, "#custom-field-fwe_size-opt-none")
 
       # A browser requires a radio group through `required` on one radio.
-      assert has_element?(ctx.lv, "#custom-field-size-opt-0[required]")
-      refute has_element?(ctx.lv, "#custom-field-size-opt-1[required]")
+      assert has_element?(ctx.lv, "#custom-field-fwe_size-opt-0[required]")
+      refute has_element?(ctx.lv, "#custom-field-fwe_size-opt-1[required]")
 
       # Visually hidden radios, each inside its own label.
-      assert has_element?(ctx.lv, ~s(label[for="custom-field-size-opt-2"] input.sr-only))
-      assert has_element?(ctx.lv, ~s(label[for="custom-field-size-opt-2"]), "l")
+      assert has_element?(ctx.lv, ~s(label[for="custom-field-fwe_size-opt-2"] input.sr-only))
+      assert has_element?(ctx.lv, ~s(label[for="custom-field-fwe_size-opt-2"]), "l")
     end
 
     test "saves the button chosen", ctx do
-      change(ctx.lv, %{"size" => "l"})
+      change(ctx.lv, %{"fwe_size" => "l"})
       save(ctx.lv)
-      assert stored(ctx)["size"] == "l"
+      assert stored(ctx)["fwe_size"] == "l"
     end
   end
 
@@ -315,7 +315,7 @@ defmodule KilnCMSWeb.FieldWidgetEditorTest do
 
     test "falls back to tags past the option cap", ctx do
       define!(ctx.admin, %{
-        name: "notes",
+        name: "fwe_notes",
         label: "Notes",
         field_type: :select,
         multiple: true,
@@ -326,37 +326,37 @@ defmodule KilnCMSWeb.FieldWidgetEditorTest do
 
       {:ok, lv, _html} = live(ctx.conn, ~p"/editor/content/page/#{ctx.page.id}")
 
-      assert has_element?(lv, "#custom-field-notes-entry[phx-hook=TermPicker]")
-      refute has_element?(lv, "#custom-field-notes input[type=checkbox]")
+      assert has_element?(lv, "#custom-field-fwe_notes-entry[phx-hook=TermPicker]")
+      refute has_element?(lv, "#custom-field-fwe_notes input[type=checkbox]")
     end
   end
 
   describe "single line" do
     test "an input with the textarea's label, help and wiring; saves", ctx do
-      assert has_element?(ctx.lv, ~s(input#custom-field-code[type=text][value="RS-1"]))
-      assert has_element?(ctx.lv, ~s(label[for="custom-field-code"]), "Code")
+      assert has_element?(ctx.lv, ~s(input#custom-field-fwe_code[type=text][value="RS-1"]))
+      assert has_element?(ctx.lv, ~s(label[for="custom-field-fwe_code"]), "Code")
       assert render(ctx.lv) =~ "One short line"
-      refute has_element?(ctx.lv, "textarea#custom-field-code")
+      refute has_element?(ctx.lv, "textarea#custom-field-fwe_code")
 
-      change(ctx.lv, %{"code" => "RS-2"})
+      change(ctx.lv, %{"fwe_code" => "RS-2"})
       save(ctx.lv)
-      assert stored(ctx)["code"] == "RS-2"
+      assert stored(ctx)["fwe_code"] == "RS-2"
     end
 
     test "a value holding a line break keeps the textarea, so the break survives", ctx do
       page =
         CMS.create_page!(
-          %{title: "Lines", slug: "fwe-#{uniq()}", custom_fields: %{"code" => "one\ntwo"}},
+          %{title: "Lines", slug: "fwe-#{uniq()}", custom_fields: %{"fwe_code" => "one\ntwo"}},
           actor: ctx.admin
         )
 
       {:ok, lv, _html} = live(ctx.conn, ~p"/editor/content/page/#{page.id}")
 
-      assert has_element?(lv, "textarea#custom-field-code")
-      refute has_element?(lv, "input#custom-field-code")
+      assert has_element?(lv, "textarea#custom-field-fwe_code")
+      refute has_element?(lv, "input#custom-field-fwe_code")
 
       lv |> form("#page-editor") |> render_submit()
-      assert CMS.get_page!(page.id, actor: ctx.admin).custom_fields["code"] == "one\ntwo"
+      assert CMS.get_page!(page.id, actor: ctx.admin).custom_fields["fwe_code"] == "one\ntwo"
     end
   end
 end

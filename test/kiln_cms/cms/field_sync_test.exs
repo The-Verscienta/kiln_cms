@@ -69,7 +69,7 @@ defmodule KilnCMS.CMS.FieldSyncTest do
     })
 
     field!(admin, %{
-      name: "secret",
+      name: "fs_secret",
       label: "Secret",
       field_type: :string,
       private: true,
@@ -658,7 +658,7 @@ defmodule KilnCMS.CMS.FieldSyncTest do
             f["name"] == "rating" ->
               %{f | "field_type" => "string", "validation" => %{}}
 
-            f["name"] == "secret" ->
+            f["name"] == "fs_secret" ->
               %{f | "field_type" => "text", "private" => false, "localization" => "localized"}
 
             true ->

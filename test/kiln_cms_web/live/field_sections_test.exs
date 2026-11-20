@@ -49,7 +49,7 @@ defmodule KilnCMSWeb.FieldSectionsTest do
       %{
         content_type: :page,
         name: name,
-        label: String.capitalize(name),
+        label: String.capitalize(String.replace_prefix(name, "fs3_", "")),
         field_type: :string,
         position: position,
         section: section
@@ -90,7 +90,7 @@ defmodule KilnCMSWeb.FieldSectionsTest do
 
     group =
       CMS.create_field_definition!(
-        %{content_type: :page, name: "doses", label: "Doses", field_type: :group},
+        %{content_type: :page, name: "fs3_doses", label: "Doses", field_type: :group},
         actor: admin
       )
 
@@ -106,18 +106,18 @@ defmodule KilnCMSWeb.FieldSectionsTest do
   describe "the editor panel" do
     setup %{conn: conn} do
       admin = authed_admin()
-      define!(admin, "intro", 0, nil)
-      define!(admin, "latin", 1, "Identity")
-      define!(admin, "pinyin", 2, "Identity")
-      define!(admin, "caution", 3, "Safety")
-      define!(admin, "dose", 4, "Dosing")
+      define!(admin, "fs3_intro", 0, nil)
+      define!(admin, "fs3_latin", 1, "Identity")
+      define!(admin, "fs3_pinyin", 2, "Identity")
+      define!(admin, "fs3_caution", 3, "Safety")
+      define!(admin, "fs3_dose", 4, "Dosing")
 
       page =
         CMS.create_page!(
           %{
             title: "Ginseng",
             slug: "sections-#{System.unique_integer([:positive])}",
-            custom_fields: %{"latin" => "Panax ginseng", "caution" => "Pregnancy"}
+            custom_fields: %{"fs3_latin" => "Panax ginseng", "fs3_caution" => "Pregnancy"}
           },
           actor: admin
         )
@@ -127,12 +127,12 @@ defmodule KilnCMSWeb.FieldSectionsTest do
     end
 
     test "files fields under their headings, with a count of what is filled", ctx do
-      assert has_element?(ctx.lv, "#custom-fields #custom-field-intro")
-      refute has_element?(ctx.lv, "[id^=cf-section-] #custom-field-intro")
+      assert has_element?(ctx.lv, "#custom-fields #custom-field-fs3_intro")
+      refute has_element?(ctx.lv, "[id^=cf-section-] #custom-field-fs3_intro")
 
       assert has_element?(ctx.lv, "#cf-section-1-heading", "Identity")
-      assert has_element?(ctx.lv, "#cf-section-1-body #custom-field-latin")
-      assert has_element?(ctx.lv, "#cf-section-1-body #custom-field-pinyin")
+      assert has_element?(ctx.lv, "#cf-section-1-body #custom-field-fs3_latin")
+      assert has_element?(ctx.lv, "#cf-section-1-body #custom-field-fs3_pinyin")
       assert has_element?(ctx.lv, "#cf-section-1-toggle", "1 of 2 filled")
 
       assert has_element?(ctx.lv, "#cf-section-2-heading", "Safety")
@@ -151,19 +151,19 @@ defmodule KilnCMSWeb.FieldSectionsTest do
 
     test "a closed section's inputs still submit", ctx do
       ctx.lv
-      |> form("#page-editor", %{"form" => %{"custom_fields" => %{"dose" => "3 g"}}})
+      |> form("#page-editor", %{"form" => %{"custom_fields" => %{"fs3_dose" => "3 g"}}})
       |> render_submit()
 
       fields = CMS.get_page!(ctx.page.id, actor: ctx.admin).custom_fields
-      assert fields["dose"] == "3 g"
-      assert fields["latin"] == "Panax ginseng"
+      assert fields["fs3_dose"] == "3 g"
+      assert fields["fs3_latin"] == "Panax ginseng"
     end
   end
 
   test "on a record with nothing stored, the first section starts open", %{conn: conn} do
     admin = authed_admin()
-    define!(admin, "latin", 0, "Identity")
-    define!(admin, "caution", 1, "Safety")
+    define!(admin, "fs3_latin", 0, "Identity")
+    define!(admin, "fs3_caution", 1, "Safety")
 
     page =
       CMS.create_page!(
@@ -179,7 +179,7 @@ defmodule KilnCMSWeb.FieldSectionsTest do
 
   test "the fields admin sets a field's section and suggests those in use", %{conn: conn} do
     admin = authed_admin()
-    define!(admin, "latin", 0, "Identity")
+    define!(admin, "fs3_latin", 0, "Identity")
 
     {:ok, lv, _html} = live(signed_in(conn, admin), ~p"/editor/fields")
 
@@ -189,7 +189,7 @@ defmodule KilnCMSWeb.FieldSectionsTest do
     |> form("#new-field-form",
       field_definition: %{
         scopes: ["page"],
-        name: "pinyin",
+        name: "fs3_pinyin",
         label: "Pinyin",
         field_type: "string",
         section: "  Identity "
@@ -200,7 +200,7 @@ defmodule KilnCMSWeb.FieldSectionsTest do
     field =
       :page
       |> CMS.field_definitions_for!(authorize?: false)
-      |> Enum.find(&(&1.name == "pinyin"))
+      |> Enum.find(&(&1.name == "fs3_pinyin"))
 
     assert field.section == "Identity"
     assert has_element?(lv, "#field-#{field.id}-section", "Identity")

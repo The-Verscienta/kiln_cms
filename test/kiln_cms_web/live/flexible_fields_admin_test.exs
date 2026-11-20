@@ -56,7 +56,7 @@ defmodule KilnCMSWeb.FlexibleFieldsAdminTest do
     do:
       def!(admin, %{
         name: name,
-        label: String.capitalize(name),
+        label: String.capitalize(String.replace_prefix(name, "ffa_", "")),
         field_type: :group,
         flex_of_id: flexible.id
       })
@@ -68,7 +68,7 @@ defmodule KilnCMSWeb.FlexibleFieldsAdminTest do
         Map.merge(
           %{
             name: name,
-            label: String.capitalize(name),
+            label: String.capitalize(String.replace_prefix(name, "ffa_", "")),
             group_of_id: parent.id,
             field_type: :string
           },
@@ -82,7 +82,7 @@ defmodule KilnCMSWeb.FlexibleFieldsAdminTest do
         Ecto.UUID.dump!(post.id)
       ])
 
-    value["sections"]
+    value["ffa_sections"]
   end
 
   defp open(conn, admin) do
@@ -96,7 +96,7 @@ defmodule KilnCMSWeb.FlexibleFieldsAdminTest do
     sections =
       def!(admin, %{
         content_type: :post,
-        name: "sections",
+        name: "ffa_sections",
         label: "Sections",
         field_type: :flexible
       })
@@ -167,7 +167,7 @@ defmodule KilnCMSWeb.FlexibleFieldsAdminTest do
       admin: admin,
       sections: sections
     } do
-      plain = def!(admin, %{content_type: :post, name: "plain", field_type: :string})
+      plain = def!(admin, %{content_type: :post, name: "ffa_plain", field_type: :string})
       {lv, _html} = open(conn, admin)
 
       lv |> element("button[phx-click=edit][phx-value-id='#{plain.id}']") |> render_click()
@@ -192,7 +192,7 @@ defmodule KilnCMSWeb.FlexibleFieldsAdminTest do
       admin: admin,
       sections: sections
     } do
-      plain = def!(admin, %{content_type: :post, name: "plain", field_type: :string})
+      plain = def!(admin, %{content_type: :post, name: "ffa_plain", field_type: :string})
       {lv, _html} = open(conn, admin)
 
       lv |> element("button[phx-click=edit][phx-value-id='#{plain.id}']") |> render_click()
@@ -294,7 +294,7 @@ defmodule KilnCMSWeb.FlexibleFieldsAdminTest do
           %{
             title: "P",
             slug: "flexa-#{System.unique_integer([:positive])}",
-            custom_fields: %{"sections" => [%{"_type" => "hero", "headline" => "A"}]}
+            custom_fields: %{"ffa_sections" => [%{"_type" => "hero", "headline" => "A"}]}
           },
           actor: admin
         )
@@ -467,7 +467,7 @@ defmodule KilnCMSWeb.FlexibleFieldsAdminTest do
             title: "P",
             slug: "flexa-#{System.unique_integer([:positive])}",
             custom_fields: %{
-              "sections" => [
+              "ffa_sections" => [
                 %{"_type" => "hero", "headline" => "A"},
                 %{"_type" => "hero", "headline" => "B"},
                 %{"_type" => "quote", "text" => "Q"}
@@ -538,7 +538,7 @@ defmodule KilnCMSWeb.FlexibleFieldsAdminTest do
         post,
         %{
           custom_fields: %{
-            "sections" => [
+            "ffa_sections" => [
               %{"_type" => "hero", "headline" => "A"},
               %{"_type" => "hero", "headline" => "B"},
               %{"_type" => "hero", "headline" => "C"},
@@ -663,7 +663,7 @@ defmodule KilnCMSWeb.FlexibleFieldsAdminTest do
       admin: admin,
       sections: sections
     } do
-      plain = def!(admin, %{content_type: :post, name: "plain", field_type: :string})
+      plain = def!(admin, %{content_type: :post, name: "ffa_plain", field_type: :string})
       hero = item_type!(admin, sections, "hero")
       {lv, _html} = open(conn, admin)
 

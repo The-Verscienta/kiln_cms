@@ -51,7 +51,12 @@ defmodule KilnCMSWeb.EditorLiveExportTest do
   defp define!(admin, name, attrs) do
     CMS.create_field_definition!(
       Map.merge(
-        %{content_type: :page, name: name, label: String.capitalize(name), field_type: :string},
+        %{
+          content_type: :page,
+          name: name,
+          label: String.capitalize(String.replace_prefix(name, "ele_", "")),
+          field_type: :string
+        },
         attrs
       ),
       actor: admin
@@ -86,7 +91,7 @@ defmodule KilnCMSWeb.EditorLiveExportTest do
 
   setup %{conn: conn} do
     admin = authed_user(:admin)
-    define!(admin, "price", %{field_type: :integer})
+    define!(admin, "ele_price", %{field_type: :integer})
     %{conn: log_in(conn, admin), admin: admin, prefix: "Exp#{uniq()}"}
   end
 
@@ -94,7 +99,7 @@ defmodule KilnCMSWeb.EditorLiveExportTest do
     conn: conn,
     prefix: prefix
   } do
-    a_page(prefix, %{"price" => 5})
+    a_page(prefix, %{"ele_price" => 5})
     lv = open(conn, prefix, %{"status" => "draft"})
 
     assert has_element?(lv, "#content-export #content-export-toggle[aria-expanded=false]")
@@ -110,12 +115,12 @@ defmodule KilnCMSWeb.EditorLiveExportTest do
   end
 
   test "field conditions and a field sort ride along on both links", %{conn: conn, prefix: prefix} do
-    a_page(prefix, %{"price" => 5})
-    cf = "price:gte:3"
-    lv = open(conn, prefix, %{"cf" => cf, "sort" => "-field:price"})
+    a_page(prefix, %{"ele_price" => 5})
+    cf = "ele_price:gte:3"
+    lv = open(conn, prefix, %{"cf" => cf, "sort" => "-field:ele_price"})
 
     for selector <- ["#export-csv", "#export-json"] do
-      assert %{"cf" => ^cf, "sort" => "-field:price"} = query_of(href(lv, selector))
+      assert %{"cf" => ^cf, "sort" => "-field:ele_price"} = query_of(href(lv, selector))
     end
   end
 
@@ -166,7 +171,7 @@ defmodule KilnCMSWeb.EditorLiveExportTest do
       admin: admin,
       prefix: prefix
     } do
-      define!(admin, "secret", %{field_type: :string, private: true})
+      define!(admin, "ele_secret", %{field_type: :string, private: true})
       page = a_page(prefix)
       lv = open(conn, prefix)
 
@@ -188,7 +193,7 @@ defmodule KilnCMSWeb.EditorLiveExportTest do
       admin: admin,
       prefix: prefix
     } do
-      define!(admin, "owner", %{field_type: :user})
+      define!(admin, "ele_owner", %{field_type: :user})
       a_page(prefix)
       lv = open(conn, prefix)
 

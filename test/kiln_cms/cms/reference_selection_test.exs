@@ -182,8 +182,8 @@ defmodule KilnCMS.CMS.ReferenceSelectionTest do
     end
 
     test "a private field's condition is inert", %{admin: admin} do
-      page_field!(admin, %{name: "secret", private: true})
-      selection = %{"by_type" => %{"page" => %{"fields" => %{"secret" => "x"}}}}
+      page_field!(admin, %{name: "rs_secret", private: true})
+      selection = %{"by_type" => %{"page" => %{"fields" => %{"rs_secret" => "x"}}}}
       assert {:ok, :unfiltered} = ReferenceSelection.query_for(selection, "page", admin, nil)
     end
 
@@ -455,14 +455,14 @@ defmodule KilnCMS.CMS.ReferenceSelectionTest do
     test "fields must be non-private equality-capable custom fields of the type",
          %{admin: admin} do
       page_field!(admin, %{})
-      page_field!(admin, %{name: "secret", label: "Secret", private: true})
+      page_field!(admin, %{name: "rs_secret", label: "Secret", private: true})
       page_field!(admin, %{name: "body_text", label: "Body", field_type: :text})
       page_field!(admin, %{name: "pic", label: "Pic", field_type: :media})
 
       page_field!(admin, %{name: "rel", label: "Rel", field_type: :reference, target_type: "post"})
 
       page_field!(admin, %{name: "where_at", label: "Where", field_type: :geolocation})
-      page_field!(admin, %{name: "rank", label: "Rank", field_type: :integer})
+      page_field!(admin, %{name: "rs_rank", label: "Rank", field_type: :integer})
 
       attempt = fn fields ->
         refusal(fn ->
@@ -481,25 +481,25 @@ defmodule KilnCMS.CMS.ReferenceSelectionTest do
       end
 
       assert attempt.(%{"missing" => "x"}) =~ "which is not a field of page"
-      assert attempt.(%{"secret" => "x"}) =~ "a private field"
+      assert attempt.(%{"rs_secret" => "x"}) =~ "a private field"
 
       for kind <- ~w(body_text pic rel where_at) do
         assert attempt.(%{kind => "x"}) =~ "has no plain value to match"
       end
 
-      assert attempt.(%{"rank" => "many"}) =~ "must be a whole number"
-      assert attempt.(%{"rank" => %{"in" => [1, "x"]}}) =~ "must be a whole number"
+      assert attempt.(%{"rs_rank" => "many"}) =~ "must be a whole number"
+      assert attempt.(%{"rs_rank" => %{"in" => [1, "x"]}}) =~ "must be a whole number"
 
       ok =
         field!(admin, %{
           selection: %{
             "by_type" => %{
-              "page" => %{"fields" => %{"diet" => "vegan", "rank" => %{"in" => [1, 2]}}}
+              "page" => %{"fields" => %{"diet" => "vegan", "rs_rank" => %{"in" => [1, 2]}}}
             }
           }
         })
 
-      assert ok.selection["by_type"]["page"]["fields"]["rank"] == %{"in" => [1, 2]}
+      assert ok.selection["by_type"]["page"]["fields"]["rs_rank"] == %{"in" => [1, 2]}
     end
 
     test "tag and category ids must exist in the org", %{admin: admin} do

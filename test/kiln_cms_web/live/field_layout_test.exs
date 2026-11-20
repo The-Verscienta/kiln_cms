@@ -48,7 +48,7 @@ defmodule KilnCMSWeb.FieldLayoutTest do
         %{
           content_type: :page,
           name: name,
-          label: String.capitalize(name),
+          label: String.capitalize(String.replace_prefix(name, "fl_", "")),
           field_type: :string,
           position: position,
           section: section
@@ -164,7 +164,7 @@ defmodule KilnCMSWeb.FieldLayoutTest do
       admin = user(:admin)
       field!(admin, "latin", 0, "Identity")
       field!(admin, "caution", 1, "Safety")
-      field!(admin, "dose", 2, "Dosing")
+      field!(admin, "fl_dose", 2, "Dosing")
       %{admin: admin}
     end
 
@@ -187,20 +187,20 @@ defmodule KilnCMSWeb.FieldLayoutTest do
 
     test "a collapsed section holding an error opens anyway", ctx do
       CMS.update_field_definition!(
-        Enum.find(CMS.field_definitions_for!(:page, actor: ctx.admin), &(&1.name == "dose")),
+        Enum.find(CMS.field_definitions_for!(:page, actor: ctx.admin), &(&1.name == "fl_dose")),
         %{required: true},
         actor: ctx.admin
       )
 
       layout!(ctx.admin, "Dosing", %{initially: :collapsed})
-      {lv, _page} = open(build_conn(), ctx.admin, ctx.admin, %{"dose" => "3 g"})
+      {lv, _page} = open(build_conn(), ctx.admin, ctx.admin, %{"fl_dose" => "3 g"})
       assert has_element?(lv, "#cf-section-2-body.hidden")
 
       lv
-      |> form("#page-editor", %{"form" => %{"custom_fields" => %{"dose" => ""}}})
+      |> form("#page-editor", %{"form" => %{"custom_fields" => %{"fl_dose" => ""}}})
       |> render_submit()
 
-      assert has_element?(lv, "#custom-field-dose-errors")
+      assert has_element?(lv, "#custom-field-fl_dose-errors")
       assert has_element?(lv, ~s(#cf-section-2-toggle[aria-expanded="true"]))
       refute has_element?(lv, "#cf-section-2-body.hidden")
     end
@@ -212,14 +212,14 @@ defmodule KilnCMSWeb.FieldLayoutTest do
       field!(admin, "intro", 0, nil)
       field!(admin, "latin", 1, "Identity")
       field!(admin, "caution", 2, "Notes")
-      field!(admin, "dose", 3, "Dosing", %{required: true})
+      field!(admin, "fl_dose", 3, "Dosing", %{required: true})
       layout!(admin, "Identity", %{display: :tab})
       layout!(admin, "Dosing", %{display: :tab})
       %{admin: admin}
     end
 
     test "render one WAI-ARIA tab set at the first tab section's place", ctx do
-      {lv, _page} = open(build_conn(), ctx.admin, ctx.admin, %{"dose" => "3 g"})
+      {lv, _page} = open(build_conn(), ctx.admin, ctx.admin, %{"fl_dose" => "3 g"})
 
       assert ["tablist"] = attr(lv, "#cf-tabs-list", "role")
       assert ["TabKeys"] = attr(lv, "#cf-tabs-list", "phx-hook")
@@ -240,7 +240,7 @@ defmodule KilnCMSWeb.FieldLayoutTest do
       refute "hidden" in classes(lv, "#cf-section-1-panel")
       assert "hidden" in classes(lv, "#cf-section-3-panel")
       # The hidden panel keeps its input.
-      assert has_element?(lv, "#cf-section-3-panel #custom-field-dose")
+      assert has_element?(lv, "#cf-section-3-panel #custom-field-fl_dose")
       refute has_element?(lv, "#cf-tabs [data-cf-section-body]")
 
       # One tab set, before the accordion that sits between the two tabs.
@@ -262,25 +262,25 @@ defmodule KilnCMSWeb.FieldLayoutTest do
     end
 
     test "a hidden tab's input still submits", ctx do
-      {lv, page} = open(build_conn(), ctx.admin, ctx.admin, %{"dose" => "3 g"})
+      {lv, page} = open(build_conn(), ctx.admin, ctx.admin, %{"fl_dose" => "3 g"})
 
       lv
-      |> form("#page-editor", %{"form" => %{"custom_fields" => %{"dose" => "5 g"}}})
+      |> form("#page-editor", %{"form" => %{"custom_fields" => %{"fl_dose" => "5 g"}}})
       |> render_submit()
 
-      assert CMS.get_page!(page.id, authorize?: false).custom_fields["dose"] == "5 g"
+      assert CMS.get_page!(page.id, authorize?: false).custom_fields["fl_dose"] == "5 g"
     end
 
     test "after a refused save the first tab holding an error is selected and marked", ctx do
-      {lv, _page} = open(build_conn(), ctx.admin, ctx.admin, %{"dose" => "3 g"})
+      {lv, _page} = open(build_conn(), ctx.admin, ctx.admin, %{"fl_dose" => "3 g"})
       assert ["true"] = attr(lv, "#cf-section-1-tab", "aria-selected")
       refute has_element?(lv, "#cf-section-3-tab .hero-exclamation-circle")
 
       lv
-      |> form("#page-editor", %{"form" => %{"custom_fields" => %{"dose" => ""}}})
+      |> form("#page-editor", %{"form" => %{"custom_fields" => %{"fl_dose" => ""}}})
       |> render_submit()
 
-      assert has_element?(lv, "#custom-field-dose-errors")
+      assert has_element?(lv, "#custom-field-fl_dose-errors")
       assert ["true"] = attr(lv, "#cf-section-3-tab", "aria-selected")
       assert ["0"] = attr(lv, "#cf-section-3-tab", "tabindex")
       assert ["false"] = attr(lv, "#cf-section-1-tab", "aria-selected")
@@ -297,14 +297,14 @@ defmodule KilnCMSWeb.FieldLayoutTest do
       admin = user(:admin)
       field!(admin, "latin", 0, "Identity", %{width: :half})
       field!(admin, "pinyin", 1, "Identity", %{width: :third})
-      field!(admin, "notes", 2, "Identity")
+      field!(admin, "fl_notes", 2, "Identity")
       field!(admin, "caution", 3, "Safety")
       {lv, _page} = open(build_conn(), admin, admin)
 
       assert has_element?(lv, "#cf-section-0-body > .grid.sm\\:grid-cols-6 > #cf-cell-latin")
       assert "sm:col-span-3" in classes(lv, "#cf-cell-latin")
       assert "sm:col-span-2" in classes(lv, "#cf-cell-pinyin")
-      assert "sm:col-span-6" in classes(lv, "#cf-cell-notes")
+      assert "sm:col-span-6" in classes(lv, "#cf-cell-fl_notes")
       assert has_element?(lv, "#cf-cell-latin #custom-field-latin")
 
       # A group of full-width fields keeps its bare rows.
@@ -314,21 +314,21 @@ defmodule KilnCMSWeb.FieldLayoutTest do
 
     test "a hidden conditional field's cell hides with it" do
       admin = user(:admin)
-      rule = %{"field" => "kind", "op" => "eq", "value" => "other"}
+      rule = %{"field" => "fl_kind", "op" => "eq", "value" => "other"}
 
-      field!(admin, "kind", 0, nil, %{
+      field!(admin, "fl_kind", 0, nil, %{
         field_type: :select,
         options: ["a", "other"],
         width: :half
       })
 
-      field!(admin, "detail", 1, nil, %{visible_when: rule, width: :half})
-      {lv, _page} = open(build_conn(), admin, admin, %{"kind" => "a"})
+      field!(admin, "fl_detail", 1, nil, %{visible_when: rule, width: :half})
+      {lv, _page} = open(build_conn(), admin, admin, %{"fl_kind" => "a"})
 
       # The cell collapses whenever its direct child (the FieldConditions
       # wrapper) is hidden — server-seeded here, toggled by the hook later.
-      assert "has-[>.hidden]:hidden" in classes(lv, "#cf-cell-detail")
-      assert has_element?(lv, "#cf-cell-detail > #cf-cond-detail.hidden")
+      assert "has-[>.hidden]:hidden" in classes(lv, "#cf-cell-fl_detail")
+      assert has_element?(lv, "#cf-cell-fl_detail > #cf-cond-fl_detail.hidden")
     end
   end
 end
