@@ -377,7 +377,9 @@ carries the reasoning.
   refuses the join in the channel itself, before mount, so the reply is now
   `"unauthorized"` instead of the guard's 404 reload. The guard stays as a
   second line. `mix.exs` now requires `~> 1.2.14`, so a lock cannot resolve
-  back to an affected release. No migration and no configuration; the
+  back to an affected release. `examples/phoenix_showcase`, which has its
+  own lock, moves from 1.2.12 to 1.2.14 with the same floor. No migration
+  and no configuration; the
   JavaScript client is built from the same Hex package, so there is no
   separate npm bump.
   ([#3190](https://github.com/The-Verscienta/kiln_cms/issues/3190))
