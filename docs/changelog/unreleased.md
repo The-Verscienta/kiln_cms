@@ -7,6 +7,17 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="backup-s3-same-bucket-overlap-upgrade"></a>
+
+- **Two S3 destinations on one bucket name stop pruning (#3088).** After the upgrade, an installation with two S3 destinations that name the same bucket, one prefix inside the other, on different hosts skips retention on both. Each pass leaves a "Retention on … skipped" notice, and the storage grows until you act. Give the two destinations prefixes side by side, or untick "Delete its old backups (retention)" on one of them if they really are separate stores.
+
+<a id="backup-sftp-destination-upgrade"></a>
+
+- **The `sftp` destination kind is now Kiln's own (#2222).** `sftp` joins `local`, `rclone` and `s3` as a kind no plugin can register. Rows a plugin made under that kind no longer match Kiln's fields, so saves and backups to them fail until you delete them and add the destination again under **SFTP server**.
+  - **Enabling:** a new SFTP destination starts disabled until a platform admin confirms the host key.
+  - **Private hosts:** list LAN SFTP servers in `BACKUP_SFTP_PRIVATE_HOSTS`; hosts in `BACKUP_S3_PRIVATE_HOSTS` don't count for SFTP.
+  - **Migration:** apply `add_backup_destination_host_key`, which adds one nullable column.
+
 <a id="public-js-bundle-upgrade"></a>
 
 - **A custom asset build or overlay `Dockerfile` that does not run `mix assets.deploy` must also run `mix esbuild kiln_public --minify` before `phx.digest` (#2402).**
@@ -59,6 +70,17 @@ carries the reasoning.
   ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165))
 
 ## Added
+
+<a id="backup-sftp-destination"></a>
+
+- **SFTP backup destination (#2222).** Backups → Destinations offers **SFTP server**, built on OTP's `:ssh`/`:ssh_sftp` with no new dependency.
+  - **Settings and credentials:** host, port, username and an absolute path. Authentication is by password, by private key, or both. Keys are Ed25519, ECDSA or RSA of 2048 bits or more, and a passphrase-protected key must have its passphrase removed. The key sits in the encrypted vault.
+  - **Host key:** a new destination is saved disabled. A platform admin checks the server's host key from its row, compares the fingerprint (or pastes the expected one) and trusts it. The scan sends no credential. Every call pins that key and its algorithm.
+  - **Changed key:** a changed key fails the destination permanently. It writes an instance security event and a platform alert, at most one per destination per hour. Trusting a new key is audited with the previous fingerprint.
+  - **Host policy:** the same as S3's (ADR 0069). Private and LAN hosts are refused unless listed in `BACKUP_SFTP_PRIVATE_HOSTS`, metadata addresses are always refused, and DNS is pinned on every call.
+  - **Uploads:** they resume after an interruption, in 128 KiB writes within OpenSSH's message limit, checked by size plus a read-back of the tail. The final rename uses `posix-rename` when the server offers it.
+  - **Retention, rescan and safety:** list, get and delete work for retention and rescan. Symlinks are refused in the `db`/`media` folders and for backup files.
+  - **More:** see ADR 0079 and the "Back up to an SFTP server" section of docs/backups.md.
 
 <a id="mcp-content-link-tools"></a>
 
@@ -554,10 +576,3 @@ carries the reasoning.
   JavaScript client is built from the same Hex package, so there is no
   separate npm bump.
   ([#3190](https://github.com/The-Verscienta/kiln_cms/issues/3190))
-
-## Upgrade notes
-
-<a id="backup-s3-same-bucket-overlap-upgrade"></a>
-
-- **Two S3 destinations on one bucket name stop pruning (#3088).** After the upgrade, an installation with two S3 destinations that name the same bucket, one prefix inside the other, on different hosts skips retention on both. Each pass leaves a "Retention on … skipped" notice, and the storage grows until you act. Give the two destinations prefixes side by side, or untick "Delete its old backups (retention)" on one of them if they really are separate stores.
-

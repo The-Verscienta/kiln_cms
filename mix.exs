@@ -698,8 +698,9 @@ defmodule KilnCMS.MixProject do
     [
       mod: {KilnCMS.Application, []},
       # `:image` (and its libvips NIF backend) is listed explicitly so it starts
-      # and is included in the Dialyzer PLT.
-      extra_applications: [:logger, :runtime_tools, :image]
+      # and is included in the Dialyzer PLT. `:ssh` and `:public_key` are
+      # OTP's own, for the SFTP backup destination (#2222).
+      extra_applications: [:logger, :runtime_tools, :image, :public_key, :ssh]
     ]
   end
 

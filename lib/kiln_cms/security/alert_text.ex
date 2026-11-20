@@ -16,7 +16,8 @@ defmodule KilnCMS.Security.AlertText do
   `KilnCMS.Security.Changes.DeliverAlert`) to the few values a headline is
   made of: `phase`, `kind`, `channel`, `change`, `kinds`, `count`, the
   display `ip`, the display block `rule` (a `blocked_ip` alert's, which
-  carries no address) and the `event_type`. That map is stored on the bell row as
+  carries no address), the `event_type`, and the `destination` name of an
+  SFTP `backup_host_key_changed` alert (#2222). That map is stored on the bell row as
   `Notification.details`, with string keys, so the inbox can say the line
   again in another language. It holds nothing the English excerpt did not
   already say: the address and rule are the ones the site's settings allow
@@ -52,7 +53,8 @@ defmodule KilnCMS.Security.AlertText do
       "count" => field(data, :count),
       "ip" => field(event, :ip),
       "rule" => field(field(event, :metadata), :rule),
-      "event_type" => field(event, :type)
+      "event_type" => field(event, :type),
+      "destination" => field(data, :destination)
     }
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
   end
@@ -85,6 +87,12 @@ defmodule KilnCMS.Security.AlertText do
   def headline(%{"kind" => "blocked_ip", "rule" => rule} = details) when is_binary(rule),
     do: gettext("%{label} (rule %{rule})", label: kind_label(details["kind"]), rule: rule)
 
+  # A changed SFTP host key names the backup destination (#2222).
+  def headline(%{"kind" => "backup_host_key_changed", "destination" => name} = details)
+      when is_binary(name),
+      do:
+        gettext("%{label}: %{destination}", label: kind_label(details["kind"]), destination: name)
+
   def headline(%{"ip" => ip} = details) when is_binary(ip),
     do: gettext("%{label} (from %{ip})", label: kind_label(details["kind"]), ip: ip)
 
@@ -104,6 +112,10 @@ defmodule KilnCMS.Security.AlertText do
   def kind_label("api_key_abuse"), do: gettext("A rotated API key was used again")
   def kind_label("api_key_rate_limited"), do: gettext("An API key hit a rate limit")
   def kind_label("blocked_ip"), do: gettext("A blocked address was refused")
+
+  def kind_label("backup_host_key_changed"),
+    do: gettext("A backup server's host key changed")
+
   def kind_label(_unknown), do: gettext("Security alert")
 
   @doc "The label of an `alerts_silenced` notice's change, in the current locale."

@@ -4254,6 +4254,178 @@ On a Test or a backup (on a Test, after the step: "checking the bucket: …"):
 | "the file read back doesn't match its sha256; it was not kept" | A read from the store didn't match the object's `x-amz-meta-kiln-sha256`. |
 | "… timed out after 30 s" (a Test) | The store didn't answer in time, or its retries ran past the Test's 30 seconds. |
 
+### Back up to an SFTP server
+
+A destination of the kind **SFTP server** sends each in-app backup to a
+folder on any host that speaks SFTP: a NAS, a storage box, a server running
+OpenSSH (#2222). Kiln uses Erlang's own SSH client, so nothing extra goes
+in the image. Large files resume where they stopped
+([Resumable uploads](#resumable-uploads)). There is no plain FTP: it sends
+the password in the clear.
+
+**Before you start:**
+
+- a running release with the `add_backup_destination_host_key` migration
+  applied, and a platform admin account;
+- an account on the server that may write to the backup folder, with a
+  password, a private key, or both;
+- the server's host key fingerprint, to compare with what Kiln reads. On
+  the server, run `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` (or
+  the `.pub` of the key type the server uses). It prints
+  `256 SHA256:… root@host (ED25519)`.
+
+**Steps:**
+
+1. On **Backups → Destinations**, choose **Add a destination**, then
+   **SFTP server**.
+2. Fill in **Host** (a name or an IP address, nothing else), **Port** (22
+   when blank), **Username** and **Path**, an absolute folder such as
+   `/backups/kiln`. Kiln keeps files in `<path>/db` and `<path>/media` and
+   creates the folders it needs.
+3. Enter a **Password**, a **Private key**, or both. A private key is the
+   whole file, `-----BEGIN … PRIVATE KEY-----` included: OpenSSH or PEM,
+   Ed25519, ECDSA or RSA of 2048 bits or more, **without a passphrase**
+   (remove one with `ssh-keygen -p -N "" -f <key file>`; Kiln stores the key
+   encrypted). Both are stored encrypted and never shown again.
+4. Save. The destination is saved **disabled**: Kiln sends nothing to a
+   server until you confirm its host key.
+5. On the destination's row, choose **Check host key**. Kiln connects,
+   reads the key the server signs with, and disconnects before logging in,
+   so no password or key is sent. Compare the fingerprint it shows with
+   the one `ssh-keygen -lf` printed on the server. If they match, choose
+   **Trust this key**.
+   Or paste the fingerprint you expect into **Or the fingerprint you
+   expect** and choose **Look for it**: Kiln asks the server for a key of
+   each type it trusts and stops at the one with that fingerprint. "The
+   server presented no key with that fingerprint" means none matched, and
+   nothing was trusted.
+6. Choose **Enable**, then **Test**. Test logs in, creates the path where
+   it is missing, writes a file under `<path>/.kiln-test/`, reads it back
+   and deletes it.
+
+The trusted key is shown on the row ("Trusted ssh-ed25519 key SHA256:…,
+since …") and recorded in the instance security log as **Backup server host
+key trusted**, with the key it replaced. Only a platform admin can check or
+trust a key; see [ADR 0079](decisions/0079-an-sftp-destinations-host-key-is-trusted-once-by-a-platform-admin-and-a-changed-key-fails-the-destination.md).
+
+<a id="when-the-servers-host-key-changes"></a>
+
+#### When the server's host key changes
+
+Every connection checks the server's key before logging in, and offers only
+the trusted key's type. If the server presents another key, the destination
+fails for good with "the server's host key changed (offered SHA256:…,
+trusted SHA256:…); if the change is expected, a platform admin checks and
+trusts the new key", nothing is sent, and:
+
+- the instance security log records **Backup server host key changed**,
+  with both fingerprints;
+- every platform admin gets the security alert "A backup server's host key
+  changed", by bell and email.
+
+Both happen at most once an hour per destination, however often a backup
+retries. A key that changed can mean someone is between Kiln and the
+server. Find out why before trusting the new one: a reinstalled server or a
+regenerated key is routine, an unexplained change is not. When you know it
+is expected, choose **Check again** on the row, compare, and trust the new
+key.
+
+A server that no longer offers its trusted key's type at all fails with
+"the server no longer offers its trusted … host key, or no algorithm Kiln
+accepts …" and raises no alert. Check and trust its key again; if the check
+fails the same way, the server is too old to share an algorithm with Kiln,
+which refuses SHA-1.
+
+<a id="reach-an-sftp-server-on-your-own-network"></a>
+
+#### Reach an SFTP server on your own network
+
+As for S3 ([above](#reach-a-store-on-your-own-network)), the host must
+resolve only to public addresses unless the operator lists it, here in
+`BACKUP_SFTP_PRIVATE_HOSTS`, on every node:
+
+```bash
+BACKUP_SFTP_PRIVATE_HOSTS=nas.lan,10.0.0.5
+```
+
+The list is SFTP's own: a host listed in `BACKUP_S3_PRIVATE_HOSTS` is not
+open to SFTP. Exact names or IP addresses only, and no listing opens a
+link-local or metadata address. The host is resolved when the destination
+is saved and again before every connection, which goes to the address
+checked.
+
+#### How an upload to an SFTP server works
+
+Each file goes up under a temporary name, `<name>.<token>.partial`, in
+pieces of at most 128 KiB, and is renamed into place once its size matches.
+A server that supports `posix-rename@openssh.com` (OpenSSH) replaces the
+old file in one step; on one that doesn't, Kiln deletes the old file first.
+An interrupted upload continues from where the server's copy ends, after
+reading back its last MiB and comparing it with the file here; a copy that
+doesn't match starts over. A file already there with the same size and
+sha256 is not sent again.
+
+What lands is checked by its size, and on a resume by that read-back, not by
+reading the whole file back over the network. A server that crashes right
+after the rename can leave a short file; the next backup checks a file of
+the right size in full before skipping it.
+
+Kiln refuses symbolic links where its own files and folders go (`db`,
+`media`, a backup file, a `.partial`), and never follows them. Your
+**Path** itself may run through a link, as NAS shares often do.
+
+#### Retention on an SFTP server
+
+As on any destination ([Retention on a destination](#retention-on-a-destination)),
+with these limits:
+
+- **Not while `BACKUP_RCLONE_REMOTE` is set**, which can name the same
+  server under any name ("an SFTP destination can't be compared with
+  BACKUP_RCLONE_REMOTE"), and the env remote is not pruned while an SFTP
+  destination exists.
+- **Two SFTP destinations overlap** when they have the same host, port and
+  username and one path is inside the other. Such a destination can't be
+  saved.
+- **Another SFTP path inside or around this one blocks retention on both**,
+  whatever its host, port or username: one server answers to many names and
+  logins. The row shows **Not pruned:** "another SFTP destination uses a
+  folder inside or around this one's; the app can't tell whether it is the
+  same server".
+
+<a id="what-can-go-wrong-with-an-sftp-destination"></a>
+
+#### What can go wrong with an SFTP destination
+
+When saving:
+
+| Message | Meaning |
+|---|---|
+| "an SFTP destination stays disabled until its host key is confirmed" | Save it disabled, then check and trust its key on the row. |
+| "the host resolves to a private or loopback address; list its host in BACKUP_SFTP_PRIVATE_HOSTS to allow it" | A server on your network. Have the operator list it ([above](#reach-an-sftp-server-on-your-own-network)). |
+| "the host must not be a .local or .internal host unless BACKUP_SFTP_PRIVATE_HOSTS lists it", "the host must not be a loopback host" | As it says. |
+| "the host resolves to a link-local or metadata address, which no setting allows", "the host must not be a metadata host" | No listing allows these. |
+| "the host must be a host name or an IP address, with no scheme or port" | Enter `nas.example.com`, not `sftp://nas.example.com:22`; the port has its own field. |
+| "the path must be absolute, e.g. /backups/kiln" | A path relative to the login folder could be the same folder as an absolute one, which Kiln couldn't tell. |
+| "the path must be folder names of letters, digits, dots, hyphens and underscores, separated by /" | No spaces or other characters, no `.` or `..` folder, no `~`. |
+| "enter a password, a private key, or both" | As it says. |
+| "the private key has a passphrase; remove it with ssh-keygen -p -N \"\" -f <key file> (the key is stored encrypted)" | Erlang's SSH client can't open an encrypted OpenSSH key. |
+| "the private key couldn't be read; paste an OpenSSH or PEM private key", "DSA keys are not supported; …", "the RSA key is shorter than 2048 bits; …" | Paste the private key file whole, of a supported type. |
+| "this is, contains or is inside another destination; choose a place of its own" | Another SFTP destination on this host, port and login has a path inside or around this one. |
+
+On **Check host key**, a Test or a backup:
+
+| Error | What to do |
+|---|---|
+| "confirm the server's host key first: …" | Check and trust the server's key on the row. |
+| "the server's host key changed (offered …, trusted …); …" | See [When the server's host key changes](#when-the-servers-host-key-changes). |
+| "the server no longer offers its trusted … host key, or no algorithm Kiln accepts (Kiln refuses SHA-1); …" | Check and trust its key again. If that fails too, update the server's SSH configuration. |
+| "the server refused the username and credentials" | Check the username and re-enter the password or key on **Edit**. The server's own message is never shown. |
+| "the server offers no host key or algorithm Kiln accepts (Kiln refuses SHA-1)" (on **Check host key**) | A very old server, or a host key type Kiln doesn't trust (DSA). Update its SSH configuration. |
+| "couldn't connect to the server (connection refused)", "(timed out)", "(unreachable)" | Retried three times within the step; check the host, the port and the firewall. |
+| "the server didn't open an SFTP session (is the SFTP subsystem on?)" | Enable the `sftp` subsystem in the server's `sshd_config`. |
+| "…: permission denied on the server", "…: the server is out of space or over its quota", "creating the path: the server refused (SFTP failure)" | The account can't write there, or the disk is full. These fail the destination at once. |
+| "db on the server is a symbolic link; Kiln doesn't follow links there" | Replace the link with a real folder, or point **Path** at the folder the link names. |
+
 ### Manage destinations from a release console
 
 The tab's code interfaces work from a release console too, with an actor

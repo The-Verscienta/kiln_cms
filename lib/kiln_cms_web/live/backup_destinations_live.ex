@@ -68,6 +68,21 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   (#2952); the `:update` action refuses a stale record as well, which covers
   a change landing between this page's read and its write.
 
+  ## An SFTP server's host key (#2222, ADR 0079)
+
+  An SFTP destination is saved disabled and can't be enabled until a
+  platform admin confirms the server's host key. Its row says whether one is
+  trusted. **Check host key** reads the key the server offers
+  (`Backups.scan_destination_host_key/2`, in a `start_async/3` task, one at
+  a time per destination) and shows its fingerprint to compare with the
+  server's own (`ssh-keygen -lf …`); or the admin pastes the fingerprint
+  they expect, and the server is asked for a key with that fingerprint.
+  What a check found stays **on the server**, in this page's assigns by
+  destination id: **Trust this key** sends only the id, so no client can
+  name a key of its choosing. Trusting writes through
+  `Backups.trust_backup_destination_host_key/6`, refused as stale when
+  another admin trusted a key since the check began.
+
   ## Test
 
   The **Test** button runs `Backups.test_destination/2` in a `start_async/3`
@@ -82,7 +97,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Destination, DestinationConfig, Retention}
-  alias KilnCMS.Backups.Destination.{Local, Rclone, S3}
+  alias KilnCMS.Backups.Destination.{Local, Rclone, S3, Sftp}
   alias KilnCMS.Backups.DestinationConfig.Fields
 
   @impl true
@@ -92,6 +107,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
        socket
        |> assign(:page_title, gettext("Backup destinations"))
        |> assign(:testing, MapSet.new())
+       |> assign(:host_keys, %{})
        |> assign(:env_test, nil)
        |> close_form()
        |> load()}
@@ -109,7 +125,8 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
       else: deny(socket)
   end
 
-  @events ~w(new pick edit cancel validate save toggle delete move test test_env)
+  @events ~w(new pick edit cancel validate save toggle delete move test test_env
+              scan_host_key match_host_key trust_host_key dismiss_host_key)
 
   # Every event asks again, whatever it is: see the moduledoc. An event this
   # page doesn't have falls to the catch-all every Kiln LiveView gets
@@ -134,6 +151,12 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
     else
       deny(socket)
     end
+  end
+
+  def handle_async({:host_key, id}, result, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket),
+      do: {:noreply, put_scan(socket, id, result)},
+      else: deny(socket)
   end
 
   def handle_async({:test, id}, result, socket) do
@@ -171,7 +194,10 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
         {:noreply, socket}
 
       adapter ->
-        params = %{"name" => "", "enabled" => "true", "prune" => "true", "settings" => %{}}
+        # An SFTP destination starts disabled: its host key is confirmed
+        # after it is saved (#2222).
+        enabled = if adapter.kind == Sftp.kind(), do: "false", else: "true"
+        params = %{"name" => "", "enabled" => enabled, "prune" => "true", "settings" => %{}}
         {:noreply, open_form(socket, :new, adapter.kind, adapter.fields, params)}
     end
   end
@@ -294,8 +320,120 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
     end
   end
 
+  # Single-flight per destination, as a Test (#2222).
+  defp event("scan_host_key", %{"id" => id}, socket) when is_binary(id),
+    do: scan_host_key(socket, id, nil)
+
+  defp event("match_host_key", %{"destination_id" => id, "fingerprint" => fingerprint}, socket)
+       when is_binary(id) and is_binary(fingerprint) do
+    if String.trim(fingerprint) == "",
+      do: {:noreply, socket},
+      else: scan_host_key(socket, id, String.slice(fingerprint, 0, 200))
+  end
+
+  # Only the id comes from the client: the key trusted is the one this
+  # page's own check found, kept here (see the moduledoc).
+  defp event("trust_host_key", %{"id" => id}, socket) when is_binary(id) do
+    case Map.get(socket.assigns.host_keys, id) do
+      {:scanned, scanned} -> with_destination(socket, id, &trust(socket, &1, scanned))
+      _nothing_checked -> {:noreply, socket}
+    end
+  end
+
+  defp event("dismiss_host_key", %{"id" => id}, socket) when is_binary(id),
+    do: {:noreply, update(socket, :host_keys, &Map.delete(&1, id))}
+
   # A mangled payload is a no-op (#764).
   defp event(_event, _params, socket), do: {:noreply, socket}
+
+  defp scan_host_key(socket, id, fingerprint) do
+    case Ecto.UUID.cast(id) do
+      {:ok, id} ->
+        if match?(:scanning, Map.get(socket.assigns.host_keys, id)),
+          do: {:noreply, socket},
+          else: with_destination(socket, id, &start_scan(socket, &1, fingerprint))
+
+      :error ->
+        {:noreply, put_flash(socket, :error, gone_flash())}
+    end
+  end
+
+  # `scan_destination_host_key/2` reads the row again as this admin, in the
+  # task, so a refusal there happens before any network I/O.
+  defp start_scan(socket, row, fingerprint) do
+    user = socket.assigns.current_user
+
+    {:noreply,
+     socket
+     |> update(:host_keys, &Map.put(&1, row.id, :scanning))
+     |> start_async({:host_key, row.id}, fn ->
+       {fingerprint,
+        Backups.scan_destination_host_key(row.id, actor: user, fingerprint: fingerprint)}
+     end)}
+  end
+
+  defp put_scan(socket, id, {:ok, {expected, {:ok, scanned}}}) do
+    how = if expected, do: :entered, else: :scanned
+    update(socket, :host_keys, &Map.put(&1, id, {:scanned, Map.put(scanned, :how, how)}))
+  end
+
+  defp put_scan(socket, id, {:ok, {_expected, {:error, reason}}}) do
+    update(socket, :host_keys, &Map.put(&1, id, {:failed, scan_error(reason)}))
+  end
+
+  defp put_scan(socket, id, {:exit, _reason}) do
+    update(
+      socket,
+      :host_keys,
+      &Map.put(&1, id, {:failed, gettext("The check didn't finish. Try again.")})
+    )
+  end
+
+  defp scan_error(:no_match),
+    do: gettext("The server presented no key with that fingerprint. Nothing was trusted.")
+
+  defp scan_error(:not_found), do: gone_flash()
+  defp scan_error(%Ash.Error.Forbidden{} = error), do: write_error(error)
+  defp scan_error(reason), do: Destination.format_reason(reason)
+
+  defp trust(socket, row, scanned) do
+    result =
+      Backups.trust_backup_destination_host_key(
+        row,
+        scanned.algorithm,
+        scanned.fingerprint,
+        scanned.how,
+        %{previous_fingerprint: scanned.previous_fingerprint, scanned_for: scanned.scanned_for},
+        write_opts(socket)
+      )
+
+    case result do
+      {:ok, _row} ->
+        {:noreply,
+         socket
+         |> update(:host_keys, &Map.delete(&1, row.id))
+         |> put_flash(:info, gettext("Host key trusted. The destination can be enabled now."))
+         |> load()}
+
+      {:error, error} ->
+        {:noreply,
+         socket
+         |> update(:host_keys, &Map.delete(&1, row.id))
+         |> put_flash(:error, trust_error(error))
+         |> load()}
+    end
+  end
+
+  defp trust_error(%Ash.Error.Invalid{} = error) do
+    if stale?(error),
+      do:
+        gettext(
+          "Another admin trusted a host key for this destination meanwhile. Nothing was saved; check it again."
+        ),
+      else: write_error(error)
+  end
+
+  defp trust_error(error), do: write_error(error)
 
   # The edit form's Save, of `row` as it is stored now. The form's own
   # `locked` fields are never read: where a destination writes is the
@@ -768,7 +906,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   # `kind` when Kiln's own adapter answers it, else nil.
   defp builtin_kind(kind) do
     case Destination.adapter(kind) do
-      {:ok, module} when module in [Local, Rclone, S3] -> kind
+      {:ok, module} when module in [Local, Rclone, S3, Sftp] -> kind
       _other -> nil
     end
   end
@@ -783,6 +921,12 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   defp builtin_label("s3", "path_style"), do: gettext("Path style")
   defp builtin_label("s3", "access_key_id"), do: gettext("Access key ID")
   defp builtin_label("s3", "secret_access_key"), do: gettext("Secret access key")
+  defp builtin_label("sftp", "host"), do: gettext("Host")
+  defp builtin_label("sftp", "port"), do: gettext("Port")
+  defp builtin_label("sftp", "username"), do: gettext("Username")
+  defp builtin_label("sftp", "path"), do: gettext("Path")
+  defp builtin_label("sftp", "password"), do: gettext("Password")
+  defp builtin_label("sftp", "private_key"), do: gettext("Private key")
   defp builtin_label(_kind, _name), do: nil
 
   # The help under a checkbox: the field's own, and for S3's Path style when
@@ -830,6 +974,9 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   defp location_text(%DestinationConfig{kind: "s3"} = row),
     do: S3.describe(%Kiln.BackupDestination.Config{kind: "s3", settings: row.settings || %{}})
 
+  defp location_text(%DestinationConfig{kind: "sftp"} = row),
+    do: Sftp.describe(%Kiln.BackupDestination.Config{kind: "sftp", settings: row.settings || %{}})
+
   defp location_text(_row), do: nil
 
   defp stamp(%DateTime{} = at), do: Calendar.strftime(at, "%Y-%m-%d %H:%M UTC")
@@ -854,6 +1001,15 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
 
   defp blocker_text(:destination_s3),
     do: gettext("an S3 destination can't be compared with it")
+
+  defp blocker_text(:destination_sftp),
+    do: gettext("an SFTP destination can't be compared with it")
+
+  defp blocker_text(:destination_overlap_possible_sftp),
+    do:
+      gettext(
+        "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server"
+      )
 
   defp blocker_text(:unreadable), do: gettext("the destinations couldn't be read")
   defp blocker_text(_other), do: gettext("it can't be pruned")
@@ -1049,6 +1205,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
               first?={index == 0}
               last?={index == length(@rows) - 1}
               testing?={MapSet.member?(@testing, row.id)}
+              host_key_state={Map.get(@host_keys, row.id)}
               blocker={Map.get(@blockers, row.id)}
               form_open?={@editing != nil}
               user={@current_user}
@@ -1078,6 +1235,10 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
 
   attr :form_open?, :boolean, required: true
   attr :user, :any, required: true
+
+  attr :host_key_state, :any,
+    default: nil,
+    doc: "an SFTP row's host key check: `:scanning`, `{:scanned, key}` or `{:failed, message}`"
 
   defp destination_row(assigns) do
     assigns =
@@ -1111,6 +1272,13 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
       <p :if={@location} data-role="location" class="font-mono text-xs text-base-content/70">
         {@location}
       </p>
+
+      <.host_key_panel
+        :if={@row.kind == "sftp"}
+        row={@row}
+        state={@host_key_state}
+        can_trust?={@can_update?}
+      />
 
       <p data-role="last-test" class="text-xs">
         <span :if={is_nil(@row.last_tested_at)} class="text-base-content/70">
@@ -1210,6 +1378,129 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
     """
   end
 
+  attr :row, DestinationConfig, required: true
+  attr :state, :any, required: true
+  attr :can_trust?, :boolean, required: true
+
+  # An SFTP row's host key (#2222): trusted or not, and the check's state.
+  # The fingerprint shown is what the server offered; trusting it sends only
+  # the row's id.
+  defp host_key_panel(assigns) do
+    ~H"""
+    <div
+      id={"host-key-#{@row.id}"}
+      data-role="host-key"
+      class="space-y-2 rounded-md border border-base-content/10 bg-base-200/40 p-3 text-xs"
+    >
+      <p :if={is_nil(@row.host_key)} data-role="host-key-unconfirmed" class="text-warning-ink">
+        <.icon name="hero-shield-exclamation" class="mr-1 size-4 align-text-bottom" />
+        {gettext("Host key not confirmed: nothing is sent to this server until it is.")}
+      </p>
+      <p :if={@row.host_key} data-role="host-key-trusted" class="text-base-content/80">
+        <.icon name="hero-shield-check" class="mr-1 size-4 align-text-bottom text-success-ink" />
+        {gettext("Trusted %{algorithm} key %{fingerprint}, since %{at}",
+          algorithm: @row.host_key["algorithm"],
+          fingerprint: @row.host_key["fingerprint"],
+          at: trusted_at(@row.host_key["trusted_at"])
+        )}
+      </p>
+
+      <%= case @state do %>
+        <% {:scanned, key} -> %>
+          <div data-role="host-key-scanned" class="space-y-1.5">
+            <p>
+              {gettext("The server offers this %{algorithm} key:", algorithm: key.algorithm)}
+            </p>
+            <p class="break-all font-mono text-sm" data-role="host-key-fingerprint">
+              {key.fingerprint}
+            </p>
+            <p class="text-base-content/70">
+              {gettext(
+                "Compare it with the server's own, e.g. ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub run on the server. Trust it only if they match."
+              )}
+            </p>
+            <div :if={@can_trust?} class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                phx-click="trust_host_key"
+                phx-value-id={@row.id}
+                phx-disable-with={gettext("Saving…")}
+                data-role="trust-host-key"
+                class="btn btn-sm btn-primary"
+              >
+                {gettext("Trust this key")}
+              </button>
+              <button
+                type="button"
+                phx-click="dismiss_host_key"
+                phx-value-id={@row.id}
+                class="btn btn-sm btn-ghost"
+              >
+                {gettext("Cancel")}
+              </button>
+            </div>
+          </div>
+        <% {:failed, message} -> %>
+          <p data-role="host-key-failed" class="text-error-ink">{message}</p>
+        <% _idle_or_scanning -> %>
+      <% end %>
+
+      <div :if={@can_trust? and not match?({:scanned, _}, @state)} class="space-y-2">
+        <button
+          type="button"
+          phx-click="scan_host_key"
+          phx-value-id={@row.id}
+          data-role="scan-host-key"
+          disabled={@state == :scanning}
+          aria-busy={@state == :scanning && "true"}
+          class="btn btn-sm btn-default"
+        >
+          <.icon
+            name="hero-finger-print"
+            class={["mr-1 size-4", @state == :scanning && "animate-pulse motion-reduce:animate-none"]}
+          />
+          {cond do
+            @state == :scanning -> gettext("Checking…")
+            @row.host_key -> gettext("Check again")
+            true -> gettext("Check host key")
+          end}
+        </button>
+        <form
+          id={"host-key-match-#{@row.id}"}
+          phx-submit="match_host_key"
+          class="flex flex-wrap items-end gap-2"
+        >
+          <input type="hidden" name="destination_id" value={@row.id} />
+          <div class="min-w-64 flex-1">
+            <.input
+              type="text"
+              name="fingerprint"
+              id={"host-key-expected-#{@row.id}"}
+              value=""
+              label={gettext("Or the fingerprint you expect")}
+              placeholder="SHA256:…"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <button type="submit" class="btn btn-sm btn-ghost" disabled={@state == :scanning}>
+            {gettext("Look for it")}
+          </button>
+        </form>
+      </div>
+    </div>
+    """
+  end
+
+  defp trusted_at(iso) when is_binary(iso) do
+    case DateTime.from_iso8601(iso) do
+      {:ok, at, _offset} -> stamp(at)
+      _invalid -> iso
+    end
+  end
+
+  defp trusted_at(_other), do: "—"
+
   attr :form, Phoenix.HTML.Form, required: true
   attr :editing, :any, required: true
   attr :kind, :string, required: true
@@ -1259,7 +1550,30 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
           <%= if field.type == :secret do %>
             <%!-- Never filled in by the server; `phx-update="ignore"` keeps
                   what the admin typed through a re-render (see moduledoc). --%>
-            <div id={"#{field_id(@editing, field.name)}-wrap"} phx-update="ignore">
+            <div
+              :if={multiline_secret?(@kind, field.name)}
+              id={"#{field_id(@editing, field.name)}-wrap"}
+              phx-update="ignore"
+            >
+              <.input
+                type="textarea"
+                name={"destination[secrets][#{field.name}]"}
+                id={field_id(@editing, field.name)}
+                value=""
+                rows="6"
+                autocomplete="off"
+                spellcheck="false"
+                class="w-full rounded-md border border-base-content/20 bg-base-100 px-3 py-2 font-mono text-xs"
+                label={field_label(@kind, field.name)}
+                required={field.required? and @editing == :new}
+                hint={secret_hint(field, @editing)}
+              />
+            </div>
+            <div
+              :if={not multiline_secret?(@kind, field.name)}
+              id={"#{field_id(@editing, field.name)}-wrap"}
+              phx-update="ignore"
+            >
               <.input
                 type="password"
                 name={"destination[secrets][#{field.name}]"}
@@ -1333,6 +1647,11 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
         <p :if={resumable?(@kind)} id="destination-resume-hint" class="text-xs text-base-content/70">
           {gettext("Uploads resume after an interruption.")}
         </p>
+        <p :if={@kind == "sftp"} id="destination-sftp-hint" class="text-xs text-base-content/70">
+          {gettext(
+            "An SFTP destination stays disabled until you confirm its host key, from its row once it is saved."
+          )}
+        </p>
         <p :if={@kind == "s3"} id="destination-s3-hint" class="text-xs text-base-content/70">
           {gettext(
             "Add a lifecycle rule to the bucket that aborts incomplete multipart uploads after a few days: Kiln aborts the uploads it recorded, but not one a crash left before it could record it."
@@ -1366,6 +1685,10 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
     </div>
     """
   end
+
+  # A pasted private key spans lines (#2222): Kiln's own SFTP field only,
+  # so no plugin's form changes.
+  defp multiline_secret?(kind, name), do: builtin_kind(kind) == "sftp" and name == "private_key"
 
   defp secret_hint(field, :new), do: field.help
 

@@ -62,6 +62,12 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Two S3 destinations on one bucket name now stop pruning.** If two S3 destinations name the same bucket with one prefix inside the other on different hosts, retention on both is skipped after the upgrade, with a notice on every pass, and their storage grows until you act. Give them prefixes side by side, or untick "Delete its old backups (retention)" on one of them.
+  ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap-upgrade))
+
+- **The destination kind `sftp` is now Kiln's own, and SFTP has its own private-host list.** A plugin destination of kind `sftp` is now answered by Kiln's adapter; delete such rows and add them again under **SFTP server**. List LAN SFTP servers in `BACKUP_SFTP_PRIVATE_HOSTS` (`BACKUP_S3_PRIVATE_HOSTS` doesn't count). Apply the `add_backup_destination_host_key` migration.
+  ([#3198](https://github.com/The-Verscienta/kiln_cms/pull/3198) · [long form](docs/changelog/unreleased.md#backup-sftp-destination-upgrade))
+
 - **Custom asset builds and overlay Dockerfiles that don't run `mix assets.deploy`: also run `mix esbuild kiln_public --minify` before `phx.digest`. Without it signed-out pages fall back to app.js and keep working. No migration; rolling back is safe.**
   ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle-upgrade))
 
@@ -76,6 +82,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/unreleased.md#plugin-health-tail-packages-unknown))
 
 ### Added
+
+- **Backups: a native SFTP destination.** Back up to any SSH server with a password or a key (Ed25519, ECDSA, RSA). A platform admin confirms the server's host key before it is used, and a changed key fails the destination and alerts platform admins. Uploads resume; retention and rescan work as for S3.
+  ([#3198](https://github.com/The-Verscienta/kiln_cms/pull/3198) · [long form](docs/changelog/unreleased.md#backup-sftp-destination))
 
 - **`/mcp` can read, create and update links between records: `read_content_links`, `create_content_link` and `update_content_link`, over the same payload-link actions as `/api/json/content-links`. Overlays that replace `:mcp_tools` must add them.**
   ([#3191](https://github.com/The-Verscienta/kiln_cms/pull/3191) · [long form](docs/changelog/unreleased.md#mcp-content-link-tools))
@@ -166,11 +175,6 @@ Every summary line below that was shortened links to its own entry there.
 
 - **phoenix_live_view 1.2.14 fixes EEF-CVE-2026-126334 (a LiveView joined without `"url"` skipped its `live_session` `on_mount` hooks); Kiln was not exposed, because `KilnCMSWeb.LiveRouteGuard` already refused those joins (#688).**
   ([#3190](https://github.com/The-Verscienta/kiln_cms/issues/3190) · [long form](docs/changelog/unreleased.md#liveview-url-less-join))
-
-### Upgrade notes
-
-- **Two S3 destinations on one bucket name now stop pruning.** If two S3 destinations name the same bucket with one prefix inside the other on different hosts, retention on both is skipped after the upgrade, with a notice on every pass, and their storage grows until you act. Give them prefixes side by side, or untick "Delete its old backups (retention)" on one of them.
-  ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap-upgrade))
 
 ## [1.11.0] - 2026-11-18
 

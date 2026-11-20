@@ -26,8 +26,10 @@ defmodule KilnCMS.Security.AlertDispatch do
       retention may prune it first; a delivery that cannot find it says less).
     * `threshold_count` — for `failed_sign_ins`, the count that crossed the
       threshold; the summary reports only when the window ended above it.
-    * `notice` — a notice's `change`, `kinds`, `endpoint_id` and `actor_id`.
-      Never an address, URL, token or email.
+    * `notice` — a notice's `change`, `kinds`, `endpoint_id` and `actor_id`;
+      for a `backup_host_key_changed` alert, whose event is in the instance
+      log its delivery doesn't read, the `destination` name (#2222). Never an
+      address, URL, token or email.
     * `alert_sent_at`, `summary_sent_at`, `failed_at` — delivery stamps.
     * `expires_at` — a day after the window ends; `:prune` deletes past it.
 

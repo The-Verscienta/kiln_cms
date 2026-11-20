@@ -1029,6 +1029,11 @@ msgstr "%{label} (regla %{rule})"
 msgid "%{label}: %{count} in this alert window"
 msgstr "%{label}: %{count} en este intervalo de alertas"
 
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "%{label}: %{destination}"
+msgstr "%{label}: %{destination}"
+
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{label}: %{message}"
@@ -1837,6 +1842,11 @@ msgstr "Hay una copia de seguridad en curso; esta empezará cuando termine."
 #, elixir-autogen, elixir-format
 msgid "A backup or another re-send is running. Re-send this backup once it finishes: a re-send is never queued."
 msgstr "Hay una copia de seguridad u otro reenvío en curso. Reenvía esta copia de seguridad cuando termine: un reenvío nunca se pone en cola."
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A backup server's host key changed"
+msgstr "La clave de host de un servidor de copias de seguridad ha cambiado"
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
@@ -3773,6 +3783,11 @@ msgstr "Una clave de API funciona sin contraseña ni segundo factor mientras sea
 msgid "An OpenAPI spec and a browsable API explorer"
 msgstr "Una especificación OpenAPI y un explorador de API navegable"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "An SFTP destination stays disabled until you confirm its host key, from its row once it is saved."
+msgstr "Un destino SFTP permanece desactivado hasta que confirmes su clave de host, desde su fila una vez guardado."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "An accordion is a heading editors open and close; a fieldset is always open; tabs show one section at a time, and every tab section of the type joins one tab set at the place of the first. Sections keep the order of their first field."
@@ -3964,6 +3979,11 @@ msgstr "Anuncie el contenido publicado en Bluesky o Mastodon. Conecte una cuenta
 #, elixir-autogen, elixir-format
 msgid "Announcements appear here after content is published."
 msgstr "Los anuncios aparecen aquí cuando se publica contenido."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Another admin trusted a host key for this destination meanwhile. Nothing was saved; check it again."
+msgstr "Otro administrador confió mientras tanto en una clave de host para este destino. No se guardó nada; vuelve a comprobarla."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -4779,6 +4799,16 @@ msgstr "Programación de copia de seguridad creada"
 msgid "Backup schedule deleted"
 msgstr "Programación de copia de seguridad eliminada"
 
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Backup server host key changed"
+msgstr "Clave de host del servidor de copias cambiada"
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Backup server host key trusted"
+msgstr "Clave de host del servidor de copias aprobada"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Backup started — this page updates when it finishes."
@@ -5523,6 +5553,7 @@ msgstr "Para cambiar este ajuste necesitas tu propio segundo factor, para que un
 msgid "Characters"
 msgstr "Caracteres"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
@@ -5538,6 +5569,11 @@ msgstr "Comprobación completada."
 #, elixir-autogen, elixir-format
 msgid "Check for near-duplicates at review"
 msgstr "Buscar casi duplicados al revisar"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Check host key"
+msgstr "Comprobar la clave de host"
 
 #: lib/kiln_cms_web/live/link_report_live.ex
 #: lib/kiln_cms_web/live/system_live.ex
@@ -6195,6 +6231,11 @@ msgstr "Comentarios — respuestas en hilos en los que participo, y cuando algui
 #, elixir-autogen, elixir-format
 msgid "Compare %{version}"
 msgstr "Comparar %{version}"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Compare it with the server's own, e.g. ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub run on the server. Trust it only if they match."
+msgstr "Compárala con la del propio servidor, p. ej. ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub ejecutado en el servidor. Confía en ella solo si coinciden."
 
 #: lib/kiln_cms_web/live/content_editor/inspector_history_component.ex
 #, elixir-autogen, elixir-format
@@ -11634,10 +11675,25 @@ msgstr "Contiene"
 msgid "Home"
 msgstr "Inicio"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Host"
+msgstr "Host"
+
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
 msgid "Host cron also backs up %{components} here, and this schedule keeps backups past BACKUP_KEEP_DAYS. Replace the host's scripts/backup.sh with this release's copy first: an older copy deletes them after BACKUP_KEEP_DAYS."
 msgstr "El cron del host también hace copias de %{components} aquí, y esta programación conserva copias más allá de BACKUP_KEEP_DAYS. Sustituya antes el scripts/backup.sh del host por el de esta versión: una copia anterior las elimina tras BACKUP_KEEP_DAYS."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Host key not confirmed: nothing is sent to this server until it is."
+msgstr "Clave de host sin confirmar: no se envía nada a este servidor hasta que lo esté."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Host key trusted. The destination can be enabled now."
+msgstr "Clave de host aprobada. Ya se puede activar el destino."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -13447,6 +13503,11 @@ msgstr "Logotipo"
 #, elixir-autogen, elixir-format
 msgid "Long slug — search engines and shared links favor short URLs (≤ 6 words)."
 msgstr "Slug largo: los motores de búsqueda y los enlaces compartidos favorecen las URL cortas (≤ 6 palabras)."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Look for it"
+msgstr "Buscarla"
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
@@ -16674,6 +16735,11 @@ msgstr "Opciones: una por línea"
 msgid "Or only these fields"
 msgstr "O solo estos campos"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Or the fingerprint you expect"
+msgstr "O la huella que esperas"
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Or type a name below to add one."
@@ -17001,6 +17067,7 @@ msgstr "Las llaves de acceso y la autenticación en dos pasos se gestionan en el
 msgid "Passphrase"
 msgstr "Frase de contraseña"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/invite_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -17457,6 +17524,7 @@ msgstr "Señala páginas relacionadas que vale la pena enlazar."
 msgid "Poor"
 msgstr "Deficiente"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Port"
@@ -17691,6 +17759,11 @@ msgstr "Bucket privado"
 #, elixir-autogen, elixir-format
 msgid "Private fields of %{type} they can read"
 msgstr "Campos privados de %{type} que pueden leer"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Private key"
+msgstr "Clave privada"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -23611,6 +23684,11 @@ msgstr "No se pudo registrar la campaña: compruebe los detalles."
 msgid "The change could not be saved."
 msgstr "No se pudo guardar el cambio."
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "The check didn't finish. Try again."
+msgstr "La comprobación no terminó. Inténtalo de nuevo."
+
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
 msgid "The check expired. Complete it again."
@@ -24290,10 +24368,20 @@ msgstr "La selección no es una lista de ids de contenido."
 msgid "The server allows at most %{percent}% here."
 msgstr "El servidor permite como máximo %{percent}% aquí."
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "The server offers this %{algorithm} key:"
+msgstr "El servidor ofrece esta clave %{algorithm}:"
+
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
 msgid "The server operator can turn checking on with %{variable}."
 msgstr "El operador del servidor puede activar la comprobación con %{variable}."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "The server presented no key with that fingerprint. Nothing was trusted."
+msgstr "El servidor no presentó ninguna clave con esa huella. No se aprobó nada."
 
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -26018,6 +26106,16 @@ msgstr "Trigramas"
 msgid "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
 msgstr "Trigramas: tres líneas por elemento — publicado abajo, traducido en medio, programado arriba; una línea continua significa sí. Pasa el cursor sobre uno para ver su lectura."
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Trust this key"
+msgstr "Confiar en esta clave"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Trusted %{algorithm} key %{fingerprint}, since %{at}"
+msgstr "Clave %{algorithm} aprobada %{fingerprint}, desde %{at}"
+
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "Try a query"
@@ -26859,6 +26957,7 @@ msgstr "Se usa cuando un editor deja este campo vacío."
 msgid "User"
 msgstr "Usuario"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -28778,6 +28877,11 @@ msgstr "también busca"
 msgid "an S3 destination can't be compared with it"
 msgstr "un destino S3 no se puede comparar con él"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "an SFTP destination can't be compared with it"
+msgstr "un destino SFTP no se puede comparar con él"
+
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format
 msgid "an admin"
@@ -28821,6 +28925,11 @@ msgstr "y %{count} más"
 #, elixir-autogen, elixir-format
 msgid "another S3 destination uses a bucket of the same name; the app can't tell whether it is the same store"
 msgstr "otro destino S3 usa un bucket con el mismo nombre; la aplicación no puede saber si es el mismo almacén"
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server"
+msgstr "otro destino SFTP usa una carpeta dentro o alrededor de la de este; la aplicación no puede saber si es el mismo servidor"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
