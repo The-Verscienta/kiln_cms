@@ -65,6 +65,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Custom asset builds and overlay Dockerfiles that don't run `mix assets.deploy`: also run `mix esbuild kiln_public --minify` before `phx.digest`. Without it signed-out pages fall back to app.js and keep working. No migration; rolling back is safe.**
   ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle-upgrade))
 
+### Breaking
+
+- **`/ws/gql` reads an `authorization` connect param under `Bearer` in any case: a lowercase valid JWT connects as its user, and lowercase garbage or a bare `Bearer` is refused (`403`) instead of connecting anonymously (#2632).**
+  ([long form](docs/changelog/unreleased.md#ws-gql-bearer-scheme-any-case))
+
 ### Added
 
 - **`GET /api/site`: a site's name, X (Twitter) handle and default share image for a headless front end's link previews, public and shared-cacheable, with a CDN purge on a Branding save that changes them.**
@@ -85,6 +90,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/unreleased.md#referrer-suppression-sweep))
 
 ### Fixed
+
+- **A valid `bearer`/`BEARER <jwt>` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing [1.9.0's `401`](docs/changelog/v1.9.0.md#bearer-401-hardening); `/mcp` and `POST /api/keys/rotate` take a `kiln_` key under any case or in a later `Authorization` value, and `/metrics` its token under any case (#2632).**
+  ([long form](docs/changelog/unreleased.md#bearer-scheme-any-case))
 
 - **Billing webhooks: recording an event and enqueueing its job are now one transaction, so a failure leaves nothing recorded and the provider's retry starts clean; redelivering an unfinished event re-enqueues it, and a worker that crashes or stalls is retried or reclaimed after 10 minutes.**
   ([long form](docs/changelog/unreleased.md#billing-webhook-lost-events))

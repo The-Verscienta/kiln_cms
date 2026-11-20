@@ -21,6 +21,35 @@ carries the reasoning.
   release that gains it later picks it up only after a restart. No
   migration and no configuration; rolling back is safe.
 
+## Breaking
+
+<a id="ws-gql-bearer-scheme-any-case"></a>
+
+- **`/ws/gql` reads an `authorization` connect param under a `Bearer` scheme in any case, so lowercase garbage and a bare `Bearer` are now refused instead of connecting anonymously (#2632).**
+  The GraphQL socket used to read an `Authorization` (or `authorization`)
+  connect param only when it started with exactly `Bearer `; any other
+  spelling was ignored and the socket connected as anonymous. It now reads
+  the scheme case-insensitively, as every HTTP surface does (see
+  [Fixed](#bearer-scheme-any-case)), which changes three answers:
+  - `bearer <valid jwt>` and `BEARER <valid jwt>` connect as the token's user
+    (they used to connect anonymously).
+  - `bearer <garbage>`, or an expired or revoked JWT under a lowercase
+    scheme, is refused like any token that does not verify: `connect/3`
+    answers `:error` and the handshake is a `403` (#2634). It used to connect
+    anonymously and read published content.
+  - A bare `Bearer` with no token, in any case, is refused too, matching the
+    `401` `/api` and `/gql` give it over HTTP. `Bearer` with no trailing space
+    used to connect anonymously.
+
+  The `token` connect param, which carries the JWT with no scheme, is
+  unchanged, as is a param under another scheme (`Basic …`), which still
+  connects anonymously. A client that sends a lowercase or empty bearer
+  should send a valid JWT or leave the param out.
+  `KILN_API_REJECT_INVALID_BEARER=false` still restores the anonymous connect
+  for a token that does not verify, and each refusal still emits
+  `[:kiln_cms, :api, :invalid_bearer]` with `surface: :graphql`. No migration;
+  rolling back restores the old reading.
+
 ## Added
 
 <a id="site-defaults-api"></a>
@@ -167,6 +196,50 @@ carries the reasoning.
   The "no all-hidden breakdown leaves a category a single value" rule (#2981) was found by a search run outside the suite, so a change to `referrer_sources/0` or to `KilnCMS.Analytics.suppress_referrer_group/1` had nothing wide to re-check against. The search is now in `test/kiln_cms/analytics/referrer_suppression_test.exs` behind the `slow_sweep` tag, which the default suite excludes. Run it with `mix test --only slow_sweep test/kiln_cms/analytics/referrer_suppression_test.exs` after touching either. It covers thresholds 2 to 20 with four, five and six categories, bounded at view totals of 40, 30 and 20; the original hand search went to 50, and the committed one does not re-run totals above these bounds. A second test in the sweep checks that the criterion can fail (three categories at a threshold of 3 still do). To let the sweep vary the number of categories, `suppress_referrer_group/2` takes an explicit category list; `/1` is `/2` over `referrer_sources/0`, and a default-suite test pins that. Nothing published changes: the dashboard and the export still call `/1`, and no setting or output differs. Operators have nothing to do. The decision record for the rule (ADR 0075) is on a separate open pull request.
 
 ## Fixed
+
+<a id="bearer-scheme-any-case"></a>
+
+- **A valid JWT under `bearer` or `BEARER` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing the 1.9.0 note that made it a `401` (#2632).**
+  An HTTP authentication scheme is case-insensitive (RFC 7235). Since 1.9.0
+  the bearer check matched it that way, but AshAuthentication's JWT loader
+  reads only the exact `Bearer ` spelling, so a valid `bearer <jwt>` loaded
+  no user and was refused as an invalid token. The
+  [1.9.0 Breaking note](v1.9.0.md#bearer-401-hardening) documented that
+  refusal as intended; it no longer applies. A new plug,
+  `KilnCMSWeb.Plugs.LoadFromBearer`, replaces `:load_from_bearer` on the
+  `:api`, `:graphql` and `:feed` pipelines: it hands the loader a copy of the
+  request with each bearer value rewritten to `Bearer <token>` and puts the
+  caller's `authorization` headers back afterwards, so nothing downstream sees
+  a rewrite. The same reading, `KilnCMSWeb.BearerAuth.parse/1` (scheme in any
+  case, surrounding whitespace and any run of whitespace after the scheme
+  tolerated), now serves every surface that takes a bearer:
+  - **`/api/*`, `/gql`, `/api/feed`.** `bearer <jwt>`, `BEARER <jwt>` and
+    `  bearer   <jwt>` authenticate as the token's user. A token that does not
+    verify (garbage, expired, revoked) and a bare `Bearer` are still a `401`
+    in any case, and API keys were already accepted under any case.
+  - **Held accounts.** Because a lowercase JWT now loads its user, an account
+    its site holds for a second factor gets the specific
+    `403 second_factor_required` answer (and the `second_factor_required`
+    telemetry event) instead of the generic `401 invalid_token`, or an
+    anonymous read with `KILN_API_REJECT_INVALID_BEARER=false`.
+  - **`/mcp`.** A `kiln_` key under a lowercase scheme, or in a later
+    `Authorization` value (after a proxy's own), now authenticates; both were
+    a `401`. The key is found as on `/api`: the first `kiln_` key in any value
+    decides. The pipeline's new `KilnCMSWeb.Plugs.RequireApiKey` does this; a
+    JWT, garbage or a bare `bearer` is still a `401`. A key accepted this way
+    is also remembered for the rate-limit alert
+    (`KilnCMSWeb.Plugs.RememberApiKey`).
+  - **`POST /api/keys/rotate`.** Same as `/mcp`: `bearer kiln_…`, or the key
+    in a second `Authorization` value, now rotates; both were a `401`.
+  - **`/metrics`.** With `KILN_METRICS_TOKEN` set, the token is accepted under
+    any case of the scheme, with surrounding whitespace trimmed. It must still
+    be the only `Authorization` value, and is still compared in constant time.
+  - **`/ws/gql`.** See [Breaking](#ws-gql-bearer-scheme-any-case): lowercase
+    garbage there is now refused rather than anonymous.
+
+  A client that sent `bearer <jwt>` and handled the `401` by
+  re-authenticating will now simply succeed. No migration and no
+  configuration; rolling back restores the 1.11.0 answers.
 
 <a id="billing-webhook-lost-events"></a>
 
