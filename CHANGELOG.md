@@ -68,7 +68,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Changed
 
 - **Search: when `query_budget` cuts a search, running sections get `cut_grace` (new, default 100 ms) to stop on their own before they are killed, so a query that finishes keeps its database connection; a cut search may answer up to that much later. New metrics `kiln_cms_search_budget_cut_returned`/`_killed`.**
-  ([long form](docs/changelog/unreleased.md#search-budget-cut-grace))
+  ([#3162](https://github.com/The-Verscienta/kiln_cms/pull/3162) · [long form](docs/changelog/unreleased.md#search-budget-cut-grace))
 
 - **The exhaustive referrer-suppression search (thresholds 2–20, four to six categories, totals up to 40/30/20) is now a `slow_sweep` test you can re-run; `suppress_referrer_group/2` takes an explicit category list, and published output is unchanged.**
   ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/unreleased.md#referrer-suppression-sweep))
