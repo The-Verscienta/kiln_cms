@@ -168,6 +168,30 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="invitation-keeps-legacy-tier"></a>
+
+- **Accepting an invitation to the default site at a lower tier no longer demotes an account that has no membership but a legacy editor or admin role (#2574).**
+  Such an account (created before site memberships; it shows as *legacy* on the
+  default site) was joined at the invited tier, so an editor invited as a
+  viewer became a viewer. Now its legacy tier is written to a default-site
+  membership first, with the audit event `role_granted` (`via: "legacy_carry"`),
+  its audiences, and a live temporary role with the same expiry, and the accept
+  reports the account as already a member (`:already_member`; the invitation is
+  used up and the page says nothing changed). An invitation at the same or a
+  higher tier is an ordinary join at the invited tier, with no carry row. Only
+  the standing role is protected: the comparison uses the account as re-read
+  under its lock, and a live temporary role is not counted. A custom role on a
+  swallowed lower-tier invitation is not applied (the account is reported as
+  already a member and `role_id` stays unset). New accounts created by an
+  invitation are unaffected. An admin's explicit **Add or invite** is unchanged
+  and still writes the tier picked, even below a legacy role. For operators: if
+  an editor or admin account was demoted this way before the fix, raise it
+  again on Team; nothing is migrated and rolling back is safe. Still open, as
+  #3178, #3179 and #3180: the console Add can still demote an unaffiliated legacy account,
+  approving a registration queued through site single sign-on can demote one
+  too, and a custom role on a swallowed invitation is not applied. See
+  [If the invitee is already a member](../account-administration.md#if-the-invitee-is-already-a-member).
+
 <a id="billing-webhook-lost-events"></a>
 
 - **A provider webhook can no longer be recorded without a job to process it (#2748).** The receiver inserted the event row and then enqueued its job as a second step, so a crash or enqueue failure between the two left a `received` row nothing would ever process, and the provider's redelivery was acked as a duplicate. Now `WebhookEvent`'s `:receive` inserts the row and the `WebhookWorker` job in one transaction: a `500` means nothing was recorded and the retry starts clean. A redelivery of a `received`, `failed` or stale `processing` event (claimed more than 10 minutes ago) re-enqueues its job and is then acked; a redelivery of a `processed` or `ignored` event, or of a freshly claimed one, is only acked. The worker has a 3-minute run timeout and rescues exceptions, exits and throws, so the event settles as `failed` and Oban retries. `:claim` can take over a `processing` event older than 10 minutes, in one atomic update. The job is unique on the event id while `available`, `scheduled` or `retryable`, but not `executing`: `Oban.Lifeline` rescues an orphaned executing job only after 180 minutes, and a redelivery must be able to enqueue meanwhile. A crash after the `200` is never redelivered by the provider; recovery there is the rescue, Oban's retry and the takeover. A taken-over event whose membership change had already committed appends a second `MembershipEvent` audit row; access is not granted twice, and ordering is #2749's. Still open, for the sweeper in #3159: a job that exhausts `max_attempts` leaves the event `failed`, a `processed` stamp that fails to save leaves it `processing`, and `received` rows recorded before this deploy have no job. No migration and no config. A rolling deploy is safe (an old node enqueues a non-unique job, which the claim catches), and rolling back is safe. See [Webhook delivery and recovery](../memberships.md#webhook-delivery-and-recovery).
