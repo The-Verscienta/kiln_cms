@@ -500,6 +500,28 @@ defmodule KilnCMS.Security.ApiKeyTripTest do
       tripped("api")
     end
 
+    # `RememberApiKey` reads the key the way `RequireApiKey` found it, so a
+    # lower-case scheme (#2632) is remembered too, and its refusal alerts.
+    test "/mcp, a key under a lower-case scheme", ctx do
+      limit(:api, 1)
+      ip = client_address()
+
+      lower = fn ->
+        ip
+        |> request(nil)
+        |> put_req_header("authorization", "bearer " <> ctx.secret)
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          "/mcp",
+          Jason.encode!(%{jsonrpc: "2.0", id: 1, method: "tools/list", params: %{}})
+        )
+      end
+
+      assert lower.().status == 200
+      assert lower.().status == 429
+      tripped("api")
+    end
+
     test "/api/media, where the key is already the actor", ctx do
       limit(:media_upload, 1)
       ip = client_address()

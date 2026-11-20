@@ -12,6 +12,7 @@ defmodule KilnCMSWeb.RejectInvalidBearerTest do
   import Ecto.Query, only: [from: 2]
 
   alias KilnCMS.Accounts
+  alias KilnCMS.SecondFactorFixtures
 
   @password "password123456"
   @accept "application/vnd.api+json"
@@ -183,10 +184,14 @@ defmodule KilnCMSWeb.RejectInvalidBearerTest do
       assert gql("Bearer").status == 401
     end
 
-    test "a valid JWT with a lower-case scheme is not served as an authenticated caller" do
-      # `:load_from_bearer` only reads the exact scheme, so it is refused rather
-      # than silently downgraded to anonymous.
-      assert_envelope(api_get("bearer " <> jwt(user(:editor))))
+    test "a valid JWT with a lower-case scheme authenticates (#2632)" do
+      editor = user(:editor)
+      conn = api_get("bearer " <> jwt(editor))
+
+      assert conn.status == 200
+      assert conn.assigns.current_user.id == editor.id
+      # The loader saw a normalized copy; the caller's header is untouched.
+      assert get_req_header(conn, "authorization") |> hd() |> String.starts_with?("bearer ")
     end
 
     test "every authorization value is checked" do
@@ -225,6 +230,167 @@ defmodule KilnCMSWeb.RejectInvalidBearerTest do
       assert content_type =~ "application/json"
 
       assert_envelope(api_get("Bearer junk"))
+    end
+  end
+
+  # RFC 7235: the scheme is case-insensitive. Each case below proves the
+  # caller was authenticated, not just answered: a draft is readable only by
+  # an editor (#2632).
+  describe "the bearer scheme in any case (#2632)" do
+    setup do
+      flag(true)
+      admin = user(:admin)
+      term = "schemecase#{System.unique_integer([:positive])}"
+
+      draft =
+        KilnCMS.CMS.create_post!(
+          %{title: "#{term} draft", slug: "scheme-#{System.unique_integer([:positive])}"},
+          actor: admin
+        )
+
+      %{editor: user(:editor), draft: draft, term: term}
+    end
+
+    defp api_get_path(path, authorization) do
+      build_conn()
+      |> put_req_header("accept", @accept)
+      |> then(
+        &if(authorization, do: put_req_header(&1, "authorization", authorization), else: &1)
+      )
+      |> get(path)
+    end
+
+    defp search_ids(authorization, term) do
+      conn =
+        build_conn()
+        |> put_req_header("content-type", "application/json")
+        |> then(
+          &if(authorization, do: put_req_header(&1, "authorization", authorization), else: &1)
+        )
+        |> post(
+          "/gql",
+          Jason.encode!(%{
+            query: "query($q:String!){ searchPosts(query:$q){ id } }",
+            variables: %{q: term}
+          })
+        )
+
+      assert conn.status == 200
+      Enum.map(Jason.decode!(conn.resp_body)["data"]["searchPosts"], & &1["id"])
+    end
+
+    test "JSON:API serves the editor's draft under bearer, BEARER and leading whitespace",
+         %{editor: editor, draft: draft} do
+      path = "/api/json/posts/#{draft.id}"
+      assert api_get_path(path, nil).status == 404
+
+      token = jwt(editor)
+
+      for value <- [
+            "Bearer " <> token,
+            "bearer " <> token,
+            "BEARER " <> token,
+            "  bearer   " <> token
+          ] do
+        conn = api_get_path(path, value)
+        assert conn.status == 200, "#{inspect(String.slice(value, 0, 10))} was not authenticated"
+        assert Jason.decode!(conn.resp_body)["data"]["id"] == draft.id
+      end
+    end
+
+    test "/gql answers as the editor under a lower-case scheme",
+         %{editor: editor, draft: draft, term: term} do
+      refute draft.id in search_ids(nil, term)
+      assert draft.id in search_ids("bearer " <> jwt(editor), term)
+      assert draft.id in search_ids("BEARER " <> jwt(editor), term)
+    end
+
+    test "/api/feed authenticates a lower-case JWT and refuses a bad one", %{editor: editor} do
+      feed = fn authorization ->
+        build_conn()
+        |> put_req_header("accept", "text/event-stream")
+        |> put_req_header("authorization", authorization)
+        |> head("/api/feed")
+      end
+
+      conn = feed.("bearer " <> jwt(editor))
+      assert conn.status == 200
+      assert conn.assigns.current_user.id == editor.id
+
+      assert feed.("bearer garbage").status == 401
+    end
+
+    test "a bad token under any case is still a 401" do
+      revoked_user = user(:editor)
+      revoked = jwt(revoked_user)
+      {:ok, %{"jti" => jti}} = AshAuthentication.Jwt.peek(revoked)
+      # Revoked: the token row its presence check needs is gone.
+      {1, _} = KilnCMS.Repo.delete_all(from(t in "tokens", where: t.jti == ^jti))
+
+      {:ok, expired, _} =
+        AshAuthentication.Jwt.token_for_user(user(:editor), %{}, token_lifetime: {-1, :minutes})
+
+      for value <- [
+            "bearer garbage",
+            "BEARER " <> expired,
+            "bearer " <> revoked,
+            "bearer",
+            "BEARER  "
+          ] do
+        assert_envelope(api_get(value))
+        assert_gql_error(gql(value))
+      end
+    end
+
+    test "a lower-case kiln_ key still authenticates; Basic stays anonymous", %{editor: editor} do
+      key =
+        editor.id
+        |> Accounts.mint_api_key!(
+          "k",
+          DateTime.add(DateTime.utc_now(), 7, :day),
+          %{access: :read},
+          actor: user(:admin)
+        )
+        |> Ash.Resource.get_metadata(:plaintext_api_key)
+
+      conn = api_get("bearer " <> key)
+      assert conn.status == 200
+      assert conn.assigns.current_user.id == editor.id
+
+      conn = api_get("Basic dXNlcjpwYXNz")
+      assert conn.status == 200
+      refute conn.assigns[:current_user]
+    end
+
+    # A lower-case JWT now loads its user, so an account its site holds for a
+    # second factor reaches `SecondFactorBearer` and gets its specific answer,
+    # not the generic `invalid_token` it got while the loader skipped it.
+    test "a held account's lower-case JWT is refused as second_factor_required" do
+      site = KilnCMS.OrgFixtures.org("scheme-held")
+      SecondFactorFixtures.policy_row!(site, :editors)
+      token = site |> SecondFactorFixtures.editor() |> SecondFactorFixtures.jwt()
+
+      test = self()
+      id = "scheme-held-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach_many(
+        id,
+        [[:kiln_cms, :api, :second_factor_required], [:kiln_cms, :api, :invalid_bearer]],
+        fn e, _m, meta, _ -> send(test, {e, meta}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(id) end)
+
+      conn =
+        build_conn()
+        |> org_conn(site)
+        |> put_req_header("authorization", "bearer " <> token)
+        |> get("/api/locales")
+
+      assert %{"errors" => [%{"code" => "second_factor_required"}]} = json_response(conn, 403)
+      assert_receive {[:kiln_cms, :api, :second_factor_required], _}
+      refute_receive {[:kiln_cms, :api, :invalid_bearer], _}
     end
   end
 
@@ -319,6 +485,8 @@ defmodule KilnCMSWeb.RejectInvalidBearerTest do
     test "silent for anonymous, valid and other-scheme requests" do
       api_get(nil)
       api_get("Bearer " <> jwt(user(:editor)))
+      api_get("bearer " <> jwt(user(:editor)))
+      api_get("BEARER " <> jwt(user(:editor)))
       api_get("Basic dXNlcjpwYXNz")
       refute_receive {@event, _, _}
     end

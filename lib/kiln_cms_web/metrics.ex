@@ -104,8 +104,11 @@ defmodule KilnCMSWeb.Metrics do
   defp authorized?(_conn, nil), do: true
 
   defp authorized?(conn, token) do
-    case get_req_header(conn, "authorization") do
-      ["Bearer " <> given] -> Plug.Crypto.secure_compare(given, token)
+    # One `authorization` value, the scheme in any case (#2632).
+    with [value] <- get_req_header(conn, "authorization"),
+         {:bearer, given} when is_binary(given) <- KilnCMSWeb.BearerAuth.parse(value) do
+      Plug.Crypto.secure_compare(given, token)
+    else
       _ -> false
     end
   end
