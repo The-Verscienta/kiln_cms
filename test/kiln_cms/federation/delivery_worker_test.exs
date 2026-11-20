@@ -202,4 +202,157 @@ defmodule KilnCMS.Federation.DeliveryWorkerTest do
 
     assert :ok = run(delivery, ctx.org_id)
   end
+
+  # #2753: one delivery stands for every follower at its inbox, so its outcome
+  # is recorded against all of them — and nobody else.
+  describe "a delivery to a shared inbox" do
+    @shared "https://shared.example/inbox"
+
+    setup ctx do
+      followers =
+        for name <- ~w(bob carol dave) do
+          uri = "https://shared.example/users/#{name}"
+
+          {:ok, follower} =
+            Federation.follow(uri, uri <> "/inbox", %{shared_inbox_uri: @shared},
+              authorize?: false,
+              tenant: ctx.org_id
+            )
+
+          follower
+        end
+
+      # The same instance followed from ANOTHER site: the same inbox URI, and
+      # none of this site's business. The test build's tenancy fails open, so
+      # only this shows a lost `tenant:`.
+      other = KilnCMS.OrgFixtures.org("fedshared")
+
+      {:ok, theirs} =
+        Federation.follow(
+          "https://shared.example/users/zed",
+          "https://shared.example/zed",
+          %{shared_inbox_uri: @shared},
+          authorize?: false,
+          tenant: other.id
+        )
+
+      # Everyone starts with a failure on the books, so a reset shows.
+      for follower <- [ctx.follower, theirs | followers] do
+        fail!(follower, follower.org_id)
+      end
+
+      %{shared: followers, theirs: theirs}
+    end
+
+    defp fail!(follower, org_id) do
+      Federation.record_follower_failure!(follower, authorize?: false, tenant: org_id)
+    end
+
+    defp shared_delivery(org_id, follower_id \\ nil) do
+      {:ok, delivery} =
+        Federation.create_federation_delivery(
+          %{
+            follower_id: follower_id,
+            inbox_uri: @shared,
+            activity_type: :create,
+            activity: %{"type" => "Create", "id" => "https://kiln.example/ap/activity/create/2"}
+          },
+          authorize?: false,
+          tenant: org_id
+        )
+
+      delivery
+    end
+
+    defp failures(follower) do
+      case Federation.get_follower(follower.id, authorize?: false, tenant: follower.org_id) do
+        {:ok, follower} -> follower.consecutive_failures
+        {:error, _gone} -> :dropped
+      end
+    end
+
+    defp delivered_at(follower) do
+      Federation.get_follower!(follower.id, authorize?: false, tenant: follower.org_id).last_delivered_at
+    end
+
+    test "a success resets every follower at the inbox, and only them", ctx do
+      Req.Test.stub(KilnCMS.Federation, fn conn -> Plug.Conn.send_resp(conn, 202, "") end)
+
+      assert :ok = run(shared_delivery(ctx.org_id), ctx.org_id)
+
+      for follower <- ctx.shared do
+        assert failures(follower) == 0
+        assert %DateTime{} = delivered_at(follower)
+      end
+
+      # A follower at a different inbox, and the other site's follower at this
+      # one, are untouched.
+      assert failures(ctx.follower) == 1
+      assert failures(ctx.theirs) == 1
+      assert delivered_at(ctx.theirs) == nil
+    end
+
+    test "an exhausted failure charges every follower at the inbox, and only them", ctx do
+      Req.Test.stub(KilnCMS.Federation, fn conn -> Plug.Conn.send_resp(conn, 500, "") end)
+
+      assert :ok = run(shared_delivery(ctx.org_id), ctx.org_id, attempt: 12, max_attempts: 12)
+
+      for follower <- ctx.shared, do: assert(failures(follower) == 2)
+      assert failures(ctx.follower) == 1
+      assert failures(ctx.theirs) == 1
+    end
+
+    test "a retryable failure charges nobody", ctx do
+      Req.Test.stub(KilnCMS.Federation, fn conn -> Plug.Conn.send_resp(conn, 500, "") end)
+
+      assert {:error, _} = run(shared_delivery(ctx.org_id), ctx.org_id, attempt: 1)
+
+      for follower <- ctx.shared, do: assert(failures(follower) == 1)
+    end
+
+    test "the failure that reaches the ceiling drops every follower at the inbox", ctx do
+      Req.Test.stub(KilnCMS.Federation, fn conn -> Plug.Conn.send_resp(conn, 500, "") end)
+
+      # One failure each from setup; take them to one short of the ceiling.
+      for follower <- ctx.shared,
+          _ <- 1..(Federation.drop_follower_after() - 2),
+          do: fail!(follower, ctx.org_id)
+
+      assert :ok = run(shared_delivery(ctx.org_id), ctx.org_id, attempt: 12, max_attempts: 12)
+
+      for follower <- ctx.shared, do: assert(failures(follower) == :dropped)
+      assert failures(ctx.follower) == 1
+      assert failures(ctx.theirs) == 1
+    end
+
+    # `follower_id` set means exactly that follower, even at a shared inbox:
+    # the row was written when the inbox had one follower, and someone who
+    # followed through it since was not part of that delivery's bookkeeping.
+    test "a named follower at a shared inbox is the only one recorded", ctx do
+      [bob | others] = ctx.shared
+      Req.Test.stub(KilnCMS.Federation, fn conn -> Plug.Conn.send_resp(conn, 500, "") end)
+
+      assert :ok =
+               run(shared_delivery(ctx.org_id, bob.id), ctx.org_id,
+                 attempt: 12,
+                 max_attempts: 12
+               )
+
+      assert failures(bob) == 2
+      for follower <- others, do: assert(failures(follower) == 1)
+    end
+
+    test "a named follower since dropped records nothing, and the delivery still settles",
+         ctx do
+      [bob | others] = ctx.shared
+      delivery = shared_delivery(ctx.org_id, bob.id)
+      Federation.destroy_follower!(bob, authorize?: false, tenant: ctx.org_id)
+      Req.Test.stub(KilnCMS.Federation, fn conn -> Plug.Conn.send_resp(conn, 202, "") end)
+
+      assert :ok = run(delivery, ctx.org_id)
+
+      assert reload(delivery, ctx.org_id).state == :delivered
+      for follower <- others, do: assert(failures(follower) == 1)
+    end
+  end
 end

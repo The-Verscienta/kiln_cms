@@ -11,9 +11,11 @@ defmodule KilnCMS.Federation.AnnounceTest do
   use Oban.Testing, repo: KilnCMS.Repo
 
   alias KilnCMS.CMS
+  alias KilnCMS.Federation
   alias KilnCMS.Federation.Announcer
   alias KilnCMS.Federation.AnnounceWorker
   alias KilnCMS.Federation.Delivery
+  alias KilnCMS.Federation.DeliveryWorker
   alias KilnCMS.Federation.Follower
   alias KilnCMS.Federation.SiteFederation
 
@@ -261,4 +263,193 @@ defmodule KilnCMS.Federation.AnnounceTest do
       refute_enqueued(worker: AnnounceWorker)
     end
   end
+
+  # #2753: a fan-out POSTs once per distinct inbox, not once per follower, and
+  # writes its rows and jobs all-or-nothing so a retry does not re-send.
+  describe "one delivery per inbox" do
+    @shared "https://shared.example/inbox"
+    @activity %{"type" => "Create", "id" => "https://kiln.example/ap/activity/create/1"}
+
+    defp follow!(org_id, host, name, shared \\ nil) do
+      uri = "https://#{host}/users/#{name}"
+
+      Federation.follow!(uri, uri <> "/inbox", %{shared_inbox_uri: shared},
+        authorize?: false,
+        tenant: org_id
+      )
+    end
+
+    defp row_at(org_id, inbox), do: Enum.filter(deliveries(org_id), &(&1.inbox_uri == inbox))
+
+    defp delivery_jobs, do: all_enqueued(worker: DeliveryWorker)
+
+    # The ledger rows and the jobs are one-to-one: every row has its job.
+    defp assert_one_job_per_row(org_id) do
+      row_ids = org_id |> deliveries() |> Enum.map(& &1.id) |> Enum.sort()
+      job_ids = delivery_jobs() |> Enum.map(& &1.args["delivery_id"]) |> Enum.sort()
+      assert job_ids == row_ids
+    end
+
+    test "followers sharing an inbox get one row and one job", %{actor: actor, org_id: org_id} do
+      for name <- ~w(bob carol dave), do: follow!(org_id, "shared.example", name, @shared)
+
+      assert :ok = announce(published_post(actor), "Create", org_id)
+
+      # The shared inbox once, with no single follower named — and the setup's
+      # personal-inbox follower beside it.
+      assert [shared] = row_at(org_id, @shared)
+      assert shared.follower_id == nil
+      assert length(deliveries(org_id)) == 2
+      assert length(delivery_jobs()) == 2
+      assert_one_job_per_row(org_id)
+    end
+
+    test "followers on personal inboxes keep a row each, naming the follower",
+         %{actor: actor, org_id: org_id} do
+      bob = follow!(org_id, "other.example", "bob")
+      [alice] = Federation.list_followers!(authorize?: false, tenant: org_id) |> without(bob)
+
+      assert :ok = announce(published_post(actor), "Create", org_id)
+
+      assert [%{follower_id: alice_id}] = row_at(org_id, @remote <> "/inbox")
+      assert alice_id == alice.id
+      assert [%{follower_id: bob_id}] = row_at(org_id, bob.inbox_uri)
+      assert bob_id == bob.id
+      assert_one_job_per_row(org_id)
+    end
+
+    test "shared and personal inboxes mixed: one row per distinct inbox",
+         %{actor: actor, org_id: org_id} do
+      for name <- ~w(bob carol dave), do: follow!(org_id, "shared.example", name, @shared)
+      follow!(org_id, "other.example", "erin")
+
+      assert :ok = announce(published_post(actor), "Create", org_id)
+
+      assert deliveries(org_id) |> Enum.map(& &1.inbox_uri) |> Enum.sort() ==
+               Enum.sort([@shared, @remote <> "/inbox", "https://other.example/users/erin/inbox"])
+
+      assert length(delivery_jobs()) == 3
+      assert_one_job_per_row(org_id)
+    end
+
+    test "an empty shared inbox is no shared inbox", %{actor: actor, org_id: org_id} do
+      bob = follow!(org_id, "blank.example", "bob", "")
+      carol = follow!(org_id, "blank.example", "carol", "")
+
+      assert :ok = announce(published_post(actor), "Create", org_id)
+
+      assert [%{follower_id: bob_id}] = row_at(org_id, bob.inbox_uri)
+      assert bob_id == bob.id
+      assert [%{follower_id: carol_id}] = row_at(org_id, carol.inbox_uri)
+      assert carol_id == carol.id
+      assert row_at(org_id, "") == []
+    end
+
+    # A group of one keeps the per-follower bookkeeping it always had, even
+    # when its one follower delivers through a shared inbox.
+    test "a shared inbox with one follower names that follower", %{actor: actor, org_id: org_id} do
+      bob = follow!(org_id, "shared.example", "bob", @shared)
+
+      assert :ok = announce(published_post(actor), "Create", org_id)
+
+      assert [%{follower_id: bob_id}] = row_at(org_id, @shared)
+      assert bob_id == bob.id
+    end
+
+    test "a blocked instance's shared inbox gets nothing", %{actor: actor, org_id: org_id} do
+      for name <- ~w(bob carol), do: follow!(org_id, "shared.example", name, @shared)
+
+      {:ok, _block} =
+        Federation.block_and_drop(:instance, "shared.example", nil, actor: actor, tenant: org_id)
+
+      assert :ok = announce(published_post(actor), "Create", org_id)
+
+      assert row_at(org_id, @shared) == []
+      assert [_alice] = deliveries(org_id)
+    end
+
+    # The failure lands on the LAST ledger batch, after earlier batches were
+    # written: without the transaction those rows would survive, and the
+    # worker's retry would queue their inboxes a second time.
+    test "a failure part-way leaves nothing behind, and the retry queues each inbox once",
+         %{actor: actor, org_id: org_id} do
+      follow!(org_id, "aaa.example", "bob")
+      broken = follow!(org_id, "zzz.example", "eve")
+
+      # An inbox the ledger's own URL limit refuses — no action can write one,
+      # so it is put there behind the actions' back.
+      KilnCMS.Repo.query!(
+        "UPDATE federation_followers SET inbox_uri = $1 WHERE id = $2",
+        [
+          "https://zzz.example/" <> String.duplicate("x", KilnCMS.Limits.url()),
+          Ecto.UUID.dump!(broken.id)
+        ]
+      )
+
+      post = published_post(actor)
+
+      # The job fails, so Oban retries it, and it leaves nothing behind.
+      assert {:error, _reason} = announce(post, "Create", org_id)
+      assert deliveries(org_id) == []
+      assert delivery_jobs() == []
+
+      # One row per batch, so two batches are written before the third fails.
+      assert {:error, %Ash.Error.Invalid{}} =
+               Federation.deliver_to_followers(@activity, :create, post.id, org_id, batch_size: 1)
+
+      assert deliveries(org_id) == []
+      assert delivery_jobs() == []
+
+      # Fixed, the retry queues each inbox exactly once.
+      Federation.destroy_follower!(broken, authorize?: false, tenant: org_id)
+      assert :ok = announce(post, "Create", org_id)
+
+      assert deliveries(org_id) |> Enum.map(& &1.inbox_uri) |> Enum.sort() ==
+               ["https://aaa.example/users/bob/inbox", @remote <> "/inbox"]
+
+      assert length(delivery_jobs()) == 2
+      assert_one_job_per_row(org_id)
+    end
+
+    # `Oban.insert_all` does not chunk, and one INSERT for a big site's fan-out
+    # would pass Postgres's parameter limit.
+    test "jobs are inserted in chunks, every one of them", %{org_id: org_id} do
+      follow!(org_id, "aaa.example", "bob")
+      follow!(org_id, "bbb.example", "carol")
+
+      test_pid = self()
+      handler = "fan-out-insert-all-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler,
+        [:oban, :engine, :insert_all_jobs, :stop],
+        fn _event, _measurements, _meta, _config -> send(test_pid, :insert_all) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      assert :ok = Federation.deliver_to_followers(@activity, :create, nil, org_id, batch_size: 2)
+
+      # Three inboxes in chunks of two: two inserts, three jobs.
+      assert_received :insert_all
+      assert_received :insert_all
+      refute_received :insert_all
+
+      assert length(delivery_jobs()) == 3
+      assert_one_job_per_row(org_id)
+    end
+
+    test "no deliverable followers writes nothing", %{org_id: org_id} do
+      org_id
+      |> then(&Federation.list_followers!(authorize?: false, tenant: &1))
+      |> Enum.each(&Federation.destroy_follower!(&1, authorize?: false, tenant: org_id))
+
+      assert :ok = Federation.deliver_to_followers(@activity, :create, nil, org_id)
+      assert deliveries(org_id) == []
+      assert delivery_jobs() == []
+    end
+  end
+
+  defp without(followers, %{id: id}), do: Enum.reject(followers, &(&1.id == id))
 end
