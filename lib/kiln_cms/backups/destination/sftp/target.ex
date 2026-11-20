@@ -101,6 +101,18 @@ defmodule KilnCMS.Backups.Destination.Sftp.Target do
     {:sftp, host, port, settings["username"] |> to_string() |> String.trim(), segments}
   end
 
+  @doc """
+  The server and login `settings` name: `%{"host", "port", "username"}`, as
+  `location/1` normalizes them. A host key is trusted for these
+  (`KilnCMS.Backups.scan_destination_host_key/2`): a scan of one never
+  vouches for another.
+  """
+  @spec server(map()) :: %{String.t() => String.t() | non_neg_integer()}
+  def server(settings) when is_map(settings) do
+    {:sftp, host, port, username, _segments} = location(settings)
+    %{"host" => host, "port" => port, "username" => username}
+  end
+
   @doc "The base directory, as an absolute path (`\"/\"` for none)."
   @spec base(t()) :: String.t()
   def base(%__MODULE__{segments: segments}), do: "/" <> Enum.join(segments, "/")

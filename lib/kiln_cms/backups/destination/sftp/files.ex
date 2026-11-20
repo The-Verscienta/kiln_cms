@@ -337,22 +337,36 @@ defmodule KilnCMS.Backups.Destination.Sftp.Files do
   end
 
   @doc """
-  Moves `from` over `to`. A server with `posix-rename@openssh.com` (OpenSSH)
-  replaces `to` in one step, which OTP uses when it is offered; one without
-  refuses an existing `to`, which is then removed (a regular file only) and
-  the rename made again.
+  Moves `from`, a file of `bytes` bytes, over `to`. A server with
+  `posix-rename@openssh.com` (OpenSSH) replaces `to` in one step, which OTP
+  uses when it is offered; one without refuses an existing `to`. `to` is
+  then removed (a regular file only) and the rename made again, but only
+  once `from` is checked to be still there, a regular file of `bytes`:
+  a refusal for any other reason (`from` gone or replaced) never costs the
+  file already in place.
   """
-  @spec rename(Session.t(), String.t(), String.t(), String.t()) :: :ok | {:error, term()}
-  def rename(session, from, to, what) do
+  @spec rename(Session.t(), String.t(), String.t(), non_neg_integer(), String.t()) ::
+          :ok | {:error, term()}
+  def rename(session, from, to, bytes, what) do
     case Session.sftp(session, :rename, [String.to_charlist(from), String.to_charlist(to)]) do
       :ok ->
         :ok
 
       {:error, reason} when reason in [:file_already_exists, :failure] ->
-        with :ok <- delete(session, to, what), do: rename_again(session, from, to, what)
+        with :ok <- still_whole(session, from, bytes, what, reason),
+             :ok <- delete(session, to, what),
+             do: rename_again(session, from, to, what)
 
       {:error, reason} ->
         {:error, Errors.op(:change, "moving #{what} into place", reason)}
+    end
+  end
+
+  defp still_whole(session, from, bytes, what, reason) do
+    case lstat(session, from, what) do
+      {:ok, %File.Stat{type: :regular, size: ^bytes}} -> :ok
+      {:error, _reason} = error -> error
+      _gone_or_changed -> {:error, Errors.op(:change, "moving #{what} into place", reason)}
     end
   end
 
@@ -360,6 +374,20 @@ defmodule KilnCMS.Backups.Destination.Sftp.Files do
     case Session.sftp(session, :rename, [String.to_charlist(from), String.to_charlist(to)]) do
       :ok -> :ok
       {:error, reason} -> {:error, Errors.op(:change, "moving #{what} into place", reason)}
+    end
+  end
+
+  @doc """
+  `:ok` unless `subdir` is a symbolic link (refused): checked before a file
+  in it is read, deleted or aborted. A missing subdirectory passes, and the
+  file's own check answers for it.
+  """
+  @spec subdir_not_linked(Session.t(), Target.t(), String.t()) :: :ok | {:error, term()}
+  def subdir_not_linked(session, target, subdir) do
+    case lstat(session, Target.dir(target, subdir), subdir) do
+      {:ok, %File.Stat{type: :symlink}} -> {:error, link(subdir)}
+      {:error, _reason} = error -> error
+      _dir_or_absent -> :ok
     end
   end
 

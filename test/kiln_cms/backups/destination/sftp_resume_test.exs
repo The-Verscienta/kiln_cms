@@ -194,6 +194,37 @@ defmodule KilnCMS.Backups.Destination.SftpResumeTest do
     assert File.ls!(dir(server)) == []
   end
 
+  test "superseded mid-upload: the recorded file is left for the attempt that took over", %{
+    server: server,
+    tmp_dir: tmp
+  } do
+    upload = Application.get_env(:kiln_cms, Upload, [])
+    Application.put_env(:kiln_cms, Upload, checkpoint_bytes: 256 * 1024)
+    on_exit(fn -> Application.put_env(:kiln_cms, Upload, upload) end)
+
+    file = local_file(tmp, 2 * @mib)
+    test = self()
+    {:ok, calls} = Agent.start_link(fn -> 0 end)
+
+    # The first save (the token) goes through; the first progress save
+    # finds a later attempt owning the upload.
+    resume = %Resume{
+      checkpoint: nil,
+      save: fn saved ->
+        send(test, {:saved, saved})
+
+        if Agent.get_and_update(calls, &{&1, &1 + 1}) == 0,
+          do: :ok,
+          else: {:error, :superseded}
+      end
+    }
+
+    assert {:error, :superseded} = Sftp.put(config(server), file, resume: resume)
+    assert [%{"token" => token} | _] = saves()
+    assert File.exists?(Path.join(dir(server), Upload.token_partial(@name, token)))
+    refute File.exists?(Path.join(dir(server), @name))
+  end
+
   test "stopping near the deadline saves the progress and says :deadline", %{
     server: server,
     tmp_dir: tmp

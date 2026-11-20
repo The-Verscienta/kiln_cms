@@ -401,16 +401,19 @@ defmodule KilnCMS.Backups do
        `trust_backup_destination_host_key/5`.
 
   Returns `{:ok, %{algorithm: type, fingerprint: fingerprint,
-  previous_fingerprint: stored_or_nil}}`, `{:error, :not_found}`,
-  `{:error, :not_sftp}`, `{:error, %Ash.Error.Forbidden{}}`, or the scan's
-  error.
+  previous_fingerprint: stored_or_nil, scanned_for: server}}`, where
+  `scanned_for` is the server and login the key was read from
+  (`Sftp.Target.server/1`), which trusting it must pass back;
+  `{:error, :not_found}`, `{:error, :not_sftp}`,
+  `{:error, %Ash.Error.Forbidden{}}`, or the scan's error.
   """
   @spec scan_destination_host_key(String.t(), keyword()) ::
           {:ok,
            %{
              algorithm: String.t(),
              fingerprint: String.t(),
-             previous_fingerprint: String.t() | nil
+             previous_fingerprint: String.t() | nil,
+             scanned_for: map()
            }}
           | {:error, term()}
   def scan_destination_host_key(id, opts) do
@@ -425,7 +428,8 @@ defmodule KilnCMS.Backups do
        %{
          algorithm: algorithm,
          fingerprint: fingerprint,
-         previous_fingerprint: (row.host_key || %{})["fingerprint"]
+         previous_fingerprint: (row.host_key || %{})["fingerprint"],
+         scanned_for: KilnCMS.Backups.Destination.Sftp.Target.server(row.settings)
        }}
     end
   end
@@ -437,7 +441,8 @@ defmodule KilnCMS.Backups do
          row,
          "ssh-ed25519",
          "SHA256:" <> String.duplicate("A", 43),
-         :scanned
+         :scanned,
+         %{scanned_for: %{}}
        ),
        do: :ok,
        else: {:error, Ash.Error.Forbidden.exception([])}

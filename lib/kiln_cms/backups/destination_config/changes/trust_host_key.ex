@@ -10,6 +10,10 @@ defmodule KilnCMS.Backups.DestinationConfig.Changes.TrustHostKey do
     * `how` says whether the admin trusted what a scan showed (`scanned`) or
       typed the fingerprint they expected (`entered`, which the server was
       scanned for too);
+    * `scanned_for`, the server and login the scan read the key from
+      (`Sftp.Target.server/1`), must still be the row's: a key read from one
+      server never vouches for another. (`:update` can't change them either:
+      they are where the destination writes, fixed once it is stored.)
     * a compare-and-swap on the stored fingerprint: the write matches the
       row only while its fingerprint is still `previous_fingerprint`, the
       one the admin saw when the scan began (`nil` for none), so two admins
@@ -20,7 +24,7 @@ defmodule KilnCMS.Backups.DestinationConfig.Changes.TrustHostKey do
 
   require Ash.Expr
 
-  alias KilnCMS.Backups.Destination.Sftp.HostKey
+  alias KilnCMS.Backups.Destination.Sftp.{HostKey, Target}
 
   @impl true
   def change(changeset, _opts, _context) do
@@ -46,6 +50,13 @@ defmodule KilnCMS.Backups.DestinationConfig.Changes.TrustHostKey do
         Ash.Changeset.add_error(changeset,
           field: :fingerprint,
           message: "must be a SHA256 fingerprint, as ssh-keygen -lf prints it"
+        )
+
+      Ash.Changeset.get_argument(changeset, :scanned_for) !=
+          Target.server(changeset.data.settings || %{}) ->
+        Ash.Changeset.add_error(changeset,
+          field: :scanned_for,
+          message: "the key was read from another server or login than this destination's"
         )
 
       true ->

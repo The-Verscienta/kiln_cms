@@ -65,7 +65,10 @@ defmodule KilnCMS.Backups.Destination.SftpHostKeyTest do
       scanned.algorithm,
       scanned.fingerprint,
       :scanned,
-      %{previous_fingerprint: previous},
+      %{
+        previous_fingerprint: previous,
+        scanned_for: Map.get(scanned, :scanned_for, Sftp.Target.server(row.settings))
+      },
       actor: actor
     )
   end
@@ -123,6 +126,56 @@ defmodule KilnCMS.Backups.Destination.SftpHostKeyTest do
 
       assert {:error, error} = Backups.create_backup_destination(inner, actor: admin)
       assert Exception.message(error) =~ "another destination"
+    end
+  end
+
+  describe "the server a key is trusted for" do
+    test "an update can't move the destination to another host, port or login", %{
+      server: server,
+      admin: admin
+    } do
+      row = create!(server, admin)
+
+      for {field, value} <- [
+            {"host", "127.0.0.2"},
+            {"port", server.port + 1},
+            {"username", "other"}
+          ] do
+        assert {:error, error} =
+                 Backups.update_backup_destination(
+                   row,
+                   %{settings: Map.put(row.settings, field, value)},
+                   actor: admin
+                 )
+
+        assert Exception.message(error) =~ "where a destination writes can't be changed",
+               field
+      end
+    end
+
+    test "a key read from another server or login is refused", %{server: server, admin: admin} do
+      row = create!(server, admin)
+      {:ok, scanned} = Backups.scan_destination_host_key(row.id, actor: admin)
+
+      assert scanned.scanned_for == %{
+               "host" => "127.0.0.1",
+               "port" => server.port,
+               "username" => "kiln"
+             }
+
+      for other <- [
+            %{scanned.scanned_for | "port" => server.port + 1},
+            %{scanned.scanned_for | "username" => "root"},
+            %{scanned.scanned_for | "host" => "10.0.0.5"}
+          ] do
+        assert {:error, %Ash.Error.Invalid{} = error} =
+                 trust(row, %{scanned | scanned_for: other}, admin)
+
+        assert Exception.message(error) =~ "another server or login"
+      end
+
+      assert Backups.get_backup_destination!(row.id, actor: admin).host_key == nil
+      assert {:ok, _} = trust(row, scanned, admin)
     end
   end
 

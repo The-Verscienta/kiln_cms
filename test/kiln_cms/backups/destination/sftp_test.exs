@@ -226,10 +226,40 @@ defmodule KilnCMS.Backups.Destination.SftpTest do
                "trusted_fingerprint" => trusted
              }
 
-      assert %{rows: [[1]]} =
+      assert %{rows: [[1, notice]]} =
                KilnCMS.Repo.query!(
-                 "SELECT count(*)::int FROM security_alert_dispatches WHERE kind = 'backup_host_key_changed' AND channel = 'platform'"
+                 "SELECT count(*)::int, max(notice::text) FROM security_alert_dispatches WHERE kind = 'backup_host_key_changed' AND channel = 'platform'"
                )
+
+      # The alert names the destination, and links to the instance log,
+      # where its event is.
+      assert Jason.decode!(notice) == %{"destination" => row.name}
+
+      [raw] =
+        Enum.filter(
+          KilnCMS.Test.SecurityAlerts.dispatches(),
+          &(&1["kind"] == "backup_host_key_changed")
+        )
+
+      dispatch = %KilnCMS.Security.AlertDispatch{
+        id: raw["id"],
+        scope: raw["scope"],
+        kind: raw["kind"],
+        channel: :platform,
+        org_id: raw["org_id"],
+        window_index: raw["window_index"],
+        window_started_at: utc(raw["window_started_at"]),
+        window_ends_at: utc(raw["window_ends_at"]),
+        notice: raw["notice"],
+        inserted_at: utc(raw["inserted_at"])
+      }
+
+      %{data: data} = KilnCMS.Security.Changes.DeliverAlert.build_plan(dispatch, :alert)
+      assert data.console_url =~ "/editor/instance-security-log"
+      assert data.destination == row.name
+
+      assert KilnCMS.Security.AlertText.headline(KilnCMS.Security.AlertText.details(data)) ==
+               "A backup server's host key changed: #{row.name}"
     end
 
     test "a mismatch refuses even when the connection would ask a person", %{server: server} do
@@ -313,7 +343,21 @@ defmodule KilnCMS.Backups.Destination.SftpTest do
       assert message =~ "symbolic link"
       assert {:error, {:permanent, _}} = Sftp.put(config, local_file(tmp, @db, 10), [])
       assert {:error, {:permanent, _}} = Sftp.delete(config, %{subdir: "db", name: @db})
-      assert File.ls!(elsewhere) == []
+
+      # Reading a file, or aborting an upload, through the link is refused too.
+      File.write!(Path.join(elsewhere, @db), "not yours")
+      partial = Path.join(elsewhere, @db <> ".0123456789abcdef.partial")
+      File.write!(partial, "not yours")
+
+      assert {:error, {:permanent, message}} =
+               Sftp.get(config, %{subdir: "db", name: @db}, Path.join(tmp, "x"))
+
+      assert message =~ "symbolic link"
+
+      upload = %{subdir: "db", name: @db, checkpoint: %{"token" => "0123456789abcdef"}}
+      assert {:error, {:permanent, _}} = Sftp.abort_upload(config, upload, [])
+      assert File.exists?(partial)
+      refute File.exists?(Path.join(tmp, "x"))
     end
 
     test "a linked backup file is left out of the listing, and not read or deleted", %{
@@ -342,6 +386,76 @@ defmodule KilnCMS.Backups.Destination.SftpTest do
 
       assert :ok = Sftp.put(config(server), local_file(tmp, @db, 10), [])
       assert File.exists?(Path.join([real, "kiln/db", @db]))
+    end
+  end
+
+  describe "the rename into place" do
+    test "the file in place is removed only when the new one is still there, whole", %{
+      server: server
+    } do
+      dir = remote(server, "db")
+      File.mkdir_p!(dir)
+      File.write!(Path.join(dir, @db), "old")
+      File.write!(Path.join(dir, "x.partial"), "12345")
+
+      target = %Target{
+        host: "127.0.0.1",
+        port: server.port,
+        username: "kiln",
+        segments: ["backups", "kiln"]
+      }
+
+      {:ok, credentials} =
+        Credentials.from_secrets("kiln", %{"password" => SftpServer.password()})
+
+      {:ok, session} = Session.open(target, credentials, {server.type, server.fingerprint})
+
+      try do
+        from = "/backups/kiln/db/x.partial"
+        to = "/backups/kiln/db/" <> @db
+
+        # Not the size it was written at: the old file stays.
+        assert {:error, _} = Files.rename(session, from, to, 10, "db/" <> @db)
+        assert File.read!(Path.join(dir, @db)) == "old"
+
+        # Gone: the old file stays.
+        assert {:error, _} =
+                 Files.rename(session, "/backups/kiln/db/missing", to, 5, "db/" <> @db)
+
+        assert File.read!(Path.join(dir, @db)) == "old"
+
+        # Whole: replaced, on a server without posix-rename.
+        assert :ok = Files.rename(session, from, to, 5, "db/" <> @db)
+        assert File.read!(Path.join(dir, @db)) == "12345"
+      after
+        Session.close(session)
+      end
+    end
+  end
+
+  describe "a connection lost after the host key checked out" do
+    @tag server: [drop_on_login: true]
+    test "is worth retrying, and the recorded upload is kept", %{server: server, tmp_dir: tmp} do
+      file = local_file(tmp, @db, 1000)
+      token = "0123456789abcdef"
+      dir = remote(server, "db")
+      File.mkdir_p!(dir)
+      partial = Path.join(dir, @db <> "." <> token <> ".partial")
+      File.write!(partial, "half")
+
+      test = self()
+
+      resume = %Kiln.BackupDestination.Resume{
+        checkpoint: %{"token" => token, "bytes_done" => 4},
+        save: fn saved ->
+          send(test, {:saved, saved})
+          :ok
+        end
+      }
+
+      assert {:error, reason} = Sftp.put(config(server), file, resume: resume)
+      refute Destination.permanent?(reason)
+      assert File.read!(partial) == "half"
     end
   end
 
@@ -398,6 +512,9 @@ defmodule KilnCMS.Backups.Destination.SftpTest do
       end
     end
   end
+
+  # A raw row's timestamps are naive UTC.
+  defp utc(%NaiveDateTime{} = at), do: DateTime.from_naive!(at, "Etc/UTC")
 
   defp active_connections, do: Supervisor.count_children(:sshc_sup).active
 

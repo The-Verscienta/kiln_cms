@@ -24,6 +24,7 @@ defmodule KilnCMS.Backups.Destination.Sftp.HostKeyAlert do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.ThrottleStore
   alias KilnCMS.Backups
+  alias KilnCMS.Backups.Redact
   alias KilnCMS.Repo
   alias KilnCMS.Security.{AlertGate, Alerts, Recorder}
 
@@ -71,7 +72,7 @@ defmodule KilnCMS.Backups.Destination.Sftp.HostKeyAlert do
                metadata: metadata
              ) do
           {:ok, event} ->
-            alert()
+            alert(metadata["name"])
             event
 
           {:error, error} ->
@@ -90,10 +91,14 @@ defmodule KilnCMS.Backups.Destination.Sftp.HostKeyAlert do
 
   # In the event's transaction, as `KilnCMS.Security.Changes.RaiseAlert`
   # claims one: a rolled-back event leaves no alert. The event lives in the
-  # instance log, which an alert's delivery doesn't read, so none is named.
-  defp alert do
+  # instance log, which an alert's delivery doesn't read, so none is named;
+  # the destination's name rides on the claim instead, and the alert links
+  # to the instance log.
+  defp alert(name) do
     if Alerts.enabled?() do
-      AlertGate.claim("platform", kind(), :platform, Accounts.default_org_id(), nil)
+      AlertGate.claim("platform", kind(), :platform, Accounts.default_org_id(), nil,
+        details: if(is_binary(name), do: %{"destination" => Redact.text(name)}, else: %{})
+      )
     end
 
     :ok

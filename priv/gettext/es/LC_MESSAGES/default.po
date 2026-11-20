@@ -1029,6 +1029,11 @@ msgstr "%{label} (regla %{rule})"
 msgid "%{label}: %{count} in this alert window"
 msgstr "%{label}: %{count} en este intervalo de alertas"
 
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "%{label}: %{destination}"
+msgstr "%{label}: %{destination}"
+
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{label}: %{message}"

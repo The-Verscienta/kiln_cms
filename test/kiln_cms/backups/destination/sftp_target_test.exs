@@ -267,6 +267,29 @@ defmodule KilnCMS.Backups.Destination.SftpTargetTest do
     end
   end
 
+  test "after the host key checked out, only a refused login is permanent" do
+    fp = "SHA256:" <> String.duplicate("a", 43)
+    offered = {"ssh-ed25519", fp}
+    mode = {:verify, "ssh-ed25519", fp}
+
+    assert Errors.connect_reason(
+             ~c"Unable to connect using the available authentication methods",
+             offered,
+             mode
+           ) == {:permanent, "the server refused the username and credentials"}
+
+    for reason <- [:timeout, :closed, ~c"Connection closed", {:exit, :boom}] do
+      assert is_binary(Errors.connect_reason(reason, offered, mode)), inspect(reason)
+    end
+
+    assert {:host_key_mismatch, "ssh-ed25519", _} =
+             Errors.connect_reason(
+               :closed,
+               {"ssh-ed25519", "SHA256:" <> String.duplicate("b", 43)},
+               mode
+             )
+  end
+
   test "server text is never repeated in an error" do
     assert Errors.connect_reason(~c"Banner: evil text authentication", nil, {:verify, "t", "f"}) ==
              {:permanent, "the server refused the username and credentials"}

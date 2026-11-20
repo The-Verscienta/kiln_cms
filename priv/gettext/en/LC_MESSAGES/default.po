@@ -1029,6 +1029,11 @@ msgstr ""
 msgid "%{label}: %{count} in this alert window"
 msgstr ""
 
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "%{label}: %{destination}"
+msgstr ""
+
 #: lib/kiln_cms_web/components/block_components.ex
 #, elixir-autogen, elixir-format
 msgid "%{label}: %{message}"

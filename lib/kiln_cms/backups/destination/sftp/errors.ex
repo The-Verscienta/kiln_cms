@@ -40,9 +40,13 @@ defmodule KilnCMS.Backups.Destination.Sftp.Errors do
   host key the server presented, when it got that far.
   """
   @spec connect_reason(term(), {String.t(), String.t()} | nil, tuple()) :: term()
-  def connect_reason(_reason, {type, fingerprint}, {:verify, trusted_type, trusted}) do
+  # The key checked out: what failed after it is classified as any other
+  # failure, so a connection dropped or timed out mid-login stays worth
+  # retrying (and a recorded upload is kept, ADR 0068); only a refused login
+  # is permanent.
+  def connect_reason(reason, {type, fingerprint}, {:verify, trusted_type, trusted} = mode) do
     if type == trusted_type and HostKey.same?(fingerprint, trusted),
-      do: {:permanent, "the server refused the username and credentials"},
+      do: connect_reason(reason, nil, mode),
       else: {:host_key_mismatch, type, fingerprint}
   end
 

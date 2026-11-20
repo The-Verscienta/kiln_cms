@@ -173,17 +173,16 @@ defmodule KilnCMS.Backups.Destination.Sftp do
 
   defp download(session, target, subdir, name, to) do
     path = Target.file(target, subdir, name)
-    with {:ok, _digest} <- Files.download(session, path, to, "#{subdir}/#{name}"), do: :ok
+
+    with :ok <- Files.subdir_not_linked(session, target, subdir),
+         {:ok, _digest} <- Files.download(session, path, to, "#{subdir}/#{name}"),
+         do: :ok
   end
 
   # A linked subdirectory is refused before the file in it is looked at.
   defp delete_file(session, target, subdir, name) do
-    case Files.lstat(session, Target.dir(target, subdir), subdir) do
-      {:ok, %File.Stat{type: :symlink}} ->
-        {:error, Files.link(subdir)}
-
-      _dir_or_absent ->
-        Files.delete(session, Target.file(target, subdir, name), "#{subdir}/#{name}")
+    with :ok <- Files.subdir_not_linked(session, target, subdir) do
+      Files.delete(session, Target.file(target, subdir, name), "#{subdir}/#{name}")
     end
   end
 

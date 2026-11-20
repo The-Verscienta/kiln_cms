@@ -403,7 +403,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
         scanned.algorithm,
         scanned.fingerprint,
         scanned.how,
-        %{previous_fingerprint: scanned.previous_fingerprint},
+        %{previous_fingerprint: scanned.previous_fingerprint, scanned_for: scanned.scanned_for},
         write_opts(socket)
       )
 

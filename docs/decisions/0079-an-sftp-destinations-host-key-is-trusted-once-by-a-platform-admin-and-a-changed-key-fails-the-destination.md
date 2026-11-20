@@ -45,7 +45,10 @@ settings, so the edit form and `:update` can't touch it; only
 the backup pipeline included), audited as
 `backup_destination_host_key_trusted` with the fingerprint it replaced. The
 write is a compare-and-swap on the stored fingerprint, so two admins
-trusting different keys at once can't overwrite each other unseen.
+trusting different keys at once can't overwrite each other unseen, and it
+names the host, port and login the key was read from, which must still be
+the row's (they are where the destination writes, so `:update` can't change
+them either): a key read from one server never vouches for another.
 
 **Until a key is trusted, nothing is sent.** A new SFTP destination is saved
 disabled, the validation refuses enabling it while `host_key` is empty, and
@@ -75,7 +78,10 @@ event.** The call answers `{:permanent, "the server's host key changed
 `backup_destination_host_key_mismatch` (name, kind, both fingerprints, no
 actor: it is the server's act), and every platform admin gets the platform
 alert `backup_host_key_changed` through the existing alert dispatch
-(`KilnCMS.Security.AlertGate`, claimed in the event's transaction). At most
+(`KilnCMS.Security.AlertGate`, claimed in the event's transaction). The
+alert's delivery reads only the site log, so the claim carries the
+destination's name itself, and the alert links to the instance security
+log, where its event is. At most
 one event and alert per destination per hour, cluster-wide: the first call
 to see the mismatch claims it with `ThrottleStore.hit/5` and a limit of
 one, the claim-first shape `ScannerGuard` uses, so a retrying step or a
@@ -114,7 +120,9 @@ Writes are at most 128 KiB and reads loop on short answers (OpenSSH's
 with up to 16 writes in flight. The rename into place uses
 `posix-rename@openssh.com` when the server offers it (OTP does so on its
 own); a server without it refuses an existing target, which is then
-removed and the rename made again. A step's own temporary files are swept by
+removed and the rename made again, but only once the temporary file is seen
+to be still there at its full size: a refusal for any other reason never
+costs the file already in place. A step's own temporary files are swept by
 later puts; a token's are removed only by `abort_upload/3`, which only
 Kiln's upload sweep calls.
 

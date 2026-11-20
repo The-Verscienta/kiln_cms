@@ -91,7 +91,10 @@ defmodule KilnCMS.Backups.Destination.Sftp.Upload do
           :ok | {:error, term()}
   def abort(session, target, subdir, name, token) do
     partial = token_partial(name, token)
-    Files.delete(session, Target.file(target, subdir, partial), "#{subdir}/#{partial}")
+
+    with :ok <- Files.subdir_not_linked(session, target, subdir) do
+      Files.delete(session, Target.file(target, subdir, partial), "#{subdir}/#{partial}")
+    end
   end
 
   ## Already there
@@ -197,12 +200,11 @@ defmodule KilnCMS.Backups.Destination.Sftp.Upload do
     with :ok <- save(ctx, 0),
          :absent <- taken(ctx, partial),
          {:ok, handle} <- Files.open(ctx.session, partial, [:write, :binary], partial_name(ctx)) do
-      case write(ctx, handle, 0) do
-        :ok -> finish(ctx)
-        {:error, :deadline} = deadline -> deadline
-        {:error, :superseded} = superseded -> discard(ctx, superseded)
-        {:error, _reason} = error -> error
-      end
+      # Recorded under its token already, whatever stops it: `:deadline`,
+      # an error, or `:superseded` (the attempt that took over may resume
+      # this very file, as S3 leaves its multipart upload), so the file is
+      # kept for the record to resume or abort.
+      with :ok <- write(ctx, handle, 0), do: finish(ctx)
     end
   end
 
@@ -383,7 +385,7 @@ defmodule KilnCMS.Backups.Destination.Sftp.Upload do
   defp checkpoint(ctx, state) do
     acked = acked(state)
 
-    if acked - state.saved >= @checkpoint_bytes or now() - state.saved_at >= @checkpoint_ms do
+    if acked - state.saved >= checkpoint_bytes() or now() - state.saved_at >= @checkpoint_ms do
       case save(ctx, acked) do
         :ok -> {:ok, %{state | saved: acked, saved_at: now()}}
         {:error, _reason} = error -> error
@@ -391,6 +393,14 @@ defmodule KilnCMS.Backups.Destination.Sftp.Upload do
     else
       {:ok, state}
     end
+  end
+
+  # `config :kiln_cms, KilnCMS.Backups.Destination.Sftp.Upload,
+  # checkpoint_bytes:` — tests only, to save progress within a small file.
+  defp checkpoint_bytes do
+    :kiln_cms
+    |> Application.get_env(__MODULE__, [])
+    |> Keyword.get(:checkpoint_bytes, @checkpoint_bytes)
   end
 
   defp near_deadline?(%{deadline: nil}), do: false
@@ -415,7 +425,13 @@ defmodule KilnCMS.Backups.Destination.Sftp.Upload do
   defp finish(ctx) do
     with :ok <- whole(ctx),
          :ok <- ctx.holds.() do
-      Files.rename(ctx.session, ctx.partial, ctx.dest, "#{ctx.file.subdir}/#{ctx.file.name}")
+      Files.rename(
+        ctx.session,
+        ctx.partial,
+        ctx.dest,
+        ctx.file.bytes,
+        "#{ctx.file.subdir}/#{ctx.file.name}"
+      )
     end
   end
 

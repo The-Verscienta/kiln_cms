@@ -189,6 +189,11 @@ defmodule KilnCMS.Backups.DestinationConfig do
       argument :how, :atom, allow_nil?: false, constraints: [one_of: [:scanned, :entered]]
       argument :previous_fingerprint, :string
 
+      # The server and login the key was read from
+      # (`Sftp.Target.server/1` at scan time): refused unless the row still
+      # names them.
+      argument :scanned_for, :map, allow_nil?: false
+
       change Changes.TrustHostKey
       change Changes.KeepUpdatedAt
 

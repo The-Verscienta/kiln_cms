@@ -128,7 +128,8 @@ defmodule KilnCMS.Test.SftpServer do
   Starts a server for the calling test. Options: `:host_key` (a private key;
   a fresh Ed25519 one by default), `:root` (a fresh temporary directory by
   default), `:write_delay_ms` (a pause in every write, to hold an upload
-  mid-file). Returns a map: `daemon`, `port`, `root`, `host_key`, `type`,
+  mid-file), `:drop_on_login` (the server's side of the connection dies when
+  a password is checked, after the host key was). Returns a map: `daemon`, `port`, `root`, `host_key`, `type`,
   `fingerprint`, and `client_key`, the PEM of a key the server authorizes.
   """
   def start!(opts \\ []) do
@@ -140,8 +141,12 @@ defmodule KilnCMS.Test.SftpServer do
     root = Keyword.get_lazy(opts, :root, &tmp_dir/0)
     system_dir = tmp_dir()
 
+    drop? = Keyword.get(opts, :drop_on_login, false)
+
     pwdfun = fn user, password ->
       send(test, {:sftp_auth, :password, to_string(user)})
+      # The connection dropped mid-login, after the key exchange.
+      if drop?, do: Process.exit(self(), :kill)
       to_string(user) == @user and to_string(password) == @password
     end
 
