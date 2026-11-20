@@ -505,6 +505,10 @@ defmodule KilnCMSWeb.OpenApi do
               }
             },
             401 => error_response("An invalid credential (API key or bearer token)"),
+            404 => %OpenApiSpex.Response{
+              description: "No site serves this host (strict host matching)"
+            },
+            429 => %OpenApiSpex.Response{description: "Rate limited — see `Retry-After`"},
             503 =>
               error_response(
                 "The site's branding could not be read (`temporarily_unavailable`) — " <>

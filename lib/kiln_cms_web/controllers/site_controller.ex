@@ -29,6 +29,12 @@ defmodule KilnCMSWeb.SiteController do
   branding row that cannot be read is a `503` with `Retry-After`, never the
   stock defaults (`KilnCMS.Branding.fetch_for_org/1`): a CDN would otherwise
   show a branded site's previews under Kiln's name for a minute.
+
+  Only a branding save purges. A change that alters the answer without one —
+  the operator's `SITE_NAME` or `:branding` config on a deploy, or a site's
+  domain or slug (which moves an absolutized `social_image_url`) — shows once
+  the cached copy expires: at most `max-age` plus `stale-while-revalidate`,
+  about two minutes.
   """
   use KilnCMSWeb, :controller
 

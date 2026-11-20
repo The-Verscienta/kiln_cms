@@ -33822,6 +33822,12 @@
             },
             "description": "An invalid credential (API key or bearer token)"
           },
+          "404": {
+            "description": "No site serves this host (strict host matching)"
+          },
+          "429": {
+            "description": "Rate limited — see `Retry-After`"
+          },
           "503": {
             "content": {
               "application/json": {
