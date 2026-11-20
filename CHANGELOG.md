@@ -60,6 +60,11 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **`GET /api/security/plugin-health`: each installed plugin's health as JSON for monitoring, read from the server's cache and never asking hex.pm; platform administrators only, behind the host site's admin allowlist.**
+  ([#3135](https://github.com/The-Verscienta/kiln_cms/pull/3135) · [long form](docs/changelog/unreleased.md#plugin-health-api))
+
 ### Changed
 
 - **The exhaustive referrer-suppression search (thresholds 2–20, four to six categories, totals up to 40/30/20) is now a `slow_sweep` test you can re-run; `suppress_referrer_group/2` takes an explicit category list, and published output is unchanged.**
@@ -69,6 +74,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Backups: two S3 destinations that name one bucket through different hosts (AWS global vs regional, R2 jurisdiction hosts, a MinIO by name and by IP) no longer both prune it; neither does, and the Destinations badge says why.**
   ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap))
+
+- **Choosing "join" again on a tier you already hold no longer demotes an `active`, `past_due` or `comped` membership to `incomplete`; the member is sent to `/account` with a notice instead, and no second checkout is opened.**
+  ([long form](docs/changelog/unreleased.md#billing-recheckout-keeps-live-membership))
 
 - **Experiments: a second Start, Conclude or Archive from a stale page or struct is refused instead of overwriting the first (the console reloads with a notice; `mix kiln.experiment conclude` reports the error instead of crashing), and a test now fails when any state machine transition lacks a from-state filter.**
   ([#3133](https://github.com/The-Verscienta/kiln_cms/pull/3133) · [long form](docs/changelog/unreleased.md#experiment-transition-compare-and-swap))

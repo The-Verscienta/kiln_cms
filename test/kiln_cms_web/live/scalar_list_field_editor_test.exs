@@ -69,7 +69,7 @@ defmodule KilnCMSWeb.ScalarListFieldEditorTest do
     })
 
     define!(admin, %{
-      name: "event_dates",
+      name: "slfe_event_dates",
       label: "Event dates",
       field_type: :date,
       multiple: true,
@@ -101,7 +101,7 @@ defmodule KilnCMSWeb.ScalarListFieldEditorTest do
           slug: "slfe-#{System.unique_integer([:positive])}",
           custom_fields: %{
             "scores" => [3],
-            "event_dates" => ["2026-03-01", "2026-05-01"],
+            "slfe_event_dates" => ["2026-03-01", "2026-05-01"],
             "slots" => ["2026-03-01T10:00:00"],
             "homepage" => "https://example.com"
           }
@@ -139,13 +139,17 @@ defmodule KilnCMSWeb.ScalarListFieldEditorTest do
                ~s(#{item("scores", 0)}[type=number][name="form[custom_fields][scores][]"][value="3"])
              )
 
-      assert has_element?(ctx.lv, ~s(#{item("event_dates", 1)}[type=date][value="2026-05-01"]))
+      assert has_element?(
+               ctx.lv,
+               ~s(#{item("slfe_event_dates", 1)}[type=date][value="2026-05-01"])
+             )
+
       assert has_element?(ctx.lv, ~s(#{item("slots", 0)}[type=datetime-local]))
-      refute has_element?(ctx.lv, "#{item("event_dates", 0)}[required]")
+      refute has_element?(ctx.lv, "#{item("slfe_event_dates", 0)}[required]")
 
       assert has_element?(
                ctx.lv,
-               ~s(#custom-field-event_dates-items[phx-hook=Sortable][data-sort-event=list_item_reorder])
+               ~s(#custom-field-slfe_event_dates-items[phx-hook=Sortable][data-sort-event=list_item_reorder])
              )
     end
 
@@ -159,10 +163,10 @@ defmodule KilnCMSWeb.ScalarListFieldEditorTest do
 
       assert has_element?(
                ctx.lv,
-               ~s(#custom-field-event_dates-entry[type=date][phx-hook=TermPicker][data-split=none])
+               ~s(#custom-field-slfe_event_dates-entry[type=date][phx-hook=TermPicker][data-split=none])
              )
 
-      assert has_element?(ctx.lv, "#custom-field-event_dates-add[data-list-add]", "Add")
+      assert has_element?(ctx.lv, "#custom-field-slfe_event_dates-add[data-list-add]", "Add")
 
       assert has_element?(
                ctx.lv,
@@ -192,11 +196,11 @@ defmodule KilnCMSWeb.ScalarListFieldEditorTest do
       add(ctx.lv, "scores", "3")
       assert item_value(ctx.lv, "scores", 1) == "3"
 
-      add(ctx.lv, "event_dates", "2026-03-01")
-      refute has_element?(ctx.lv, item("event_dates", 2))
+      add(ctx.lv, "slfe_event_dates", "2026-03-01")
+      refute has_element?(ctx.lv, item("slfe_event_dates", 2))
 
-      add(ctx.lv, "event_dates", "2026-07-04")
-      assert item_value(ctx.lv, "event_dates", 2) == "2026-07-04"
+      add(ctx.lv, "slfe_event_dates", "2026-07-04")
+      assert item_value(ctx.lv, "slfe_event_dates", 2) == "2026-07-04"
     end
 
     test "a repeat is judged as the list stores it", ctx do
@@ -221,49 +225,55 @@ defmodule KilnCMSWeb.ScalarListFieldEditorTest do
     end
 
     test "removes and reorders; an order that is no permutation changes nothing", ctx do
-      add(ctx.lv, "event_dates", "2026-07-04")
+      add(ctx.lv, "slfe_event_dates", "2026-07-04")
 
       ctx.lv
-      |> element("#custom-field-event_dates-items")
-      |> render_hook("list_item_reorder", %{"field" => "event_dates", "order" => ["2", "0"]})
+      |> element("#custom-field-slfe_event_dates-items")
+      |> render_hook("list_item_reorder", %{"field" => "slfe_event_dates", "order" => ["2", "0"]})
 
-      assert item_value(ctx.lv, "event_dates", 0) == "2026-03-01"
-
-      ctx.lv
-      |> element("#custom-field-event_dates-items")
-      |> render_hook("list_item_reorder", %{"field" => "event_dates", "order" => ["2", "0", "1"]})
-
-      assert item_value(ctx.lv, "event_dates", 0) == "2026-07-04"
-      assert item_value(ctx.lv, "event_dates", 1) == "2026-03-01"
+      assert item_value(ctx.lv, "slfe_event_dates", 0) == "2026-03-01"
 
       ctx.lv
-      |> element("#cf-item-event_dates-1 button[phx-click=list_item_remove]")
+      |> element("#custom-field-slfe_event_dates-items")
+      |> render_hook("list_item_reorder", %{
+        "field" => "slfe_event_dates",
+        "order" => ["2", "0", "1"]
+      })
+
+      assert item_value(ctx.lv, "slfe_event_dates", 0) == "2026-07-04"
+      assert item_value(ctx.lv, "slfe_event_dates", 1) == "2026-03-01"
+
+      ctx.lv
+      |> element("#cf-item-slfe_event_dates-1 button[phx-click=list_item_remove]")
       |> render_click()
 
-      assert item_value(ctx.lv, "event_dates", 1) == "2026-05-01"
-      refute has_element?(ctx.lv, item("event_dates", 2))
+      assert item_value(ctx.lv, "slfe_event_dates", 1) == "2026-05-01"
+      refute has_element?(ctx.lv, item("slfe_event_dates", 2))
     end
 
     test "an item that is not a date is shown and named by the field's error", ctx do
-      html = add(ctx.lv, "event_dates", "someday")
+      html = add(ctx.lv, "slfe_event_dates", "someday")
 
-      assert item_value(ctx.lv, "event_dates", 2) == "someday"
+      assert item_value(ctx.lv, "slfe_event_dates", 2) == "someday"
       assert html =~ "item 3 must be a date"
     end
 
     test "saves the list JSON-native, in screen order", ctx do
       add(ctx.lv, "scores", "3")
-      add(ctx.lv, "event_dates", "2026-07-04")
+      add(ctx.lv, "slfe_event_dates", "2026-07-04")
 
       ctx.lv
-      |> element("#custom-field-event_dates-items")
-      |> render_hook("list_item_reorder", %{"field" => "event_dates", "order" => ["2", "0", "1"]})
+      |> element("#custom-field-slfe_event_dates-items")
+      |> render_hook("list_item_reorder", %{
+        "field" => "slfe_event_dates",
+        "order" => ["2", "0", "1"]
+      })
 
       ctx.lv |> form("#page-editor") |> render_submit()
 
       assert %{
                "scores" => [3, 3],
-               "event_dates" => ["2026-07-04", "2026-03-01", "2026-05-01"]
+               "slfe_event_dates" => ["2026-07-04", "2026-03-01", "2026-05-01"]
              } = stored(ctx)
     end
   end
@@ -283,16 +293,24 @@ defmodule KilnCMSWeb.ScalarListFieldEditorTest do
     end
 
     test "renders read-only, and its list events change nothing", ctx do
-      assert has_element?(ctx.lv, "#cf-read-only-event_dates")
+      assert has_element?(ctx.lv, "#cf-read-only-slfe_event_dates")
 
-      render_hook(ctx.lv, "list_item_add", %{"field" => "event_dates", "item" => "2026-07-04"})
-      refute has_element?(ctx.lv, item("event_dates", 2))
+      render_hook(ctx.lv, "list_item_add", %{
+        "field" => "slfe_event_dates",
+        "item" => "2026-07-04"
+      })
 
-      render_hook(ctx.lv, "list_item_remove", %{"field" => "event_dates", "index" => "0"})
-      assert item_value(ctx.lv, "event_dates", 0) == "2026-03-01"
+      refute has_element?(ctx.lv, item("slfe_event_dates", 2))
 
-      render_hook(ctx.lv, "list_item_reorder", %{"field" => "event_dates", "order" => ["1", "0"]})
-      assert item_value(ctx.lv, "event_dates", 0) == "2026-03-01"
+      render_hook(ctx.lv, "list_item_remove", %{"field" => "slfe_event_dates", "index" => "0"})
+      assert item_value(ctx.lv, "slfe_event_dates", 0) == "2026-03-01"
+
+      render_hook(ctx.lv, "list_item_reorder", %{
+        "field" => "slfe_event_dates",
+        "order" => ["1", "0"]
+      })
+
+      assert item_value(ctx.lv, "slfe_event_dates", 0) == "2026-03-01"
     end
 
     test "a granted list field still takes its events", ctx do

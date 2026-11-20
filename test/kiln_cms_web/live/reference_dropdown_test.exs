@@ -65,7 +65,7 @@ defmodule KilnCMSWeb.ReferenceDropdownTest do
         %{
           content_type: :post,
           name: name,
-          label: String.capitalize(name),
+          label: String.capitalize(String.replace_prefix(name, "rd_", "")),
           field_type: :reference,
           target_type: "page",
           widget: "dropdown"
@@ -78,7 +78,7 @@ defmodule KilnCMSWeb.ReferenceDropdownTest do
 
   setup do
     admin = authed_user(:admin)
-    field!(admin, "hero")
+    field!(admin, "rd_hero")
 
     word = "Dahlia#{uniq()}"
     published = page!("#{word} Alpha", admin, publish: true)
@@ -124,14 +124,14 @@ defmodule KilnCMSWeb.ReferenceDropdownTest do
 
     assert has_element?(
              lv,
-             ~s(select#{select("hero")}[name="_kiln_ref_pick[hero]"][aria-labelledby="custom-field-hero-label"])
+             ~s(select#{select("rd_hero")}[name="_kiln_ref_pick[rd_hero]"][aria-labelledby="custom-field-rd_hero-label"])
            )
 
-    refute has_element?(lv, "#custom-field-hero-search")
+    refute has_element?(lv, "#custom-field-rd_hero-search")
     # The value input is the picker's own, as with the search.
-    assert single_value(lv, "hero") == [""]
+    assert single_value(lv, "rd_hero") == [""]
 
-    values = option_values(lv, "hero")
+    values = option_values(lv, "rd_hero")
     assert List.first(values) == ""
     assert ctx.published.id in values
     assert ctx.draft.id in values
@@ -139,37 +139,37 @@ defmodule KilnCMSWeb.ReferenceDropdownTest do
     assert Enum.find_index(values, &(&1 == ctx.published.id)) <
              Enum.find_index(values, &(&1 == ctx.draft.id))
 
-    choose(lv, "hero", ctx.draft.id)
+    choose(lv, "rd_hero", ctx.draft.id)
 
-    assert single_value(lv, "hero") == [ctx.draft.id]
-    assert has_element?(lv, "#cf-ref-hero-#{ctx.draft.id}", "Draft")
-    assert has_element?(lv, "#{select("hero")} option[value='#{ctx.draft.id}'][selected]")
+    assert single_value(lv, "rd_hero") == [ctx.draft.id]
+    assert has_element?(lv, "#cf-ref-rd_hero-#{ctx.draft.id}", "Draft")
+    assert has_element?(lv, "#{select("rd_hero")} option[value='#{ctx.draft.id}'][selected]")
 
     save(lv)
-    assert stored(ctx.post, ctx.admin)["hero"]["id"] == ctx.draft.id
+    assert stored(ctx.post, ctx.admin)["rd_hero"]["id"] == ctx.draft.id
 
     # Another choice replaces it; "— None —" clears it.
-    choose(lv, "hero", ctx.published.id)
-    assert single_value(lv, "hero") == [ctx.published.id]
+    choose(lv, "rd_hero", ctx.published.id)
+    assert single_value(lv, "rd_hero") == [ctx.published.id]
     save(lv)
-    assert stored(ctx.post, ctx.admin)["hero"]["id"] == ctx.published.id
+    assert stored(ctx.post, ctx.admin)["rd_hero"]["id"] == ctx.published.id
 
-    choose(lv, "hero", "")
-    assert single_value(lv, "hero") == [""]
+    choose(lv, "rd_hero", "")
+    assert single_value(lv, "rd_hero") == [""]
     save(lv)
-    refute stored(ctx.post, ctx.admin)["hero"]
+    refute stored(ctx.post, ctx.admin)["rd_hero"]
   end
 
   test "lists only what the editor can read, and a hand-sent id changes nothing", ctx do
     restricted = authed_user(:editor, %{readable_types: ["post"]})
     lv = open_editor(ctx.conn, restricted, ctx.post)
 
-    values = option_values(lv, "hero")
+    values = option_values(lv, "rd_hero")
     assert ctx.published.id in values
     refute ctx.draft.id in values
 
-    choose(lv, "hero", ctx.draft.id)
-    assert single_value(lv, "hero") == [""]
+    choose(lv, "rd_hero", ctx.draft.id)
+    assert single_value(lv, "rd_hero") == [""]
   end
 
   test "never lists a record of another site", ctx do
@@ -189,36 +189,36 @@ defmodule KilnCMSWeb.ReferenceDropdownTest do
     {:ok, _} = CMS.publish_page(elsewhere, %{}, actor: ctx.admin, tenant: org)
 
     lv = open_editor(ctx.conn, ctx.admin, ctx.post)
-    values = option_values(lv, "hero")
+    values = option_values(lv, "rd_hero")
 
     assert ctx.published.id in values
     refute elsewhere.id in values
 
-    choose(lv, "hero", elsewhere.id)
-    assert single_value(lv, "hero") == [""]
+    choose(lv, "rd_hero", elsewhere.id)
+    assert single_value(lv, "rd_hero") == [""]
   end
 
   test "keeps the current pick as an option, even one the editor can't read", ctx do
     post =
-      CMS.update_post!(ctx.post, %{custom_fields: %{"hero" => ctx.draft.id}}, actor: ctx.admin)
+      CMS.update_post!(ctx.post, %{custom_fields: %{"rd_hero" => ctx.draft.id}}, actor: ctx.admin)
 
     lv = open_editor(ctx.conn, ctx.admin, post)
-    assert has_element?(lv, "#{select("hero")} option[value='#{ctx.draft.id}'][selected]")
+    assert has_element?(lv, "#{select("rd_hero")} option[value='#{ctx.draft.id}'][selected]")
 
     restricted = authed_user(:editor, %{readable_types: ["post"]})
     lv = open_editor(ctx.conn, restricted, post)
 
-    assert single_value(lv, "hero") == [ctx.draft.id]
+    assert single_value(lv, "rd_hero") == [ctx.draft.id]
 
     assert has_element?(
              lv,
-             "#{select("hero")} option[value='#{ctx.draft.id}'][selected]",
+             "#{select("rd_hero")} option[value='#{ctx.draft.id}'][selected]",
              "Unavailable"
            )
 
     # Saving untouched keeps it.
     save(lv)
-    assert stored(post, ctx.admin)["hero"]["id"] == ctx.draft.id
+    assert stored(post, ctx.admin)["rd_hero"]["id"] == ctx.draft.id
   end
 
   test "a target full under max_sources is listed, disabled, and can't be chosen", ctx do
@@ -250,33 +250,38 @@ defmodule KilnCMSWeb.ReferenceDropdownTest do
 
     lv = open_editor(ctx.conn, ctx.admin, ctx.post)
 
-    refute has_element?(lv, select("hero"))
-    assert has_element?(lv, "#custom-field-hero-search[role=combobox]")
-    assert has_element?(lv, "#custom-field-hero-too-many", "Too many to list — search instead.")
+    refute has_element?(lv, select("rd_hero"))
+    assert has_element?(lv, "#custom-field-rd_hero-search[role=combobox]")
+
+    assert has_element?(
+             lv,
+             "#custom-field-rd_hero-too-many",
+             "Too many to list — search instead."
+           )
   end
 
   test "Add new leaves the new record picked, and shown in the select", ctx do
     lv = open_editor(ctx.conn, ctx.admin, ctx.post)
 
-    lv |> element("#custom-field-hero-new-page") |> render_click()
+    lv |> element("#custom-field-rd_hero-new-page") |> render_click()
 
     lv
-    |> element("#custom-field-hero-new-form-title")
-    |> render_change(%{"_kiln_ref_new" => %{"hero" => %{"title" => "#{ctx.word} Fresh"}}})
+    |> element("#custom-field-rd_hero-new-form-title")
+    |> render_change(%{"_kiln_ref_new" => %{"rd_hero" => %{"title" => "#{ctx.word} Fresh"}}})
 
-    lv |> element("#custom-field-hero-new-form-submit") |> render_click()
+    lv |> element("#custom-field-rd_hero-new-form-submit") |> render_click()
 
     [created] = CMS.list_pages!(actor: ctx.admin, query: [filter: [title: "#{ctx.word} Fresh"]])
-    assert single_value(lv, "hero") == [created.id]
+    assert single_value(lv, "rd_hero") == [created.id]
 
     assert has_element?(
              lv,
-             "#{select("hero")} option[value='#{created.id}'][selected]",
+             "#{select("rd_hero")} option[value='#{created.id}'][selected]",
              "#{ctx.word} Fresh"
            )
 
     save(lv)
-    assert stored(ctx.post, ctx.admin)["hero"]["id"] == created.id
+    assert stored(ctx.post, ctx.admin)["rd_hero"]["id"] == created.id
   end
 
   test "a row picked from the dropdown keeps its link inputs", ctx do
@@ -335,7 +340,7 @@ defmodule KilnCMSWeb.ReferenceDropdownTest do
     CMS.create_field_definition!(
       %{
         content_type: :post,
-        name: "plain",
+        name: "rd_plain",
         label: "Plain",
         field_type: :reference,
         target_type: "page"
@@ -344,7 +349,7 @@ defmodule KilnCMSWeb.ReferenceDropdownTest do
     )
 
     lv = open_editor(ctx.conn, ctx.admin, ctx.post)
-    assert has_element?(lv, "#custom-field-plain-search")
-    refute has_element?(lv, select("plain"))
+    assert has_element?(lv, "#custom-field-rd_plain-search")
+    refute has_element?(lv, select("rd_plain"))
   end
 end

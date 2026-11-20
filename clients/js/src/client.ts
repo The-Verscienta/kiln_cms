@@ -775,7 +775,8 @@ export class KilnClient {
 
   /**
    * `imageUrl`, signed with the `imageTransformKey` the client was created
-   * with: exact sizes, no snapping. Throws if no key was configured.
+   * with: exact sizes, no snapping. Throws `KilnConfigError`
+   * (`missing_image_transform_key`) if no key was configured.
    */
   async signedImageUrl(media: TransformMedia, options: TransformOptions = {}): Promise<string> {
     return this.baseUrl + (await signedTransformPath(media, options, this.transformKey()));
@@ -783,7 +784,8 @@ export class KilnClient {
 
   /**
    * `imageSrcset`, signed with the `imageTransformKey`: widths used exactly as
-   * given. Throws if no key was configured.
+   * given. Throws `KilnConfigError` (`missing_image_transform_key`) if no key
+   * was configured.
    */
   async signedImageSrcset(
     media: TransformMedia,
@@ -794,8 +796,9 @@ export class KilnClient {
 
   private transformKey(): string {
     if (this.imageTransformKey === undefined || this.imageTransformKey === "") {
-      throw new Error(
+      throw new KilnConfigError(
         "Signed image URLs need the imageTransformKey client option (the server's KILN_IMAGE_TRANSFORM_KEY).",
+        "missing_image_transform_key",
       );
     }
     return this.imageTransformKey;
@@ -877,9 +880,14 @@ export class KilnClient {
       "/api/media/uploads",
       { filename, byte_size: byteSize },
       options.signal,
-    )) as { data: Record<string, unknown> };
+    )) as { data?: Record<string, unknown> } | null;
 
-    const data = body.data;
+    const data = body?.data;
+    if (data === undefined || data === null) {
+      throw new KilnError("Kiln answered a direct-upload request with no upload", {
+        code: "empty_response",
+      });
+    }
     return {
       token: data.token as string,
       uploadUrl: data.upload_url as string,
@@ -1285,6 +1293,7 @@ export class KilnClient {
       contentType: body instanceof FormData ? undefined : mime,
       body,
       upload,
+      allowEmpty: true,
     });
   }
 
@@ -1315,6 +1324,7 @@ export class KilnClient {
       contentType: body === undefined ? undefined : JSON_API,
       body,
       headers,
+      allowEmpty: true,
     });
   }
 
@@ -1351,6 +1361,13 @@ export class KilnClient {
       anonymous?: boolean;
       /** Per-request headers, over the client's own (never over auth). */
       headers?: Record<string, string>;
+      /**
+       * Resolve an empty 2xx body as `null` instead of throwing. Only the
+       * write paths set it: a soft-delete answers 204, and every other write
+       * turns `null` into its own `empty_response` error. No read route
+       * answers an empty 2xx, so for one an empty body is not Kiln's answer.
+       */
+      allowEmpty?: boolean;
     },
   ): Promise<unknown> {
     // A `FormData` goes to `fetch` untouched: it must not be stringified, and
@@ -1408,9 +1425,13 @@ export class KilnClient {
     }
 
     // A 204 (or any empty 2xx — a soft-delete may answer either way) has no
-    // document to parse. Anything else that isn't JSON is not Kiln's answer
-    // (a proxy's or captive portal's page), and says so as a KilnError.
-    if (text === "") return null;
+    // document to parse, which only a write may answer (`allowEmpty`).
+    // Anything else that isn't JSON — an empty read included — is not Kiln's
+    // answer (a proxy's or captive portal's page), and says so as a KilnError.
+    if (text === "") {
+      if (request.allowEmpty === true) return null;
+      throw new KilnUnexpectedBodyError(response.status, url, text, undefined);
+    }
     try {
       return JSON.parse(text);
     } catch (error) {

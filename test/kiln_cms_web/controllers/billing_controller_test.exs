@@ -100,6 +100,24 @@ defmodule KilnCMSWeb.BillingControllerTest do
     )
   end
 
+  defp seed_membership(user, tier, status, extra \\ %{}) do
+    Ash.Seed.seed!(
+      KilnCMS.Billing.Membership,
+      Map.merge(
+        %{org_id: default_org_id(), user_id: user.id, tier_id: tier.id, status: status},
+        extra
+      )
+    )
+  end
+
+  defp membership_events(membership_id) do
+    import Ecto.Query
+
+    KilnCMS.Repo.all(
+      from e in KilnCMS.Billing.MembershipEvent, where: e.membership_id == ^membership_id
+    )
+  end
+
   describe "checkout" do
     test "redirects a signed-in member to the provider's hosted page", %{conn: conn} do
       configure_billing!()
@@ -126,6 +144,100 @@ defmodule KilnCMSWeb.BillingControllerTest do
 
       assert membership.status == :incomplete
       assert membership.tier_id == t.id
+    end
+
+    for status <- [:active, :past_due] do
+      test "a #{status} member is sent to /account and nothing is changed", %{conn: conn} do
+        configure_billing!()
+        t = tier()
+        user = authed_user()
+        row = seed_membership(user, t, unquote(status), %{provider_customer_id: "cus_live"})
+        {:ok, _} = KilnCMS.Billing.Entitlements.recompute(user.id)
+        before_events = membership_events(row.id)
+        KilnCMS.StubBillingProvider.spy_on(:checkout_session, self())
+
+        conn = post(log_in(conn, user), ~p"/billing/checkout", %{"tier" => t.slug})
+
+        assert redirected_to(conn) == ~p"/account"
+        assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "already have this membership"
+        refute_received {:stub_billing, :checkout_session, _}
+
+        assert [m] =
+                 Billing.memberships_for_user!(user.id,
+                   authorize?: false,
+                   tenant: default_org_id()
+                 )
+
+        assert m.status == unquote(status)
+        assert membership_events(row.id) == before_events
+
+        {:ok, _} = KilnCMS.Billing.Entitlements.recompute(user.id)
+        {:ok, reloaded} = KilnCMS.Accounts.get_user(user.id, authorize?: false)
+        assert @gated in reloaded.audiences
+      end
+    end
+
+    test "an entitled member with no provider customer is sent to /account", %{conn: conn} do
+      configure_billing!()
+      t = tier()
+      user = authed_user()
+      seed_membership(user, t, :active)
+      KilnCMS.StubBillingProvider.spy_on(:checkout_session, self())
+
+      conn = post(log_in(conn, user), ~p"/billing/checkout", %{"tier" => t.slug})
+
+      assert redirected_to(conn) == ~p"/account"
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "already have this membership"
+      refute_received {:stub_billing, :checkout_session, _}
+    end
+
+    test "a comped member goes to /account even with a customer id", %{conn: conn} do
+      configure_billing!()
+      t = tier()
+      user = authed_user()
+      row = seed_membership(user, t, :comped, %{provider_customer_id: "cus_old"})
+      before_events = membership_events(row.id)
+      KilnCMS.StubBillingProvider.spy_on(:checkout_session, self())
+
+      conn = post(log_in(conn, user), ~p"/billing/checkout", %{"tier" => t.slug})
+
+      assert redirected_to(conn) == ~p"/account"
+      assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "already have this membership"
+      refute_received {:stub_billing, :checkout_session, _}
+
+      assert [m] =
+               Billing.memberships_for_user!(user.id, authorize?: false, tenant: default_org_id())
+
+      assert m.status == :comped
+      assert membership_events(row.id) == before_events
+    end
+
+    test "a refused restart is not reported as a provider failure", %{conn: conn} do
+      configure_billing!()
+      t = tier()
+      user = authed_user()
+      seed_membership(user, t, :active, %{provider_customer_id: "cus_live"})
+
+      conn = post(log_in(conn, user), ~p"/billing/checkout", %{"tier" => t.slug})
+
+      assert redirected_to(conn) == ~p"/account"
+      refute Phoenix.Flash.get(conn.assigns.flash, :error)
+    end
+
+    test "a canceled member starts a fresh checkout", %{conn: conn} do
+      configure_billing!()
+      t = tier()
+      user = authed_user()
+      seed_membership(user, t, :canceled)
+
+      conn = post(log_in(conn, user), ~p"/billing/checkout", %{"tier" => t.slug})
+
+      assert redirected_to(conn) =~ "checkout.example.test"
+
+      assert [m] =
+               Billing.memberships_for_user!(user.id, authorize?: false, tenant: default_org_id())
+
+      assert m.status == :incomplete
     end
 
     test "clicking join twice reuses the same membership row", %{conn: conn} do

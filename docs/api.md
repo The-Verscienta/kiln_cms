@@ -102,6 +102,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Media upload** | `POST /api/media`, `POST /api/media/import-url`, `/api/media/uploads[/complete]` | Upload a file, import one from a public URL, or send a large one straight to object storage; metadata edits ride the JSON:API `PATCH`. `read_write` key on an editor account (a `draft_write` key is refused). | [§ Uploading media](#uploading-media) |
 | **Key rotation** | `POST /api/keys/rotate` | A drafts-only key with a self-rotation window swaps itself for a fresh one; the old key is revoked. | [headless-consumer-guide.md](headless-consumer-guide.md#keeping-the-key-alive-self-rotation) |
 | **Security posture** | `GET /api/security/posture` | The console's Security posture checks as JSON, for monitoring. A site administrator's JWT or API key (never a `draft_write` key), behind the site's admin allowlist; no check's details. | [§ Security posture (monitoring)](#security-posture-monitoring) |
+| **Plugin health** | `GET /api/security/plugin-health` | Every installed plugin's health (integrity against hex.pm, security notices, abandonment) as JSON, for monitoring, from the server's cache; never asks hex.pm. A platform administrator's JWT or API key (never a `draft_write` key; a site administrator is refused), behind the admin allowlist of the host's site. | [§ Plugin health (monitoring)](#plugin-health-monitoring) |
 | **MCP** | `/mcp` | Model Context Protocol server for LLM authoring clients; **API key required**. | [mcp.md](mcp.md) |
 | **Forms** | `GET /api/forms/:slug`, `POST /api/forms/:slug`, `<script src="…/embed.js">` | A form's schema and JSON submission, or an auto-resizing iframe on any site. | [§ Embeddable forms](#embeddable-forms) |
 | **Visual editing** | `<script src="…/bridge.js">` | In-context edit overlay for an external front end (annotated preview + deep-link + live push). | [visual-editing-bridge.md](visual-editing-bridge.md) |
@@ -208,8 +209,9 @@ Notes:
   account, members included, so a single-page app or a mobile app that signs
   people in from their own devices only works from listed networks while a
   list is on. Tokens already issued and API keys are not affected, except
-  on [`GET /api/security/posture`](#security-posture-monitoring), which
-  answers only to listed networks whatever the credential.
+  on [`GET /api/security/posture`](#security-posture-monitoring) and
+  [`GET /api/security/plugin-health`](#plugin-health-monitoring), which
+  answer only to listed networks whatever the credential.
 - The endpoint accepts an optional `challenge_token`, which is read only when
   the operator has turned on [human verification](#human-verification) for
   it. By default it is not, and the endpoint behaves exactly as above.
@@ -463,7 +465,7 @@ authenticator app is unaffected here: it still gets the `200`
 **Every request with that account's JWT** is refused from the deadline, a
 token issued during the grace period included (and a passkey-only account's,
 which never passed the passkey), on `/api/*` (JSON:API, media,
-the content and posture routes), `/gql` (`GET` and `POST`) and `/api/feed`.
+the content and monitoring routes), `/gql` (`GET` and `POST`) and `/api/feed`.
 The answer is `403`, `Cache-Control: private, no-store`, `Vary:
 Authorization`: on `/api` the envelope above with `meta.setup_url` only, on
 `/gql` GraphQL's shape:
@@ -2308,6 +2310,180 @@ A request meets these in order, and the first that applies answers:
 An unexpected failure answers `500` `internal_server_error`; the server log
 names the error's class and nothing a check said.
 
+## Plugin health (monitoring)
+
+`GET /api/security/plugin-health` returns the health of every plugin built
+into this release as JSON (#2571): the same check as the **Plugins** table on
+**Operations → System** ([Check your installed plugins](security-posture.md#check-your-installed-plugins)),
+one entry per plugin, so a monitor can alert on the plugin itself rather than
+on the posture's one **Installed plugins** line. It reads the answer the
+server already has and never asks hex.pm or the security notices feed
+anything.
+
+The report describes the whole installation, so only a **platform
+administrator** may read it. A site administrator is refused, even on their
+own site's host, as on System → Plugins. The body is the same on every
+site's host and names no site.
+
+### Set up a plugin health monitor
+
+1. **Pick the account.** It must be a platform administrator: a standing one,
+   or one holding a temporary admin grant that has not expired (a grant that
+   expires takes the key's access with it).
+2. **Mint a key for it.** At **`/editor/api-keys`**, mint a **Read-only**
+   (`read`) key owned by that account
+   ([API keys](#api-keys-third-party-access)). A `read_write` key works too,
+   but this endpoint needs nothing more than `read`, and the posture's
+   **API keys** line reports a read-write key owned by an administrator as
+   **Fix now**. A `draft_write` key is always refused here, whoever owns it.
+   A bearer JWT from `POST /api/auth/sign_in` works too, but expires.
+3. **Allow the monitor's network.** The endpoint is behind the
+   [admin allowlist](admin-allowlist.md) of the site whose host you call,
+   like the console. If that site has a list on, add the monitor's outgoing
+   address or range to it, or every request is a `403` `network_not_allowed`.
+4. **Make sure the server has an answer.** This endpoint never starts a
+   check. A server fills its cache when a platform administrator opens
+   **Operations → System** or **Security posture**, or calls
+   [`GET /api/security/posture`](#security-posture-monitoring), on that
+   server. Until then it answers `state: "not_checked"`. Each server keeps its
+   own cache (24 hours, 15 minutes after a request failed, lost on restart).
+   Behind a load balancer, or after a deploy, have the same key call
+   `GET /api/security/posture` too: on a server with nothing cached, that
+   call starts the check in the background, and a plugin health call a
+   minute or so later on that server has the answer. That posture call is
+   what asks hex.pm and the notices feed ([what is sent](data-flows.md)).
+5. **Call it on any site's host.** The answer is the same everywhere; the
+   host only decides whose allowlist applies.
+
+```bash
+curl -s https://cms.example.com/api/security/plugin-health \
+  -H "authorization: Bearer $KILN_API_KEY"
+```
+
+For an installation with two plugins from Hex (one with a medium security
+notice, one with no release for over two years) and one built from a local
+path:
+
+```jsonc
+// 200 OK, cache-control: private, no-store
+{
+  "version": 1,
+  "state": "fresh",
+  "checked_at": "2026-11-19T09:00:00Z",
+  "notices": "ok",
+  "counts": {"fail": 0, "warn": 2, "unknown": 0, "unverifiable": 1, "not_applicable": 0, "ok": 0},
+  "plugins": [
+    {"id": "Acme.Seo.Plugin", "name": "acme_seo", "source": "path",
+     "package": null, "version": "0.1.0", "latest_version": null,
+     "overall": "unverifiable",
+     "integrity": {"status": "unverifiable", "reason": "path"},
+     "notices": {"complete": true, "items": []},
+     "abandonment": {"known": true, "reasons": []}},
+    {"id": "LegacyEmbeds.Plugin", "name": "legacy_embeds", "source": "hex",
+     "package": "legacy_embeds", "version": "1.0.2", "latest_version": "1.0.2",
+     "overall": "warn",
+     "integrity": {"status": "ok", "reason": null},
+     "notices": {"complete": true, "items": []},
+     "abandonment": {"known": true, "reasons": [
+       {"kind": "stale", "retirement": null, "last_release_at": "2023-05-02T10:11:12Z",
+        "requirement": null, "bundled": null}]}},
+    {"id": "Ratings.Plugin", "name": "ratings", "source": "hex",
+     "package": "ratings", "version": "0.3.1", "latest_version": "0.3.2",
+     "overall": "warn",
+     "integrity": {"status": "ok", "reason": null},
+     "notices": {"complete": true, "items": [
+       {"id": "GHSA-xxxx-xxxx-xxxx", "aliases": ["CVE-2026-12345"], "severity": "medium",
+        "source": "kiln", "url": "https://kilncms.dev/security/GHSA-xxxx-xxxx-xxxx"}]},
+     "abandonment": {"known": true, "reasons": []}}
+  ]
+}
+```
+
+A server with nothing cached answers:
+
+```json
+{"version": 1, "state": "not_checked", "checked_at": null, "notices": null,
+ "counts": {"fail": 0, "warn": 0, "unknown": 0, "unverifiable": 0, "not_applicable": 0, "ok": 0},
+ "plugins": []}
+```
+
+### Plugin health fields
+
+| Field | What it holds |
+|-------|---------------|
+| `version` | `1`. Changes only for a change that breaks this shape, and only alongside a major release. |
+| `state` | How to read the rest. `fresh`: every source answered. `partial`: hex.pm or the notices feed did not answer, and the plugins it concerns are `unknown`. `disabled`: plugin checks are off (`KILN_PLUGIN_HEALTH_CHECK`, [the variables](environment-variables.md#plugin-health-check-2244)); nothing was asked, the plugins are still listed, and a plugin from hex.pm has `integrity.status` `disabled`. `nothing_to_check`: no plugin comes from Hex, git or a path, so nothing needs asking. `not_checked`: this server holds no answer yet (step 4 above); `plugins` is empty. |
+| `checked_at` | When the oldest of the fetched data was fetched (ISO 8601, UTC, whole seconds), on the server that answered. `null` when nothing was fetched: `disabled`, `nothing_to_check` and `not_checked`. |
+| `notices` | The security notices feed: `ok`, `unknown` (it did not answer) or `disabled` (`KILN_SECURITY_NOTICES_URL=false`, a fork that names no feed, or checks off). `null` when `not_checked`. |
+| `counts` | How many plugins have each `overall`. Every key is present, `0` included: `fail`, `warn`, `unknown`, `unverifiable`, `not_applicable`, `ok`. |
+| `plugins[].id` | The plugin's module, as Elixir writes it (`Ratings.Plugin`), unique in the installation. **Key on this.** |
+| `plugins[].name` | The plugin's own name. Two plugins may share one. |
+| `plugins[].source` | Where it was built from: `hex`, `git`, `path`, `overlay` (built from this project, under `projects/`) or `unknown`. |
+| `plugins[].package` | The Hex package name for a Hex plugin, otherwise `null`. |
+| `plugins[].version`, `plugins[].latest_version` | The installed version, and the latest release on Hex when known; `null` otherwise. |
+| `plugins[].overall` | The plugin's badge on System: `fail` (red: its package changed on Hex since this build, a high, critical or unrated notice covers it, or Hex retired it for security), `warn` (amber: a low or medium notice, not on Hex, retired for another reason, no recent release, or a `kiln_plugin` requirement this Kiln doesn't meet), `unknown`, `unverifiable` (**Can't verify**: git, path or a private repository), `not_applicable` (**Built from this project**) or `ok`. |
+| `plugins[].integrity` | `status`: `ok`, `mismatch`, `not_found`, `unverifiable`, `not_applicable`, `unknown` or `disabled`. `reason`, only for `unverifiable`: `git`, `path`, `private_repo`, `no_checksum` or `unknown_source`; `null` otherwise. The checksums themselves are never sent. |
+| `plugins[].notices` | `items`: the security notices covering the installed version, each with `id`, `aliases` (CVE or GHSA ids), `severity` (`low`, `medium`, `high`, `critical` or `unknown`), `source` (`kiln`, the notices feed, or `hex`) and `url` (an `http(s)://` page, or `null`). `complete` is `false` when a source the plugin needs did not answer: `items` is then what *was* found, not a clean bill. |
+| `plugins[].abandonment` | `reasons`: one object per reason, each with all five keys, `null` where a key does not apply. `kind` `retired` (with `retirement`: `security`, `deprecated`, `invalid`, `renamed` or `other`), `stale` (with `last_release_at`, the last release on Hex), `sdk_unsupported` (with the plugin's `kiln_plugin` `requirement` and the `bundled` SDK version) or `sdk_requirement_invalid` (with the `requirement` that could not be read). `known` is `false` when a source it needs did not answer. |
+
+Never in the body: Hex's retirement message, a notice's title and its
+affected and patched ranges, the locked and registry checksums, a git ref,
+any sentence written for a person, a site id, or the server's name. Open
+System → Plugins for those.
+
+### What to alert on in plugin health
+
+- **Read `state` first.** An empty `plugins` is never "all clean". Alert, or
+  at least log, when `state` is `not_checked` for long (that server has no
+  answer: see step 4), `partial` (some plugins could not be checked), or
+  `disabled` when you expect checks to run.
+- **Alert at once on `counts.fail` above zero.** Find the plugins with
+  `"overall": "fail"` and read their `integrity` and `notices`.
+- **Alert on a new `warn`**, comparing by `id` against the last answer: a new
+  notice, a new retirement or an SDK the plugin no longer accepts. A `stale`
+  reason appears once and stays; decide once whether you trust the plugin.
+- **Treat `unknown` as not OK**, and as a value you don't know: a later
+  release may add a value to any of these lists.
+- **Read plugins by `id`, never by `name` or position.** Names may repeat,
+  and the order (by `name`, then `id`) is not part of the contract.
+- **Expect each server to answer for itself.** `state` and `checked_at`
+  describe the server that answered; behind a load balancer two requests a
+  second apart can come from different servers, one `fresh` and one
+  `not_checked`.
+
+### What a plugin health consumer can rely on
+
+- **Additive only**, like the [reporting views](reporting.md): a field may be
+  added, never removed, renamed or retyped. `version` changes only for a
+  change that breaks that.
+- **Value sets are open.** Every string value above may gain a value in a
+  later release, and `counts` may gain a key. Tolerate a value or key you
+  don't know, and read an unknown status as unknown, never as OK.
+- **Never makes a request.** Calling it, however often, tells hex.pm and the
+  notices feed nothing and starts no check, not even in the background
+  ([what is sent, and when](data-flows.md)).
+- **Never cached by anyone else.** Every answer, refusals included, carries
+  `cache-control: private, no-store`. There is no server-side response
+  cache: each read re-evaluates the server's cached data against the current
+  time, so a plugin turns `stale` without a new fetch.
+
+### Plugin health status codes
+
+A request meets these in order, and the first that applies answers:
+
+| Status | `code` | When |
+|--------|--------|------|
+| `403` | `network_not_allowed` | The admin allowlist of the site whose host the request uses is on, and the request's address is not on it. Checked before the credential, so an off-list caller learns nothing about its key. |
+| `503` | `temporarily_unavailable` | That site's admin allowlist could not be read (it fails closed), with `retry-after: 30`. |
+| `429` | `too_many_requests` | The `api` bucket for the client's address is spent ([Rate limits](#rate-limits)), with `retry-after`. |
+| `401` | `invalid_token` | A bearer was sent that is not a valid JWT or API key (unknown, revoked or expired). |
+| `401` | `unauthenticated` | No credential at all, with `www-authenticate: Bearer`. |
+| `403` | `forbidden` | The credential is not a platform administrator's (a site administrator, an editor, a viewer, a platform administrator whose temporary grant has expired), or it is a `draft_write` key. |
+| `200` | | The report, `not_checked` included. A server with nothing cached is not an error and has no `retry-after`. |
+
+An unexpected failure answers `500` `internal_server_error`; the server log
+names the error's class and nothing from the report.
+
 ## Caching and CDNs
 
 Every headless read surface tells a shared cache what it may keep, so a CDN in
@@ -2501,7 +2677,7 @@ Over the limit returns **429** with a `retry-after` header.
 
 | Bucket | Endpoints       | Limit (per IP)        |
 |--------|-----------------|-----------------------|
-| `api`  | `/api/json/*`, `GET /api/content/:type/:slug` (fired artifacts), `GET /api/locales`, `GET /api/search`, `GET /api/security/posture` | 120 requests / minute |
+| `api`  | `/api/json/*`, `GET /api/content/:type/:slug` (fired artifacts), `GET /api/locales`, `GET /api/search`, `GET /api/security/posture`, `GET /api/security/plugin-health` | 120 requests / minute |
 | `feed_join` | `GET /api/feed` connects (and `HEAD`) — charged **first**, then `api` too. Over it, the answer is a `200` with `event: busy`, not a `429` ([§ Change feed](#change-feed-sse)) | 60 connects / minute |
 | `gql`  | `/gql`          | 60 requests / minute  |
 | `auth` | sign-in / auth, and `POST /api/keys/rotate` | 40 requests / minute  |
@@ -2610,7 +2786,8 @@ version-history (`unauthenticated`, `invalid_id`, `invalid_cursor`,
 (`invalid_format`, `invalid_package`, `invalid_type`), key-rotation
 (`invalid_api_key`, `forbidden`, `not_rotatable`), security-posture
 (`network_not_allowed`, `temporarily_unavailable`, `invalid_token`,
-`unauthenticated`, `forbidden`; [§ Posture status codes](#posture-status-codes)) and preview-token (`invalid_preview`)
+`unauthenticated`, `forbidden`; [§ Posture status codes](#posture-status-codes)), plugin-health
+(the same codes; [§ Plugin health status codes](#plugin-health-status-codes)) and preview-token (`invalid_preview`)
 endpoints — **and from the 429 when you exceed a rate-limit bucket**
 (`too_many_requests`, alongside `retry-after`), and from the `401`
 `invalid_token` a bearer token that does not verify gets on any `/api` route
@@ -2658,6 +2835,10 @@ release**, not the HTTP contract — don't pin behaviour to it.
   (`GET /api/security/posture`): additive only, with its own `version`, open
   value sets, and `title`/`summary` excluded. See
   [What a posture consumer can rely on](#what-a-posture-consumer-can-rely-on).
+- The [plugin health](#plugin-health-monitoring) body
+  (`GET /api/security/plugin-health`): additive only, with its own `version`
+  and open value sets; plugins are keyed by `id`. See
+  [What a plugin health consumer can rely on](#what-a-plugin-health-consumer-can-rely-on).
 - Author PII is never exposed (only `authorId` + display `name`); `*BySlug`
   returns published content only. See the consumer guide.
 - A JSON:API GET of an **unpublished** record returns **404** (not 403) for

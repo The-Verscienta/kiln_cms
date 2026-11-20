@@ -20,7 +20,7 @@ defmodule KilnClient.Error do
   | `:transport` | No response at all (DNS, refused, TLS, timeout); the underlying exception is in `:exception`. |
   | `:graphql` | `/gql` answered with a top-level `errors` array; any partial `data` is in `:data`. |
   | `:storage_refused` | A direct upload's `PUT` to object storage answered non-2xx (a stale presigned URL, a length mismatch); the store's raw body is in `:body`, the presigned URL in `:path`. |
-  | `:unexpected_body` | A 2xx with a body that isn't the expected shape: no `data` resource (the decoded body is in `:body`), or not JSON at all, such as a captive portal's or a CDN's HTML page (its first 1 KiB, as a binary, is in `:body`). |
+  | `:unexpected_body` | A 2xx with a body that isn't the expected shape: no `data` resource (the decoded body is in `:body`), not JSON at all, such as a captive portal's or a CDN's HTML page (its first 1 KiB, as a binary, is in `:body`); or empty (`body: ""`), which only `delete/3` accepts as success. |
 
   `:errors` is the JSON:API `errors` array Kiln answers every headless refusal
   with (`[%{"status" => "409", "code" => …, "detail" => …, "source" =>

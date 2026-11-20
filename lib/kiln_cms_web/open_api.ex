@@ -95,6 +95,9 @@ defmodule KilnCMSWeb.OpenApi do
     * **Security posture** for monitoring at `GET /api/security/posture`
       (operation below): a site administrator's checks as JSON, behind the
       site's admin allowlist.
+    * **Plugin health** for monitoring at `GET /api/security/plugin-health`
+      (operation below): the installed plugins' cached health, for a platform
+      administrator, behind the site's admin allowlist.
     * **MCP** for LLM authoring clients at `/mcp` (`docs/mcp.md`).
     * **Outbound webhooks** (HMAC-signed) on publish/unpublish/update.
     * **Signed preview URLs** for unpublished content at `GET /preview/:token`
@@ -768,10 +771,11 @@ defmodule KilnCMSWeb.OpenApi do
     )
   end
 
-  # Admin surfaces for machines (`KilnCMSWeb.SecurityPostureController`): a
-  # credential is required, so `security` lists no empty requirement. Value
-  # sets are open (`KilnCMSWeb.SecurityPostureJSON`'s contract), so no field
-  # carries an `enum`; the description lists today's values.
+  # Admin surfaces for machines (`KilnCMSWeb.SecurityPostureController`,
+  # `KilnCMSWeb.PluginHealthController`): a credential is required, so
+  # `security` lists no empty requirement. Value sets are open (each JSON
+  # module's contract), so no field carries an `enum`; the description lists
+  # today's values.
   defp admin_paths do
     %{
       "/api/security/posture" => %OpenApiSpex.PathItem{
@@ -811,6 +815,48 @@ defmodule KilnCMSWeb.OpenApi do
               error_response(
                 "`temporarily_unavailable`: the site's checks are already running " <>
                   "(`Retry-After: 5`), or its admin allowlist could not be read " <>
+                  "(`Retry-After: 30`)"
+              )
+          }
+        }
+      },
+      "/api/security/plugin-health" => %OpenApiSpex.PathItem{
+        get: %OpenApiSpex.Operation{
+          tags: ["Monitoring"],
+          operationId: "getPluginHealth",
+          summary: "Read the installed plugins' cached health",
+          description:
+            "The installed plugins' health as JSON, for monitoring (#2571): integrity " <>
+              "against hex.pm, security notices and abandonment, per plugin. Needs a " <>
+              "bearer JWT or API key of a platform administrator (not a `draft_write` " <>
+              "key); a site administrator is refused. Behind the host site's admin " <>
+              "allowlist. Answers from the answering node's cache only and never asks " <>
+              "hex.pm or the notices feed, nor starts a check: a node with no fresh " <>
+              "check answers `state: not_checked`. The same body on every site's host. " <>
+              "Additive only: read plugins by `id`, read `state` before `plugins`, and " <>
+              "tolerate values and `counts` keys you do not know. Every answer is " <>
+              "`Cache-Control: private, no-store`.",
+          security: [%{"apiKeyAuth" => []}, %{"bearerAuth" => []}],
+          responses: %{
+            200 => %OpenApiSpex.Response{
+              description: "The installed plugins' cached health",
+              content: %{
+                "application/json" => %OpenApiSpex.MediaType{schema: plugin_health_schema()}
+              }
+            },
+            401 =>
+              error_response(
+                "No credential (`unauthenticated`), or one that does not verify (`invalid_token`)"
+              ),
+            403 =>
+              error_response(
+                "Not a platform administrator, or a `draft_write` key (`forbidden`); " <>
+                  "or an address outside the site's admin allowlist (`network_not_allowed`)"
+              ),
+            429 => error_response("`api` bucket spent — see `Retry-After`"),
+            503 =>
+              error_response(
+                "`temporarily_unavailable`: the site's admin allowlist could not be read " <>
                   "(`Retry-After: 30`)"
               )
           }
@@ -899,6 +945,180 @@ defmodule KilnCMSWeb.OpenApi do
                 )
             }
           }
+        }
+      }
+    }
+  end
+
+  defp plugin_health_schema do
+    string = fn description -> %OpenApiSpex.Schema{type: :string, description: description} end
+
+    nullable_string = fn description ->
+      %OpenApiSpex.Schema{type: :string, nullable: true, description: description}
+    end
+
+    nullable_time = fn description ->
+      %OpenApiSpex.Schema{
+        type: :string,
+        format: :"date-time",
+        nullable: true,
+        description: description
+      }
+    end
+
+    notice = %OpenApiSpex.Schema{
+      type: :object,
+      required: [:id, :aliases, :severity, :source, :url],
+      properties: %{
+        id: string.("The advisory's id"),
+        aliases: %OpenApiSpex.Schema{
+          type: :array,
+          description: "Other ids it is known by (CVE, GHSA)",
+          items: %OpenApiSpex.Schema{type: :string}
+        },
+        severity: string.("`low`, `medium`, `high`, `critical` or `unknown` today"),
+        source: string.("`kiln` (kilncms.dev's notices feed) or `hex` today"),
+        url: nullable_string.("An `http(s)://` page about the advisory")
+      }
+    }
+
+    reason = %OpenApiSpex.Schema{
+      type: :object,
+      required: [:kind, :retirement, :last_release_at, :requirement, :bundled],
+      properties: %{
+        kind: string.("`retired`, `stale`, `sdk_unsupported` or `sdk_requirement_invalid` today"),
+        retirement:
+          nullable_string.(
+            "For `retired`: `security`, `deprecated`, `invalid`, `renamed` or `other` today"
+          ),
+        last_release_at: nullable_time.("For `stale`: the last release on Hex"),
+        requirement:
+          nullable_string.(
+            "For `sdk_unsupported` and `sdk_requirement_invalid`: the plugin's " <>
+              "`kiln_plugin` requirement"
+          ),
+        bundled: nullable_string.("For `sdk_unsupported`: the `kiln_plugin` this core bundles")
+      }
+    }
+
+    plugin = %OpenApiSpex.Schema{
+      type: :object,
+      required: [
+        :id,
+        :name,
+        :source,
+        :package,
+        :version,
+        :latest_version,
+        :overall,
+        :integrity,
+        :notices,
+        :abandonment
+      ],
+      properties: %{
+        id: string.("The plugin's module, e.g. `MyApp.MyPlugin`; unique. Key on this"),
+        name: string.("The plugin's own name; may repeat"),
+        source: string.("`hex`, `git`, `path`, `overlay` or `unknown` today"),
+        package: nullable_string.("The Hex package, for `source: hex`"),
+        version: nullable_string.("The installed version"),
+        latest_version: nullable_string.("The latest version on Hex, when known"),
+        overall:
+          string.(
+            "`fail`, `warn`, `unknown`, `unverifiable`, `not_applicable` or `ok` today; " <>
+              "read a value you do not know as unknown"
+          ),
+        integrity: %OpenApiSpex.Schema{
+          type: :object,
+          required: [:status, :reason],
+          properties: %{
+            status:
+              string.(
+                "`ok`, `mismatch`, `not_found`, `unverifiable`, `not_applicable`, " <>
+                  "`unknown` or `disabled` today"
+              ),
+            reason:
+              nullable_string.(
+                "For `unverifiable`: `git`, `path`, `private_repo`, `no_checksum` or " <>
+                  "`unknown_source` today"
+              )
+          }
+        },
+        notices: %OpenApiSpex.Schema{
+          type: :object,
+          required: [:complete, :items],
+          properties: %{
+            complete: %OpenApiSpex.Schema{
+              type: :boolean,
+              description:
+                "`false` when a source did not answer: `items` is what was found, not a " <>
+                  "clean bill"
+            },
+            items: %OpenApiSpex.Schema{
+              type: :array,
+              description: "Security notices covering the installed version",
+              items: notice
+            }
+          }
+        },
+        abandonment: %OpenApiSpex.Schema{
+          type: :object,
+          required: [:known, :reasons],
+          properties: %{
+            known: %OpenApiSpex.Schema{
+              type: :boolean,
+              description: "`false` when a source it needs was unavailable"
+            },
+            reasons: %OpenApiSpex.Schema{
+              type: :array,
+              description: "Every key present on each, `null` where it does not apply",
+              items: reason
+            }
+          }
+        }
+      }
+    }
+
+    %OpenApiSpex.Schema{
+      type: :object,
+      required: [:version, :state, :checked_at, :notices, :counts, :plugins],
+      properties: %{
+        version: %OpenApiSpex.Schema{
+          type: :integer,
+          description: "`1`. Changes only for a change that breaks this shape."
+        },
+        state:
+          string.(
+            "`fresh`, `partial`, `disabled`, `nothing_to_check` or `not_checked` today. " <>
+              "An empty `plugins` is never a clean bill: read this first"
+          ),
+        checked_at:
+          nullable_time.(
+            "When the oldest remote data was fetched, on the answering node; `null` " <>
+              "when nothing was"
+          ),
+        notices:
+          nullable_string.(
+            "The security notices feed: `ok`, `unknown` or `disabled` today; `null` " <>
+              "when `not_checked`"
+          ),
+        counts: %OpenApiSpex.Schema{
+          type: :object,
+          description:
+            "How many plugins have each `overall`: `fail`, `warn`, `unknown`, " <>
+              "`unverifiable`, `not_applicable`, `ok` today, every one present",
+          required: [:fail, :warn, :unknown, :unverifiable, :not_applicable, :ok],
+          properties:
+            Map.new(
+              [:fail, :warn, :unknown, :unverifiable, :not_applicable, :ok],
+              &{&1, %OpenApiSpex.Schema{type: :integer}}
+            ),
+          additionalProperties: %OpenApiSpex.Schema{type: :integer}
+        },
+        plugins: %OpenApiSpex.Schema{
+          type: :array,
+          description:
+            "One per installed plugin, sorted by `name` then `id` (not part of the contract)",
+          items: plugin
         }
       }
     }

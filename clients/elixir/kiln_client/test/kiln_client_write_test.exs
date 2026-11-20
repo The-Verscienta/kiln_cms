@@ -326,7 +326,7 @@ defmodule KilnClientWriteTest do
   end
 
   describe "a 2xx body that is not JSON" do
-    test "a write returns :unexpected_body; an empty body is still {:ok, nil}" do
+    test "a write returns :unexpected_body; an empty 204 still deletes" do
       Req.Test.stub(KilnClient, fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("text/html")
@@ -341,6 +341,50 @@ defmodule KilnClientWriteTest do
                 path: "/api/json/posts/p1",
                 body: "<html>portal</html>"
               }} = KilnClient.update("posts", "p1", %{title: "x"}, api_key: @key)
+
+      stub(204, "")
+      assert :ok = KilnClient.delete("posts", "p1", api_key: @key)
+    end
+  end
+
+  # #3129: only `delete/3` takes an empty 2xx as success. Every other write
+  # answers a document, so an empty body there is an error, not `{:ok, nil}`.
+  describe "an empty 2xx body on a write" do
+    test "create/3, update/4 and transition/4 return :unexpected_body" do
+      stub(200, "")
+
+      assert {:error,
+              %Error{
+                reason: :unexpected_body,
+                status: 200,
+                method: :post,
+                path: "/api/json/posts",
+                body: ""
+              }} = KilnClient.create("posts", %{title: "x"}, api_key: @key)
+
+      assert {:error, %Error{reason: :unexpected_body, method: :patch, body: ""}} =
+               KilnClient.update("posts", "p1", %{title: "x"}, api_key: @key)
+
+      assert {:error, %Error{reason: :unexpected_body, body: ""}} =
+               KilnClient.publish("posts", "p1", api_key: @key)
+    end
+
+    test "restore_revision/4 returns :unexpected_body rather than {:ok, nil}" do
+      stub(200, "")
+
+      assert {:error,
+              %Error{
+                reason: :unexpected_body,
+                status: 200,
+                method: :post,
+                path: "/api/content/post/p1/revisions/v1/restore",
+                body: ""
+              }} = KilnClient.restore_revision("post", "p1", "v1", api_key: @key)
+    end
+
+    test "delete/3 still returns :ok on an empty 200 or 204" do
+      stub(200, "")
+      assert :ok = KilnClient.delete("posts", "p1", api_key: @key)
 
       stub(204, "")
       assert :ok = KilnClient.delete("posts", "p1", api_key: @key)

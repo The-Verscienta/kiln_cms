@@ -53,7 +53,7 @@ defmodule KilnCMSWeb.GroupFieldEditorTest do
       CMS.create_field_definition!(
         %{
           content_type: :page,
-          name: "dosages",
+          name: "gfe_dosages",
           label: "Dosages",
           field_type: :group,
           multiple: true,
@@ -83,7 +83,7 @@ defmodule KilnCMSWeb.GroupFieldEditorTest do
 
     size =
       CMS.create_field_definition!(
-        %{content_type: :page, name: "size", label: "Size", field_type: :group, position: 1},
+        %{content_type: :page, name: "gfe_size", label: "Size", field_type: :group, position: 1},
         actor: admin
       )
 
@@ -96,8 +96,8 @@ defmodule KilnCMSWeb.GroupFieldEditorTest do
           title: "Dosed",
           slug: "gfe-#{System.unique_integer([:positive])}",
           custom_fields: %{
-            "dosages" => [%{"amount" => 2, "unit" => "g"}, %{"amount" => 5, "unit" => "mg"}],
-            "size" => %{"width" => 10, "height" => 20}
+            "gfe_dosages" => [%{"amount" => 2, "unit" => "g"}, %{"amount" => 5, "unit" => "mg"}],
+            "gfe_size" => %{"width" => 10, "height" => 20}
           }
         },
         actor: admin
@@ -112,10 +112,10 @@ defmodule KilnCMSWeb.GroupFieldEditorTest do
     %{admin: admin, page: page, lv: lv, conn: conn}
   end
 
-  defp row(n), do: "#cf-group-dosages-row-#{n}"
+  defp row(n), do: "#cf-group-gfe_dosages-row-#{n}"
 
   defp amount(lv, n) do
-    case lv |> element("#custom-field-dosages-#{n}-amount") |> render() do
+    case lv |> element("#custom-field-gfe_dosages-#{n}-amount") |> render() do
       html -> html |> Floki.parse_fragment!() |> Floki.attribute("value") |> List.first()
     end
   end
@@ -123,9 +123,13 @@ defmodule KilnCMSWeb.GroupFieldEditorTest do
   defp stored(ctx), do: CMS.get_page!(ctx.page.id, actor: ctx.admin).custom_fields
 
   test "a single group is one fieldset; a repeating group is rows with their values", ctx do
-    assert has_element?(ctx.lv, "fieldset#custom-field-size legend", "Size")
-    assert has_element?(ctx.lv, ~s(#custom-field-size-width[value="10"]))
-    assert has_element?(ctx.lv, ~s(input[name="form[custom_fields][size][height]"][value="20"]))
+    assert has_element?(ctx.lv, "fieldset#custom-field-gfe_size legend", "Size")
+    assert has_element?(ctx.lv, ~s(#custom-field-gfe_size-width[value="10"]))
+
+    assert has_element?(
+             ctx.lv,
+             ~s(input[name="form[custom_fields][gfe_size][height]"][value="20"])
+           )
 
     assert has_element?(ctx.lv, row(0))
     assert has_element?(ctx.lv, row(1))
@@ -134,30 +138,30 @@ defmodule KilnCMSWeb.GroupFieldEditorTest do
 
     assert has_element?(
              ctx.lv,
-             ~s(#{row(1)} select[name="form[custom_fields][dosages][1][unit]"] option[value=mg][selected])
+             ~s(#{row(1)} select[name="form[custom_fields][gfe_dosages][1][unit]"] option[value=mg][selected])
            )
 
-    assert has_element?(ctx.lv, "#custom-field-dosages", "2 of 3 rows")
+    assert has_element?(ctx.lv, "#custom-field-gfe_dosages", "2 of 3 rows")
     # The rows are a drag-to-reorder list.
     assert has_element?(
              ctx.lv,
-             ~s(#custom-field-dosages-rows[phx-hook=Sortable][data-sort-event=group_row_reorder])
+             ~s(#custom-field-gfe_dosages-rows[phx-hook=Sortable][data-sort-event=group_row_reorder])
            )
   end
 
   test "add a row up to max_items; remove one", ctx do
-    ctx.lv |> element("#custom-field-dosages-add") |> render_click()
+    ctx.lv |> element("#custom-field-gfe_dosages-add") |> render_click()
     assert has_element?(ctx.lv, row(2))
     assert amount(ctx.lv, 2) in [nil, ""]
 
     # Full at three: "Add row" is disabled and says why.
-    assert has_element?(ctx.lv, "#custom-field-dosages-add[disabled]")
+    assert has_element?(ctx.lv, "#custom-field-gfe_dosages-add[disabled]")
     assert render(ctx.lv) =~ "the most this field holds"
 
     ctx.lv |> element("#{row(0)} button[phx-click=group_row_remove]") |> render_click()
     refute has_element?(ctx.lv, row(2))
     assert amount(ctx.lv, 0) =~ "5"
-    refute has_element?(ctx.lv, "#custom-field-dosages-add[disabled]")
+    refute has_element?(ctx.lv, "#custom-field-gfe_dosages-add[disabled]")
   end
 
   test "move a row with the arrows, or by the dragged order", ctx do
@@ -166,36 +170,36 @@ defmodule KilnCMSWeb.GroupFieldEditorTest do
     assert amount(ctx.lv, 1) =~ "2"
 
     ctx.lv
-    |> element("#custom-field-dosages-rows")
-    |> render_hook("group_row_reorder", %{"field" => "dosages", "order" => ["1", "0"]})
+    |> element("#custom-field-gfe_dosages-rows")
+    |> render_hook("group_row_reorder", %{"field" => "gfe_dosages", "order" => ["1", "0"]})
 
     assert amount(ctx.lv, 0) =~ "2"
 
     # An order that is not the rows' own positions changes nothing.
     ctx.lv
-    |> element("#custom-field-dosages-rows")
-    |> render_hook("group_row_reorder", %{"field" => "dosages", "order" => ["0", "0"]})
+    |> element("#custom-field-gfe_dosages-rows")
+    |> render_hook("group_row_reorder", %{"field" => "gfe_dosages", "order" => ["0", "0"]})
 
     assert amount(ctx.lv, 0) =~ "2"
     assert amount(ctx.lv, 1) =~ "5"
   end
 
   test "edited, added and reordered rows save as an ordered list", ctx do
-    ctx.lv |> element("#custom-field-dosages-add") |> render_click()
+    ctx.lv |> element("#custom-field-gfe_dosages-add") |> render_click()
 
     # The first edit of the session posted only the group's rows; every other
     # field still shows its stored value rather than a blank the save posts.
-    assert has_element?(ctx.lv, ~s(#custom-field-size-height[value="20"]))
+    assert has_element?(ctx.lv, ~s(#custom-field-gfe_size-height[value="20"]))
 
     ctx.lv
     |> form("#page-editor", %{
       "form" => %{
         "custom_fields" => %{
-          "dosages" => %{
+          "gfe_dosages" => %{
             "0" => %{"amount" => "2.5"},
             "2" => %{"amount" => "1", "unit" => "mg", "with_food" => "true"}
           },
-          "size" => %{"width" => "11"}
+          "gfe_size" => %{"width" => "11"}
         }
       }
     })
@@ -205,30 +209,30 @@ defmodule KilnCMSWeb.GroupFieldEditorTest do
     ctx.lv |> form("#page-editor") |> render_submit()
 
     assert %{
-             "dosages" => [
+             "gfe_dosages" => [
                %{"amount" => 2.5, "unit" => "g"},
                %{"amount" => 1.0, "unit" => "mg", "with_food" => true},
                %{"amount" => 5.0, "unit" => "mg"}
              ],
-             "size" => %{"width" => 11, "height" => 20}
+             "gfe_size" => %{"width" => 11, "height" => 20}
            } = stored(ctx)
   end
 
   test "removing every row clears the group", ctx do
     ctx.lv |> element("#{row(0)} button[phx-click=group_row_remove]") |> render_click()
     ctx.lv |> element("#{row(0)} button[phx-click=group_row_remove]") |> render_click()
-    assert has_element?(ctx.lv, "#custom-field-dosages", "No rows yet.")
+    assert has_element?(ctx.lv, "#custom-field-gfe_dosages", "No rows yet.")
 
     ctx.lv |> form("#page-editor") |> render_submit()
-    refute Map.has_key?(stored(ctx), "dosages")
+    refute Map.has_key?(stored(ctx), "gfe_dosages")
   end
 
   test "a problem shows next to its row and sub-field, and nothing is saved", ctx do
-    ctx.lv |> element("#custom-field-dosages-add") |> render_click()
+    ctx.lv |> element("#custom-field-gfe_dosages-add") |> render_click()
 
     ctx.lv
     |> form("#page-editor", %{
-      "form" => %{"custom_fields" => %{"dosages" => %{"2" => %{"amount" => "lots"}}}}
+      "form" => %{"custom_fields" => %{"gfe_dosages" => %{"2" => %{"amount" => "lots"}}}}
     })
     |> render_change()
 
@@ -238,35 +242,41 @@ defmodule KilnCMSWeb.GroupFieldEditorTest do
     assert row =~ "Amount must be a number"
     assert row =~ "Unit is required"
     refute ctx.lv |> element(row(0)) |> render() =~ "is required"
-    assert has_element?(ctx.lv, ~s(#custom-field-dosages-2-amount[aria-invalid="true"]))
+    assert has_element?(ctx.lv, ~s(#custom-field-gfe_dosages-2-amount[aria-invalid="true"]))
 
-    assert [_, _] = stored(ctx)["dosages"]
+    assert [_, _] = stored(ctx)["gfe_dosages"]
   end
 
   test "a save that does not name the group keeps its rows", ctx do
     render_hook(ctx.lv, "save", %{"form" => %{"title" => "Renamed"}})
 
-    assert %{"dosages" => [%{"amount" => 2.0}, %{"amount" => 5.0}]} = stored(ctx)
+    assert %{"gfe_dosages" => [%{"amount" => 2.0}, %{"amount" => 5.0}]} = stored(ctx)
     assert CMS.get_page!(ctx.page.id, actor: ctx.admin).title == "Renamed"
   end
 
   test "an autosave keeps a row just added on screen", ctx do
-    ctx.lv |> element("#custom-field-dosages-add") |> render_click()
+    ctx.lv |> element("#custom-field-gfe_dosages-add") |> render_click()
     send(ctx.lv.pid, :autosave)
     _ = render(ctx.lv)
 
     assert has_element?(ctx.lv, row(2))
-    assert [_, _] = stored(ctx)["dosages"]
+    assert [_, _] = stored(ctx)["gfe_dosages"]
   end
 
   test "a group with no sub-fields yet says so and posts nothing", ctx do
     CMS.create_field_definition!(
-      %{content_type: :page, name: "specs", label: "Specs", field_type: :group, multiple: true},
+      %{
+        content_type: :page,
+        name: "gfe_specs",
+        label: "Specs",
+        field_type: :group,
+        multiple: true
+      },
       actor: ctx.admin
     )
 
     {:ok, lv, _html} = live(ctx.conn, ~p"/editor/content/page/#{ctx.page.id}")
-    assert has_element?(lv, "#custom-field-specs", "This group has no fields yet")
-    refute has_element?(lv, ~s(input[name^="form[custom_fields][specs]"]))
+    assert has_element?(lv, "#custom-field-gfe_specs", "This group has no fields yet")
+    refute has_element?(lv, ~s(input[name^="form[custom_fields][gfe_specs]"]))
   end
 end

@@ -90,7 +90,7 @@ defmodule KilnCMSWeb.FieldConditionsEditorTest do
       position: 1
     })
 
-    field!(admin, %{name: "plain", label: "Plain", field_type: :string, position: 2})
+    field!(admin, %{name: "fce_plain", label: "Plain", field_type: :string, position: 2})
     %{admin: admin, rule: rule}
   end
 
@@ -107,7 +107,7 @@ defmodule KilnCMSWeb.FieldConditionsEditorTest do
 
     # No required on the input while hidden, and no wrapper on an unconditional field.
     assert [] = attr(lv, "#custom-field-detail", "required")
-    refute has_element?(lv, "#cf-cond-plain")
+    refute has_element?(lv, "#cf-cond-fce_plain")
     refute has_element?(lv, "#cf-cond-kind")
   end
 

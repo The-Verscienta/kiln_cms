@@ -495,7 +495,7 @@ writes alike. Branch on `:reason`:
 | `:transport` | no response (DNS, refused, TLS, timeout); the exception is in `:exception` |
 | `:graphql` | `/gql` answered with top-level `errors` |
 | `:storage_refused` | a direct upload's `PUT` to object storage answered non-2xx (e.g. a stale presigned URL); the store's raw body is in `:body` |
-| `:unexpected_body` | a 2xx whose body isn't the expected shape: a media write with no `data` resource (the decoded body is in `:body`), or a body that isn't JSON at all, such as a captive portal's or a CDN's HTML page (its first 1 KiB is in `:body`) |
+| `:unexpected_body` | a 2xx whose body isn't the expected shape: a media write with no `data` resource, or a `sync/1` page or `release/2` document of the wrong shape (the decoded body is in `:body`); a body that isn't JSON at all, such as a captive portal's or a CDN's HTML page (its first 1 KiB is in `:body`); or an empty body (`body: ""`), which no read sends and only `delete/3` accepts as success |
 | `:http` | any other status |
 
 Every error also carries `:status`, `:code` (the first error's) and `:errors`

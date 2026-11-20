@@ -525,20 +525,26 @@ defmodule KilnCMSWeb.RevisionControllerTest do
   describe "custom fields in a revision" do
     test "changes[\"custom_fields\"] is the whole new map, not the edited key",
          %{admin: admin} do
-      for name <- ~w(price sku) do
+      for name <- ~w(rc_price rc_sku) do
         CMS.create_field_definition!(
-          %{content_type: :page, name: name, label: String.capitalize(name)},
+          %{
+            content_type: :page,
+            name: name,
+            label: String.capitalize(String.replace_prefix(name, "rc_", ""))
+          },
           actor: admin
         )
       end
 
       page =
         CMS.create_page!(
-          %{title: "CF", slug: slug(), custom_fields: %{"price" => "9", "sku" => "a"}},
+          %{title: "CF", slug: slug(), custom_fields: %{"rc_price" => "9", "rc_sku" => "a"}},
           actor: admin
         )
 
-      CMS.update_page!(page, %{custom_fields: %{"price" => "12", "sku" => "a"}}, actor: admin)
+      CMS.update_page!(page, %{custom_fields: %{"rc_price" => "12", "rc_sku" => "a"}},
+        actor: admin
+      )
 
       [_create, update] = versions(page, admin)
       key = mint(user(:editor), :read)
@@ -547,32 +553,41 @@ defmodule KilnCMSWeb.RevisionControllerTest do
                req(:get, "#{rev_path(:page, page.id)}/#{update.id}", key: key)
 
       # Only `price` was edited; the version still carries the untouched `sku`.
-      assert data["changes"]["custom_fields"] == %{"price" => "12", "sku" => "a"}
+      assert data["changes"]["custom_fields"] == %{"rc_price" => "12", "rc_sku" => "a"}
       assert data["changed_fields"] == ["custom_fields"]
-      assert data["snapshot"]["custom_fields"] == %{"price" => "12", "sku" => "a"}
+      assert data["snapshot"]["custom_fields"] == %{"rc_price" => "12", "rc_sku" => "a"}
     end
 
     test "changed_custom_fields names the edited keys, against the last version that touched them",
          %{admin: admin} do
-      for name <- ~w(price sku) do
+      for name <- ~w(rc_price rc_sku) do
         CMS.create_field_definition!(
-          %{content_type: :page, name: name, label: String.capitalize(name)},
+          %{
+            content_type: :page,
+            name: name,
+            label: String.capitalize(String.replace_prefix(name, "rc_", ""))
+          },
           actor: admin
         )
       end
 
       page =
         CMS.create_page!(
-          %{title: "CF", slug: slug(), custom_fields: %{"price" => "9", "sku" => "a"}},
+          %{title: "CF", slug: slug(), custom_fields: %{"rc_price" => "9", "rc_sku" => "a"}},
           actor: admin
         )
 
       page =
-        CMS.update_page!(page, %{custom_fields: %{"price" => "12", "sku" => "a"}}, actor: admin)
+        CMS.update_page!(page, %{custom_fields: %{"rc_price" => "12", "rc_sku" => "a"}},
+          actor: admin
+        )
 
       # A silent row between: touches no custom field.
       page = CMS.update_page!(page, %{title: "Retitled"}, actor: admin)
-      CMS.update_page!(page, %{custom_fields: %{"price" => "12", "sku" => "b"}}, actor: admin)
+
+      CMS.update_page!(page, %{custom_fields: %{"rc_price" => "12", "rc_sku" => "b"}},
+        actor: admin
+      )
 
       [create, price, title, sku] = versions(page, admin)
       key = mint(user(:editor), :read)
@@ -583,10 +598,10 @@ defmodule KilnCMSWeb.RevisionControllerTest do
         data["changed_custom_fields"]
       end
 
-      assert changed.(create) == ["price", "sku"]
-      assert changed.(price) == ["price"]
+      assert changed.(create) == ["rc_price", "rc_sku"]
+      assert changed.(price) == ["rc_price"]
       assert changed.(title) == []
-      assert changed.(sku) == ["sku"]
+      assert changed.(sku) == ["rc_sku"]
     end
   end
 end

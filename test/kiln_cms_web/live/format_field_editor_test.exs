@@ -39,9 +39,14 @@ defmodule KilnCMSWeb.FormatFieldEditorTest do
   end
 
   defp editor(conn, admin, fields) do
-    for {name, type} <- [{"payload", :json}, {"accent", :color}, {"opens", :time}] do
+    for {name, type} <- [{"payload", :json}, {"ffe2_accent", :color}, {"opens", :time}] do
       CMS.create_field_definition!(
-        %{content_type: :page, name: name, label: String.capitalize(name), field_type: type},
+        %{
+          content_type: :page,
+          name: name,
+          label: String.capitalize(String.replace_prefix(name, "ffe2_", "")),
+          field_type: type
+        },
         actor: admin
       )
     end
@@ -87,12 +92,12 @@ defmodule KilnCMSWeb.FormatFieldEditorTest do
     admin = authed_admin()
     {lv, html, page} = editor(conn, admin, %{})
 
-    assert html =~ ~r/id="custom-field-accent"[^>]*pattern=/ or
-             html =~ ~r/pattern="[^"]*"[^>]*id="custom-field-accent"/
+    assert html =~ ~r/id="custom-field-ffe2_accent"[^>]*pattern=/ or
+             html =~ ~r/pattern="[^"]*"[^>]*id="custom-field-ffe2_accent"/
 
     lv |> form("#page-editor") |> render_submit()
 
     saved = CMS.get_page!(page.id, actor: admin)
-    refute Map.has_key?(saved.custom_fields, "accent")
+    refute Map.has_key?(saved.custom_fields, "ffe2_accent")
   end
 end
