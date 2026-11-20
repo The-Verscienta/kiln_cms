@@ -23,6 +23,14 @@ carries the reasoning.
 
 ## Added
 
+<a id="backup-schedule-disk-warning"></a>
+
+- **Schedule preview warns about runaway disk use (#2984).** A sub-daily schedule with a long `keep_days` can keep thousands of full backups. For example, every 2 hours for 60 days keeps 721 of each component. The preview now warns, without blocking the save, in two cases:
+  - when it would keep more than about 500 backups of each component;
+  - when the newest backup of each component it covers, times that count, is more than `BACKUP_DIR` has room for. Room is the free space, read with the same bounded `df` as the backup preflight, plus the finished backups already in `db/` and `media/`, which this schedule's retention can reuse. This check is skipped when `BACKUP_FREE_SPACE_CHECK=false`.
+
+  The size warning gives the estimated total, the free space and the space held by existing backups. Backups kept by something else also count as room, so a nearly full disk can still go unwarned. `keep_days` has no cap, and media stays allowed in sub-daily schedules.
+
 <a id="site-defaults-api"></a>
 
 - **A headless front end can read the site's link-preview defaults at

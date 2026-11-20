@@ -67,6 +67,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **Backups → Schedule: the preview warns when a schedule would keep more than about 500 backups of each component, or more than the backup directory has room for (free space plus the backups already there); it never blocks the save.**
+  ([#3172](https://github.com/The-Verscienta/kiln_cms/pull/3172) · [long form](docs/changelog/unreleased.md#backup-schedule-disk-warning))
+
 - **`GET /api/site`: a site's name, X (Twitter) handle and default share image for a headless front end's link previews, public and shared-cacheable, with a CDN purge on a Branding save that changes them.**
   ([#3167](https://github.com/The-Verscienta/kiln_cms/pull/3167) · [long form](docs/changelog/unreleased.md#site-defaults-api))
 
