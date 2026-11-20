@@ -475,18 +475,11 @@ These are the values Kiln's own pages use for `og:title` / `twitter:title`,
 `social.title` stays the canonical one: a link preview is read by a machine,
 and a variant never changes what a machine reads.
 
-**What you supply yourself.** `social` is per document, so it leaves out the
-three values that belong to the site rather than the document:
-
-- **The card type.** Use `summary_large_image` when you have an image
-  (`social.image`, or your own default) and `summary` when you don't. That is
-  Kiln's own rule.
-- **`twitter:site`.** The site's X username is set in Kiln's Branding settings,
-  but branding is not on any API yet, so put your handle in your front end's
-  config.
-- **A fallback image.** Kiln's pages fall back to Branding's Default social
-  image; the artifact does not, so `image` is absent on a document without one.
-  Use your own default.
+**What comes from the site.** `social` is per document, so it leaves out the
+three values that belong to the site rather than the document: the card type,
+`twitter:site` and the fallback image. Read the site's X username and default
+image from `GET /api/site`, and apply Kiln's card-type rule yourself;
+[Add the site-level tags](#add-the-site-level-tags) below walks through it.
 
 Why these stay out of the artifact:
 [ADR 0061](decisions/0061-site-level-values-stay-out-of-per-document-artifacts.md).
@@ -524,6 +517,104 @@ consumer can still keep the old body:
 Read `social` as optional and fall back to `title` when it is missing. Why
 `social` moved `format_version` when other new keys didn't:
 [ADR 0060](decisions/0060-an-artifact-change-bumps-format-version-only-when-every-existing-document-needs-it.md).
+
+### Add the site-level tags
+
+You start with a front end that writes its tags from `social`, as above. At the
+end, its cards carry the site's X username and fall back to the site's default
+image, as Kiln's own pages do. No credential is needed, and none should be
+sent (see Caching below).
+
+1. **Fetch the site's values.** Request `GET /api/site` on the host of the
+   site you render: it answers for the site the host names, like every
+   delivery surface.
+
+   ```bash
+   curl -s https://cms.example.com/api/site
+   ```
+
+   ```json
+   {"site_name": "Acme Docs",
+    "twitter_site": "@acme",
+    "social_image_url": "https://cms.example.com/uploads/card.png"}
+   ```
+
+   Every key is always present; the two that can be empty are `null`.
+
+   | Key | Value |
+   |---|---|
+   | `site_name` | The site's name, as its pages' `<title>` carries it: Branding's **Site name**, else the operator's `SITE_NAME`, else `KilnCMS`. Never `null`. A site nobody has branded therefore answers the deployment's default name, not one of its own. |
+   | `twitter_site` | Branding's **X (Twitter) username** as `@handle` (a saved `acme` comes back as `@acme`), or `null`. Per site only; there is no instance-wide default. |
+   | `social_image_url` | Branding's **Default social image** as an absolute URL, or `null`. A site-relative image is put on the site's own host (custom domain, else subdomain, else `PUBLIC_BASE_URL`); a full `https://` URL is passed through. |
+
+2. **Combine it with each document's `social`.** These are Kiln's own rules
+   ([seo.md](seo.md#link-previews-open-graph-and-x-twitter-cards)):
+
+   - `og:image` / `twitter:image`: `social.image ?? site.social_image_url`.
+   - `twitter:card`: `summary_large_image` when either image is present, else
+     `summary`. This rule is the one part that stays with you; no endpoint
+     answers it.
+   - `twitter:site`: `site.twitter_site`; leave the tag out when it is `null`.
+   - `og:title` / `twitter:title`: `social.title`, else `site.site_name`.
+
+   ```ts
+   const site = await fetch("https://cms.example.com/api/site").then((r) => r.json());
+
+   function socialTags(social) {
+     const image = social?.image ?? site.social_image_url;
+
+     return {
+       "og:title": social?.title ?? site.site_name,
+       "og:description": social?.description,
+       "og:image": image,
+       "twitter:card": image ? "summary_large_image" : "summary",
+       "twitter:site": site.twitter_site,
+       "twitter:title": social?.title ?? site.site_name,
+       "twitter:description": social?.description,
+       "twitter:image": image,
+     };
+   }
+   ```
+
+   Render only the entries with a value, so no tag goes out with
+   `content=""`.
+
+3. **Check a page.** For a document with no image of its own, your
+   `og:image` should now equal `social_image_url`, and your `twitter:site`
+   the one on the same page rendered by Kiln.
+
+Fetch `/api/site` once per build or render, not once per document: the
+values are the site's, the same for every page.
+
+**Caching.** An anonymous response is shared-cacheable like search:
+`public, max-age=60, stale-while-revalidate=60`, a weak `ETag` that answers
+`304` to `If-None-Match`, and `Vary: Accept, Authorization, Origin`. A valid
+API key or bearer token gets the same body as `private, no-store`, so leave
+credentials off this request. With `KILN_CDN_PURGE_URL` set, a Branding save
+that changes one of the three values purges the site's CDN key, so the new
+value is served at once. Some changes reach the response without a purge and
+show within the `max-age` plus `stale-while-revalidate` (two minutes by
+default): an operator changing `SITE_NAME` or the branding config, and a
+change to the site's custom domain or slug, which moves the host of a
+site-relative default image. A static build sees a Branding change only when
+it next runs; a Branding save sends no webhook.
+
+What can go wrong:
+
+- **`401`.** The request carried an `Authorization` header with an invalid
+  key or token. A bad credential is refused even where none is needed: drop
+  the header.
+- **`404`.** The host names no Kiln site, and the deployment refuses unknown
+  hosts (always, once it has more than one site). Request the site's own
+  host. On a one-site deployment, which doesn't refuse them by default, an
+  unknown host gets the default site's values instead.
+- **`503` with `"code": "temporarily_unavailable"`.** The site's Branding
+  settings could not be read. Retry after the `Retry-After` delay (2 seconds).
+  The response is never cached, and Kiln sends it rather than its stock
+  defaults so a cache never keeps a branded site's previews under Kiln's name.
+- **`site_name` is `KilnCMS`.** Nobody has set a site name in Branding and the
+  operator has not set `SITE_NAME`. A site admin sets one at
+  **Delivery → Branding** (`/editor/branding`).
 
 ## Author / PII
 
@@ -871,8 +962,8 @@ serves only what was *published* at that instant, to anyone.
 ## Caching
 
 Anonymous reads of the main delivery surfaces are shared-cacheable: fired
-artifacts (`public, max-age=300`), and JSON:API, GraphQL queries over `GET` and
-`/api/search` (`public, max-age=60, stale-while-revalidate=60`). Each carries an
+artifacts (`public, max-age=300`), and JSON:API, GraphQL queries over `GET`,
+`/api/search` and `/api/site` (`public, max-age=60, stale-while-revalidate=60`). Each carries an
 `ETag`; send it back as `If-None-Match` and an unchanged response is a bodyless
 `304`. The full table, the headers and CDN setup are in
 [api.md → Caching and CDNs](api.md#caching-and-cdns).

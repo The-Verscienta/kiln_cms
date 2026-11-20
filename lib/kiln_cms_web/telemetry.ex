@@ -349,6 +349,21 @@ defmodule KilnCMSWeb.Telemetry do
             "other). Anything but ok keeps the list held before until it goes stale."
       ),
 
+      # Search sweeps the query budget cut (#2614). `returned` counts sections
+      # that stopped on their own after the deadline, inside the grace;
+      # `killed` the ones still running after it, each a dropped and reopened
+      # database connection if it was mid-query.
+      sum("kiln_cms.search.budget.cut.returned",
+        description:
+          "Search sections that returned on their own after the query budget's " <>
+            "deadline, inside the cut grace (#2614)"
+      ),
+      sum("kiln_cms.search.budget.cut.killed",
+        description:
+          "Search sections killed after the query budget's deadline and grace (#2614); " <>
+            "one killed mid-query costs a database reconnect"
+      ),
+
       # Backup retention (#2487). The events carry the reason and, on a
       # destination, its key: neither is a tag (unbounded). `scope` is local
       # or destination.

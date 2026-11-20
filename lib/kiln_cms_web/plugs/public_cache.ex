@@ -1,7 +1,8 @@
 defmodule KilnCMSWeb.Plugs.PublicCache do
   @moduledoc """
   Shared-cache headers for **anonymous** reads of the headless read APIs —
-  JSON:API (`/api/json`), GraphQL `GET` (`/gql`) and `/api/search`.
+  JSON:API (`/api/json`), GraphQL `GET` (`/gql`), `/api/search` and
+  `/api/site` (the site's link-preview defaults, #2577).
 
   Before this, only the fired-artifact API (`/api/content/:type/:slug`) told a
   CDN anything; every other read went out with Plug's default
@@ -17,8 +18,8 @@ defmodule KilnCMSWeb.Plugs.PublicCache do
       account, and an editor's token sees drafts on these same URLs;
     * an `x-api-key` header (allowed by CORS; treated like `Authorization`);
     * an unlock grant (#496) — the `x-kiln-unlock` header or `?unlock=` param.
-      These three surfaces never honour one (their read policies exclude
-      locked rows for every non-editor), but a caller presenting a grant is
+      These surfaces never honour one (their read policies exclude locked
+      rows for every non-editor, and `/api/site` reads no content), but a caller presenting a grant is
       asking for a per-caller answer and gets a per-caller header;
     * a preview token (#1887) that `KilnCMSWeb.Plugs.PreviewGrant` admitted
       (`PreviewGrant.credential?/1`) — on JSON:API, the one surface here that
@@ -68,9 +69,9 @@ defmodule KilnCMSWeb.Plugs.PublicCache do
   that honour it; `docs/api.md` spells out the bypass rule for a CDN that does
   not.
 
-  Deliberately **not** `Accept-Language` or `Cookie`: the locale of all three
+  Deliberately **not** `Accept-Language` or `Cookie`: the locale of these
   surfaces is a URL input (`?locale=`, a GraphQL argument, a JSON:API filter or
-  a `/fr/` path prefix), already in every cache key, and varying on either would
+  a `/fr/` path prefix; `/api/site` has none), already in every cache key, and varying on either would
   split one cached answer into one per browser for nothing. If a surface ever
   starts reading either, it belongs here.
 

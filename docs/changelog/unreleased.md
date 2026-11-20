@@ -23,6 +23,50 @@ carries the reasoning.
 
 ## Added
 
+<a id="site-defaults-api"></a>
+
+- **A headless front end can read the site's link-preview defaults at
+  `GET /api/site` (#2577): its name, its X (Twitter) handle and its default
+  share image, with no credential.** A fired artifact's `social` object
+  carries only the document's own values
+  ([ADR 0061](../decisions/0061-site-level-values-stay-out-of-per-document-artifacts.md)),
+  so until now a front end had to copy the site's X handle and fallback image
+  into its own config by hand. Guides:
+  [Site defaults](../api.md#site-defaults) and
+  [Add the site-level tags](../headless-consumer-guide.md#add-the-site-level-tags).
+  - **The answer.** Exactly three keys, every one always present:
+    `site_name` (the site's name as its `<title>` carries it: Branding, else
+    `SITE_NAME`, else `KilnCMS`; a site nobody has branded answers the
+    deployment's default name), `twitter_site` (`@handle` or `null`, per
+    site only, with no operator default) and `social_image_url` (an absolute
+    URL on the site's own host, or a full URL passed through, or `null`;
+    the operator's branding config applies as it does on the pages). Each is
+    a value the site's public `<head>` already shows. Logo, favicon, colors,
+    theme and menus are left out on purpose.
+  - **Whose site.** The one the request's host names, as on every other
+    delivery surface; under strict host matching an unknown host is a `404`.
+  - **Caching.** Anonymous reads are `public, max-age=60,
+    stale-while-revalidate=60` with a weak `ETag` and `304`, like
+    `/api/search`; a valid credential gets the same body as
+    `private, no-store`, and an invalid one is a `401`. If the site's
+    Branding can't be read the answer is a `503` with `Retry-After: 2`,
+    never cached, rather than Kiln's stock defaults.
+  - **CDN purge on a Branding save.** With `KILN_CDN_PURGE_URL` set, the
+    first Branding save, **Reset to defaults**, and a save that changes the
+    site name, the X username or the default social image now purge the
+    site's CDN key, which drops every cached response for that site, not
+    just this one. A save that changes only the logo, favicon, color, theme
+    or menus doesn't, nor does the nightly app-icon re-check. A change of
+    `SITE_NAME`, the operator's branding config, or the site's domain or slug
+    is not purged and shows within two minutes.
+  - **The contract.** Listed as covered in the 1.x stability table; new keys
+    are additive only. REST only: no JSON:API resource, GraphQL field or MCP
+    tool. `site()` methods for `kiln_client` and `@kiln-cms/client` will
+    follow separately. In the OpenAPI document as `getSite`.
+  - **Upgrading.** No migration and no setting. On a deployment with
+    `KILN_CDN_PURGE_URL` set, expect a site-wide purge after a Branding save
+    that changes one of the three values.
+
 <a id="plugin-health-api"></a>
 
 - **Each installed plugin's health is available as JSON for monitoring, at
@@ -74,6 +118,11 @@ carries the reasoning.
     `GET /api/security/posture` is unaffected.
 
 ## Changed
+
+<a id="search-budget-cut-grace"></a>
+
+- **A search the budget cuts now gives its running sections 100 ms to stop on their own before killing them, so a query that finishes in time keeps its database connection (#2614).**
+  When `query_budget` ran out, every content section still running was killed at once. A section killed mid-query costs its connection: Postgrex cancels the query in Postgres (so, contrary to what #2614 suspected, nothing keeps running there), but DBConnection drops the connection and opens a new one, a TLS handshake and authentication against a remote database. Now, at `section_concurrency` above 1 (the default is 2), nothing new starts at the deadline and the running sections get `cut_grace` more milliseconds (`config :kiln_cms, KilnCMS.Search, cut_grace: 100` by default) to return. A section checks the deadline between its legs, so most return within one query; those are kept with every leg they finished, and only the ones still running after the grace are killed. The grace does not remove every reconnect: a query longer than the grace is still killed, and a section that was waiting for a connection at the deadline may get one during the grace. Two things readers see: a cut search may now answer up to `cut_grace` later than before (100 ms at the defaults), and a leg that finishes inside the grace is no longer listed under `incomplete`. The response shape and the meaning of `partial` and `incomplete` are unchanged. A new event, `[:kiln_cms, :search, :budget, :cut]` with `returned` and `killed`, is exported as `kiln_cms_search_budget_cut_returned` and `kiln_cms_search_budget_cut_killed` (see [observability.md](../observability.md#search-budget-cuts)). Set `cut_grace: 0` to kill at the deadline as before. A per-query `statement_timeout` was considered and rejected: it needs a transaction or a session `SET`/`RESET` on every checkout, round trips on every search to save a reconnect on the rare one the budget cuts. No migration; rolling back is safe.
 
 <a id="public-js-bundle"></a>
 
