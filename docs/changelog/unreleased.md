@@ -5,6 +5,22 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Upgrade notes
+
+<a id="public-js-bundle-upgrade"></a>
+
+- **A custom asset build or overlay `Dockerfile` that does not run `mix assets.deploy` must also run `mix esbuild kiln_public --minify` before `phx.digest` (#2402).**
+  Signed-out content pages now load `public.js`, built by the new
+  `kiln_public` esbuild profile (see [Changed](#public-js-bundle)).
+  `mix assets.deploy`, which the stock `Dockerfile` runs, already includes
+  it, as does `mix assets.build`. A build that runs the esbuild profiles
+  itself and skips this one loses nothing but the saving: when
+  `priv/static/assets/js/public.js` is missing, every page loads `app.js`
+  as before, and public forms' human-verification widgets still mount.
+  Outside dev, whether `public.js` exists is checked once per VM, so a
+  release that gains it later picks it up only after a restart. No
+  migration and no configuration; rolling back is safe.
+
 ## Added
 
 <a id="plugin-health-api"></a>
@@ -59,6 +75,43 @@ carries the reasoning.
 
 ## Changed
 
+<a id="public-js-bundle"></a>
+
+- **Signed-out content pages load a small `public.js` instead of `app.js` (#2402).**
+  Every page used to load `app.js`: LiveView, the Phoenix socket, the
+  console's hooks, Sortable and topbar, 257,647 B minified and 80,526 B
+  gzipped across three requests, none of which a visitor reading a page
+  uses. Those pages now load `public.js`: 6,433 B minified and 2,505 B
+  gzipped in one request. It carries the human-verification mount for
+  public forms, the `data-method`/`data-confirm` helpers from
+  `phoenix_html`, and the ⌘K / Ctrl-K shortcut to the console's search
+  (now shared with `app.js` through `assets/js/search_shortcut.js`).
+  - **Which pages.** Those rendered by `ContentController` (delivered
+    pages and posts, the blog and event indexes, `/search`, the passphrase
+    lock page, the delivery 404 and the stock home page), `FormController`
+    (`/forms/<slug>`, its thank-you page and its refused re-render) and
+    `NewsletterController`. Each opts in with the new
+    `KilnCMSWeb.Plugs.PublicJsBundle`; `KilnCMSWeb.Layouts.js_bundle_path/1`
+    still answers `app.js` for any LiveView, for a page with a flash (its
+    close button needs LiveView), and when `public.js` was not built. The
+    console, sign-in and every other LiveView keep `app.js`.
+  - **Code-injection snippets.** A head or footer snippet on a page that
+    now loads `public.js` no longer runs alongside `app.js`, so one that
+    used `window.liveSocket` or another `app.js` global finds nothing.
+    That was never supported.
+  - **A budget gate.** `mix kiln.assets.budget [--only public|app]` builds
+    the bundles minified into `_build/asset_budget/` and fails when
+    `public.js` passes 12,000 B minified or 5,000 B gzipped, carries
+    LiveView, Phoenix, the colocated hooks, Sortable, topbar, the rich-text
+    editor, TipTap or Yjs, or loses `js/challenge.js`; and when `app.js`
+    loads TipTap, Yjs or the rich-text editor outside `import()`. `app.js`
+    sizes are printed, not gated. CI's required `build` job runs
+    `--only public`, which needs no npm.
+  - **Dev.** A third esbuild watcher builds `public.js`, and the dev
+    assets banner names it when it is missing.
+
+  See [Which script a page loads](../frontend-assets.md#which-script-a-page-loads).
+
 <a id="referrer-suppression-sweep"></a>
 
 - **The wide search behind the referrer-suppression rule is now a test you can re-run (#3123).**
@@ -74,6 +127,10 @@ carries the reasoning.
   - `backup.sh` prunes with the `BACKUP_KEEP_DAYS` in force when the prune runs, so a changed setting is judged correctly.
   - A cron run records its window only if an import runs while cron's manifest is still the latest. Imports run at an app backup's start, during marker sync and when History opens. Cron's separate `db` and `media` entries write no manifest, so they never record one.
   - Rows imported before this change stay as they were.
+
+<a id="backup-s3-same-bucket-overlap"></a>
+
+- **S3 destinations naming one bucket through different hosts (#3088).** Overlap between S3 destinations was compared by host, port and bucket. Two destinations reaching one bucket through different endpoint names each pruned it by their own keep rules, so one could delete a backup the other still counted on. Examples: `s3.amazonaws.com` and `s3.us-east-1.amazonaws.com`, R2 account and jurisdiction hosts, or a MinIO by name and by IP. Now two S3 destinations with the same bucket name and nested prefixes block pruning on both, whatever their host. Each row's badge reads "Not pruned: another S3 destination uses a bucket of the same name; the app can't tell whether it is the same store". Saving such a pair is still allowed; only an exact overlap is refused.
 
 <a id="webhook-resolve-ladder-errors"></a>
 
@@ -191,3 +248,10 @@ carries the reasoning.
     background with a 5-second limit, as the Backups page does, and says
     when it couldn't check in time.
   ([#2983](https://github.com/The-Verscienta/kiln_cms/issues/2983), [#2985](https://github.com/The-Verscienta/kiln_cms/issues/2985), [#2986](https://github.com/The-Verscienta/kiln_cms/issues/2986))
+
+## Upgrade notes
+
+<a id="backup-s3-same-bucket-overlap-upgrade"></a>
+
+- **Two S3 destinations on one bucket name stop pruning (#3088).** After the upgrade, an installation with two S3 destinations that name the same bucket, one prefix inside the other, on different hosts skips retention on both. Each pass leaves a "Retention on … skipped" notice, and the storage grows until you act. Give the two destinations prefixes side by side, or untick "Delete its old backups (retention)" on one of them if they really are separate stores.
+
