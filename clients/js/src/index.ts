@@ -96,6 +96,7 @@ export type {
   RevisionListOptions,
   SchemaOptions,
   SearchOptions,
+  Site,
   SubmitFormOptions,
   Surface,
   SyncDelete,
