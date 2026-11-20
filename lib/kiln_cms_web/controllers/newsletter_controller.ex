@@ -25,7 +25,13 @@ defmodule KilnCMSWeb.NewsletterController do
   alias KilnCMS.Forms
   alias KilnCMS.Newsletter
   alias KilnCMSWeb.Params
+  alias KilnCMSWeb.Plugs.PublicJsBundle
   alias KilnCMSWeb.Tenant
+
+  # Every page here is a dead render in `Layouts.public` with one plain form
+  # at most, so it loads `public.js`, not app.js (#2402). See
+  # `KilnCMSWeb.Plugs.PublicJsBundle`.
+  plug PublicJsBundle
 
   @doc """
   `POST /newsletter/subscribe` — anonymous sign-up (issue #586).

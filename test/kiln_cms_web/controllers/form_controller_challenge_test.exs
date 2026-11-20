@@ -51,7 +51,7 @@ defmodule KilnCMSWeb.FormControllerChallengeTest do
       assert html =~ ~s(data-action-option="action")
       assert html =~ ~s(data-onload-param="")
       assert html =~ ~s(data-interactive="false")
-      # On the site's own pages app.js mounts it; no extra script.
+      # On the site's own pages public.js (or app.js) mounts it; no extra script.
       refute html =~ "challenge_static.js"
 
       assert csp(conn) =~ "script-src 'self' 'nonce-"

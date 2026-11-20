@@ -31,6 +31,7 @@ defmodule KilnCMSWeb.DevAssetsTest do
     unless opts[:no_js] do
       File.mkdir_p!(Path.join(root, "priv/static/assets/js"))
       File.write!(Path.join(root, "priv/static/assets/js/app.js"), "")
+      File.write!(Path.join(root, "priv/static/assets/js/public.js"), "")
     end
 
     unless opts[:no_node_modules], do: File.mkdir_p!(Path.join(root, "assets/node_modules"))
@@ -61,12 +62,29 @@ defmodule KilnCMSWeb.DevAssetsTest do
 
     problems = DevAssets.check(root)
     missing = for {:missing, path} <- problems, do: Path.relative_to(path, root)
-    assert missing == ["priv/static/assets/css/app.css", "priv/static/assets/js/app.js"]
+
+    assert missing == [
+             "priv/static/assets/css/app.css",
+             "priv/static/assets/js/app.js",
+             "priv/static/assets/js/public.js"
+           ]
+
     assert :no_node_modules in problems
 
     message = DevAssets.message(problems)
     assert message =~ "mix assets.setup && mix assets.build"
     assert message =~ "assets/node_modules is missing"
+  end
+
+  # #2402: the signed-out pages' bundle is its own esbuild profile, so it can
+  # be missing while app.js is not (a watcher that died, a custom build).
+  test "a missing public.js is named on its own", %{tmp_dir: root} do
+    build!(root, ":root{--side-w:16rem}")
+    File.rm!(Path.join(root, "priv/static/assets/js/public.js"))
+
+    assert [{:missing, path}] = DevAssets.check(root)
+    assert Path.relative_to(path, root) == "priv/static/assets/js/public.js"
+    assert DevAssets.message(DevAssets.check(root)) =~ "`mix assets.build`"
   end
 
   test "a stale stylesheet alone points at assets.build", %{tmp_dir: root} do
