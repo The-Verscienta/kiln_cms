@@ -23,6 +23,14 @@ carries the reasoning.
 
 ## Added
 
+<a id="backup-schedule-disk-warning"></a>
+
+- **Schedule preview warns about runaway disk use (#2984).** A sub-daily schedule with a long `keep_days` can keep thousands of full backups. For example, every 2 hours for 60 days keeps 721 of each component. The preview now warns, without blocking the save, in two cases:
+  - when it would keep more than about 500 backups of each component;
+  - when the newest backup of each component it covers, times that count, is more than `BACKUP_DIR` has room for. Room is the free space, read with the same bounded `df` as the backup preflight, plus the finished backups already in `db/` and `media/`, which this schedule's retention can reuse. This check is skipped when `BACKUP_FREE_SPACE_CHECK=false`.
+
+  The size warning gives the estimated total, the free space and the space held by existing backups. Backups kept by something else also count as room, so a nearly full disk can still go unwarned. `keep_days` has no cap, and media stays allowed in sub-daily schedules.
+
 <a id="site-defaults-api"></a>
 
 - **A headless front end can read the site's link-preview defaults at
@@ -171,6 +179,12 @@ carries the reasoning.
 <a id="webhook-ordering-identity"></a>
 
 - **A late, retried or foreign provider webhook can no longer overwrite a membership with the wrong subscription's state (#2749).** Metadata resolves an event to a membership row, not to a subscription, so a delayed event could undo newer state and an event for an abandoned subscription could rewrite a paying row. Events are now checked before they are applied, and one that fails is acknowledged, writes nothing and ends `ignored` in `/editor/billing` with a reason. `other_subscription`: the membership is `active` or `past_due`, holds a subscription id, and the event is about a different one (logged at warning); a cancellation for a subscription other than the stored one is ignored on any row, so it never overwrites the stored id. `out_of_order`: the event's `created` is older than the last one applied for the same subscription; an equal stamp applies, except that an event that would not cancel never revives a `canceled` row. `comped_not_provider_managed`: a `comped` membership ignores every provider event, and comping a paying member does not cancel their provider subscription (#3156), so cancel it in the provider's dashboard. An event with no subscription id, or an entitling row with no stored one, is still applied. A row that does not entitle accepts a different subscription only when it is `incomplete`, when the state was fetched live at checkout, or when the event is strictly newer than the last one applied, so a late non-cancelling event for a canceled row's old subscription cannot revive it. Checkout completion applies state fetched live, is exempt from the ordering check, and is stamped with the checkout event's own `created`. `invoice.payment_failed` now also has its subscription id read from the newer Stripe shape (`parent.subscription_details.subscription`). The check repeats inside the write transaction under the row lock; a row that moved and an event now superseded settles as `ignored`, and if the row moved but the event still applies the write errors and Oban retries it. Residual window: Stripe's `created` has one-second resolution, so two different events in the same second delivered in the wrong order are not caught. Replaying an applied event still appends a second `reconciled` audit row (status unchanged). Operators: ignored events show in `/editor/billing` with the reason; a burst of `other_subscription` is worth a look. A new nullable column, `billing_memberships.last_provider_event_at` (expand-only, not exposed in the API), and no config. A node on the previous release does not stamp it, which only makes ordering more permissive, so rolling back is safe. See [Late, repeated and foreign events](../memberships.md#late-repeated-and-foreign-events).
+
+<a id="scoping-bare-org-id"></a>
+
+- **A member of a non-default site now sees that site's content-type scope on the content list's "New" buttons and the translations dashboard (#2599).** For a member whose membership on a non-default site lists `editable_types`, the content list's New buttons, the translations dashboard's Missing chips and its translation actions were decided by the default site's scope, so they could offer a type the member may not create on their own site, or hide one they may. They now follow the scope of the site being viewed. This was a display error only: the create and update policies already judged the right site, so nothing was allowed that should not have been, and a refused create still failed with the same error. No action is needed.
+
+  For developers, `KilnCMS.Accounts.Scoping.permitted?/4` and `explicitly_permits?/4` take their second argument as a bare org id, an `%Organization{}`, or any query, changeset, action input or plain map carrying `:tenant` or `:to_tenant`. `nil` or a tenant-less subject still means the default site. Any other shape (an integer, an atom, a list, a tuple) now raises `ArgumentError` instead of silently judging the default site. A bare id used to take that silent path, which is how this went unnoticed. Still open: `subject_org_id/1` (used by `effective_tier/2` and `field_grant/3`) and `audience_org_id/1` fall back to the default org for odd shapes; a follow-up will make those resolvers strict too.
 
 <a id="billing-webhook-lost-events"></a>
 

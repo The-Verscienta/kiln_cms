@@ -25328,6 +25328,20 @@ msgstr "Cette planification a changé depuis que vous l'avez ouverte : elle n'a 
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
+msgid "This schedule keeps about %{count} backup of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgid_plural "This schedule keeps about %{count} backups of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgstr[0] "Cette planification conserve environ %{count} sauvegarde de chaque composant (environ %{size}), plus que la place dans le répertoire de sauvegarde : %{free} libres et %{held} dans les sauvegardes déjà présentes."
+msgstr[1] "Cette planification conserve environ %{count} sauvegardes de chaque composant (environ %{size}), plus que la place dans le répertoire de sauvegarde : %{free} libres et %{held} dans les sauvegardes déjà présentes."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "This schedule keeps about %{count} backup of each component. Check that the backup directory has room for them, or keep fewer."
+msgid_plural "This schedule keeps about %{count} backups of each component. Check that the backup directory has room for them, or keep fewer."
+msgstr[0] "Cette planification conserve environ %{count} sauvegarde de chaque composant. Vérifiez que le répertoire de sauvegarde a la place de les contenir, ou conservez-en moins."
+msgstr[1] "Cette planification conserve environ %{count} sauvegardes de chaque composant. Vérifiez que le répertoire de sauvegarde a la place de les contenir, ou conservez-en moins."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
 msgid "This schedule runs more often than daily without Keep for (days), so its backups are kept for BACKUP_KEEP_DAYS. Set Keep for (days) to edit it; you can still pause, resume or delete it."
 msgstr "Cette planification s’exécute plus d’une fois par jour sans « Conserver pendant (jours) » : ses sauvegardes sont donc conservées selon BACKUP_KEEP_DAYS. Renseignez « Conserver pendant (jours) » pour la modifier ; vous pouvez toujours la mettre en pause, la reprendre ou la supprimer."
 
