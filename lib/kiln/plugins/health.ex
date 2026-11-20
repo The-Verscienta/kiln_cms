@@ -482,10 +482,21 @@ defmodule Kiln.Plugins.Health do
     notices =
       case Task.yield(notices, remaining(deadline)) || Task.shutdown(notices, :brutal_kill) do
         {:ok, result} -> result
-        _timeout -> {:error, :timeout}
+        _timeout -> notices_cut_off()
       end
 
     %{hex: hex, notices: notices}
+  end
+
+  # The feed's task was cut off at the round's deadline. If it never got to
+  # store (it was still waiting on `SecurityNotices`' lock, behind a holder
+  # that died or ran long), the feed's cache is empty, and `cached_entry/1`
+  # would then refuse the Hex half this round just stored: the next load
+  # would ask hex.pm again. Store the timeout for the feed, so its 15-minute
+  # failure lifetime applies as if its own request had timed out.
+  defp notices_cut_off do
+    if SecurityNotices.cached() == nil, do: SecurityNotices.put_cache({:error, :timeout})
+    {:error, :timeout}
   end
 
   # The feed's own limit, shortened to leave the lock back-off spare inside

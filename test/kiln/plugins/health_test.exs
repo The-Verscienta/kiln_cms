@@ -694,6 +694,44 @@ defmodule Kiln.Plugins.HealthTest do
       assert %Report{state: :partial, notices: :unknown} = Health.check(installed: installed)
       assert requests() == []
     end
+
+    test "a feed still waiting on its lock at the limit caches a timeout, so the next load asks nothing" do
+      enable()
+      put_health(fetch_budget_ms: 500)
+      stub([])
+
+      # Another caller holds the feed's lock for the whole round and stores
+      # nothing (a page that left mid-request), so the round's notices task
+      # never gets to fetch.
+      test_pid = self()
+
+      holder =
+        spawn(fn ->
+          :global.trans(
+            {{SecurityNotices, :fetch}, self()},
+            fn ->
+              send(test_pid, :locked)
+
+              receive do
+                :release -> :ok
+              end
+            end,
+            [node()]
+          )
+        end)
+
+      assert_receive :locked
+      on_exit(fn -> send(holder, :release) end)
+
+      installed = [hex_plugin()]
+      assert %Report{state: :partial, notices: :unknown} = Health.check(installed: installed)
+      assert SecurityNotices.cached() == {:error, :timeout}
+
+      send(holder, :release)
+      _ = requests()
+      assert %Report{state: :partial, notices: :unknown} = Health.check(installed: installed)
+      assert requests() == []
+    end
   end
 
   describe "warm/0" do
