@@ -14,6 +14,8 @@ defmodule Kiln.Plugins.HealthTest do
   # A check that finds a failing plugin logs a warning; several cases do.
   @moduletag :capture_log
 
+  import KilnCMS.Test.Eventually, only: [eventually: 2]
+
   alias Kiln.Plugins.Health
   alias Kiln.Plugins.Health.Installed
   alias Kiln.Plugins.Health.Report
@@ -31,6 +33,9 @@ defmodule Kiln.Plugins.HealthTest do
     Health.clear_cache()
 
     on_exit(fn ->
+      # A round outlives the caller that started it; let it finish (blocked
+      # stubs give up after 5 s) before the next case's cache and env.
+      eventually(fn -> Process.whereis(Health.warmer_name()) == nil end, timeout_ms: 15_000)
       Application.put_env(:kiln_cms, Health, health)
       Application.put_env(:kiln_cms, SecurityNotices, notices)
       Application.put_env(:kiln_cms, Kiln.Updates, updates)
@@ -158,6 +163,79 @@ defmodule Kiln.Plugins.HealthTest do
       0 -> []
     end
   end
+
+  # Like `stub/1`, but the first request for jason's package document waits
+  # for `:release` (5 s at most), so a round stays in flight while the test
+  # brings in a second caller.
+  defp blocking_stub do
+    test = self()
+    package = fixture("jason_package.json")
+    release = fixture("jason_release_1.4.5.json")
+
+    stub(
+      hex: fn conn, path ->
+        case path do
+          "/api/packages/jason" ->
+            send(test, {:blocked, self()})
+
+            receive do
+              :release -> :ok
+            after
+              5_000 -> :ok
+            end
+
+            Req.Test.json(conn, package)
+
+          "/api/packages/jason/releases/1.4.5" ->
+            Req.Test.json(conn, release)
+
+          _other ->
+            Plug.Conn.send_resp(conn, 404, "")
+        end
+      end
+    )
+  end
+
+  # A process registered as the node's warmer, standing in for a round in
+  # flight: on `:go` it runs `fun` and exits. Killed when the case ends.
+  defp fake_warmer(fun) do
+    test = self()
+
+    pid =
+      spawn(fn ->
+        Process.register(self(), Health.warmer_name())
+        send(test, :registered)
+
+        receive do
+          :go -> fun.()
+        after
+          10_000 -> :ok
+        end
+      end)
+
+    assert_receive :registered
+    on_exit(fn -> Process.exit(pid, :kill) end)
+    pid
+  end
+
+  # Until `caller` is waiting on the warmer: it joined the round rather than
+  # starting its own or reading a cache the round had already filled.
+  defp joined(caller) do
+    eventually(
+      fn ->
+        with warmer when is_pid(warmer) <- Process.whereis(Health.warmer_name()),
+             {:monitored_by, by} <- Process.info(warmer, :monitored_by) do
+          caller in by
+        end
+      end,
+      message: "the caller never joined the round in flight"
+    )
+  end
+
+  defp hex_requests, do: Enum.filter(requests(), &match?({"hex.pm", _}, &1))
+
+  defp slow_plugin(package),
+    do: hex_plugin(plugin: Module.concat(Slow, package), name: package, package: package)
 
   describe "the mutation, end to end" do
     test "a release whose checksum changed on Hex fails" do
@@ -420,6 +498,201 @@ defmodule Kiln.Plugins.HealthTest do
 
       assert %Report{state: :fresh} = Health.check(installed: [hex_plugin()], force: true)
       assert [_ | _] = requests()
+    end
+  end
+
+  # #2565: every round runs in the node's one warmer, so pages loading
+  # together ask once between them.
+  describe "one round per node" do
+    test "concurrent cold checks and a warm share one round" do
+      enable()
+      blocking_stub()
+      installed = [hex_plugin()]
+
+      first = Task.async(fn -> Health.check(installed: installed) end)
+      assert_receive {:blocked, fetcher}, 2_000
+
+      second = Task.async(fn -> Health.check(installed: installed) end)
+      joined(second.pid)
+      assert Health.warm(installed: installed) == :in_flight
+
+      send(fetcher, :release)
+      assert [%Report{state: :fresh} = one, two] = Task.await_many([first, second], 10_000)
+      assert one == two
+
+      assert Enum.sort(requests()) == [
+               {"hex.pm", "/api/packages/jason"},
+               {"hex.pm", "/api/packages/jason/releases/1.4.5"},
+               {"kilncms.dev", "/api/json/entries/published"}
+             ]
+    end
+
+    test "a forced check while a round is in flight joins it" do
+      enable()
+      blocking_stub()
+      installed = [hex_plugin()]
+
+      first = Task.async(fn -> Health.check(installed: installed) end)
+      assert_receive {:blocked, fetcher}, 2_000
+
+      forced = Task.async(fn -> Health.check(installed: installed, force: true) end)
+      joined(forced.pid)
+
+      send(fetcher, :release)
+      assert [%Report{state: :fresh}, %Report{state: :fresh}] = Task.await_many([first, forced])
+      assert length(hex_requests()) == 2
+    end
+
+    test "joins a warmer that is already running and answers from what it cached" do
+      enable()
+      stub()
+
+      warmer =
+        fake_warmer(fn ->
+          Health.put_cache(%{hex: %{"jason" => {:error, :not_found}}, notices: {:ok, []}})
+        end)
+
+      caller = Task.async(fn -> Health.check(installed: [hex_plugin()]) end)
+      joined(caller.pid)
+      send(warmer, :go)
+
+      assert %Report{state: :fresh, plugins: [%{integrity: :not_found}]} = Task.await(caller)
+      assert requests() == []
+    end
+
+    test "a round that stored nothing answers unknown, never OK, and caches nothing" do
+      enable()
+      stub()
+      warmer = fake_warmer(fn -> :ok end)
+
+      caller = Task.async(fn -> Health.check(installed: [hex_plugin(), path_plugin()]) end)
+      joined(caller.pid)
+      send(warmer, :go)
+
+      assert %Report{state: :partial, notices: :unknown, checked_at: nil, plugins: plugins} =
+               Task.await(caller)
+
+      assert Enum.map(plugins, & &1.overall) == [:unknown, :unknown]
+      assert Health.cached(installed: [hex_plugin()]) == nil
+      assert requests() == []
+    end
+
+    test "disabled and nothing-to-check answer at once, without joining a round" do
+      stub()
+      _warmer = fake_warmer(fn -> :ok end)
+
+      assert %Report{state: :disabled} =
+               Task.await(Task.async(fn -> Health.check(installed: [hex_plugin()]) end), 1_000)
+
+      enable()
+
+      assert %Report{state: :nothing_to_check} =
+               Task.await(
+                 Task.async(fn -> Health.check(installed: [overlay_plugin()]) end),
+                 1_000
+               )
+
+      assert requests() == []
+    end
+
+    test "inline: true runs the round in the caller, past a warmer in flight" do
+      enable()
+      stub()
+      _warmer = fake_warmer(fn -> :ok end)
+
+      check =
+        Task.async(fn -> Health.check(installed: [hex_plugin()], force: true, inline: true) end)
+
+      assert %Report{state: :fresh} = Task.await(check, 5_000)
+      assert {"hex.pm", "/api/packages/jason/releases/1.4.5"} in requests()
+    end
+  end
+
+  describe "a round's time limit" do
+    test "a slow package is cut off, and what came back is cached" do
+      enable()
+      put_health(fetch_budget_ms: 500)
+
+      stub(
+        hex: fn conn, path ->
+          case path do
+            "/api/packages/slow" <> _rest -> Process.sleep(3_000)
+            _jason -> :ok
+          end
+
+          case path do
+            "/api/packages/jason" ->
+              Req.Test.json(conn, fixture("jason_package.json"))
+
+            "/api/packages/jason/releases/1.4.5" ->
+              Req.Test.json(conn, fixture("jason_release_1.4.5.json"))
+
+            _other ->
+              Plug.Conn.send_resp(conn, 404, "")
+          end
+        end
+      )
+
+      installed = [hex_plugin(), slow_plugin("slow")]
+      {micros, report} = :timer.tc(fn -> Health.check(installed: installed) end)
+
+      assert micros < 2_000_000
+      assert %Report{state: :partial, plugins: [jason, slow]} = report
+      assert jason.integrity == :ok
+      assert slow.integrity == :unknown
+      assert slow.overall == :unknown
+      assert Health.cached(installed: installed) != nil
+
+      _ = requests()
+      assert %Report{state: :partial} = Health.check(installed: installed)
+      assert requests() == []
+    end
+
+    test "a package whose turn comes after the limit is never asked" do
+      enable()
+      put_health(fetch_budget_ms: 200)
+
+      stub(
+        hex: fn conn, _path ->
+          Process.sleep(3_000)
+          Plug.Conn.send_resp(conn, 404, "")
+        end
+      )
+
+      # Four at a time: the fifth starts only once the first four ran out.
+      installed = Enum.map(~w(slow_a slow_b slow_c slow_d slow_e), &slow_plugin/1)
+
+      assert %Report{state: :partial, plugins: plugins} = Health.check(installed: installed)
+      assert Enum.all?(plugins, &(&1.integrity == :unknown))
+
+      asked = Enum.map(hex_requests(), fn {_host, path} -> path end)
+      assert length(asked) == 4
+      refute Enum.any?(asked, &String.contains?(&1, "slow_e"))
+      assert Health.cached(installed: installed) != nil
+    end
+
+    test "a slow feed is cut off inside the limit, and its timeout is cached too" do
+      enable()
+      put_health(fetch_budget_ms: 1_000)
+
+      stub(
+        notices: fn conn ->
+          Process.sleep(3_000)
+          Req.Test.json(conn, %{"data" => []})
+        end
+      )
+
+      installed = [hex_plugin()]
+      {micros, report} = :timer.tc(fn -> Health.check(installed: installed) end)
+
+      assert micros < 2_500_000
+      assert %Report{state: :partial, notices: :unknown, plugins: [status]} = report
+      assert status.integrity == :ok
+      assert SecurityNotices.cached() != nil
+
+      _ = requests()
+      assert %Report{state: :partial, notices: :unknown} = Health.check(installed: installed)
+      assert requests() == []
     end
   end
 
