@@ -447,6 +447,23 @@ defmodule KilnCMS.Backups.Destination do
   def overlap?({:s3, host, port, bucket, a}, {:s3, host, port, bucket, b}), do: nested?(a, b)
   def overlap?(_a, _b), do: false
 
+  @doc """
+  Whether two locations may be the same place though `overlap?/2` can't
+  show it (#3088): two S3 locations naming a bucket of the same name, one
+  prefix inside the other, whatever their endpoint host or port. One bucket
+  answers to many hosts (AWS's global and regional endpoints, an R2
+  account's jurisdiction hosts, a MinIO by name and by IP), and the app
+  can't tell those from two stores that each hold a bucket of that name.
+  Retention treats such a pair as overlapping; creating one is still
+  allowed, since only an exact `overlap?/2` is refused. True of every pair
+  `overlap?/2` is true of, too.
+  """
+  @spec possible_overlap?(location(), location()) :: boolean()
+  def possible_overlap?({:s3, _host_a, _port_a, bucket, a}, {:s3, _host_b, _port_b, bucket, b}),
+    do: nested?(a, b)
+
+  def possible_overlap?(a, b), do: overlap?(a, b)
+
   defp nested?(a, b), do: List.starts_with?(a, b) or List.starts_with?(b, a)
 
   @doc """

@@ -119,6 +119,10 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="backup-s3-same-bucket-overlap"></a>
+
+- **S3 destinations naming one bucket through different hosts (#3088).** Overlap between S3 destinations was compared by host, port and bucket. Two destinations reaching one bucket through different endpoint names each pruned it by their own keep rules, so one could delete a backup the other still counted on. Examples: `s3.amazonaws.com` and `s3.us-east-1.amazonaws.com`, R2 account and jurisdiction hosts, or a MinIO by name and by IP. Now two S3 destinations with the same bucket name and nested prefixes block pruning on both, whatever their host. Each row's badge reads "Not pruned: another S3 destination uses a bucket of the same name; the app can't tell whether it is the same store". Saving such a pair is still allowed; only an exact overlap is refused.
+
 <a id="webhook-resolve-ladder-errors"></a>
 
 - **A provider webhook whose membership could not be looked up because of a database fault is now retried instead of dropped (#2754).** While resolving which membership an event concerns, any failed read other than a refusal was treated as "nothing we hold": the event ended `:ignored`, which is final and purgeable, so a transient fault could lose a payment event for good. Now such a failure ends the event `:failed` and Oban retries it (8 attempts, with backoff). Only a malformed identifier in the payload (a `membership_id` or `org_id` that is not a UUID) is still ignored, because a retry cannot change it. Separately, a metadata mismatch (the event's `user_id` differs from the owner of the membership its `membership_id` names) now halts the lookup: the event row is `:ignored` with the reason `metadata_mismatch` and nothing is written. Before, the lookup went on to the subscription and customer ids, which could write the very row the mismatch check had just refused. An org mismatch cannot occur, since the metadata lookup is filtered by that org. Also fixed: with strict tenancy on (the production default), the customer-id lookup raised `TenantRequired` while loading the tier and was swallowed as "no membership", so an event with no usable `membership_id` or subscription id never resolved by customer; it does now, and a customer holding several tiers is told apart by price id within each membership's own site. Operators: you may now see `failed` events in `/editor/billing` during a database incident, and they settle once the retry succeeds; `metadata_mismatch` is worth a look if it recurs. No migration and no config; rolling back is safe. See [Organizations](../memberships.md#organizations).
@@ -235,3 +239,10 @@ carries the reasoning.
     background with a 5-second limit, as the Backups page does, and says
     when it couldn't check in time.
   ([#2983](https://github.com/The-Verscienta/kiln_cms/issues/2983), [#2985](https://github.com/The-Verscienta/kiln_cms/issues/2985), [#2986](https://github.com/The-Verscienta/kiln_cms/issues/2986))
+
+## Upgrade notes
+
+<a id="backup-s3-same-bucket-overlap-upgrade"></a>
+
+- **Two S3 destinations on one bucket name stop pruning (#3088).** After the upgrade, an installation with two S3 destinations that name the same bucket, one prefix inside the other, on different hosts skips retention on both. Each pass leaves a "Retention on … skipped" notice, and the storage grows until you act. Give the two destinations prefixes side by side, or untick "Delete its old backups (retention)" on one of them if they really are separate stores.
+

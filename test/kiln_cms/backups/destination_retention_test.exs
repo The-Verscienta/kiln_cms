@@ -654,6 +654,44 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
       assert Retention.prune_blocker(stored_config(s3), [s3], @env) == :env_overlap_unknown
     end
 
+    test "a bucket of the same name on another host blocks both rows as a possible overlap " <>
+           "(#3088)" do
+      global =
+        row("s3", %{@s3 | "endpoint" => "https://s3.amazonaws.com"} |> Map.put("prefix", "site"))
+
+      regional =
+        row(
+          "s3",
+          %{@s3 | "endpoint" => "https://s3.us-east-1.amazonaws.com"}
+          |> Map.put("prefix", "site/a")
+        )
+
+      rows = [global, regional]
+
+      for row <- rows do
+        assert Retention.prune_blocker(stored_config(row), rows, nil) ==
+                 :destination_overlap_possible
+      end
+
+      assert Retention.describe(:destination_overlap_possible) ==
+               "another S3 backup destination uses a bucket of the same name; the app can't " <>
+                 "tell whether it is the same store"
+
+      # An exact overlap is still named as one.
+      same_host = row("s3", Map.put(@s3, "prefix", "site"))
+      inner = row("s3", Map.put(@s3, "prefix", "site/inner"))
+
+      assert Retention.prune_blocker(stored_config(same_host), [same_host, inner, global], nil) ==
+               :destination_overlap
+
+      # A different bucket, or prefixes side by side, block nothing.
+      other_bucket = row("s3", %{@s3 | "bucket" => "else"} |> Map.put("prefix", "site"))
+      beside = row("s3", %{@s3 | "endpoint" => "https://other.test"} |> Map.put("prefix", "b"))
+
+      assert Retention.prune_blocker(stored_config(global), [global, other_bucket, beside], nil) ==
+               nil
+    end
+
     test "a stored destination whose adapter can't list and delete" do
       Application.put_env(:kiln_cms, KilnCMS.Backups.Destination,
         extra_adapters: [KilnCMS.Test.BackupDestinations.Fake, Bare]
@@ -782,6 +820,36 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
       }
 
       assert {:ok, %{deleted: []}} = prune(dir, own)
+    end
+
+    # #3088: one bucket name reached through two hosts. The pass is refused
+    # before anything is listed, with the reason the notice and log quote.
+    test "an S3 destination whose bucket another S3 destination names on another host is skipped",
+         %{dir: dir} do
+      s3 = fn endpoint ->
+        Backups.create_backup_destination!(
+          %{
+            name: "Bucket #{System.unique_integer([:positive])}",
+            kind: "s3",
+            settings: %{
+              "endpoint" => endpoint,
+              "region" => "us-east-1",
+              "bucket" => "kiln",
+              "prefix" => "site"
+            },
+            secrets: %{"access_key_id" => "AKIDTEST", "secret_access_key" => "s3-secret-test"}
+          },
+          actor: BackupSchedules.platform_admin()
+        )
+      end
+
+      global = s3.("https://s3.amazonaws.com")
+      _regional = s3.("https://s3.us-east-1.amazonaws.com")
+
+      {:ok, config} = KilnCMS.Backups.DestinationConfig.to_config(global)
+      assert {:error, :destination_overlap_possible = reason} = prune(dir, config)
+
+      assert Retention.describe(reason) =~ "same name"
     end
   end
 

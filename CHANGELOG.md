@@ -80,6 +80,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Backups: two S3 destinations that name one bucket through different hosts (AWS global vs regional, R2 jurisdiction hosts, a MinIO by name and by IP) no longer both prune it; neither does, and the Destinations badge says why.**
+  ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap))
+
 - **Billing webhooks: a database fault while resolving an event's membership now fails the event and Oban retries it (8 attempts) instead of dropping it as `ignored`; a metadata mismatch halts the lookup as `ignored` (`metadata_mismatch`) with nothing written.**
   ([long form](docs/changelog/unreleased.md#webhook-resolve-ladder-errors))
 
@@ -106,6 +109,11 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Backups → Schedule: a warning when `KILN_BACKUP_SCHEDULER_CRON` ticks less often than a schedule runs; the tab no longer freezes on a hung backup directory; and a keep-days change made while a backup runs reaches the `.hold` markers when it ends, even if it failed.**
   ([#3112](https://github.com/The-Verscienta/kiln_cms/pull/3112) · [long form](docs/changelog/unreleased.md#backup-schedule-tab-followups))
+
+### Upgrade notes
+
+- **Two S3 destinations on one bucket name now stop pruning.** If two S3 destinations name the same bucket with one prefix inside the other on different hosts, retention on both is skipped after the upgrade, with a notice on every pass, and their storage grows until you act. Give them prefixes side by side, or untick "Delete its old backups (retention)" on one of them.
+  ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap-upgrade))
 
 ## [1.11.0] - 2026-11-18
 
