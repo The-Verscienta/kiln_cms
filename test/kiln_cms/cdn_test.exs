@@ -148,4 +148,84 @@ defmodule KilnCMS.CDNTest do
       assert :ok = perform_job(PurgeWorker, %{org_id: org_id()})
     end
   end
+
+  # `GET /api/site` is publicly cached per URL, and a branding save changes it
+  # without a publish (#2577). Only a change to a value it answers purges.
+  describe "branding writes" do
+    setup do
+      configure(purge_url: @url)
+
+      previous = Application.get_env(:kiln_cms, :csp_img_src, [])
+      Application.put_env(:kiln_cms, :csp_img_src, ["cdn.test"])
+      on_exit(fn -> Application.put_env(:kiln_cms, :csp_img_src, previous) end)
+
+      org = KilnCMS.OrgFixtures.org("cdn-brand")
+      on_exit(fn -> KilnCMS.Cache.bust_branding(org.id) end)
+      %{org: org}
+    end
+
+    # The settings form submits every field, so a save carries them all.
+    @form %{
+      site_name: "Purge Site",
+      twitter_site: "@purgesite",
+      social_image_url: "/uploads/card.png",
+      logo_url: "/uploads/logo.png"
+    }
+
+    # authorize?: false — test setup; the admin-only write is covered by
+    # `KilnCMSWeb.BrandingLiveTest`.
+    defp save!(org, attrs),
+      do: CMS.save_site_branding!(attrs, authorize?: false, tenant: org.id)
+
+    defp clear_jobs, do: KilnCMS.Repo.delete_all(Oban.Job)
+
+    test "the first save purges", %{org: org} do
+      save!(org, @form)
+      assert_enqueued(worker: PurgeWorker, args: %{org_id: org.id})
+    end
+
+    test "a save changing a value /api/site answers purges", %{org: org} do
+      save!(org, @form)
+
+      for {field, value} <- [
+            twitter_site: "@renamed",
+            site_name: "Renamed Site",
+            social_image_url: "https://cdn.test/other.png"
+          ] do
+        clear_jobs()
+        save!(org, Map.put(@form, field, value))
+        assert_enqueued(worker: PurgeWorker, args: %{org_id: org.id})
+      end
+    end
+
+    test "a save changing only other fields does not purge", %{org: org} do
+      save!(org, @form)
+      clear_jobs()
+
+      save!(org, %{@form | logo_url: "/uploads/new-logo.png"})
+      save!(org, Map.put(@form, :brand_color, "#1f6feb"))
+
+      refute_enqueued(worker: PurgeWorker)
+    end
+
+    test "the nightly app-icon re-verify does not purge", %{org: org} do
+      row = save!(org, Map.merge(@form, %{app_icon_url: "https://cdn.test/icon.png"}))
+      clear_jobs()
+
+      Req.Test.stub(KilnCMS.Branding.AppIcon, &Plug.Conn.send_resp(&1, 404, "gone"))
+      # The AshOban worker's trust, as `KilnCMS.CMS.AppIconReverifyTest` calls it.
+      updated = CMS.reverify_site_branding_app_icon!(row, tenant: org.id, authorize?: false)
+      assert updated.app_icon_verify_failures == 1
+
+      refute_enqueued(worker: PurgeWorker)
+    end
+
+    test "a reset purges", %{org: org} do
+      row = save!(org, @form)
+      clear_jobs()
+
+      CMS.reset_site_branding!(row, authorize?: false, tenant: org.id)
+      assert_enqueued(worker: PurgeWorker, args: %{org_id: org.id})
+    end
+  end
 end

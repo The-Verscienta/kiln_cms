@@ -8,7 +8,7 @@ defmodule KilnCMSWeb.BillingWebhookController do
   `KilnCMSWeb.Plugs.RawBodyReader`; re-encoding the parsed JSON would not reproduce
   them.
 
-  ## Verify → record → enqueue → ack
+  ## Verify → record+enqueue → ack
 
   Processing is **not** inline. The provider times out at around 20 seconds and
   treats a timeout as a failure, while handling an event does one or two outbound
@@ -32,10 +32,17 @@ defmodule KilnCMSWeb.BillingWebhookController do
   | missing raw body | 400 | reader misconfiguration; must be loud |
   | missing/invalid signature | 400 | the provider's convention. Not 401/403, which invite retry loops and read as a WAF block |
   | malformed payload, or no id/type | 400 | genuine malformation, post-verification |
-  | duplicate event id | 200 | we already have it; anything else makes the provider retry work we've done |
+  | duplicate of a `:processed`/`:ignored` or live `:processing` event | 200 | we already have it; anything else makes the provider retry work we've done |
+  | duplicate of a `:received`/`:failed` (or stale `:processing`) event | 200 | acked **after** re-enqueueing its job (the job is unique, so a pending one is not doubled) |
+  | duplicate whose row cannot be read or re-enqueued | 500 | the provider must retry |
   | unhandled event type | 200 | success from the provider's view; no row written |
   | recorded and enqueued | 200 | |
   | record/enqueue failure | 500 | we have *not* durably accepted it, so the provider must retry. The only 5xx |
+
+  Recording and enqueueing are one transaction (`WebhookEvent`'s `:receive`), so a
+  failed enqueue leaves no row and the redelivery starts clean. A crash **after**
+  the 200 is never redelivered by the provider; that recovery is the worker's
+  rescue, Oban's retry and the stale-`:processing` reclaim, not this controller.
   """
   use KilnCMSWeb, :controller
 
@@ -85,14 +92,15 @@ defmodule KilnCMSWeb.BillingWebhookController do
            %{provider: :stripe, provider_event_id: id, type: type, payload: event},
            authorize?: false
          ) do
-      {:ok, record} ->
-        enqueue(conn, record)
+      {:ok, _record} ->
+        send_resp(conn, :ok, "")
 
       {:error, %{errors: errors}} ->
         # A duplicate is matched STRUCTURALLY on the dedupe identity, never on
-        # error text. Ack it: we already hold this event.
+        # error text. We already hold this event; whether it still needs a job
+        # depends on its row.
         if WebhookEvent.duplicate?(errors) do
-          send_resp(conn, :ok, "")
+          redeliver(conn, id)
         else
           Logger.error("billing webhook: could not record event #{id}")
           send_resp(conn, :internal_server_error, "")
@@ -104,17 +112,35 @@ defmodule KilnCMSWeb.BillingWebhookController do
     end
   end
 
-  defp enqueue(conn, record) do
-    case %{"webhook_event_id" => record.id}
-         |> KilnCMS.Billing.WebhookWorker.new()
-         |> Oban.insert() do
+  # A redelivery of an event we hold. If it is unsettled the previous attempt
+  # may have died before processing it, so enqueue again: the job is unique while
+  # pending and `:claim` guards double processing. A settled or actively claimed
+  # event is just acked.
+  defp redeliver(conn, id) do
+    # authorize?: false — same grant as the insert: the verified HMAC. The
+    # `by_event_id` read is platform-admin only for people, and a webhook has no
+    # actor.
+    case Billing.webhook_event_by_event_id(id, authorize?: false, not_found_error?: false) do
+      {:ok, %WebhookEvent{} = row} ->
+        if WebhookEvent.redeliverable?(row) do
+          enqueue(conn, row)
+        else
+          send_resp(conn, :ok, "")
+        end
+
+      _missing_or_error ->
+        Logger.error("billing webhook: could not look up duplicate event #{id}")
+        send_resp(conn, :internal_server_error, "")
+    end
+  end
+
+  defp enqueue(conn, row) do
+    case KilnCMS.Billing.WebhookWorker.enqueue(row) do
       {:ok, _job} ->
         send_resp(conn, :ok, "")
 
       {:error, _reason} ->
-        # The row exists but nothing will process it, so ask for a retry: the
-        # dedupe read path will find the existing row and re-enqueue.
-        Logger.error("billing webhook: could not enqueue event #{record.provider_event_id}")
+        Logger.error("billing webhook: could not re-enqueue event #{row.provider_event_id}")
         send_resp(conn, :internal_server_error, "")
     end
   end

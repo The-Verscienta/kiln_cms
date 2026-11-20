@@ -67,10 +67,16 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **`GET /api/site`: a site's name, X (Twitter) handle and default share image for a headless front end's link previews, public and shared-cacheable, with a CDN purge on a Branding save that changes them.**
+  ([#3167](https://github.com/The-Verscienta/kiln_cms/pull/3167) · [long form](docs/changelog/unreleased.md#site-defaults-api))
+
 - **`GET /api/security/plugin-health`: each installed plugin's health as JSON for monitoring, read from the server's cache and never asking hex.pm; platform administrators only, behind the host site's admin allowlist.**
   ([#3135](https://github.com/The-Verscienta/kiln_cms/pull/3135) · [long form](docs/changelog/unreleased.md#plugin-health-api))
 
 ### Changed
+
+- **Search: when `query_budget` cuts a search, running sections get `cut_grace` (new, default 100 ms) to stop on their own before they are killed, so a query that finishes keeps its database connection; a cut search may answer up to that much later. New metrics `kiln_cms_search_budget_cut_returned`/`_killed`.**
+  ([#3162](https://github.com/The-Verscienta/kiln_cms/pull/3162) · [long form](docs/changelog/unreleased.md#search-budget-cut-grace))
 
 - **Signed-out content pages load a 2.5 KB (gzipped) `public.js` instead of the 81 KB app.js and its chunks; `mix kiln.assets.budget` keeps it free of LiveView and console code.**
   ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle))
@@ -82,6 +88,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Members of a non-default site: the content list's New buttons and the translations dashboard's Missing chips and actions now follow that site's content-type scope, not the default site's (display only; the policies were already correct). `Scoping.permitted?/4` and `explicitly_permits?/4` accept a bare org id and raise `ArgumentError` on shapes that name no org.**
   ([long form](docs/changelog/unreleased.md#scoping-bare-org-id))
+
+- **Billing webhooks: recording an event and enqueueing its job are now one transaction, so a failure leaves nothing recorded and the provider's retry starts clean; redelivering an unfinished event re-enqueues it, and a worker that crashes or stalls is retried or reclaimed after 10 minutes.**
+  ([long form](docs/changelog/unreleased.md#billing-webhook-lost-events))
 
 - **Backups: two S3 destinations that name one bucket through different hosts (AWS global vs regional, R2 jurisdiction hosts, a MinIO by name and by IP) no longer both prune it; neither does, and the Destinations badge says why.**
   ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap))

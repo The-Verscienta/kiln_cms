@@ -80,10 +80,11 @@ defmodule KilnCMS.Search.QueryBudgetTest do
     # count on a slow runner, not of how an embedding miss is charged.
     #
     # A budget of seconds, not milliseconds (#2553): a keyword leg still
-    # querying at the deadline is killed mid-query, and in the SQL sandbox
-    # that takes down the test's shared connection, so every later read
-    # fails with an `OwnershipError`. Under a loaded suite 400 ms cut the
-    # keyword legs as well as the embedding.
+    # querying after the deadline and `cut_grace` (1 s in test, #2614) is
+    # killed mid-query, and in the SQL sandbox that takes down the test's
+    # shared connection, so every later read fails with an `OwnershipError`.
+    # Under a loaded suite 400 ms cut the keyword legs as well as the
+    # embedding. The 6 s bound below leaves room for budget and grace.
     sections = [:pages, :posts, :entries]
 
     for concurrency <- [1, 2] do
@@ -109,8 +110,10 @@ defmodule KilnCMS.Search.QueryBudgetTest do
   end
 
   test "a budget already spent answers every section empty, and says so", %{admin: admin} do
-    for concurrency <- [1, 2] do
-      put_search_env(section_concurrency: concurrency)
+    # With or without a grace: past the deadline nothing starts, so there is
+    # nothing for a grace to wait for (#2614).
+    for concurrency <- [1, 2], grace <- [0, 1_000] do
+      put_search_env(section_concurrency: concurrency, cut_grace: grace)
 
       report = Search.global_report("alpha", actor: admin, budget: 0)
 
