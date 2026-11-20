@@ -50,20 +50,17 @@ defmodule KilnCMS.Billing.EventGuard do
 
   alias KilnCMS.Billing.Membership
 
+  # Both are plain `map()` in the spec: callers hand over a `Membership` struct
+  # (typed `struct()` where it is read back from the action), and a precise map
+  # type with required keys makes Dialyzer reject that call. The fields read are
+  # `status`, `provider_subscription_id` and `last_provider_event_at` on the
+  # row, and `kind`, `subscription_id`, `created_at` and `target_status` on the
+  # event.
   @typedoc "The row fields the decision reads."
-  @type row :: %{
-          status: atom(),
-          provider_subscription_id: String.t() | nil,
-          last_provider_event_at: DateTime.t() | nil
-        }
+  @type row :: map()
 
   @typedoc "What the event says about itself."
-  @type event :: %{
-          kind: :event | :live,
-          subscription_id: String.t() | nil,
-          created_at: DateTime.t() | nil,
-          target_status: atom()
-        }
+  @type event :: map()
 
   @spec check(row(), event()) :: :ok | {:ignore, atom()}
   def check(%{status: :comped}, _event), do: {:ignore, :comped_not_provider_managed}
