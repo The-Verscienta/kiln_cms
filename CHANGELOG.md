@@ -62,10 +62,16 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **The destination kind `sftp` is now Kiln's own, and SFTP has its own private-host list.** A plugin destination of kind `sftp` is now answered by Kiln's adapter; delete such rows and add them again under **SFTP server**. List LAN SFTP servers in `BACKUP_SFTP_PRIVATE_HOSTS` (`BACKUP_S3_PRIVATE_HOSTS` doesn't count). Apply the `add_backup_destination_host_key` migration.
+  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#backup-sftp-destination-upgrade))
+
 - **Custom asset builds and overlay Dockerfiles that don't run `mix assets.deploy`: also run `mix esbuild kiln_public --minify` before `phx.digest`. Without it signed-out pages fall back to app.js and keep working. No migration; rolling back is safe.**
   ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle-upgrade))
 
 ### Added
+
+- **Backups: a native SFTP destination.** Back up to any SSH server with a password or a key (Ed25519, ECDSA, RSA). A platform admin confirms the server's host key before it is used, and a changed key fails the destination and alerts platform admins. Uploads resume; retention and rescan work as for S3.
+  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#backup-sftp-destination))
 
 - **`GET /api/site`: a site's name, X (Twitter) handle and default share image for a headless front end's link previews, public and shared-cacheable, with a CDN purge on a Branding save that changes them.**
   ([#3167](https://github.com/The-Verscienta/kiln_cms/pull/3167) · [long form](docs/changelog/unreleased.md#site-defaults-api))
