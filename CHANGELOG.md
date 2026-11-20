@@ -102,6 +102,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **The release refusals ("release is no longer open for changes", "release is full", and two more) are translated in the content editor (es, fr; API callers still get English), and an admin's "Release a stuck claim" that wins against a running go-live or rollback now logs at info instead of error. `Releases.publish/1` and `roll_back/1` can return `{:error, :abandoned}`.**
+  ([long form](docs/changelog/unreleased.md#release-refusal-text-abandon-log))
+
 - **A valid `bearer`/`BEARER <jwt>` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing [1.9.0's `401`](docs/changelog/v1.9.0.md#bearer-401-hardening); `/mcp` and `POST /api/keys/rotate` take a `kiln_` key under any case or in a later `Authorization` value, and `/metrics` its token under any case (#2632).**
   ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#bearer-scheme-any-case))
 

@@ -186,6 +186,14 @@ open for changes*, and the panel redraws to show the release as it is now. The c
 list's bulk **Add to release** counts that record as skipped. An add that
 lands before the claim is published with the release.
 
+The four refusals an add can hit (*release is no longer open for changes*,
+*release was not found*, *release is full (N items); ship or split it* and
+*release size could not be checked*) are translated in the content editor, in
+the editor's own language (English, Spanish, French). The JSON:API, GraphQL, MCP
+and the release worker have no viewer language and use the process's default
+locale, so their error text stays English. Match on the field (`release_id`),
+not on the wording.
+
 ## What "atomic" means here
 
 The interesting question is what happens when item 7 of 10 fails.
@@ -264,6 +272,17 @@ the worker's own transaction rolls back when it tries to mark the release
 published, nothing ships, the release stays **Failed**, and `release.failed`
 is sent once. (A running rollback is treated the same way and the release
 stays **Published**.)
+
+**What the logs show.** An abandon that wins against a running go-live or
+rollback is an outcome an admin asked for, so it is logged at `info` only: the
+release logs "...the release was abandoned while the worker ran" and the worker
+logs "...stopped: abandoned while the worker ran". Neither writes an
+error-level line, so error-level log alerts no longer fire on it. Every other
+abort (an item that failed, a timeout, a failure that could not be recorded)
+still logs "Release <id> go-live aborted: ..." or "Release <id> rollback
+aborted: ..." at `error`. `release.failed` is sent once in both cases. If you
+alert on those error lines, an abandon is now visible only in the info log and
+in the release's own history.
 
 ## Preview as of a release
 

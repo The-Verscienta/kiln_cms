@@ -35,10 +35,17 @@ defmodule KilnCMS.CMS.Validations.ReleaseOpenForEdit do
   "still composing", called at runtime so this module and the resource don't
   form a compile-time cycle.
 
+  ## Messages are gettext'd (#3074)
+
+  The refusal text is translated in the caller's locale, which a LiveView
+  process sets from the viewer. A caller with no locale (the JSON:API, GraphQL,
+  a worker) gets the default `en` text, so API errors keep their wording.
+
   Reads the parent release rather than trusting a passed-in state, because on
   `:add` the release is a foreign key the caller supplied.
   """
   use Ash.Resource.Validation
+  use Gettext, backend: KilnCMSWeb.Gettext
 
   alias Ash.Error.Changes.InvalidChanges
   alias KilnCMS.CMS.ContentRelease
@@ -57,7 +64,7 @@ defmodule KilnCMS.CMS.Validations.ReleaseOpenForEdit do
           {:error,
            InvalidChanges.exception(
              fields: [:release_id],
-             message: "release is no longer open for changes"
+             message: gettext("release is no longer open for changes")
            )}
         end
 
@@ -74,7 +81,10 @@ defmodule KilnCMS.CMS.Validations.ReleaseOpenForEdit do
       # foreign key.
       _ ->
         {:error,
-         InvalidChanges.exception(fields: [:release_id], message: "release was not found")}
+         InvalidChanges.exception(
+           fields: [:release_id],
+           message: gettext("release was not found")
+         )}
     end
   end
 

@@ -219,6 +219,28 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="release-refusal-text-abandon-log"></a>
+
+- **Release refusals are translated in the content editor, and an admin's *Release a stuck claim* that wins against a running go-live or rollback no longer logs an error (#3074, #3075).**
+  The four refusals an add to a release can hit (*release is no longer open
+  for changes*, *release was not found*, *release is full (N items); ship or
+  split it*, *release size could not be checked*) now go through gettext, with
+  Spanish and French catalogs, so the content editor's flash shows them in the
+  editor's language. Callers with no viewer locale (JSON:API, GraphQL, the
+  release worker) get the process's default locale and so English; we did not
+  check whether any API plug sets another locale. Separately, when an admin
+  abandons a release while its go-live or rollback is still running, the
+  worker's outcome write loses to the abandon by design, and that used to log
+  an error from the release and another from the worker. It now logs at info
+  only; error-level alerting no longer fires on it. Every other abort still logs
+  at error, and `release.failed` still fires once. Developers:
+  `KilnCMS.CMS.Releases.publish/1` and `roll_back/1` can now return
+  `{:error, :abandoned}` (nothing shipped, the abandon recorded the outcome).
+  The release worker is their only caller in core; a plugin calling them
+  directly should treat it as "stopped by an admin", not as a failure. No
+  migration; rolling back is safe. Follow-ups, separate PRs: #3073 (item-cap
+  serialization) and #3072 (cleanup of stranded pending items).
+
 <a id="bearer-scheme-any-case"></a>
 
 - **A valid JWT under `bearer` or `BEARER` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing the 1.9.0 note that made it a `401` (#2632).**
