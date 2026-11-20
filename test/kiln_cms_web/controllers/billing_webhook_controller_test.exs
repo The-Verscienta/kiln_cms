@@ -571,6 +571,164 @@ defmodule KilnCMSWeb.BillingWebhookControllerTest do
     end
   end
 
+  # #2749: a provider event is not applied over newer state or another
+  # subscription's state.
+  describe "event ordering and subscription identity" do
+    defp event_status(event),
+      do: Enum.find(event_rows(), &(&1.provider_event_id == event["id"]))
+
+    test "a deleted event for an abandoned subscription is settled :ignored", %{conn: conn} do
+      u = member()
+
+      m =
+        Ash.Seed.seed!(Billing.Membership, %{
+          org_id: default_org_id(),
+          user_id: u.id,
+          tier_id: tier().id,
+          status: :active,
+          provider_subscription_id: "sub_paid"
+        })
+
+      {:ok, _delta} = KilnCMS.Billing.Entitlements.recompute(u.id)
+
+      event =
+        subscription_event("customer.subscription.deleted", m, %{
+          "id" => "sub_abandoned",
+          "status" => "canceled"
+        })
+
+      assert post_event(conn, event).status == 200
+      KilnCMS.DataCase.drain_oban()
+
+      assert %{status: :ignored, error: "other_subscription"} = event_status(event)
+      reloaded = Billing.get_membership!(m.id, authorize?: false, tenant: m.org_id)
+      assert reloaded.status == :active
+      assert reloaded.provider_subscription_id == "sub_paid"
+      assert audiences_of(u.id) == [@gated]
+    end
+
+    test "a retried event older than the applied one is settled :ignored", %{conn: conn} do
+      u = member()
+
+      m =
+        Ash.Seed.seed!(Billing.Membership, %{
+          org_id: default_org_id(),
+          user_id: u.id,
+          tier_id: tier().id,
+          status: :active,
+          provider_subscription_id: "sub_paid"
+        })
+
+      now = System.os_time(:second)
+
+      deleted =
+        "customer.subscription.deleted"
+        |> subscription_event(m, %{"id" => "sub_paid", "status" => "canceled"})
+        |> Map.put("created", now)
+
+      late =
+        "customer.subscription.updated"
+        |> subscription_event(m, %{"id" => "sub_paid", "status" => "active"})
+        |> Map.put("created", now - 60)
+
+      assert post_event(conn, deleted).status == 200
+      KilnCMS.DataCase.drain_oban()
+      assert post_event(conn, late).status == 200
+      KilnCMS.DataCase.drain_oban()
+
+      assert %{status: :processed} = event_status(deleted)
+      assert %{status: :ignored, error: "out_of_order"} = event_status(late)
+
+      assert Billing.get_membership!(m.id, authorize?: false, tenant: m.org_id).status ==
+               :canceled
+    end
+
+    test "checkout completion for another subscription on a paying row is ignored" do
+      stub_subscription()
+      u = member()
+
+      m =
+        Ash.Seed.seed!(Billing.Membership, %{
+          org_id: default_org_id(),
+          user_id: u.id,
+          tier_id: tier().id,
+          status: :active,
+          provider_subscription_id: "sub_paid"
+        })
+
+      event = put_in(checkout_event(m), ["data", "object", "subscription"], "sub_stub")
+
+      assert {:ignored, :other_subscription} = Billing.Subscriptions.apply(event)
+
+      reloaded = Billing.get_membership!(m.id, authorize?: false, tenant: m.org_id)
+      assert reloaded.provider_subscription_id == "sub_paid"
+    end
+
+    test "an event in the same second as the checkout, or later with a fast local clock, still applies" do
+      stub_subscription()
+
+      # `created` values a few seconds in the past: the local clock is ahead of
+      # the provider's, as it can be. The old stamp (`utc_now`) put the row's
+      # mark ahead of these and dropped the cancellation.
+      for {session_at, later_at} <- [{10, 10}, {10, 5}] do
+        m =
+          Ash.Seed.seed!(Billing.Membership, %{
+            org_id: default_org_id(),
+            user_id: member().id,
+            tier_id: tier().id,
+            status: :incomplete
+          })
+
+        now = System.os_time(:second)
+
+        checkout =
+          m
+          |> checkout_event()
+          |> put_in(["data", "object", "subscription"], "sub_stub")
+          |> Map.put("created", now - session_at)
+
+        assert {:ok, _} = Billing.Subscriptions.apply(checkout)
+
+        canceled =
+          "customer.subscription.deleted"
+          |> subscription_event(m, %{"id" => "sub_stub", "status" => "canceled"})
+          |> Map.put("created", now - later_at)
+
+        assert {:ok, _} = Billing.Subscriptions.apply(canceled)
+
+        assert Billing.get_membership!(m.id, authorize?: false, tenant: m.org_id).status ==
+                 :canceled
+      end
+    end
+
+    test "checkout completion is a live state: exempt from the stale check, stamped with its own created" do
+      stub_subscription()
+      u = member()
+
+      m =
+        Ash.Seed.seed!(Billing.Membership, %{
+          org_id: default_org_id(),
+          user_id: u.id,
+          tier_id: tier().id,
+          status: :incomplete,
+          provider_subscription_id: "sub_stub",
+          last_provider_event_at: DateTime.add(DateTime.utc_now(), 1, :day)
+        })
+
+      event =
+        m
+        |> checkout_event()
+        |> put_in(["data", "object", "subscription"], "sub_stub")
+        |> Map.put("created", System.os_time(:second) - 3600)
+
+      assert {:ok, _} = Billing.Subscriptions.apply(event)
+
+      reloaded = Billing.get_membership!(m.id, authorize?: false, tenant: m.org_id)
+      assert reloaded.status == :active
+      assert DateTime.to_unix(reloaded.last_provider_event_at) == event["created"]
+    end
+  end
+
   describe "governance visibility" do
     test "the entitlement change appears in the governance trail", %{conn: conn} do
       # The acceptance criterion "every entitlement change is visible in the
