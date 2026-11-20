@@ -26,6 +26,7 @@ import {hooks as colocatedHooks} from "phoenix-colocated/kiln_cms"
 import topbar from "../vendor/topbar"
 import Sortable from "../vendor/sortable"
 import {FocusTrap} from "./focus_trap"
+import {initSearchShortcut} from "./search_shortcut"
 import {PasskeyEnroll, PasskeySignIn, initPasskeyStepUp} from "./passkeys"
 import {Challenge, mountAllWhenReady as mountFormChallenges} from "./challenge"
 import {PushToggle} from "./push"
@@ -1263,25 +1264,9 @@ initServerReveal()
 // `initPasskeyStepUp` in assets/js/passkeys.js.
 initPasskeyStepUp()
 
-// ⌘K / Ctrl-K opens the editor search palette from anywhere (no-op if already
-// there). Skipped while typing in an input so it doesn't hijack the field.
-// Prefer the hidden `navigate` link rendered in the app layout so connected
-// LiveViews jump there without a full page reload (#139); fall back to a normal
-// load when the link isn't present (e.g. public pages).
-window.addEventListener("keydown", e => {
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-    const tag = (e.target.tagName || "").toLowerCase()
-    if (tag === "input" || tag === "textarea" || e.target.isContentEditable) return
-    if (window.location.pathname === "/editor/search") return
-    e.preventDefault()
-    const link = document.getElementById("cmdk-search-link")
-    if (link) {
-      link.click()
-    } else {
-      window.location.href = "/editor/search"
-    }
-  }
-})
+// ⌘K / Ctrl-K opens the editor search palette from anywhere — see
+// assets/js/search_shortcut.js, which public.js shares.
+initSearchShortcut()
 
 // "?" opens the console's keyboard shortcut list (#1839) — the panel the
 // account menu's "Keyboard shortcuts" item opens with `popovertarget`. Same

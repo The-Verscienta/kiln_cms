@@ -129,6 +129,21 @@ jobs:
       - name: Test the conditions evaluator (JS parity)
         run: npm test --prefix assets
 
+      - name: Check the signed-out pages' script stays small
+        # public.js (#2402) is what every delivered page loads instead of
+        # app.js. One stray `import` puts LiveView back on all of them and no
+        # page looks different, so this builds it minified (into _build, not
+        # priv/static) and fails on a LiveView/console/editor input, a lost
+        # `js/challenge.js`, or a size over budget. `--only public`: app.js
+        # needs `npm ci`, which this job does not run; public.js needs only
+        # deps/ and the esbuild binary.
+        # The esbuild binary comes from the npm registry when the cached _build
+        # lacks it (cold cache, version bump); retry_download.sh rides out a
+        # transient fetch failure, as in the Dockerfile.
+        run: |
+          sh rel/docker/retry_download.sh mix esbuild.install --if-missing
+          mix kiln.assets.budget --only public
+
       - name: Check the toolchain declarations agree
         # .tool-versions is the source of truth, and this job already reads it
         # via setup-beam. The two places that *cannot* read it — mix.exs's

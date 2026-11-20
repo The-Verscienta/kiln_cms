@@ -39,6 +39,86 @@ defmodule KilnCMSWeb.Layouts do
     _ -> nil
   end
 
+  @public_bundle_key {__MODULE__, :public_bundle_built?}
+
+  @doc """
+  The script `root.html.heex` loads: `public.js` for a signed-out content page,
+  `app.js` for everything else (#2402).
+
+  `public.js` (`assets/js/public.js`) carries what a dead, delivered page uses —
+  the human-verification mount and the ⌘K shortcut — and none of LiveView or
+  the console. It is chosen only when all of these hold:
+
+    * the controller opted in with `assign(conn, :js_bundle, :public)`
+      (`KilnCMSWeb.Plugs.PublicJsBundle`). Per controller, never in a pipeline:
+      `Phoenix.LiveView.Controller.live_render/3` merges the conn's assigns
+      into the root layout's, so a pipeline assign would reach `MembershipLive`
+      and the plugin LiveViews in the same scope;
+    * no LiveView is rendering (`:live_module` is unset) — a second guard on
+      the same leak;
+    * the flash is empty. `Layouts.flash_group/1` closes through a LiveView JS
+      command and a hook, which LiveView runs on a dead page too; app.js is
+      the one that has them;
+    * `public.js` was built. A custom asset build that skipped the
+      `kiln_public` profile keeps app.js, which mounts the same widgets, rather
+      than a script that 404s.
+  """
+  @spec js_bundle_path(map()) :: String.t()
+  def js_bundle_path(assigns) do
+    if public_bundle?(assigns) and public_bundle_built?(),
+      do: ~p"/assets/js/public.js",
+      else: ~p"/assets/js/app.js"
+  end
+
+  defp public_bundle?(assigns) do
+    assigns[:js_bundle] == :public and is_nil(assigns[:live_module]) and
+      assigns[:flash] in [nil, %{}]
+  end
+
+  @doc """
+  Whether `priv/static/assets/js/public.js` exists. Outside dev the answer,
+  hit or miss, is looked up once per VM and kept in `:persistent_term`: a
+  running release's build does not change, and every delivered page asks.
+  Under the code reloader it is looked up on every call, so a dev server that
+  boots before its esbuild watcher wrote the file, or whose assets were
+  cleaned, follows the disk instead of a stale answer.
+  """
+  @spec public_bundle_built?() :: boolean()
+  def public_bundle_built? do
+    case :persistent_term.get(@public_bundle_key, nil) do
+      nil ->
+        built? =
+          :kiln_cms
+          |> Application.app_dir("priv/static/assets/js/public.js")
+          |> File.exists?()
+
+        unless code_reloading?(), do: :persistent_term.put(@public_bundle_key, built?)
+        built?
+
+      built? ->
+        built?
+    end
+  end
+
+  defp code_reloading? do
+    :kiln_cms
+    |> Application.get_env(KilnCMSWeb.Endpoint, [])
+    |> Keyword.get(:code_reloader, false)
+  end
+
+  @doc false
+  # Tests: force the answer (`true`/`false`) or forget it (`nil`) so the next
+  # call looks at the disk again. `mix test` builds no assets, so a test that
+  # expects `public.js` has to say it was built.
+  @spec put_public_bundle_built(boolean() | nil) :: :ok
+  def put_public_bundle_built(nil) do
+    :persistent_term.erase(@public_bundle_key)
+    :ok
+  end
+
+  def put_public_bundle_built(built?) when is_boolean(built?),
+    do: :persistent_term.put(@public_bundle_key, built?)
+
   @doc """
   Emits the request org's brand colour tokens as an **unlayered** `<style>`
   block, or nothing at all when the site is unbranded (#48).

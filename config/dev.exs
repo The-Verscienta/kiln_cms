@@ -30,6 +30,7 @@ config :kiln_cms, KilnCMSWeb.Endpoint,
     esbuild: {Esbuild, :install_and_run, [:kiln_cms, ~w(--sourcemap=inline --watch)]},
     challenge_embed:
       {Esbuild, :install_and_run, [:kiln_challenge_embed, ~w(--sourcemap=inline --watch)]},
+    public_bundle: {Esbuild, :install_and_run, [:kiln_public, ~w(--sourcemap=inline --watch)]},
     tailwind: {Tailwind, :install_and_run, [:kiln_cms, ~w(--watch)]}
   ]
 
