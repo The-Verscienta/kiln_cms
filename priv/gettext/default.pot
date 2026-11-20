@@ -25328,6 +25328,20 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
+msgid "This schedule keeps about %{count} backup of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgid_plural "This schedule keeps about %{count} backups of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "This schedule keeps about %{count} backup of each component. Check that the backup directory has room for them, or keep fewer."
+msgid_plural "This schedule keeps about %{count} backups of each component. Check that the backup directory has room for them, or keep fewer."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
 msgid "This schedule runs more often than daily without Keep for (days), so its backups are kept for BACKUP_KEEP_DAYS. Set Keep for (days) to edit it; you can still pause, resume or delete it."
 msgstr ""
 

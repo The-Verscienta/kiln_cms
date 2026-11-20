@@ -23,6 +23,14 @@ carries the reasoning.
 
 ## Added
 
+<a id="backup-schedule-disk-warning"></a>
+
+- **Schedule preview warns about runaway disk use (#2984).** A sub-daily schedule with a long `keep_days` can keep thousands of full backups. For example, every 2 hours for 60 days keeps 721 of each component. The preview now warns, without blocking the save, in two cases:
+  - when it would keep more than about 500 backups of each component;
+  - when the newest backup of each component it covers, times that count, is more than `BACKUP_DIR` has room for. Room is the free space, read with the same bounded `df` as the backup preflight, plus the finished backups already in `db/` and `media/`, which this schedule's retention can reuse. This check is skipped when `BACKUP_FREE_SPACE_CHECK=false`.
+
+  The size warning gives the estimated total, the free space and the space held by existing backups. Backups kept by something else also count as room, so a nearly full disk can still go unwarned. `keep_days` has no cap, and media stays allowed in sub-daily schedules.
+
 <a id="site-defaults-api"></a>
 
 - **A headless front end can read the site's link-preview defaults at
@@ -176,6 +184,12 @@ carries the reasoning.
   - `backup.sh` prunes with the `BACKUP_KEEP_DAYS` in force when the prune runs, so a changed setting is judged correctly.
   - A cron run records its window only if an import runs while cron's manifest is still the latest. Imports run at an app backup's start, during marker sync and when History opens. Cron's separate `db` and `media` entries write no manifest, so they never record one.
   - Rows imported before this change stay as they were.
+
+<a id="scoping-bare-org-id"></a>
+
+- **A member of a non-default site now sees that site's content-type scope on the content list's "New" buttons and the translations dashboard (#2599).** For a member whose membership on a non-default site lists `editable_types`, the content list's New buttons, the translations dashboard's Missing chips and its translation actions were decided by the default site's scope, so they could offer a type the member may not create on their own site, or hide one they may. They now follow the scope of the site being viewed. This was a display error only: the create and update policies already judged the right site, so nothing was allowed that should not have been, and a refused create still failed with the same error. No action is needed.
+
+  For developers, `KilnCMS.Accounts.Scoping.permitted?/4` and `explicitly_permits?/4` take their second argument as a bare org id, an `%Organization{}`, or any query, changeset, action input or plain map carrying `:tenant` or `:to_tenant`. `nil` or a tenant-less subject still means the default site. Any other shape (an integer, an atom, a list, a tuple) now raises `ArgumentError` instead of silently judging the default site. A bare id used to take that silent path, which is how this went unnoticed. Still open: `subject_org_id/1` (used by `effective_tier/2` and `field_grant/3`) and `audience_org_id/1` fall back to the default org for odd shapes; a follow-up will make those resolvers strict too.
 
 <a id="billing-webhook-lost-events"></a>
 
