@@ -77,6 +77,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **`/mcp` can read, create and update links between records: `read_content_links`, `create_content_link` and `update_content_link`, over the same payload-link actions as `/api/json/content-links`. Overlays that replace `:mcp_tools` must add them.**
+  ([#3191](https://github.com/The-Verscienta/kiln_cms/pull/3191) · [long form](docs/changelog/unreleased.md#mcp-content-link-tools))
+
 - **Backups → Schedule: the preview warns when a schedule would keep more than about 500 backups of each component, or more than the backup directory has room for (free space plus the backups already there); it never blocks the save.**
   ([#3172](https://github.com/The-Verscienta/kiln_cms/pull/3172) · [long form](docs/changelog/unreleased.md#backup-schedule-disk-warning))
 

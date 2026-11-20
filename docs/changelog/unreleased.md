@@ -60,6 +60,12 @@ carries the reasoning.
 
 ## Added
 
+<a id="mcp-content-link-tools"></a>
+
+- **Content link tools on `/mcp` (#3191).** `read_content_links` (`ContentLink :read`), `create_content_link` (`:create_link`) and `update_content_link` (`:update_link`) let an LLM author link records with any `kind`, not only the `related_*_ids` the update tools already take. They follow the payload-link route's rules from R8 (#2014): a write is authorized as an edit of the link's source, `kind: reference` is refused, and a link is visible only when the key may read both ends. There is no destroy tool, as for every other `/mcp` tool.
+  AshAi lists a tool only if `Ash.can?` passes on a blank changeset, which `Checks.SourceUpdatable` could never pass without a source, so a source-less tool probe now passes that check, the same rule as `DraftWriteKey`'s. The write-key and editor policies still decide whether the tools are listed.
+  A project that replaces `config :kiln_cms, :mcp_tools` must add the three names to serve them.
+
 <a id="backup-schedule-disk-warning"></a>
 
 - **Schedule preview warns about runaway disk use (#2984).** A sub-daily schedule with a long `keep_days` can keep thousands of full backups. For example, every 2 hours for 60 days keeps 721 of each component. The preview now warns, without blocking the save, in two cases:
