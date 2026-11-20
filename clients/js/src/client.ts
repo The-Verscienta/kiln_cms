@@ -1537,7 +1537,13 @@ function isObject(body: unknown): body is Record<string, unknown> {
 function isJsonApiDocument(body: unknown): boolean {
   if (!isObject(body) || !("data" in body)) return false;
   const data = body.data;
-  return data === null || isObject(data) || (Array.isArray(data) && data.every(isObject));
+  const dataOk =
+    data === null || isObject(data) || (Array.isArray(data) && data.every(isObject));
+  // `included`, when present, is a list of resources.
+  const included = body.included;
+  const includedOk =
+    included === undefined || (Array.isArray(included) && included.every(isObject));
+  return dataOk && includedOk;
 }
 
 // A `{data: {…}}` envelope around one object: a single JSON:API resource, a

@@ -745,7 +745,15 @@ describe("transport", () => {
 
   // JSON, but not the shape the read promises: before, these resolved an
   // empty list, `null`, `{}` or a bogus record, or crashed with a TypeError.
-  const notJsonApi = ["null", "{}", "[]", '{"data": "x"}', '{"data": [1]}'];
+  const notJsonApi = [
+    "null",
+    "{}",
+    "[]",
+    '{"data": "x"}',
+    '{"data": [1]}',
+    '{"data": [], "included": null}',
+    '{"data": [], "included": [1]}',
+  ];
   const notAnEnvelope = ["null", "{}", "[]", '{"data": null}', '{"data": []}'];
   const notAnObject = ["null", "[]", '"x"', "1"];
   const wrongShapeReads: [
