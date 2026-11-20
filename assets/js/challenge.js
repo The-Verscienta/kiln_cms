@@ -20,9 +20,9 @@
 // Public forms (#2249) are dead renders — a delivered page, `/forms/:slug`,
 // the embed iframe, a refused re-render — so there is no hook to mount them.
 // Their widget is marked `data-kiln-challenge` instead, and `mountAll` mounts
-// every one in a document once: app.js calls it on the site's own pages, and
-// the embed (which does not load app.js) loads `challenge_static.js`, which
-// does nothing else. It also makes the form wait briefly for a token rather
+// every one in a document once: public.js calls it on the site's own pages
+// (app.js too, for a page that loads that instead — #2402), and the embed
+// (which loads neither) loads `challenge_static.js`, which does nothing else. It also makes the form wait briefly for a token rather
 // than posting without one (`holdSubmitForToken`).
 //
 // The provider is the operator's choice (`Kiln.Challenge.Provider`): the markup

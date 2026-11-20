@@ -60,12 +60,20 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Upgrade notes
+
+- **Custom asset builds and overlay Dockerfiles that don't run `mix assets.deploy`: also run `mix esbuild kiln_public --minify` before `phx.digest`. Without it signed-out pages fall back to app.js and keep working. No migration; rolling back is safe.**
+  ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle-upgrade))
+
 ### Added
 
 - **`GET /api/security/plugin-health`: each installed plugin's health as JSON for monitoring, read from the server's cache and never asking hex.pm; platform administrators only, behind the host site's admin allowlist.**
   ([#3135](https://github.com/The-Verscienta/kiln_cms/pull/3135) · [long form](docs/changelog/unreleased.md#plugin-health-api))
 
 ### Changed
+
+- **Signed-out content pages load a 2.5 KB (gzipped) `public.js` instead of the 81 KB app.js and its chunks; `mix kiln.assets.budget` keeps it free of LiveView and console code.**
+  ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle))
 
 - **The exhaustive referrer-suppression search (thresholds 2–20, four to six categories, totals up to 40/30/20) is now a `slow_sweep` test you can re-run; `suppress_referrer_group/2` takes an explicit category list, and published output is unchanged.**
   ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/unreleased.md#referrer-suppression-sweep))
@@ -74,6 +82,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Billing webhooks: recording an event and enqueueing its job are now one transaction, so a failure leaves nothing recorded and the provider's retry starts clean; redelivering an unfinished event re-enqueues it, and a worker that crashes or stalls is retried or reclaimed after 10 minutes.**
   ([long form](docs/changelog/unreleased.md#billing-webhook-lost-events))
+
+- **Backups: two S3 destinations that name one bucket through different hosts (AWS global vs regional, R2 jurisdiction hosts, a MinIO by name and by IP) no longer both prune it; neither does, and the Destinations badge says why.**
+  ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap))
 
 - **Billing webhooks: a database fault while resolving an event's membership now fails the event and Oban retries it (8 attempts) instead of dropping it as `ignored`; a metadata mismatch halts the lookup as `ignored` (`metadata_mismatch`) with nothing written.**
   ([long form](docs/changelog/unreleased.md#webhook-resolve-ladder-errors))
@@ -101,6 +112,11 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Backups → Schedule: a warning when `KILN_BACKUP_SCHEDULER_CRON` ticks less often than a schedule runs; the tab no longer freezes on a hung backup directory; and a keep-days change made while a backup runs reaches the `.hold` markers when it ends, even if it failed.**
   ([#3112](https://github.com/The-Verscienta/kiln_cms/pull/3112) · [long form](docs/changelog/unreleased.md#backup-schedule-tab-followups))
+
+### Upgrade notes
+
+- **Two S3 destinations on one bucket name now stop pruning.** If two S3 destinations name the same bucket with one prefix inside the other on different hosts, retention on both is skipped after the upgrade, with a notice on every pass, and their storage grows until you act. Give them prefixes side by side, or untick "Delete its old backups (retention)" on one of them.
+  ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap-upgrade))
 
 ## [1.11.0] - 2026-11-18
 
