@@ -111,6 +111,12 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Federation: a publish sends one signed POST per remote inbox (a `sharedInbox` reaches all its followers) instead of one per follower, settled against every follower there; the fan-out is one transaction, so a retry no longer re-sends to inboxes already queued.**
+  ([#3195](https://github.com/The-Verscienta/kiln_cms/pull/3195) · [long form](docs/changelog/unreleased.md#federation-shared-inbox-dedup))
+
+- **The release refusals ("release is no longer open for changes", "release is full", and two more) are translated in the content editor (es, fr; API callers still get English), and an admin's "Release a stuck claim" that wins against a running go-live or rollback now logs at info instead of error. `Releases.publish/1` and `roll_back/1` can return `{:error, :abandoned}`.**
+  ([long form](docs/changelog/unreleased.md#release-refusal-text-abandon-log))
+
 - **A valid `bearer`/`BEARER <jwt>` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing [1.9.0's `401`](docs/changelog/v1.9.0.md#bearer-401-hardening); `/mcp` and `POST /api/keys/rotate` take a `kiln_` key under any case or in a later `Authorization` value, and `/metrics` its token under any case (#2632).**
   ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#bearer-scheme-any-case))
 
@@ -161,6 +167,11 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Backups → Schedule: a warning when `KILN_BACKUP_SCHEDULER_CRON` ticks less often than a schedule runs; the tab no longer freezes on a hung backup directory; and a keep-days change made while a backup runs reaches the `.hold` markers when it ends, even if it failed.**
   ([#3112](https://github.com/The-Verscienta/kiln_cms/pull/3112) · [long form](docs/changelog/unreleased.md#backup-schedule-tab-followups))
+
+### Security
+
+- **phoenix_live_view 1.2.14 fixes EEF-CVE-2026-126334 (a LiveView joined without `"url"` skipped its `live_session` `on_mount` hooks); Kiln was not exposed, because `KilnCMSWeb.LiveRouteGuard` already refused those joins (#688).**
+  ([#3190](https://github.com/The-Verscienta/kiln_cms/issues/3190) · [long form](docs/changelog/unreleased.md#liveview-url-less-join))
 
 ## [1.11.0] - 2026-11-18
 

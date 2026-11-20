@@ -334,24 +334,35 @@ defmodule KilnCMS.Federation.Inbox do
   # The `Accept` goes out through the ordinary delivery machinery, so it gets
   # the same signing, retries and ledger row every other activity does. A
   # follow that is never accepted silently does not stick on Mastodon.
+  #
+  # The ledger row and its job are written together (#2753): a row with no job
+  # would sit `:pending` until the prune, claiming an Accept is on its way.
   defp enqueue_accept(activity, identity, follower, org_id) do
     accept = Activity.accept_follow(activity, identity)
 
-    case Federation.create_federation_delivery(
-           %{
-             follower_id: follower.id,
-             inbox_uri: Follower.delivery_inbox(follower),
-             activity_type: :accept,
-             activity: accept
-           },
-           actor: Federation.system(),
-           tenant: org_id
-         ) do
-      {:ok, delivery} ->
-        %{"org_id" => org_id, "delivery_id" => delivery.id}
-        |> DeliveryWorker.new()
-        |> Oban.insert()
-
+    KilnCMS.Repo.transaction(fn ->
+      with {:ok, delivery} <-
+             Federation.create_federation_delivery(
+               %{
+                 follower_id: follower.id,
+                 inbox_uri: Follower.delivery_inbox(follower),
+                 activity_type: :accept,
+                 activity: accept
+               },
+               actor: Federation.system(),
+               tenant: org_id
+             ),
+           {:ok, _job} <-
+             %{"org_id" => org_id, "delivery_id" => delivery.id}
+             |> DeliveryWorker.new()
+             |> Oban.insert() do
+        :ok
+      else
+        {:error, reason} -> KilnCMS.Repo.rollback(reason)
+      end
+    end)
+    |> case do
+      {:ok, :ok} ->
         :ok
 
       {:error, reason} ->

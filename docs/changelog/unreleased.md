@@ -241,6 +241,79 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="federation-shared-inbox-dedup"></a>
+
+- **A publish now sends one signed POST per remote inbox instead of one per follower, and a fan-out that fails part-way can be retried without re-sending (#2753).**
+  The fan-out wrote a ledger row and a delivery job for every follower, to the
+  follower's delivery inbox, which is the instance's `sharedInbox` when it
+  publishes one. 2,000 followers on one instance meant 2,000 identical signed
+  POSTs there per publish, which invites rate limiting, and the 429s that
+  followed counted against every one of those followers toward the drop
+  ceiling. The loop was not transactional either, so when it failed part-way
+  `AnnounceWorker` re-ran it and re-sent to everyone already queued.
+  - **One delivery per distinct inbox.** Followers are grouped by
+    `Follower.delivery_inbox/1` and each group gets one ledger row and one
+    POST. Everything the fan-out sends is addressed to the public and
+    followers collections, which is what a shared inbox fans out on, so the one
+    POST reaches every follower there. On `/editor/federation`, **Recent
+    deliveries** now shows one row per inbox.
+  - **Whose outcome it is.** A row's `follower_id` set means exactly that
+    follower (an inbox with one follower when the row was written, and every
+    `Accept`); `nil` means every follower whose deliveries go to the row's
+    `inbox_uri` when the delivery settles, including followers who arrived
+    after the row was written. A success resets all of them; a delivery that
+    exhausts its 12 attempts charges each one failure, in one atomic `UPDATE`,
+    and drops those it takes to `drop_follower_after`. Each follower is still
+    charged once per failed delivery, so a dead instance's followers are
+    dropped after the same number of publishes as before. A failed credit or
+    charge is now logged at warning.
+  - **All or nothing.** The ledger rows and delivery jobs are written in one
+    transaction (job inserts chunked at 500). A failure leaves nothing behind
+    and the calling worker retries from a clean start;
+    `KilnCMS.Federation.deliver_to_followers/5` returns `{:error, reason}`
+    instead of crashing on a `MatchError`. Residual window: a worker that dies
+    after the commit and before Oban records the job done fans out a second
+    time, one extra POST per inbox, carrying an activity id the receiver
+    already saw for a document activity. An `Accept`'s ledger row and job are
+    now written in one transaction as well; where it is sent is unchanged
+    (sending it to the follower's personal inbox is #3186).
+  - **For developers.** New `Follower` read action `:at_inbox` (code interface
+    `KilnCMS.Federation.followers_at_inbox/2`, argument `inbox_uri`), the
+    inverse of `delivery_inbox/1`, under the existing read policy (the
+    `:federation` and `:operator` system actors). `deliver_to_followers` gains
+    an `opts` argument (`:batch_size`, default 500) and its return type is now
+    `:ok | {:error, term()}`. `Follower`'s `:record_failure` and
+    `:record_success` are now atomic.
+  - **Known cost.** Settling a shared row reads the site's followers by inbox
+    with no index on the shared inbox column (#3187).
+  - **Upgrade and rollback.** No migration and no config. Rolling back is
+    possible, with one effect: the previous release's delivery worker does
+    nothing with a row whose `follower_id` is `nil`, so shared rows still queued
+    at rollback are delivered but credit or charge no follower. See
+    [One POST per inbox](../federation.md#one-post-per-inbox-2753).
+
+<a id="release-refusal-text-abandon-log"></a>
+
+- **Release refusals are translated in the content editor, and an admin's *Release a stuck claim* that wins against a running go-live or rollback no longer logs an error (#3074, #3075).**
+  The four refusals an add to a release can hit (*release is no longer open
+  for changes*, *release was not found*, *release is full (N items); ship or
+  split it*, *release size could not be checked*) now go through gettext, with
+  Spanish and French catalogs, so the content editor's flash shows them in the
+  editor's language. Callers with no viewer locale (JSON:API, GraphQL, the
+  release worker) get the process's default locale and so English; we did not
+  check whether any API plug sets another locale. Separately, when an admin
+  abandons a release while its go-live or rollback is still running, the
+  worker's outcome write loses to the abandon by design, and that used to log
+  an error from the release and another from the worker. It now logs at info
+  only; error-level alerting no longer fires on it. Every other abort still logs
+  at error, and `release.failed` still fires once. Developers:
+  `KilnCMS.CMS.Releases.publish/1` and `roll_back/1` can now return
+  `{:error, :abandoned}` (nothing shipped, the abandon recorded the outcome).
+  The release worker is their only caller in core; a plugin calling them
+  directly should treat it as "stopped by an admin", not as a failure. No
+  migration; rolling back is safe. Follow-ups, separate PRs: #3073 (item-cap
+  serialization) and #3072 (cleanup of stranded pending items).
+
 <a id="bearer-scheme-any-case"></a>
 
 - **A valid JWT under `bearer` or `BEARER` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing the 1.9.0 note that made it a `401` (#2632).**
@@ -462,3 +535,25 @@ carries the reasoning.
     background with a 5-second limit, as the Backups page does, and says
     when it couldn't check in time.
   ([#2983](https://github.com/The-Verscienta/kiln_cms/issues/2983), [#2985](https://github.com/The-Verscienta/kiln_cms/issues/2985), [#2986](https://github.com/The-Verscienta/kiln_cms/issues/2986))
+
+## Security
+
+<a id="liveview-url-less-join"></a>
+
+- **phoenix_live_view 1.2.14 fixes EEF-CVE-2026-126334 (GHSA-v4p7-3pm2-wq6c,
+  medium).** In earlier releases a signed-in user could open a websocket by
+  hand and join a router-mounted LiveView without the `"url"` key. The
+  channel then matched no route and skipped the `live_session`'s `on_mount`
+  hooks, which is where Kiln's sign-in, tenant and editor/admin role checks
+  run. Kiln was not exposed: since #688 every Kiln LiveView carries
+  `KilnCMSWeb.LiveRouteGuard`, a module-level hook that refuses such a join,
+  and a test checks every `live` route in the router carries it. 1.2.14
+  refuses the join in the channel itself, before mount, so the reply is now
+  `"unauthorized"` instead of the guard's 404 reload. The guard stays as a
+  second line. `mix.exs` now requires `~> 1.2.14`, so a lock cannot resolve
+  back to an affected release. `examples/phoenix_showcase`, which has its
+  own lock, moves from 1.2.12 to 1.2.14 with the same floor. No migration
+  and no configuration; the
+  JavaScript client is built from the same Hex package, so there is no
+  separate npm bump.
+  ([#3190](https://github.com/The-Verscienta/kiln_cms/issues/3190))

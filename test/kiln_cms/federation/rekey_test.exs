@@ -157,6 +157,35 @@ defmodule KilnCMS.Federation.RekeyTest do
                )
     end
 
+    # #2753: the actor Update fans out like any other activity — once per
+    # distinct inbox, so an instance's followers share one POST.
+    test "followers sharing an inbox get the Update once", ctx do
+      shared = "https://shared.example/inbox"
+
+      for name <- ~w(bob carol) do
+        uri = "https://shared.example/users/#{name}"
+
+        Federation.follow!(uri, uri <> "/inbox", %{shared_inbox_uri: shared},
+          authorize?: false,
+          tenant: ctx.org_id
+        )
+      end
+
+      Federation.rekey_site_federation!(ctx.settings, authorize?: false, tenant: ctx.org_id)
+      assert :ok = perform_job(ActorUpdateWorker, %{"org_id" => ctx.org_id})
+
+      deliveries = Federation.list_federation_deliveries!(authorize?: false, tenant: ctx.org_id)
+
+      assert [%{follower_id: nil, activity_type: :update}] =
+               Enum.filter(deliveries, &(&1.inbox_uri == shared))
+
+      assert [%{follower_id: follower_id}] =
+               Enum.filter(deliveries, &(&1.inbox_uri == @remote <> "/inbox"))
+
+      assert follower_id == ctx.follower.id
+      assert length(all_enqueued(worker: DeliveryWorker)) == 2
+    end
+
     test "a site switched off re-keys but tells nobody", ctx do
       settings =
         Federation.disable_site_federation!(ctx.settings, authorize?: false, tenant: ctx.org_id)

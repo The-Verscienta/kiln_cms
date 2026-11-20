@@ -2,7 +2,7 @@ defmodule KilnCMS.Federation.ActorUpdateWorker do
   @moduledoc """
   Tells a site's followers that its actor changed — today, that it was re-keyed
   (#1487) — by fanning an actor `Update` out through the ordinary delivery
-  ledger (`KilnCMS.Federation.deliver_to_followers/4`).
+  ledger (`KilnCMS.Federation.deliver_to_followers/5`).
 
   Enqueued by `SiteFederation`'s `:rekey` action **inside its transaction**, so
   the job becomes visible only once the new key is committed and `/actor`
@@ -14,6 +14,10 @@ defmodule KilnCMS.Federation.ActorUpdateWorker do
   old one fails that signature and, if it behaves like Mastodon, re-fetches the
   actor and then accepts the `Update`; the `Update` is as much a nudge to
   re-fetch as it is a message.
+
+  The fan-out is written in one transaction (#2753), so a failed attempt
+  leaves no ledger rows or jobs behind and its retry sends each inbox one
+  `Update`, not a second one to every inbox the first attempt reached.
 
   A site that is switched off, or whose key the vault cannot open, sends
   nothing: its followers learn the new key from the actor document the next

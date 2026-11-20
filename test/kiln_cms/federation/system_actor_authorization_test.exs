@@ -109,6 +109,93 @@ defmodule KilnCMS.Federation.SystemActorAuthorizationTest do
     end
   end
 
+  # #2753: the delivery worker reads who a shared-inbox delivery stood for.
+  # The same read policy as every other Follower read, so the same refusals.
+  describe "Follower :at_inbox — who one delivery reached" do
+    defp follower_at!(name, inbox, shared, tenant \\ org_id()) do
+      uri = "https://#{name}-#{uniq()}.example/users/#{name}"
+
+      Federation.follow!(uri, inbox, %{shared_inbox_uri: shared},
+        authorize?: false,
+        tenant: tenant
+      )
+    end
+
+    setup do
+      shared = "https://shared-#{uniq()}.example/inbox"
+      personal = "https://solo-#{uniq()}.example/inbox"
+
+      via_shared = follower_at!("bob", "https://x-#{uniq()}.example/inbox", shared)
+      # An empty shared inbox is no shared inbox: this one delivers to its own.
+      blank_shared = follower_at!("carol", personal, "")
+      # Its personal inbox happens to be the shared URI, but it delivers to
+      # its own shared inbox — not reached by a delivery to `shared`.
+      elsewhere = follower_at!("dave", shared, "https://elsewhere-#{uniq()}.example/inbox")
+      theirs = follower_at!("zed", "https://y.example/inbox", shared, org("fsaat").id)
+
+      %{
+        shared: shared,
+        personal: personal,
+        via_shared: via_shared,
+        blank_shared: blank_shared,
+        elsewhere: elsewhere,
+        theirs: theirs
+      }
+    end
+
+    defp org(slug), do: KilnCMS.OrgFixtures.org(slug)
+
+    test "the system reads exactly the followers whose deliveries go to the inbox", ctx do
+      assert ids(Federation.followers_at_inbox!(ctx.shared, actor: system(), tenant: org_id())) ==
+               [ctx.via_shared.id]
+
+      assert ids(Federation.followers_at_inbox!(ctx.personal, actor: system(), tenant: org_id())) ==
+               [ctx.blank_shared.id]
+
+      # Agrees with the rule the fan-out groups by.
+      for follower <- [ctx.via_shared, ctx.blank_shared, ctx.elsewhere] do
+        assert follower.id in ids(
+                 Federation.followers_at_inbox!(Follower.delivery_inbox(follower),
+                   actor: system(),
+                   tenant: org_id()
+                 )
+               )
+      end
+    end
+
+    test "tenant-scoped: another org's follower at the same inbox is not in the read", ctx do
+      refute ctx.theirs.id in ids(
+               Federation.followers_at_inbox!(ctx.shared, actor: system(), tenant: org_id())
+             )
+
+      assert ids(
+               Federation.followers_at_inbox!(ctx.shared,
+                 actor: system(),
+                 tenant: ctx.theirs.org_id
+               )
+             ) == [ctx.theirs.id]
+    end
+
+    test "no actor reads nothing", ctx do
+      assert_refused(Federation.followers_at_inbox(ctx.shared, actor: nil, tenant: org_id()))
+    end
+
+    # An editor of the default org has no tier on the other org.
+    test "an actor with no membership on the org reads nothing", ctx do
+      assert_refused(
+        Federation.followers_at_inbox(ctx.shared,
+          actor: user(:editor),
+          tenant: ctx.theirs.org_id
+        )
+      )
+    end
+
+    # Refused reads under a filter policy come back empty rather than as an
+    # error; either is a refusal, a row is not.
+    defp assert_refused({:ok, rows}), do: assert(rows == [])
+    defp assert_refused({:error, error}), do: assert(%Ash.Error.Forbidden{} = error)
+  end
+
   describe "Delivery — write and settle the ledger, never prune it" do
     test "the fan-out writes a row and the worker re-reads and settles it" do
       follower = follower!()

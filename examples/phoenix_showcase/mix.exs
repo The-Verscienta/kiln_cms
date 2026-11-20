@@ -28,7 +28,8 @@ defmodule Showcase.MixProject do
   defp deps do
     [
       {:phoenix, "~> 1.8.0"},
-      {:phoenix_live_view, "~> 1.0"},
+      # 1.2.14 is the floor: EEF-CVE-2026-126334 (#3190).
+      {:phoenix_live_view, "~> 1.2.14"},
       {:phoenix_html, "~> 4.1"},
       {:bandit, "~> 1.5"},
       {:req, "~> 0.5"},

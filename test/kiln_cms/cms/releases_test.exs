@@ -790,11 +790,14 @@ defmodule KilnCMS.CMS.ReleasesTest do
       {:ok, _} = CMS.abandon_release(claimed, %{}, actor: admin)
 
       log =
-        ExUnit.CaptureLog.capture_log(fn ->
-          assert {:error, _} = Releases.publish(claimed)
+        capture_info(fn ->
+          assert {:error, :abandoned} = Releases.publish(claimed)
         end)
 
       refute log =~ "could not record"
+      # An abandon that wins is an outcome the admin asked for (#3075).
+      refute log =~ "[error]"
+      assert log =~ "abandoned while the worker ran"
 
       after_run = reload(rel)
       assert after_run.state == :failed
@@ -807,6 +810,92 @@ defmodule KilnCMS.CMS.ReleasesTest do
 
       # The claim's own job finds the release `:failed` and does nothing.
       KilnCMS.DataCase.drain_oban()
+      assert reload(rel).state == :failed
+    end
+  end
+
+  describe "the log level of an aborted go-live (#3075)" do
+    alias KilnCMS.CMS.Workers.ReleaseWorker
+
+    # The suite runs at `:warning`; the abandon is logged at info, so lower the
+    # level for the capture and put it back. `async: false` is why that is safe.
+    defp capture_info(fun) do
+      previous = Logger.level()
+      Logger.configure(level: :info)
+
+      try do
+        ExUnit.CaptureLog.capture_log([level: :info], fun)
+      after
+        Logger.configure(level: previous)
+      end
+    end
+
+    defp job(rel, mode),
+      do: %Oban.Job{args: %{"release_id" => rel.id, "org_id" => rel.org_id, "mode" => mode}}
+
+    test "an abandon that wins a real go-live race logs no error, worker included" do
+      admin = user(:admin)
+      rel = release(admin)
+      p = page()
+      {:ok, _} = add(rel, p, admin)
+      {:ok, claimed} = CMS.start_release(rel, %{}, actor: admin)
+
+      # The go-live reads its items after the worker loaded the release as
+      # `:publishing`; the admin abandons in between.
+      on_action_start(:read, KilnCMS.CMS.ReleaseItem, :for_release_with_status, fn ->
+        {:ok, _} = CMS.abandon_release(claimed, %{}, actor: admin)
+      end)
+
+      log = capture_info(fn -> assert :ok = ReleaseWorker.perform(job(rel, "publish")) end)
+
+      refute log =~ "[error]"
+      assert log =~ "abandoned while the worker ran"
+      assert reload(rel).state == :failed
+      assert reload(rel).failure_reason =~ "Abandoned"
+      assert reload_page(p).state == :draft
+    end
+
+    test "an abandon that wins a rollback logs no error either" do
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+      {:ok, published} = go_live(rel, admin)
+      {:ok, rolling} = CMS.start_release_rollback(published, %{}, actor: admin)
+
+      on_action_start(:read, KilnCMS.CMS.ReleaseItem, :for_release_with_status, fn ->
+        {:ok, _} = CMS.abandon_release(rolling, %{}, actor: admin)
+      end)
+
+      log = capture_info(fn -> assert :ok = ReleaseWorker.perform(job(rel, "rollback")) end)
+
+      refute log =~ "[error]"
+      assert log =~ "abandoned while the worker ran"
+      assert reload(rel).state == :published
+    end
+
+    test "an abort that is not an abandon still logs at error, in the release and the worker" do
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+      unseen = page()
+      {:ok, _claimed} = CMS.start_release(rel, %{}, actor: admin)
+
+      on_action_start(:update, KilnCMS.CMS.ReleaseItem, :mark_applied, fn ->
+        Ash.Seed.seed!(KilnCMS.CMS.ReleaseItem, %{
+          release_id: rel.id,
+          org_id: rel.org_id,
+          content_type: "page",
+          content_id: unseen.id,
+          action: :publish,
+          status: :pending
+        })
+      end)
+
+      log = capture_info(fn -> assert :ok = ReleaseWorker.perform(job(rel, "publish")) end)
+
+      assert log =~ "[error] Release #{rel.id} go-live aborted"
+      assert log =~ "[error] Release #{rel.id} go-live failed"
+      refute log =~ "abandoned while the worker ran"
       assert reload(rel).state == :failed
     end
   end
