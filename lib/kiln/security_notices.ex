@@ -283,9 +283,14 @@ defmodule Kiln.SecurityNotices do
     :ok
   end
 
-  @doc false
-  # Test seam: cache `result` for the current URL as if a fetch had just
-  # stored it. Nothing is stored when there is no URL to ask.
+  @doc """
+  Caches `result` for the current URL as if a fetch had just stored it, with
+  the same lifetime (24 hours for `{:ok, _}`, 15 minutes for an error).
+  Nothing is stored when there is no URL to ask.
+
+  `Kiln.Plugins.Health` stores `{:error, :timeout}` here when its round had to
+  cut off a fetch that never stored anything. Tests use it to seed the cache.
+  """
   @spec put_cache(result()) :: :ok
   def put_cache(result) do
     with {:ok, url} <- url(), do: store(url, result)

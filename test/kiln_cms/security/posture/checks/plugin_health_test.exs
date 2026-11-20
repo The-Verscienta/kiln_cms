@@ -32,6 +32,9 @@ defmodule KilnCMS.Security.Posture.Checks.PluginHealthTest do
     Health.clear_cache()
 
     on_exit(fn ->
+      # A cold cache starts the node's background check; let it finish
+      # before resetting what it reads.
+      eventually(fn -> Process.whereis(Health.warmer_name()) == nil end)
       Application.put_env(:kiln_cms, Health, original)
       Application.put_env(:kiln_cms, SecurityNotices, notices)
       Health.clear_cache()

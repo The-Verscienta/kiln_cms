@@ -38,9 +38,10 @@ defmodule KilnCMSWeb.SystemLive do
   Each row carries the plugin's health (#2244, `Kiln.Plugins.Health`): whether
   the package changed on Hex since this build, a security notice, a retired
   or long-unreleased package, an SDK this Kiln does not bundle. The page reads
-  the cached answer and, on a cold cache, runs the check via `start_async`, so
-  it never waits on hex.pm. A check that could not finish reads as unknown,
-  never OK. "Check plugins now" re-checks platform admin in its handler for
+  the cached answer and, on a cold cache, waits via `start_async` for the
+  node's one plugin check (#2565: started here, or already running for
+  Security posture or another admin's page), so it never waits on hex.pm
+  itself. A check that could not finish reads as unknown, never OK. "Check plugins now" re-checks platform admin in its handler for
   the same reason `flush-cache` does: it makes outbound requests on the
   server's behalf.
 
@@ -148,7 +149,7 @@ defmodule KilnCMSWeb.SystemLive do
     end
   end
 
-  # Run directly in `start_async`, unlike `isolated_plugin_check/1` below:
+  # Run directly in `start_async`, like the plugin check below:
   # `Kiln.SecurityNotices.fetch/1` runs its request in one task whose body
   # rescues and catches everything (a crash is stored as an answer), and
   # shuts that task down itself on a timeout, so no linked process can send
@@ -173,26 +174,15 @@ defmodule KilnCMSWeb.SystemLive do
     end
   end
 
+  # Run directly in `start_async`: `Health.check/1` does no fetching in this
+  # process. It waits on the node's warmer through a monitor, never a link,
+  # so neither a crash there nor this page going away reaches the other; and
+  # it bounds its own wait, answering unknown past it. Anything raised here
+  # still arrives as `{:exit, _}`.
   defp check_plugins(socket, opts) do
     socket
     |> assign(:plugin_health, :loading)
-    |> start_async(:plugin_health, fn -> isolated_plugin_check(opts) end)
-  end
-
-  # The check fans out into linked tasks (one per Hex package, one for the
-  # notices feed). Run unlinked, a crash in any of them reaches this task as
-  # an exit `start_async` turns into `{:exit, _}` (rendered unknown), instead
-  # of an exit signal that would take the whole page down with it.
-  @plugin_check_timeout_ms 90_000
-
-  defp isolated_plugin_check(opts) do
-    task = Task.Supervisor.async_nolink(KilnCMS.TaskSupervisor, fn -> Health.check(opts) end)
-
-    case Task.yield(task, @plugin_check_timeout_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, report} -> report
-      {:exit, reason} -> exit(reason)
-      nil -> exit(:timeout)
-    end
+    |> start_async(:plugin_health, fn -> Health.check(opts) end)
   end
 
   @impl true
@@ -244,7 +234,10 @@ defmodule KilnCMSWeb.SystemLive do
   # platform admin whose temporary grant expired after mount is refused too
   # (`platform_admin?/1` re-reads the grant's expiry). While a check is in
   # flight a second press is a no-op, as for "Check now"; `Kiln.Plugins.Health`
-  # also floors forced checks at one round a minute.
+  # also floors forced checks at one round a minute. A press while the node
+  # already has a round in flight (Security posture's, another admin's) joins
+  # that round instead of asking again; if that round was not forced, the
+  # notices it reads are the cached ones, not asked again past the cache.
   def handle_event("check-plugins-now", _params, socket) do
     cond do
       not KilnCMSWeb.LiveUserAuth.platform_admin?(socket) ->

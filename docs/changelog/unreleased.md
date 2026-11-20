@@ -50,6 +50,14 @@ carries the reasoning.
   `[:kiln_cms, :api, :invalid_bearer]` with `surface: :graphql`. No migration;
   rolling back restores the old reading.
 
+## Known issues
+
+<a id="plugin-health-tail-packages-unknown"></a>
+
+- **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check.**
+  A plugin check now stops at 75 seconds and does not ask about packages it hasn't reached ([plugin check single-flight](#plugin-check-single-flight)). Packages are asked in a fixed order, so the ones at the end are the ones left out each round, while the rest are re-checked every 15 minutes. Affects platform administrators reading System or Security posture on a deployment with enough Hex plugins that a round doesn't finish in time (roughly 13 or more at hex.pm's slowest). Workaround: none needed for the plugins that answered; for the rest, check the package on hex.pm by hand until hex.pm answers in time. Unknown is never shown as OK.
+  ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165))
+
 ## Added
 
 <a id="backup-schedule-disk-warning"></a>
@@ -248,6 +256,16 @@ carries the reasoning.
   A client that sent `bearer <jwt>` and handled the `401` by
   re-authenticating will now simply succeed. No migration and no
   configuration; rolling back restores the 1.11.0 answers.
+
+<a id="plugin-check-single-flight"></a>
+
+- **The plugin health check runs one round per server at a time, and a round that runs out of time still caches what it got (#2565).** System started its own check on a cold cache, apart from the background check Security posture starts, so two administrators opening System, or System and Security posture together, each sent hex.pm a full round of requests, each disclosing the installed plugins' names and versions. And with about 13 or more Hex plugins and a slow hex.pm, System's check outran its 90-second wait and was killed before it stored anything, so the 15-minute failure cache never applied: every later visit asked hex.pm again and showed Unknown.
+  - **One round per server.** Every round now runs in one supervised process per node. System, Security posture and **Check plugins now** all start it or join the one already running, and wait for its answer; hex.pm is asked once. Closing the page no longer stops the round. A press of **Check plugins now** while another round is in flight joins it instead of asking again; if that round wasn't a forced one, its security notices are the cached ones. A forced check right after a non-forced round still asks; the once-a-minute floor applies to back-to-back forced checks.
+  - **One time limit per round, 75 seconds.** It covers Hex and the notices feed together (before, System effectively allowed 90 s and Security posture's background check had no overall limit). A package not started by then is not asked at all, so fewer names reach hex.pm, and one still in flight is cut off; either reads Unknown, never OK. A page waits up to 90 seconds for the round; one that still has no answer reads every plugin Unknown.
+  - **A partial answer is cached for 15 minutes**, so the next page load doesn't ask again. That includes a forced check that replaces a complete 24-hour answer: its Unknowns stand for 15 minutes, as a failed request's always have. When the round cut off a notices request that never stored anything (it was waiting behind another request for the feed), the feed's timeout is cached for it too, so the Hex half is served.
+  - `mix kiln.plugins.list --health` runs its check inline, as before, through the new `inline: true` option of `Kiln.Plugins.Health.check/1`. `Kiln.Plugins.Health.warm/0` is now `warm/1` (an `:installed` option; `warm()` still works), and `Kiln.SecurityNotices.put_cache/1` is documented.
+
+  No migration and no config; rolling back is safe. See [Check your installed plugins](../security-posture.md#check-your-installed-plugins).
 
 <a id="invitation-keeps-legacy-tier"></a>
 
