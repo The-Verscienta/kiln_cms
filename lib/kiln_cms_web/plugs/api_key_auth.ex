@@ -3,8 +3,9 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   Authenticates headless API requests presenting an **API key** as
   `Authorization: Bearer kiln_…`, setting the owning user as the Ash actor.
 
-  Runs after `:load_from_bearer`/`:set_actor` so JWT and API-key auth share one
-  `Authorization: Bearer` scheme, disambiguated by the key's `kiln_` prefix:
+  Runs after `KilnCMSWeb.Plugs.LoadFromBearer`/`:set_actor` so JWT and API-key
+  auth share one `Authorization: Bearer` scheme, disambiguated by the key's
+  `kiln_` prefix:
 
     * `Bearer kiln_…` → delegated to `AshAuthentication.Strategy.ApiKey.Plug`,
       which validates the key and assigns `current_user` / the actor. An invalid,
@@ -14,12 +15,14 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
       key the first one decides, and a key wins over a JWT sent alongside it
       (#2633).
     * anything else (a JWT, or no header) → passed through untouched, so
-      `:load_from_bearer` retains sole responsibility for JWT bearer tokens.
+      `KilnCMSWeb.Plugs.LoadFromBearer` retains sole responsibility for JWT
+      bearer tokens.
 
   ## Rejecting a bearer that verifies as nothing (#2161)
 
-  `:load_from_bearer` silently degrades a JWT that fails verification (garbage,
-  expired, signed by another instance) to **anonymous**, so a client with a
+  `KilnCMSWeb.Plugs.LoadFromBearer` silently degrades a JWT that fails
+  verification (garbage, expired, signed by another instance) to
+  **anonymous**, so a client with a
   broken credential reads public content and takes it for success. So an
   `Authorization: Bearer …` header that left no actor behind is answered `401`
   in the standard `KilnCMSWeb.ApiError` envelope instead (on `/gql`:
@@ -58,6 +61,8 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   """
   @behaviour Plug
 
+  alias KilnCMSWeb.BearerAuth
+
   @key_prefix KilnCMS.Accounts.ApiKey.prefix() <> "_"
 
   # `required?: false` so requests *without* a key aren't rejected here (they may
@@ -71,8 +76,8 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
         required?: false
       )
 
-    # `loads_bearer: true` only where `:load_from_bearer` ran earlier in the
-    # pipeline. Without it a valid JWT has no actor yet, so the #2161 rejection
+    # `loads_bearer: true` only where `KilnCMSWeb.Plugs.LoadFromBearer` ran
+    # earlier in the pipeline. Without it a valid JWT has no actor yet, so the #2161 rejection
     # would 401 it (the `:api_spec` pipeline has no JWT loader).
     {key_opts, Keyword.get(opts, :loads_bearer, false)}
   end
@@ -86,24 +91,32 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
     end
   end
 
-  # The key plug reads only the first `authorization` value and needs the
-  # exact `Bearer ` prefix, so it is handed one normalized header. The
-  # caller's headers are put back afterwards for everything downstream. A key
-  # that authenticated is remembered on this node, so a later rate-limit
-  # refusal can tell it was a real key (`KilnCMS.Security.ApiKeyTrip`).
+  # A key that authenticated is remembered on this node, so a later
+  # rate-limit refusal can tell it was a real key (`KilnCMS.Security.ApiKeyTrip`).
   defp authenticate_key(conn, key, opts) do
-    original = conn.req_headers
-
-    conn =
-      conn
-      |> Plug.Conn.put_req_header("authorization", "Bearer " <> key)
-      |> AshAuthentication.Strategy.ApiKey.Plug.call(opts)
-      |> Map.put(:req_headers, original)
+    conn = verify_key(conn, key, opts)
 
     unless conn.halted,
       do: KilnCMS.Security.ApiKeyTrip.remember(key, Ash.PlugHelpers.get_actor(conn))
 
     conn
+  end
+
+  @doc """
+  Runs `AshAuthentication.Strategy.ApiKey.Plug` (initialized as `key_opts`)
+  on `key`, the one `presented_key/1` found. That plug reads only the first
+  `authorization` value and needs the exact `Bearer ` prefix, so it is handed
+  one normalized header; the caller's headers are put back afterwards for
+  everything downstream.
+  """
+  @spec verify_key(Plug.Conn.t(), String.t(), term()) :: Plug.Conn.t()
+  def verify_key(conn, key, key_opts) do
+    original = conn.req_headers
+
+    conn
+    |> Plug.Conn.put_req_header("authorization", "Bearer " <> key)
+    |> AshAuthentication.Strategy.ApiKey.Plug.call(key_opts)
+    |> Map.put(:req_headers, original)
   end
 
   defp stale_bearer(conn) do
@@ -180,17 +193,12 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
   end
 
   # Every `authorization` value whose scheme is `Bearer`, matched
-  # case-insensitively (RFC 7235), including a bare `Bearer` with no token. A
-  # proxy may append a second value; a bearer among them that did not
-  # authenticate must not slip past.
+  # case-insensitively (RFC 7235, `KilnCMSWeb.BearerAuth.parse/1`), including a
+  # bare `Bearer` with no token. A proxy may append a second value; a bearer
+  # among them that did not authenticate must not slip past.
   defp bearer_headers(conn) do
     for value <- Plug.Conn.get_req_header(conn, "authorization"),
-        value
-        |> String.trim_leading()
-        |> String.split(~r/\s+/, parts: 2)
-        |> hd()
-        |> String.downcase() ==
-          "bearer",
+        match?({:bearer, _}, BearerAuth.parse(value)),
         do: value
   end
 
@@ -244,6 +252,7 @@ defmodule KilnCMSWeb.Plugs.ApiKeyAuth do
 
   # The token after the scheme, or `nil` for a bare `Bearer`.
   defp bearer_token(value) do
-    value |> String.trim() |> String.split(~r/\s+/, parts: 2) |> Enum.at(1)
+    {:bearer, token} = BearerAuth.parse(value)
+    token
   end
 end

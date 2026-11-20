@@ -57,6 +57,17 @@ defmodule KilnCMSWeb.MetricsTest do
       assert %{status: 401} = Req.get!(url, headers: [authorization: "s3cret"])
       assert %{status: 200} = Req.get!(url, auth: {:bearer, "s3cret"})
     end
+
+    # RFC 7235: the scheme is case-insensitive (#2632). Still one value only.
+    test "takes the bearer token under any case of the scheme" do
+      port = start_exporter(Keyword.put(@enabled, :token, "s3cret"))
+      url = "http://127.0.0.1:#{port}/metrics"
+
+      assert %{status: 200} = Req.get!(url, headers: [authorization: "bearer s3cret"])
+      assert %{status: 200} = Req.get!(url, headers: [authorization: "BEARER s3cret"])
+      assert %{status: 401} = Req.get!(url, headers: [authorization: "bearer wrong"])
+      assert %{status: 401} = Req.get!(url, headers: [authorization: "bearer"])
+    end
   end
 
   describe "what a scrape carries" do

@@ -3,8 +3,10 @@ defmodule KilnCMSWeb.ApiKeyRotationController do
   `POST /api/keys/rotate` — a `:draft_write` API key exchanges itself for a
   fresh one (ADR 0012, "Rotation").
 
-  The request is `Authorization: Bearer kiln_…` and an empty body. The answer
-  is `201` with the new plaintext key, shown once:
+  The request is `Authorization: Bearer kiln_…` and an empty body. The key is
+  found as `KilnCMSWeb.Plugs.ApiKeyAuth.presented_key/1` finds it: the scheme in
+  any case (#2632), in any `authorization` value, the first key deciding. The
+  answer is `201` with the new plaintext key, shown once:
 
       {"data": {"id": "…", "api_key": "kiln_…", "expires_at": "…",
                 "rotatable_until": "…", "rotated_from_id": "…"}}
@@ -35,15 +37,14 @@ defmodule KilnCMSWeb.ApiKeyRotationController do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.ApiKeyReuse
   alias KilnCMSWeb.ApiError
+  alias KilnCMSWeb.Plugs.ApiKeyAuth
 
   require Logger
-
-  @bearer "Bearer " <> KilnCMS.Accounts.ApiKey.prefix() <> "_"
 
   def rotate(conn, _params) do
     conn = put_resp_header(conn, "cache-control", "no-store")
 
-    case presented_key(conn) do
+    case ApiKeyAuth.presented_key(conn) do
       {:ok, plaintext} -> authenticate_and_rotate(conn, plaintext)
       :error -> unauthorized(conn)
     end
@@ -57,13 +58,6 @@ defmodule KilnCMSWeb.ApiKeyRotationController do
       :error ->
         ApiKeyReuse.check(plaintext, KilnCMS.Security.Recorder.context(conn))
         unauthorized(conn)
-    end
-  end
-
-  defp presented_key(conn) do
-    case get_req_header(conn, "authorization") do
-      [@bearer <> _ = "Bearer " <> plaintext | _] -> {:ok, plaintext}
-      _ -> :error
     end
   end
 
