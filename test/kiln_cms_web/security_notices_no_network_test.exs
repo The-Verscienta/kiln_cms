@@ -2,8 +2,9 @@ defmodule KilnCMSWeb.SecurityNoticesNoNetworkTest do
   @moduledoc """
   #2522's promise: the security notices feed is asked only when a platform
   admin opens a page that reads it (System, Security posture). A public page,
-  the public API, the sign-in page and an editor's console page must not
-  reach it, not even through a background warmer.
+  the public API, the sign-in page, an editor's console page and the plugin
+  health endpoint (#2571, even a platform admin's read) must not reach it,
+  not even through a background warmer.
 
   The stub reports every request with `send/2` rather than failing the test
   itself: the fetch runs in a task whose body turns any exception into an
@@ -54,14 +55,16 @@ defmodule KilnCMSWeb.SecurityNoticesNoNetworkTest do
     :ok
   end
 
-  defp editor do
+  defp editor, do: signed_in(:editor)
+
+  defp signed_in(role) do
     email = "no-network-#{System.unique_integer([:positive])}@example.com"
 
     Ash.Seed.seed!(User, %{
       email: email,
       hashed_password: Bcrypt.hash_pwd_salt(@password),
       confirmed_at: DateTime.utc_now(),
-      role: :editor
+      role: role
     })
 
     strategy = AshAuthentication.Info.strategy!(User, :password)
@@ -77,7 +80,8 @@ defmodule KilnCMSWeb.SecurityNoticesNoNetworkTest do
     user
   end
 
-  test "public pages, the API, sign-in and an editor's console page ask nothing", %{conn: conn} do
+  test "public pages, the API, sign-in, an editor's console page and plugin health ask nothing",
+       %{conn: conn} do
     # The opt-in took: the feed would be asked if anything asked it.
     assert {:ok, _url} = SecurityNotices.url()
 
@@ -97,6 +101,15 @@ defmodule KilnCMSWeb.SecurityNoticesNoNetworkTest do
 
     assert {:ok, lv, _html} = live(signed_in, ~p"/editor")
     render_async(lv, 1000)
+
+    # A platform admin's read of plugin health (#2571) answers from the cache
+    # only: on a cold one, not_checked, and no check started.
+    assert %{"state" => "not_checked"} =
+             build_conn()
+             |> put_req_header("accept", "application/json")
+             |> put_req_header("authorization", "Bearer #{signed_in(:admin).__metadata__.token}")
+             |> get("/api/security/plugin-health")
+             |> json_response(200)
 
     # Anything those requests started in the background has finished.
     eventually(fn ->

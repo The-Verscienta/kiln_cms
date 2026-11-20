@@ -464,7 +464,8 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.AdminAllowlist, :html
   end
 
-  # The same gate on the security posture, answering in JSON.
+  # The same gate on the monitoring endpoints under `/api/security` (posture
+  # and plugin health), answering in JSON.
   pipeline :admin_allowlist_api do
     plug KilnCMSWeb.Plugs.AdminAllowlist, :json
   end
@@ -948,15 +949,20 @@ defmodule KilnCMSWeb.Router do
     post "/sign_in/verify", ApiAuthController, :verify
   end
 
-  # Security posture for monitoring (#2521): an administrator's JWT or API
-  # key, behind the site's admin allowlist (first, as on the headless
-  # sign-in, so an off-list caller learns nothing about its credential), on
-  # `:api`'s bucket. The checks behind it run at most once per site and scope
-  # set every 30 s per node (`KilnCMS.Security.Posture.snapshot/2`).
+  # Monitoring endpoints: an administrator's JWT or API key, behind the
+  # host site's admin allowlist (first, as on the headless sign-in, so an
+  # off-list caller learns nothing about its credential), on `:api`'s bucket.
+  #
+  #   * Security posture (#2521), a site administrator's: the checks behind it
+  #     run at most once per site and scope set every 30 s per node
+  #     (`KilnCMS.Security.Posture.snapshot/2`).
+  #   * Plugin health (#2571), a platform administrator's: read from this
+  #     node's cache only, never asking hex.pm or the notices feed.
   scope "/api/security", KilnCMSWeb do
     pipe_through [:admin_allowlist_api, :no_store, :api]
 
     get "/posture", SecurityPostureController, :show
+    get "/plugin-health", PluginHealthController, :show
   end
 
   # A drafts-only key exchanging itself for a fresh one (ADR 0012). On the

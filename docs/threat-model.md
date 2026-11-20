@@ -66,6 +66,7 @@ the router so preflights are answered before route matching).
 | Media upload | `POST /api/media`, `/api/media/import-url`, `/api/media/uploads[/complete]` | JWT / API key; `:read_write` + editor, checked **before** `POST /api/media`'s body is parsed (the endpoint leaves it unread) | `:api` + `:media_upload` |
 | MCP (LLM authoring) | `/mcp` | **API key required** | `:api` |
 | Security posture (monitoring) | `GET /api/security/posture` (#2521) | **JWT or API key of an administrator of the request's site required** (never a `:draft_write` key); behind the site's admin allowlist, checked first | `:api` |
+| Plugin health (monitoring) | `GET /api/security/plugin-health` (#2571) | **JWT or API key of a platform administrator required** (a site administrator is refused; never a `:draft_write` key); behind the host site's admin allowlist, checked first; answers from the node's cache and never makes an outbound request | `:api` |
 | Public forms | `GET /api/forms/:slug`, `POST /forms/:slug`, `POST /api/forms/:slug` | none (no CSRF by design) | `:form` |
 | Form embed | `GET /forms/:slug/embed` | none | `:delivery` (framing CSP) |
 | Form page | `GET /forms/:slug` (#2138): not a route, the last fallback of `/:type/:slug` delivery; active forms of the serving org only | none | `:delivery` (site CSP) |
@@ -720,7 +721,8 @@ sign-in route to listed networks at `/editor/admin-allowlist`; see
   console, its exports, `/setup` or any sign-in route, including the headless
   password exchange `POST /api/auth/sign_in`, and any credential, API keys
   included, used from outside to read the site's security posture
-  (`GET /api/security/posture`, #2521). The password form checks the
+  (`GET /api/security/posture`, #2521) or the installation's plugin health
+  (`GET /api/security/plugin-health`, #2571). The password form checks the
   password over its LiveView socket (`SignInLive`), so the socket join is gated
   as well as the HTTP request; otherwise an outsider could test passwords.
 - **Gated by route, not by path.** The HTTP gate is the router pipelines
@@ -777,7 +779,8 @@ sign-in route to listed networks at `/editor/admin-allowlist`; see
      may read. It cannot reach the console.
   5. **Issued JWTs and API keys keep working anywhere**, including a JWT
      obtained from a listed network before the attacker left it, on every
-     surface but `GET /api/security/posture` (#2521), which is behind the
+     surface but `GET /api/security/posture` (#2521) and
+     `GET /api/security/plugin-health` (#2571), which are behind the
      allowlist whatever the credential. A per-key allowlist is a follow-up.
   6. **The kill switch is not in the security log.** `KILN_ADMIN_ALLOWLIST_DISABLED`
      has no site and no person; the boot log warns and the allowlist page
@@ -793,7 +796,8 @@ sign-in route to listed networks at `/editor/admin-allowlist`; see
      anywhere.** The sign-in routes and `POST /api/auth/sign_in*` answer every
      network, so an outsider can test a password and, with an admin's, get a
      full-role JWT that JSON:API, GraphQL and MCP accept from anywhere. The
-     console, `/setup`, `/ws/collab` and the posture endpoint stay gated. The
+     console, `/setup`, `/ws/collab` and the two monitoring endpoints stay
+     gated. The
      setting is the site admin's, audited as `sign_in` on
      `admin_allowlist_changed`; the page recommends two-factor sign-in.
 
@@ -2241,6 +2245,47 @@ policy is under "Security posture" in [policy-matrix.md](policy-matrix.md).
   check when nothing is cached, below. (6) The monitoring snapshot is per
   node, so a cluster runs the checks up to once per node per window, and two
   answers a second apart can differ.
+- **Plugin health over HTTP (#2571).** `GET /api/security/plugin-health`
+  (`KilnCMSWeb.PluginHealthController`, `KilnCMSWeb.PluginHealthJSON`)
+  serves the installed plugins' cached health through
+  `KilnCMS.Security.PluginHealthReport`'s `:cached` action. What a key
+  reveals, and what it cannot cause:
+  - **Credential.** A JWT or API key of a platform administrator
+    (`Checks.PlatformAdmin`: the effective platform role, so a live temporary
+    grant counts and an expired one does not); `forbid_if DraftWriteKey`
+    comes first. A site administrator is refused, even on their own site's
+    host: which plugins are installed, at which versions, and which notices
+    cover them, describe the whole installation, as on **System → Plugins**.
+  - **Deployment-wide data, a site's gate.** The body is the same on every
+    site's host and names no site. The only network gate in front of it is
+    the admin allowlist of the site whose host the request uses
+    (`:admin_allowlist_api`, ahead of the rate limit and the credential
+    plugs), the same as for the posture's deployment lines and System →
+    Plugins. A platform administrator's key used on the host of a site with
+    no list answers from any network. A deployment-level allowlist is a
+    follow-up.
+  - **No request, ever.** The action reads `Kiln.Plugins.Health.cached/0`
+    only: no `check/1`, no `warm/0`, not in the background. A cold node
+    answers `200` with `state: "not_checked"`, so calling the endpoint tells
+    hex.pm and the notices feed nothing, and a monitor polling it cannot be
+    used to drive outbound traffic.
+  - **What leaves.** The serializer picks each field by name: the plugin's
+    module (as `id`), name, source, package, versions, a status per
+    dimension, notice ids, aliases, severity, source and `http(s)` link, and
+    abandonment kinds with their structured values. Never a Hex retirement
+    message, a notice's title or affected and patched ranges, the locked or
+    registry checksums, the git ref, any sentence written for a person, a
+    site id or the node's name. A field added to `PluginStatus` or `Notice`
+    stays private until the serializer names it. Every string passes
+    `String.replace_invalid/1`; a notice link that is not `http(s)://` is
+    `null`.
+  - **Cache.** None of its own: each read re-evaluates the node's cached
+    fetch. Every response is `cache-control: private, no-store`.
+  - **Residual risks.** (1) A long-lived `read` key on a platform
+    administrator now carries the installation's plugin inventory. (2) The
+    cache is per node: behind a load balancer one node can answer
+    `not_checked` while another answers `fresh`, until a platform
+    administrator's page visit or posture call fills it on that node.
 
 ### Security alerts (#2245)
 
@@ -2304,7 +2349,7 @@ cached, and the feed's `links.next` is followed only on its own
 origin),
 `Kiln.Plugins.Health` (hex.pm's package API for each plugin locked from
 hex.pm, and the security notices feed; on the same platform-admin triggers,
-through `SafeFetch`, the feed's `links.next` followed only on its own origin
+never on a read of `GET /api/security/plugin-health`, through `SafeFetch`, the feed's `links.next` followed only on its own origin
 and at most five pages; package names are checked against Hex's naming rule
 before they are put in a URL),
 `Kiln.SecurityNotices` (the same security notices feed, fetched once per

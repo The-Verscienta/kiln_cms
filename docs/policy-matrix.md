@@ -1471,6 +1471,26 @@ MCP: `snapshot` is exposed only at `GET /api/security/posture`, without
 `details` ([API guide](api.md#security-posture-monitoring)); `run` is the
 page's alone.
 
+## Plugin health — `Security.PluginHealthReport` (#2571)
+
+| Action | platform admin | site admin (any site, default included) | editor | viewer | anonymous | System actor |
+|--------|:--------------:|:---------------------------------------:|:------:|:------:|:---------:|:------------:|
+| `cached` (generic action) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+`cached` answers `Kiln.Plugins.Health.cached/0`, the installed plugins'
+health from the node's cache, or `nil` when the node holds no fresh check.
+It never makes a request and never starts a check, not even in the
+background. The resource has no data layer and stores nothing. The policy is
+`forbid_if Accounts.Checks.DraftWriteKey` (a `:draft_write` key is refused
+whoever owns it), then `authorize_if Accounts.Checks.PlatformAdmin`: the
+effective platform role, so a live temporary admin grant counts and an
+expired one does not. A site administrator is refused, the default site's
+included: the report describes the whole installation, as on **System →
+Plugins**, and it is the same on every site, so the action takes no tenant.
+Not on JSON:API, GraphQL or MCP: exposed only at
+`GET /api/security/plugin-health`
+([API guide](api.md#plugin-health-monitoring)).
+
 ## Automation & newsletter
 
 `Automation.Rule`, `Newsletter.Subscriber`, `Newsletter.Segment`,
@@ -1618,7 +1638,7 @@ API key carries an immutable **access scope** (`:read`, `:read_write` or
 |---|---|
 | `KilnCMS.Accounts.Checks.ApiKeyWithoutWriteAccess` | an API-key actor whose key is *not* `:read_write` — i.e. a `:read` key, or any key whose record cannot be inspected (**fails closed to read-only**) |
 | `AshAuthentication.Checks.UsingApiKey` | *any* API-key actor, regardless of scope |
-| `KilnCMS.Accounts.Checks.DraftWriteKey` | an actor whose key is `:draft_write`, in three modes: `:any` (also the `forbid_if` on `Security.PostureReport`), `:outside_allowlist` (the `forbid_if` on `Content`), `:within_allowlist` (the grant inside `EditableContentType`'s policy) |
+| `KilnCMS.Accounts.Checks.DraftWriteKey` | an actor whose key is `:draft_write`, in three modes: `:any` (also the `forbid_if` on `Security.PostureReport` and `Security.PluginHealthReport`), `:outside_allowlist` (the `forbid_if` on `Content`), `:within_allowlist` (the grant inside `EditableContentType`'s policy) |
 
 Applied as `forbid_if` clauses placed **before** the `OrgAdmin` bypass, so a key
 minted on an admin account cannot skip them:

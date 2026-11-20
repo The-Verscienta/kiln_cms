@@ -214,7 +214,10 @@ the package (it is the trust root the registry plan named anyway) and
 **kilncms.dev's security notices feed** (#1873) for advisories. Operators read
 it at **Operations → System → Plugins** and in the Security posture line
 `core.plugin_health`; how to read the badges is in
-[Security posture](security-posture.md#check-your-installed-plugins).
+[Security posture](security-posture.md#check-your-installed-plugins). A
+monitor reads the same answer per plugin, from the node's cache and without
+asking anything, at `GET /api/security/plugin-health` (#2571, platform
+administrators only; [API guide](api.md#plugin-health-monitoring)).
 
 ### The trust chain, and where this sits in it
 

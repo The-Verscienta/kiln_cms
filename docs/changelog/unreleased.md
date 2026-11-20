@@ -21,6 +21,58 @@ carries the reasoning.
   release that gains it later picks it up only after a restart. No
   migration and no configuration; rolling back is safe.
 
+## Added
+
+<a id="plugin-health-api"></a>
+
+- **Each installed plugin's health is available as JSON for monitoring, at
+  `GET /api/security/plugin-health` (#2571).** The Security posture's
+  **Installed plugins** line, and `GET /api/security/posture`, give one
+  verdict for all plugins together; a monitor can now see which plugin
+  failed and why (a changed package on Hex, a security notice, a retirement,
+  no recent release, an SDK it doesn't accept). Guides:
+  [Plugin health (monitoring)](../api.md#plugin-health-monitoring) and
+  [Monitor each plugin from a script](../security-posture.md#monitor-each-plugin-from-a-script).
+  - **Who may call it.** A platform administrator, with a bearer JWT or an
+    API key they own (`read` is enough, and is the one to use). A live
+    temporary admin grant counts; an expired one doesn't. A site
+    administrator is refused even on their own site's host, as on
+    **System → Plugins**, because the report describes the whole
+    installation. A `draft_write` key is refused whoever owns it. The
+    policy is on a new `KilnCMS.Security.PluginHealthReport` resource
+    (`forbid_if DraftWriteKey`, then `authorize_if PlatformAdmin`).
+  - **Behind the admin allowlist of the host's site**, then the `api` rate
+    limit: `403` `network_not_allowed`, `503` `temporarily_unavailable`
+    (`retry-after: 30`) when the list can't be read, `429` when the bucket is
+    spent, `401` `invalid_token` or `unauthenticated`, `403` `forbidden`.
+    The body is the same on every site's host and has no site id; the host
+    decides only whose allowlist applies. The allowlist page's note now says
+    both monitoring endpoints under `/api/security` answer only to listed
+    networks. Every answer, refusals included, is
+    `cache-control: private, no-store`.
+  - **It never asks anything.** It reads the node's cached check and starts
+    no check, not even in the background. A node with nothing cached answers
+    `200` with `state: "not_checked"` and an empty `plugins`, without a
+    `retry-after`. Opening System or Security posture, or a platform
+    administrator's `GET /api/security/posture`, on that node still fills
+    the cache as before. The cache is per node, so `state` and `checked_at`
+    describe the node that answered.
+  - **The answer.** `version` (1), `state` (`fresh`, `partial`, `disabled`,
+    `nothing_to_check`, `not_checked`), `checked_at`, `notices`, `counts`
+    per `overall`, and `plugins`, each with `id` (the plugin's module),
+    `name`, `source`, `package`, `version`, `latest_version`, `overall`,
+    `integrity`, `notices` (ids, aliases, severity, source, link) and
+    `abandonment` (structured reasons). Never a Hex retirement message, a
+    notice's title or ranges, the checksums, a git ref, a sentence written
+    for a person, a site id or the node's name.
+  - **The contract.** Additive only, with its own `version`; open value sets
+    (read a value you don't know as unknown, never OK); key plugins on `id`,
+    since `name` may repeat; read `state` before trusting an empty
+    `plugins`. Listed as covered in the 1.x stability table. Not on
+    JSON:API, GraphQL or MCP.
+  - **Upgrading.** No migration and no setting. A monitor already on
+    `GET /api/security/posture` is unaffected.
+
 ## Changed
 
 <a id="public-js-bundle"></a>

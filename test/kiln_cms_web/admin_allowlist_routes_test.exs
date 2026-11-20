@@ -29,7 +29,7 @@ defmodule KilnCMSWeb.AdminAllowlistRoutesTest do
   @gated @sign_in ++ ~w(/setup)
 
   @sign_in_api ~w(/api/auth/sign_in /api/auth/sign_in/verify)
-  @console_api ~w(/api/security/posture)
+  @console_api ~w(/api/security/posture /api/security/plugin-health)
   @gated_api @sign_in_api ++ @console_api
 
   # Every route, with the `pipe_through` the router matched it to. A pattern
