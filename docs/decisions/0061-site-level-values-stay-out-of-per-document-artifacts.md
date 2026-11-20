@@ -87,3 +87,12 @@ body that was signed.
   Branding per request and need nothing.
 - A new site-level value wanted on a document's preview goes on a site-level
   surface, not into the artifact.
+- **Note (2026-11-19).** That site-level surface now exists:
+  `GET /api/site` ([#2577](https://github.com/The-Verscienta/kiln_cms/issues/2577),
+  [api.md → Site defaults](../api.md#site-defaults)) answers the site's name,
+  its X handle and its default social image, resolved per request and purged
+  from a CDN on a Branding save. This supersedes "Branding is on no API yet"
+  in the first point: a consumer reads `twitter:site` and the fallback image
+  from it rather than its own configuration, and only the card-type rule stays
+  with the consumer. The decision above is unchanged: these values are still
+  not in the artifact.

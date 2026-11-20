@@ -98,6 +98,7 @@ The JSON:API is one of several headless surfaces. Pick the one that fits:
 | **Ask your content** | `GET /api/ask?q=` | Cited published passages, plus a generated answer when a generator is configured. | [rag.md](rag.md) |
 | **Provenance** | `GET /api/provenance/verify/:type/:slug`, `GET /api/provenance/:type/:slug`, `…/verify`, `GET /api/provenance/public-key` | Whether an artifact is `verified`, `tampered` or `unsigned`, and the signed manifests behind the answer. On by default since 1.7; 404 when an operator switches provenance off. | [provenance.md](provenance.md) |
 | **Locales** | `GET /api/locales` | Configured content locales, the default, and each locale's fallback chain. | [§ Locale discovery](#locale-discovery), [§ Locale fallback](#locale-fallback) |
+| **Site defaults** | `GET /api/site` | The site's name, X (Twitter) handle and default share image, for the link-preview tags a front end renders when a document has none of its own. No credential needed; shared-cacheable. | [§ Site defaults](#site-defaults) |
 | **Schema** | `GET /api/schema` | JSON Schema for the fired `json` payloads — generate types, validate responses. | [§ Schema discovery](#schema-discovery-typed-clients) |
 | **Media upload** | `POST /api/media`, `POST /api/media/import-url`, `/api/media/uploads[/complete]` | Upload a file, import one from a public URL, or send a large one straight to object storage; metadata edits ride the JSON:API `PATCH`. `read_write` key on an editor account (a `draft_write` key is refused). | [§ Uploading media](#uploading-media) |
 | **Key rotation** | `POST /api/keys/rotate` | A drafts-only key with a self-rotation window swaps itself for a fresh one; the old key is revoked. | [headless-consumer-guide.md](headless-consumer-guide.md#keeping-the-key-alive-self-rotation) |
@@ -1436,6 +1437,54 @@ instead of silently serving the default locale: a typo like `fr_CA` answered in
 English is indistinguishable from a missing translation. The same goes for
 `fallback_locale`. GraphQL returns an error on the field.
 
+## Site defaults
+
+`GET /api/site` returns the site-level values a front end needs for its Open
+Graph and X (Twitter) card tags, which a per-document artifact leaves out
+([ADR 0061](decisions/0061-site-level-values-stay-out-of-per-document-artifacts.md)):
+the site's name, its X username and its default share image.
+Each is the value the site's own pages already carry in their `<head>`, so the
+endpoint shows nothing a visitor can't already see. No credential is needed.
+
+```bash
+curl -s https://cms.example.com/api/site
+# {"site_name":"Acme Docs","twitter_site":"@acme",
+#  "social_image_url":"https://cms.example.com/uploads/card.png"}
+```
+
+| Key | Value |
+|---|---|
+| `site_name` | The site's name, the same value as its pages' `<title>`: the name set in the site's Branding settings, else the operator's `SITE_NAME`, else `KilnCMS`. Never `null`, so a site nobody has branded answers the deployment's default name, not a name of its own. |
+| `twitter_site` | The site's X username from Branding, as `@handle` (a saved `acme` comes back as `@acme`), or `null`. Set per site only: there is no operator default. |
+| `social_image_url` | Branding's Default social image as an absolute `http(s)` URL, or `null`. Falls back to the operator's `:branding` config like the pages do. A site-relative image is put on the site the request reached: its custom domain, its subdomain, or `PUBLIC_BASE_URL` for the default site. An absolute URL is passed through. |
+
+Every key is always present. The answer is for the site the request's host
+names, the same way every other delivery surface picks its site. A host that
+names no site is a `404` under strict host matching, which is on as soon as a
+deployment has a second site
+([`TENANT_STRICT_HOST`](environment-variables.md#multi-tenancy-336)); on a
+single-site deployment without it, such a host gets the default site's values.
+REST only: there is no GraphQL field or MCP tool for these values.
+
+How to combine it with a document's `social` object:
+[headless-consumer-guide.md → Link previews](headless-consumer-guide.md#link-previews-the-social-object).
+
+**Caching.** An anonymous `200` is shared-cacheable like search
+(`public, max-age=60, stale-while-revalidate=60`, a weak `ETag` that answers
+`304`, `Vary: Accept, Authorization, Origin`); see
+[Caching and CDNs](#caching-and-cdns). A valid credential changes nothing in
+the body but makes the response `private, no-store`, so fetch it anonymously.
+With `KILN_CDN_PURGE_URL` set, a Branding save that changes one of the three
+values purges the site's CDN key ([Purging on publish](#purging-on-publish)).
+
+| Status | Meaning |
+|---|---|
+| `200` | The three keys. |
+| `401` | The request carried an `Authorization` header with an invalid API key or bearer token. Drop the header; none is needed. |
+| `404` | Strict host matching is on and the host names no site. |
+| `429` | Over the `api` rate limit for this address ([§ Rate limits](#rate-limits)); wait for `retry-after`. Fetching once per build or render keeps well under it. |
+| `503` `temporarily_unavailable` | The site's Branding settings could not be read. The response carries `Retry-After: 2` and is never cached; retry after the delay. Kiln answers this instead of its stock defaults so a CDN never keeps a branded site's previews under the wrong name. |
+
 ## Schema discovery (typed clients)
 
 `GET /api/schema` returns a JSON Schema (draft 2020-12) describing exactly what
@@ -2495,6 +2544,7 @@ front of Kiln can answer delivery traffic instead of the app.
 | `GET /api/json/*` (JSON:API) | `public, max-age=60, stale-while-revalidate=60`, `ETag` | `private, no-store` |
 | `GET /gql?query=…` (GraphQL queries over `GET`) | `public, max-age=60, stale-while-revalidate=60`, `ETag` | `private, no-store` |
 | `GET /api/search` | `public, max-age=60, stale-while-revalidate=60`, `ETag` | `private, no-store` |
+| `GET /api/site` (site defaults) | `public, max-age=60, stale-while-revalidate=60`, `ETag` | `private, no-store` (same body) |
 | `GET /api/search?explain=1` | `private, no-store`, no `ETag` | `private, no-store` |
 | `POST /gql`, any JSON:API write | never cached | never cached |
 
@@ -2583,10 +2633,18 @@ search, 300 s for fired artifacts. Set **`KILN_CDN_PURGE_URL`** and every
 `<type>.published`, `<type>.unpublished`, `<type>.updated` and
 `release.published` in a site sends one purge of that site's key, as does every
 write to a search synonym (`/editor/search-synonyms`), which changes what a
-cached `/api/search` URL answers. The others are the
+cached `/api/search` URL answers, and a Branding save that changes what
+[`GET /api/site`](#site-defaults) answers: the first save, a reset, or a save
+that changes the site name, the X username or the default social image. A save
+that changes none of those three (only the logo, favicon, color, theme or
+menus, say) does not purge, and neither does the nightly re-check of the app
+icon. The others are the
 content webhook events; a change that emits none — renaming a category or tag,
 editing a type definition or custom field — is not purged and ages out on the
-`max-age`:
+`max-age`. So do two changes that alter `/api/site` without a save on the site:
+an operator changing `SITE_NAME` or the `:branding` config, and a change to the
+site's domain or slug (which moves the host of a relative default image). They
+show within `max-age` plus `stale-while-revalidate` (two minutes by default):
 
 ```http
 POST <KILN_CDN_PURGE_URL>
@@ -2682,7 +2740,7 @@ Over the limit returns **429** with a `retry-after` header.
 
 | Bucket | Endpoints       | Limit (per IP)        |
 |--------|-----------------|-----------------------|
-| `api`  | `/api/json/*`, `GET /api/content/:type/:slug` (fired artifacts), `GET /api/locales`, `GET /api/search`, `GET /api/security/posture`, `GET /api/security/plugin-health` | 120 requests / minute |
+| `api`  | `/api/json/*`, `GET /api/content/:type/:slug` (fired artifacts), `GET /api/locales`, `GET /api/search`, `GET /api/site`, `GET /api/security/posture`, `GET /api/security/plugin-health` | 120 requests / minute |
 | `feed_join` | `GET /api/feed` connects (and `HEAD`) — charged **first**, then `api` too. Over it, the answer is a `200` with `event: busy`, not a `429` ([§ Change feed](#change-feed-sse)) | 60 connects / minute |
 | `gql`  | `/gql`          | 60 requests / minute  |
 | `auth` | sign-in / auth, and `POST /api/keys/rotate` | 40 requests / minute  |
