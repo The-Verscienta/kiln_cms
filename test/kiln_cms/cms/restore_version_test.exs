@@ -247,7 +247,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
         canonical_url: "https://example.com/original",
         noindex: true,
         nofollow: true,
-        custom_fields: %{"price" => "9"}
+        custom_fields: %{"rv_price" => "9"}
       }
 
       page = CMS.create_page!(Map.put(original, :blocks, block("Original")), actor: admin)
@@ -269,7 +269,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
             canonical_url: "https://example.com/edited",
             noindex: false,
             nofollow: false,
-            custom_fields: %{"price" => "19"},
+            custom_fields: %{"rv_price" => "19"},
             blocks: block("Edited")
           },
           actor: admin
@@ -392,18 +392,18 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
 
       page =
         CMS.create_page!(
-          %{title: "Prices", slug: slug(), custom_fields: %{"price" => "9"}},
+          %{title: "Prices", slug: slug(), custom_fields: %{"rv_price" => "9"}},
           actor: admin
         )
 
       [create_version | _] = versions(page, admin)
       at_create = page.custom_fields
-      refute at_create["sale"] == true
+      refute at_create["rv_sale"] == true
 
       edited =
         CMS.update_page!(
           page,
-          %{custom_fields: %{"price" => "19", "sale" => true}},
+          %{custom_fields: %{"rv_price" => "19", "rv_sale" => true}},
           actor: admin
         )
 
@@ -413,8 +413,8 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       # The compare view reports `sale` as *added* between these two versions; a
       # key-wise merge would leave it behind and make that report a lie.
       assert restored.custom_fields == at_create
-      assert restored.custom_fields["price"] == "9"
-      refute restored.custom_fields["sale"] == true
+      assert restored.custom_fields["rv_price"] == "9"
+      refute restored.custom_fields["rv_sale"] == true
     end
 
     test "category and featured image restore as references" do
@@ -486,7 +486,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
 
       page =
         CMS.create_page!(
-          %{title: "P", slug: slug(), custom_fields: %{"price" => "9"}},
+          %{title: "P", slug: slug(), custom_fields: %{"rv_price" => "9"}},
           actor: admin
         )
 
@@ -500,7 +500,7 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
 
       # `custom_fields` is `public? true`; resurrecting the key would republish a
       # value an admin removed the definition for. The registry pass drops it.
-      refute Map.has_key?(restored.custom_fields, "price")
+      refute Map.has_key?(restored.custom_fields, "rv_price")
     end
 
     test "a :select value outside a since-narrowed option list fails the restore" do
@@ -712,10 +712,10 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
     CMS.create_field_definition!(Map.put(attrs, :content_type, :page), actor: admin)
   end
 
-  defp define_price!(admin), do: define_field!(admin, %{name: "price", label: "Price"})
+  defp define_price!(admin), do: define_field!(admin, %{name: "rv_price", label: "Price"})
 
   defp define_sale!(admin),
-    do: define_field!(admin, %{name: "sale", label: "On sale", field_type: :boolean})
+    do: define_field!(admin, %{name: "rv_sale", label: "On sale", field_type: :boolean})
 
   defp category!(admin) do
     CMS.create_category!(

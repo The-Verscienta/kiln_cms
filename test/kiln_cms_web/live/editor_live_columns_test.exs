@@ -52,7 +52,12 @@ defmodule KilnCMSWeb.EditorLiveColumnsTest do
   defp define!(admin, name, attrs) do
     CMS.create_field_definition!(
       Map.merge(
-        %{content_type: :page, name: name, label: String.capitalize(name), field_type: :string},
+        %{
+          content_type: :page,
+          name: name,
+          label: String.capitalize(String.replace_prefix(name, "elc_", "")),
+          field_type: :string
+        },
         attrs
       ),
       actor: admin
@@ -78,18 +83,18 @@ defmodule KilnCMSWeb.EditorLiveColumnsTest do
     admin = authed_user(:admin)
     prefix = "Cols#{uniq()}"
 
-    define!(admin, "price", %{field_type: :integer})
+    define!(admin, "elc_price", %{field_type: :integer})
 
-    define!(admin, "color", %{
+    define!(admin, "elc_color", %{
       field_type: :select,
       options: ["red", "blue"],
       option_labels: %{"red" => "Crimson"}
     })
 
     define!(admin, "flag", %{field_type: :boolean})
-    define!(admin, "related", %{field_type: :reference, target_type: "post"})
+    define!(admin, "elc_related", %{field_type: :reference, target_type: "post"})
     define!(admin, "owner", %{field_type: :user})
-    define!(admin, "shape", %{field_type: :group})
+    define!(admin, "elc_shape", %{field_type: :group})
 
     %{conn: log_in(conn, admin), admin: admin, prefix: prefix}
   end
@@ -107,16 +112,16 @@ defmodule KilnCMSWeb.EditorLiveColumnsTest do
     conn: conn,
     prefix: prefix
   } do
-    page = a_page(prefix, %{"price" => 12})
+    page = a_page(prefix, %{"elc_price" => 12})
     {lv, _html} = open(conn, prefix)
 
     assert has_element?(lv, "#content-columns #content-columns-toggle[aria-expanded=false]")
 
-    for name <- ~w(price color flag related owner) do
+    for name <- ~w(elc_price elc_color flag elc_related owner) do
       assert has_element?(lv, ~s(#content-columns-form input[type=checkbox][value="#{name}"]))
     end
 
-    refute has_element?(lv, ~s(#content-columns-form input[value="shape"]))
+    refute has_element?(lv, ~s(#content-columns-form input[value="elc_shape"]))
     refute has_element?(lv, "#row-fields-page-#{page.id}")
   end
 
@@ -126,10 +131,15 @@ defmodule KilnCMSWeb.EditorLiveColumnsTest do
     prefix: prefix
   } do
     page =
-      a_page(prefix, %{"price" => 12, "color" => "red", "flag" => true, "ignored" => "nope"})
+      a_page(prefix, %{
+        "elc_price" => 12,
+        "elc_color" => "red",
+        "flag" => true,
+        "ignored" => "nope"
+      })
 
     {lv, _html} = open(conn, prefix)
-    pick(lv, ["price", "color", "flag"])
+    pick(lv, ["elc_price", "elc_color", "flag"])
 
     html = strip(lv, page)
     assert html =~ "Price"
@@ -137,7 +147,7 @@ defmodule KilnCMSWeb.EditorLiveColumnsTest do
     assert html =~ "Crimson"
     assert html =~ "Yes"
     refute html =~ "nope"
-    assert has_element?(lv, ~s(#content-columns-form input[value="price"][checked]))
+    assert has_element?(lv, ~s(#content-columns-form input[value="elc_price"][checked]))
 
     stored = Accounts.get_user!(admin.id, actor: admin)
 
@@ -145,7 +155,7 @@ defmodule KilnCMSWeb.EditorLiveColumnsTest do
              stored,
              Accounts.default_org_id(),
              "page"
-           ) == ["price", "color", "flag"]
+           ) == ["elc_price", "elc_color", "flag"]
 
     # A new session (a reload) reads the remembered choice back.
     strategy = AshAuthentication.Info.strategy!(User, :password)
@@ -170,7 +180,7 @@ defmodule KilnCMSWeb.EditorLiveColumnsTest do
   } do
     page = a_page(prefix, %{})
     {lv, _html} = open(conn, prefix)
-    pick(lv, ~w(price color flag related owner))
+    pick(lv, ~w(elc_price elc_color flag elc_related owner))
 
     assert lv
            |> element("#row-fields-page-#{page.id}")
@@ -181,9 +191,9 @@ defmodule KilnCMSWeb.EditorLiveColumnsTest do
   end
 
   test "type=all offers no picker and draws no strip, only a hint", %{conn: conn, prefix: prefix} do
-    page = a_page(prefix, %{"price" => 12})
+    page = a_page(prefix, %{"elc_price" => 12})
     {lv, _html} = open(conn, prefix)
-    pick(lv, ["price"])
+    pick(lv, ["elc_price"])
     assert has_element?(lv, "#row-fields-page-#{page.id}")
 
     {:ok, all, _html} = live(conn, "/editor?q=#{prefix}")
@@ -196,15 +206,15 @@ defmodule KilnCMSWeb.EditorLiveColumnsTest do
     conn: conn,
     prefix: prefix
   } do
-    page = a_page(prefix, %{"price" => 12})
+    page = a_page(prefix, %{"elc_price" => 12})
     {lv, _html} = open(conn, prefix)
 
-    render_hook(lv, "set_columns", %{"type" => "post", "columns" => ["price"]})
-    render_hook(lv, "set_columns", %{"type" => "page", "columns" => ["shape"]})
+    render_hook(lv, "set_columns", %{"type" => "post", "columns" => ["elc_price"]})
+    render_hook(lv, "set_columns", %{"type" => "page", "columns" => ["elc_shape"]})
     render_hook(lv, "set_columns", %{"type" => "page", "columns" => ["nope"]})
-    render_hook(lv, "set_columns", %{"type" => "page", "columns" => "price"})
+    render_hook(lv, "set_columns", %{"type" => "page", "columns" => "elc_price"})
     render_hook(lv, "set_columns", %{"type" => "page", "columns" => [1]})
-    render_hook(lv, "set_columns", %{"type" => ["page"], "columns" => ["price"]})
+    render_hook(lv, "set_columns", %{"type" => ["page"], "columns" => ["elc_price"]})
     render_hook(lv, "set_columns", %{"type" => "page", "columns" => Enum.map(1..7, &"f#{&1}")})
 
     refute has_element?(lv, "#row-fields-page-#{page.id}")
@@ -226,11 +236,11 @@ defmodule KilnCMSWeb.EditorLiveColumnsTest do
     readable =
       Ash.Seed.seed!(Post, %{title: "Readable-#{uniq()}", slug: "ok-#{uniq()}", state: :draft})
 
-    hidden_page = a_page(prefix, %{"related" => snapshot(secret, secret.title)})
-    shown_page = a_page(prefix, %{"related" => snapshot(readable, "stale snapshot title")})
+    hidden_page = a_page(prefix, %{"elc_related" => snapshot(secret, secret.title)})
+    shown_page = a_page(prefix, %{"elc_related" => snapshot(readable, "stale snapshot title")})
 
     {lv, _html} = open(conn, prefix)
-    pick(lv, ["related"])
+    pick(lv, ["elc_related"])
 
     assert strip(lv, hidden_page) =~ "Unavailable"
     refute render(lv) =~ secret.title
@@ -277,22 +287,22 @@ defmodule KilnCMSWeb.EditorLiveColumnsTest do
   end
 
   test "choosing columns keeps the selection", %{conn: conn, prefix: prefix} do
-    page = a_page(prefix, %{"price" => 3})
+    page = a_page(prefix, %{"elc_price" => 3})
     {lv, _html} = open(conn, prefix)
 
     lv |> element("#page-#{page.id} input[phx-click=toggle_select]") |> render_click()
     assert has_element?(lv, "#content-selected-count", "1 selected")
 
-    pick(lv, ["price"])
+    pick(lv, ["elc_price"])
 
     assert has_element?(lv, "#content-selected-count", "1 selected")
     assert has_element?(lv, "#row-fields-page-#{page.id}")
   end
 
   test "an emptied choice removes the strip", %{conn: conn, prefix: prefix} do
-    page = a_page(prefix, %{"price" => 3})
+    page = a_page(prefix, %{"elc_price" => 3})
     {lv, _html} = open(conn, prefix)
-    pick(lv, ["price"])
+    pick(lv, ["elc_price"])
     assert has_element?(lv, "#row-fields-page-#{page.id}")
 
     pick(lv, [])
@@ -300,9 +310,9 @@ defmodule KilnCMSWeb.EditorLiveColumnsTest do
   end
 
   test "load more keeps the strip on the rows it adds", %{conn: conn, prefix: prefix} do
-    pages = for n <- 1..52, do: a_page(prefix, %{"price" => n})
+    pages = for n <- 1..52, do: a_page(prefix, %{"elc_price" => n})
     {lv, _html} = open(conn, prefix)
-    pick(lv, ["price"])
+    pick(lv, ["elc_price"])
 
     lv |> element("button[phx-click=load_more]") |> render_click()
 

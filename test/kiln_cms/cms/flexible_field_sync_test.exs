@@ -53,7 +53,7 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
   # sections > quote { text }; a dynamic type carries one too.
   defp model!(admin) do
     sections =
-      def!(admin, %{name: "sections", label: "Sections", field_type: :flexible, max_items: 8})
+      def!(admin, %{name: "ffs_sections", label: "Sections", field_type: :flexible, max_items: 8})
 
     hero = item_type!(admin, sections, "hero", %{label: "Hero", help_text: "A banner"})
     sub!(admin, hero, "headline", %{required: true})
@@ -124,7 +124,7 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
     test "nests item types and their sub-fields to the depth cap", %{admin: admin} do
       model!(admin)
       post = admin |> export!() |> owner("compiled", "post")
-      sections = field(post, "sections")
+      sections = field(post, "ffs_sections")
 
       assert sections["field_type"] == "flexible"
       assert ["hero", "quote"] = Enum.map(sections["item_types"], & &1["name"])
@@ -150,7 +150,7 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
         admin
         |> export!()
         |> owner("compiled", "post")
-        |> field("sections")
+        |> field("ffs_sections")
         |> then(& &1["item_types"])
         |> hd()
 
@@ -162,7 +162,7 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
     end
 
     test "a site with no flexible fields exports no new key", %{admin: admin} do
-      def!(admin, %{name: "plain", field_type: :string})
+      def!(admin, %{name: "ffs_plain", field_type: :string})
       doc = export!(admin)
       refute Jason.encode!(doc) =~ "item_setting"
       refute Jason.encode!(doc) =~ "item_types"
@@ -200,13 +200,17 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
       wipe!(admin)
       {:ok, _} = apply!(doc, admin)
 
-      assert %{custom_fields: %{"sections" => [%{"_type" => "hero", "headline" => "H"} = item]}} =
+      assert %{
+               custom_fields: %{
+                 "ffs_sections" => [%{"_type" => "hero", "headline" => "H"} = item]
+               }
+             } =
                CMS.create_post!(
                  %{
                    title: "T",
                    slug: "flexfs-#{System.unique_integer([:positive])}",
                    custom_fields: %{
-                     "sections" => [
+                     "ffs_sections" => [
                        %{
                          "_type" => "hero",
                          "headline" => "H",
@@ -234,7 +238,7 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
 
       doc =
         update_in(export!(admin), ["owners", Access.all(), "fields", Access.all()], fn f ->
-          if f["name"] == "sections" do
+          if f["name"] == "ffs_sections" do
             update_in(f, ["item_types", Access.filter(&(&1["name"] == "quote")), "label"], fn _ ->
               "Pull quote"
             end)
@@ -245,7 +249,7 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
 
       assert {:ok, report} = FieldSync.import_doc(doc, actor: admin)
 
-      assert [%{path: "post.sections.quote", changes: %{"label" => _}}] =
+      assert [%{path: "post.ffs_sections.quote", changes: %{"label" => _}}] =
                Enum.filter(report.ops, &(&1.op == :update))
     end
 
@@ -319,7 +323,7 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
       bad =
         export!(admin)
         |> update_in(["owners", Access.all(), "fields", Access.all()], fn f ->
-          if f["name"] == "sections" do
+          if f["name"] == "ffs_sections" do
             update_in(
               f,
               ["item_types", Access.at(0)],
@@ -345,7 +349,9 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
   describe "prune and data loss" do
     setup %{admin: admin} do
       model!(admin)
-      sections = CMS.list_field_definitions!(actor: admin) |> Enum.find(&(&1.name == "sections"))
+
+      sections =
+        CMS.list_field_definitions!(actor: admin) |> Enum.find(&(&1.name == "ffs_sections"))
 
       post =
         CMS.create_post!(
@@ -353,7 +359,7 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
             title: "T",
             slug: "flexfs-#{System.unique_integer([:positive])}",
             custom_fields: %{
-              "sections" => [
+              "ffs_sections" => [
                 %{"_type" => "hero", "headline" => "H"},
                 %{"_type" => "quote", "text" => "Q"}
               ]
@@ -368,7 +374,7 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
     defp drop_item_type(doc, name),
       do: update_in(doc, ["owners", Access.all(), "fields", Access.all()], &drop_from(&1, name))
 
-    defp drop_from(%{"name" => "sections"} = f, name),
+    defp drop_from(%{"name" => "ffs_sections"} = f, name),
       do: Map.update!(f, "item_types", fn ts -> Enum.reject(ts, &(&1["name"] == name)) end)
 
     defp drop_from(f, _name), do: f
@@ -383,7 +389,7 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
       doc = admin |> export!() |> drop_item_type("quote")
 
       assert {:ok, report} = apply!(doc, admin)
-      assert "post.sections.quote" in report.untouched
+      assert "post.ffs_sections.quote" in report.untouched
       assert "quote" in item_type_names(admin)
     end
 
@@ -393,29 +399,29 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
     } do
       doc = admin |> export!() |> drop_item_type("quote")
 
-      assert {:error, %{blocked: [%{path: "post.sections.quote"}]}} =
+      assert {:error, %{blocked: [%{path: "post.ffs_sections.quote"}]}} =
                apply!(doc, admin, prune?: true)
 
       assert "quote" in item_type_names(admin)
-      assert length(CMS.get_post!(post.id, actor: admin).custom_fields["sections"]) == 2
+      assert length(CMS.get_post!(post.id, actor: admin).custom_fields["ffs_sections"]) == 2
     end
 
     test "with the flag the destroy is still refused: an import cannot pass purge_items?",
          %{admin: admin, post: post} do
       doc = admin |> export!() |> drop_item_type("quote")
 
-      assert {:error, %{errors: [%{path: "post.sections.quote", messages: [message]}]}} =
+      assert {:error, %{errors: [%{path: "post.ffs_sections.quote", messages: [message]}]}} =
                apply!(doc, admin, prune?: true, allow_data_loss?: true)
 
       assert message =~ "purge_items?"
       assert "quote" in item_type_names(admin)
-      assert length(CMS.get_post!(post.id, actor: admin).custom_fields["sections"]) == 2
+      assert length(CMS.get_post!(post.id, actor: admin).custom_fields["ffs_sections"]) == 2
     end
 
     test "pruning an item type no item uses is allowed", %{admin: admin, post: post} do
       CMS.update_post!(
         post,
-        %{custom_fields: %{"sections" => [%{"_type" => "hero", "headline" => "H"}]}},
+        %{custom_fields: %{"ffs_sections" => [%{"_type" => "hero", "headline" => "H"}]}},
         actor: admin
       )
 
@@ -427,7 +433,7 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
     test "pruning a sub-field of an item type that holds items is blocked", %{admin: admin} do
       doc =
         update_in(export!(admin), ["owners", Access.all(), "fields", Access.all()], fn f ->
-          if f["name"] == "sections" do
+          if f["name"] == "ffs_sections" do
             update_in(
               f,
               ["item_types", Access.filter(&(&1["name"] == "quote")), "group_fields"],
@@ -438,7 +444,7 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
           end
         end)
 
-      assert {:error, %{blocked: [%{path: "post.sections.quote.text"}]}} =
+      assert {:error, %{blocked: [%{path: "post.ffs_sections.quote.text"}]}} =
                apply!(doc, admin, prune?: true)
     end
 
@@ -446,7 +452,7 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
       # `cell` has no stored items, `hero` does: its nested sub-field is judged by its own type
       doc =
         update_in(export!(admin), ["owners", Access.all(), "fields", Access.all()], fn f ->
-          if f["name"] == "sections" do
+          if f["name"] == "ffs_sections" do
             update_in(
               f,
               [
@@ -478,21 +484,23 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
     } do
       doc =
         update_in(export!(admin), ["owners", Access.all(), "fields"], fn fs ->
-          Enum.reject(fs, &(&1["name"] == "sections"))
+          Enum.reject(fs, &(&1["name"] == "ffs_sections"))
         end)
 
-      assert {:error, %{blocked: [%{path: "post.sections"}]}} = apply!(doc, admin, prune?: true)
-      assert length(CMS.get_post!(post.id, actor: admin).custom_fields["sections"]) == 2
+      assert {:error, %{blocked: [%{path: "post.ffs_sections"}]}} =
+               apply!(doc, admin, prune?: true)
+
+      assert length(CMS.get_post!(post.id, actor: admin).custom_fields["ffs_sections"]) == 2
 
       assert {:ok, _} = apply!(doc, admin, prune?: true, allow_data_loss?: true)
-      refute Map.has_key?(CMS.get_post!(post.id, actor: admin).custom_fields, "sections")
+      refute Map.has_key?(CMS.get_post!(post.id, actor: admin).custom_fields, "ffs_sections")
       assert item_type_names(admin) -- ["part"] == []
     end
 
     test "flipping item_setting over stored items is blocked", %{admin: admin} do
       doc =
         update_in(export!(admin), ["owners", Access.all(), "fields", Access.all()], fn f ->
-          if f["name"] == "sections" do
+          if f["name"] == "ffs_sections" do
             update_in(
               f,
               [
@@ -508,7 +516,7 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
           end
         end)
 
-      assert {:error, %{blocked: [%{path: "post.sections.quote.text"}]}} =
+      assert {:error, %{blocked: [%{path: "post.ffs_sections.quote.text"}]}} =
                FieldSync.import_doc(doc, actor: admin)
     end
   end
@@ -519,12 +527,12 @@ defmodule KilnCMS.CMS.FlexibleFieldSyncTest do
 
       to_string_doc =
         update_in(export!(admin), ["owners", Access.all(), "fields", Access.all()], fn f ->
-          if f["name"] == "sections",
+          if f["name"] == "ffs_sections",
             do: f |> Map.put("field_type", "text") |> Map.drop(["item_types"]),
             else: f
         end)
 
-      assert {:error, %{errors: [%{path: "post.sections", messages: [message]}]}} =
+      assert {:error, %{errors: [%{path: "post.ffs_sections", messages: [message]}]}} =
                apply!(to_string_doc, admin, allow_data_loss?: true)
 
       assert message =~ "to or from a flexible field"
