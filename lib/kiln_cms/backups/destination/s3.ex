@@ -39,7 +39,7 @@ defmodule KilnCMS.Backups.Destination.S3 do
   use Kiln.BackupDestination
 
   alias Kiln.BackupDestination.Config
-  alias KilnCMS.Backups.Destination
+  alias KilnCMS.Backups.Destination.RemotePath
   alias KilnCMS.Backups.Destination.S3.{Client, Endpoint, Errors, Multipart, Xml}
   alias KilnCMS.Backups.Destination.S3.Errors.Error
 
@@ -225,12 +225,7 @@ defmodule KilnCMS.Backups.Destination.S3 do
   defp reason({:error, %Error{} = error}), do: {:error, Errors.to_reason(error)}
   defp reason(other), do: other
 
-  defp safe_ref(subdir, name) do
-    if subdir in @subdirs and is_binary(name) and name not in [".", ".."] and
-         name =~ ~r/\A[A-Za-z0-9._-]{1,255}\z/,
-       do: :ok,
-       else: {:error, "#{inspect(subdir)}/#{inspect(name)} is not a backup file"}
-  end
+  defp safe_ref(subdir, name), do: RemotePath.safe_ref(subdir, name)
 
   ## Test
 
@@ -332,8 +327,7 @@ defmodule KilnCMS.Backups.Destination.S3 do
   # Only a whole backup file directly in `<prefix>/<subdir>/`.
   defp entry(%{key: key, size: size, last_modified: modified}, subdir, prefix) do
     with ^prefix <> name <- key,
-         false <- String.contains?(name, "/"),
-         true <- size >= 0 and Destination.backup_file?(name) do
+         true <- size >= 0 and RemotePath.listed_name?(name) do
       [%{subdir: subdir, name: name, bytes: size, mtime: mtime(modified)}]
     else
       _ -> []

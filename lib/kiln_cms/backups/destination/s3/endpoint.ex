@@ -26,6 +26,10 @@ defmodule KilnCMS.Backups.Destination.S3.Endpoint do
     * the prefix is `/`-separated segments of `A-Z a-z 0-9 . _ -`, none of
       them `.` or `..`, slashes at either end dropped.
 
+  The host rules are `KilnCMS.Backups.Destination.HostPolicy`'s, shared
+  with the other network adapters; the prefix rules are
+  `KilnCMS.Backups.Destination.RemotePath`'s.
+
   `pin/1` resolves the host requests connect to (the bucket's own name when
   addressed virtual-hosted) and answers the one address to connect to:
   every address it resolves to must be allowed, as above. Run on save (a
@@ -34,7 +38,7 @@ defmodule KilnCMS.Backups.Destination.S3.Endpoint do
   test env), a name pins to `nil` and is connected to by name.
   """
 
-  alias KilnCMS.Webhooks.SafeUrl
+  alias KilnCMS.Backups.Destination.{HostPolicy, RemotePath}
 
   @enforce_keys [:scheme, :host, :port, :bucket, :region]
   defstruct [:scheme, :host, :port, :bucket, :region, prefix: [], path_style?: false]
@@ -49,24 +53,19 @@ defmodule KilnCMS.Backups.Destination.S3.Endpoint do
           path_style?: boolean()
         }
 
-  @metadata_names ~w(metadata.google.internal metadata.goog metadata instance-data)
-  @blocked_names ~w(localhost)
+  # How `HostPolicy` words this adapter's refusals (`docs/backups.md`
+  # quotes them).
+  @wording [env: "BACKUP_S3_PRIVATE_HOSTS", noun: "the endpoint"]
 
   @region ~r/\A[a-z0-9][a-z0-9-]{0,39}\z/
   @bucket ~r/\A[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\z/
-  @segment ~r/\A[A-Za-z0-9._-]{1,255}\z/
-  @max_prefix 512
 
   @doc """
   The hosts `BACKUP_S3_PRIVATE_HOSTS` lists, lowercased: the only ones an S3
   destination may reach over `http://` or on a private or loopback address.
   """
   @spec private_hosts() :: [String.t()]
-  def private_hosts do
-    :kiln_cms
-    |> Application.get_env(KilnCMS.Backups.Destination.S3, [])
-    |> Keyword.get(:private_hosts, [])
-  end
+  def private_hosts, do: HostPolicy.private_hosts(KilnCMS.Backups.Destination.S3)
 
   @doc """
   Parses `BACKUP_S3_PRIVATE_HOSTS`: host names (or IP literals) separated by
@@ -75,16 +74,7 @@ defmodule KilnCMS.Backups.Destination.S3.Endpoint do
   only ever names exact hosts.
   """
   @spec parse_private_hosts(String.t() | nil) :: [String.t()]
-  def parse_private_hosts(nil), do: []
-
-  def parse_private_hosts(raw) when is_binary(raw) do
-    raw
-    |> String.split(",")
-    |> Enum.map(&(&1 |> String.trim() |> String.downcase()))
-    |> Enum.filter(&(&1 =~ ~r/\A(?:[a-z0-9_-]+(?:\.[a-z0-9_-]+)*\.?|[0-9a-f:.]+)\z/))
-    |> Enum.map(&String.trim_trailing(&1, "."))
-    |> Enum.uniq()
-  end
+  defdelegate parse_private_hosts(raw), to: HostPolicy
 
   @doc "The settings as an endpoint, or `{:error, message}`. See the moduledoc."
   @spec parse(map(), [String.t()]) :: {:ok, t()} | {:error, String.t()}
@@ -112,7 +102,7 @@ defmodule KilnCMS.Backups.Destination.S3.Endpoint do
 
       with :ok <- scheme(uri.scheme, listed?),
            :ok <- metadata(host),
-           :ok <- host(connect_host(endpoint), listed?),
+           :ok <- HostPolicy.check_host(connect_host(endpoint), listed?, @wording),
            do: {:ok, endpoint}
     end
   end
@@ -126,7 +116,7 @@ defmodule KilnCMS.Backups.Destination.S3.Endpoint do
     do: connect_host(endpoint) in listed
 
   defp metadata(host) do
-    if host in @metadata_names,
+    if HostPolicy.metadata_name?(host),
       do: {:error, "the endpoint must not be a metadata host"},
       else: :ok
   end
@@ -184,75 +174,15 @@ defmodule KilnCMS.Backups.Destination.S3.Endpoint do
   """
   @spec pin(t(), [String.t()]) ::
           {:ok, :inet.ip_address() | nil} | {:error, String.t() | {:permanent, String.t()}}
-  def pin(%__MODULE__{} = endpoint, listed \\ private_hosts()) do
-    listed? = listed?(endpoint, listed)
-    target = connect_host(endpoint)
-
-    case SafeUrl.lookup(target) do
-      :no_dns ->
-        {:ok, nil}
-
-      {:ok, addresses} ->
-        case Enum.find(addresses, &(not allowed_address?(&1, listed?))) do
-          nil -> {:ok, hd(addresses)}
-          refused -> {:error, {:permanent, refusal(refused, listed?)}}
-        end
-
-      {:error, message} ->
-        {:error, "#{target}: #{message}"}
-    end
-  end
-
-  defp refusal(address, listed?) do
-    cond do
-      never?(address) ->
-        "the endpoint resolves to a link-local or metadata address, which no setting allows"
-
-      listed? ->
-        "the endpoint resolves to an address that is not allowed"
-
-      true ->
-        "the endpoint resolves to a private or loopback address; " <>
-          "list its host in BACKUP_S3_PRIVATE_HOSTS to allow it"
-    end
-  end
+  def pin(%__MODULE__{} = endpoint, listed \\ private_hosts()),
+    do: HostPolicy.pin(connect_host(endpoint), listed?(endpoint, listed), @wording)
 
   @doc """
   Whether a destination may connect to `address`: never to a link-local or
   metadata address; to a private or loopback one only for a listed host.
   """
   @spec allowed_address?(:inet.ip_address(), boolean()) :: boolean()
-  def allowed_address?(address, listed?) do
-    cond do
-      never?(address) -> false
-      listed? -> true
-      true -> not SafeUrl.blocked_address?(address)
-    end
-  end
-
-  # 169.254.0.0/16 (cloud metadata lives at 169.254.169.254), fe80::/10, the
-  # EC2 IPv6 metadata address, and their IPv4-mapped and -compatible forms.
-  defp never?({169, 254, _c, _d}), do: true
-  defp never?({0xFD00, 0xEC2, 0, 0, 0, 0, 0, 0x254}), do: true
-  defp never?({g1, _, _, _, _, _, _, _}) when Bitwise.band(g1, 0xFFC0) == 0xFE80, do: true
-
-  # NAT64 64:ff9b::/96 and 6to4 2002::/16 carry an IPv4 address that a
-  # translator or relay delivers to.
-  defp never?({0x64, 0xFF9B, 0, 0, 0, 0, g7, g8}), do: never?(v4(g7, g8))
-  defp never?({0x2002, g2, g3, _, _, _, _, _}), do: never?(v4(g2, g3))
-
-  defp never?({0, 0, 0, 0, 0, mapped, g7, g8}) when mapped in [0, 0xFFFF],
-    do:
-      never?(
-        {Bitwise.bsr(g7, 8), Bitwise.band(g7, 0xFF), Bitwise.bsr(g8, 8), Bitwise.band(g8, 0xFF)}
-      )
-
-  defp never?(_address), do: false
-
-  defp v4(high, low),
-    do:
-      {Bitwise.bsr(high, 8), Bitwise.band(high, 0xFF), Bitwise.bsr(low, 8),
-       Bitwise.band(low, 0xFF)}
+  defdelegate allowed_address?(address, listed?), to: HostPolicy
 
   ## Settings
 
@@ -283,46 +213,7 @@ defmodule KilnCMS.Backups.Destination.S3.Endpoint do
 
   defp scheme(_scheme, _listed?), do: {:error, "the endpoint must use https://"}
 
-  defp host(host, listed?) do
-    base = String.trim_trailing(host, ".")
-
-    cond do
-      base in @metadata_names -> {:error, "the endpoint must not be a metadata host"}
-      ip_literal?(base) -> literal(base, listed?)
-      listed? -> :ok
-      true -> unlisted_name(base)
-    end
-  end
-
-  defp literal(base, listed?) do
-    {:ok, address} = :inet.parse_address(String.to_charlist(base))
-    if allowed_address?(address, listed?), do: :ok, else: {:error, refusal(address, listed?)}
-  end
-
-  defp unlisted_name(base) do
-    cond do
-      base in @blocked_names or String.ends_with?(base, ".localhost") ->
-        {:error, "the endpoint must not be a loopback host"}
-
-      String.ends_with?(base, [".local", ".internal"]) ->
-        {:error,
-         "the endpoint must not be a .local or .internal host unless BACKUP_S3_PRIVATE_HOSTS lists it"}
-
-      true ->
-        :ok
-    end
-  end
-
-  defp ip_literal?(host) do
-    match?(
-      {:ok, _},
-      host
-      |> String.trim_leading("[")
-      |> String.trim_trailing("]")
-      |> String.to_charlist()
-      |> :inet.parse_address()
-    )
-  end
+  defp ip_literal?(host), do: HostPolicy.ip_literal?(host)
 
   defp bucket(bucket) when is_binary(bucket) do
     bucket = String.trim(bucket)
@@ -365,26 +256,5 @@ defmodule KilnCMS.Backups.Destination.S3.Endpoint do
   The prefix setting as segments (see the moduledoc), or `{:error, message}`.
   """
   @spec prefix(String.t() | nil) :: {:ok, [String.t()]} | {:error, String.t()}
-  def prefix(nil), do: {:ok, []}
-
-  def prefix(prefix) when is_binary(prefix) do
-    trimmed = prefix |> String.trim() |> String.trim("/")
-
-    segments = if trimmed == "", do: [], else: String.split(trimmed, "/")
-
-    cond do
-      byte_size(trimmed) > @max_prefix ->
-        {:error, "the prefix is too long"}
-
-      Enum.any?(segments, &(&1 in [".", ".."] or not Regex.match?(@segment, &1))) ->
-        {:error,
-         "the prefix must be folder names of letters, digits, dots, hyphens and underscores, " <>
-           "separated by /"}
-
-      true ->
-        {:ok, segments}
-    end
-  end
-
-  def prefix(_prefix), do: {:error, "the prefix must be text"}
+  def prefix(prefix), do: RemotePath.segments(prefix, "the prefix")
 end
