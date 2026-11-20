@@ -103,7 +103,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Fixed
 
 - **Federation: a publish sends one signed POST per remote inbox (a `sharedInbox` reaches all its followers) instead of one per follower, settled against every follower there; the fan-out is one transaction, so a retry no longer re-sends to inboxes already queued.**
-  ([long form](docs/changelog/unreleased.md#federation-shared-inbox-dedup))
+  ([#3195](https://github.com/The-Verscienta/kiln_cms/pull/3195) · [long form](docs/changelog/unreleased.md#federation-shared-inbox-dedup))
 
 - **A valid `bearer`/`BEARER <jwt>` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing [1.9.0's `401`](docs/changelog/v1.9.0.md#bearer-401-hardening); `/mcp` and `POST /api/keys/rotate` take a `kiln_` key under any case or in a later `Authorization` value, and `/metrics` its token under any case (#2632).**
   ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#bearer-scheme-any-case))
