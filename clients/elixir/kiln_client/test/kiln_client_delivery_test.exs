@@ -117,6 +117,24 @@ defmodule KilnClientDeliveryTest do
       refute_received {:request, _, _, _, _, _}
     end
 
+    # #3129: the spec promises a map; an empty 2xx used to be `{:ok, nil}`.
+    test "an empty 2xx is :unexpected_body, not {:ok, nil}" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.send_resp(200, "")
+      end)
+
+      assert {:error,
+              %Error{
+                reason: :unexpected_body,
+                status: 200,
+                method: :post,
+                path: "/api/content/post/p1/preview-token",
+                body: ""
+              }} = KilnClient.mint_preview("post", "p1", api_key: @key)
+    end
+
     test "a 403 (not an editor of it) is :forbidden" do
       stub(403, %{"errors" => [%{"status" => "403", "code" => "forbidden"}]})
 
