@@ -220,7 +220,12 @@ export class KilnClient {
     options: ListOptions = {},
   ): Promise<ListResult<T>> {
     const path = published(options) ? `/api/json/${plural}/published` : `/api/json/${plural}`;
-    const doc = await this.request(path, listParams(options), options.signal);
+    const doc = await this.request(
+      path,
+      listParams(options),
+      options.signal,
+      isJsonApiDocument,
+    );
     return flattenDocument<T>(doc);
   }
 
@@ -343,7 +348,7 @@ export class KilnClient {
     appendIfPresent(params, "include", options.include?.join(","));
     appendSparseFields(params, options.fields);
 
-    const doc = await this.request(path, params, options.signal);
+    const doc = await this.request(path, params, options.signal, isJsonApiDocument);
     return flattenDocument<T>(doc);
   }
 
@@ -366,7 +371,12 @@ export class KilnClient {
     appendIfPresent(params, "locale", options.locale);
     appendIfPresent(params, "category", options.category);
     if (options.facets) params.append("facets", "true");
-    return (await this.request("/api/search", params, options.signal)) as HybridSearchResult;
+    return (await this.request(
+      "/api/search",
+      params,
+      options.signal,
+      isHybridSearchResult,
+    )) as HybridSearchResult;
   }
 
   /**
@@ -392,7 +402,13 @@ export class KilnClient {
     const path = `/api/content/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`;
 
     try {
-      return (await this.request(path, params, options.signal, "application/json")) as T;
+      return (await this.request(
+        path,
+        params,
+        options.signal,
+        isObject,
+        "application/json",
+      )) as T;
     } catch (error) {
       const retriable =
         error instanceof KilnHttpError && error.status === 503 && options.retry !== false;
@@ -406,7 +422,13 @@ export class KilnClient {
       } catch {
         throw error;
       }
-      return (await this.request(path, params, options.signal, "application/json")) as T;
+      return (await this.request(
+        path,
+        params,
+        options.signal,
+        isObject,
+        "application/json",
+      )) as T;
     }
   }
 
@@ -429,6 +451,7 @@ export class KilnClient {
       path,
       params,
       options.signal,
+      isObject,
       "application/json",
     )) as AsOfIndexResult;
   }
@@ -488,6 +511,7 @@ export class KilnClient {
       "/api/sync",
       params,
       options.signal,
+      isSyncPage,
       "application/json",
     )) as SyncPage<A>;
   }
@@ -525,6 +549,7 @@ export class KilnClient {
       path,
       new URLSearchParams(),
       options.signal,
+      isObject,
       "application/json",
     );
     // The server wraps the draft in a `{data: …}` envelope; unwrap it so the
@@ -554,6 +579,8 @@ export class KilnClient {
       path,
       new URLSearchParams(),
       options.signal,
+      // A mint is a write, and writes keep their own handling of the body.
+      undefined,
       "application/json",
       "POST",
     )) as MintedPreview;
@@ -574,6 +601,7 @@ export class KilnClient {
       "/api/schema",
       params,
       options.signal,
+      isObject,
       "application/json",
     )) as SchemaDocument;
   }
@@ -594,6 +622,7 @@ export class KilnClient {
       "/api/schema",
       params,
       options.signal,
+      isObject,
       "application/json",
     )) as OpenApiComponentsDocument;
   }
@@ -623,6 +652,7 @@ export class KilnClient {
         "/api/resolve",
         params,
         options.signal,
+        isResolveResult,
         "application/json",
       )) as ResolveResult;
     } catch (error) {
@@ -643,6 +673,7 @@ export class KilnClient {
       "/api/menus",
       new URLSearchParams(),
       options.signal,
+      isObject,
       "application/json",
     )) as MenuList;
   }
@@ -662,6 +693,7 @@ export class KilnClient {
       `/api/menus/${encodeURIComponent(key)}`,
       params,
       options.signal,
+      isObject,
       "application/json",
     )) as Menu;
   }
@@ -676,6 +708,7 @@ export class KilnClient {
       "/api/locales",
       new URLSearchParams(),
       options.signal,
+      isObject,
       "application/json",
     )) as Locales;
   }
@@ -699,6 +732,7 @@ export class KilnClient {
       path,
       params,
       options.signal,
+      isObject,
       "application/json",
     )) as RelatedResult;
   }
@@ -714,6 +748,7 @@ export class KilnClient {
       `/api/forms/${encodeURIComponent(slug)}`,
       new URLSearchParams(),
       options.signal,
+      isObject,
       "application/json",
     )) as FormSchema;
   }
@@ -980,6 +1015,7 @@ export class KilnClient {
       revisionsPath(type, id),
       params,
       options.signal,
+      isDataList,
       "application/json",
     )) as RevisionList;
   }
@@ -999,6 +1035,7 @@ export class KilnClient {
       path,
       new URLSearchParams(),
       options.signal,
+      isSingleResourceDocument,
       "application/json",
     );
     return (body as { data: RevisionDetail }).data;
@@ -1026,6 +1063,7 @@ export class KilnClient {
       path,
       new URLSearchParams(),
       options.signal,
+      isSingleResourceDocument,
       "application/json",
       "POST",
     );
@@ -1038,7 +1076,12 @@ export class KilnClient {
    * release's contents; `filter: { state: "scheduled" }` narrows the index.
    */
   async releases(options: ReleaseListOptions = {}): Promise<ListResult<ContentRelease>> {
-    const doc = await this.request("/api/json/releases", listParams(options), options.signal);
+    const doc = await this.request(
+      "/api/json/releases",
+      listParams(options),
+      options.signal,
+      isJsonApiDocument,
+    );
     return flattenDocument<ContentRelease>(doc);
   }
 
@@ -1057,7 +1100,7 @@ export class KilnClient {
     appendSparseFields(params, options.fields);
     const path = `/api/json/releases/${encodeURIComponent(id)}`;
     const { items, included } = flattenDocument<ContentRelease>(
-      await this.request(path, params, options.signal),
+      await this.request(path, params, options.signal, isSingleResourceDocument),
     );
     return { ...items[0]!, included };
   }
@@ -1074,6 +1117,7 @@ export class KilnClient {
       "/api/json/release-items",
       listParams(options),
       options.signal,
+      isJsonApiDocument,
     );
     return flattenDocument<ContentReleaseItem>(doc);
   }
@@ -1297,14 +1341,17 @@ export class KilnClient {
     });
   }
 
+  // `shape` is required so every new read decides what a 2xx body must look
+  // like; `undefined` opts out (a write, which handles its own body).
   private request(
     path: string,
     params: URLSearchParams,
     signal: AbortSignal | undefined,
+    shape: Shape | undefined,
     accept = JSON_API,
     method: "GET" | "POST" = "GET",
   ): Promise<unknown> {
-    return this.send(method, path, { params, signal, accept });
+    return this.send(method, path, { params, signal, accept, shape });
   }
 
   // Writes fail fast without a key: an anonymous write can only be refused,
@@ -1368,6 +1415,13 @@ export class KilnClient {
        * answers an empty 2xx, so for one an empty body is not Kiln's answer.
        */
       allowEmpty?: boolean;
+      /**
+       * What a read's parsed 2xx body must look like. A body that is JSON but
+       * fails it (`null` or `{}` where a document was due) throws
+       * `KilnUnexpectedBodyError` rather than resolving an empty list, `null`
+       * or a bogus record, or crashing the caller with a `TypeError`.
+       */
+      shape?: Shape;
     },
   ): Promise<unknown> {
     // A `FormData` goes to `fetch` untouched: it must not be stringified, and
@@ -1432,12 +1486,60 @@ export class KilnClient {
       if (request.allowEmpty === true) return null;
       throw new KilnUnexpectedBodyError(response.status, url, text, undefined);
     }
+    let body: unknown;
     try {
-      return JSON.parse(text);
+      body = JSON.parse(text);
     } catch (error) {
       throw new KilnUnexpectedBodyError(response.status, url, text, error);
     }
+    if (request.shape !== undefined && !request.shape(body)) {
+      throw new KilnUnexpectedBodyError(response.status, url, text, undefined, true);
+    }
+    return body;
   }
+}
+
+// ── response shapes ─────────────────────────────────────────────────────────
+//
+// What each read's 2xx body must be before the client destructures it. Each
+// checks only what the client (or its documented return type) relies on.
+
+type Shape = (body: unknown) => boolean;
+
+function isObject(body: unknown): body is Record<string, unknown> {
+  return body !== null && typeof body === "object" && !Array.isArray(body);
+}
+
+// A JSON:API document: `data` is `null` (an empty to-one), one resource
+// object, or a list of them. `{"data": []}` is an empty result, not an error.
+function isJsonApiDocument(body: unknown): boolean {
+  if (!isObject(body) || !("data" in body)) return false;
+  const data = body.data;
+  return data === null || isObject(data) || (Array.isArray(data) && data.every(isObject));
+}
+
+// A `{data: {…}}` envelope around one object: a single JSON:API resource, a
+// revision, a restore result.
+function isSingleResourceDocument(body: unknown): boolean {
+  return isObject(body) && isObject(body.data);
+}
+
+// A `{data: […]}` envelope around a list (a revision history page).
+function isDataList(body: unknown): boolean {
+  return isObject(body) && Array.isArray(body.data);
+}
+
+function isSyncPage(body: unknown): boolean {
+  return isObject(body) && Array.isArray(body.items) && "cursor" in body;
+}
+
+function isResolveResult(body: unknown): boolean {
+  return isObject(body) && "status" in body;
+}
+
+// `/api/search` answers `results` even for an empty query.
+function isHybridSearchResult(body: unknown): boolean {
+  return isObject(body) && isObject(body.results);
 }
 
 // The singular JSON:API `type` the server validates `data.type` against.

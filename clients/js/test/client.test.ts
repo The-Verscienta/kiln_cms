@@ -719,6 +719,7 @@ describe("transport", () => {
     ["graphql", (kiln) => kiln.graphql("{ listPosts { id } }")],
     ["restoreRevision", (kiln) => kiln.restoreRevision("page", "p1", "v1")],
     ["mintPreview", (kiln) => kiln.mintPreview("post", "p1")],
+    ["submitForm", (kiln) => kiln.submitForm("contact", { email: "a@example.com" })],
   ];
 
   for (const [name, call] of emptyReads) {
@@ -741,6 +742,92 @@ describe("transport", () => {
       expect(unexpected.cause).toBeUndefined();
     });
   }
+
+  // JSON, but not the shape the read promises: before, these resolved an
+  // empty list, `null`, `{}` or a bogus record, or crashed with a TypeError.
+  const notJsonApi = ["null", "{}", "[]", '{"data": "x"}', '{"data": [1]}'];
+  const notAnEnvelope = ["null", "{}", "[]", '{"data": null}', '{"data": []}'];
+  const notAnObject = ["null", "[]", '"x"', "1"];
+  const wrongShapeReads: [
+    string,
+    (kiln: ReturnType<typeof client>) => Promise<unknown>,
+    string[],
+  ][] = [
+    ["list", (kiln) => kiln.list("posts"), notJsonApi],
+    ["one", (kiln) => kiln.one("posts", { slug: "hello" }), notJsonApi],
+    ["byIds", (kiln) => kiln.byIds("posts", ["p1"]), notJsonApi],
+    ["textSearch", (kiln) => kiln.textSearch("posts", "cats"), notJsonApi],
+    ["semanticSearch", (kiln) => kiln.semanticSearch("posts", "cats"), notJsonApi],
+    ["autocomplete", (kiln) => kiln.autocomplete("posts", "ca"), notJsonApi],
+    ["releases", (kiln) => kiln.releases(), notJsonApi],
+    ["releaseItems", (kiln) => kiln.releaseItems(), notJsonApi],
+    ["release", (kiln) => kiln.release("r1"), notAnEnvelope],
+    ["revision", (kiln) => kiln.revision("page", "p1", "v1"), notAnEnvelope],
+    ["restoreRevision", (kiln) => kiln.restoreRevision("page", "p1", "v1"), notAnEnvelope],
+    [
+      "listRevisions",
+      (kiln) => kiln.listRevisions("page", "p1"),
+      ["null", "{}", "[]", '{"data": null}', '{"data": {}}'],
+    ],
+    ["sync", (kiln) => kiln.sync(), ["null", "{}", "[]", '{"items": [], "has_more": false}']],
+    [
+      "syncPage",
+      (kiln) => kiln.syncPage(),
+      ["null", "{}", '{"items": null, "cursor": "c1"}', '{"cursor": "c1"}'],
+    ],
+    ["search", (kiln) => kiln.search("cats"), ["null", "{}", '{"results": []}']],
+    ["resolvePath", (kiln) => kiln.resolvePath("/blog/x"), ["null", "{}", "[]"]],
+    ["menus", (kiln) => kiln.menus(), notAnObject],
+    ["menu", (kiln) => kiln.menu("main"), notAnObject],
+    ["locales", (kiln) => kiln.locales(), notAnObject],
+    ["related", (kiln) => kiln.related("post", "hello"), notAnObject],
+    ["form", (kiln) => kiln.form("contact"), notAnObject],
+    ["contentAsOf", (kiln) => kiln.contentAsOf("post", "2026-01-01"), notAnObject],
+    ["schema", (kiln) => kiln.schema(), notAnObject],
+    ["schemaComponents", (kiln) => kiln.schemaComponents(), notAnObject],
+    ["artifact", (kiln) => kiln.artifact("post", "hello"), notAnObject],
+    ["preview", (kiln) => kiln.preview("tok"), notAnObject],
+  ];
+
+  for (const [name, call, bodies] of wrongShapeReads) {
+    for (const text of bodies) {
+      it(`throws KilnUnexpectedBodyError when ${name} gets 200 ${text}`, async () => {
+        const stub = stubFetch({ status: 200, text });
+
+        const error = await call(client(stub, "rw-key")).then(
+          () => null,
+          (caught: unknown) => caught,
+        );
+
+        expect(error).toBeInstanceOf(KilnUnexpectedBodyError);
+        expect(isKilnHttpError(error)).toBe(false);
+        const unexpected = error as KilnUnexpectedBodyError;
+        expect(unexpected.code).toBe("unexpected_body");
+        expect(unexpected.status).toBe(200);
+        expect(unexpected.body).toBe(text);
+        expect(unexpected.url).toBe(stub.calls[0]!.url.toString());
+        expect(unexpected.message).toBe(
+          `Kiln answered 200 ${stub.calls[0]!.url.toString()} with a JSON body of the wrong shape`,
+        );
+        expect(unexpected.cause).toBeUndefined();
+      });
+    }
+  }
+
+  it("still reads an empty JSON:API document as no results", async () => {
+    const stub = stubFetch({ body: { data: [] } });
+    const kiln = client(stub);
+
+    await expect(kiln.list("posts")).resolves.toMatchObject({ items: [] });
+    await expect(kiln.one("posts", { slug: "nope" })).resolves.toBeNull();
+    await expect(kiln.textSearch("posts", "cats")).resolves.toMatchObject({ items: [] });
+    await expect(kiln.releases()).resolves.toMatchObject({ items: [] });
+  });
+
+  it("still reads data: null (an empty to-one) as no results", async () => {
+    const stub = stubFetch({ body: { data: null } });
+    await expect(client(stub).list("posts")).resolves.toMatchObject({ items: [] });
+  });
 
   it("throws KilnUnexpectedBodyError on a 204 to a read", async () => {
     const stub = stubFetch({ status: 204, text: "" });

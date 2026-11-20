@@ -159,6 +159,22 @@ describe("transform builders", () => {
     }
   });
 
+  it("checks the key before the dimensions: unknown size without a key still rejects", async () => {
+    const unsized = { id: photo.id };
+
+    for (const key of ["", undefined as unknown as string]) {
+      const error = await signedTransformSrcset(unsized, { widths: [300] }, key).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(KilnConfigError);
+      expect((error as KilnConfigError).code).toBe("missing_image_transform_key");
+    }
+
+    await expect(
+      signedTransformSrcset(unsized, { widths: [300] }, vectors.signing_key),
+    ).resolves.toBeNull();
+  });
+
   describe("without WebCrypto", () => {
     afterEach(() => {
       vi.unstubAllGlobals();
