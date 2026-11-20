@@ -94,7 +94,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Upgrade notes
 
 - **Two S3 destinations on one bucket name now stop pruning.** If two S3 destinations name the same bucket with one prefix inside the other on different hosts, retention on both is skipped after the upgrade, with a notice on every pass, and their storage grows until you act. Give them prefixes side by side, or untick "Delete its old backups (retention)" on one of them.
-  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap))
+  ([#PRNUM](https://github.com/The-Verscienta/kiln_cms/pull/PRNUM) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap-upgrade))
 
 ## [1.11.0] - 2026-11-18
 
