@@ -170,13 +170,23 @@ defmodule KilnCMS.Federation.DeliveryWorker do
   end
 
   defp record_success(delivery, org_id) do
-    delivery
-    |> covered_followers(org_id)
-    |> Federation.record_follower_success(
-      actor: Federation.system(),
-      tenant: org_id,
-      bulk_options: [strategy: :atomic]
-    )
+    case delivery
+         |> covered_followers(org_id)
+         |> Federation.record_follower_success(
+           actor: Federation.system(),
+           tenant: org_id,
+           bulk_options: [strategy: :atomic]
+         ) do
+      %Ash.BulkResult{status: :success} ->
+        :ok
+
+      # Not crediting them leaves their failure count standing, and the
+      # ceiling may later drop them: say so rather than lose it.
+      %Ash.BulkResult{errors: errors} ->
+        Logger.warning(
+          "Federation delivery #{delivery.id} could not credit its followers: #{inspect(errors)}"
+        )
+    end
 
     # The site's own "last federated" line (#967) — system-side, its own
     # action so no settings form can backdate it.

@@ -239,9 +239,12 @@ defmodule KilnCMS.Federation do
       case create_federation_delivery(inputs,
              actor: system(),
              tenant: org_id,
+             # Only the ids come back: the jobs need nothing else, and the
+             # full rows would decode one copy of the activity per inbox.
              bulk_options: [
                batch_size: batch_size,
                return_records?: true,
+               select: [:id],
                return_errors?: true,
                stop_on_error?: true
              ]
