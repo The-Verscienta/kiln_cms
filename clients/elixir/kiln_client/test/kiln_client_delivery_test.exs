@@ -340,6 +340,15 @@ defmodule KilnClientDeliveryTest do
       assert headers["authorization"] == []
     end
 
+    test "never sends the configured key" do
+      Application.put_env(:kiln_client, :api_key, "kiln_configured_key")
+      stub(200, @site)
+
+      assert {:ok, _} = KilnClient.site()
+      assert_received {:request, "GET", "/api/site", _, headers, nil}
+      assert headers["authorization"] == []
+    end
+
     test "nulls are answers, not a wrong shape" do
       stub(200, %{@site | "twitter_site" => nil, "social_image_url" => nil})
 

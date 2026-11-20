@@ -591,18 +591,22 @@ defmodule KilnClient do
 
   The three keys are always present: a 2xx missing one is `{:error,
   %KilnClient.Error{reason: :unexpected_body}}`. Newer servers may add keys.
-  No key is needed. The answer is for the site the request's host names, so
+  It never sends the API key, even a configured one: a credential changes
+  nothing in the answer but keeps a shared cache from storing it. The answer is for the site the request's host names, so
   point `base_url` at that site's host. A 503 is `reason: :server` with any
   `Retry-After` in `:retry_after`; this read does not retry it. See Kiln's
   `docs/api.md` ("Site defaults"). Options: `:req`.
   """
   @spec site(keyword()) :: {:ok, map()} | {:error, Error.t()}
   def site(opts \\ []) do
-    json_get(
-      "/api/site",
-      [],
-      opts,
-      &match?(%{"site_name" => _, "twitter_site" => _, "social_image_url" => _}, &1)
+    # Anonymous by design: a credential changes nothing in the body but makes
+    # the answer `private, no-store`, and an invalid one turns it into a 401.
+    request(:get, "/api/site",
+      params: [],
+      headers: [{"accept", @json}],
+      req: opts[:req],
+      anonymous: true,
+      expect: &match?(%{"site_name" => _, "twitter_site" => _, "social_image_url" => _}, &1)
     )
   end
 

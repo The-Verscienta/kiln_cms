@@ -111,6 +111,7 @@ import type {
   RevisionListOptions,
   SchemaOptions,
   SearchOptions,
+  Site,
   SyncOptions,
   SyncPage,
   SyncResult,
@@ -711,6 +712,27 @@ export class KilnClient {
       isObject,
       "application/json",
     )) as Locales;
+  }
+
+  /**
+   * The site's link-preview defaults: `GET /api/site` — its name, X (Twitter)
+   * handle and default share image, for the Open Graph and X card tags a
+   * front end renders when a document's own `social` object leaves them out.
+   * Every key is always present; `twitter_site` and `social_image_url` are
+   * `null` when unset (see Kiln's `docs/api.md` → "Site defaults").
+   *
+   * Sent without the client's API key, whatever it carries: the body is the
+   * same either way, and only an anonymous answer is shared-cacheable. A 503
+   * (the site's settings could not be read) throws `KilnServerError` with
+   * `retryAfter`.
+   */
+  async site(options: RequestOptions = {}): Promise<Site> {
+    return (await this.send("GET", "/api/site", {
+      signal: options.signal,
+      accept: "application/json",
+      anonymous: true,
+      shape: isSite,
+    })) as Site;
   }
 
   /**
@@ -1540,6 +1562,16 @@ function isResolveResult(body: unknown): boolean {
 // `/api/search` answers `results` even for an empty query.
 function isHybridSearchResult(body: unknown): boolean {
   return isObject(body) && isObject(body.results);
+}
+
+// Present, not exactly these: a later server may add a key.
+function isSite(body: unknown): boolean {
+  return (
+    isObject(body) &&
+    "site_name" in body &&
+    "twitter_site" in body &&
+    "social_image_url" in body
+  );
 }
 
 // The singular JSON:API `type` the server validates `data.type` against.

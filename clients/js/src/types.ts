@@ -392,6 +392,19 @@ export interface Locales {
   fallbacks: Record<string, string[]>;
 }
 
+/**
+ * `GET /api/site`: the site-level values a front end needs for its link
+ * previews when a document has none of its own. Every key is always present.
+ */
+export interface Site {
+  /** The site's name, as its pages' `<title>` carries it. Never `null`. */
+  site_name: string;
+  /** The site's X (Twitter) username as `@handle`, or `null`. */
+  twitter_site: string | null;
+  /** The default share image as an absolute `http(s)` URL, or `null`. */
+  social_image_url: string | null;
+}
+
 export interface RelatedOptions extends DeliveryLocaleOptions {
   /** Default 5, max 20. */
   limit?: number;
