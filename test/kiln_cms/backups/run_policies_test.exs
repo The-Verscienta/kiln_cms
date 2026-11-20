@@ -545,6 +545,79 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
     end
   end
 
+  describe "keep_days and the prune windows (#3113)" do
+    defp imported!(started_at, keep_days) do
+      Backups.import_run!(
+        %{
+          stamp: stamp(),
+          trigger: "cron",
+          status: :succeeded,
+          started_at: started_at,
+          finished_at: DateTime.add(started_at, 60, :second),
+          keep_days: keep_days
+        },
+        actor: Backups.system()
+      )
+    end
+
+    test "only :import accepts keep_days" do
+      accepting =
+        for action <- Ash.Resource.Info.actions(Backups.Run),
+            action.type in [:create, :update],
+            :keep_days in action.accept,
+            do: action.name
+
+      assert accepting == [:import]
+    end
+
+    test "a write action other than :import refuses keep_days" do
+      assert {:error, %Ash.Error.Invalid{}} =
+               Backups.start_run(%{stamp: stamp(), trigger: "t", keep_days: 7},
+                 actor: Backups.system()
+               )
+    end
+
+    test "keep_days below 1 is refused" do
+      assert {:error, %Ash.Error.Invalid{}} =
+               Backups.import_run(
+                 %{stamp: stamp(), trigger: "cron", status: :succeeded, keep_days: 0},
+                 actor: Backups.system()
+               )
+    end
+
+    test "a platform admin reads the imported runs after an instant that carry keep_days" do
+      admin = user(:admin)
+      now = DateTime.utc_now()
+      _before = imported!(DateTime.add(now, -30 * 86_400, :second), 7)
+      later = imported!(DateTime.add(now, -10 * 86_400, :second), 3)
+      _unknown = imported!(DateTime.add(now, -5 * 86_400, :second), nil)
+      newest = imported!(DateTime.add(now, -2 * 86_400, :second), nil)
+      _app = run!(%{started_at: DateTime.add(now, -1 * 86_400, :second)})
+
+      windows =
+        Backups.list_run_prune_windows!(DateTime.add(now, -20 * 86_400, :second), actor: admin)
+
+      assert [%{id: id, keep_days: 3, finished_at: %DateTime{}}] = windows
+      assert id == later.id
+      assert Backups.newest_imported_run!(actor: admin).id == newest.id
+    end
+
+    test "editor, org admin, anonymous and the :backups system actor read no prune windows" do
+      imported!(DateTime.utc_now(), 7)
+
+      for actor <- [user(:editor), user(:viewer), org_admin(), nil, Backups.system()] do
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Backups.list_run_prune_windows(DateTime.utc_now(),
+                   actor: actor,
+                   authorize_with: :error
+                 )
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Backups.newest_imported_run(actor: actor, authorize_with: :error)
+      end
+    end
+  end
+
   describe "with_actor/2 (a revoked grant fails closed)" do
     test "system/0 answers the override only inside the block" do
       assert %SystemActor{} = Backups.system()

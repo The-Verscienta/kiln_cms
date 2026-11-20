@@ -7,7 +7,7 @@ defmodule KilnCMS.Backups.DiskViewTest do
   # :dir`, pointed at a temp directory here (`Application.put_env` is VM-global).
   use ExUnit.Case, async: false
 
-  alias KilnCMS.Backups.{Artifact, DiskView, Manifest, Markers, Run, WorkState}
+  alias KilnCMS.Backups.{Artifact, DiskView, Manifest, Markers, Presence, Run, WorkState}
 
   setup do
     dir = Path.join(System.tmp_dir!(), "kiln_dv_#{System.unique_integer([:positive])}")
@@ -100,6 +100,28 @@ defmodule KilnCMS.Backups.DiskViewTest do
       )
 
     assert DiskView.read(dir, [old]).presence[old.id].state == :expired
+  end
+
+  test "a later cron run's keep days judge an imported row, not manifest.json (#3113)", %{
+    dir: dir
+  } do
+    # The latest manifest is Kiln's, so cron's window is unknown from it.
+    :ok = Manifest.write(dir, %Manifest{trigger: "manual", ok: true, components: ["db"]})
+    touch(dir, "db", "kiln-db-20260901-031700.dump")
+    now = DateTime.utc_now()
+    old = run("20260801-031700", origin: :imported, started_at: DateTime.add(now, -30 * 86_400))
+
+    later = %Run{
+      origin: :imported,
+      started_at: DateTime.add(now, -10 * 86_400),
+      finished_at: DateTime.add(now, -10 * 86_400),
+      keep_days: 7
+    }
+
+    prunes = Presence.cron_prunes([later], later.started_at)
+
+    assert DiskView.read(dir, [old], now).presence[old.id].state == :probably_expired
+    assert DiskView.read(dir, [old], now, cron_prunes: prunes).presence[old.id].state == :expired
   end
 
   test "an unlistable db/ is unreadable and unknown, and never raises (#2799)", %{dir: dir} do
