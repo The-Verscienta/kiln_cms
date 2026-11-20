@@ -270,6 +270,28 @@ carries the reasoning.
     at rollback are delivered but credit or charge no follower. See
     [One POST per inbox](../federation.md#one-post-per-inbox-2753).
 
+<a id="release-refusal-text-abandon-log"></a>
+
+- **Release refusals are translated in the content editor, and an admin's *Release a stuck claim* that wins against a running go-live or rollback no longer logs an error (#3074, #3075).**
+  The four refusals an add to a release can hit (*release is no longer open
+  for changes*, *release was not found*, *release is full (N items); ship or
+  split it*, *release size could not be checked*) now go through gettext, with
+  Spanish and French catalogs, so the content editor's flash shows them in the
+  editor's language. Callers with no viewer locale (JSON:API, GraphQL, the
+  release worker) get the process's default locale and so English; we did not
+  check whether any API plug sets another locale. Separately, when an admin
+  abandons a release while its go-live or rollback is still running, the
+  worker's outcome write loses to the abandon by design, and that used to log
+  an error from the release and another from the worker. It now logs at info
+  only; error-level alerting no longer fires on it. Every other abort still logs
+  at error, and `release.failed` still fires once. Developers:
+  `KilnCMS.CMS.Releases.publish/1` and `roll_back/1` can now return
+  `{:error, :abandoned}` (nothing shipped, the abandon recorded the outcome).
+  The release worker is their only caller in core; a plugin calling them
+  directly should treat it as "stopped by an admin", not as a failure. No
+  migration; rolling back is safe. Follow-ups, separate PRs: #3073 (item-cap
+  serialization) and #3072 (cleanup of stranded pending items).
+
 <a id="bearer-scheme-any-case"></a>
 
 - **A valid JWT under `bearer` or `BEARER` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing the 1.9.0 note that made it a `401` (#2632).**
@@ -491,6 +513,28 @@ carries the reasoning.
     background with a 5-second limit, as the Backups page does, and says
     when it couldn't check in time.
   ([#2983](https://github.com/The-Verscienta/kiln_cms/issues/2983), [#2985](https://github.com/The-Verscienta/kiln_cms/issues/2985), [#2986](https://github.com/The-Verscienta/kiln_cms/issues/2986))
+
+## Security
+
+<a id="liveview-url-less-join"></a>
+
+- **phoenix_live_view 1.2.14 fixes EEF-CVE-2026-126334 (GHSA-v4p7-3pm2-wq6c,
+  medium).** In earlier releases a signed-in user could open a websocket by
+  hand and join a router-mounted LiveView without the `"url"` key. The
+  channel then matched no route and skipped the `live_session`'s `on_mount`
+  hooks, which is where Kiln's sign-in, tenant and editor/admin role checks
+  run. Kiln was not exposed: since #688 every Kiln LiveView carries
+  `KilnCMSWeb.LiveRouteGuard`, a module-level hook that refuses such a join,
+  and a test checks every `live` route in the router carries it. 1.2.14
+  refuses the join in the channel itself, before mount, so the reply is now
+  `"unauthorized"` instead of the guard's 404 reload. The guard stays as a
+  second line. `mix.exs` now requires `~> 1.2.14`, so a lock cannot resolve
+  back to an affected release. `examples/phoenix_showcase`, which has its
+  own lock, moves from 1.2.12 to 1.2.14 with the same floor. No migration
+  and no configuration; the
+  JavaScript client is built from the same Hex package, so there is no
+  separate npm bump.
+  ([#3190](https://github.com/The-Verscienta/kiln_cms/issues/3190))
 
 ## Upgrade notes
 

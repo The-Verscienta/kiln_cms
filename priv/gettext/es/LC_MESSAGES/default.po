@@ -30410,10 +30410,30 @@ msgstr "el lanzamiento no se pudo publicar"
 msgid "release goes live"
 msgstr "se publica el lanzamiento"
 
+#: lib/kiln_cms/cms/validations/release_within_size_limit.ex
+#, elixir-autogen, elixir-format
+msgid "release is full (%{cap} items); ship or split it"
+msgstr "el lanzamiento está lleno (%{cap} elementos); publícalo o divídelo"
+
+#: lib/kiln_cms/cms/validations/release_open_for_edit.ex
+#, elixir-autogen, elixir-format
+msgid "release is no longer open for changes"
+msgstr "el lanzamiento ya no admite cambios"
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "release shipped"
 msgstr "lanzamiento publicado"
+
+#: lib/kiln_cms/cms/validations/release_within_size_limit.ex
+#, elixir-autogen, elixir-format
+msgid "release size could not be checked"
+msgstr "no se pudo comprobar el tamaño del lanzamiento"
+
+#: lib/kiln_cms/cms/validations/release_open_for_edit.ex
+#, elixir-autogen, elixir-format
+msgid "release was not found"
+msgstr "no se encontró el lanzamiento"
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format

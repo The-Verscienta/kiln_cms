@@ -173,6 +173,9 @@ defmodule KilnCMS.CMS.Releases do
 
   Returns `{:ok, release}` with the release marked `:published`, or
   `{:error, reason}` with it marked `:failed` and nothing changed on the site.
+  `{:error, :abandoned}` is the same rollback when an admin's `:abandon` took
+  the release out of `:publishing` while this ran (#3075): nothing shipped, the
+  abandon already recorded the outcome, and it is not an error to alert on.
   Expects the release to have been claimed already (state `:publishing` — see
   `ContentRelease`'s `:start` and `:start_scheduled`), which is what stops the
   minute cron from starting the same release twice.
@@ -181,7 +184,7 @@ defmodule KilnCMS.CMS.Releases do
   the `:pending` items (#2740). One it never read fails the release, with
   nothing changed, rather than shipping without it.
   """
-  @spec publish(struct()) :: {:ok, struct()} | {:error, term()}
+  @spec publish(struct()) :: {:ok, struct()} | {:error, :abandoned | term()}
   def publish(%{state: :publishing} = release) do
     actor = triggering_actor(release)
     opts = release |> system_opts() |> with_task_settings(release)
@@ -207,9 +210,10 @@ defmodule KilnCMS.CMS.Releases do
 
   `:skipped` items are left alone — the release didn't change them. Returns
   `{:ok, release}` with the release `:rolled_back`, or `{:error, reason}` with it
-  returned to `:published` and nothing changed.
+  returned to `:published` and nothing changed. `{:error, :abandoned}` when an
+  admin's `:abandon` released the claim while it ran, as for `publish/1`.
   """
-  @spec roll_back(struct()) :: {:ok, struct()} | {:error, term()}
+  @spec roll_back(struct()) :: {:ok, struct()} | {:error, :abandoned | term()}
   def roll_back(%{state: :rolling_back} = release) do
     actor = triggering_actor(release)
     opts = system_opts(release)
@@ -227,17 +231,18 @@ defmodule KilnCMS.CMS.Releases do
       {:error, reason} ->
         {item_id, message} = describe_failure(reason, items)
 
-        Logger.error("Release #{release.id} rollback aborted: #{message}")
+        marked =
+          CMS.mark_release_rollback_failed(
+            release,
+            %{failure_reason: message, failed_item_id: item_id},
+            opts
+          )
 
-        release
-        |> CMS.mark_release_rollback_failed(
-          %{failure_reason: message, failed_item_id: item_id},
-          opts
-        )
-        |> announce_failure(release, items, "rollback")
+        outcome = abort_outcome(marked, release, "rollback", message, reason)
+        announce_failure(marked, release, items, "rollback")
 
         announce(release)
-        {:error, reason}
+        outcome
     end
   end
 
@@ -394,12 +399,32 @@ defmodule KilnCMS.CMS.Releases do
   defp fail(release, items, reason, opts) do
     {item_id, message} = describe_failure(reason, items)
 
-    Logger.error("Release #{release.id} go-live aborted: #{message}")
+    marked =
+      CMS.mark_release_failed(release, %{failure_reason: message, failed_item_id: item_id}, opts)
 
-    release
-    |> CMS.mark_release_failed(%{failure_reason: message, failed_item_id: item_id}, opts)
-    |> announce_failure(release, items, "publish")
+    outcome = abort_outcome(marked, release, "go-live", message, reason)
+    announce_failure(marked, release, items, "publish")
 
+    outcome
+  end
+
+  # The abort's log level and return value are decided by the outcome write, so
+  # this runs AFTER it (#3075). A stale write means the release already left
+  # its claim state while the run worked: an admin's `:abandon` won, which is an
+  # outcome they asked for, not a failure. `announce_failure` says so at info;
+  # here it only becomes `{:error, :abandoned}` so the worker does not log an
+  # error for it either. Every other abort keeps its error line.
+  defp abort_outcome({:error, marked_error}, release, what, message, reason) do
+    if stale?(marked_error) do
+      {:error, :abandoned}
+    else
+      Logger.error("Release #{release.id} #{what} aborted: #{message}")
+      {:error, reason}
+    end
+  end
+
+  defp abort_outcome(_marked, release, what, message, reason) do
+    Logger.error("Release #{release.id} #{what} aborted: #{message}")
     {:error, reason}
   end
 
