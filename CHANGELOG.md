@@ -63,7 +63,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Added
 
 - **`GET /api/site`: a site's name, X (Twitter) handle and default share image for a headless front end's link previews, public and shared-cacheable, with a CDN purge on a Branding save that changes them.**
-  ([long form](docs/changelog/unreleased.md#site-defaults-api))
+  ([#3167](https://github.com/The-Verscienta/kiln_cms/pull/3167) · [long form](docs/changelog/unreleased.md#site-defaults-api))
 
 - **`GET /api/security/plugin-health`: each installed plugin's health as JSON for monitoring, read from the server's cache and never asking hex.pm; platform administrators only, behind the host site's admin allowlist.**
   ([#3135](https://github.com/The-Verscienta/kiln_cms/pull/3135) · [long form](docs/changelog/unreleased.md#plugin-health-api))
