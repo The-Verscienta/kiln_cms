@@ -2620,9 +2620,14 @@ response exists for a deployment-wide purge by hand.
 
 `GET /api/search` answers within a time budget (#2166): `query_budget` in
 `config :kiln_cms, KilnCMS.Search`, 1500 ms by default. The query embedding
-gets half of it. A leg still running at the deadline is left out, and the
-legs that finished are fused as usual. Every response says whether that
-happened:
+gets half of it. No leg starts after the deadline. A leg already running
+then gets `cut_grace` more (same config, 100 ms by default; #2614) to
+finish: one that does is kept, one that doesn't is left out. The legs that
+finished are fused as usual. So a cut search can answer up to
+`query_budget + cut_grace` after it started. (At `section_concurrency: 1`
+there is no grace and nothing is stopped midway: a running leg finishes and
+the later ones don't start.) Every response says whether the budget cut
+anything:
 
 ```json
 {
