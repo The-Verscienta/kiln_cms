@@ -60,7 +60,7 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       %{
         content_type: :page,
         name: name,
-        label: String.capitalize(name),
+        label: String.capitalize(String.replace_prefix(name, "fsa_", "")),
         field_type: :string,
         position: position,
         section: section
@@ -81,15 +81,15 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
   describe "the Sections panel" do
     test "lists the sections in use in editor order, as accordions by default", %{conn: conn} do
       admin = authed_user(:admin)
-      field!(admin, "notes", 0, "Dosing")
-      field!(admin, "latin", 1, "Identity")
-      field!(admin, "dose", 2, "Dosing")
-      field!(admin, "plain", 3, nil)
+      field!(admin, "fsa_notes", 0, "Fsa Dosing")
+      field!(admin, "fsa_latin", 1, "Fsa Identity")
+      field!(admin, "fsa_dose", 2, "Fsa Dosing")
+      field!(admin, "fsa_plain", 3, nil)
 
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
-      assert has_element?(lv, ~s(#sections-type-page-0[data-field-section="Dosing"]))
-      assert has_element?(lv, ~s(#sections-type-page-1[data-field-section="Identity"]))
+      assert has_element?(lv, ~s(#sections-type-page-0[data-field-section="Fsa Dosing"]))
+      assert has_element?(lv, ~s(#sections-type-page-1[data-field-section="Fsa Identity"]))
       refute has_element?(lv, "#sections-type-page-2")
 
       assert has_element?(
@@ -102,7 +102,7 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
 
     test "is not shown for a type whose fields have no section", %{conn: conn} do
       admin = authed_user(:admin)
-      field!(admin, "plain", 0, nil)
+      field!(admin, "fsa_plain", 0, nil)
 
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
@@ -112,8 +112,8 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
 
     test "sets a section's display, saved as the select changes", %{conn: conn} do
       admin = authed_user(:admin)
-      field!(admin, "latin", 0, "Identity")
-      field!(admin, "dose", 1, "Dosing")
+      field!(admin, "fsa_latin", 0, "Fsa Identity")
+      field!(admin, "fsa_dose", 1, "Fsa Dosing")
 
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
@@ -121,8 +121,8 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       lay_out(lv, 1, %{"display" => "fieldset"})
 
       assert %{
-               "Identity" => %{display: :tab, initially: :auto},
-               "Dosing" => %{display: :fieldset, initially: :auto}
+               "Fsa Identity" => %{display: :tab, initially: :auto},
+               "Fsa Dosing" => %{display: :fieldset, initially: :auto}
              } = layouts()
 
       assert has_element?(lv, ~s(#sections-type-page-0-display option[value="tab"][selected]))
@@ -130,41 +130,41 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       assert has_element?(lv, "#sections-type-page-0-initially[disabled]")
 
       lay_out(lv, 0, %{"display" => "fieldset"})
-      assert %{"Identity" => %{display: :fieldset}} = layouts()
+      assert %{"Fsa Identity" => %{display: :fieldset}} = layouts()
     end
 
     test "sets whether an accordion starts open, kept while it is laid out otherwise",
          %{conn: conn} do
       admin = authed_user(:admin)
-      field!(admin, "latin", 0, "Identity")
+      field!(admin, "fsa_latin", 0, "Fsa Identity")
 
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
       lay_out(lv, 0, %{"display" => "accordion", "initially" => "collapsed"})
-      assert %{"Identity" => %{display: :accordion, initially: :collapsed}} = layouts()
+      assert %{"Fsa Identity" => %{display: :accordion, initially: :collapsed}} = layouts()
 
       # A tab posts no "Starts" (the select is disabled): the choice stands.
       render_change(lv, "section_layout", %{
         "scope" => "page",
-        "name" => "Identity",
+        "name" => "Fsa Identity",
         "section" => %{"display" => "tab"}
       })
 
-      assert %{"Identity" => %{display: :tab, initially: :collapsed}} = layouts()
+      assert %{"Fsa Identity" => %{display: :tab, initially: :collapsed}} = layouts()
 
       lay_out(lv, 0, %{"display" => "accordion"})
-      assert %{"Identity" => %{display: :accordion, initially: :collapsed}} = layouts()
+      assert %{"Fsa Identity" => %{display: :accordion, initially: :collapsed}} = layouts()
     end
 
     test "a section set back to an accordion that opens by itself keeps no row",
          %{conn: conn} do
       admin = authed_user(:admin)
-      field!(admin, "latin", 0, "Identity")
+      field!(admin, "fsa_latin", 0, "Fsa Identity")
 
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
       lay_out(lv, 0, %{"display" => "tab"})
-      assert %{"Identity" => _} = layouts()
+      assert %{"Fsa Identity" => _} = layouts()
 
       lay_out(lv, 0, %{"display" => "accordion"})
       assert layouts() == %{}
@@ -173,10 +173,13 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
 
     test "a save prunes the type's layouts that no field names any more", %{conn: conn} do
       admin = authed_user(:admin)
-      field!(admin, "latin", 0, "Identity")
-      CMS.create_field_section!(%{content_type: :page, name: "Gone", display: :tab}, actor: admin)
+      field!(admin, "fsa_latin", 0, "Fsa Identity")
 
-      CMS.create_field_section!(%{content_type: :post, name: "Gone", display: :tab},
+      CMS.create_field_section!(%{content_type: :page, name: "Fsa Gone", display: :tab},
+        actor: admin
+      )
+
+      CMS.create_field_section!(%{content_type: :post, name: "Fsa Gone", display: :tab},
         actor: admin
       )
 
@@ -184,37 +187,38 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
 
       lay_out(lv, 0, %{"display" => "fieldset"})
 
-      assert %{"Identity" => %{display: :fieldset}} = layouts()
-      refute Map.has_key?(layouts(), "Gone")
+      assert %{"Fsa Identity" => %{display: :fieldset}} = layouts()
+      refute Map.has_key?(layouts(), "Fsa Gone")
       # Another type's rows are that type's to prune.
-      assert [%{name: "Gone"}] = CMS.field_sections_for!(:post, authorize?: false)
+      assert [%{name: "Fsa Gone"}] = CMS.field_sections_for!(:post, authorize?: false)
     end
 
     test "a save on a page loaded earlier keeps a section added since", %{conn: conn} do
       admin = authed_user(:admin)
-      field!(admin, "latin", 0, "Identity")
+      field!(admin, "fsa_latin", 0, "Fsa Identity")
 
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
       # Another admin, behind this page's back: a new section, laid out.
-      field!(admin, "dose", 1, "Dosing")
+      field!(admin, "fsa_dose", 1, "Fsa Dosing")
 
-      CMS.create_field_section!(%{content_type: :page, name: "Dosing", display: :tab},
+      CMS.create_field_section!(%{content_type: :page, name: "Fsa Dosing", display: :tab},
         actor: admin
       )
 
       lay_out(lv, 0, %{"display" => "fieldset"})
 
-      assert %{"Identity" => %{display: :fieldset}, "Dosing" => %{display: :tab}} = layouts()
+      assert %{"Fsa Identity" => %{display: :fieldset}, "Fsa Dosing" => %{display: :tab}} =
+               layouts()
     end
 
     test "deleting the last field of a section drops its layout", %{conn: conn} do
       admin = authed_user(:admin)
-      latin = field!(admin, "latin", 0, "Identity")
-      dose = field!(admin, "dose", 1, "Dosing")
-      field!(admin, "amount", 2, "Dosing")
+      latin = field!(admin, "fsa_latin", 0, "Fsa Identity")
+      dose = field!(admin, "fsa_dose", 1, "Fsa Dosing")
+      field!(admin, "amount", 2, "Fsa Dosing")
 
-      for name <- ["Identity", "Dosing"],
+      for name <- ["Fsa Identity", "Fsa Dosing"],
           do:
             CMS.create_field_section!(%{content_type: :page, name: name, display: :tab},
               actor: admin
@@ -223,19 +227,19 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
       render_click(lv, "delete", %{"id" => dose.id})
-      assert %{"Identity" => _, "Dosing" => _} = layouts()
+      assert %{"Fsa Identity" => _, "Fsa Dosing" => _} = layouts()
 
       render_click(lv, "delete", %{"id" => latin.id})
-      assert %{"Dosing" => %{display: :tab}} = layouts()
-      refute Map.has_key?(layouts(), "Identity")
+      assert %{"Fsa Dosing" => %{display: :tab}} = layouts()
+      refute Map.has_key?(layouts(), "Fsa Identity")
     end
 
     test "a rename onto a section with a layout of its own keeps that layout",
          %{conn: conn} do
       admin = authed_user(:admin)
-      latin = field!(admin, "latin", 0, "Identity")
+      latin = field!(admin, "fsa_latin", 0, "Fsa Identity")
 
-      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+      CMS.create_field_section!(%{content_type: :page, name: "Fsa Identity", display: :tab},
         actor: admin
       )
 
@@ -256,15 +260,15 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       refute html =~ "Couldn&#39;t save the section layout."
       assert CMS.get_field_definition!(latin.id, actor: admin).section == "Names"
       assert %{"Names" => %{display: :fieldset}} = layouts()
-      refute Map.has_key?(layouts(), "Identity")
+      refute Map.has_key?(layouts(), "Fsa Identity")
     end
 
     test "a rename whose layout cannot be carried says so, and saves nothing",
          %{conn: conn} do
       admin = authed_user(:admin)
-      latin = field!(admin, "latin", 0, "Identity")
+      latin = field!(admin, "fsa_latin", 0, "Fsa Identity")
 
-      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+      CMS.create_field_section!(%{content_type: :page, name: "Fsa Identity", display: :tab},
         actor: admin
       )
 
@@ -290,16 +294,16 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
         |> render_submit()
 
       assert html =~ "Couldn&#39;t save the section layout."
-      assert CMS.get_field_definition!(latin.id, actor: admin).section == "Identity"
-      assert %{"Identity" => %{display: :tab}, "Names" => %{display: :accordion}} = layouts()
+      assert CMS.get_field_definition!(latin.id, actor: admin).section == "Fsa Identity"
+      assert %{"Fsa Identity" => %{display: :tab}, "Names" => %{display: :accordion}} = layouts()
     end
 
     test "a rename on a stale page keeps a layout another admin's field now shares",
          %{conn: conn} do
       admin = authed_user(:admin)
-      latin = field!(admin, "latin", 0, "Identity")
+      latin = field!(admin, "fsa_latin", 0, "Fsa Identity")
 
-      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+      CMS.create_field_section!(%{content_type: :page, name: "Fsa Identity", display: :tab},
         actor: admin
       )
 
@@ -307,7 +311,7 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
 
       # Another admin, behind this page's back: a second field in Identity.
       other = authed_user(:admin)
-      field!(other, "pinyin", 1, "Identity")
+      field!(other, "fsa_pinyin", 1, "Fsa Identity")
 
       render_click(lv, "edit", %{"id" => latin.id})
 
@@ -315,17 +319,17 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       |> form("#edit-field-#{latin.id}", field_definition: %{section: "Names"})
       |> render_submit()
 
-      assert %{"Identity" => %{display: :tab}} = layouts()
+      assert %{"Fsa Identity" => %{display: :tab}} = layouts()
       refute Map.has_key?(layouts(), "Names")
     end
 
     test "a rename on a stale page moves a layout its last field now holds alone",
          %{conn: conn} do
       admin = authed_user(:admin)
-      latin = field!(admin, "latin", 0, "Identity")
-      pinyin = field!(admin, "pinyin", 1, "Identity")
+      latin = field!(admin, "fsa_latin", 0, "Fsa Identity")
+      pinyin = field!(admin, "fsa_pinyin", 1, "Fsa Identity")
 
-      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+      CMS.create_field_section!(%{content_type: :page, name: "Fsa Identity", display: :tab},
         actor: admin
       )
 
@@ -342,14 +346,14 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       |> render_submit()
 
       assert %{"Names" => %{display: :tab}} = layouts()
-      refute Map.has_key?(layouts(), "Identity")
+      refute Map.has_key?(layouts(), "Fsa Identity")
     end
 
     test "clearing the section of its last field drops its layout (#2881)", %{conn: conn} do
       admin = authed_user(:admin)
-      latin = field!(admin, "latin", 0, "Identity")
+      latin = field!(admin, "fsa_latin", 0, "Fsa Identity")
 
-      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+      CMS.create_field_section!(%{content_type: :page, name: "Fsa Identity", display: :tab},
         actor: admin
       )
 
@@ -365,15 +369,15 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       assert layouts() == %{}
       # No field of the type has a section now, so no panel is left to prune
       # it from: the save itself had to.
-      refute has_element?(lv, ~s([data-field-section="Identity"]))
+      refute has_element?(lv, ~s([data-field-section="Fsa Identity"]))
     end
 
     test "a rename from a form opened before another admin moved the field keeps no orphan",
          %{conn: conn} do
       admin = authed_user(:admin)
-      latin = field!(admin, "latin", 0, "Identity")
+      latin = field!(admin, "fsa_latin", 0, "Fsa Identity")
 
-      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+      CMS.create_field_section!(%{content_type: :page, name: "Fsa Identity", display: :tab},
         actor: admin
       )
 
@@ -383,9 +387,9 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       # Another admin, with the form open: latin moves to Dosing, alone
       # there, and Dosing gets a layout.
       other = authed_user(:admin)
-      CMS.update_field_definition!(latin, %{section: "Dosing"}, actor: other)
+      CMS.update_field_definition!(latin, %{section: "Fsa Dosing"}, actor: other)
 
-      CMS.create_field_section!(%{content_type: :page, name: "Dosing", display: :fieldset},
+      CMS.create_field_section!(%{content_type: :page, name: "Fsa Dosing", display: :fieldset},
         actor: other
       )
 
@@ -401,10 +405,10 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
 
     test "renaming a section on its last field takes its layout along", %{conn: conn} do
       admin = authed_user(:admin)
-      latin = field!(admin, "latin", 0, "Identity")
-      field!(admin, "dose", 1, "Dosing")
+      latin = field!(admin, "fsa_latin", 0, "Fsa Identity")
+      field!(admin, "fsa_dose", 1, "Fsa Dosing")
 
-      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+      CMS.create_field_section!(%{content_type: :page, name: "Fsa Identity", display: :tab},
         actor: admin
       )
 
@@ -417,16 +421,16 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       |> render_submit()
 
       assert %{"Names" => %{display: :tab}} = layouts()
-      refute Map.has_key?(layouts(), "Identity")
+      refute Map.has_key?(layouts(), "Fsa Identity")
     end
 
     test "a section renamed while other fields still carry it keeps its layout",
          %{conn: conn} do
       admin = authed_user(:admin)
-      latin = field!(admin, "latin", 0, "Identity")
-      field!(admin, "pinyin", 1, "Identity")
+      latin = field!(admin, "fsa_latin", 0, "Fsa Identity")
+      field!(admin, "fsa_pinyin", 1, "Fsa Identity")
 
-      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+      CMS.create_field_section!(%{content_type: :page, name: "Fsa Identity", display: :tab},
         actor: admin
       )
 
@@ -438,7 +442,7 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       |> form("#edit-field-#{latin.id}", field_definition: %{section: "Names"})
       |> render_submit()
 
-      assert %{"Identity" => %{display: :tab}} = layouts()
+      assert %{"Fsa Identity" => %{display: :tab}} = layouts()
       refute Map.has_key?(layouts(), "Names")
     end
   end
@@ -446,17 +450,21 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
   describe "a forged section event" do
     test "naming a section no field of the type carries writes nothing", %{conn: conn} do
       admin = authed_user(:admin)
-      field!(admin, "latin", 0, "Identity")
+      field!(admin, "fsa_latin", 0, "Fsa Identity")
 
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
       for params <- [
             %{"scope" => "page", "name" => "Nowhere", "section" => %{"display" => "tab"}},
-            %{"scope" => "post", "name" => "Identity", "section" => %{"display" => "tab"}},
-            %{"scope" => "page", "name" => "Identity", "section" => %{"display" => "carousel"}},
+            %{"scope" => "post", "name" => "Fsa Identity", "section" => %{"display" => "tab"}},
+            %{
+              "scope" => "page",
+              "name" => "Fsa Identity",
+              "section" => %{"display" => "carousel"}
+            },
             %{
               "scope" => "def:#{Ecto.UUID.generate()}",
-              "name" => "Identity",
+              "name" => "Fsa Identity",
               "section" => %{"display" => "tab"}
             }
           ] do
@@ -471,7 +479,7 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
          %{conn: conn} do
       admin = authed_user(:admin)
       other = org("fsadmin-other")
-      field!(admin, "latin", 0, "Identity")
+      field!(admin, "fsa_latin", 0, "Fsa Identity")
       field!(admin, "secret", 0, "Secret", tenant: other)
 
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
@@ -493,7 +501,7 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
     test "an admin demoted after mounting cannot lay out a section", %{conn: conn} do
       platform_admin = authed_user(:admin)
       site = org("fsadmin-site")
-      field!(platform_admin, "latin", 0, "Identity", tenant: site)
+      field!(platform_admin, "fsa_latin", 0, "Fsa Identity", tenant: site)
 
       user = authed_user(:editor)
 
@@ -520,9 +528,9 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
          %{conn: conn} do
       platform_admin = authed_user(:admin)
       site = org("fsadmin-rename")
-      latin = field!(platform_admin, "latin", 0, "Identity", tenant: site)
+      latin = field!(platform_admin, "fsa_latin", 0, "Fsa Identity", tenant: site)
 
-      CMS.create_field_section!(%{content_type: :page, name: "Identity", display: :tab},
+      CMS.create_field_section!(%{content_type: :page, name: "Fsa Identity", display: :tab},
         actor: platform_admin,
         tenant: site
       )
@@ -549,9 +557,9 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       refute html =~ "Saved."
 
       assert CMS.get_field_definition!(latin.id, actor: platform_admin, tenant: site).section ==
-               "Identity"
+               "Fsa Identity"
 
-      assert %{"Identity" => %{display: :tab}} = layouts(tenant: site)
+      assert %{"Fsa Identity" => %{display: :tab}} = layouts(tenant: site)
       refute Map.has_key?(layouts(tenant: site), "Names")
     end
   end
@@ -565,7 +573,7 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       |> form("#new-field-form",
         field_definition: %{
           scopes: ["page"],
-          name: "dose",
+          name: "fsa_dose",
           label: "Dose",
           field_type: "string",
           width: "half"
@@ -576,12 +584,12 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       assert %{width: :half} =
                :page
                |> CMS.field_definitions_for!(authorize?: false)
-               |> Enum.find(&(&1.name == "dose"))
+               |> Enum.find(&(&1.name == "fsa_dose"))
     end
 
     test "is changed in the edit form, which shows the stored width", %{conn: conn} do
       admin = authed_user(:admin)
-      dose = field!(admin, "dose", 0, nil)
+      dose = field!(admin, "fsa_dose", 0, nil)
 
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 

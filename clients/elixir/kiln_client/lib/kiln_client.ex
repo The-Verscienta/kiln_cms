@@ -389,6 +389,7 @@ defmodule KilnClient do
 
     # The `llm` surface is the one read that answers text (`text/markdown`),
     # so its binary body is the result rather than an `:unexpected_body`.
+    # An empty one still is (the server always writes the `# title` line).
     req_opts = [params: params, text_body: to_string(opts[:surface]) == "llm", req: opts[:req]]
 
     case request(:get, path, req_opts) do
@@ -724,6 +725,10 @@ defmodule KilnClient do
 
       {:ok, %{"items" => items, "cursor" => next}} ->
         {:ok, %{items: [items | acc] |> Enum.reverse() |> Enum.concat(), cursor: next}}
+
+      # JSON, but not a sync page (`null`, `{}`): an error, not a crash.
+      {:ok, other} ->
+        {:error, %Error{reason: :unexpected_body, body: other, method: :get, path: "/api/sync"}}
 
       {:error, _} = error ->
         error
@@ -1080,8 +1085,21 @@ defmodule KilnClient do
            req: opts[:req]
          ) do
       {:ok, doc} ->
-        %{items: [release | _], included: included} = flatten_doc(doc)
-        {:ok, Map.put(release, "included", included)}
+        case flatten_doc(doc) do
+          %{items: [release | _], included: included} ->
+            {:ok, Map.put(release, "included", included)}
+
+          # JSON, but not a release document (`null`, `{}`): an error, not
+          # a crash.
+          _ ->
+            {:error,
+             %Error{
+               reason: :unexpected_body,
+               body: doc,
+               method: :get,
+               path: "/api/json/releases/" <> segment(id)
+             }}
+        end
 
       {:error, reason} ->
         {:error, reason}
@@ -1239,7 +1257,14 @@ defmodule KilnClient do
   """
   @spec delete(String.t(), String.t(), keyword()) :: :ok | {:error, Error.t()}
   def delete(plural, id, opts \\ []) do
-    case write_request(:delete, "/api/json/#{plural}/#{encode(id)}", nil, opts) do
+    # The one write whose success may carry no body: a soft-delete answers
+    # 200 with the record or an empty 204.
+    case write_request(
+           :delete,
+           "/api/json/#{plural}/#{encode(id)}",
+           nil,
+           Keyword.put(opts, :empty_ok, true)
+         ) do
       {:ok, _body} -> :ok
       {:error, %Error{} = error} -> {:error, error}
     end
@@ -1516,6 +1541,12 @@ defmodule KilnClient do
   # whose body is still a non-empty binary came from something else — a
   # captive portal's or a CDN's HTML page — and is `:unexpected_body`, unless
   # the caller asked for text (`text_body: true`, the `llm` artifact surface).
+  #
+  # An empty 2xx is `:unexpected_body` too, text reads included: no route a
+  # read calls answers an empty body by design (the `llm` surface always
+  # carries at least its `# title` line), so an empty one would otherwise
+  # pass for an empty collection, or crash a caller matching on the document.
+  # `graphql/3` treats an empty body the same way.
   defp request(method, path, opts) do
     {anonymous?, opts} = Keyword.pop(opts, :anonymous, false)
     {per_call_key, opts} = Keyword.pop(opts, :api_key)
@@ -1523,8 +1554,11 @@ defmodule KilnClient do
     key = if anonymous?, do: nil, else: api_key(api_key: per_call_key)
 
     case do_request(method, path, opts, key) do
+      {:ok, %Req.Response{status: status, body: ""}} when status in 200..299 ->
+        unexpected_body(status, "", method, path)
+
       {:ok, %Req.Response{status: status, body: body}}
-      when status in 200..299 and is_binary(body) and body != "" and not text_body? ->
+      when status in 200..299 and is_binary(body) and not text_body? ->
         unexpected_body(status, body, method, path)
 
       {:ok, %Req.Response{status: status, body: body}} when status in 200..299 ->
@@ -1547,6 +1581,10 @@ defmodule KilnClient do
   # content type Req must write itself, boundary and all), and is bounded by
   # the upload timeout rather than the read one. The defaults reproduce the
   # JSON:API behaviour exactly, so the content writes are unchanged.
+  #
+  # An empty 2xx is `{:ok, nil}` only with `empty_ok: true`, which only
+  # `delete/3` passes (a soft-delete may answer an empty 204). Every other
+  # write answers a document, so an empty body there is `:unexpected_body`.
   defp write_request(method, path, body, opts) do
     case api_key(opts) do
       nil ->
@@ -1579,9 +1617,8 @@ defmodule KilnClient do
           |> put_present_opt(:receive_timeout, opts[:receive_timeout])
 
         case do_request(method, path, req_opts, key) do
-          # A soft-delete may answer 200 with the record or an empty 204.
           {:ok, %Req.Response{status: status, body: ""}} when status in 200..299 ->
-            {:ok, nil}
+            if opts[:empty_ok], do: {:ok, nil}, else: unexpected_body(status, "", method, path)
 
           # Any other binary is a body Req did not decode as JSON (see
           # `request/3`).
@@ -1614,7 +1651,8 @@ defmodule KilnClient do
   @body_excerpt_bytes 1024
 
   defp unexpected_body(status, body, method, path) do
-    Logger.warning("Kiln #{method} #{path} returned #{status} with a body that is not JSON")
+    what = if body == "", do: "an empty body", else: "a body that is not JSON"
+    Logger.warning("Kiln #{method} #{path} returned #{status} with #{what}")
 
     {:error,
      %Error{

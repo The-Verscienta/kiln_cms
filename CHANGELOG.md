@@ -60,6 +60,11 @@ Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
 
+### Added
+
+- **`GET /api/security/plugin-health`: each installed plugin's health as JSON for monitoring, read from the server's cache and never asking hex.pm; platform administrators only, behind the host site's admin allowlist.**
+  ([#3135](https://github.com/The-Verscienta/kiln_cms/pull/3135) · [long form](docs/changelog/unreleased.md#plugin-health-api))
+
 ### Changed
 
 - **Search: when `query_budget` cuts a search, running sections get `cut_grace` (new, default 100 ms) to stop on their own before they are killed, so a query that finishes keeps its database connection; a cut search may answer up to that much later. New metrics `kiln_cms_search_budget_cut_returned`/`_killed`.**
@@ -69,6 +74,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/unreleased.md#referrer-suppression-sweep))
 
 ### Fixed
+
+- **Choosing "join" again on a tier you already hold no longer demotes an `active`, `past_due` or `comped` membership to `incomplete`; the member is sent to `/account` with a notice instead, and no second checkout is opened.**
+  ([long form](docs/changelog/unreleased.md#billing-recheckout-keeps-live-membership))
 
 - **Experiments: a second Start, Conclude or Archive from a stale page or struct is refused instead of overwriting the first (the console reloads with a notice; `mix kiln.experiment conclude` reports the error instead of crashing), and a test now fails when any state machine transition lacks a from-state filter.**
   ([#3133](https://github.com/The-Verscienta/kiln_cms/pull/3133) · [long form](docs/changelog/unreleased.md#experiment-transition-compare-and-swap))

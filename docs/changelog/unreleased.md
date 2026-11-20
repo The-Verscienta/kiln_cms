@@ -5,6 +5,58 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Added
+
+<a id="plugin-health-api"></a>
+
+- **Each installed plugin's health is available as JSON for monitoring, at
+  `GET /api/security/plugin-health` (#2571).** The Security posture's
+  **Installed plugins** line, and `GET /api/security/posture`, give one
+  verdict for all plugins together; a monitor can now see which plugin
+  failed and why (a changed package on Hex, a security notice, a retirement,
+  no recent release, an SDK it doesn't accept). Guides:
+  [Plugin health (monitoring)](../api.md#plugin-health-monitoring) and
+  [Monitor each plugin from a script](../security-posture.md#monitor-each-plugin-from-a-script).
+  - **Who may call it.** A platform administrator, with a bearer JWT or an
+    API key they own (`read` is enough, and is the one to use). A live
+    temporary admin grant counts; an expired one doesn't. A site
+    administrator is refused even on their own site's host, as on
+    **System → Plugins**, because the report describes the whole
+    installation. A `draft_write` key is refused whoever owns it. The
+    policy is on a new `KilnCMS.Security.PluginHealthReport` resource
+    (`forbid_if DraftWriteKey`, then `authorize_if PlatformAdmin`).
+  - **Behind the admin allowlist of the host's site**, then the `api` rate
+    limit: `403` `network_not_allowed`, `503` `temporarily_unavailable`
+    (`retry-after: 30`) when the list can't be read, `429` when the bucket is
+    spent, `401` `invalid_token` or `unauthenticated`, `403` `forbidden`.
+    The body is the same on every site's host and has no site id; the host
+    decides only whose allowlist applies. The allowlist page's note now says
+    both monitoring endpoints under `/api/security` answer only to listed
+    networks. Every answer, refusals included, is
+    `cache-control: private, no-store`.
+  - **It never asks anything.** It reads the node's cached check and starts
+    no check, not even in the background. A node with nothing cached answers
+    `200` with `state: "not_checked"` and an empty `plugins`, without a
+    `retry-after`. Opening System or Security posture, or a platform
+    administrator's `GET /api/security/posture`, on that node still fills
+    the cache as before. The cache is per node, so `state` and `checked_at`
+    describe the node that answered.
+  - **The answer.** `version` (1), `state` (`fresh`, `partial`, `disabled`,
+    `nothing_to_check`, `not_checked`), `checked_at`, `notices`, `counts`
+    per `overall`, and `plugins`, each with `id` (the plugin's module),
+    `name`, `source`, `package`, `version`, `latest_version`, `overall`,
+    `integrity`, `notices` (ids, aliases, severity, source, link) and
+    `abandonment` (structured reasons). Never a Hex retirement message, a
+    notice's title or ranges, the checksums, a git ref, a sentence written
+    for a person, a site id or the node's name.
+  - **The contract.** Additive only, with its own `version`; open value sets
+    (read a value you don't know as unknown, never OK); key plugins on `id`,
+    since `name` may repeat; read `state` before trusting an empty
+    `plugins`. Listed as covered in the 1.x stability table. Not on
+    JSON:API, GraphQL or MCP.
+  - **Upgrading.** No migration and no setting. A monitor already on
+    `GET /api/security/posture` is unaffected.
+
 ## Changed
 
 <a id="search-budget-cut-grace"></a>
@@ -18,6 +70,10 @@ carries the reasoning.
   The "no all-hidden breakdown leaves a category a single value" rule (#2981) was found by a search run outside the suite, so a change to `referrer_sources/0` or to `KilnCMS.Analytics.suppress_referrer_group/1` had nothing wide to re-check against. The search is now in `test/kiln_cms/analytics/referrer_suppression_test.exs` behind the `slow_sweep` tag, which the default suite excludes. Run it with `mix test --only slow_sweep test/kiln_cms/analytics/referrer_suppression_test.exs` after touching either. It covers thresholds 2 to 20 with four, five and six categories, bounded at view totals of 40, 30 and 20; the original hand search went to 50, and the committed one does not re-run totals above these bounds. A second test in the sweep checks that the criterion can fail (three categories at a threshold of 3 still do). To let the sweep vary the number of categories, `suppress_referrer_group/2` takes an explicit category list; `/1` is `/2` over `referrer_sources/0`, and a default-suite test pins that. Nothing published changes: the dashboard and the export still call `/1`, and no setting or output differs. Operators have nothing to do. The decision record for the rule (ADR 0075) is on a separate open pull request.
 
 ## Fixed
+
+<a id="billing-recheckout-keeps-live-membership"></a>
+
+- **Choosing "join" again on a tier you already hold no longer demotes the membership (#2747).** The `:start` action upserted the membership row and set its status to `incomplete` unconditionally, so a member whose membership was `active`, `past_due` or `comped` lost their audience and bypassed the audit trail by clicking join a second time, until a webhook restored it (a `comped` one has no webhook to do so). `:start` now carries an `upsert_condition` so only an `incomplete` or `canceled` row restarts; the condition is in the `ON CONFLICT ... DO UPDATE ... WHERE`, so a second tab racing the first is covered. On a live row `Billing.start_membership/2` returns the existing row unchanged with `upsert_skipped` metadata instead of an error. `POST /billing/checkout` then makes no provider call for an entitled member: the member is sent to `/account` with the new notice "You already have this membership." (its "Manage billing" button opens the portal) (translated in the en, es and fr catalogs). No migration and no config; rolling back is safe. See [Choosing a tier you already hold](../memberships.md#choosing-a-tier-you-already-hold).
 
 <a id="experiment-transition-compare-and-swap"></a>
 

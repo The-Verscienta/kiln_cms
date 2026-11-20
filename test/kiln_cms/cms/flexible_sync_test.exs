@@ -52,7 +52,7 @@ defmodule KilnCMS.CMS.FlexibleSyncTest do
   setup do
     admin = user(:admin)
 
-    sections = def!(admin, %{content_type: :post, name: "sections", field_type: :flexible})
+    sections = def!(admin, %{content_type: :post, name: "fs2_sections", field_type: :flexible})
     hero = item_type!(admin, sections, "hero")
     headline = sub!(admin, hero, "headline")
 
@@ -86,7 +86,7 @@ defmodule KilnCMS.CMS.FlexibleSyncTest do
           title: "P",
           slug: slug(),
           custom_fields: %{
-            "sections" => [
+            "fs2_sections" => [
               %{
                 "_type" => "hero",
                 "headline" => "H",
@@ -131,7 +131,7 @@ defmodule KilnCMS.CMS.FlexibleSyncTest do
     }
   end
 
-  defp hero_of(fields), do: fields["sections"] |> Enum.at(0)
+  defp hero_of(fields), do: fields["fs2_sections"] |> Enum.at(0)
   defp row_of(fields), do: fields |> hero_of() |> Map.fetch!("rows") |> Enum.at(0)
   defp cells_of(fields), do: fields |> row_of() |> Map.fetch!("cells")
 
@@ -143,7 +143,7 @@ defmodule KilnCMS.CMS.FlexibleSyncTest do
       assert hero_of(fields)["title"] == "H"
       refute Map.has_key?(hero_of(fields), "headline")
       # the other type of the same field, and the same names in another field
-      assert Enum.at(fields["sections"], 1)["headline"] == "Q"
+      assert Enum.at(fields["fs2_sections"], 1)["headline"] == "Q"
       assert [%{"headline" => "X"}] = fields["extras"]
       # ids, types and everything else are untouched
       assert hero_of(fields)["_type"] == "hero"
@@ -194,7 +194,7 @@ defmodule KilnCMS.CMS.FlexibleSyncTest do
       fields = raw(ctx.post)
       refute Map.has_key?(hero_of(fields), "headline")
       assert Map.has_key?(hero_of(fields), "rows")
-      assert Enum.at(fields["sections"], 1)["headline"] == "Q"
+      assert Enum.at(fields["fs2_sections"], 1)["headline"] == "Q"
       assert [%{"headline" => "X"}] = fields["extras"]
     end
 
@@ -207,7 +207,7 @@ defmodule KilnCMS.CMS.FlexibleSyncTest do
 
       # the quote holds only a headline: purging it drops the quote
       CMS.destroy_field_definition!(ctx.quote_headline, actor: ctx.admin)
-      assert [%{"_type" => "hero"}] = raw(ctx.post)["sections"]
+      assert [%{"_type" => "hero"}] = raw(ctx.post)["fs2_sections"]
     end
 
     test "a setting is removed from _settings, which goes when it empties", ctx do
@@ -232,7 +232,7 @@ defmodule KilnCMS.CMS.FlexibleSyncTest do
       assert hero_of(fields)["_type"] == "banner"
       assert hero_of(fields)["headline"] == "H"
       assert [%{"_type" => "hero"}] = fields["extras"]
-      assert Enum.at(fields["sections"], 1)["_type"] == "quote"
+      assert Enum.at(fields["fs2_sections"], 1)["_type"] == "quote"
     end
 
     test "and at depth 3", ctx do
@@ -247,7 +247,9 @@ defmodule KilnCMS.CMS.FlexibleSyncTest do
       assert {:ok, _} =
                CMS.update_post(
                  ctx.post,
-                 %{custom_fields: %{"sections" => stored(ctx.post, ctx.admin)["sections"]}},
+                 %{
+                   custom_fields: %{"fs2_sections" => stored(ctx.post, ctx.admin)["fs2_sections"]}
+                 },
                  actor: ctx.admin
                )
     end
@@ -290,7 +292,7 @@ defmodule KilnCMS.CMS.FlexibleSyncTest do
                )
 
       fields = raw(ctx.post)
-      assert [%{"_type" => "hero"}] = fields["sections"]
+      assert [%{"_type" => "hero"}] = fields["fs2_sections"]
       assert [%{"headline" => "X"}] = fields["extras"]
     end
 
@@ -312,7 +314,7 @@ defmodule KilnCMS.CMS.FlexibleSyncTest do
       assert :ok = CMS.destroy_field_definition(ctx.extras, actor: ctx.admin)
 
       refute Map.has_key?(raw(ctx.post), "extras")
-      assert length(raw(ctx.post)["sections"]) == 2
+      assert length(raw(ctx.post)["fs2_sections"]) == 2
     end
 
     test "purging an item type sweeps the owning type", ctx do

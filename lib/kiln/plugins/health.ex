@@ -38,6 +38,9 @@ defmodule Kiln.Plugins.Health do
 
   Both go through `KilnCMS.SafeFetch` with a bare `KilnCMS` user-agent.
 
+  The monitoring endpoint `GET /api/security/plugin-health` (#2571) reads
+  `cached/1` only: it never asks, and never starts a check.
+
   ## Configuration
 
   `config :kiln_cms, Kiln.Plugins.Health` — see `config/runtime/updates.exs`:

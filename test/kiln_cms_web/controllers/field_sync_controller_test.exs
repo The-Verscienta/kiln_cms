@@ -40,7 +40,7 @@ defmodule KilnCMSWeb.FieldSyncControllerTest do
     admin = authed_user(:admin)
 
     CMS.create_field_definition!(
-      %{content_type: :post, name: "rating", label: "Rating", field_type: :integer},
+      %{content_type: :post, name: "fsc_rating", label: "Rating", field_type: :integer},
       actor: admin
     )
 
@@ -52,7 +52,7 @@ defmodule KilnCMSWeb.FieldSyncControllerTest do
     assert doc["format"] == "kiln-field-definitions"
 
     assert Enum.any?(doc["owners"], fn o ->
-             Enum.any?(o["fields"], &(&1["name"] == "rating"))
+             Enum.any?(o["fields"], &(&1["name"] == "fsc_rating"))
            end)
   end
 

@@ -71,7 +71,7 @@ defmodule KilnCMSWeb.PluginFieldTypeTest do
 
     field =
       CMS.create_field_definition!(
-        %{content_type: :page, name: "stars", label: "Stars", field_type: :rating},
+        %{content_type: :page, name: "pft_stars", label: "Stars", field_type: :rating},
         actor: admin
       )
 
@@ -80,7 +80,7 @@ defmodule KilnCMSWeb.PluginFieldTypeTest do
         %{
           title: "Rated page",
           slug: "pft-#{System.unique_integer([:positive])}",
-          custom_fields: %{"stars" => 3}
+          custom_fields: %{"pft_stars" => 3}
         },
         actor: admin
       )
