@@ -5,27 +5,79 @@ defmodule KilnCMS.Billing.WebhookWorker do
   The receiver has already verified the signature and durably recorded the event;
   this worker claims it and applies the membership transition.
 
-  ## Three independent idempotency layers
+  ## Idempotency layers
 
-  1. The unique identity on `{provider, provider_event_id}` means a concurrent
-     duplicate delivery never gets a job.
-  2. `:claim` is an atomic filtered update, so an Oban **re-execution** (a crash
-     between running and acking) finds zero rows and cancels.
-  3. `KilnCMS.Billing.Entitlements.recompute/1` is a pure function of current
-     state, so even if 1 and 2 were both defeated, re-application cannot
+  1. The unique identity on `{provider, provider_event_id}` means a duplicate
+     delivery never inserts a second row.
+  2. The job is `unique` on the event id while it is `:available`, `:scheduled`
+     or `:retryable`, so a redelivery that re-enqueues (the row is still
+     `:received`/`:failed`, #2748) adds no second job to the queue. `:executing`
+     is deliberately **not** a unique state: a node killed mid-run leaves its job
+     `:executing` until `Oban.Lifeline` rescues it (180 minutes by default), and
+     the provider's redelivery must be able to enqueue a fresh job meanwhile. A
+     second job running next to a live one is harmless because of 3.
+  3. `:claim` is an atomic filtered update, so an Oban **re-execution** (a crash
+     between running and acking) or a concurrent second job finds zero rows and
+     cancels. A `:processing` claim older than
+     `KilnCMS.Billing.WebhookEvent.reclaim_after_ms/0` is taken over instead: its
+     worker is presumed dead.
+  4. `KilnCMS.Billing.Entitlements.recompute/1` is a pure function of current
+     state, so even if the rest were defeated, re-application cannot
      double-grant.
+
+  `timeout/1` bounds one run strictly below the reclaim threshold, so a live run
+  can never be mistaken for a dead one. An exception, exit or throw inside
+  `Subscriptions.apply/1` is caught and settled as `:failed`, and Oban retries.
+
+  Known windows that still need a periodic sweeper (follow-up): a job that
+  exhausts `max_attempts` leaves the event `:failed` until the provider happens to
+  redeliver; a `:mark_processed` stamp that does not save leaves the event
+  `:processing`; and `:received` rows recorded before enqueue became atomic have
+  no job.
 
   `{:cancel, reason}` is used for permanently unactionable conditions — already
   claimed, unresolvable, an unhandled type — so Oban stops retrying. Transient
   failures (a provider 5xx, `:econnrefused`) return `{:error, _}` so Oban retries
   with backoff; the event stays `:processing` until a later attempt settles it.
   """
-  use Oban.Worker, queue: :billing, max_attempts: 8
+  use Oban.Worker,
+    queue: :billing,
+    max_attempts: 8,
+    unique: [
+      keys: [:webhook_event_id],
+      states: [:available, :scheduled, :retryable],
+      period: :infinity
+    ]
 
   require Logger
 
   alias KilnCMS.Billing
   alias KilnCMS.Billing.Subscriptions
+
+  # Generous for one event (a provider call or two at 15 s each, plus a
+  # transaction) yet far below `WebhookEvent.reclaim_after_ms/0` (10 min).
+  @run_timeout :timer.minutes(3)
+
+  @doc """
+  Enqueues the job for a recorded event. `{:ok, job}` also covers a unique
+  conflict (the pending job is returned), which is success: the event is queued.
+
+  Called from `WebhookEvent`'s `:receive` inside its transaction, and by the
+  receiver when a redelivery finds an unsettled row.
+  """
+  @spec enqueue(map()) :: {:ok, Oban.Job.t()} | {:error, term()}
+  def enqueue(%{id: id}) do
+    # `:billing_webhook_insert` is a test seam for forcing an enqueue failure;
+    # unset in every real environment.
+    insert = Application.get_env(:kiln_cms, :billing_webhook_insert, &Oban.insert/1)
+
+    %{"webhook_event_id" => id}
+    |> new()
+    |> insert.()
+  end
+
+  @impl Oban.Worker
+  def timeout(_job), do: @run_timeout
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"webhook_event_id" => id}}) do
@@ -68,15 +120,22 @@ defmodule KilnCMS.Billing.WebhookWorker do
 
         {:error, reason}
 
-      # Someone else already claimed it — an Oban re-execution, or a duplicate that
-      # slipped past the insert guard. Either way there is nothing to do.
-      {:error, _reason} ->
-        {:cancel, :already_claimed}
+      # The claim's `UPDATE` matched no row: a live worker holds it, or it is
+      # settled. An Oban re-execution or a concurrent duplicate job; nothing to do.
+      {:error, %Ash.Error.Invalid{errors: errors} = reason} ->
+        if Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1)) do
+          {:cancel, :already_claimed}
+        else
+          {:error, reason}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
   defp process(event) do
-    case Subscriptions.apply(event.payload) do
+    case apply_event(event) do
       {:ok, membership} ->
         settle(
           event,
@@ -115,6 +174,25 @@ defmodule KilnCMS.Billing.WebhookWorker do
 
         {:error, reason}
     end
+  end
+
+  # A crash inside the transition must not leave the row `:processing`: caught
+  # here it settles as `:failed` and Oban retries (the retry's claim accepts
+  # `:failed`). Rescue is justified: this is the boundary around third-party
+  # provider code and a multi-row transaction.
+  defp apply_event(event) do
+    Subscriptions.apply(event.payload)
+  rescue
+    exception ->
+      Logger.error(
+        "billing webhook #{event.provider_event_id} raised: " <>
+          Exception.format(:error, exception, __STACKTRACE__)
+      )
+
+      {:error, {:exception, Exception.message(exception)}}
+  catch
+    kind, reason when kind in [:exit, :throw] ->
+      {:error, {kind, inspect(reason)}}
   end
 
   # The settle stamps run as the billing system actor, which `WebhookEvent`
