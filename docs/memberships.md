@@ -368,6 +368,24 @@ Return URLs are built from the **request's** host, so a member on a
 custom-domain site returns to that domain — otherwise their session cookie
 wouldn't be there.
 
+### Choosing a tier you already hold
+
+Choosing "join" on a tier whose membership is `active`, `past_due` or `comped`
+does not start a second checkout, and it does not touch the membership. Nothing
+is sent to the provider, so the member cannot be billed twice, and their
+audience and audit trail are left alone. Instead the member is sent to `/account` with the notice "You already have this
+membership." The account page has the "Manage billing" button, which opens the
+provider's billing portal for a billed member.
+
+Only an `incomplete` or `canceled` membership restarts: its status goes back to
+`incomplete` and the member gets a fresh checkout. Before this guard, a second
+click on a live membership reset it to `incomplete`, which dropped the audience
+until the webhook restored it (#2747). The guard is part of the `:start` action
+itself (an `upsert_condition` on the row's status), so a second browser tab
+racing the first is covered too. Calling `Billing.start_membership/2` on a live
+row returns that row unchanged, with `upsert_skipped` set in its metadata
+(`Ash.Resource.get_metadata(row, :upsert_skipped)`), instead of an error.
+
 ### Coming back from checkout
 
 The member may land on `/account` before the provider's webhook arrives. When the
