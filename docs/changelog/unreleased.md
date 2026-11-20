@@ -362,6 +362,26 @@ carries the reasoning.
     when it couldn't check in time.
   ([#2983](https://github.com/The-Verscienta/kiln_cms/issues/2983), [#2985](https://github.com/The-Verscienta/kiln_cms/issues/2985), [#2986](https://github.com/The-Verscienta/kiln_cms/issues/2986))
 
+## Security
+
+<a id="liveview-url-less-join"></a>
+
+- **phoenix_live_view 1.2.14 fixes EEF-CVE-2026-126334 (GHSA-v4p7-3pm2-wq6c,
+  medium).** In earlier releases a signed-in user could open a websocket by
+  hand and join a router-mounted LiveView without the `"url"` key. The
+  channel then matched no route and skipped the `live_session`'s `on_mount`
+  hooks, which is where Kiln's sign-in, tenant and editor/admin role checks
+  run. Kiln was not exposed: since #688 every Kiln LiveView carries
+  `KilnCMSWeb.LiveRouteGuard`, a module-level hook that refuses such a join,
+  and a test checks every `live` route in the router carries it. 1.2.14
+  refuses the join in the channel itself, before mount, so the reply is now
+  `"unauthorized"` instead of the guard's 404 reload. The guard stays as a
+  second line. `mix.exs` now requires `~> 1.2.14`, so a lock cannot resolve
+  back to an affected release. No migration and no configuration; the
+  JavaScript client is built from the same Hex package, so there is no
+  separate npm bump.
+  ([#3190](https://github.com/The-Verscienta/kiln_cms/issues/3190))
+
 ## Upgrade notes
 
 <a id="backup-s3-same-bucket-overlap-upgrade"></a>

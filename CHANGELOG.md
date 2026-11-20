@@ -142,6 +142,11 @@ Every summary line below that was shortened links to its own entry there.
 - **Backups → Schedule: a warning when `KILN_BACKUP_SCHEDULER_CRON` ticks less often than a schedule runs; the tab no longer freezes on a hung backup directory; and a keep-days change made while a backup runs reaches the `.hold` markers when it ends, even if it failed.**
   ([#3112](https://github.com/The-Verscienta/kiln_cms/pull/3112) · [long form](docs/changelog/unreleased.md#backup-schedule-tab-followups))
 
+### Security
+
+- **phoenix_live_view 1.2.14 fixes EEF-CVE-2026-126334 (a LiveView joined without `"url"` skipped its `live_session` `on_mount` hooks); Kiln was not exposed, because `KilnCMSWeb.LiveRouteGuard` already refused those joins (#688).**
+  ([#3190](https://github.com/The-Verscienta/kiln_cms/issues/3190) · [long form](docs/changelog/unreleased.md#liveview-url-less-join))
+
 ### Upgrade notes
 
 - **Two S3 destinations on one bucket name now stop pruning.** If two S3 destinations name the same bucket with one prefix inside the other on different hosts, retention on both is skipped after the upgrade, with a notice on every pass, and their storage grows until you act. Give them prefixes side by side, or untick "Delete its old backups (retention)" on one of them.
