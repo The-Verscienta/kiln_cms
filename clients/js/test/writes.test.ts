@@ -214,6 +214,22 @@ describe("a write answered with an empty body", () => {
       expect((error as KilnError).code).toBe("empty_response");
     }
   });
+
+  // Writes keep their own check: a JSON body with no resource is still
+  // `empty_response`, not the reads' wrong-shape KilnUnexpectedBodyError.
+  it("keeps empty_response for a JSON body with no resource", async () => {
+    for (const text of ["{}", "null", '{"data": []}']) {
+      const stub = stubFetch({ status: 200, text });
+
+      const error = await client(stub)
+        .update("posts", "p1", { title: "x" })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(KilnError);
+      expect(error).not.toBeInstanceOf(KilnUnexpectedBodyError);
+      expect((error as KilnError).code).toBe("empty_response");
+    }
+  });
 });
 
 describe("the no-API-key guard", () => {

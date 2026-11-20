@@ -109,6 +109,8 @@ defmodule KilnCMS.Backups do
       define :run_history, action: :history
       define :get_run, action: :read, get_by: [:id]
       define :get_run_by_stamp, action: :by_stamp, args: [:stamp], not_found_error?: false
+      define :list_run_prune_windows, action: :prune_windows, args: [:after]
+      define :newest_imported_run, action: :newest_import, not_found_error?: false
       define :list_running_runs, action: :running
       define :mark_run_pruned, action: :mark_pruned
       define :cancel_run, action: :cancel
@@ -644,7 +646,14 @@ defmodule KilnCMS.Backups do
   @type component :: :db | :media
 
   @type component_status :: %{
-          last_good: %{at: DateTime.t(), stamp: String.t() | nil, source: :run | :manifest} | nil,
+          last_good:
+            %{
+              at: DateTime.t(),
+              stamp: String.t() | nil,
+              source: :run | :manifest,
+              bytes: non_neg_integer()
+            }
+            | nil,
           last_attempt:
             %{at: DateTime.t(), ok?: boolean(), stamp: String.t() | nil, source: :run | :manifest}
             | nil,
@@ -966,7 +975,9 @@ defmodule KilnCMS.Backups do
 
     * `last_good`: the newest succeeded run that covered it and has a verified
       artifact of that kind, or the manifest when it is newer (or the only
-      source); `nil` when there is none.
+      source); `nil` when there is none. Its `bytes` is the size of that
+      backup's files of the component (every part of a media set), what the
+      Schedule tab's disk warning multiplies (#2984).
     * `last_attempt`: the newest run that covered it and succeeded or failed,
       or the manifest, whichever is newer. A failed manifest that doesn't say
       what it covered counts against every component, and so does a failed
@@ -1663,7 +1674,9 @@ defmodule KilnCMS.Backups do
     name = Atom.to_string(component)
     runs = runs || %{good: nil, attempt: nil}
 
-    last_good = newer(run_point(runs.good), manifest_good(manifest, name))
+    last_good =
+      newer(good_point(runs.good, component), manifest_good(manifest, name))
+
     last_attempt = newer(run_point(runs.attempt), manifest_attempt(manifest, name))
     hours = rule.hours
 
@@ -1690,6 +1703,19 @@ defmodule KilnCMS.Backups do
     }
   end
 
+  # The newest good run, with the size of its files of `component`.
+  defp good_point(nil, _component), do: nil
+
+  defp good_point(run, component) do
+    bytes =
+      run.artifacts
+      |> Enum.filter(&(&1.kind == component))
+      |> Enum.map(& &1.bytes)
+      |> Enum.sum()
+
+    run |> run_point() |> Map.put(:bytes, bytes)
+  end
+
   # An ok manifest vouches for a component it covered with a verified file of
   # that kind.
   defp manifest_good(%Manifest{ok: true, finished_at: %DateTime{} = at} = manifest, name) do
@@ -1697,10 +1723,14 @@ defmodule KilnCMS.Backups do
       name in Manifest.components(manifest) and
         Enum.any?(manifest.artifacts, &(&1.kind == name and &1.verified))
 
-    if covered?, do: %{at: at, ok?: true, stamp: nil, source: :manifest}
+    if covered?,
+      do: %{at: at, ok?: true, stamp: nil, source: :manifest, bytes: kind_bytes(manifest, name)}
   end
 
   defp manifest_good(_manifest, _name), do: nil
+
+  defp kind_bytes(%Manifest{artifacts: artifacts}, name),
+    do: artifacts |> Enum.filter(&(&1.kind == name)) |> Enum.map(& &1.bytes) |> Enum.sum()
 
   # A failed manifest that doesn't say what it covered (cron's, or one with no
   # artifacts) counts against every component: failing closed.

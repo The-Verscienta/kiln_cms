@@ -73,9 +73,60 @@ tagged `kiln_client-vX.Y.Z` in the
 
   `sync/1` and `release/2` also return `:unexpected_body`, with the decoded
   body in `:body`, on a 2xx JSON answer of the wrong shape (`null`, `{}`),
-  where they used to crash.
+  where they used to crash. Every other read that promises a shape now does
+  the same (kiln_cms#3151, below).
+
+- **A 2xx JSON body of the wrong shape is `:unexpected_body` on every read
+  that promises a shape (kiln_cms#3151).** A body that is valid JSON but not
+  what the route answers (`null`, `{}`, a top-level list) used to pass for an
+  answer: a JSON:API read returned an empty collection, `revision/4` and
+  `sync_page/2` returned `{:ok, nil}` or `{:ok, %{}}`, the plain-JSON reads
+  returned whatever was decoded, and a `"data"` that wasn't resources
+  (`"x"`, `[1]`) crashed the flattening. Each of these reads now returns
+  `{:error, %KilnClient.Error{reason: :unexpected_body}}` with the 2xx in
+  `:status`, the decoded body in `:body`, `:method` and `:path`, and logs a
+  warning ending "with a JSON body of the wrong shape" (the body itself is
+  never logged). What each read requires:
+
+  | Read | A 2xx body must be |
+  |---|---|
+  | `list/2`, `one/3`, `by_ids/3`, `text_search/3`, `semantic_search/3`, `autocomplete/3`, `list_releases/1`, `list_release_items/1` | a JSON:API document: a map whose `"data"` is `nil`, a map or a list of maps, and whose `"included"`, when present, is a list of maps |
+  | `release/2` | that, with `"data"` a map |
+  | `sync/1`, `sync_page/2` | a map with an `"items"` list and a `"cursor"` key |
+  | `revision/4`, `restore_revision/4` | a map whose `"data"` is a map |
+  | `list_revisions/3` | a map whose `"data"` is a list |
+  | `search/2` | a map whose `"results"` is a map |
+  | `resolve_path/2` | a map with a `"status"` key |
+  | `artifact/3` (except `surface: "llm"`), `content_as_of/3`, `schema/1`, `menus/1`, `menu/2`, `locales/1`, `related/3`, `form/2` | a map |
+
+  A document with no resources, `{"data": []}`, is still a valid empty
+  result, and `one/3` on it is still `reason: :not_found`. The errors
+  `sync/1` and `release/2` already returned for `null` or `{}`
+  (kiln_cms#3129) now carry `:status` too. Writes are unchanged: a `create/3`,
+  `update/4` or transition answered `200 {}` is still `reason: :http, code:
+  "empty_response"`, and `graphql/3`, `mint_preview/3` and `submit_form/3`
+  check no shape.
+
+  To migrate: a caller that matched `{:ok, nil}` from `revision/4` or
+  `sync_page/2`, or treated an empty list from a `{}` answer as "no
+  results", now gets the error instead; match `{:error,
+  %KilnClient.Error{reason: :unexpected_body}}` and treat it as a broken
+  answer, not an empty one.
 
 ### Added
+
+- **`site/1` reads `GET /api/site` (kiln_cms#3168).** It returns the site's
+  link-preview defaults, for the Open Graph and X card tags a front end
+  renders when a document has none of its own:
+  `{:ok, %{"site_name" => _, "twitter_site" => _, "social_image_url" => _}}`.
+  The three keys are always present; `"twitter_site"` (`"@handle"`) and
+  `"social_image_url"` (an absolute URL) are `nil` when unset, and any keys
+  a newer server adds are kept. A 2xx missing one of the three is
+  `:unexpected_body`. It never sends the API key, even a configured one: the
+  answer is the same either way, and only an anonymous one can be shared by
+  a cache. A 503 is `reason: :server` with any `Retry-After` in
+  `:retry_after`, and is not retried. The route comes with kiln_cms#3167, so
+  `site/1` needs a server that includes it.
 
 - **Editorial reads take a per-call `:api_key` (kiln_cms#2734).**
   `list_revisions/3`, `revision/4`, `list_releases/1`, `release/2` and

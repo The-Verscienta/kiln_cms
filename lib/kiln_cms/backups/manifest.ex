@@ -259,6 +259,25 @@ defmodule KilnCMS.Backups.Manifest do
   def components(%__MODULE__{artifacts: artifacts}),
     do: artifacts |> Enum.map(& &1.kind) |> Enum.uniq()
 
+  @doc """
+  Whether `scripts/backup.sh` wrote this manifest: one without
+  `"components"`, which Kiln always writes (#2219). The trigger says nothing
+  here; an operator sets it.
+  """
+  @spec cron?(t() | nil) :: boolean()
+  def cron?(%__MODULE__{components: nil}), do: true
+  def cron?(_kiln_or_none), do: false
+
+  @doc """
+  Cron's `BACKUP_KEEP_DAYS` as this manifest recorded it, or `nil` when the
+  manifest is Kiln's (`cron?/1`), records none, or there is no manifest.
+  """
+  @spec cron_keep_days(t() | nil) :: pos_integer() | nil
+  def cron_keep_days(%__MODULE__{keep_days: days} = manifest) when is_integer(days),
+    do: if(cron?(manifest), do: days)
+
+  def cron_keep_days(_none), do: nil
+
   defp to_map(%__MODULE__{} = m) do
     %{
       "version" => m.version,
