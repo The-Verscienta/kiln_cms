@@ -112,6 +112,29 @@ defmodule KilnCMS.Backups.Run do
       filter expr(status == :running)
     end
 
+    # The prunes cron recorded after a page's oldest imported row (#3113):
+    # the imported runs started after `after` that carry `keep_days`, oldest
+    # first, with only what `KilnCMS.Backups.Presence` judges by. Read by the
+    # history page, as the platform admin, once per disk read.
+    read :prune_windows do
+      argument :after, :utc_datetime_usec, allow_nil?: false
+
+      filter expr(origin == :imported and started_at > ^arg(:after) and not is_nil(keep_days))
+
+      prepare build(
+                select: [:id, :started_at, :finished_at, :keep_days],
+                sort: [started_at: :asc, id: :asc]
+              )
+    end
+
+    # The newest imported run (#3113): a row older than it had a later cron
+    # run, whether or not that run recorded `keep_days`.
+    read :newest_import do
+      get? true
+      filter expr(origin == :imported)
+      prepare build(select: [:id, :started_at], sort: [started_at: :desc, id: :desc], limit: 1)
+    end
+
     read :by_stamp do
       get? true
       argument :stamp, :string, allow_nil?: false
@@ -345,7 +368,8 @@ defmodule KilnCMS.Backups.Run do
               end}
     end
 
-    # A cron-made backup becomes a row, once. `upsert_fields []` makes a
+    # A cron-made backup becomes a row, once. `keep_days` (#3113) is cron's
+    # window as the run's own manifest recorded it; no other action takes it. `upsert_fields []` makes a
     # conflict on the stamp do nothing, so an existing run — the app's own,
     # still `running`, or a previous import — is never touched.
     create :import do
@@ -358,7 +382,8 @@ defmodule KilnCMS.Backups.Run do
         :finished_at,
         :error,
         :log,
-        :artifacts
+        :artifacts,
+        :keep_days
       ]
 
       upsert? true
@@ -532,6 +557,15 @@ defmodule KilnCMS.Backups.Run do
     # resume's start runs on a node with that directory. Nil for imported runs
     # and runs from before #2539.
     attribute :dir_id, :uuid, public?: true
+
+    # Cron's `BACKUP_KEEP_DAYS` when this run's prune ran (#3113), from the
+    # `manifest.json` of an imported `backup.sh all` run that succeeded, if
+    # the importer saw that manifest. Nil on every other run, and on runs
+    # imported before #3113. Only `:import` sets it.
+    attribute :keep_days, :integer do
+      constraints min: 1
+      public? true
+    end
 
     timestamps()
   end

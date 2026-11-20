@@ -13,7 +13,8 @@ defmodule KilnCMS.Backups.DiskView do
   and `manifest.json` is read once. A file is `lstat`ed only when its name is
   listed, and a run's `.work/<stamp>/state.json` only for a run whose status
   could be resumed. No database reads: the caller passes the runs it read as
-  its actor. Never raises; every filesystem failure is reported as data (an
+  its actor, and the prunes cron recorded after them (`:cron_prunes`, #3113)
+  as it read those. Never raises; every filesystem failure is reported as data (an
   unreadable directory, an `:unknown` presence).
   """
   alias KilnCMS.Backups
@@ -30,13 +31,26 @@ defmodule KilnCMS.Backups.DiskView do
   Read `dir` for `runs` (`KilnCMS.Backups.Run` structs), at `now`.
 
   `cron_keep_days` is the `keep_days` of the directory's `manifest.json` when
-  `scripts/backup.sh` wrote it (a manifest without `"components"`, which Kiln
-  always writes), else `nil`: the app doesn't know cron's window then.
+  `scripts/backup.sh` wrote it (`KilnCMS.Backups.Manifest.cron?/1`), else
+  `nil`: the app doesn't know cron's window then. It judges an imported row
+  only when no imported run is newer than it; one that is newer and recorded
+  its own `keep_days` judges it instead (#3113).
+
+  Options: `:cron_prunes`, the later imported runs' windows
+  (`KilnCMS.Backups.Presence.cron_prunes/2`), default `nil`: none were read,
+  so every imported row is judged by `cron_keep_days`.
   """
-  @spec read(Path.t(), [Run.t()], DateTime.t()) :: t()
-  def read(dir, runs, now \\ DateTime.utc_now()) when is_binary(dir) and is_list(runs) do
-    cron_keep_days = cron_keep_days(Manifest.read(dir))
-    context = Presence.context(dir, now: now, cron_keep_days: cron_keep_days)
+  @spec read(Path.t(), [Run.t()], DateTime.t(), keyword()) :: t()
+  def read(dir, runs, now \\ DateTime.utc_now(), opts \\ [])
+      when is_binary(dir) and is_list(runs) do
+    cron_keep_days = Manifest.cron_keep_days(Manifest.read(dir))
+
+    context =
+      Presence.context(dir,
+        now: now,
+        cron_keep_days: cron_keep_days,
+        cron_prunes: Keyword.get(opts, :cron_prunes)
+      )
 
     %{
       markers: context.markers,
@@ -50,9 +64,4 @@ defmodule KilnCMS.Backups.DiskView do
   # (few) failed or running rows of the page.
   defp resumable?(run, now),
     do: Backups.run_resumable?(run, now) and Backups.work_state?(run.stamp)
-
-  defp cron_keep_days(%Manifest{components: nil, keep_days: days}) when is_integer(days),
-    do: days
-
-  defp cron_keep_days(_kiln_or_none), do: nil
 end

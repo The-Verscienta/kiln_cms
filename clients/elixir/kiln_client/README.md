@@ -199,6 +199,8 @@ end
 
 {:ok, %{"menus" => menus}} = KilnClient.menus()
 {:ok, %{"default" => default, "fallbacks" => chains}} = KilnClient.locales()
+{:ok, %{"site_name" => name, "twitter_site" => handle, "social_image_url" => image}} =
+  KilnClient.site()
 {:ok, %{"related" => related}} = KilnClient.related("post", "hello-world", limit: 3)
 ```
 
@@ -206,6 +208,11 @@ end
 `fallback: false` to turn the site's fallback chain off and
 `:fallback_locale` to name one fallback. The result's `"locale"` says which
 translation answered.
+
+`site/1` (`GET /api/site`) returns the site-wide values a page's link-preview
+tags fall back to when a document has none of its own: `"twitter_site"`
+(`"@handle"`) and `"social_image_url"` are `nil` when unset. It never sends
+the API key, and needs a server with that route (kiln_cms#3167).
 
 Forms render from their schema and submit as JSON:
 
@@ -495,7 +502,7 @@ writes alike. Branch on `:reason`:
 | `:transport` | no response (DNS, refused, TLS, timeout); the exception is in `:exception` |
 | `:graphql` | `/gql` answered with top-level `errors` |
 | `:storage_refused` | a direct upload's `PUT` to object storage answered non-2xx (e.g. a stale presigned URL); the store's raw body is in `:body` |
-| `:unexpected_body` | a 2xx whose body isn't the expected shape: a media write with no `data` resource, or a `sync/1` page or `release/2` document of the wrong shape (the decoded body is in `:body`); a body that isn't JSON at all, such as a captive portal's or a CDN's HTML page (its first 1 KiB is in `:body`); or an empty body (`body: ""`), which no read sends and only `delete/3` accepts as success |
+| `:unexpected_body` | a 2xx whose body isn't the expected shape: JSON of the wrong shape for the call, such as `null`, `{}` or a list where a document was promised, a JSON:API read whose `data` is missing or not resources, or a media write with no `data` resource (the decoded body is in `:body`); a body that isn't JSON at all, such as a captive portal's or a CDN's HTML page (its first 1 KiB is in `:body`); or an empty body (`body: ""`), which no read sends and only `delete/3` accepts as success. A read carries the 2xx in `:status`. `{"data": []}` is not the wrong shape: it is an empty result |
 | `:http` | any other status |
 
 Every error also carries `:status`, `:code` (the first error's) and `:errors`

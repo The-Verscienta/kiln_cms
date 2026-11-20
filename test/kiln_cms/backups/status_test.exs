@@ -215,6 +215,36 @@ defmodule KilnCMS.Backups.StatusTest do
     assert DateTime.diff(DateTime.utc_now(), status.components.media.last_good.at, :hour) >= 4
   end
 
+  test "last_good says the size of that backup's files of the component (#2984)", %{dir: dir} do
+    at = hours_ago(3)
+    stamp = Artifact.stamp(at)
+
+    run!([:db, :media], 3,
+      artifacts: [
+        %{kind: :db, name: "kiln-db-#{stamp}.dump", bytes: 700, verified: true},
+        %{kind: :media, name: "kiln-media-#{stamp}.tar.gz", bytes: 9_000, verified: true}
+      ]
+    )
+
+    status = Backups.status()
+    assert %{last_good: %{source: :run, bytes: 700}} = status.components.db
+    assert %{last_good: %{source: :run, bytes: 9_000}} = status.components.media
+
+    # A newer manifest: its files of each kind, every part summed.
+    manifest!(dir,
+      components: ["db", "media"],
+      artifacts: [
+        %{kind: "db", path: "db/kiln-db-20260805-031700.dump", bytes: 50, verified: true},
+        %{kind: "media", path: "media/a.part01.tar.gz", bytes: 300, verified: true},
+        %{kind: "media", path: "media/a.part02.tar.gz", bytes: 200, verified: true}
+      ]
+    )
+
+    status = Backups.status()
+    assert %{last_good: %{source: :manifest, bytes: 50}} = status.components.db
+    assert %{last_good: %{source: :manifest, bytes: 500}} = status.components.media
+  end
+
   test "a cron manifest newer than every run counts for the components it covered", %{dir: dir} do
     run!([:db, :media], 72)
 

@@ -118,7 +118,8 @@ defmodule KilnCMS.Billing.Membership do
         :provider_customer_id,
         :provider_subscription_id,
         :current_period_end,
-        :cancel_at_period_end
+        :cancel_at_period_end,
+        :last_provider_event_at
       ]
 
       require_atomic? false
@@ -126,6 +127,19 @@ defmodule KilnCMS.Billing.Membership do
       # Threaded into the audit row so a replay investigation can trace which
       # provider event caused which grant.
       argument :provider_event_id, :string
+
+      # What the event says about itself, for `Changes.GuardProviderEvent`
+      # (#2749). All optional: a caller that passes no `event_kind` is not
+      # guarded, which is what an operator-driven reconcile wants.
+      #
+      #   * `event_kind` — `:event` for a delivered webhook, `:live` for a state
+      #     retrieved from the provider on the spot (checkout completion), which
+      #     is newer than any event and so exempt from the stale check;
+      #   * `event_subscription_id` — the subscription the event is about;
+      #   * `event_created_at` — the provider's `created` stamp for the event.
+      argument :event_kind, :atom, constraints: [one_of: [:event, :live]]
+      argument :event_subscription_id, :string
+      argument :event_created_at, :utc_datetime_usec
 
       # The account's row before this one (`KilnCMS.Accounts.AccountLock`'s
       # lock order). The recompute in `RecordTransition` takes it anyway, but
@@ -135,6 +149,11 @@ defmodule KilnCMS.Billing.Membership do
       # webhook must not revive the membership erasure cancelled, and must
       # settle rather than retry. See the change.
       change KilnCMS.Billing.Changes.SettleErasedAccount
+
+      # Re-checks the event's ordering and subscription identity under the
+      # row lock, after the account's (lock order), and settles a superseded
+      # event as a no-op (#2749).
+      change KilnCMS.Billing.Changes.GuardProviderEvent
 
       change KilnCMS.Billing.Changes.RecordTransition
     end
@@ -336,6 +355,13 @@ defmodule KilnCMS.Billing.Membership do
       default false
       public? true
     end
+
+    # The provider's `created` stamp of the last event applied to this row, so a
+    # late or retried event that predates it is not applied over newer state
+    # (#2749). Seconds resolution. Null until the first guarded event; a null
+    # accepts anything. Not public: it is bookkeeping, not a field of the
+    # membership.
+    attribute :last_provider_event_at, :utc_datetime_usec, public?: false
 
     attribute :activated_at, :utc_datetime_usec, public?: true
     attribute :canceled_at, :utc_datetime_usec, public?: true

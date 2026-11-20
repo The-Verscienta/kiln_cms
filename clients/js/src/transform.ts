@@ -179,7 +179,9 @@ export function transformSrcset(
 
 /**
  * `transformSrcset`, signed under `key`: widths used exactly as given. Same
- * server-side-only caveat as `signedTransformPath`.
+ * server-side-only caveat as `signedTransformPath`. A missing key rejects
+ * with `KilnConfigError` even for media of unknown size, which otherwise
+ * resolves `null`.
  */
 export function signedTransformSrcset(
   media: TransformMedia,
@@ -215,10 +217,12 @@ export async function buildSignedTransformSrcset(
   key: string,
   origin: string,
 ): Promise<string | null> {
+  // The key (and WebCrypto) first: a missing key is a configuration error
+  // whatever the media, not something only items of known size reveal.
+  const cryptoKey = await importKey(key);
   const candidates = srcsetCandidates(media, options, false);
   if (candidates === null) return null;
 
-  const cryptoKey = await importKey(key);
   const entries = await Promise.all(
     candidates.map(async ({ width, described }) => {
       const ops = canonicalOps(media, candidateOptions(options, width), false);

@@ -98,6 +98,8 @@ describe("uploadMedia", () => {
     for (const answer of [
       { status: 201, body: { data: [] } },
       { status: 204, text: "" },
+      { status: 201, text: "{}" },
+      { status: 201, text: "null" },
     ]) {
       const stub = stubFetch(answer);
 

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { createClient, KilnNotFoundError, KilnValidationError } from "../src/index.js";
+import {
+  createClient,
+  KilnNotFoundError,
+  KilnServerError,
+  KilnUnexpectedBodyError,
+  KilnValidationError,
+  type Site,
+} from "../src/index.js";
 import { stubFetch, type FetchStub } from "./helpers.js";
 
 function client(stub: FetchStub, apiKey?: string) {
@@ -91,6 +98,62 @@ describe("menus, menu and locales", () => {
     const stub = stubFetch({ body });
     expect(await client(stub).locales()).toEqual(body);
     expect(stub.calls[0]!.url.pathname).toBe("/api/locales");
+  });
+});
+
+describe("site", () => {
+  it("reads the link-preview defaults, anonymously", async () => {
+    const body: Site = {
+      site_name: "Acme Docs",
+      twitter_site: "@acme",
+      social_image_url: "https://cms.example.com/uploads/card.png",
+    };
+    const stub = stubFetch({ body });
+
+    expect(await client(stub, "kiln_key").site()).toEqual(body);
+    const call = stub.calls[0]!;
+    expect(call.method).toBe("GET");
+    expect(call.url.pathname).toBe("/api/site");
+    expect(call.url.search).toBe("");
+    expect(call.headers.authorization).toBeUndefined();
+  });
+
+  it("returns nulls as served", async () => {
+    const body = { site_name: "KilnCMS", twitter_site: null, social_image_url: null };
+    expect(await client(stubFetch({ body })).site()).toEqual(body);
+  });
+
+  it("throws KilnUnexpectedBodyError when a key is missing", async () => {
+    for (const text of ["{}", '{"site_name": "Acme", "twitter_site": null}', "null"]) {
+      const stub = stubFetch({ text });
+
+      const error = await client(stub)
+        .site()
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(KilnUnexpectedBodyError);
+      expect((error as KilnUnexpectedBodyError).body).toBe(text);
+      expect((error as KilnUnexpectedBodyError).message).toContain(
+        "a JSON body of the wrong shape",
+      );
+    }
+  });
+
+  it("surfaces a 503 as KilnServerError with retryAfter", async () => {
+    const stub = stubFetch({
+      status: 503,
+      body: { errors: [{ status: "503", code: "temporarily_unavailable" }] },
+      headers: { "retry-after": "2" },
+    });
+
+    const error = await client(stub)
+      .site()
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(KilnServerError);
+    expect((error as KilnServerError).status).toBe(503);
+    expect((error as KilnServerError).retryAfter).toBe(2);
+    expect((error as KilnServerError).code).toBe("temporarily_unavailable");
   });
 });
 
