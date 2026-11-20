@@ -3,7 +3,8 @@ defmodule KilnClient do
   Official Elixir client for the KilnCMS APIs — the JSON:API read surface at
   `/api/json/*`, per-type and hybrid search, fired artifacts at
   `/api/content/:type/:slug` (including `:as_of` point-in-time reads), path
-  resolution, menus, locales, related content, forms, preview tokens, the
+  resolution, menus, locales, the site's link-preview defaults, related
+  content, forms, preview tokens, the
   delivery schema, the JSON:API write surface (create, update, workflow
   transitions, soft-delete), the media upload API (`upload_media/2` and
   friends), the `/api/sync` delta API and a minimal `/gql` helper (see Kiln's `docs/json-api.md` and
@@ -576,6 +577,34 @@ defmodule KilnClient do
   """
   @spec locales(keyword()) :: {:ok, map()} | {:error, Error.t()}
   def locales(opts \\ []), do: json_get("/api/locales", [], opts)
+
+  @doc """
+  The site's link-preview defaults: `GET /api/site`, for the Open Graph and
+  X (Twitter) card tags a front end renders when a document has none of its
+  own. Returns `%{"site_name", "twitter_site", "social_image_url"}`:
+
+    * `"site_name"` — the site's name, as its pages' `<title>` carries it.
+      Never `nil`.
+    * `"twitter_site"` — the site's X username as `"@handle"`, or `nil`.
+    * `"social_image_url"` — the default share image as an absolute URL, or
+      `nil`.
+
+  The three keys are always present: a 2xx missing one is `{:error,
+  %KilnClient.Error{reason: :unexpected_body}}`. Newer servers may add keys.
+  No key is needed. The answer is for the site the request's host names, so
+  point `base_url` at that site's host. A 503 is `reason: :server` with any
+  `Retry-After` in `:retry_after`; this read does not retry it. See Kiln's
+  `docs/api.md` ("Site defaults"). Options: `:req`.
+  """
+  @spec site(keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def site(opts \\ []) do
+    json_get(
+      "/api/site",
+      [],
+      opts,
+      &match?(%{"site_name" => _, "twitter_site" => _, "social_image_url" => _}, &1)
+    )
+  end
 
   @doc """
   Published documents semantically closest to one:
