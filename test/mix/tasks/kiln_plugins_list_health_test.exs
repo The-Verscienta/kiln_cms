@@ -75,6 +75,33 @@ defmodule Mix.Tasks.Kiln.Plugins.ListHealthTest do
     assert Application.get_env(:kiln_cms, Health, []) == original
   end
 
+  # #2565: the task runs without the application, so it checks in its own
+  # process rather than through the node's shared check; a warmer in flight
+  # is neither joined nor waited on.
+  test "--health checks in the task's own process" do
+    stub(&Req.Test.json(&1, %{"data" => []}))
+    test = self()
+
+    warmer =
+      spawn(fn ->
+        Process.register(self(), Health.warmer_name())
+        send(test, :registered)
+
+        receive do
+        after
+          10_000 -> :ok
+        end
+      end)
+
+    assert_receive :registered
+    on_exit(fn -> Process.exit(warmer, :kill) end)
+
+    output = Task.await(Task.async(fn -> run_task(["--health"]) end), 5_000)
+
+    assert output =~ "health: can't verify (git or path: no registry checksum)"
+    assert_received {:health_request, "/api/json/entries/published"}
+  end
+
   test "--health with an unreachable feed says unknown, not ok" do
     stub(&Plug.Conn.send_resp(&1, 503, ""))
 
