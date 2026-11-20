@@ -14,7 +14,7 @@ defmodule KilnCMS.Backups.Destination.Sftp do
   ## The host key (ADR 0079)
 
   A destination is trusted to one host key, which a platform admin confirms
-  on the Destinations tab (`KilnCMS.Backups.trust_backup_destination_host_key/3`)
+  on the Destinations tab (the `trust_backup_destination_host_key` code interface)
   and which is stored on the row, never in its editable settings. Until
   then every call refuses, and the destination can't be enabled. Every
   connection offers only the trusted key's algorithm and checks the key
