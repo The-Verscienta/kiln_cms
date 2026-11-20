@@ -89,6 +89,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Accepting an invitation to the default site at a lower tier no longer demotes an account with no membership but a legacy editor or admin role: its tier is carried into a membership first and the accept reports it already a member. An admin's own Add is unchanged.**
+  ([long form](docs/changelog/unreleased.md#invitation-keeps-legacy-tier))
+
 - **Billing webhooks: an event older than the last one applied, about a different subscription than the membership holds, or for a `comped` membership is now ignored (with a reason in `/editor/billing`) instead of overwriting it; new nullable column `last_provider_event_at`, rollback-safe.**
   ([long form](docs/changelog/unreleased.md#webhook-ordering-identity))
 

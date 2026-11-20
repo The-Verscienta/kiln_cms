@@ -678,6 +678,187 @@ defmodule KilnCMS.Accounts.RegisterWithInvitationTest do
     end
   end
 
+  describe "an unaffiliated legacy account invited to the default site (#2574)" do
+    setup do
+      %{default: Accounts.default_org_id(), admin: user(:admin)}
+    end
+
+    defp invited_legacy(admin, legacy_role, invited_role, attrs \\ %{}, invite_attrs \\ %{}) do
+      {invitation, token} =
+        invite!(Map.merge(%{admin: admin, role: invited_role}, invite_attrs))
+
+      owner = user(legacy_role, Map.merge(%{email: to_string(invitation.email)}, attrs))
+      {invitation, token, owner}
+    end
+
+    for legacy <- [:editor, :admin] do
+      test "a #{legacy} invited as a viewer keeps its tier: already a member, one carried row",
+           %{default: default, admin: admin} do
+        {_invitation, token, owner} = invited_legacy(admin, unquote(legacy), :viewer)
+
+        assert {:ok, %{outcome: :already_member, role: role}} = accept_existing(token)
+        assert role == unquote(legacy)
+
+        assert [%{role: ^role, status: :active}] =
+                 Accounts.list_memberships_for_user!(owner.id, authorize?: false)
+
+        assert memberships(owner.id)[default].role == unquote(legacy)
+        assert Invitations.peek(token) == nil
+
+        # The one audit row is the carry, not a grant of the invited tier.
+        assert [event] = role_events(default, owner, :role_granted)
+        assert event.metadata["via"] == "legacy_carry"
+        assert event.metadata["role"] == to_string(unquote(legacy))
+      end
+    end
+
+    test "a legacy editor invited as an admin is simply joined at admin (nothing to protect)", %{
+      default: default,
+      admin: admin
+    } do
+      {_invitation, token, owner} = invited_legacy(admin, :editor, :admin)
+
+      assert {:ok, %{outcome: :joined, role: :admin}} = accept_existing(token)
+      assert memberships(owner.id)[default].role == :admin
+
+      assert [event] = role_events(default, owner, :role_granted)
+      assert event.metadata["via"] == nil
+    end
+
+    test "an unaffiliated viewer invited as a viewer or an editor is simply joined", %{
+      default: default,
+      admin: admin
+    } do
+      for invited <- [:viewer, :editor] do
+        {_invitation, token, owner} = invited_legacy(admin, :viewer, invited)
+
+        assert {:ok, %{outcome: :joined, role: ^invited}} = accept_existing(token)
+
+        assert [%{role: ^invited}] =
+                 Accounts.list_memberships_for_user!(owner.id, authorize?: false)
+
+        assert memberships(owner.id)[default].role == invited
+
+        assert role_events(default, owner, :role_granted) |> Enum.map(& &1.metadata["via"]) ==
+                 [nil]
+      end
+    end
+
+    test "an equal tier loses nothing, so it is a plain join at that tier", %{
+      default: default,
+      admin: admin
+    } do
+      {_invitation, token, owner} = invited_legacy(admin, :editor, :editor)
+
+      assert {:ok, %{outcome: :joined, role: :editor}} = accept_existing(token)
+      assert memberships(owner.id)[default].role == :editor
+    end
+
+    test "User.audiences ride onto the carried row", %{default: default, admin: admin} do
+      gated = hd(KilnCMS.CMS.Audiences.gated())
+      {_invitation, token, owner} = invited_legacy(admin, :editor, :viewer, %{audiences: [gated]})
+
+      assert {:ok, %{outcome: :already_member}} = accept_existing(token)
+      assert memberships(owner.id)[default].audiences == [gated]
+    end
+
+    test "a live temporary grant is carried with its expiry, not made standing", %{
+      default: default,
+      admin: admin
+    } do
+      until = DateTime.utc_now() |> DateTime.add(1, :day) |> DateTime.truncate(:second)
+
+      {_invitation, token, owner} =
+        invited_legacy(admin, :editor, :viewer, %{
+          granted_role: :admin,
+          granted_role_expires_at: until
+        })
+
+      assert {:ok, %{outcome: :already_member, role: :editor}} = accept_existing(token)
+
+      row = memberships(owner.id)[default]
+      assert row.role == :editor
+      assert row.granted_role == :admin
+      assert DateTime.compare(row.granted_role_expires_at, until) == :eq
+    end
+
+    test "only the standing tier is protected: an invitation above it but below a live grant raises it",
+         %{default: default, admin: admin} do
+      until = DateTime.utc_now() |> DateTime.add(1, :day) |> DateTime.truncate(:second)
+
+      {_invitation, token, owner} =
+        invited_legacy(admin, :viewer, :editor, %{
+          granted_role: :admin,
+          granted_role_expires_at: until
+        })
+
+      assert {:ok, %{outcome: :joined, role: :editor}} = accept_existing(token)
+      assert memberships(owner.id)[default].role == :editor
+    end
+
+    test "an unconfirmed legacy editor accepting with a password keeps its tier", %{
+      default: default,
+      admin: admin
+    } do
+      {_invitation, token, owner} =
+        invited_legacy(admin, :editor, :viewer, %{confirmed_at: nil})
+
+      assert {:ok, accepted} = accept_with_password(owner, token)
+      assert %{outcome: :already_member, role: :editor} = accepted.__metadata__.invitation_outcome
+      assert memberships(owner.id)[default].role == :editor
+    end
+
+    test "a custom role at an equal or lower tier is not applied", %{
+      default: default,
+      admin: admin
+    } do
+      role = Accounts.create_role!(%{name: "Desk #{uniq()}", org_id: default}, actor: admin)
+
+      {_invitation, token, owner} =
+        invited_legacy(admin, :admin, :editor, %{}, %{role_id: role.id})
+
+      assert {:ok, %{outcome: :already_member, role: :admin}} = accept_existing(token)
+      assert memberships(owner.id)[default].role_id == nil
+    end
+
+    test "carry_legacy?: false (a brand-new account) leaves the viewer join as it was", %{
+      default: default,
+      admin: admin
+    } do
+      {invitation, _token, owner} = invited_legacy(admin, :editor, :viewer)
+
+      assert {:ok, {:ok, %{outcome: :joined, membership: %{role: :viewer}}}} =
+               Repo.transaction(fn ->
+                 Invitations.grant_membership(owner, invitation, %{}, carry_legacy?: false)
+               end)
+
+      assert memberships(owner.id)[default].role == :viewer
+    end
+
+    test "a stale struct: the role is read fresh under the lock, not from the caller's copy", %{
+      default: default,
+      admin: admin
+    } do
+      # Demoted after the struct was loaded: no higher tier is written.
+      {invitation, _token, stale} = invited_legacy(admin, :editor, :viewer)
+      Ash.Seed.update!(stale, %{role: :viewer})
+
+      assert {:ok, {:ok, %{outcome: :joined, membership: %{role: :viewer}}}} =
+               Repo.transaction(fn -> Invitations.grant_membership(stale, invitation) end)
+
+      assert memberships(stale.id)[default].role == :viewer
+
+      # Promoted after the struct was loaded: carried.
+      {invitation2, _token2, stale2} = invited_legacy(admin, :viewer, :viewer)
+      Ash.Seed.update!(stale2, %{role: :editor})
+
+      assert {:ok, {:ok, %{outcome: :already_member, membership: %{role: :editor}}}} =
+               Repo.transaction(fn -> Invitations.grant_membership(stale2, invitation2) end)
+
+      assert memberships(stale2.id)[default].role == :editor
+    end
+  end
+
   describe "OrgMembership.:raise_role_by_invitation, called directly" do
     setup do
       site = org("raise-direct")

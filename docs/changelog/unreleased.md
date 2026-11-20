@@ -176,6 +176,30 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="invitation-keeps-legacy-tier"></a>
+
+- **Accepting an invitation to the default site at a lower tier no longer demotes an account that has no membership but a legacy editor or admin role (#2574).**
+  Such an account (created before site memberships; it shows as *legacy* on the
+  default site) was joined at the invited tier, so an editor invited as a
+  viewer became a viewer. Now its legacy tier is written to a default-site
+  membership first, with the audit event `role_granted` (`via: "legacy_carry"`),
+  its audiences, and a live temporary role with the same expiry, and the accept
+  reports the account as already a member (`:already_member`; the invitation is
+  used up and the page says nothing changed). An invitation at the same or a
+  higher tier is an ordinary join at the invited tier, with no carry row. Only
+  the standing role is protected: the comparison uses the account as re-read
+  under its lock, and a live temporary role is not counted. A custom role on a
+  swallowed lower-tier invitation is not applied (the account is reported as
+  already a member and `role_id` stays unset). New accounts created by an
+  invitation are unaffected. An admin's explicit **Add or invite** is unchanged
+  and still writes the tier picked, even below a legacy role. For operators: if
+  an editor or admin account was demoted this way before the fix, raise it
+  again on Team; nothing is migrated and rolling back is safe. Still open, as
+  #3178, #3179 and #3180: the console Add can still demote an unaffiliated legacy account,
+  approving a registration queued through site single sign-on can demote one
+  too, and a custom role on a swallowed invitation is not applied. See
+  [If the invitee is already a member](../account-administration.md#if-the-invitee-is-already-a-member).
+
 <a id="webhook-ordering-identity"></a>
 
 - **A late, retried or foreign provider webhook can no longer overwrite a membership with the wrong subscription's state (#2749).** Metadata resolves an event to a membership row, not to a subscription, so a delayed event could undo newer state and an event for an abandoned subscription could rewrite a paying row. Events are now checked before they are applied, and one that fails is acknowledged, writes nothing and ends `ignored` in `/editor/billing` with a reason. `other_subscription`: the membership is `active` or `past_due`, holds a subscription id, and the event is about a different one (logged at warning); a cancellation for a subscription other than the stored one is ignored on any row, so it never overwrites the stored id. `out_of_order`: the event's `created` is older than the last one applied for the same subscription; an equal stamp applies, except that an event that would not cancel never revives a `canceled` row. `comped_not_provider_managed`: a `comped` membership ignores every provider event, and comping a paying member does not cancel their provider subscription (#3156), so cancel it in the provider's dashboard. An event with no subscription id, or an entitling row with no stored one, is still applied. A row that does not entitle accepts a different subscription only when it is `incomplete`, when the state was fetched live at checkout, or when the event is strictly newer than the last one applied, so a late non-cancelling event for a canceled row's old subscription cannot revive it. Checkout completion applies state fetched live, is exempt from the ordering check, and is stamped with the checkout event's own `created`. `invoice.payment_failed` now also has its subscription id read from the newer Stripe shape (`parent.subscription_details.subscription`). The check repeats inside the write transaction under the row lock; a row that moved and an event now superseded settles as `ignored`, and if the row moved but the event still applies the write errors and Oban retries it. Residual window: Stripe's `created` has one-second resolution, so two different events in the same second delivered in the wrong order are not caught. Replaying an applied event still appends a second `reconciled` audit row (status unchanged). Operators: ignored events show in `/editor/billing` with the reason; a burst of `other_subscription` is worth a look. A new nullable column, `billing_memberships.last_provider_event_at` (expand-only, not exposed in the API), and no config. A node on the previous release does not stamp it, which only makes ordering more permissive, so rolling back is safe. See [Late, repeated and foreign events](../memberships.md#late-repeated-and-foreign-events).
