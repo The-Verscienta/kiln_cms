@@ -5155,7 +5155,7 @@ The files column reads, for the backup as a whole:
 | `partly pruned (retention)` | Some parts of a media set are still here, and every part that's gone was removed by the application's own retention. |
 | `off-site only` | Gone locally, but a copy reached an off-site destination (`BACKUP_RCLONE_REMOTE` or a stored one). |
 | `expired` | `backup.sh prune` on cron removed it. See [Expired, probably expired, missing](#expired-probably-expired-missing). |
-| `probably expired` | Most likely removed by `backup.sh prune`, but cron's `BACKUP_KEEP_DAYS` isn't known here, so the app's own is used. |
+| `probably expired` | Most likely removed by `backup.sh prune`, but the `BACKUP_KEEP_DAYS` cron pruned with since isn't known here, so an estimate is used. |
 | `missing` | Gone with no recorded reason: deleted by hand, or recorded by another node. |
 | `couldn't check` | Its directory or one of its files couldn't be read (permissions, an I/O error, a stale network mount), so nothing is claimed. Also shown on every row when the read of the backup directory failed outright. |
 | `couldn't check in time` | The read of the backup directory didn't answer within 5 seconds. |
@@ -5218,17 +5218,38 @@ is gone, by cron's own rules as far as the app can see them. A gone file is
   prune keeps those, so something else removed it;
 - no newer complete backup of the same kind (database or media) is in the
   directory: prune never deletes the newest complete one;
-- it is no older than the retention window plus a day (below), by the
-  run's finish time, else its start;
+- no prune that ran after it would have removed it (below);
 - `db/` or `media/` couldn't be listed, so a marker can't be ruled out.
 
-Otherwise it is `expired`. Cron's `BACKUP_KEEP_DAYS` is read from the
-`keep_days` that `backup.sh all` writes into `manifest.json`. When the
-manifest there is the app's own (the last backup was an in-app one) or
-there is none, cron's value is unknown: the app's `BACKUP_KEEP_DAYS` stands
-in, and an old enough file reads `probably expired`. Only the latest
-manifest is read, so a host that changed cron's `BACKUP_KEEP_DAYS` is judged
-by the newer value.
+Otherwise it is `expired`. `backup.sh prune` deletes with the
+`BACKUP_KEEP_DAYS` in force when it runs, so a file is judged by the prunes
+that ran after its backup, not by today's value (#3113). `backup.sh all`
+prunes as its last step and writes that `BACKUP_KEEP_DAYS` into
+`manifest.json` as `keep_days`; the importer stores it on the imported row
+of that run, when the run succeeded and the manifest is cron's. Age is
+counted from the run's finish time, else its start. Then:
+
+- **A later cron run recorded `keep_days`.** The file is `expired` if one of
+  those runs finished more than its `keep_days` plus a day after the file's
+  backup, so its prune would have removed it. Otherwise it is `missing`.
+  Shortening `BACKUP_KEEP_DAYS` takes effect from the next prune; lengthening
+  it doesn't bring back what an earlier prune already counted.
+- **Later cron runs exist, but none recorded `keep_days`.** The file reads
+  `probably expired` once it is older than the latest cron manifest's
+  `keep_days` (else the app's `BACKUP_KEEP_DAYS`) plus a day.
+- **No imported run is newer than it.** Its age today against the
+  `keep_days` in the latest `manifest.json`, when cron wrote it: older than
+  that plus a day is `expired`. When the manifest there is the app's own
+  (the last backup was an in-app one) or there is none, the app's
+  `BACKUP_KEEP_DAYS` stands in, and an old enough file reads
+  `probably expired`.
+
+A cron run's `keep_days` is captured only if the app imports it while its
+manifest is still the latest one: at the start of each backup, at each
+marker sync (every 15 minutes) and whenever History opens. A run whose
+manifest the next run overwrote first, a `backup.sh db` or `backup.sh media`
+entry (they write no manifest), and every row an older release imported keep no
+`keep_days`; the rows they precede are judged by the other cases.
 
 A backup the app made is never `expired`: the app records its own prunes.
 If cron's `backup.sh prune` shares a `BACKUP_DIR` with in-app backups and

@@ -18,6 +18,10 @@
   [ADR 0041](0041-the-app-and-backup-sh-agree-on-what-to-keep-only-through-presence-only-marker-files.md)
   and [ADR 0062](0062-a-schedules-keep-holds-reach-backup-sh-through-a-third-presence-only-marker.md)
   (the markers prune obeys).
+- **Amended** (2026-11-19, [#3113](https://github.com/The-Verscienta/kiln_cms/issues/3113)):
+  an imported row is judged by the cron prunes that ran after it, each with
+  the `keep_days` its run recorded, before the latest manifest's window.
+  This closes the first item of "When to revisit".
 - **Changelog** — the 1.10.0 entry
   [Backups History says what is on this server's disk artifact by artifact](../changelog/v1.10.0.md#backup-history-presence).
 
@@ -91,12 +95,38 @@ network mount that hung froze the page, its buttons and its poll.
   The window is cron's `BACKUP_KEEP_DAYS`, which `backup.sh all` writes into
   `manifest.json` as `keep_days`. `KilnCMS.Backups.DiskView` reads it only
   from a manifest without `"components"`, which the app always writes, so the
-  value is cron's. Past it, the unit is `:expired`. When the latest manifest
-  is the app's, or there is none, cron's window is unknown: the app's
-  `BACKUP_KEEP_DAYS` stands in, and past it the unit is only
-  `:probably_expired`.
+  value is cron's (`KilnCMS.Backups.Manifest.cron?/1`). Past it, the unit is
+  `:expired`. When the latest manifest is the app's, or there is none,
+  cron's window is unknown: the app's `BACKUP_KEEP_DAYS` stands in, and past
+  it the unit is only `:probably_expired`.
+
+  **Amended by #3113: the prunes after the row decide first.** `backup.sh`
+  prunes with the `BACKUP_KEEP_DAYS` in force when the prune runs, so the
+  latest manifest's window is only right for a row no later cron run has
+  pruned past. The importer stores `keep_days` on an imported run
+  (`Run.keep_days`, nullable, set only by `:import`) when the run's covering
+  manifest is cron's and says it succeeded: `backup.sh all` prunes last,
+  just before that manifest, and a failed run may have stopped first. With
+  `at` the unit's `finished_at`, else `started_at`, and P ranging over the
+  imported runs started after the row:
+  - some P recorded `keep_days`: `:expired` if, for one of them,
+    `P.finished_at - at > (P.keep_days + 1) days`, else `:missing`;
+  - no P recorded `keep_days`, but some P exists: `:probably_expired` past
+    the latest cron manifest's window (else the app's) plus a day;
+  - no P: the rule above, unchanged.
+
+  `KilnCMSWeb.BackupLive` reads the P with `keep_days` (only those started
+  after the page's oldest imported row, four columns) and the newest
+  imported run's start, as the platform admin, before each disk read, and
+  passes them to the read (`DiskView.read/4`, `:cron_prunes`): the disk read
+  itself still does no database reads, and no older manifest is read from
+  disk. Rows are never rewritten (`:import` does nothing on a stamp it
+  already has), so rows imported before #3113 keep `nil`. A cron run records
+  `keep_days` only if an import runs while its manifest is the latest (a
+  backup's start, the marker sync every 15 minutes, a History mount);
+  `backup.sh db` and `media` entries write no manifest and never do.
 - **The disk is read off the page process.** `KilnCMSWeb.BackupLive` runs
-  `KilnCMS.Backups.DiskView.read/3` in `start_async/3`, one read at a time
+  `KilnCMS.Backups.DiskView.read/4` in `start_async/3`, one read at a time
   per page: a refresh while one is out marks the page dirty, and the read
   that lands starts one more. A read lists `db/` and `media/` once each,
   reads `manifest.json` once, `lstat`s only listed names, checks
@@ -137,10 +167,10 @@ network mount that hung froze the page, its buttons and its poll.
 
 ## When to revisit
 
-- **A host where cron and the app both back up.** The latest manifest is
+- ~~**A host where cron and the app both back up.** The latest manifest is
   often the app's, so cron's `keep_days` is unknown and every eligible
-  imported row reads `probably expired`. Neither the importer nor the run
-  log keeps an older manifest's `keep_days`; reading it from there would
-  need new storage (#2942).
+  imported row reads `probably expired`.~~ Closed by #3113: each imported
+  cron run stores the `keep_days` its manifest recorded, and a row is judged
+  by the prunes after it.
 - **A directory per host.** Runs carry the `dir_id` of their directory
   (#2539); presence could say "on another host" instead of `missing`.

@@ -267,6 +267,126 @@ defmodule KilnCMS.Backups.PresenceTest do
     end
   end
 
+  describe "expired: judged by the cron prunes after the row (#3113)" do
+    @row "20260701-031700"
+    @later "20260720-031700"
+    # One clock for the rows, the prunes and the context, so a boundary is exact.
+    @now ~U[2026-08-01 03:17:00.000000Z]
+
+    setup %{dir: dir} do
+      touch(dir, "db", "kiln-db-#{@later}.dump")
+      :ok
+    end
+
+    defp days_ago(days), do: DateTime.add(@now, -days * 86_400, :second)
+
+    # An imported row whose dump finished `age` days before `@now`.
+    defp row(age) do
+      run([artifact(:db, "kiln-db-#{@row}.dump")],
+        origin: :imported,
+        stamp: @row,
+        started_at: days_ago(age),
+        finished_at: days_ago(age)
+      )
+    end
+
+    # A later imported cron run, `age` days before `@now`, that recorded
+    # `keep_days`.
+    defp prune(age, keep_days),
+      do: %Run{
+        origin: :imported,
+        started_at: days_ago(age),
+        finished_at: days_ago(age),
+        keep_days: keep_days
+      }
+
+    defp prunes(windows, newest \\ :latest) do
+      newest =
+        if newest == :latest,
+          do: windows |> Enum.map(& &1.started_at) |> Enum.max(DateTime, fn -> nil end),
+          else: newest
+
+      Presence.cron_prunes(windows, newest)
+    end
+
+    defp judged(run, dir, opts), do: state(run, dir, Keyword.put(opts, :now, @now))
+
+    test "a window shortened later: the later prune removed it, expired", %{dir: dir} do
+      # The row's own run recorded 30; a prune 10 days later ran with 7.
+      prunes = prunes([prune(30, 30), prune(20, 7)])
+      assert judged(row(30), dir, cron_prunes: prunes) == :expired
+    end
+
+    test "a window lengthened later: no later prune removed it, missing", %{dir: dir} do
+      # 10 days old at a prune that ran with 30.
+      prunes = prunes([prune(30, 7), prune(20, 30)])
+      assert judged(row(30), dir, cron_prunes: prunes) == :missing
+      # The latest manifest's shorter window doesn't override what the prunes did.
+      assert judged(row(30), dir, cron_prunes: prunes, cron_keep_days: 3) == :missing
+    end
+
+    test "any one later prune that would have removed it is enough", %{dir: dir} do
+      prunes = prunes([prune(25, 30), prune(15, 7), prune(5, 30)])
+      assert judged(row(30), dir, cron_prunes: prunes) == :expired
+    end
+
+    test "a prune exactly keep_days plus one after the row keeps it", %{dir: dir} do
+      assert judged(row(30), dir, cron_prunes: prunes([prune(22, 7)])) == :missing
+      assert judged(row(30), dir, cron_prunes: prunes([prune(21, 7)])) == :expired
+    end
+
+    test "prunes started before the row don't judge it", %{dir: dir} do
+      prunes = prunes([prune(40, 1)])
+      # No imported run after the row: the latest manifest's window decides.
+      assert judged(row(30), dir, cron_prunes: prunes, cron_keep_days: 60) == :missing
+      assert judged(row(30), dir, cron_prunes: prunes, cron_keep_days: 3) == :expired
+    end
+
+    test "later imported runs that recorded no keep_days: probably expired", %{dir: dir} do
+      prunes = prunes([], days_ago(5))
+      assert judged(row(30), dir, cron_prunes: prunes, cron_keep_days: 3) == :probably_expired
+      assert judged(row(30), dir, cron_prunes: prunes) == :probably_expired
+      # Younger than the window it is judged by (the app's 14 days): not claimed.
+      assert judged(row(10), dir, cron_prunes: prunes) == :missing
+    end
+
+    test "no imported run after the row: the latest manifest, then the app's", %{dir: dir} do
+      prunes = prunes([])
+      assert judged(row(30), dir, cron_prunes: prunes, cron_keep_days: 3) == :expired
+      assert judged(row(3), dir, cron_prunes: prunes, cron_keep_days: 3) == :missing
+      assert judged(row(30), dir, cron_prunes: prunes) == :probably_expired
+      # Not read at all: the same.
+      assert judged(row(30), dir, cron_keep_days: 3) == :expired
+    end
+
+    test "the latest manifest is the app's, but a later run recorded cron's window",
+         %{dir: dir} do
+      # No `cron_keep_days`: the directory's manifest is Kiln's.
+      assert judged(row(30), dir, cron_prunes: prunes([prune(10, 7)])) == :expired
+    end
+
+    test "a pin, or no newer complete dump, still wins", %{dir: dir} do
+      prunes = prunes([prune(10, 1)])
+      touch(dir, "db", "kiln-#{@row}.keep")
+      assert judged(row(30), dir, cron_prunes: prunes) == :missing
+      File.rm!(Path.join([dir, "db", "kiln-#{@row}.keep"]))
+
+      File.rm!(Path.join([dir, "db", "kiln-db-#{@later}.dump"]))
+      assert judged(row(30), dir, cron_prunes: prunes) == :missing
+    end
+
+    test "an app-made run is never judged by cron's prunes", %{dir: dir} do
+      app = %{row(30) | origin: :app}
+      assert judged(app, dir, cron_prunes: prunes([prune(10, 1)])) == :missing
+    end
+
+    test "cron_prunes/2 skips runs without keep_days" do
+      prunes = Presence.cron_prunes([prune(10, nil), prune(5, 2)], days_ago(5))
+      assert prunes.cutoffs == [{days_ago(5), days_ago(8)}]
+      assert prunes.newest_import == days_ago(5)
+    end
+  end
+
   test "none for a run with no artifacts", %{dir: dir} do
     assert presence(run([]), dir) == %{state: :none, artifacts: []}
   end

@@ -109,6 +109,8 @@ defmodule KilnCMS.Backups do
       define :run_history, action: :history
       define :get_run, action: :read, get_by: [:id]
       define :get_run_by_stamp, action: :by_stamp, args: [:stamp], not_found_error?: false
+      define :list_run_prune_windows, action: :prune_windows, args: [:after]
+      define :newest_imported_run, action: :newest_import, not_found_error?: false
       define :list_running_runs, action: :running
       define :mark_run_pruned, action: :mark_pruned
       define :cancel_run, action: :cancel
