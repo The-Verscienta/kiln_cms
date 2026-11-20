@@ -63,7 +63,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Added
 
 - **`GET /api/security/plugin-health`: each installed plugin's health as JSON for monitoring, read from the server's cache and never asking hex.pm; platform administrators only, behind the host site's admin allowlist.**
-  ([long form](docs/changelog/unreleased.md#plugin-health-api))
+  ([#3135](https://github.com/The-Verscienta/kiln_cms/pull/3135) · [long form](docs/changelog/unreleased.md#plugin-health-api))
 
 ### Changed
 
