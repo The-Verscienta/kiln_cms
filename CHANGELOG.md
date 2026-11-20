@@ -89,6 +89,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Billing webhooks: recording an event and enqueueing its job are now one transaction, so a failure leaves nothing recorded and the provider's retry starts clean; redelivering an unfinished event re-enqueues it, and a worker that crashes or stalls is retried or reclaimed after 10 minutes.**
+  ([long form](docs/changelog/unreleased.md#billing-webhook-lost-events))
+
 - **Backups: two S3 destinations that name one bucket through different hosts (AWS global vs regional, R2 jurisdiction hosts, a MinIO by name and by IP) no longer both prune it; neither does, and the Destinations badge says why.**
   ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap))
 

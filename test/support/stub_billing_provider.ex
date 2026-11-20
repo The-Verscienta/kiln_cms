@@ -73,6 +73,9 @@ defmodule KilnCMS.StubBillingProvider do
   def retrieve_subscription(id, _config) do
     case setting(:subscription) do
       {:error, reason} -> {:error, reason}
+      # Crash the caller, to prove a webhook worker settles an exception.
+      {:raise, message} -> raise message
+      {:throw, value} -> throw(value)
       nil -> {:ok, subscription(id, "active")}
       subscription -> {:ok, subscription}
     end
