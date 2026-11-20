@@ -7,7 +7,9 @@ defmodule KilnCMS.Billing.Changes.RecordTransition do
   (`KilnCMS.Billing.MembershipWebhooks`).
 
   None of it happens for an erased account, whose transition
-  `KilnCMS.Billing.Changes.SettleErasedAccount` has made a no-op (#2774).
+  `KilnCMS.Billing.Changes.SettleErasedAccount` has made a no-op (#2774), nor
+  for a provider event that turned out to be superseded under the row lock
+  (`KilnCMS.Billing.Changes.GuardProviderEvent`, #2749).
 
   All four happen in the action's `after_action`, i.e. **inside the same
   transaction** as the status write. If the recompute fails, the status change
@@ -21,6 +23,7 @@ defmodule KilnCMS.Billing.Changes.RecordTransition do
   use Ash.Resource.Change
 
   alias KilnCMS.Billing
+  alias KilnCMS.Billing.Changes.GuardProviderEvent
   alias KilnCMS.Billing.Changes.SettleErasedAccount
   alias KilnCMS.Billing.Entitlements
   alias KilnCMS.Billing.MembershipWebhooks
@@ -34,10 +37,12 @@ defmodule KilnCMS.Billing.Changes.RecordTransition do
     |> Ash.Changeset.after_action(fn changeset_now, membership ->
       # An erased account's transition was settled as a no-op
       # (`SettleErasedAccount`, #2774): it changed nothing, so there is
-      # nothing to recompute, record, announce or sync.
-      if SettleErasedAccount.erased?(changeset_now),
-        do: {:ok, membership},
-        else: record(changeset, membership, from_status, context)
+      # nothing to recompute, record, announce or sync. The same goes for a
+      # provider event superseded under the lock (#2749).
+      if SettleErasedAccount.erased?(changeset_now) or
+           GuardProviderEvent.ignored?(changeset_now),
+         do: {:ok, membership},
+         else: record(changeset, membership, from_status, context)
     end)
   end
 

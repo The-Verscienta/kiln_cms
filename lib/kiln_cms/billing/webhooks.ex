@@ -279,6 +279,20 @@ defmodule KilnCMS.Billing.Webhooks do
   # subscription id not consuming an event the customer rung could still
   # resolve — holds either way, and is tested for its own sake.
   defp subscription_id(%{"object" => "subscription", "id" => id}) when is_binary(id), do: id
+  #
+  # On the pinned `2025-04-30.basil` API an invoice's subscription moved to
+  # `parent.subscription_details.subscription` (#2749); the flat key is kept for
+  # the shape before it.
+  defp subscription_id(%{"parent" => %{"subscription_details" => %{"subscription" => sub}}})
+       when is_binary(sub),
+       do: sub
+
+  defp subscription_id(%{
+         "parent" => %{"subscription_details" => %{"subscription" => %{"id" => id}}}
+       })
+       when is_binary(id),
+       do: id
+
   defp subscription_id(%{"subscription" => %{"id" => id}}) when is_binary(id), do: id
   defp subscription_id(%{"subscription" => id}) when is_binary(id), do: id
   defp subscription_id(_object), do: nil

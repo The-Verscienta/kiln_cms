@@ -72,6 +72,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Billing webhooks: an event older than the last one applied, about a different subscription than the membership holds, or for a `comped` membership is now ignored (with a reason in `/editor/billing`) instead of overwriting it; new nullable column `last_provider_event_at`, rollback-safe.**
+  ([long form](docs/changelog/unreleased.md#webhook-ordering-identity))
+
 - **Billing webhooks: a database fault while resolving an event's membership now fails the event and Oban retries it (8 attempts) instead of dropping it as `ignored`; a metadata mismatch halts the lookup as `ignored` (`metadata_mismatch`) with nothing written.**
   ([long form](docs/changelog/unreleased.md#webhook-resolve-ladder-errors))
 

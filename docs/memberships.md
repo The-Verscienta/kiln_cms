@@ -265,6 +265,58 @@ the checkout session **and** the subscription it creates: session metadata does
 not propagate to the subscription, and the subscription is what carries every
 later event.
 
+### Late, repeated and foreign events
+
+Finding the membership row is not the same as knowing the event belongs to the
+subscription that row holds. The provider delivers late and retries, and one row
+can see two subscriptions over its life (a checkout abandoned, then retried and
+paid). So once an event resolves, Kiln checks it before applying it. An event
+that fails the check is acknowledged, nothing is written, and the event row in
+`/editor/billing` is `ignored` with the reason:
+
+| Reason | When | Notes |
+|---|---|---|
+| `other_subscription` | The membership is entitling (`active` or `past_due`) and holds a subscription id, and the event is about a different subscription. Also a row that does not entitle, in the cases under the list below, and a cancellation (`customer.subscription.deleted`) for a subscription other than the stored one, on any row. | Logged at warning. It can mean the provider is still billing a subscription this membership no longer holds: check the provider's dashboard. A cancellation for a different subscription never overwrites the stored subscription id. |
+| `out_of_order` | The event is older than the last one applied to the **same** subscription. | Compared with the provider's `created` stamp, kept on the row. |
+| `comped_not_provider_managed` | The membership is `comped`. | Every provider event for a comped row is ignored. Comping a paying member does **not** cancel their provider subscription (#3156): cancel it in the provider's dashboard, or the person stays billed. |
+
+Details worth knowing:
+
+- A row that does not entitle (`incomplete`, `canceled`) accepts a different
+  subscription only in three cases: the row is `incomplete` (an abandoned
+  checkout replaced by a paid one), the state was retrieved live at checkout (a
+  canceled member resubscribing), or the event is strictly newer than the last
+  one applied. A late, non-cancelling event for the old subscription of a
+  `canceled` row is ignored (`other_subscription`), so it cannot revive access
+  on a dead subscription. Ordering restarts with an admitted new subscription: a
+  delayed event for it is not judged against the old one's stamp.
+- An event with no subscription id, or an entitling row with no stored
+  subscription id, is applied: there is nothing to compare, so the check fails
+  open.
+- Events with an equal `created` stamp are applied, except that an event that
+  would not cancel never revives a `canceled` row at the same stamp. The
+  provider's stamp has one-second resolution, so two *different* events in the
+  same second delivered in the wrong order remain a residual window.
+- Checkout completion applies the state Kiln just retrieved from the provider,
+  which is newer than any event: it is exempt from the ordering check, and the
+  row is stamped with the checkout event's own `created` (the provider's clock,
+  the same one later events carry), not the server's clock.
+- `invoice.payment_failed` carries its subscription id at
+  `parent.subscription_details.subscription` on the newer Stripe API shape, and
+  at `subscription` on the older one. Both are read.
+- The check runs again inside the write transaction, under the row lock, so two
+  workers racing on one membership cannot both pass. If the row moved and the
+  event is now superseded, it settles as `ignored` as above. If the row moved but
+  the event still applies, the write errors and Oban retries it (the event ends
+  `failed` if every attempt does).
+- Replaying an event that was already applied still appends a second `reconciled`
+  audit row; the status does not change.
+
+The stamp lives in a private column, `billing_memberships.last_provider_event_at`
+(nullable; not in the API). It is added by an expand-only migration with no
+config. A node still on the previous release simply does not stamp it, which only
+makes ordering more permissive, so rolling back is safe.
+
 ### When the member was erased
 
 Erasing an account cancels its paid memberships in Kiln, drops their provider
