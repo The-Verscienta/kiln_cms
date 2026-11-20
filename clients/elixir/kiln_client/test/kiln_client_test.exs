@@ -615,6 +615,87 @@ defmodule KilnClientTest do
     end
   end
 
+  # #3129: an empty 2xx used to pass `request/3` as `{:ok, ""}`, which
+  # `list/2` flattened to an empty collection and `sync/1`/`release/2`
+  # crashed on. No route a read calls answers an empty body by design.
+  describe "an empty 2xx body on a read" do
+    defp stub_empty(content_type \\ "application/json") do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type(content_type)
+        |> Plug.Conn.send_resp(200, "")
+      end)
+    end
+
+    test "list/2 returns :unexpected_body rather than an empty list" do
+      stub_empty()
+
+      assert {:error,
+              %KilnClient.Error{
+                reason: :unexpected_body,
+                status: 200,
+                method: :get,
+                path: "/api/json/posts/published",
+                body: ""
+              }} = KilnClient.list("posts")
+    end
+
+    test "one/3 returns :unexpected_body rather than :not_found" do
+      stub_empty()
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body, status: 200, body: ""}} =
+               KilnClient.one("posts", %{slug: "hello"})
+    end
+
+    test "sync/1 and release/2 return the error instead of crashing" do
+      stub_empty()
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body, body: "", path: "/api/sync"}} =
+               KilnClient.sync(retries: 0)
+
+      assert {:error,
+              %KilnClient.Error{reason: :unexpected_body, body: "", path: "/api/json/releases/r1"}} =
+               KilnClient.release("r1")
+    end
+
+    test "a plain-JSON read (menus/1) returns :unexpected_body, not an empty string" do
+      stub_empty()
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body, path: "/api/menus", body: ""}} =
+               KilnClient.menus()
+    end
+
+    test "artifact/3's llm surface is text, but an empty one is still an error" do
+      stub_empty("text/markdown")
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body, status: 200, body: ""}} =
+               KilnClient.artifact("posts", "hello", surface: "llm", retry: false)
+    end
+  end
+
+  # #3129: a 2xx JSON body of the wrong shape (`null`, `{}`) used to crash
+  # `sync/1` (no matching clause) and `release/2` (a failed match).
+  describe "a 2xx JSON body of the wrong shape" do
+    for {label, json} <- [{"null", "null"}, {"{}", "{}"}] do
+      test "sync/1 and release/2 return :unexpected_body on #{label}" do
+        stub_status(200, unquote(json))
+        decoded = Jason.decode!(unquote(json))
+
+        assert {:error,
+                %KilnClient.Error{reason: :unexpected_body, body: ^decoded, path: "/api/sync"}} =
+                 KilnClient.sync(retries: 0)
+
+        assert {:error,
+                %KilnClient.Error{
+                  reason: :unexpected_body,
+                  body: ^decoded,
+                  method: :get,
+                  path: "/api/json/releases/r1"
+                }} = KilnClient.release("r1")
+      end
+    end
+  end
+
   describe "transport" do
     test "sends the configured bearer key" do
       Application.put_env(:kiln_client, :api_key, "kiln_secret")

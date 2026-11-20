@@ -30,6 +30,8 @@
  * matches as `immutable` for a year; without one, it is cached for minutes.
  */
 
+import { KilnConfigError } from "./errors.js";
+
 // ── types ───────────────────────────────────────────────────────────────────
 
 /** `cover` (default) fills the box and crops; `contain` fits inside it. */
@@ -143,7 +145,9 @@ export function transformPath(media: TransformMedia, options: TransformOptions =
  * **Server-side only.** Anyone holding the key can make the server render
  * arbitrary sizes; never ship it to a browser.
  *
- * Async because it signs with WebCrypto (`globalThis.crypto.subtle`).
+ * Async because it signs with WebCrypto (`globalThis.crypto.subtle`). Rejects
+ * with `KilnConfigError` when `key` is empty (`missing_image_transform_key`)
+ * or the runtime has no WebCrypto (`webcrypto_unavailable`).
  */
 export async function signedTransformPath(
   media: TransformMedia,
@@ -421,9 +425,10 @@ function fnv1a32(bytes: Uint8Array): number {
 function subtleCrypto(): SubtleCrypto {
   const subtle = globalThis.crypto?.subtle;
   if (subtle === undefined) {
-    throw new Error(
+    throw new KilnConfigError(
       "Kiln image transform: signing needs WebCrypto (globalThis.crypto.subtle) — " +
         "Node 19+, or Node 18 with --experimental-global-webcrypto.",
+      "webcrypto_unavailable",
     );
   }
   return subtle;
@@ -431,7 +436,10 @@ function subtleCrypto(): SubtleCrypto {
 
 async function importKey(key: string): Promise<CryptoKey> {
   if (typeof key !== "string" || key === "") {
-    throw new Error("Kiln image transform: a signing key is required for signed URLs.");
+    throw new KilnConfigError(
+      "Kiln image transform: a signing key is required for signed URLs.",
+      "missing_image_transform_key",
+    );
   }
   return subtleCrypto().importKey(
     "raw",
