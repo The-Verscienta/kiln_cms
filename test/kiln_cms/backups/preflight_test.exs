@@ -108,6 +108,29 @@ defmodule KilnCMS.Backups.PreflightTest do
     end
   end
 
+  describe "free_space/1 (#2984)" do
+    test "reads the nearest directory that exists through the seam", %{tmp_dir: tmp} do
+      free({:ok, 42 * @mb})
+
+      assert {:ok, bytes} = Preflight.free_space(Path.join([tmp, "db", "not-yet"]))
+      assert bytes == 42 * @mb
+      assert_received {:measured, ^tmp}
+    end
+
+    test "is :error, without a log, when free space can't be read", %{tmp_dir: tmp} do
+      free(:error)
+
+      assert capture_log(fn -> assert :error = Preflight.free_space(tmp) end) == ""
+    end
+
+    test "reads df when no seam is set", %{tmp_dir: tmp, original: original} do
+      Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.delete(original, :free_space))
+
+      assert {:ok, bytes} = Preflight.free_space(tmp)
+      assert bytes > 0
+    end
+  end
+
   describe "needed/1" do
     test "is the estimate plus 10% plus the configured margin" do
       assert Preflight.needed(0) == 256 * @mb

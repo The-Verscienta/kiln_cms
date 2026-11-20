@@ -3128,6 +3128,23 @@ The plus one is the backup being made: the prune runs while it is still in
 flight, so it keeps N finished backups beside it, and N + 1 sets are on disk
 until the next prune. Budget for that with large media archives.
 
+**When the preview warns about the disk** (#2984). The preview warns, without
+stopping the save, when a schedule keeps more than 500 backups of each
+component: "This schedule keeps about 721 backups of each component. Check
+that the backup directory has room for them, or keep fewer." for every 2
+hours kept 60 days. It also warns when the estimate times the newest backup
+of each component the schedule covers is more than the free space in the
+backup directory: "This schedule keeps about 15 backups of each component
+(about 15.0 GB), more than the 10.0 GB free in the backup directory." The
+free space is read with `df` when the tab loads, after a change and on its
+minute refresh, in the background and for at most 10 seconds, as the
+free-space check before a backup reads it
+([Disk space](#media-backups-in-parts-2218)). The size half is left out
+until each covered component has a backup, when `df` can't be read, and
+when `BACKUP_FREE_SPACE_CHECK=false`. It errs toward warning: the estimate
+counts every set the schedule keeps, the ones already on the disk too,
+while the free space has those taken out.
+
 **What can go wrong:**
 
 | Message | Meaning |

@@ -25328,6 +25328,20 @@ msgstr "Esta programación cambió desde que la abrió, así que no se guardó. 
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
+msgid "This schedule keeps about %{count} backup of each component (about %{size}), more than the %{free} free in the backup directory."
+msgid_plural "This schedule keeps about %{count} backups of each component (about %{size}), more than the %{free} free in the backup directory."
+msgstr[0] "Esta programación conserva unas %{count} copia de cada componente (unos %{size}), más que los %{free} libres en el directorio de copias."
+msgstr[1] "Esta programación conserva unas %{count} copias de cada componente (unos %{size}), más que los %{free} libres en el directorio de copias."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "This schedule keeps about %{count} backup of each component. Check that the backup directory has room for them, or keep fewer."
+msgid_plural "This schedule keeps about %{count} backups of each component. Check that the backup directory has room for them, or keep fewer."
+msgstr[0] "Esta programación conserva unas %{count} copia de cada componente. Comprueba que el directorio de copias tiene espacio para ellas, o conserva menos."
+msgstr[1] "Esta programación conserva unas %{count} copias de cada componente. Comprueba que el directorio de copias tiene espacio para ellas, o conserva menos."
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
 msgid "This schedule runs more often than daily without Keep for (days), so its backups are kept for BACKUP_KEEP_DAYS. Set Keep for (days) to edit it; you can still pause, resume or delete it."
 msgstr "Esta programación se ejecuta más de una vez al día sin «Conservar durante (días)», así que sus copias se conservan según BACKUP_KEEP_DAYS. Indique «Conservar durante (días)» para editarla; aún puede pausarla, reanudarla o eliminarla."
 

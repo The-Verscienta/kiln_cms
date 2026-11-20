@@ -101,12 +101,28 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   expression's minute and hour fields), the schedule's card and the form's
   preview say that some of its windows are skipped
   (`data-role="tick-coarse"`). The default, every minute, never does.
+
+  ## A schedule that would fill the disk (#2984)
+
+  The preview warns, without refusing the save, when what the schedule keeps
+  looks like more than the disk takes (`data-role="disk-warning"`,
+  `disk_warning/3`): when the estimate is over 500 backups of each
+  component, or when the estimate times the newest backup of each component
+  it covers (`Backups.status/0`'s `last_good` `bytes`) is more than the free
+  space in the backup directory. The free space is read with
+  `KilnCMS.Backups.Preflight.free_space/1` (`df`, bounded to 10 seconds) in
+  its own `start_async/3`, started beside each status read, only while
+  connected and one at a time, and not at all when
+  `BACKUP_FREE_SPACE_CHECK=false`. Until both are read, or when either
+  can't be (no backup of a covered component yet, `df` unreadable), only
+  the count half applies.
   """
   use KilnCMSWeb, :live_view
 
   import KilnCMSWeb.BackupComponents
 
   alias KilnCMS.Backups
+  alias KilnCMS.Backups.Preflight
   alias KilnCMS.Backups.Schedule
   alias KilnCMS.Backups.Schedule.Window
   alias KilnCMS.Backups.Scheduler
@@ -120,6 +136,9 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   # KILN_BACKUP_SCHEDULER_CRON slot further back stretches it
   # (`tick_expected_since/1`).
   @stale_tick_floor_s 300
+
+  # More backups of each component than this and the preview warns (#2984).
+  @disk_warn_count 500
 
   @impl true
   def mount(_params, _session, socket) do
@@ -138,6 +157,8 @@ defmodule KilnCMSWeb.BackupScheduleLive do
        |> assign(:status_ref, nil)
        |> assign(:status_running?, false)
        |> assign(:status_dirty?, false)
+       |> assign(:free_space, nil)
+       |> assign(:free_space_running?, false)
        |> assign(:entries, [])
        |> assign(:runs, %{})
        |> assign(:stale_tick, nil)
@@ -313,6 +334,23 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket),
       do: {:noreply, status_settled(socket, :failed)},
       else: deny(socket)
+  end
+
+  # The backup directory's free space, for the preview's disk warning
+  # (#2984). Unreadable or crashed: the size half of the warning is dropped
+  # until a later read lands.
+  def handle_async(:free_space, result, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      free =
+        case result do
+          {:ok, {:ok, bytes}} when is_integer(bytes) and bytes >= 0 -> bytes
+          _unreadable -> nil
+        end
+
+      {:noreply, assign(socket, free_space: free, free_space_running?: false)}
+    else
+      deny(socket)
+    end
   end
 
   defp status_settled(socket, state) do
@@ -638,6 +676,74 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   end
 
   @doc false
+  # The preview's disk warning (#2984), or nil: `estimate` backups of each
+  # component, `set_bytes` the newest backup of each component the schedule
+  # covers summed (nil when one isn't known) and `free` the backup
+  # directory's free bytes (nil when unread). Over the free space wins, as it
+  # says the sizes; else over `@disk_warn_count` (500) backups warns on the count
+  # alone. Public for the tests.
+  @spec disk_warning(pos_integer(), non_neg_integer() | nil, non_neg_integer() | nil) ::
+          %{count: pos_integer(), size: non_neg_integer() | nil, free: non_neg_integer() | nil}
+          | nil
+  def disk_warning(estimate, set_bytes, free) do
+    size = if is_integer(set_bytes), do: estimate * set_bytes
+
+    cond do
+      is_integer(size) and is_integer(free) and size > free ->
+        %{count: estimate, size: size, free: free}
+
+      estimate > @disk_warn_count ->
+        %{count: estimate, size: nil, free: nil}
+
+      true ->
+        nil
+    end
+  end
+
+  # The newest backup of each of `components` summed, from the status's
+  # `last_good` sizes, or nil while the status is unread or one has none.
+  defp set_bytes(components, %{components: by_component}) when components != [] do
+    Enum.reduce_while(components, 0, fn component, sum ->
+      case by_component do
+        %{^component => %{last_good: %{bytes: bytes}}} when is_integer(bytes) ->
+          {:cont, sum + bytes}
+
+        _unknown ->
+          {:halt, nil}
+      end
+    end)
+  end
+
+  defp set_bytes(_components, _status), do: nil
+
+  defp preview_disk_warning(
+         %{components: [_ | _] = components, estimate: estimate},
+         status,
+         free
+       ),
+       do: disk_warning(estimate, set_bytes(components, status), free)
+
+  defp preview_disk_warning(_preview, _status, _free), do: nil
+
+  defp disk_warning_text(%{count: count, size: size, free: free}) when is_integer(size) do
+    ngettext(
+      "This schedule keeps about %{count} backup of each component (about %{size}), more than the %{free} free in the backup directory.",
+      "This schedule keeps about %{count} backups of each component (about %{size}), more than the %{free} free in the backup directory.",
+      count,
+      size: Preflight.human(size, :up),
+      free: Preflight.human(free, :down)
+    )
+  end
+
+  defp disk_warning_text(%{count: count}) do
+    ngettext(
+      "This schedule keeps about %{count} backup of each component. Check that the backup directory has room for them, or keep fewer.",
+      "This schedule keeps about %{count} backups of each component. Check that the backup directory has room for them, or keep fewer.",
+      count
+    )
+  end
+
+  @doc false
   # Whether some of what the schedule keeps is older than BACKUP_KEEP_DAYS
   # (`default`): a longer `keep_days`, or a newest N reaching further back
   # (N intervals, in hours). Public for the tests.
@@ -689,6 +795,28 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     |> assign(:status_running?, true)
     |> assign(:status_state, if(socket.assigns.status, do: :ready, else: :loading))
     |> start_async(:status, status_reader())
+    |> start_free_space_read()
+  end
+
+  # Beside each status read (connected only, as that is), one at a time: a
+  # `df` that hangs on a dead mount is bounded by `Preflight` and no other
+  # starts while it runs. Not at all with the free-space check turned off,
+  # which is how an operator says `df` misreports this disk.
+  defp start_free_space_read(socket) do
+    cond do
+      socket.assigns.free_space_running? ->
+        socket
+
+      not Preflight.enabled?() ->
+        assign(socket, :free_space, nil)
+
+      true ->
+        dir = Backups.dir()
+
+        socket
+        |> assign(:free_space_running?, true)
+        |> start_async(:free_space, fn -> Preflight.free_space(dir) end)
+    end
   end
 
   # `config :kiln_cms, KilnCMSWeb.BackupScheduleLive, status_timeout_ms: ...,
@@ -1022,6 +1150,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
           media_dir?={@media_dir?}
           runs_here?={@status && (@status.scheduler_enabled? and @status.available?)}
           tick_gap={@tick_gap}
+          disk_warning={preview_disk_warning(@preview, @status, @free_space)}
         />
 
         <section id="backup-schedules" class="rounded-lg border border-base-content/10 p-4 text-sm">
@@ -1290,6 +1419,7 @@ defmodule KilnCMSWeb.BackupScheduleLive do
   attr :media_dir?, :boolean, required: true
   attr :runs_here?, :any, required: true, doc: "nil until the status is read"
   attr :tick_gap, :any, required: true, doc: "`Scheduler.max_tick_gap_minutes/1`"
+  attr :disk_warning, :any, required: true, doc: "`disk_warning/3`, or nil"
 
   defp schedule_form(assigns) do
     field = assigns.form[:components]
@@ -1546,6 +1676,9 @@ defmodule KilnCMSWeb.BackupScheduleLive do
               @preview.estimate,
               components: components_label(@preview.components)
             )}
+          </p>
+          <p :if={@disk_warning} class="text-warning-ink" data-role="disk-warning">
+            {disk_warning_text(@disk_warning)}
           </p>
           <p :if={@preview.shorter_days} class="text-warning-ink" data-role="keep-shorter">
             {ngettext(

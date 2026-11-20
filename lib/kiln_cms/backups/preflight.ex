@@ -127,6 +127,18 @@ defmodule KilnCMS.Backups.Preflight do
   end
 
   @doc """
+  The free bytes on the file system holding `path` (its nearest existing
+  directory), read as `check/3` reads them: `df -Pk`, bounded to 10 seconds,
+  or the `free_space` function in tests. `:error` when it can't be read.
+  Doesn't log and doesn't look at `enabled?/0`; the caller decides both.
+
+  The Schedule tab's preview reads it, off the LiveView process, for its
+  disk warning (#2984).
+  """
+  @spec free_space(Path.t()) :: {:ok, non_neg_integer()} | :error
+  def free_space(path) when is_binary(path), do: path |> existing() |> free_bytes()
+
+  @doc """
   Whether the check runs (`free_space_check`, `BACKUP_FREE_SPACE_CHECK`;
   default on). Only `false` turns it off.
   """
