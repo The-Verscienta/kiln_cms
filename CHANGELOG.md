@@ -72,6 +72,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Choosing "join" again on a tier you already hold no longer demotes an `active`, `past_due` or `comped` membership to `incomplete`; the member is sent to `/account` with a notice instead, and no second checkout is opened.**
+  ([long form](docs/changelog/unreleased.md#billing-recheckout-keeps-live-membership))
+
 - **Experiments: a second Start, Conclude or Archive from a stale page or struct is refused instead of overwriting the first (the console reloads with a notice; `mix kiln.experiment conclude` reports the error instead of crashing), and a test now fails when any state machine transition lacks a from-state filter.**
   ([#3133](https://github.com/The-Verscienta/kiln_cms/pull/3133) · [long form](docs/changelog/unreleased.md#experiment-transition-compare-and-swap))
 
