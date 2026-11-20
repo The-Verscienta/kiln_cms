@@ -365,6 +365,13 @@ Why an invitation is not an account until it is accepted: [ADR 0050](decisions/0
      rejected: adding the address reverses that rejection
      ([Invitations and registrations](#invitations-and-registrations)).
 
+   **Add or invite** writes exactly the tier you picked. That includes an
+   account with no membership that still holds a legacy editor or admin role:
+   picking *Viewer* for it makes it a viewer on this site. Picking is a
+   decision, and the notice mail names the tier. An invitation the person
+   accepts themselves never lowers such an account
+   ([If the invitee is already a member](#if-the-invitee-is-already-a-member)).
+
    If the site [requires two-step sign-in](two-factor-auth.md#requiring-two-step-sign-in-on-a-site)
    of the tier you picked and the person has no second factor, the message
    goes on to say when they must set one up
@@ -500,6 +507,24 @@ the invited tier with the one they hold:
   records *Role granted*, with the previous role and no person.
 - **The invited tier or higher:** nothing changes, and the invitation is used
   up. An invitation never lowers anyone.
+
+An account that has **no membership at all** but still carries a legacy
+editor or admin role (the account was created before site memberships and
+shows as *legacy* on the default site) is treated the same way when the
+invitation is to the **default site** and its tier is **lower** than the
+standing role. The standing tier is written to a membership first (the
+security log records *Role granted* with the legacy carry as its source;
+audiences and a live temporary role come along, the temporary role with its
+original expiry), and the accept then reports "You're already a member of
+(site) as (tier); nothing changed." and uses the invitation up. Before this, such
+an accept joined the account at the lower tier. An invitation at the **same
+or a higher** tier is an ordinary join at the invited tier, with no carry. A
+custom role on a lower-tier invitation is not applied in this case; edit the
+member's row on Team afterwards if you want it. Invitations to a site other
+than the default one already carried the legacy tier first. An admin's own
+**Add or invite** is different: the tier you pick in the dropdown is a
+deliberate choice and is written as picked, even below the account's legacy
+role (step 3 of [Invite someone](#invite-someone-to-a-site)).
 
 The comparison is with the member's **standing** tier. A
 [temporary role](#temporary-roles) above it is not counted, because it

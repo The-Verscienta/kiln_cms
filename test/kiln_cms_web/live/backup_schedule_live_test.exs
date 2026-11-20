@@ -113,8 +113,9 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
     |> Enum.filter(&(&1.type == type))
   end
 
-  # A backup host cron made here `hours` ago, as the importer records one.
-  defp cron_import!(components, hours) do
+  # A backup host cron made here `hours` ago, as the importer records one,
+  # `bytes` of each component.
+  defp cron_import!(components, hours, bytes \\ 10) do
     at = DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
     stamp = KilnCMS.Backups.Artifact.stamp(at)
 
@@ -129,7 +130,7 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
         artifacts:
           for(
             c <- components,
-            do: %{kind: c, name: "kiln-#{c}-#{stamp}", bytes: 10, verified: true}
+            do: %{kind: c, name: "kiln-#{c}-#{stamp}", bytes: bytes, verified: true}
           )
       },
       actor: Backups.system()
@@ -672,6 +673,246 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
 
       refute has_element?(lv, "#schedule-preview [data-role=keep-shorter]", "sooner than")
       assert has_element?(lv, "#schedule-preview [data-role=keep-shorter]", "5 jours")
+    end
+  end
+
+  # #2984: warn-only, never a refusal.
+  describe "the preview's disk warning" do
+    @gb 1_073_741_824
+
+    # What `Preflight.free_space/1` reads, in place of `df`.
+    defp free_space(result), do: put_backups(:free_space, fn _path -> result end)
+
+    defp open_new(conn, locale \\ nil) do
+      lv = mount(conn, platform_admin(), locale)
+      lv |> element("#schedule-new") |> render_click()
+      lv
+    end
+
+    test "more than 500 backups of each component warns on the count", %{conn: conn} do
+      free_space(:error)
+      lv = open_new(conn)
+
+      # Every 2 hours for 60 days: 60 × 12 + 1.
+      preview_of(lv, %{"interval" => "every_2h", "keep_days" => "60"})
+
+      assert has_element?(
+               lv,
+               "#schedule-preview [data-role=disk-warning]",
+               "This schedule keeps about 721 backups of each component. Check that the backup directory has room for them, or keep fewer."
+             )
+
+      # The save isn't refused.
+      lv
+      |> form("#schedule-form",
+        schedule: form_params(%{"interval" => "every_2h", "keep_days" => "60"})
+      )
+      |> render_submit()
+
+      settle(lv)
+
+      assert [%{interval: :every_2h, keep_days: 60}] =
+               Backups.list_backup_schedules!(actor: platform_admin())
+    end
+
+    test "500 is the most that doesn't warn", %{conn: conn} do
+      free_space(:error)
+      lv = open_new(conn)
+
+      preview_of(lv, %{})
+      refute has_element?(lv, "#schedule-preview [data-role=disk-warning]")
+
+      # Keep the newest 499: 500 at a time.
+      preview_of(lv, %{"keep_count" => "499"})
+      assert has_element?(lv, "#schedule-preview [data-role=estimate]", "about 500 backups")
+      refute has_element?(lv, "#schedule-preview [data-role=disk-warning]")
+
+      preview_of(lv, %{"keep_count" => "500"})
+      assert has_element?(lv, "#schedule-preview [data-role=disk-warning]", "about 501 backups")
+    end
+
+    test "more than the free space warns with the sizes", %{conn: conn} do
+      cron_import!([:db], 2, @gb)
+      free_space({:ok, 10 * @gb})
+      lv = open_new(conn)
+
+      # Daily for BACKUP_KEEP_DAYS (14): 15 × 1 GB.
+      preview_of(lv, %{})
+
+      assert has_element?(
+               lv,
+               "#schedule-preview [data-role=disk-warning]",
+               "This schedule keeps about 15 backups of each component (about 15.0 GB), more than the backup directory has room for: 10.0 GB free and 0 KB in the backups already there."
+             )
+
+      # 6 × 1 GB fits.
+      preview_of(lv, %{"keep_days" => "5"})
+      refute has_element?(lv, "#schedule-preview [data-role=disk-warning]")
+    end
+
+    test "every covered component's newest backup counts", %{conn: conn, dir: dir} do
+      media = Path.join(dir, "uploads")
+      File.mkdir_p!(media)
+      put_backups(:media_dir, media)
+      cron_import!([:db, :media], 2, 400 * 1_048_576)
+      free_space({:ok, 10 * @gb})
+      lv = open_new(conn)
+
+      # The database alone: 15 × 400 MB fits.
+      preview_of(lv, %{})
+      refute has_element?(lv, "#schedule-preview [data-role=disk-warning]")
+
+      # Both: 15 × 800 MB doesn't.
+      preview_of(lv, %{"components" => ["", "db", "media"]})
+
+      assert has_element?(
+               lv,
+               "#schedule-preview [data-role=disk-warning]",
+               "(about 11.8 GB), more than the backup directory has room for: 10.0 GB free"
+             )
+    end
+
+    test "a component never backed up leaves the count rule only", %{conn: conn, dir: dir} do
+      media = Path.join(dir, "uploads")
+      File.mkdir_p!(media)
+      put_backups(:media_dir, media)
+      cron_import!([:db], 2, @gb)
+      free_space({:ok, @gb})
+      lv = open_new(conn)
+
+      preview_of(lv, %{"components" => ["", "db", "media"]})
+      refute has_element?(lv, "#schedule-preview [data-role=disk-warning]")
+
+      preview_of(lv, %{"components" => ["", "db", "media"], "keep_count" => "600"})
+      assert has_element?(lv, "#schedule-preview [data-role=disk-warning]", "about 601 backups")
+      refute has_element?(lv, "#schedule-preview [data-role=disk-warning]", "already there")
+    end
+
+    test "free space that can't be read leaves the count rule only", %{conn: conn} do
+      cron_import!([:db], 2, @gb)
+      free_space(:error)
+      lv = open_new(conn)
+
+      preview_of(lv, %{})
+      refute has_element?(lv, "#schedule-preview [data-role=disk-warning]")
+
+      preview_of(lv, %{"keep_count" => "600"})
+      assert has_element?(lv, "#schedule-preview [data-role=disk-warning]", "or keep fewer")
+      refute has_element?(lv, "#schedule-preview [data-role=disk-warning]", "already there")
+    end
+
+    test "with the free-space check off, free space isn't read", %{conn: conn} do
+      cron_import!([:db], 2, @gb)
+      parent = self()
+
+      put_backups(:free_space, fn _path ->
+        send(parent, :measured)
+        {:ok, 1}
+      end)
+
+      put_backups(:free_space_check, false)
+      lv = open_new(conn)
+
+      preview_of(lv, %{})
+      refute has_element?(lv, "#schedule-preview [data-role=disk-warning]")
+      refute_received :measured
+    end
+
+    test "free space is read once, in the background, after the connected mount", %{conn: conn} do
+      parent = self()
+
+      put_backups(:free_space, fn _path ->
+        send(parent, {:measured, self()})
+        {:ok, 1}
+      end)
+
+      lv = mount(conn, platform_admin())
+
+      # Once, from the connected mount's background read: not in the
+      # disconnected pass, and not on the LiveView process.
+      assert_received {:measured, reader}
+      refute_received {:measured, _}
+      refute reader == lv.pid
+    end
+
+    # The review's case: a volume already holding the sets a schedule keeps
+    # has them taken out of its free space; they are room, not a shortfall.
+    test "a schedule already holding its sets doesn't warn", %{conn: conn, dir: dir} do
+      cron_import!([:db], 2, 2_000)
+      db = Path.join(dir, "db")
+      File.mkdir_p!(db)
+
+      for day <- 1..15 do
+        stamp = "202610#{String.pad_leading("#{day}", 2, "0")}-030000"
+        File.write!(Path.join(db, "kiln-db-#{stamp}.dump"), :binary.copy("a", 2_000))
+      end
+
+      # Not backups: a partial, a sidecar and a marker don't count as room.
+      File.write!(Path.join(db, "kiln-db-20261016-030000.dump.partial"), :binary.copy("a", 9_000))
+      File.write!(Path.join(db, "notes.txt"), :binary.copy("a", 9_000))
+
+      # 15 × 2 000 bytes kept, 20 000 free besides the 30 000 already there.
+      free_space({:ok, 20_000})
+      lv = open_new(conn)
+
+      preview_of(lv, %{})
+      refute has_element?(lv, "#schedule-preview [data-role=disk-warning]")
+
+      # Keeping 30 needs 62 000 bytes: more than the 50 000 of room.
+      preview_of(lv, %{"keep_days" => "30"})
+
+      assert has_element?(
+               lv,
+               "#schedule-preview [data-role=disk-warning]",
+               "(about 61 KB), more than the backup directory has room for: 19 KB free and 29 KB in the backups already there."
+             )
+    end
+
+    test "a backup subdirectory that can't be listed leaves the count rule only",
+         %{conn: conn, dir: dir} do
+      cron_import!([:db], 2, @gb)
+      # A file where `db/` should be: listing it fails.
+      File.write!(Path.join(dir, "db"), "")
+      free_space({:ok, @gb})
+      lv = open_new(conn)
+
+      preview_of(lv, %{})
+      refute has_element?(lv, "#schedule-preview [data-role=disk-warning]")
+    end
+
+    test "the warning is translated", %{conn: conn} do
+      cron_import!([:db], 2, @gb)
+      free_space({:ok, 10 * @gb})
+      lv = open_new(conn, "fr")
+
+      preview_of(lv, %{})
+
+      assert has_element?(
+               lv,
+               "#schedule-preview [data-role=disk-warning]",
+               "environ 15 sauvegardes de chaque composant (environ 15.0 GB)"
+             )
+    end
+
+    test "disk_warning/3: over the room says the sizes; else over 500 on the count" do
+      count_only = fn n -> %{count: n, size: nil, free: nil, held: nil} end
+
+      assert BackupScheduleLive.disk_warning(15, @gb, %{free: 10 * @gb, held: 0}) ==
+               %{count: 15, size: 15 * @gb, free: 10 * @gb, held: 0}
+
+      # The backups already there are room: 20 free + 10 held fits 15 × 2.
+      assert BackupScheduleLive.disk_warning(15, 2 * @gb, %{free: 20 * @gb, held: 10 * @gb}) ==
+               nil
+
+      assert BackupScheduleLive.disk_warning(15, 2 * @gb, %{free: 20 * @gb, held: 9 * @gb}) ==
+               %{count: 15, size: 30 * @gb, free: 20 * @gb, held: 9 * @gb}
+
+      assert BackupScheduleLive.disk_warning(15, @gb, %{free: 15 * @gb, held: 0}) == nil
+      assert BackupScheduleLive.disk_warning(500, nil, nil) == nil
+      assert BackupScheduleLive.disk_warning(501, nil, nil) == count_only.(501)
+      assert BackupScheduleLive.disk_warning(501, 1, %{free: @gb, held: 0}) == count_only.(501)
+      assert BackupScheduleLive.disk_warning(600, @gb, nil) == count_only.(600)
+      assert BackupScheduleLive.disk_warning(600, nil, %{free: 1, held: 0}) == count_only.(600)
     end
   end
 

@@ -322,6 +322,76 @@ defmodule KilnClientDeliveryTest do
     end
   end
 
+  describe "site/1" do
+    @site %{
+      "site_name" => "Acme Docs",
+      "twitter_site" => "@acme",
+      "social_image_url" => "https://cms.example.com/uploads/card.png"
+    }
+
+    test "reads GET /api/site with no key and returns the body, unknown keys kept" do
+      stub(200, Map.put(@site, "added_later", true))
+
+      assert {:ok, %{"site_name" => "Acme Docs", "added_later" => true}} = KilnClient.site()
+
+      assert_received {:request, "GET", "/api/site", query, headers, nil}
+      assert query == %{}
+      assert headers["accept"] == ["application/json"]
+      assert headers["authorization"] == []
+    end
+
+    test "never sends the configured key" do
+      Application.put_env(:kiln_client, :api_key, "kiln_configured_key")
+      stub(200, @site)
+
+      assert {:ok, _} = KilnClient.site()
+      assert_received {:request, "GET", "/api/site", _, headers, nil}
+      assert headers["authorization"] == []
+    end
+
+    test "nulls are answers, not a wrong shape" do
+      stub(200, %{@site | "twitter_site" => nil, "social_image_url" => nil})
+
+      assert {:ok, %{"twitter_site" => nil, "social_image_url" => nil}} = KilnClient.site()
+    end
+
+    test "a 2xx missing one of the three keys is :unexpected_body" do
+      body = Map.delete(@site, "social_image_url")
+      stub(200, body)
+
+      assert {:error,
+              %Error{
+                reason: :unexpected_body,
+                status: 200,
+                body: ^body,
+                method: :get,
+                path: "/api/site"
+              }} = KilnClient.site()
+    end
+
+    test "an empty 2xx is :unexpected_body" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.send_resp(200, "")
+      end)
+
+      assert {:error, %Error{reason: :unexpected_body, status: 200, body: ""}} = KilnClient.site()
+    end
+
+    test "a 503 is :server with its Retry-After" do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("retry-after", "5")
+        |> Plug.Conn.put_status(503)
+        |> Req.Test.json(%{"errors" => [%{"status" => "503"}]})
+      end)
+
+      assert {:error, %Error{reason: :server, status: 503, retry_after: 5, path: "/api/site"}} =
+               KilnClient.site()
+    end
+  end
+
   describe "related/3" do
     test "reads the related documents with :limit and the locale" do
       body = %{"type" => "post", "slug" => "hello", "locale" => "en", "related" => []}

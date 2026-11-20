@@ -55,6 +55,9 @@ defmodule KilnCMS.Accounts.Scoping do
 
   @axes [:editable_types, :readable_types]
 
+  @typedoc "What names the org `permitted?/4` and `explicitly_permits?/4` judge on."
+  @type org_subject :: String.t() | map() | nil
+
   # How long a resolved affiliation may be reused within one process. Bounds
   # both the per-request duplicate lookups (policy checks + changes each
   # resolve) and staleness in long-lived LiveView processes.
@@ -68,9 +71,14 @@ defmodule KilnCMS.Accounts.Scoping do
   membership for the request's org while holding memberships elsewhere) is
   denied every type. A `nil` type name (a resource outside the content macro)
   only passes an unrestricted scope.
+
+  `subject` names the org the question is asked on: a bare org id, an
+  `%Organization{}`, or anything carrying a tenant (query, changeset, action
+  input, a plain `%{tenant: org}` map). `nil`, or a tenant-less subject, means
+  the default org. Any other shape (an integer, an atom, a list) raises
+  `ArgumentError` rather than silently judging the default site.
   """
-  @spec permitted?(map(), Ash.Query.t() | Ash.Changeset.t() | nil, atom(), String.t() | nil) ::
-          boolean()
+  @spec permitted?(map(), org_subject(), atom(), String.t() | nil) :: boolean()
   def permitted?(actor, subject, axis, type_name) when axis in @axes do
     case scope(actor, subject, axis) do
       :denied -> false
@@ -87,12 +95,7 @@ defmodule KilnCMS.Accounts.Scoping do
   `editable_types` entry implies editorial visibility, but "may author
   everything" must not dissolve a `readable_types` restriction).
   """
-  @spec explicitly_permits?(
-          map(),
-          Ash.Query.t() | Ash.Changeset.t() | nil,
-          atom(),
-          String.t() | nil
-        ) :: boolean()
+  @spec explicitly_permits?(map(), org_subject(), atom(), String.t() | nil) :: boolean()
   def explicitly_permits?(actor, subject, axis, type_name) when axis in @axes do
     case scope(actor, subject, axis) do
       :denied -> false
@@ -587,7 +590,7 @@ defmodule KilnCMS.Accounts.Scoping do
   def subject_org_id(subject), do: org_id(subject)
 
   defp scope(actor, subject, axis) do
-    case affiliation(actor, org_id(subject)) do
+    case affiliation(actor, scope_org_id(subject)) do
       {:member, %{status: :active} = membership} ->
         list_axis(membership, axis) || list_axis(role_of(membership), axis) ||
           list_axis(actor, axis) || []
@@ -684,6 +687,18 @@ defmodule KilnCMS.Accounts.Scoping do
   # can turn the memo off; production keeps the default.
   defp memo_ttl_ms do
     :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(:memo_ttl_ms, @memo_ttl_ms)
+  end
+
+  # `scope/3`'s org: `subject_org_id/1`'s resolution, but a value that cannot
+  # name an org at all (not nil, a binary or a map/struct) raises instead of
+  # falling back to the default org, which is how a bare id once hid #2599.
+  defp scope_org_id(subject) when is_nil(subject) or is_binary(subject) or is_map(subject),
+    do: subject_org_id(subject)
+
+  defp scope_org_id(subject) do
+    raise ArgumentError,
+          "Scoping cannot resolve an org from #{inspect(subject)}; pass an org id, " <>
+            "an %Organization{}, or a query/changeset with a tenant"
   end
 
   # The org the authorization runs under. Queries/changesets carry the resolved

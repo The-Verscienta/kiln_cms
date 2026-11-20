@@ -25,6 +25,12 @@ defmodule KilnCMS.Accounts.Invitations.AddOrInvite do
   outcome names that case, so the Team page can say a rejection was reversed
   rather than let it pass as an ordinary add.
 
+  A direct add writes the tier the admin chose, even below the standing legacy
+  tier of an account with no membership (#2574): the dropdown is a deliberate
+  decision and the notice mail names it. An invitation the invitee accepts
+  never lowers (`Invitations.grant_membership/4`), because no one chose the
+  lower tier for that account.
+
   ## As the actor, all the way down
 
   Every read and write here runs as the calling admin with authorization on —

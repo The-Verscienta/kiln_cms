@@ -162,8 +162,7 @@ defmodule KilnCMSWeb.WorkflowMessages do
   defp out_of_scope?(actor, org_id, %resource{}), do: out_of_scope?(actor, org_id, resource)
 
   # The question `KilnCMS.CMS.Checks.EditableContentType` asks, of a query on
-  # the same org: `permitted?/4` reads the org off a query or changeset, and
-  # resolves a bare org id against the default org instead.
+  # the same org.
   defp out_of_scope?(actor, org_id, resource) when is_atom(resource) do
     subject = resource |> Ash.Query.new() |> Ash.Query.set_tenant(org_id)
 
