@@ -72,6 +72,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Search: when `query_budget` cuts a search, running sections get `cut_grace` (new, default 100 ms) to stop on their own before they are killed, so a query that finishes keeps its database connection; a cut search may answer up to that much later. New metrics `kiln_cms_search_budget_cut_returned`/`_killed`.**
+  ([#3162](https://github.com/The-Verscienta/kiln_cms/pull/3162) · [long form](docs/changelog/unreleased.md#search-budget-cut-grace))
+
 - **Signed-out content pages load a 2.5 KB (gzipped) `public.js` instead of the 81 KB app.js and its chunks; `mix kiln.assets.budget` keeps it free of LiveView and console code.**
   ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle))
 

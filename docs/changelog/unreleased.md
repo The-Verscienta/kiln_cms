@@ -75,6 +75,11 @@ carries the reasoning.
 
 ## Changed
 
+<a id="search-budget-cut-grace"></a>
+
+- **A search the budget cuts now gives its running sections 100 ms to stop on their own before killing them, so a query that finishes in time keeps its database connection (#2614).**
+  When `query_budget` ran out, every content section still running was killed at once. A section killed mid-query costs its connection: Postgrex cancels the query in Postgres (so, contrary to what #2614 suspected, nothing keeps running there), but DBConnection drops the connection and opens a new one, a TLS handshake and authentication against a remote database. Now, at `section_concurrency` above 1 (the default is 2), nothing new starts at the deadline and the running sections get `cut_grace` more milliseconds (`config :kiln_cms, KilnCMS.Search, cut_grace: 100` by default) to return. A section checks the deadline between its legs, so most return within one query; those are kept with every leg they finished, and only the ones still running after the grace are killed. The grace does not remove every reconnect: a query longer than the grace is still killed, and a section that was waiting for a connection at the deadline may get one during the grace. Two things readers see: a cut search may now answer up to `cut_grace` later than before (100 ms at the defaults), and a leg that finishes inside the grace is no longer listed under `incomplete`. The response shape and the meaning of `partial` and `incomplete` are unchanged. A new event, `[:kiln_cms, :search, :budget, :cut]` with `returned` and `killed`, is exported as `kiln_cms_search_budget_cut_returned` and `kiln_cms_search_budget_cut_killed` (see [observability.md](../observability.md#search-budget-cuts)). Set `cut_grace: 0` to kill at the deadline as before. A per-query `statement_timeout` was considered and rejected: it needs a transaction or a session `SET`/`RESET` on every checkout, round trips on every search to save a reconnect on the rare one the budget cuts. No migration; rolling back is safe.
+
 <a id="public-js-bundle"></a>
 
 - **Signed-out content pages load a small `public.js` instead of `app.js` (#2402).**

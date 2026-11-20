@@ -181,14 +181,32 @@ content section fuses up to eight legs. Since #1712 it is built to share the poo
 - **Analytics off the request.** The `search_queries` upsert runs on the task supervisor.
 - **A budget per search** (#2166). `query_budget` (`config :kiln_cms, KilnCMS.Search`,
   milliseconds, default **1500**, `:infinity` for none) caps how long one sweep may take.
-  The query embedding gets half of it. A leg still running at the deadline is dropped,
-  the legs that finished are fused, and a reranker that misses it leaves fused order.
+  The query embedding gets half of it. A leg still running at the deadline is dropped
+  unless it finishes within `cut_grace` (below), the legs that finished are fused, and
+  a reranker that misses it leaves fused order.
   `GET /api/search` then answers `partial: true` with the cut legs under `incomplete`,
   and sends `cache-control: no-store` so no shared cache keeps the cut answer. A normal
   search takes tens of milliseconds, so the budget only bounds the tail: a cold serving,
   a slow nearest-neighbour scan, a pool queue during a deploy. Every response carries a
   `Server-Timing` header with the time per leg, so the slow part shows in the browser's
   network panel or a `curl -D -`.
+- **A grace before the budget kills a section** (#2614). With `section_concurrency`
+  above 1 (the default is 2) each content section runs in its own task, and a section
+  checks the deadline only between its legs. A task still running at the deadline used
+  to be killed at once. Killing one mid-query costs its database connection: Postgrex
+  sends Postgres a cancel request, so the query does not keep running there, but
+  DBConnection drops the connection and opens a new one, which against a remote
+  database is a TLS handshake and authentication. Now the sections still running at
+  the deadline get `cut_grace` (`config :kiln_cms, KilnCMS.Search`, milliseconds,
+  default **100**) to return on their own; a section that does is kept, with its
+  finished legs, and only the ones still running after the grace are killed. The cost is the tail: a cut search may answer up to `cut_grace`
+  after `query_budget`. The grace saves only the connections whose query ends inside
+  it. A longer query is still killed, and a section that was waiting for a connection
+  at the deadline may get one during the grace and start its query. Set `cut_grace: 0`
+  for the old behavior. At `section_concurrency: 1` nothing is killed and the setting
+  does nothing. `kiln_cms_search_budget_cut_returned` and
+  `kiln_cms_search_budget_cut_killed` show how often each happens
+  ([observability.md](observability.md#search-budget-cuts)).
 
 Measured with `scripts/benchmarks/api_latency.sh` (#1546): `MIX_ENV=prod`, `POOL_SIZE=10`,
 500 pages, 1,500 posts and 200 drafts, closed-loop clients, Apple M5 Pro with PostgreSQL
