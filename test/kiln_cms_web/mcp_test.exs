@@ -661,4 +661,106 @@ defmodule KilnCMSWeb.McpTest do
       assert text =~ expected
     end
   end
+
+  describe "content link tools" do
+    defp draft_post(editor, title) do
+      KilnCMS.CMS.create_post!(
+        %{title: title, slug: "mcp-link-#{System.unique_integer([:positive])}"},
+        actor: editor
+      )
+    end
+
+    defp call(conn, key, name, arguments) do
+      conn
+      |> rpc(key, "tools/call", %{name: name, arguments: arguments})
+      |> json_response(200)
+    end
+
+    test "are listed for a write key, never with a destroy, and not for a read key",
+         %{conn: conn} do
+      write = mint(user(:editor), :read_write)
+      %{"result" => %{"tools" => tools}} = conn |> rpc(write, "tools/list") |> json_response(200)
+      names = MapSet.new(tools, & &1["name"])
+
+      for name <- ~w(read_content_links create_content_link update_content_link),
+          do: assert(name in names, "expected tool #{name} to be exposed")
+
+      refute "destroy_content_link" in names
+
+      read = mint(user(:viewer), :read)
+
+      %{"result" => %{"tools" => tools}} =
+        build_conn() |> rpc(read, "tools/list") |> json_response(200)
+
+      names = MapSet.new(tools, & &1["name"])
+
+      assert "read_content_links" in names
+      refute "create_content_link" in names
+      refute "update_content_link" in names
+    end
+
+    test "an editor key links two records, reads the link back and relabels it",
+         %{conn: conn} do
+      editor = user(:editor)
+      key = mint(editor, :read_write)
+      source = draft_post(editor, "Source")
+      target = draft_post(editor, "Target")
+
+      assert %{"result" => %{"isError" => false, "content" => [%{"text" => created}]}} =
+               call(conn, key, "create_content_link", %{
+                 input: %{
+                   source_id: source.id,
+                   target_id: target.id,
+                   kind: "see_also",
+                   position: 2,
+                   label: "Background"
+                 }
+               })
+
+      %{"id" => link_id} = Jason.decode!(created)
+
+      assert %{"result" => %{"isError" => false, "content" => [%{"text" => listed}]}} =
+               call(build_conn(), key, "read_content_links", %{
+                 filter: %{field: "source_id", operator: "eq", value: source.id}
+               })
+
+      assert [%{"id" => ^link_id, "target_id" => target_id, "kind" => "see_also"}] =
+               listed |> Jason.decode!() |> Map.fetch!("results")
+
+      assert target_id == target.id
+
+      assert %{"result" => %{"isError" => false}} =
+               call(build_conn(), key, "update_content_link", %{
+                 id: link_id,
+                 input: %{label: "Further reading", position: 0}
+               })
+
+      [link] =
+        KilnCMS.CMS.list_content_links!(
+          actor: user(:admin),
+          query: [filter: [source_id: source.id]]
+        )
+
+      assert {link.kind, link.label, link.position} == {:see_also, "Further reading", 0}
+    end
+
+    test "a reference link is refused, so a reference field and its edge never disagree",
+         %{conn: conn} do
+      editor = user(:editor)
+      key = mint(editor, :read_write)
+      source = draft_post(editor, "Source")
+      target = draft_post(editor, "Target")
+
+      assert %{"result" => %{"isError" => true}} =
+               call(conn, key, "create_content_link", %{
+                 input: %{source_id: source.id, target_id: target.id, kind: "reference"}
+               })
+
+      assert [] =
+               KilnCMS.CMS.list_content_links!(
+                 actor: user(:admin),
+                 query: [filter: [source_id: source.id]]
+               )
+    end
+  end
 end
