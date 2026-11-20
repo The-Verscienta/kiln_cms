@@ -112,6 +112,24 @@ defmodule KilnCMSWeb.MetricsTest do
       refute body =~ "read?"
       refute body =~ "?="
     end
+
+    # Kills against grace saves when the search budget cuts a sweep (#2614).
+    test "a cut search sweep sums the sections that returned and the ones killed" do
+      KilnCMS.Search.Budget.run(
+        [
+          quick: fn _sweep -> Process.sleep(80) end,
+          wedged: fn _sweep -> Process.sleep(5_000) end
+        ],
+        KilnCMS.Search.Budget.deadline(30),
+        concurrency: 2,
+        stall_timeout: 5_000,
+        grace: 200
+      )
+
+      body = scrape()
+      assert body =~ ~r/^kiln_cms_search_budget_cut_returned 1$/m
+      assert body =~ ~r/^kiln_cms_search_budget_cut_killed 1$/m
+    end
   end
 
   describe "KilnCMSWeb.Telemetry.metrics/0" do

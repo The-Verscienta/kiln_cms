@@ -120,6 +120,87 @@ defmodule KilnCMS.Search.BudgetTest do
     refute_received _anything
   end
 
+  describe "the grace after the deadline (#2614)" do
+    @grace Keyword.put(@opts, :grace, 500)
+
+    test "a section that finishes inside it is done, not cut" do
+      sections = [a: legs(x: 0), b: legs(keyword: 0, semantic: 150)]
+
+      outcomes = Budget.run(sections, Budget.deadline(100), @grace)
+
+      assert outcomes == %{a: {:done, [:x]}, b: {:done, [:semantic, :keyword]}}
+    end
+
+    test "a section still running after it is killed and keeps what it sent" do
+      sections = [slow: legs(keyword: 0, semantic: 5_000)]
+
+      {micros, outcomes} = :timer.tc(fn -> Budget.run(sections, Budget.deadline(50), @grace) end)
+
+      assert outcomes == %{slow: {:cut, %{keyword: :keyword}}}
+      # The deadline and the grace, not the section's five seconds.
+      assert micros >= 550_000 and micros < 2_000_000
+    end
+
+    test "nothing starts during it" do
+      test_pid = self()
+      # Two slots, both taken past the deadline; the third would start when
+      # one frees up inside the grace, but must not.
+      third = fn _sweep -> send(test_pid, :third_ran) end
+      sections = [a: legs(x: 150), b: legs(y: 150), c: third]
+
+      outcomes = Budget.run(sections, Budget.deadline(50), @grace)
+
+      assert outcomes == %{a: {:done, [:x]}, b: {:done, [:y]}, c: {:cut, %{}}}
+      refute_received :third_ran
+    end
+
+    test "no task outlives the call" do
+      test_pid = self()
+
+      wedged = fn _sweep ->
+        send(test_pid, {:task, self()})
+        Process.sleep(5_000)
+      end
+
+      Budget.run(
+        [a: wedged, b: legs(x: 100)],
+        Budget.deadline(30),
+        Keyword.put(@opts, :grace, 200)
+      )
+
+      assert_received {:task, a}
+      refute Process.alive?(a)
+    end
+
+    test "a cut reports the sections that returned and the ones killed" do
+      ref = make_ref()
+      test_pid = self()
+      event = [:kiln_cms, :search, :budget, :cut]
+
+      :telemetry.attach(
+        "budget-cut-#{inspect(ref)}",
+        event,
+        # Only this test's own runs: the handler is node-wide, and it runs in
+        # the process that emits, which for a cut is `Budget.run/3`'s caller.
+        fn ^event, measurements, _meta, _config ->
+          if self() == test_pid, do: send(test_pid, {ref, measurements})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach("budget-cut-#{inspect(ref)}") end)
+
+      Budget.run([a: legs(x: 100), b: legs(y: 5_000)], Budget.deadline(30), @grace)
+      assert_received {^ref, %{returned: 1, killed: 1}}
+
+      Budget.run([a: legs(x: 100)], Budget.deadline(30), @grace)
+      assert_received {^ref, %{returned: 1, killed: 0}}
+
+      Budget.run([a: legs(x: 0)], Budget.deadline(1_000), @grace)
+      refute_received {^ref, _measurements}
+    end
+  end
+
   describe "within_slots/4" do
     test "an abandoned call keeps its slot until it finishes, and its answer is dropped" do
       slots = make_ref()

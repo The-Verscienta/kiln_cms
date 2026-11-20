@@ -131,10 +131,32 @@ defmodule KilnCMS.Search.Budget do
   At `concurrency: 1` the sections run in the caller's process and the
   deadline is only checked: between sections here, between legs in the
   section (`emit` is `nil` there, since nothing can stop it midway). Above 1
-  it is enforced: up to `concurrency` tasks run at once and those still
-  running at the deadline are killed. With no deadline, a sweep that makes
-  no progress for `:stall_timeout` milliseconds raises. A section that
-  raises fails the call with its own error.
+  it is enforced: up to `concurrency` tasks run at once, nothing new starts
+  once the deadline has passed, and the tasks still running then get
+  `:grace` more milliseconds (default 0) to return on their own. A section
+  that returns inside the grace is `{:done, result}`; one still running
+  after it is killed and cut. With no deadline, a sweep that makes no
+  progress for `:stall_timeout` milliseconds raises. A section that raises
+  fails the call with its own error.
+
+  Why a grace (#2614): killing a task that holds a database connection
+  mid-query costs that connection. Postgrex cancels the query on the server
+  (a `CancelRequest`, so nothing keeps running there), but DBConnection
+  drops the connection and opens a new one — and in the SQL sandbox the
+  connection it drops is the test's own. A section checks the deadline
+  between its legs, so most return within one query of it. The grace only
+  saves the connection of a query that finishes inside it: a query still
+  running after it is killed as before, and a task that was waiting for a
+  connection at the deadline may get one during the grace and run its
+  query. A server-side `statement_timeout` would bound each query instead,
+  but only inside a transaction or with a session `SET`/`RESET` per
+  checkout — round trips on every search to spare a reconnect on the rare
+  one the budget cuts.
+
+  When the deadline passes with sections still running, it emits
+  `[:kiln_cms, :search, :budget, :cut]` with `%{returned: n, killed: k}`:
+  how many of them returned after the deadline (inside the grace, or while
+  being stopped) and how many were killed.
   """
   @spec run([section()], deadline(), keyword()) :: %{term() => outcome()}
   def run(sections, deadline, opts) do
@@ -150,6 +172,9 @@ defmodule KilnCMS.Search.Budget do
           sent: %{},
           tag: make_ref(),
           deadline: deadline,
+          grace: Keyword.get(opts, :grace, 0),
+          grace_until: nil,
+          returned: 0,
           max: concurrency,
           stall: Keyword.fetch!(opts, :stall_timeout)
         }
@@ -191,6 +216,8 @@ defmodule KilnCMS.Search.Budget do
   # Nothing in flight with sections left over means the deadline passed
   # before they could start.
   defp await(%{running: running} = state) when map_size(running) == 0 do
+    if state.grace_until, do: cut_event(state.returned, 0)
+
     Enum.reduce(state.pending, state.outcomes, fn {key, _run}, acc ->
       Map.put(acc, key, {:cut, %{}})
     end)
@@ -203,7 +230,7 @@ defmodule KilnCMS.Search.Budget do
 
       {ref, reply} when is_map_key(running, ref) ->
         Process.demonitor(ref, [:flush])
-        state = %{state | running: Map.delete(running, ref)}
+        state = %{state | running: Map.delete(running, ref), returned: returned(state)}
         {key, result} = unwrap(reply, state.running)
 
         %{state | outcomes: Map.put(state.outcomes, key, {:done, result})}
@@ -222,12 +249,20 @@ defmodule KilnCMS.Search.Budget do
           raise "search section(s) #{inspect(keys)} made no progress in #{state.stall} ms"
         end
 
-        cut(state)
+        if state.grace_until == nil and state.grace > 0,
+          do: await(%{state | grace_until: state.deadline + state.grace}),
+          else: cut(state)
     end
   end
 
   defp wait(%{deadline: :infinity, stall: stall}), do: stall
-  defp wait(%{deadline: deadline}), do: remaining(deadline)
+  defp wait(%{grace_until: nil, deadline: deadline}), do: remaining(deadline)
+  defp wait(%{grace_until: grace_until}), do: remaining(grace_until)
+
+  # A section that answers once the grace has begun returned after the
+  # deadline.
+  defp returned(%{grace_until: nil, returned: returned}), do: returned
+  defp returned(%{returned: returned}), do: returned + 1
 
   defp record_sent(state, key, leg, result) do
     Map.update!(state, :sent, fn sent ->
@@ -245,14 +280,17 @@ defmodule KilnCMS.Search.Budget do
 
   defp unwrap(reply, _running), do: reply
 
-  # The deadline passed. A task that answered while being stopped is done;
-  # the rest keep what they sent, and the sections never started have none.
+  # The deadline (and the grace after it) passed. A task that answered while
+  # being stopped is done; the rest keep what they sent, and the sections
+  # never started have none.
   defp cut(%{running: running} = state) do
     replies =
       Enum.map(running, fn {_ref, {key, task}} -> {key, Task.shutdown(task, :brutal_kill)} end)
 
     finished =
       for {key, {:ok, reply}} <- replies, do: {key, {:done, reply |> unwrap(%{}) |> elem(1)}}
+
+    cut_event(state.returned + length(finished), length(replies) - length(finished))
 
     %{sent: sent} = drain(state)
     stopped = Enum.map(Map.values(running), &elem(&1, 0)) ++ Enum.map(state.pending, &elem(&1, 0))
@@ -272,6 +310,14 @@ defmodule KilnCMS.Search.Budget do
       0 -> state
     end
   end
+
+  defp cut_event(returned, killed),
+    do:
+      :telemetry.execute(
+        [:kiln_cms, :search, :budget, :cut],
+        %{returned: returned, killed: killed},
+        %{}
+      )
 
   defp shutdown(running),
     do: Enum.each(running, fn {_ref, {_key, task}} -> Task.shutdown(task, :brutal_kill) end)

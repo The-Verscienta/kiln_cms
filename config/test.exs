@@ -486,7 +486,13 @@ config :kiln_cms, KilnCMS.Accounts.SignInUnlock, async: false
 # How to tell if it happens anyway: a search test that finds nothing where it
 # expected hits, with no error. Run the query through `Search.global_report/2`
 # and look at `:partial`.
-config :kiln_cms, KilnCMS.Search, query_budget: 10_000
+#
+# `cut_grace` is 1 s, not production's 100 ms: a section the budget kills
+# while it holds a connection takes down the SQL sandbox owner's connection,
+# and every later read in the test fails (#2553, #2614). A loaded runner can
+# take that long to finish the query a section is in. The budget tests'
+# timing bounds leave room for it (budget 3 s + grace 1 s, under 6 s).
+config :kiln_cms, KilnCMS.Search, query_budget: 10_000, cut_grace: 1_000
 
 # Crawler verification (#2254) is on, like production, but asks
 # `KilnCMS.Test.StubCrawlerResolver` instead of DNS: every address has no PTR

@@ -67,8 +67,10 @@ defmodule KilnCMSWeb.SearchApiBudgetTest do
     # registered content type and has no parameter to narrow that, so an
     # overlay with a dozen more types left 200 ms (at a 400 ms budget) too
     # little on a 2-scheduler CI runner, and the pages section was cut. And a
-    # lexical leg still querying at the deadline is killed mid-query, which
-    # in the SQL sandbox takes the test's shared connection with it (#2553).
+    # lexical leg still querying after the deadline and `cut_grace` (1 s in
+    # test, #2614) is killed mid-query, which in the SQL sandbox takes the
+    # test's shared connection with it (#2553). The 6 s bound leaves room
+    # for both.
     Application.put_env(:kiln_cms, :search_api_budget_delay, 30_000)
     put_search_env(semantic: true, embedder: SlowEmbedder, query_budget: 3_000)
 
