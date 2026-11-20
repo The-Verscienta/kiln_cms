@@ -1,7 +1,12 @@
 defmodule KilnCMSWeb.BearerAuth do
   @moduledoc """
-  Shared bearer-token verification for HTTP plugs and the GraphQL WebSocket.
-  Mirrors `AshAuthentication.Plug.Helpers.retrieve_from_bearer/3` without a conn.
+  Shared bearer-token parsing and verification for HTTP plugs and the GraphQL
+  WebSocket. `user_from_token/1` mirrors
+  `AshAuthentication.Plug.Helpers.retrieve_from_bearer/3` without a conn.
+
+  `parse/1` is the one reading of an `Authorization` value every surface uses
+  (#2632): the scheme is matched case-insensitively (RFC 7235), so `bearer`,
+  `BEARER` and `Bearer` are the same scheme.
   """
 
   alias AshAuthentication.Info
@@ -10,12 +15,57 @@ defmodule KilnCMSWeb.BearerAuth do
 
   @user KilnCMS.Accounts.User
 
-  @doc "Extract a bearer token from WebSocket connection params."
+  @doc """
+  Reads one `Authorization` value: `{:bearer, token}` when its scheme is
+  `Bearer` in any case, with the token trimmed, or `{:bearer, nil}` for a
+  bare `Bearer` with no token (which never authenticates); `:other` for any
+  other scheme, or a value that is not a string. Leading and trailing
+  whitespace and any run of whitespace after the scheme are tolerated.
+
+      iex> KilnCMSWeb.BearerAuth.parse("bearer  abc ")
+      {:bearer, "abc"}
+
+      iex> KilnCMSWeb.BearerAuth.parse("BEARER")
+      {:bearer, nil}
+
+      iex> KilnCMSWeb.BearerAuth.parse("Basic dXNlcjpwYXNz")
+      :other
+  """
+  @spec parse(term()) :: {:bearer, String.t() | nil} | :other
+  def parse(value) when is_binary(value) do
+    [scheme | rest] = value |> String.trim() |> String.split(~r/\s+/, parts: 2)
+
+    if String.downcase(scheme) == "bearer",
+      do: {:bearer, List.first(rest)},
+      else: :other
+  end
+
+  def parse(_value), do: :other
+
+  @doc """
+  `value` rewritten to the exact `Bearer <token>` form that AshAuthentication's
+  plugs match, when it is a bearer with a token; any other value unchanged.
+  """
+  @spec normalize(String.t()) :: String.t()
+  def normalize(value) do
+    case parse(value) do
+      {:bearer, token} when is_binary(token) -> "Bearer " <> token
+      _ -> value
+    end
+  end
+
+  @doc """
+  The bearer token in WebSocket connection params: `params["token"]`, else an
+  `Authorization`/`authorization` param under a `Bearer` scheme in any case
+  (`parse/1`). `nil` when neither carries one, so the socket is anonymous; `""`
+  for a bare `Bearer`, which verifies as nothing and is refused like any other
+  bad token, as `/api` and `/gql` refuse it over HTTP.
+  """
   def token_from_params(params) when is_map(params) do
     params["token"] ||
-      case params["Authorization"] || params["authorization"] do
-        "Bearer " <> token -> String.trim(token)
-        _ -> nil
+      case parse(params["Authorization"] || params["authorization"]) do
+        {:bearer, token} -> token || ""
+        :other -> nil
       end
   end
 

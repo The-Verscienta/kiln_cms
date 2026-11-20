@@ -65,7 +65,20 @@ Every summary line below that was shortened links to its own entry there.
 - **Custom asset builds and overlay Dockerfiles that don't run `mix assets.deploy`: also run `mix esbuild kiln_public --minify` before `phx.digest`. Without it signed-out pages fall back to app.js and keep working. No migration; rolling back is safe.**
   ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle-upgrade))
 
+### Breaking
+
+- **`/ws/gql` reads an `authorization` connect param under `Bearer` in any case: a lowercase valid JWT connects as its user, and lowercase garbage or a bare `Bearer` is refused (`403`) instead of connecting anonymously (#2632).**
+  ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#ws-gql-bearer-scheme-any-case))
+
+### Known issues
+
+- **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check; check those on hex.pm by hand.**
+  ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/unreleased.md#plugin-health-tail-packages-unknown))
+
 ### Added
+
+- **`/mcp` can read, create and update links between records: `read_content_links`, `create_content_link` and `update_content_link`, over the same payload-link actions as `/api/json/content-links`. Overlays that replace `:mcp_tools` must add them.**
+  ([#3191](https://github.com/The-Verscienta/kiln_cms/pull/3191) · [long form](docs/changelog/unreleased.md#mcp-content-link-tools))
 
 - **Backups → Schedule: the preview warns when a schedule would keep more than about 500 backups of each component, or more than the backup directory has room for (free space plus the backups already there); it never blocks the save.**
   ([#3172](https://github.com/The-Verscienta/kiln_cms/pull/3172) · [long form](docs/changelog/unreleased.md#backup-schedule-disk-warning))
@@ -91,6 +104,12 @@ Every summary line below that was shortened links to its own entry there.
 
 - **Federation: a publish sends one signed POST per remote inbox (a `sharedInbox` reaches all its followers) instead of one per follower, settled against every follower there; the fan-out is one transaction, so a retry no longer re-sends to inboxes already queued.**
   ([long form](docs/changelog/unreleased.md#federation-shared-inbox-dedup))
+
+- **A valid `bearer`/`BEARER <jwt>` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing [1.9.0's `401`](docs/changelog/v1.9.0.md#bearer-401-hardening); `/mcp` and `POST /api/keys/rotate` take a `kiln_` key under any case or in a later `Authorization` value, and `/metrics` its token under any case (#2632).**
+  ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#bearer-scheme-any-case))
+
+- **Plugin health: System, Security posture and "Check plugins now" share one check per server, so hex.pm is asked once; a check stops at 75 s and caches what it got for 15 minutes instead of being killed with nothing stored.**
+  ([#3183](https://github.com/The-Verscienta/kiln_cms/pull/3183) · [long form](docs/changelog/unreleased.md#plugin-check-single-flight))
 
 - **Accepting an invitation to the default site at a lower tier no longer demotes an account with no membership but a legacy editor or admin role: its tier is carried into a membership first and the accept reports it already a member. An admin's own Add is unchanged.**
   ([long form](docs/changelog/unreleased.md#invitation-keeps-legacy-tier))

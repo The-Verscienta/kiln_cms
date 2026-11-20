@@ -21,7 +21,50 @@ carries the reasoning.
   release that gains it later picks it up only after a restart. No
   migration and no configuration; rolling back is safe.
 
+## Breaking
+
+<a id="ws-gql-bearer-scheme-any-case"></a>
+
+- **`/ws/gql` reads an `authorization` connect param under a `Bearer` scheme in any case, so lowercase garbage and a bare `Bearer` are now refused instead of connecting anonymously (#2632).**
+  The GraphQL socket used to read an `Authorization` (or `authorization`)
+  connect param only when it started with exactly `Bearer `; any other
+  spelling was ignored and the socket connected as anonymous. It now reads
+  the scheme case-insensitively, as every HTTP surface does (see
+  [Fixed](#bearer-scheme-any-case)), which changes three answers:
+  - `bearer <valid jwt>` and `BEARER <valid jwt>` connect as the token's user
+    (they used to connect anonymously).
+  - `bearer <garbage>`, or an expired or revoked JWT under a lowercase
+    scheme, is refused like any token that does not verify: `connect/3`
+    answers `:error` and the handshake is a `403` (#2634). It used to connect
+    anonymously and read published content.
+  - A bare `Bearer` with no token, in any case, is refused too, matching the
+    `401` `/api` and `/gql` give it over HTTP. `Bearer` with no trailing space
+    used to connect anonymously.
+
+  The `token` connect param, which carries the JWT with no scheme, is
+  unchanged, as is a param under another scheme (`Basic …`), which still
+  connects anonymously. A client that sends a lowercase or empty bearer
+  should send a valid JWT or leave the param out.
+  `KILN_API_REJECT_INVALID_BEARER=false` still restores the anonymous connect
+  for a token that does not verify, and each refusal still emits
+  `[:kiln_cms, :api, :invalid_bearer]` with `surface: :graphql`. No migration;
+  rolling back restores the old reading.
+
+## Known issues
+
+<a id="plugin-health-tail-packages-unknown"></a>
+
+- **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check.**
+  A plugin check now stops at 75 seconds and does not ask about packages it hasn't reached ([plugin check single-flight](#plugin-check-single-flight)). Packages are asked in a fixed order, so the ones at the end are the ones left out each round, while the rest are re-checked every 15 minutes. Affects platform administrators reading System or Security posture on a deployment with enough Hex plugins that a round doesn't finish in time (roughly 13 or more at hex.pm's slowest). Workaround: none needed for the plugins that answered; for the rest, check the package on hex.pm by hand until hex.pm answers in time. Unknown is never shown as OK.
+  ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165))
+
 ## Added
+
+<a id="mcp-content-link-tools"></a>
+
+- **Content link tools on `/mcp` (#3191).** `read_content_links` (`ContentLink :read`), `create_content_link` (`:create_link`) and `update_content_link` (`:update_link`) let an LLM author link records with any `kind`, not only the `related_*_ids` the update tools already take. They follow the payload-link route's rules from R8 (#2014): a write is authorized as an edit of the link's source, `kind: reference` is refused, and a link is visible only when the key may read both ends. There is no destroy tool, as for every other `/mcp` tool.
+  AshAi lists a tool only if `Ash.can?` passes on a blank changeset, which `Checks.SourceUpdatable` could never pass without a source, so a source-less tool probe now passes that check, the same rule as `DraftWriteKey`'s. The write-key and editor policies still decide whether the tools are listed.
+  A project that replaces `config :kiln_cms, :mcp_tools` must add the three names to serve them.
 
 <a id="backup-schedule-disk-warning"></a>
 
@@ -226,6 +269,60 @@ carries the reasoning.
     nothing with a row whose `follower_id` is `nil`, so shared rows still queued
     at rollback are delivered but credit or charge no follower. See
     [One POST per inbox](../federation.md#one-post-per-inbox-2753).
+
+<a id="bearer-scheme-any-case"></a>
+
+- **A valid JWT under `bearer` or `BEARER` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing the 1.9.0 note that made it a `401` (#2632).**
+  An HTTP authentication scheme is case-insensitive (RFC 7235). Since 1.9.0
+  the bearer check matched it that way, but AshAuthentication's JWT loader
+  reads only the exact `Bearer ` spelling, so a valid `bearer <jwt>` loaded
+  no user and was refused as an invalid token. The
+  [1.9.0 Breaking note](v1.9.0.md#bearer-401-hardening) documented that
+  refusal as intended; it no longer applies. A new plug,
+  `KilnCMSWeb.Plugs.LoadFromBearer`, replaces `:load_from_bearer` on the
+  `:api`, `:graphql` and `:feed` pipelines: it hands the loader a copy of the
+  request with each bearer value rewritten to `Bearer <token>` and puts the
+  caller's `authorization` headers back afterwards, so nothing downstream sees
+  a rewrite. The same reading, `KilnCMSWeb.BearerAuth.parse/1` (scheme in any
+  case, surrounding whitespace and any run of whitespace after the scheme
+  tolerated), now serves every surface that takes a bearer:
+  - **`/api/*`, `/gql`, `/api/feed`.** `bearer <jwt>`, `BEARER <jwt>` and
+    `  bearer   <jwt>` authenticate as the token's user. A token that does not
+    verify (garbage, expired, revoked) and a bare `Bearer` are still a `401`
+    in any case, and API keys were already accepted under any case.
+  - **Held accounts.** Because a lowercase JWT now loads its user, an account
+    its site holds for a second factor gets the specific
+    `403 second_factor_required` answer (and the `second_factor_required`
+    telemetry event) instead of the generic `401 invalid_token`, or an
+    anonymous read with `KILN_API_REJECT_INVALID_BEARER=false`.
+  - **`/mcp`.** A `kiln_` key under a lowercase scheme, or in a later
+    `Authorization` value (after a proxy's own), now authenticates; both were
+    a `401`. The key is found as on `/api`: the first `kiln_` key in any value
+    decides. The pipeline's new `KilnCMSWeb.Plugs.RequireApiKey` does this; a
+    JWT, garbage or a bare `bearer` is still a `401`. A key accepted this way
+    is also remembered for the rate-limit alert
+    (`KilnCMSWeb.Plugs.RememberApiKey`).
+  - **`POST /api/keys/rotate`.** Same as `/mcp`: `bearer kiln_…`, or the key
+    in a second `Authorization` value, now rotates; both were a `401`.
+  - **`/metrics`.** With `KILN_METRICS_TOKEN` set, the token is accepted under
+    any case of the scheme, with surrounding whitespace trimmed. It must still
+    be the only `Authorization` value, and is still compared in constant time.
+  - **`/ws/gql`.** See [Breaking](#ws-gql-bearer-scheme-any-case): lowercase
+    garbage there is now refused rather than anonymous.
+
+  A client that sent `bearer <jwt>` and handled the `401` by
+  re-authenticating will now simply succeed. No migration and no
+  configuration; rolling back restores the 1.11.0 answers.
+
+<a id="plugin-check-single-flight"></a>
+
+- **The plugin health check runs one round per server at a time, and a round that runs out of time still caches what it got (#2565).** System started its own check on a cold cache, apart from the background check Security posture starts, so two administrators opening System, or System and Security posture together, each sent hex.pm a full round of requests, each disclosing the installed plugins' names and versions. And with about 13 or more Hex plugins and a slow hex.pm, System's check outran its 90-second wait and was killed before it stored anything, so the 15-minute failure cache never applied: every later visit asked hex.pm again and showed Unknown.
+  - **One round per server.** Every round now runs in one supervised process per node. System, Security posture and **Check plugins now** all start it or join the one already running, and wait for its answer; hex.pm is asked once. Closing the page no longer stops the round. A press of **Check plugins now** while another round is in flight joins it instead of asking again; if that round wasn't a forced one, its security notices are the cached ones. A forced check right after a non-forced round still asks; the once-a-minute floor applies to back-to-back forced checks.
+  - **One time limit per round, 75 seconds.** It covers Hex and the notices feed together (before, System effectively allowed 90 s and Security posture's background check had no overall limit). A package not started by then is not asked at all, so fewer names reach hex.pm, and one still in flight is cut off; either reads Unknown, never OK. A page waits up to 90 seconds for the round; one that still has no answer reads every plugin Unknown.
+  - **A partial answer is cached for 15 minutes**, so the next page load doesn't ask again. That includes a forced check that replaces a complete 24-hour answer: its Unknowns stand for 15 minutes, as a failed request's always have. When the round cut off a notices request that never stored anything (it was waiting behind another request for the feed), the feed's timeout is cached for it too, so the Hex half is served.
+  - `mix kiln.plugins.list --health` runs its check inline, as before, through the new `inline: true` option of `Kiln.Plugins.Health.check/1`. `Kiln.Plugins.Health.warm/0` is now `warm/1` (an `:installed` option; `warm()` still works), and `Kiln.SecurityNotices.put_cache/1` is documented.
+
+  No migration and no config; rolling back is safe. See [Check your installed plugins](../security-posture.md#check-your-installed-plugins).
 
 <a id="invitation-keeps-legacy-tier"></a>
 

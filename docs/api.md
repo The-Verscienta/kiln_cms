@@ -131,9 +131,12 @@ Authorization: Bearer <token>
 The same token authenticates GraphQL (`POST /gql` and its WebSocket) — see the
 `bearerAuth` security scheme in the OpenAPI spec.
 
+The scheme is case-insensitive: `bearer <token>` and `BEARER <token>`
+authenticate as `Bearer <token>` does (#2632).
+
 Anonymous means **no `Authorization` header**. A bearer token that does not
-verify (malformed, expired, or signed by another instance), a bare `Bearer`,
-or a JWT under the scheme spelled `bearer` is answered `401` `invalid_token` with
+verify (malformed, expired, or signed by another instance), or a bare `Bearer`
+in any case, is answered `401` `invalid_token` with
 `WWW-Authenticate: Bearer error="invalid_token"` on `/api/json`, `/gql` and
 the other `/api` routes, not served as an anonymous read (#2161). The
 GraphQL WebSocket `/ws/gql` refuses the connect for the same token (the

@@ -153,6 +153,34 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
     end
   end
 
+  # The scheme is case-insensitive (#2632), and the key is found the way
+  # `ApiKeyAuth.presented_key/1` finds it: in any `authorization` value.
+  test "rotates under a lower-case scheme, and with the key in a second value" do
+    {_key, secret} = mint(user(:viewer))
+    {conn, body} = rotate("bearer #{secret}")
+    assert conn.status == 201
+    assert %{"api_key" => "kiln_" <> _} = body["data"]
+
+    {_key, secret} = mint(user(:viewer))
+
+    conn =
+      build_conn()
+      |> put_req_header("accept", "application/json")
+      |> Map.update!(
+        :req_headers,
+        &[{"authorization", "Basic dXNlcjpwYXNz"}, {"authorization", "BEARER #{secret}"} | &1]
+      )
+      |> post("/api/keys/rotate")
+
+    assert conn.status == 201
+    assert :error = Accounts.actor_from_api_key(secret)
+
+    for header <- ["bearer", "bearer kiln_bogus_x"] do
+      {conn, _} = rotate(header)
+      assert conn.status == 401
+    end
+  end
+
   test "403 for a key that may not rotate" do
     {_, read_secret} = mint(user(:viewer), :read)
     {_, rw_secret} = mint(user(:editor), :read_write)

@@ -97,12 +97,23 @@ summary of the same check. You need to be a platform administrator.
 3. To ask again, select **Check plugins now**. The badges show nothing
    while it runs, then the new answer. The button is there only when the
    checks are on and some plugin comes from Hex, git or a path. Hex and the
-   notices feed are asked at most once a minute: a second press within the
-   minute shows the answer already cached.
+   notices feed are asked at most once a minute by this button: a second
+   press within the minute shows the answer already cached. A press while a
+   check is already running on the server (one this page, this page in
+   another administrator's browser, or Security posture started) waits for
+   that check instead of starting another. If that check was not itself
+   started by **Check plugins now**, the notices it reads are the cached
+   ones.
+
+Each server runs one plugin check at a time (#2565). System, Security
+posture and a second administrator's page that need an answer together wait
+for the same check, so hex.pm is asked once. Closing the page doesn't stop
+the check; its answer is cached for the next visit.
 
 The answer is cached on each server for 24 hours (15 minutes after a request
-failed) and is lost when the server restarts, so a new deploy asks again the
-first time a platform administrator opens System or this page.
+failed or the check ran out of time) and is lost when the server restarts,
+so a new deploy asks again the first time a platform administrator opens
+System or this page.
 
 ### Monitor each plugin from a script
 
@@ -197,7 +208,9 @@ at all, set `KILN_SECURITY_NOTICES_URL=false` or `KILN_UPDATE_CHECK=false`
 
 | What you see | What it means |
 | --- | --- |
-| "Hex or the notices feed could not be reached; these results are unknown, not OK." | A request failed or the check did not finish in 90 seconds. The plugins it concerns show **Unknown**. Kiln asks again on the first visit after 15 minutes, or when you select **Check plugins now**. A server that can't reach `hex.pm` or `kilncms.dev` through its firewall always ends here. |
+| "Hex or the notices feed could not be reached; these results are unknown, not OK." | A request failed, or the check did not finish within its 75-second limit. A plugin whose request hadn't started by then is not asked at all. The plugins it concerns show **Unknown**; the plugins that did answer show their badge. The partial answer is kept for 15 minutes, then the first visit asks again; select **Check plugins now** to ask sooner. A server that can't reach `hex.pm` or `kilncms.dev` through its firewall always ends here. |
+| Every plugin shows **Unknown** with the same line | Either neither source answered, as above, or the page waited 90 seconds for the server's check and it stopped without leaving an answer. Nothing is kept in the second case: reload the page and it asks again, or reads the answer if the check has finished since. |
+| With many Hex plugins and a slow hex.pm, the same plugins at the end of the list stay **Unknown** on every check | A known issue ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165)): plugins are asked in a fixed order, so the ones at the end are the ones that run out of time each round. The plugins that did answer are still checked. Nothing to set; it clears when hex.pm answers in time. |
 | "Plugin checks are off." | `KILN_PLUGIN_HEALTH_CHECK=false`, or `KILN_UPDATE_CHECK=false` with `KILN_PLUGIN_HEALTH_CHECK` unset. Hex plugins show **Unknown**; there is no **Check plugins now**. |
 | "No dependency plugins to check." | Every plugin is built from this project. No request is made. |
 | "The security notices feed is turned off; only Hex's own advisories were checked." | `KILN_SECURITY_NOTICES_URL=false`, or a fork or mirror that doesn't name a notices feed. |
