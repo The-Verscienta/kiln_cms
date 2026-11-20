@@ -104,6 +104,10 @@ defmodule KilnCMS.Security.AlertText do
   def kind_label("api_key_abuse"), do: gettext("A rotated API key was used again")
   def kind_label("api_key_rate_limited"), do: gettext("An API key hit a rate limit")
   def kind_label("blocked_ip"), do: gettext("A blocked address was refused")
+
+  def kind_label("backup_host_key_changed"),
+    do: gettext("A backup server's host key changed")
+
   def kind_label(_unknown), do: gettext("Security alert")
 
   @doc "The label of an `alerts_silenced` notice's change, in the current locale."

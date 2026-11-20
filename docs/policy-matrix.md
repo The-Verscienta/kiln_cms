@@ -577,6 +577,7 @@ claimed window is never asked for again is argued in
 | `read`, `enabled` | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | `create`, `update`, `reorder`, `destroy` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `record_test_result` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `trust_host_key` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 Where in-app backups copy their files besides `BACKUP_DIR` and
 `BACKUP_RCLONE_REMOTE` (#2220). Instance-wide and tenant-less, gated on the
@@ -589,7 +590,16 @@ value or secret in the metadata. The credentials are vault-encrypted
 button (`Backups.test_destination/2`) reads the row as the admin, so anyone
 else is refused before any file or network I/O, and records the outcome as
 the `:backups` system actor (`backup_destination_tested`, the admin as its
-actor). Not exposed through GraphQL, JSON:API or MCP.
+actor). An SFTP destination's trusted host key (`host_key`, #2222) is set
+only by `trust_host_key`, a platform admin's alone and never the `:backups`
+system actor's, so nothing automatic can decide which server a backup
+trusts; it is audited as `backup_destination_host_key_trusted` with the key
+it replaced, and refused as stale when the stored key changed since the
+admin's check. **Check host key** (`Backups.scan_destination_host_key/2`)
+reads the row as the admin and asks `can_trust_backup_destination_host_key?`
+before any network I/O, and sends the server no credential
+([ADR 0079](decisions/0079-an-sftp-destinations-host-key-is-trusted-once-by-a-platform-admin-and-a-changed-key-fails-the-destination.md)).
+Not exposed through GraphQL, JSON:API or MCP.
 
 <a id="backup-uploads"></a>
 

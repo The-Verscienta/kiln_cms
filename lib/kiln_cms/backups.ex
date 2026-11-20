@@ -165,6 +165,12 @@ defmodule KilnCMS.Backups do
       define :destroy_backup_destination, action: :destroy
       define :list_enabled_backup_destinations, action: :enabled
       define :record_backup_destination_test, action: :record_test_result
+
+      # A platform admin trusting an SFTP server's host key (#2222), with
+      # what `scan_destination_host_key/2` read.
+      define :trust_backup_destination_host_key,
+        action: :trust_host_key,
+        args: [:algorithm, :fingerprint, :how]
     end
 
     resource KilnCMS.Backups.NodeBeat do
@@ -367,6 +373,94 @@ defmodule KilnCMS.Backups do
        label: entry["label"],
        at: DateTime.utc_now()
      }}
+  end
+
+  # A scan connects this long at most per host key type, and as long as
+  # every type a pasted fingerprint is looked for under takes, in all.
+  @host_key_connect_timeout :timer.seconds(10)
+  @host_key_scan_timeout :timer.seconds(30)
+  @host_key_match_timeout :timer.seconds(90)
+
+  @doc """
+  Reads the host key the SFTP destination `id`'s server offers (#2222, ADR
+  0079), behind the Destinations tab's **Check host key**: connects, records
+  the key the server signs with, and refuses it, so no password or key is
+  ever sent.
+
+    1. The row is read as `opts[:actor]` with `authorize_with: :error`, and
+       the actor must be allowed to trust a key
+       (`can_trust_backup_destination_host_key?/2`, a platform admin): anyone
+       else is refused before any network I/O.
+    2. Without `opts[:fingerprint]` it reads the key the server prefers;
+       with one (what the admin expects, from `ssh-keygen -lf`), it asks for
+       each type Kiln trusts in turn until one matches, and answers
+       `{:error, :no_match}` when none does.
+    3. Bounded through `KilnCMS.Backups.Destination.call/4` (30 s, or 90 s
+       for a fingerprint: six types at 10 s each). Nothing is written: the
+       admin trusts what this answered with
+       `trust_backup_destination_host_key/5`.
+
+  Returns `{:ok, %{algorithm: type, fingerprint: fingerprint,
+  previous_fingerprint: stored_or_nil}}`, `{:error, :not_found}`,
+  `{:error, :not_sftp}`, `{:error, %Ash.Error.Forbidden{}}`, or the scan's
+  error.
+  """
+  @spec scan_destination_host_key(String.t(), keyword()) ::
+          {:ok,
+           %{
+             algorithm: String.t(),
+             fingerprint: String.t(),
+             previous_fingerprint: String.t() | nil
+           }}
+          | {:error, term()}
+  def scan_destination_host_key(id, opts) do
+    actor = Keyword.fetch!(opts, :actor)
+
+    with {:ok, %DestinationConfig{} = row} <-
+           found(get_backup_destination(id, actor: actor, authorize_with: :error)),
+         :ok <- may_trust(actor, row),
+         :ok <- sftp(row),
+         {:ok, {algorithm, fingerprint}} <- scan_host_key(row, Keyword.get(opts, :fingerprint)) do
+      {:ok,
+       %{
+         algorithm: algorithm,
+         fingerprint: fingerprint,
+         previous_fingerprint: (row.host_key || %{})["fingerprint"]
+       }}
+    end
+  end
+
+  defp may_trust(actor, row) do
+    # The policy reads no argument: any well-formed ones ask the question.
+    if can_trust_backup_destination_host_key?(
+         actor,
+         row,
+         "ssh-ed25519",
+         "SHA256:" <> String.duplicate("A", 43),
+         :scanned
+       ),
+       do: :ok,
+       else: {:error, Ash.Error.Forbidden.exception([])}
+  end
+
+  defp sftp(%DestinationConfig{kind: "sftp"}), do: :ok
+  defp sftp(_row), do: {:error, :not_sftp}
+
+  # Settings only: a scan sends no credential, so none is decrypted.
+  defp scan_host_key(row, nil) do
+    config = %Kiln.BackupDestination.Config{id: row.id, kind: row.kind, settings: row.settings}
+
+    Destination.call(config, :scan, [nil, [timeout: @host_key_connect_timeout]],
+      timeout: @host_key_scan_timeout
+    )
+  end
+
+  defp scan_host_key(row, expected) do
+    config = %Kiln.BackupDestination.Config{id: row.id, kind: row.kind, settings: row.settings}
+
+    Destination.call(config, :match, [expected, [timeout: @host_key_connect_timeout]],
+      timeout: @host_key_match_timeout
+    )
   end
 
   defp run_destination_test(destination, timeout) do

@@ -23,9 +23,15 @@ defmodule KilnCMS.Backups.DestinationConfig.Validations.AdapterSettings do
        `Destination.call/4` (bounded, isolated, its error scrubbed of the
        secrets);
    10. for an S3 destination (#2221), its endpoint resolves only to
-       addresses it may reach (`KilnCMS.Backups.Destination.S3.Endpoint.pin/2`):
-       `validate/1` stays offline, as the contract asks, so the DNS check is
-       the core's, here, and again before every call.
+       addresses it may reach (`KilnCMS.Backups.Destination.S3.Endpoint.pin/2`),
+       and for an SFTP destination (#2222) its host does
+       (`KilnCMS.Backups.Destination.Sftp.Target.pin/2`): `validate/1` stays
+       offline, as the contract asks, so the DNS check is the core's, here,
+       and again before every call.
+
+  Before any of them, an SFTP destination is refused as enabled while no
+  host key is trusted for it (#2222, ADR 0079): it is saved disabled, and
+  enabled once a platform admin has confirmed the server's key.
 
   An update that changes neither the settings nor the secrets, and does not
   enable the destination, is not checked: a destination whose plugin was
@@ -42,7 +48,7 @@ defmodule KilnCMS.Backups.DestinationConfig.Validations.AdapterSettings do
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Destination, DestinationConfig}
-  alias KilnCMS.Backups.Destination.S3
+  alias KilnCMS.Backups.Destination.{S3, Sftp}
   alias KilnCMS.Backups.DestinationConfig.Changes.{EnabledCap, StoreSecrets}
   alias KilnCMS.Backups.DestinationConfig.Fields
 
@@ -71,6 +77,7 @@ defmodule KilnCMS.Backups.DestinationConfig.Validations.AdapterSettings do
     settings = Ash.Changeset.get_attribute(changeset, :settings) || %{}
 
     with {:ok, module} <- installed(kind),
+         :ok <- host_key_first(changeset, kind),
          {:ok, fields} <- fields(module),
          :ok <- known_settings(settings, fields),
          :ok <- known_secrets(changeset, fields),
@@ -84,6 +91,26 @@ defmodule KilnCMS.Backups.DestinationConfig.Validations.AdapterSettings do
       reachable(config)
     end
   end
+
+  # Refused before anything is contacted: enabling is what sends backups.
+  defp host_key_first(changeset, "sftp") do
+    enabled? = Ash.Changeset.get_attribute(changeset, :enabled) == true
+    trusted? = is_map(Ash.Changeset.get_attribute(changeset, :host_key))
+
+    if enabled? and not trusted?,
+      do:
+        error(
+          :enabled,
+          dgettext_noop(
+            "errors",
+            "an SFTP destination stays disabled until its host key is confirmed"
+          ),
+          []
+        ),
+      else: :ok
+  end
+
+  defp host_key_first(_changeset, _kind), do: :ok
 
   defp installed(kind) do
     case Destination.adapter(kind) do
@@ -297,6 +324,15 @@ defmodule KilnCMS.Backups.DestinationConfig.Validations.AdapterSettings do
   defp reachable(%Config{kind: "s3", settings: settings}) do
     with {:ok, endpoint} <- S3.Endpoint.parse(settings),
          {:ok, _address} <- S3.Endpoint.pin(endpoint) do
+      :ok
+    else
+      {:error, reason} -> error(:settings, Destination.format_reason(reason), [])
+    end
+  end
+
+  defp reachable(%Config{kind: "sftp", settings: settings}) do
+    with {:ok, target} <- Sftp.Target.parse(settings),
+         {:ok, _address} <- Sftp.Target.pin(target) do
       :ok
     else
       {:error, reason} -> error(:settings, Destination.format_reason(reason), [])

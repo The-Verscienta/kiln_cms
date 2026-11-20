@@ -37,14 +37,15 @@ defmodule KilnCMS.Backups.DestinationTest do
     test "lists Kiln's own adapters, then the plugins', then the test extras, in a fixed order" do
       registry = Destination.registry()
 
-      assert [Rclone, Local, S3 | rest] = registry
+      assert [Rclone, Local, S3, KilnCMS.Backups.Destination.Sftp | rest] = registry
       assert rest == [KilnDepFixture.BackupDestination, Fake, ResumableFake]
       assert Destination.registry() == registry
     end
 
     test "core_kinds/0 names Kiln's own kinds, the ones no plugin can take" do
-      assert Destination.core_kinds() == ["rclone", "local", "s3"]
+      assert Destination.core_kinds() == ["rclone", "local", "s3", "sftp"]
       assert Destination.adapter("s3") == {:ok, S3}
+      assert Destination.adapter("sftp") == {:ok, KilnCMS.Backups.Destination.Sftp}
     end
 
     test "finds an adapter by kind, and an unknown kind is not installed" do

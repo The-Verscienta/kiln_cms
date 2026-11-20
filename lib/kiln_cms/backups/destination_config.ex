@@ -50,6 +50,17 @@ defmodule KilnCMS.Backups.DestinationConfig do
   others under a transaction-scoped advisory lock (`Changes.EnabledCap`), so
   two at once can't both take the last place (#2952).
 
+  ## An SFTP destination's host key
+
+  `host_key` (#2222, ADR 0079) is the server key a platform admin confirmed
+  for an SFTP destination: `%{"algorithm", "fingerprint", "how",
+  "trusted_at"}`, or `nil` until they do. It is not one of the settings, so
+  no `:update` can change it: only `:trust_host_key`, a platform admin's
+  alone and audited as `backup_destination_host_key_trusted` with the key it
+  replaced. An SFTP destination can't be enabled while it has none
+  (`Validations.AdapterSettings`). `to_config/1` passes it to the adapter in
+  the settings, under keys no form can set.
+
   ## A stale save is refused
 
   `:update` writes only while the row's `updated_at` is the one the caller
@@ -165,6 +176,30 @@ defmodule KilnCMS.Backups.DestinationConfig do
     # actor's alone, so no person can mark a destination as tested. The
     # platform admin who pressed Test is the event's actor, passed in the
     # changeset context by `test_destination/2`.
+    # A platform admin trusting an SFTP server's host key (#2222, ADR 0079),
+    # from a scan (`KilnCMS.Backups.scan_destination_host_key/2`).
+    # `previous_fingerprint` is what was stored when the scan began: the
+    # write is refused as stale if another admin trusted a key since.
+    update :trust_host_key do
+      accept []
+      require_atomic? false
+
+      argument :algorithm, :string, allow_nil?: false
+      argument :fingerprint, :string, allow_nil?: false
+      argument :how, :atom, allow_nil?: false, constraints: [one_of: [:scanned, :entered]]
+      argument :previous_fingerprint, :string
+
+      change Changes.TrustHostKey
+      change Changes.KeepUpdatedAt
+
+      change {KilnCMS.Security.Changes.Record,
+              type: :backup_destination_host_key_trusted,
+              scope: :instance,
+              mode: :in_transaction,
+              target: &Audit.target/2,
+              metadata: &Audit.host_key_trusted/2}
+    end
+
     update :record_test_result do
       accept []
       require_atomic? false
@@ -199,6 +234,12 @@ defmodule KilnCMS.Backups.DestinationConfig do
 
     # A platform admin manages destinations; the pipeline never does.
     policy action([:create, :update, :reorder, :destroy]) do
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
+    end
+
+    # A platform admin, and never the pipeline: no system actor may decide
+    # which server a backup trusts (#2222).
+    policy action(:trust_host_key) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
 
@@ -262,6 +303,10 @@ defmodule KilnCMS.Backups.DestinationConfig do
       public? true
     end
 
+    # The SFTP host key a platform admin trusted (#2222): written only by
+    # `:trust_host_key`, never part of `settings`.
+    attribute :host_key, :map, public?: true
+
     attribute :last_tested_at, :utc_datetime_usec, public?: true
     attribute :last_test_ok, :boolean, public?: true
 
@@ -308,11 +353,22 @@ defmodule KilnCMS.Backups.DestinationConfig do
          id: destination.id,
          key: destination.id && key(destination),
          kind: destination.kind,
-         settings: destination.settings || %{},
+         settings: with_host_key(destination),
          secrets: secrets
        }}
     end
   end
+
+  # An SFTP destination's trusted key travels in the settings, under keys
+  # `Validations.AdapterSettings` refuses from any form (#2222).
+  defp with_host_key(%__MODULE__{kind: "sftp", host_key: %{} = host_key} = destination) do
+    Map.merge(destination.settings || %{}, %{
+      KilnCMS.Backups.Destination.Sftp.algorithm_key() => host_key["algorithm"],
+      KilnCMS.Backups.Destination.Sftp.fingerprint_key() => host_key["fingerprint"]
+    })
+  end
+
+  defp with_host_key(destination), do: destination.settings || %{}
 
   @doc """
   The secret fields `ciphertext` holds: `%{}` for none,

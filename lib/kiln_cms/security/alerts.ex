@@ -32,6 +32,7 @@ defmodule KilnCMS.Security.Alerts do
   | `api_key_abuse` | platform | a rotated API key presented again |
   | `api_key_rate_limited` | platform | a verified API key over a rate limit |
   | `blocked_ip` | site | a request from an address on the site's block list refused |
+  | `backup_host_key_changed` | platform | an SFTP backup server offered a host key other than the one trusted (#2222); raised from the instance log, not by `classify/2` |
 
   `api_key_rate_limited` is its own kind, not part of `api_key_abuse`: an
   alert window is claimed per kind, so a key over a rate limit must not use up
@@ -78,7 +79,8 @@ defmodule KilnCMS.Security.Alerts do
     :platform_role_changed,
     :new_api_key,
     :api_key_abuse,
-    :api_key_rate_limited
+    :api_key_rate_limited,
+    :backup_host_key_changed
   ]
 
   # The platform kinds a platform admin can turn off (owner decision D-A on
@@ -113,6 +115,7 @@ defmodule KilnCMS.Security.Alerts do
           | :new_api_key
           | :api_key_abuse
           | :api_key_rate_limited
+          | :backup_host_key_changed
 
   @typedoc """
   One thing an event raises: an alert of `kind` on a channel, or an

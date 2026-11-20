@@ -232,3 +232,13 @@ if raw = System.get_env("BACKUP_S3_PRIVATE_HOSTS") do
   config :kiln_cms, KilnCMS.Backups.Destination.S3,
     private_hosts: KilnCMS.Backups.Destination.S3.Endpoint.parse_private_hosts(raw)
 end
+
+# SFTP backup destinations (#2222): the hosts an admin may point one at that
+# resolve to a private or loopback address (a NAS on the LAN). Exact names,
+# comma-separated, and its own list: allowing a host for S3 opens none of
+# its SSH ports. Read in every environment. Down here so no anchor above
+# shifts.
+if raw = System.get_env("BACKUP_SFTP_PRIVATE_HOSTS") do
+  config :kiln_cms, KilnCMS.Backups.Destination.Sftp,
+    private_hosts: KilnCMS.Backups.Destination.HostPolicy.parse_private_hosts(raw)
+end
