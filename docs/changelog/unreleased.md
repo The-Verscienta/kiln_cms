@@ -23,6 +23,50 @@ carries the reasoning.
 
 ## Added
 
+<a id="site-defaults-api"></a>
+
+- **A headless front end can read the site's link-preview defaults at
+  `GET /api/site` (#2577): its name, its X (Twitter) handle and its default
+  share image, with no credential.** A fired artifact's `social` object
+  carries only the document's own values
+  ([ADR 0061](../decisions/0061-site-level-values-stay-out-of-per-document-artifacts.md)),
+  so until now a front end had to copy the site's X handle and fallback image
+  into its own config by hand. Guides:
+  [Site defaults](../api.md#site-defaults) and
+  [Add the site-level tags](../headless-consumer-guide.md#add-the-site-level-tags).
+  - **The answer.** Exactly three keys, every one always present:
+    `site_name` (the site's name as its `<title>` carries it: Branding, else
+    `SITE_NAME`, else `KilnCMS`; a site nobody has branded answers the
+    deployment's default name), `twitter_site` (`@handle` or `null`, per
+    site only, with no operator default) and `social_image_url` (an absolute
+    URL on the site's own host, or a full URL passed through, or `null`;
+    the operator's branding config applies as it does on the pages). Each is
+    a value the site's public `<head>` already shows. Logo, favicon, colors,
+    theme and menus are left out on purpose.
+  - **Whose site.** The one the request's host names, as on every other
+    delivery surface; under strict host matching an unknown host is a `404`.
+  - **Caching.** Anonymous reads are `public, max-age=60,
+    stale-while-revalidate=60` with a weak `ETag` and `304`, like
+    `/api/search`; a valid credential gets the same body as
+    `private, no-store`, and an invalid one is a `401`. If the site's
+    Branding can't be read the answer is a `503` with `Retry-After: 2`,
+    never cached, rather than Kiln's stock defaults.
+  - **CDN purge on a Branding save.** With `KILN_CDN_PURGE_URL` set, the
+    first Branding save, **Reset to defaults**, and a save that changes the
+    site name, the X username or the default social image now purge the
+    site's CDN key, which drops every cached response for that site, not
+    just this one. A save that changes only the logo, favicon, color, theme
+    or menus doesn't, nor does the nightly app-icon re-check. A change of
+    `SITE_NAME`, the operator's branding config, or the site's domain or slug
+    is not purged and shows within two minutes.
+  - **The contract.** Listed as covered in the 1.x stability table; new keys
+    are additive only. REST only: no JSON:API resource, GraphQL field or MCP
+    tool. `site()` methods for `kiln_client` and `@kiln-cms/client` will
+    follow separately. In the OpenAPI document as `getSite`.
+  - **Upgrading.** No migration and no setting. On a deployment with
+    `KILN_CDN_PURGE_URL` set, expect a site-wide purge after a Branding save
+    that changes one of the three values.
+
 <a id="plugin-health-api"></a>
 
 - **Each installed plugin's health is available as JSON for monitoring, at
@@ -127,6 +171,10 @@ carries the reasoning.
 <a id="webhook-ordering-identity"></a>
 
 - **A late, retried or foreign provider webhook can no longer overwrite a membership with the wrong subscription's state (#2749).** Metadata resolves an event to a membership row, not to a subscription, so a delayed event could undo newer state and an event for an abandoned subscription could rewrite a paying row. Events are now checked before they are applied, and one that fails is acknowledged, writes nothing and ends `ignored` in `/editor/billing` with a reason. `other_subscription`: the membership is `active` or `past_due`, holds a subscription id, and the event is about a different one (logged at warning); a cancellation for a subscription other than the stored one is ignored on any row, so it never overwrites the stored id. `out_of_order`: the event's `created` is older than the last one applied for the same subscription; an equal stamp applies, except that an event that would not cancel never revives a `canceled` row. `comped_not_provider_managed`: a `comped` membership ignores every provider event, and comping a paying member does not cancel their provider subscription (#3156), so cancel it in the provider's dashboard. An event with no subscription id, or an entitling row with no stored one, is still applied. A row that does not entitle accepts a different subscription only when it is `incomplete`, when the state was fetched live at checkout, or when the event is strictly newer than the last one applied, so a late non-cancelling event for a canceled row's old subscription cannot revive it. Checkout completion applies state fetched live, is exempt from the ordering check, and is stamped with the checkout event's own `created`. `invoice.payment_failed` now also has its subscription id read from the newer Stripe shape (`parent.subscription_details.subscription`). The check repeats inside the write transaction under the row lock; a row that moved and an event now superseded settles as `ignored`, and if the row moved but the event still applies the write errors and Oban retries it. Residual window: Stripe's `created` has one-second resolution, so two different events in the same second delivered in the wrong order are not caught. Replaying an applied event still appends a second `reconciled` audit row (status unchanged). Operators: ignored events show in `/editor/billing` with the reason; a burst of `other_subscription` is worth a look. A new nullable column, `billing_memberships.last_provider_event_at` (expand-only, not exposed in the API), and no config. A node on the previous release does not stamp it, which only makes ordering more permissive, so rolling back is safe. See [Late, repeated and foreign events](../memberships.md#late-repeated-and-foreign-events).
+
+<a id="billing-webhook-lost-events"></a>
+
+- **A provider webhook can no longer be recorded without a job to process it (#2748).** The receiver inserted the event row and then enqueued its job as a second step, so a crash or enqueue failure between the two left a `received` row nothing would ever process, and the provider's redelivery was acked as a duplicate. Now `WebhookEvent`'s `:receive` inserts the row and the `WebhookWorker` job in one transaction: a `500` means nothing was recorded and the retry starts clean. A redelivery of a `received`, `failed` or stale `processing` event (claimed more than 10 minutes ago) re-enqueues its job and is then acked; a redelivery of a `processed` or `ignored` event, or of a freshly claimed one, is only acked. The worker has a 3-minute run timeout and rescues exceptions, exits and throws, so the event settles as `failed` and Oban retries. `:claim` can take over a `processing` event older than 10 minutes, in one atomic update. The job is unique on the event id while `available`, `scheduled` or `retryable`, but not `executing`: `Oban.Lifeline` rescues an orphaned executing job only after 180 minutes, and a redelivery must be able to enqueue meanwhile. A crash after the `200` is never redelivered by the provider; recovery there is the rescue, Oban's retry and the takeover. A taken-over event whose membership change had already committed appends a second `MembershipEvent` audit row; access is not granted twice, and ordering is #2749's. Still open, for the sweeper in #3159: a job that exhausts `max_attempts` leaves the event `failed`, a `processed` stamp that fails to save leaves it `processing`, and `received` rows recorded before this deploy have no job. No migration and no config. A rolling deploy is safe (an old node enqueues a non-unique job, which the claim catches), and rolling back is safe. See [Webhook delivery and recovery](../memberships.md#webhook-delivery-and-recovery).
 
 <a id="backup-s3-same-bucket-overlap"></a>
 

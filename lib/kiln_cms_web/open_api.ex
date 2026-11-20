@@ -90,6 +90,8 @@ defmodule KilnCMSWeb.OpenApi do
       and the presigned direct-upload pair under `/api/media/uploads`
       (`docs/api.md` → "Uploading media"). Metadata edits are the JSON:API
       `PATCH /api/json/media-items/{id}` below.
+    * **Site defaults** for link previews at `GET /api/site` (operation
+      below): the site's name, X (Twitter) handle and default share image.
     * **Search, resolve, menus, locales, forms, related, ask, provenance** under
       `/api/*`.
     * **Security posture** for monitoring at `GET /api/security/posture`
@@ -480,6 +482,41 @@ defmodule KilnCMSWeb.OpenApi do
           }
         }
       },
+      "/api/site" => %OpenApiSpex.PathItem{
+        get: %OpenApiSpex.Operation{
+          tags: ["Delivery"],
+          operationId: "getSite",
+          summary: "Fetch the site's link-preview defaults",
+          description:
+            "The site-level values a headless front end falls back to for its " <>
+              "Open Graph and X (Twitter) card tags when a document's own " <>
+              "`social` object has none: the values this site's own pages " <>
+              "carry. Every key is always present. Public; a credential is " <>
+              "accepted and changes nothing, but an invalid one is a 401. " <>
+              "Anonymous responses are shared-cacheable for 60 seconds with an " <>
+              "ETag, and a branding save purges the site's CDN key. A 503 with " <>
+              "`Retry-After` means the site's branding could not be read.",
+          security: [],
+          responses: %{
+            200 => %OpenApiSpex.Response{
+              description: "The site's link-preview defaults",
+              content: %{
+                "application/json" => %OpenApiSpex.MediaType{schema: site_defaults_schema()}
+              }
+            },
+            401 => error_response("An invalid credential (API key or bearer token)"),
+            404 => %OpenApiSpex.Response{
+              description: "No site serves this host (strict host matching)"
+            },
+            429 => %OpenApiSpex.Response{description: "Rate limited — see `Retry-After`"},
+            503 =>
+              error_response(
+                "The site's branding could not be read (`temporarily_unavailable`) — " <>
+                  "retry after the `Retry-After` delay"
+              )
+          }
+        }
+      },
       "/api/graphql/schema.graphql" => %OpenApiSpex.PathItem{
         get: %OpenApiSpex.Operation{
           tags: ["Delivery"],
@@ -549,6 +586,36 @@ defmodule KilnCMSWeb.OpenApi do
             },
             404 => %OpenApiSpex.Response{description: "Unknown type or document"}
           }
+        }
+      }
+    }
+  end
+
+  # `GET /api/site` (#2577): `KilnCMSWeb.SiteDefaults`. Every key required, so
+  # a typed client never has to tell "absent" from "null".
+  defp site_defaults_schema do
+    %OpenApiSpex.Schema{
+      type: :object,
+      required: [:site_name, :twitter_site, :social_image_url],
+      properties: %{
+        site_name: %OpenApiSpex.Schema{
+          type: :string,
+          description:
+            "The site's name, as its pages' `<title>` carries it. An unbranded " <>
+              "site answers the operator's default name, or `KilnCMS`"
+        },
+        twitter_site: %OpenApiSpex.Schema{
+          type: :string,
+          nullable: true,
+          description: "The site's X (Twitter) handle as `@handle`, or `null`"
+        },
+        social_image_url: %OpenApiSpex.Schema{
+          type: :string,
+          format: :uri,
+          nullable: true,
+          description:
+            "The default share image, an absolute http(s) URL on the site's own " <>
+              "host (or a CDN's), or `null`"
         }
       }
     }
