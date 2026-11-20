@@ -7,6 +7,42 @@ tagged `client-js-vX.Y.Z` in the
 
 ## Unreleased
 
+### Changed
+
+- **An empty 2xx body throws `KilnUnexpectedBodyError`, except on a content
+  or media write (kiln_cms#3129).** No read route answers a 2xx with an empty body, so an
+  empty one is not Kiln's answer, but the client took it as one. JSON:API
+  collection reads such as `list()` and `releases()` resolved an empty list,
+  `one()` resolved `null`, `release()` an object holding only `included`,
+  and the plain-JSON reads (`search()`, `syncPage()`, `menus()`, `locales()`,
+  `artifact()`, `preview()`, `resolvePath()`, `schema()`, `related()` and
+  the rest) resolved `null`. `revision()`, `sync()` and `restoreRevision()`
+  threw a `TypeError`; `graphql()` resolved `{}`; `mintPreview()` and
+  `submitForm()` resolved `null`. Each of these now throws
+  `KilnUnexpectedBodyError` with `code: "unexpected_body"`, the 2xx
+  `status`, `url`, `body: ""` and no `cause`; its message ends "with an
+  empty body".
+
+  `one()` therefore throws on an empty 2xx where it used to resolve `null`.
+  A real empty match, `{"data": []}`, still resolves `null`.
+
+  The content and media writes are unchanged. `delete()` still resolves on a 204 or an empty 200.
+  The other content writes and the media writes still throw `KilnError` with
+  `code: "empty_response"`. `beginDirectUpload()` now throws that same
+  `empty_response` error on an empty answer instead of a `TypeError`.
+
+- **A missing image transform key throws `KilnConfigError`
+  (kiln_cms#3130).** `signedImageUrl()` and `signedImageSrcset()` on a client
+  created without `imageTransformKey` threw a plain `Error`; they now throw
+  `KilnConfigError` with `code: "missing_image_transform_key"`. The exported
+  `signedTransformPath()` and `signedTransformSrcset()` reject with the same
+  error for an empty key, and with `code: "webcrypto_unavailable"` in a
+  runtime without `globalThis.crypto.subtle`. The messages are unchanged and
+  the errors are still `instanceof Error`, so a check on the message keeps
+  working; branch on `code` instead.
+
+### Fixed
+
 - **Fix: a 2xx answer that isn't JSON throws `KilnUnexpectedBodyError`
   (kiln_cms#2735).** A captive portal, a CDN error page or a proxy answering
   `200 text/html` in Kiln's place made the client throw the raw `SyntaxError`
@@ -15,8 +51,8 @@ tagged `client-js-vX.Y.Z` in the
   first 1 KiB of the text in `body` (cut on a UTF-8 character boundary, kept
   out of `message`) and the `SyntaxError` as `cause`. It is not a
   `KilnHttpError`, which stays reserved for non-2xx answers, so
-  `isKilnHttpError(err)` is false for it. An empty 2xx still resolves to
-  `null`.
+  `isKilnHttpError(err)` is false for it. An empty 2xx body throws it too,
+  except on a content or media write (kiln_cms#3129, under Changed).
 - **Fix: a body that breaks off mid-read throws `KilnNetworkError`.** When
   the connection dropped after the headers arrived, reading the body rejected
   with the platform's own error. It is now a `KilnNetworkError` with that

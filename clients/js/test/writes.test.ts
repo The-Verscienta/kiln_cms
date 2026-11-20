@@ -14,6 +14,7 @@ import {
   KilnNotFoundError,
   KilnRateLimitError,
   KilnServerError,
+  KilnUnexpectedBodyError,
   KilnValidationError,
 } from "../src/index.js";
 import type { ContentProvenance, Item } from "../src/index.js";
@@ -191,6 +192,27 @@ describe("delete", () => {
   it("resolves on an empty 204", async () => {
     const stub = stubFetch({ status: 204, text: "" });
     await expect(client(stub).delete("posts", "p1")).resolves.toBeUndefined();
+  });
+
+  it("resolves on an empty 200", async () => {
+    const stub = stubFetch({ status: 200, text: "" });
+    await expect(client(stub).delete("posts", "p1")).resolves.toBeUndefined();
+  });
+});
+
+describe("a write answered with an empty body", () => {
+  it("throws KilnError empty_response, not KilnUnexpectedBodyError", async () => {
+    for (const status of [200, 204]) {
+      const stub = stubFetch({ status, text: "" });
+
+      const error = await client(stub)
+        .create("posts", { title: "x" })
+        .catch((caught: unknown) => caught);
+
+      expect(error).toBeInstanceOf(KilnError);
+      expect(error).not.toBeInstanceOf(KilnUnexpectedBodyError);
+      expect((error as KilnError).code).toBe("empty_response");
+    }
   });
 });
 

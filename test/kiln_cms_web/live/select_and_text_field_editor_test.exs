@@ -56,7 +56,7 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
     admin = authed_admin()
 
     define!(admin, %{
-      name: "properties",
+      name: "satfe_properties",
       label: "Western properties",
       field_type: :select,
       multiple: true,
@@ -79,14 +79,14 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
     define!(admin, %{name: "uses", label: "Uses", field_type: :text, position: 1})
 
     define!(admin, %{
-      name: "code",
+      name: "satfe_code",
       label: "Code",
       field_type: :text,
       format: :plain,
       position: 2
     })
 
-    define!(admin, %{name: "legacy", label: "Legacy", field_type: :text, position: 3})
+    define!(admin, %{name: "satfe_legacy", label: "Legacy", field_type: :text, position: 3})
 
     define!(admin, %{
       name: "symptoms",
@@ -101,7 +101,7 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
       %{
         title: "Other",
         slug: "stfe-#{System.unique_integer([:positive])}",
-        custom_fields: %{"properties" => ["nervine"]}
+        custom_fields: %{"satfe_properties" => ["nervine"]}
       },
       actor: admin
     )
@@ -112,10 +112,10 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
           title: "Ginseng",
           slug: "stfe-#{System.unique_integer([:positive])}",
           custom_fields: %{
-            "properties" => ["tonic"],
+            "satfe_properties" => ["tonic"],
             "uses" => "<p>Ren Shen <strong>tonifies</strong></p>",
-            "code" => "RS-1",
-            "legacy" => ~s(["a","b"]),
+            "satfe_code" => "RS-1",
+            "satfe_legacy" => ~s(["a","b"]),
             "symptoms" => ["fatigue", "night sweats"],
             "category" => "transforming_phlegm"
           }
@@ -128,7 +128,7 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
     %{admin: admin, page: page, lv: lv, conn: conn}
   end
 
-  defp chip(n), do: "#cf-term-properties-#{n}"
+  defp chip(n), do: "#cf-term-satfe_properties-#{n}"
   defp stored(ctx), do: CMS.get_page!(ctx.page.id, actor: ctx.admin).custom_fields
 
   describe "the tag picker" do
@@ -139,50 +139,60 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
 
       assert has_element?(
                ctx.lv,
-               ~s(#custom-field-properties-entry[phx-hook=TermPicker][data-count="1"])
+               ~s(#custom-field-satfe_properties-entry[phx-hook=TermPicker][data-count="1"])
              )
 
       # Options, then the terms in use, less what is already chosen.
       # A labelled option is suggested by its label.
       assert has_element?(
                ctx.lv,
-               ~s{#custom-field-properties-suggestions option[value="Adaptogen (stress)"]}
+               ~s{#custom-field-satfe_properties-suggestions option[value="Adaptogen (stress)"]}
              )
 
-      assert has_element?(ctx.lv, ~s(#custom-field-properties-suggestions option[value=nervine]))
-      refute has_element?(ctx.lv, ~s(#custom-field-properties-suggestions option[value=tonic]))
+      assert has_element?(
+               ctx.lv,
+               ~s(#custom-field-satfe_properties-suggestions option[value=nervine])
+             )
+
+      refute has_element?(
+               ctx.lv,
+               ~s(#custom-field-satfe_properties-suggestions option[value=tonic])
+             )
     end
 
     test "adds, removes and reorders terms, and saves them as an ordered list", ctx do
-      entry = element(ctx.lv, "#custom-field-properties-entry")
+      entry = element(ctx.lv, "#custom-field-satfe_properties-entry")
 
-      render_hook(entry, "list_item_add", %{"field" => "properties", "item" => " nervine "})
-      render_hook(entry, "list_item_add", %{"field" => "properties", "item" => "tonic"})
-      render_hook(entry, "list_item_add", %{"field" => "properties", "item" => "adaptogen"})
+      render_hook(entry, "list_item_add", %{"field" => "satfe_properties", "item" => " nervine "})
+      render_hook(entry, "list_item_add", %{"field" => "satfe_properties", "item" => "tonic"})
+      render_hook(entry, "list_item_add", %{"field" => "satfe_properties", "item" => "adaptogen"})
 
       assert has_element?(ctx.lv, chip(1), "nervine")
       assert has_element?(ctx.lv, chip(2), "Adaptogen (stress)")
       refute has_element?(ctx.lv, chip(3))
 
       # Full at max_items: the box goes, and says why.
-      refute has_element?(ctx.lv, "#custom-field-properties-entry")
+      refute has_element?(ctx.lv, "#custom-field-satfe_properties-entry")
       assert render(ctx.lv) =~ "At the limit of 3 terms."
 
       ctx.lv
-      |> element("#custom-field-properties-terms")
-      |> render_hook("list_item_reorder", %{"field" => "properties", "order" => ["2", "0", "1"]})
+      |> element("#custom-field-satfe_properties-terms")
+      |> render_hook("list_item_reorder", %{
+        "field" => "satfe_properties",
+        "order" => ["2", "0", "1"]
+      })
 
       ctx.lv |> element("#{chip(2)} button[phx-click=list_item_remove]") |> render_click()
 
       ctx.lv |> form("#page-editor") |> render_submit()
-      assert stored(ctx)["properties"] == ["adaptogen", "tonic"]
+      assert stored(ctx)["satfe_properties"] == ["adaptogen", "tonic"]
     end
 
     test "removing every term clears the field", ctx do
       ctx.lv |> element("#{chip(0)} button[phx-click=list_item_remove]") |> render_click()
       ctx.lv |> form("#page-editor") |> render_submit()
 
-      refute Map.has_key?(stored(ctx), "properties")
+      refute Map.has_key?(stored(ctx), "satfe_properties")
     end
   end
 
@@ -204,18 +214,21 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
     test "the tag picker suggests labels, and a label picked adds its value", ctx do
       assert has_element?(
                ctx.lv,
-               ~s{#custom-field-properties-suggestions option[value="Adaptogen (stress)"]}
+               ~s{#custom-field-satfe_properties-suggestions option[value="Adaptogen (stress)"]}
              )
 
       ctx.lv
-      |> element("#custom-field-properties-entry")
-      |> render_hook("list_item_add", %{"field" => "properties", "item" => "adaptogen (STRESS)"})
+      |> element("#custom-field-satfe_properties-entry")
+      |> render_hook("list_item_add", %{
+        "field" => "satfe_properties",
+        "item" => "adaptogen (STRESS)"
+      })
 
       assert has_element?(ctx.lv, ~s(#{chip(1)} input[type=hidden][value=adaptogen]))
       assert has_element?(ctx.lv, chip(1), "Adaptogen (stress)")
 
       ctx.lv |> form("#page-editor") |> render_submit()
-      assert stored(ctx)["properties"] == ["tonic", "adaptogen"]
+      assert stored(ctx)["satfe_properties"] == ["tonic", "adaptogen"]
     end
   end
 
@@ -291,11 +304,11 @@ defmodule KilnCMSWeb.SelectAndTextFieldEditorTest do
     end
 
     test "a plain one, and a rich one holding JSON data, keep the textarea", ctx do
-      assert has_element?(ctx.lv, "textarea#custom-field-code", "RS-1")
-      refute has_element?(ctx.lv, "#cf-rich-code")
+      assert has_element?(ctx.lv, "textarea#custom-field-satfe_code", "RS-1")
+      refute has_element?(ctx.lv, "#cf-rich-satfe_code")
 
-      assert has_element?(ctx.lv, "textarea#custom-field-legacy")
-      refute has_element?(ctx.lv, "#cf-rich-legacy")
+      assert has_element?(ctx.lv, "textarea#custom-field-satfe_legacy")
+      refute has_element?(ctx.lv, "#cf-rich-satfe_legacy")
     end
 
     test "what the field editor writes is saved, sanitized", ctx do

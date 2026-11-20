@@ -229,9 +229,11 @@ A degraded embedding backend _stalls_ the semantic routes without failing them
 far too late to be useful). Callers with a keyword fallback should bound
 `semanticSearch()` and `search()` well above their healthy latency.
 
-`one()` resolves `null` for an empty match, and `artifact()` retries a
-cold-cache 503 once before throwing; everything else that fails throws — see
-[Errors](#errors).
+`one()` resolves `null` when nothing matches (`{"data": []}`), and
+`artifact()` retries a cold-cache 503 once before throwing; everything else
+that fails throws — see [Errors](#errors). That includes a 2xx with an empty
+body, which no read route sends: every call but a content or media write
+throws `KilnUnexpectedBodyError` for one, `one()` included.
 
 ## API surface
 
@@ -415,6 +417,14 @@ const set = await kiln.signedImageSrcset(media, { widths: [300, 600, 1200] });
 > step), never in code that ships to a browser. Signing uses WebCrypto
 > (`globalThis.crypto.subtle`), hence the `await`.
 
+On a client created without `imageTransformKey`, `signedImageUrl()` and
+`signedImageSrcset()` throw `KilnConfigError` with
+`code: "missing_image_transform_key"` before signing anything. The exported
+`signedTransformPath()` and `signedTransformSrcset()` reject with the same
+error for an empty key, and with `code: "webcrypto_unavailable"` in a runtime
+without `globalThis.crypto.subtle` (Node 18 needs
+`--experimental-global-webcrypto`).
+
 The same builders are exported as pure functions returning paths —
 `transformPath`, `transformSrcset`, `signedTransformPath`,
 `signedTransformSrcset`, `transformVersion`, `snapTransformSize` — for callers
@@ -586,18 +596,18 @@ Everything the client throws is a `KilnError` (`status`, `code`, the JSON:API
 (`status`, `url`, parsed `body` — unchanged from 0.1, so `isKilnHttpError(err)`
 still narrows) refined by status:
 
-| Class                     | When                                                                                                                                                                                                |
-| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `KilnAuthError`           | 401 (no/invalid/expired key) · 403 (the key's owner lacks the right — a `:read` key writing, an editor publishing)                                                                                  |
-| `KilnNotFoundError`       | 404                                                                                                                                                                                                 |
-| `KilnValidationError`     | 400 / 422 — `pointers` (`/data/attributes/slug`) and `fieldErrors()`. AshJsonApi answers most attribute errors with 400, not 422                                                                    |
-| `KilnConflictError`       | 409 — a transition from the wrong state (`code: "invalid_state_transition"`, `currentState`) or a lost race                                                                                         |
-| `KilnRateLimitError`      | 429 — wait `retryAfter` seconds                                                                                                                                                                     |
-| `KilnServerError`         | 5xx (a 503 may carry `retryAfter`)                                                                                                                                                                  |
-| `KilnNetworkError`        | no response at all (DNS, refused, TLS), or the body broke off mid-read; the original error is `cause`                                                                                               |
-| `KilnUnexpectedBodyError` | a 2xx whose body isn't JSON (a proxy's, CDN's or captive portal's HTML page), `code: "unexpected_body"`; the first 1 KiB of the text is `body`, the `SyntaxError` is `cause`. Not a `KilnHttpError` |
-| `KilnGraphQLError`        | `/gql` answered with top-level `errors`                                                                                                                                                             |
-| `KilnConfigError`         | refused client-side — a write (`restoreRevision` included) with no `apiKey` (`code: "missing_api_key"`)                                                                                             |
+| Class                     | When                                                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `KilnAuthError`           | 401 (no/invalid/expired key) · 403 (the key's owner lacks the right — a `:read` key writing, an editor publishing)                                                                                                                                                                                                                                                               |
+| `KilnNotFoundError`       | 404                                                                                                                                                                                                                                                                                                                                                                              |
+| `KilnValidationError`     | 400 / 422 — `pointers` (`/data/attributes/slug`) and `fieldErrors()`. AshJsonApi answers most attribute errors with 400, not 422                                                                                                                                                                                                                                                 |
+| `KilnConflictError`       | 409 — a transition from the wrong state (`code: "invalid_state_transition"`, `currentState`) or a lost race                                                                                                                                                                                                                                                                      |
+| `KilnRateLimitError`      | 429 — wait `retryAfter` seconds                                                                                                                                                                                                                                                                                                                                                  |
+| `KilnServerError`         | 5xx (a 503 may carry `retryAfter`)                                                                                                                                                                                                                                                                                                                                               |
+| `KilnNetworkError`        | no response at all (DNS, refused, TLS), or the body broke off mid-read; the original error is `cause`                                                                                                                                                                                                                                                                            |
+| `KilnUnexpectedBodyError` | a 2xx whose body isn't JSON (a proxy's, CDN's or captive portal's HTML page) or is empty, `code: "unexpected_body"`; the first 1 KiB of the text is `body`, the `SyntaxError` is `cause`. An empty body is `body: ""` with no `cause`, and only a content or media write accepts one (`delete()` resolves; the others throw `KilnError` `empty_response`). Not a `KilnHttpError` |
+| `KilnGraphQLError`        | `/gql` answered with top-level `errors`                                                                                                                                                                                                                                                                                                                                          |
+| `KilnConfigError`         | refused client-side — a write (`restoreRevision` included) with no `apiKey` (`code: "missing_api_key"`); a signed image URL with no `imageTransformKey`, or an empty key passed to a signed builder (`code: "missing_image_transform_key"`); signing without WebCrypto (`code: "webcrypto_unavailable"`)                                                                         |
 
 Aborts are not wrapped: a `signal` (or the client's timeout) rejects with the
 platform's `AbortError` / `TimeoutError`, exactly as `fetch` does. The API key

@@ -707,9 +707,48 @@ describe("transport", () => {
     expect(body).toBe(`<${"é".repeat(511)}`);
   });
 
-  it("still resolves an empty 2xx body as null", async () => {
-    const stub = stubFetch({ status: 200, text: "" });
-    await expect(client(stub).search("cats")).resolves.toBeNull();
+  // No read route answers an empty 2xx, so an empty body is not Kiln's answer:
+  // before, these resolved an empty list, `null`, `{}` or a bogus record, or
+  // crashed with a TypeError.
+  const emptyReads: [string, (kiln: ReturnType<typeof client>) => Promise<unknown>][] = [
+    ["list", (kiln) => kiln.list("posts")],
+    ["one", (kiln) => kiln.one("posts", { slug: "hello" })],
+    ["search", (kiln) => kiln.search("cats")],
+    ["release", (kiln) => kiln.release("r1")],
+    ["sync", (kiln) => kiln.sync()],
+    ["graphql", (kiln) => kiln.graphql("{ listPosts { id } }")],
+    ["restoreRevision", (kiln) => kiln.restoreRevision("page", "p1", "v1")],
+    ["mintPreview", (kiln) => kiln.mintPreview("post", "p1")],
+  ];
+
+  for (const [name, call] of emptyReads) {
+    it(`throws KilnUnexpectedBodyError when ${name} gets an empty 2xx body`, async () => {
+      const stub = stubFetch({ status: 200, text: "" });
+
+      const error = await call(client(stub, "rw-key")).then(
+        () => null,
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toBeInstanceOf(KilnUnexpectedBodyError);
+      expect(isKilnError(error)).toBe(true);
+      const unexpected = error as KilnUnexpectedBodyError;
+      expect(unexpected.code).toBe("unexpected_body");
+      expect(unexpected.status).toBe(200);
+      expect(unexpected.body).toBe("");
+      expect(unexpected.url).toBe(stub.calls[0]!.url.toString());
+      expect(unexpected.message).toContain("an empty body");
+      expect(unexpected.cause).toBeUndefined();
+    });
+  }
+
+  it("throws KilnUnexpectedBodyError on a 204 to a read", async () => {
+    const stub = stubFetch({ status: 204, text: "" });
+    await expect(client(stub).list("posts")).rejects.toMatchObject({
+      name: "KilnUnexpectedBodyError",
+      status: 204,
+      body: "",
+    });
   });
 
   it("wraps a body stream that fails mid-read as KilnNetworkError", async () => {

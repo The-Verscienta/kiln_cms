@@ -50,7 +50,12 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
   defp define!(admin, name, attrs) do
     CMS.create_field_definition!(
       Map.merge(
-        %{content_type: :page, name: name, label: String.capitalize(name), field_type: :string},
+        %{
+          content_type: :page,
+          name: name,
+          label: String.capitalize(String.replace_prefix(name, "elff_", "")),
+          field_type: :string
+        },
         attrs
       ),
       actor: admin
@@ -81,13 +86,19 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
     admin = authed_user(:admin)
     prefix = "FF#{uniq()}"
 
-    price = define!(admin, "price", %{field_type: :integer})
-    define!(admin, "note", %{field_type: :string})
-    define!(admin, "shape", %{field_type: :group})
+    price = define!(admin, "elff_price", %{field_type: :integer})
+    define!(admin, "elff_note", %{field_type: :string})
+    define!(admin, "elff_shape", %{field_type: :group})
 
     # A private field of ANOTHER type: unknown to a page list.
     CMS.create_field_definition!(
-      %{content_type: :post, name: "secret", label: "Secret", field_type: :string, private: true},
+      %{
+        content_type: :post,
+        name: "elff_secret",
+        label: "Secret",
+        field_type: :string,
+        private: true
+      },
       actor: admin
     )
 
@@ -96,15 +107,15 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
 
   describe "cf in the URL" do
     test "narrows the list, and the count follows", %{conn: conn, prefix: prefix} do
-      cheap = a_page(prefix, %{"price" => 5})
-      mid = a_page(prefix, %{"price" => 15})
-      high = a_page(prefix, %{"price" => 25})
+      cheap = a_page(prefix, %{"elff_price" => 5})
+      mid = a_page(prefix, %{"elff_price" => 15})
+      high = a_page(prefix, %{"elff_price" => 25})
       bare = a_page(prefix, %{})
 
       {lv, html} = open(conn, prefix)
       assert Enum.sort(ids(html)) == Enum.sort([cheap.id, mid.id, high.id, bare.id])
 
-      {lv2, html} = open(conn, prefix, %{"cf" => "price:gte:10;price:lte:20"})
+      {lv2, html} = open(conn, prefix, %{"cf" => "elff_price:gte:10;elff_price:lte:20"})
       assert ids(html) == [mid.id]
       assert has_element?(lv2, "#content-count", "1 item")
       refute render(lv) =~ "1 item"
@@ -114,19 +125,27 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
       conn: conn,
       prefix: prefix
     } do
-      hit = a_page(prefix, %{"note" => "Save 50% today"})
-      _miss = a_page(prefix, %{"note" => "Save 500 today"})
+      hit = a_page(prefix, %{"elff_note" => "Save 50% today"})
+      _miss = a_page(prefix, %{"elff_note" => "Save 500 today"})
 
-      {_lv, html} = open(conn, prefix, %{"cf" => "note:contains:" <> URI.encode_www_form("50%")})
+      {_lv, html} =
+        open(conn, prefix, %{"cf" => "elff_note:contains:" <> URI.encode_www_form("50%")})
+
       assert ids(html) == [hit.id]
     end
 
     test "forged conditions are dropped: unknown, another type's private field, an unfilterable one",
          %{conn: conn, prefix: prefix} do
-      a = a_page(prefix, %{"price" => 1})
-      b = a_page(prefix, %{"price" => 2})
+      a = a_page(prefix, %{"elff_price" => 1})
+      b = a_page(prefix, %{"elff_price" => 2})
 
-      for cf <- ["ghost:eq:1", "secret:eq:x", "shape:eq:1", "price:eq:abc", "price:bogus:1"] do
+      for cf <- [
+            "ghost:eq:1",
+            "elff_secret:eq:x",
+            "elff_shape:eq:1",
+            "elff_price:eq:abc",
+            "elff_price:bogus:1"
+          ] do
         {lv, html} = open(conn, prefix, %{"cf" => cf})
         assert Enum.sort(ids(html)) == Enum.sort([a.id, b.id]), cf
         assert has_element?(lv, "#content-count", "2 items")
@@ -137,9 +156,16 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
       conn: conn,
       prefix: prefix
     } do
-      a = a_page(prefix, %{"price" => 1})
-      b = a_page(prefix, %{"price" => 2})
-      query = URI.encode_query(%{"q" => prefix, "cf" => "price:gte:2", "sort" => "field:price"})
+      a = a_page(prefix, %{"elff_price" => 1})
+      b = a_page(prefix, %{"elff_price" => 2})
+
+      query =
+        URI.encode_query(%{
+          "q" => prefix,
+          "cf" => "elff_price:gte:2",
+          "sort" => "field:elff_price"
+        })
+
       {:ok, _lv, html} = live(conn, "/editor?" <> query)
       assert Enum.sort(ids(html)) == Enum.sort([a.id, b.id])
     end
@@ -150,12 +176,12 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
       conn: conn,
       prefix: prefix
     } do
-      rows = for n <- 1..60, do: {n, a_page(prefix, %{"price" => rem(n, 7)})}
+      rows = for n <- 1..60, do: {n, a_page(prefix, %{"elff_price" => rem(n, 7)})}
       bare = for _ <- 1..3, do: a_page(prefix, %{})
       by_id = Map.new(rows, fn {n, page} -> {page.id, rem(n, 7)} end)
       bare_ids = MapSet.new(bare, & &1.id)
 
-      for {sort, dir} <- [{"field:price", :asc}, {"-field:price", :desc}] do
+      for {sort, dir} <- [{"field:elff_price", :asc}, {"-field:elff_price", :desc}] do
         {lv, html} = open(conn, prefix, %{"sort" => sort})
         first = ids(html)
         assert length(first) == 50
@@ -178,10 +204,10 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
       conn: conn,
       prefix: prefix
     } do
-      older = a_page(prefix, %{"price" => 1})
-      newer = a_page(prefix, %{"price" => 2})
+      older = a_page(prefix, %{"elff_price" => 1})
+      newer = a_page(prefix, %{"elff_price" => 2})
 
-      for sort <- ["field:ghost", "field:shape", "-field:"] do
+      for sort <- ["field:ghost", "field:elff_shape", "-field:"] do
         {_lv, html} = open(conn, prefix, %{"sort" => sort})
         assert ids(html) == [newer.id, older.id], sort
       end
@@ -279,40 +305,50 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
       conn: conn,
       prefix: prefix
     } do
-      low = a_page(prefix, %{"price" => 1})
-      high = a_page(prefix, %{"price" => 9})
+      low = a_page(prefix, %{"elff_price" => 1})
+      high = a_page(prefix, %{"elff_price" => 9})
       {lv, _} = open(conn, prefix)
 
-      render_hook(lv, "add_field_filter", %{"field" => "price", "op" => "gte", "value" => "5"})
+      render_hook(lv, "add_field_filter", %{
+        "field" => "elff_price",
+        "op" => "gte",
+        "value" => "5"
+      })
+
       patched = assert_patch(lv)
 
-      assert %{"cf" => "price:gte:5"} =
+      assert %{"cf" => "elff_price:gte:5"} =
                patched |> URI.parse() |> Map.fetch!(:query) |> URI.decode_query()
 
       assert ids(render(lv)) == [high.id]
 
-      render_hook(lv, "remove_field_filter", %{"field" => "price", "op" => "gte"})
+      render_hook(lv, "remove_field_filter", %{"field" => "elff_price", "op" => "gte"})
       patched = assert_patch(lv)
       refute patched =~ "cf="
       assert Enum.sort(ids(render(lv))) == Enum.sort([low.id, high.id])
     end
 
     test "forged payloads change nothing and say so", %{conn: conn, prefix: prefix} do
-      a_page(prefix, %{"price" => 1})
+      a_page(prefix, %{"elff_price" => 1})
       {lv, _} = open(conn, prefix)
 
       for payload <- [
             %{"field" => "ghost", "op" => "eq", "value" => "1"},
-            %{"field" => "secret", "op" => "eq", "value" => "x"},
-            %{"field" => "price", "op" => "contains", "value" => "1"},
-            %{"field" => "price", "op" => "eq", "value" => "nope"}
+            %{"field" => "elff_secret", "op" => "eq", "value" => "x"},
+            %{"field" => "elff_price", "op" => "contains", "value" => "1"},
+            %{"field" => "elff_price", "op" => "eq", "value" => "nope"}
           ] do
         html = render_hook(lv, "add_field_filter", payload)
         assert html =~ "not valid here"
       end
 
       # Wrong shapes reach the catch-all, not a crash.
-      render_hook(lv, "add_field_filter", %{"field" => ["price"], "op" => "eq", "value" => "1"})
+      render_hook(lv, "add_field_filter", %{
+        "field" => ["elff_price"],
+        "op" => "eq",
+        "value" => "1"
+      })
+
       render_hook(lv, "remove_field_filter", %{"field" => %{"a" => 1}, "op" => "eq"})
       assert render(lv) =~ "FF"
     end
@@ -322,11 +358,15 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
 
       {lv, _} =
         open(conn, prefix, %{
-          "cf" => "note:eq:a;note:contains:b;price:eq:1;price:gte:1"
+          "cf" => "elff_note:eq:a;elff_note:contains:b;elff_price:eq:1;elff_price:gte:1"
         })
 
       html =
-        render_hook(lv, "add_field_filter", %{"field" => "price", "op" => "lte", "value" => "9"})
+        render_hook(lv, "add_field_filter", %{
+          "field" => "elff_price",
+          "op" => "lte",
+          "value" => "9"
+        })
 
       assert html =~ "at most 4 field filters"
     end
@@ -335,8 +375,8 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
       conn: conn,
       prefix: prefix
     } do
-      a_page(prefix, %{"price" => 1})
-      {lv, _} = open(conn, prefix, %{"cf" => "price:gte:1", "sort" => "field:price"})
+      a_page(prefix, %{"elff_price" => 1})
+      {lv, _} = open(conn, prefix, %{"cf" => "elff_price:gte:1", "sort" => "field:elff_price"})
 
       render_hook(lv, "filter", %{"type" => "post"})
       path = assert_patch(lv)
@@ -355,16 +395,16 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
         """
         INSERT INTO pages (title, slug, locale, state, org_id, custom_fields)
         SELECT $1 || ' ' || g, 'ffbulk-' || g || '-' || $2::text, 'en', 'draft', $3,
-               jsonb_build_object('price', g)
+               jsonb_build_object('elff_price', g)
         FROM generate_series(1, 1010) g
         """,
         [prefix, to_string(uniq()), Ecto.UUID.dump!(KilnCMS.Accounts.default_org_id())]
       )
 
-      {lv, _} = open(conn, prefix, %{"cf" => "price:gte:1"})
+      {lv, _} = open(conn, prefix, %{"cf" => "elff_price:gte:1"})
       assert has_element?(lv, "#content-count", "1000+ items")
 
-      {lv, _} = open(conn, prefix, %{"cf" => "price:gte:1005"})
+      {lv, _} = open(conn, prefix, %{"cf" => "elff_price:gte:1005"})
       assert has_element?(lv, "#content-count", "6 items")
     end
   end
@@ -376,12 +416,15 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
       prefix: prefix,
       price: price
     } do
-      low = a_page(prefix, %{"price" => 1})
-      high = a_page(prefix, %{"price" => 99})
+      low = a_page(prefix, %{"elff_price" => 1})
+      high = a_page(prefix, %{"elff_price" => 99})
 
       view =
         CMS.create_saved_view!(
-          %{name: "Pricey", params: %{"type" => "page", "q" => prefix, "cf" => "price:gte:50"}},
+          %{
+            name: "Pricey",
+            params: %{"type" => "page", "q" => prefix, "cf" => "elff_price:gte:50"}
+          },
           actor: admin
         )
 
@@ -402,8 +445,8 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
 
     test "a read that fails after validation clears the field filter and flashes, on Load more too",
          %{conn: conn, admin: admin, prefix: prefix, price: price} do
-      for n <- 1..60, do: a_page(prefix, %{"price" => n})
-      {lv, html} = open(conn, prefix, %{"cf" => "price:gte:1", "sort" => "field:price"})
+      for n <- 1..60, do: a_page(prefix, %{"elff_price" => n})
+      {lv, html} = open(conn, prefix, %{"cf" => "elff_price:gte:1", "sort" => "field:elff_price"})
       assert length(ids(html)) == 50
 
       # The list is open on conditions that were valid; the field goes away.
@@ -421,14 +464,14 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
   describe "review fixes" do
     test "a saved view with only a field sort keeps it, is the active pill, and goes stale",
          %{conn: conn, admin: admin, prefix: prefix, price: price} do
-      low = a_page(prefix, %{"price" => 1})
-      high = a_page(prefix, %{"price" => 9})
+      low = a_page(prefix, %{"elff_price" => 1})
+      high = a_page(prefix, %{"elff_price" => 9})
 
       view =
         CMS.create_saved_view!(
           %{
             name: "By price",
-            params: %{"type" => "page", "q" => prefix, "sort" => "-field:price"}
+            params: %{"type" => "page", "q" => prefix, "sort" => "-field:elff_price"}
           },
           actor: admin
         )
@@ -436,7 +479,7 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
       {:ok, lv, _html} = live(conn, "/editor?type=page&q=#{prefix}")
       lv |> element("#view-#{view.id}") |> render_click()
       path = assert_patch(lv)
-      assert path =~ "sort=-field%3Aprice"
+      assert path =~ "sort=-field%3Aelff_price"
       assert ids(render(lv)) == [high.id, low.id]
       assert has_element?(lv, "#view-#{view.id}[aria-current=page]")
       refute render(lv) =~ "no longer applies"
@@ -455,8 +498,8 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
       prefix: prefix,
       price: price
     } do
-      a = a_page(prefix, %{"price" => 1})
-      {lv, _} = open(conn, prefix, %{"cf" => "price:gte:0"})
+      a = a_page(prefix, %{"elff_price" => 1})
+      {lv, _} = open(conn, prefix, %{"cf" => "elff_price:gte:0"})
       assert ids(render(lv)) == [a.id]
 
       CMS.destroy_field_definition!(price, actor: admin)
@@ -490,18 +533,27 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
       conn: conn,
       prefix: prefix
     } do
-      a_page(prefix, %{"price" => 1})
+      a_page(prefix, %{"elff_price" => 1})
       {:ok, lv, _html} = live(conn, "/editor?q=#{prefix}")
 
-      render_hook(lv, "field_filter_draft", %{"field" => "price", "op" => "gte", "value" => "5"})
+      render_hook(lv, "field_filter_draft", %{
+        "field" => "elff_price",
+        "op" => "gte",
+        "value" => "5"
+      })
+
       render_hook(lv, "field_filter_draft", %{})
 
       html =
-        render_hook(lv, "add_field_filter", %{"field" => "price", "op" => "gte", "value" => "5"})
+        render_hook(lv, "add_field_filter", %{
+          "field" => "elff_price",
+          "op" => "gte",
+          "value" => "5"
+        })
 
       assert html =~ "not valid here"
 
-      for payload <- [%{}, %{"field" => "price"}, %{"field" => 1, "op" => 2, "value" => 3}] do
+      for payload <- [%{}, %{"field" => "elff_price"}, %{"field" => 1, "op" => 2, "value" => 3}] do
         render_hook(lv, "add_field_filter", payload)
         render_hook(lv, "remove_field_filter", payload)
       end
@@ -514,12 +566,12 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
       admin: admin,
       prefix: prefix
     } do
-      define!(admin, "note", %{content_type: :post, field_type: :string})
+      define!(admin, "elff_note", %{content_type: :post, field_type: :string})
       a_page(prefix, %{})
       {lv, _} = open(conn, prefix)
 
       render_hook(lv, "toggle_filters", %{})
-      draft = %{"field" => "note", "op" => "eq", "value" => "halfway"}
+      draft = %{"field" => "elff_note", "op" => "eq", "value" => "halfway"}
       # The first event picks the field (a new field starts empty); the second types.
       render_hook(lv, "field_filter_draft", draft)
       render_hook(lv, "field_filter_draft", draft)

@@ -193,13 +193,13 @@ defmodule KilnCMSWeb.ReferenceSelectionApiTest do
   test "/api/schema never names a private field in a selection", ctx do
     secret =
       CMS.create_field_definition!(
-        %{content_type: :page, name: "secret", label: "Secret", field_type: :string},
+        %{content_type: :page, name: "rsa_secret", label: "Secret", field_type: :string},
         actor: ctx.admin
       )
 
     CMS.update_field_definition!(
       ctx.field,
-      %{selection: %{"by_type" => %{"page" => %{"fields" => %{"secret" => "classified"}}}}},
+      %{selection: %{"by_type" => %{"page" => %{"fields" => %{"rsa_secret" => "classified"}}}}},
       actor: ctx.admin
     )
 

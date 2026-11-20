@@ -29,6 +29,7 @@ defmodule KilnCMSWeb.BillingController do
 
   alias KilnCMS.Accounts.Errors.RegistrationRefused
   alias KilnCMS.Billing
+  alias KilnCMS.Billing.Membership
 
   # Start a subscription checkout for the signed-in member.
   def checkout(conn, %{"tier" => slug}) do
@@ -36,6 +37,7 @@ defmodule KilnCMSWeb.BillingController do
          {:ok, user} <- ensure_signed_in(conn, slug),
          {:ok, tier} <- fetch_tier(conn, slug),
          {:ok, membership} <- start_membership(user, tier, conn),
+         :ok <- ensure_not_entitled(conn, membership),
          {:ok, session} <- create_session(user, tier, membership, conn) do
       redirect(conn, external: session.url)
     else
@@ -132,6 +134,23 @@ defmodule KilnCMSWeb.BillingController do
           Logger.error("billing checkout: could not start membership: #{inspect(reason)}")
           {:halted, fail(conn)}
         end
+    end
+  end
+
+  # A member who already holds this tier has nothing to buy, and a second
+  # checkout would bill them twice (#2747). `:start` refuses to touch such a
+  # row (its `upsert_condition`) and hands it back, so this also covers a second
+  # tab racing the first; the provider is never called. They go to their
+  # account page, whose "Manage billing" button is the portal's only entry
+  # (`/billing/portal` is POST-only, so a redirect cannot reach it).
+  defp ensure_not_entitled(conn, membership) do
+    if Membership.entitling?(membership.status) do
+      {:halted,
+       conn
+       |> put_flash(:info, gettext("You already have this membership."))
+       |> redirect(to: ~p"/account")}
+    else
+      :ok
     end
   end
 

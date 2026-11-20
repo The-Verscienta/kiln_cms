@@ -44,7 +44,7 @@ defmodule KilnCMSWeb.FlexibleFieldEditorTest do
 
     flexible =
       CMS.create_field_definition!(
-        %{content_type: :page, name: "sections", label: "Sections", field_type: :flexible},
+        %{content_type: :page, name: "ffe_sections", label: "Sections", field_type: :flexible},
         actor: admin
       )
 
@@ -65,7 +65,7 @@ defmodule KilnCMSWeb.FlexibleFieldEditorTest do
           title: "Flexible",
           slug: "ffe-#{System.unique_integer([:positive])}",
           custom_fields: %{
-            "sections" => [
+            "ffe_sections" => [
               %{"_type" => "quote", "text" => "one"},
               %{"_type" => "quote", "text" => "two"}
             ]
@@ -84,11 +84,15 @@ defmodule KilnCMSWeb.FlexibleFieldEditorTest do
   end
 
   test "shows a count and a card per item, with no read-only note", %{lv: lv} do
-    assert has_element?(lv, "#custom-field-sections", "Sections")
-    assert has_element?(lv, "#custom-field-sections", "2 items")
-    refute has_element?(lv, "#custom-field-sections", "Edited through the API")
-    assert has_element?(lv, "#custom-field-sections-items > li", "one")
-    assert has_element?(lv, ~s(input[name="form[custom_fields][sections][1][text]"][value=two]))
+    assert has_element?(lv, "#custom-field-ffe_sections", "Sections")
+    assert has_element?(lv, "#custom-field-ffe_sections", "2 items")
+    refute has_element?(lv, "#custom-field-ffe_sections", "Edited through the API")
+    assert has_element?(lv, "#custom-field-ffe_sections-items > li", "one")
+
+    assert has_element?(
+             lv,
+             ~s(input[name="form[custom_fields][ffe_sections][1][text]"][value=two])
+           )
   end
 
   test "saving something else keeps the stored items, ids and all", %{
@@ -96,13 +100,13 @@ defmodule KilnCMSWeb.FlexibleFieldEditorTest do
     admin: admin,
     page: page
   } do
-    before = CMS.get_page!(page.id, actor: admin).custom_fields["sections"]
+    before = CMS.get_page!(page.id, actor: admin).custom_fields["ffe_sections"]
     assert length(before) == 2
 
     lv |> form("#page-editor", %{"form" => %{"title" => "Renamed"}}) |> render_submit()
 
     saved = CMS.get_page!(page.id, actor: admin)
     assert saved.title == "Renamed"
-    assert saved.custom_fields["sections"] == before
+    assert saved.custom_fields["ffe_sections"] == before
   end
 end

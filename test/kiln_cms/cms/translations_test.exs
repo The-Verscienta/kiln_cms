@@ -79,7 +79,7 @@ defmodule KilnCMS.CMS.TranslationsTest do
 
     field =
       CMS.create_field_definition!(
-        %{content_type: :page, name: "region", label: "Region"},
+        %{content_type: :page, name: "t_region", label: "Region"},
         actor: actor
       )
 
