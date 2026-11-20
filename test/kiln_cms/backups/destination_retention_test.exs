@@ -821,6 +821,36 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
 
       assert {:ok, %{deleted: []}} = prune(dir, own)
     end
+
+    # #3088: one bucket name reached through two hosts. The pass is refused
+    # before anything is listed, with the reason the notice and log quote.
+    test "an S3 destination whose bucket another S3 destination names on another host is skipped",
+         %{dir: dir} do
+      s3 = fn endpoint ->
+        Backups.create_backup_destination!(
+          %{
+            name: "Bucket #{System.unique_integer([:positive])}",
+            kind: "s3",
+            settings: %{
+              "endpoint" => endpoint,
+              "region" => "us-east-1",
+              "bucket" => "kiln",
+              "prefix" => "site"
+            },
+            secrets: %{"access_key_id" => "AKIDTEST", "secret_access_key" => "s3-secret-test"}
+          },
+          actor: BackupSchedules.platform_admin()
+        )
+      end
+
+      global = s3.("https://s3.amazonaws.com")
+      _regional = s3.("https://s3.us-east-1.amazonaws.com")
+
+      {:ok, config} = KilnCMS.Backups.DestinationConfig.to_config(global)
+      assert {:error, :destination_overlap_possible = reason} = prune(dir, config)
+
+      assert Retention.describe(reason) =~ "same name"
+    end
   end
 
   # -- after a real backup -----------------------------------------------------
