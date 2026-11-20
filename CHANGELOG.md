@@ -92,6 +92,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Billing webhooks: an event older than the last one applied, about a different subscription than the membership holds, or for a `comped` membership is now ignored (with a reason in `/editor/billing`) instead of overwriting it; new nullable column `last_provider_event_at`, rollback-safe.**
   ([long form](docs/changelog/unreleased.md#webhook-ordering-identity))
 
+- **Backups History: on a host where both cron and the app back up, an imported row no longer reads "probably expired" just because the app wrote the latest manifest; it reads "expired" only when a later cron prune, by its own keep days, would have removed it.**
+  ([#3161](https://github.com/The-Verscienta/kiln_cms/pull/3161) · [long form](docs/changelog/unreleased.md#backup-history-cron-keep-days))
+
 - **Members of a non-default site: the content list's New buttons and the translations dashboard's Missing chips and actions now follow that site's content-type scope, not the default site's (display only; the policies were already correct). `Scoping.permitted?/4` and `explicitly_permits?/4` accept a bare org id and raise `ArgumentError` on shapes that name no org.**
   ([long form](docs/changelog/unreleased.md#scoping-bare-org-id))
 

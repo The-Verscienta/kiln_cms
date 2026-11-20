@@ -14,9 +14,11 @@
  *     │  └─ KilnServerError        5xx
  *     ├─ KilnNetworkError          fetch itself failed (DNS, refused, TLS…), or
  *     │                            the body stream broke off mid-read
- *     ├─ KilnUnexpectedBodyError   a 2xx whose body is not JSON or is empty (a
- *     │                            proxy's or captive portal's HTML page, an
- *     │                            empty answer to a read) — not an HTTP error
+ *     ├─ KilnUnexpectedBodyError   a 2xx whose body is not JSON, is empty, or is
+ *     │                            JSON of the wrong shape (a proxy's or captive
+ *     │                            portal's HTML page, an empty answer to a read,
+ *     │                            `null` where a document was due) — not an
+ *     │                            HTTP error
  *     ├─ KilnGraphQLError          `/gql` answered with `errors`
  *     └─ KilnConfigError           refused client-side: the client lacks what the
  *                                  call needs (a write with no API key, a signed
@@ -211,6 +213,12 @@ export class KilnNetworkError extends KilnError {
  * `graphql`, `submitForm`, `mintPreview`, `restoreRevision`) answers one, so
  * `body` is `""` and there is no `cause`. A write's empty answer (a 204
  * soft-delete) is not an error.
+ *
+ * So is valid JSON of the wrong shape on a read that promises one (`null` or
+ * `{}` where a JSON:API document, a sync page or a `{data: …}` envelope was
+ * due): the message says "a JSON body of the wrong shape", `body` is the raw
+ * text, and there is no `cause`. Before, those resolved an empty list,
+ * `null` or a bogus record, or crashed with a `TypeError`.
  */
 export class KilnUnexpectedBodyError extends KilnError {
   declare readonly status: number;
@@ -218,8 +226,16 @@ export class KilnUnexpectedBodyError extends KilnError {
   /** The raw body text, truncated to its first 1 KiB (UTF-8). */
   readonly body: string;
 
-  constructor(status: number, url: string, body: string, cause: unknown) {
-    const what = body === "" ? "an empty body" : "a body that is not JSON";
+  /**
+   * `wrongShape` marks a body that parsed as JSON but is not the shape the
+   * call expects; it changes only the message.
+   */
+  constructor(status: number, url: string, body: string, cause: unknown, wrongShape = false) {
+    const what = wrongShape
+      ? "a JSON body of the wrong shape"
+      : body === ""
+        ? "an empty body"
+        : "a body that is not JSON";
     super(`Kiln answered ${status} ${url} with ${what}`, {
       status,
       code: "unexpected_body",
