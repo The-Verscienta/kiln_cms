@@ -592,8 +592,9 @@ defmodule KilnClient do
   The three keys are always present: a 2xx missing one is `{:error,
   %KilnClient.Error{reason: :unexpected_body}}`. Newer servers may add keys.
   It never sends the API key, even a configured one: a credential changes
-  nothing in the answer but keeps a shared cache from storing it. The answer is for the site the request's host names, so
-  point `base_url` at that site's host. A 503 is `reason: :server` with any
+  nothing in the answer but keeps a shared cache from storing it. The answer
+  is for the site the request's host names, so point `base_url` at that
+  site's host. A 503 is `reason: :server` with any
   `Retry-After` in `:retry_after`; this read does not retry it. See Kiln's
   `docs/api.md` ("Site defaults"). Options: `:req`.
   """
@@ -1452,9 +1453,19 @@ defmodule KilnClient do
   # `nil` (no resource), one resource, or a list of them. `null`, `{}`, a
   # top-level list and `"data": "x"` or `[1]` are not: the first two used to
   # pass for an empty collection, the others crashed `flatten_resource/1`.
-  defp json_api_doc?(%{"data" => data}) when is_nil(data) or is_map(data), do: true
-  defp json_api_doc?(%{"data" => data}) when is_list(data), do: Enum.all?(data, &is_map/1)
+  defp json_api_doc?(%{"data" => data} = doc) do
+    included = Map.get(doc, "included", [])
+    resources?(data) and is_list(included) and resources?(included)
+  end
+
   defp json_api_doc?(_body), do: false
+
+  # `data` may be one resource, none (`nil`) or a list of them; `included`,
+  # when present, must be a list of them. Anything else would crash `flatten_resource/1`.
+  defp resources?(nil), do: true
+  defp resources?(resource) when is_map(resource), do: true
+  defp resources?(list) when is_list(list), do: Enum.all?(list, &is_map/1)
+  defp resources?(_other), do: false
 
   defp flatten_doc(%{"data" => data} = doc) do
     included =

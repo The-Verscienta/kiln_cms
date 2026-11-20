@@ -705,7 +705,15 @@ defmodule KilnClientTest do
   # to flatten `null` or `{}` to an empty collection, `sync_page/2` and
   # `revision/4` returned `{:ok, nil}`, and `"data": "x"` crashed.
   describe "a 2xx JSON body of the wrong shape, on every read that promises one" do
-    @json_api_bad ["null", "{}", "[]", ~s({"data":"x"}), ~s({"data":[1]})]
+    @json_api_bad [
+      "null",
+      "{}",
+      "[]",
+      ~s({"data":"x"}),
+      ~s({"data":[1]}),
+      ~s({"data":[],"included":null}),
+      ~s({"data":[],"included":[1]})
+    ]
 
     @reads [
       {"list/2", "/api/json/posts/published", @json_api_bad, quote(do: KilnClient.list("posts"))},
