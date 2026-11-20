@@ -355,6 +355,41 @@ defmodule KilnCMSWeb.ContentETagInputsTest do
     end
   end
 
+  # The bust hooks compare the stored name before and after: on the atomic
+  # path a submitted name equal to the stored one is still an atomic update,
+  # and the editor's forms always post the name. The probe is a payload entry
+  # the hook would drop; it survives only if nothing was flushed.
+  describe "a save that renames nothing flushes no payloads" do
+    defp probe(org_id, value),
+      do: Cache.fetch_published_payload(org_id, "etag-probe", "probe", "en", fn -> value end)
+
+    test "a category saved with its own name, or a tag renamed", %{admin: admin, org_id: org_id} do
+      category = CMS.create_category!(%{name: "Glazes", slug: slug()}, actor: admin)
+      tag = CMS.create_tag!(%{name: "stoneware", slug: slug()}, actor: admin)
+      assert probe(org_id, :first) == :first
+
+      category =
+        CMS.update_category!(category, %{name: "Glazes", description: "Notes"}, actor: admin)
+
+      CMS.update_tag!(tag, %{name: "porcelain"}, actor: admin)
+      assert probe(org_id, :second) == :first
+
+      CMS.update_category!(category, %{name: "Glazing"}, actor: admin)
+      assert probe(org_id, :third) == :third
+    end
+
+    test "a profile saved with its own name", %{org_id: org_id} do
+      author = user(:editor, %{name: "Grace"})
+      assert probe(org_id, :first) == :first
+
+      author = Accounts.update_profile!(author, %{name: "Grace"}, actor: author)
+      assert probe(org_id, :second) == :first
+
+      Accounts.update_profile!(author, %{name: "Grace Hopper"}, actor: author)
+      assert probe(org_id, :third) == :third
+    end
+  end
+
   describe "nothing changed, nothing moves" do
     test "a repeat request, a rebuilt payload and another page's publish keep the 304",
          %{admin: admin} do

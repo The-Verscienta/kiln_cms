@@ -10,8 +10,9 @@ defmodule KilnCMS.Accounts.Changes.BustAuthorPayloads do
   the ETag, which hashes the payload, kept validating it.
 
   A user can author on any site they belong to, and the name names no page, so
-  every site's payloads go (`KilnCMS.Cache.bust_payloads/1` with `nil`). Only
-  when the name actually changed, which is rare: a profile save, accepting an
+  every site's payloads go (`KilnCMS.Cache.bust_payloads/1` with `nil`), rather
+  than only the sites they are a member of now: a former member's posts still
+  carry their name. Only when the stored name actually changed, which is rare: a profile save, accepting an
   invitation over an unconfirmed account, an erasure.
 
   After the commit (`KilnCMS.AfterCommit`), so a page rebuilt between the bust
@@ -29,8 +30,11 @@ defmodule KilnCMS.Accounts.Changes.BustAuthorPayloads do
   @impl true
   def atomic(changeset, opts, context), do: {:ok, change(changeset, opts, context)}
 
-  defp bust(changeset, {:ok, _record} = result) do
-    if Ash.Changeset.changing_attribute?(changeset, :name),
+  # The stored name before and after, not `changing_attribute?/2`: on the
+  # atomic path a submitted name equal to the stored one is still an atomic
+  # update, so every profile save would flush every site's payloads.
+  defp bust(changeset, {:ok, %{name: name}} = result) do
+    if changeset.data.name != name,
       do: KilnCMS.AfterCommit.run(fn -> KilnCMS.Cache.bust_payloads(nil) end)
 
     result
