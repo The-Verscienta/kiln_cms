@@ -182,6 +182,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Security
 
+- **phoenix 1.8.17 fixes EEF-CVE-2026-128361 (a non-string Presence key crashes the tracker) and EEF-CVE-2026-129344 (a client on the V1 serializer crashes binary broadcasts); Kiln was not exposed: its Presence keys are server-made strings and it broadcasts no binary payloads.**
+  ([#3205](https://github.com/The-Verscienta/kiln_cms/pull/3205) · [long form](docs/changelog/unreleased.md#phoenix-presence-serializer-advisories))
+
 - **A database restored on another server no longer prunes the original server's backups on its destinations: retention deletes only what this server's backup directory sent, plus directories a platform admin adopts (GHSA-rx2c-h7cx-wmfj).**
   ([GHSA-rx2c-h7cx-wmfj](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-rx2c-h7cx-wmfj) · [#3204](https://github.com/The-Verscienta/kiln_cms/pull/3204) · [long form](docs/changelog/unreleased.md#backup-destination-prune-ownership))
 
