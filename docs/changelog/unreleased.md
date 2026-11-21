@@ -614,7 +614,7 @@ carries the reasoning.
     what stops being pruned, and
     [ADR 0064](../decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md)
     for the reasoning.
-  ([GHSA-rx2c-h7cx-wmfj](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-rx2c-h7cx-wmfj))
+  ([GHSA-rx2c-h7cx-wmfj](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-rx2c-h7cx-wmfj) · [#3204](https://github.com/The-Verscienta/kiln_cms/pull/3204))
 
 <a id="liveview-url-less-join"></a>
 
