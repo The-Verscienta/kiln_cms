@@ -24,6 +24,13 @@ carries the reasoning.
   - **Private hosts:** list LAN SFTP servers in `BACKUP_SFTP_PRIVATE_HOSTS`; hosts in `BACKUP_S3_PRIVATE_HOSTS` don't count for SFTP.
   - **Migration:** apply `add_backup_destination_host_key`, which adds one nullable column.
 
+<a id="backup-destination-prune-ownership-upgrade"></a>
+
+- **Retention on a destination deletes only this server's backups from this release, so some old backups stop being pruned (GHSA-rx2c-h7cx-wmfj).** A backup is now deleted from a stored destination only when an in-app backup of the backup directory this server has now (its `.kiln-dir-id`) sent it there, or a directory the destination adopted (see [Security](#backup-destination-prune-ownership)). Two kinds of backups that were pruned before are kept after the upgrade, and the destination's storage grows until you act:
+  - **Backups made before v1.10.0.** Their History rows record no backup directory. Prune them by hand, or let a lifecycle rule do it.
+  - **Backups sent from a `BACKUP_DIR` that didn't persist.** A container whose `BACKUP_DIR` isn't on a persistent volume gets a new `.kiln-dir-id` each time it is replaced, so its earlier backups now belong to another backup directory. Put `BACKUP_DIR` on a volume, then adopt the old ids once from the Destinations tab ([Adopt a directory only when its server is gone](../backups.md#adopt-another-backup-directory)).
+  - **Migration:** apply `destination_prune_ownership`, which adds `backup_destinations.adoptions` (an array, default empty) and a nullable `backup_uploads.dir_id`. Rolling back is safe; an older release ignores both columns and prunes as before.
+
 <a id="public-js-bundle-upgrade"></a>
 
 - **A custom asset build or overlay `Dockerfile` that does not run `mix assets.deploy` must also run `mix esbuild kiln_public --minify` before `phx.digest` (#2402).**
@@ -591,6 +598,42 @@ carries the reasoning.
   moves from 1.8.15 to 1.8.17 with the same floor. No other dependency moves.
   No migration and no configuration.
   ([#3205](https://github.com/The-Verscienta/kiln_cms/pull/3205))
+
+<a id="backup-destination-prune-ownership"></a>
+
+- **A database restored on another server no longer prunes the original server's backups on its destinations (GHSA-rx2c-h7cx-wmfj).**
+  Backup destinations and the History that says what was sent to each live
+  in the database. Retention on a stored destination deleted any old backup
+  a History row recorded sending there, so a production database restored
+  on another server, outside the staging tool (whose scrub already removes
+  destinations and History), let that server's in-app backups delete
+  production's off-site backups as its own. Retention on a stored
+  destination now deletes a backup only when an in-app backup of the backup
+  directory this server has now (its `.kiln-dir-id`) sent it, the rule
+  `BACKUP_RCLONE_REMOTE` already followed. A restored copy has a directory of
+  its own, so it deletes nothing the original sent. Without a readable
+  `.kiln-dir-id` the pass is skipped and deletes nothing.
+  - **Backups of other directories are kept and listed.** The run's log
+    counts them, and each destination's row on the Destinations tab lists
+    the other backup directories that sent backups there, with how many and
+    when.
+  - **Adopting a retired server's directory.** A platform admin can tick a
+    directory to let this server prune its backups there too. A directory a
+    running server reported in the last three minutes can't be adopted. An
+    adoption counts only on the servers running when it was made, so a
+    restored database inherits none. Each change is logged as
+    `backup_destination_adoptions_changed` in the instance security log. At
+    most 50 per destination.
+  - **Interrupted uploads follow the same rule.** Uploads now record the
+    backup directory that opened them. A backup resumes, and the stale
+    upload sweep aborts, only uploads of this server's directory or an
+    adopted one. Uploads opened before this release, which record none, are
+    resumed by no backup and aborted only once untouched for four days.
+  - See [the upgrade note](#backup-destination-prune-ownership-upgrade) for
+    what stops being pruned, and
+    [ADR 0064](../decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md)
+    for the reasoning.
+  ([GHSA-rx2c-h7cx-wmfj](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-rx2c-h7cx-wmfj) · [#3204](https://github.com/The-Verscienta/kiln_cms/pull/3204))
 
 <a id="liveview-url-less-join"></a>
 

@@ -53,7 +53,9 @@ defmodule KilnCMS.Backups.Destination.S3ResumeTest do
       key: Destination.target_key(%{"key" => config.key, "source" => "db"}, config),
       owner: %{job_id: 4_242, attempt: attempt},
       deadline: System.monotonic_time(:millisecond) + 60_000,
-      stamp: "20261117-000000"
+      stamp: "20261117-000000",
+      # The step's backup directory: only its steps take the upload over.
+      dir_id: "0c9a3f2e-5b7d-4e1a-8c6f-2d4b6a8e0f13"
     }
 
     {:ok, opts, info} = Uploads.handle(config, put, target)
