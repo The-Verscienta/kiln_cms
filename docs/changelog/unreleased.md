@@ -590,6 +590,7 @@ carries the reasoning.
   cannot resolve back to an affected release; `examples/phoenix_showcase`
   moves from 1.8.15 to 1.8.17 with the same floor. No other dependency moves.
   No migration and no configuration.
+  ([#3205](https://github.com/The-Verscienta/kiln_cms/pull/3205))
 
 <a id="liveview-url-less-join"></a>
 
