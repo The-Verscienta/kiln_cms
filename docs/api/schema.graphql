@@ -463,15 +463,20 @@ be converted to UTC if there is an offset.
 """
 scalar DateTime
 
-"Operators for a `datetime` custom field."
+"""
+Operators for a `datetime` custom field. Operands are wall-clock times, compared
+as written: a UTC offset is ignored, as it is when the field is saved, so
+`2026-06-01T12:00:00+02:00` matches a stored `2026-06-01T12:00:00`. Fractional
+seconds match however many digits the value was saved with.
+"""
 input DateTimeFilter {
-  eq: DateTime
-  notEq: DateTime
-  in: [DateTime!]
-  gt: DateTime
-  gte: DateTime
-  lt: DateTime
-  lte: DateTime
+  eq: NaiveDateTime
+  notEq: NaiveDateTime
+  in: [NaiveDateTime!]
+  gt: NaiveDateTime
+  gte: NaiveDateTime
+  lt: NaiveDateTime
+  lte: NaiveDateTime
   isNull: Boolean
 }
 
@@ -1997,6 +2002,13 @@ type MutationError {
   "The path to the field that produced the error"
   path: [String!]
 }
+
+"""
+The `Naive DateTime` scalar type represents a naive date and time without
+timezone. The DateTime appears in a JSON response as an ISO8601 formatted
+string.
+"""
+scalar NaiveDateTime
 
 type Page implements ContentRecord {
   id: ID!
