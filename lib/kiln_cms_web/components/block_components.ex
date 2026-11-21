@@ -149,7 +149,15 @@ defmodule KilnCMSWeb.BlockComponents do
                 batch media load. --%>
           <section class="kiln-gallery space-y-2">
             <h2 :if={@block.content not in [nil, ""]} class="text-xl font-bold">{@block.content}</h2>
-            <div class="kiln-gallery-items" style={@block[:style]}>
+            <%!-- A carousel scrolls, so it takes keyboard focus and a name (#2590);
+                  grid and masonry have no scroll label and stay untouched. --%>
+            <div
+              class="kiln-gallery-items"
+              style={@block[:style]}
+              tabindex={@block[:scroll_label] && "0"}
+              role={@block[:scroll_label] && "group"}
+              aria-label={@block[:scroll_label]}
+            >
               <%!-- Filtered, not guarded per-element: the block's own `:web`
                     serializer drops url-less items entirely, and guarding only
                     the `<img>` would leave an empty captioned figure here that
@@ -982,6 +990,7 @@ defmodule KilnCMSWeb.BlockComponents do
       type: "gallery",
       content: b.title,
       style: Blocks.Gallery.layout_style(b.layout),
+      scroll_label: Blocks.Gallery.scroll_label(b.layout),
       images:
         for image <- Blocks.Gallery.images(b) do
           %{

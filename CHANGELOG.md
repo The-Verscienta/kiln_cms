@@ -123,6 +123,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **A gallery in the carousel layout can be scrolled with the keyboard: Tab reaches it, the arrow keys scroll it, and it has a focus ring and an "Image gallery" label (#2590).**
+  ([long form](docs/changelog/unreleased.md#gallery-carousel-keyboard))
+
 - **A revalidating browser or CDN no longer gets a `304` for a public page whose fragments, media, translations, inherited fields, bylines, author name, category or menu links changed: the HTML `ETag` now hashes the cached payload and the menus, and type, field and locale-settings saves move every page's tag.**
   ([#3202](https://github.com/The-Verscienta/kiln_cms/pull/3202) · [long form](docs/changelog/unreleased.md#public-html-etag-render-inputs))
 
