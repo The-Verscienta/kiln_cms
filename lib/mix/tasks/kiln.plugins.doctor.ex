@@ -1312,9 +1312,29 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
 
     list? = match?({:ok, true}, Keyword.get(answers, :multiple?))
 
-    shape_problems ++
-      raised ++ if(list?, do: scalar_list_problems(plugin, mod, subject), else: [])
+    problems =
+      shape_problems ++
+        raised ++ if(list?, do: scalar_list_problems(plugin, mod, subject), else: [])
+
+    problems ++ probe_problems(list?, problems, mod, subject)
   end
+
+  # The host decides list capability once, at compile time, probing
+  # `input_parts/1` with a bare definition map rather than a
+  # `FieldDefinition` struct; a type whose `input_parts/1` raises on that map
+  # is quietly left single-valued. Say so, since nothing else would.
+  defp probe_problems(true = _list?, [] = _problems, mod, subject) do
+    if KilnCMS.CMS.FieldTypes.Capability.list_capable?(mod),
+      do: [],
+      else: [
+        "#{subject} multiple?/0 returns true, but the host's probe of input_parts/1 " <>
+          "(a definition map with only name, label, field_type, widget and multiple) " <>
+          "raised or returned parts, so the type stays single-valued; make input_parts/1 " <>
+          "return [] without reading other definition keys"
+      ]
+  end
+
+  defp probe_problems(_list?, _problems, _mod, _subject), do: []
 
   defp list_answer(plugin, mod, callback) do
     {:ok, apply(mod, callback, [])}

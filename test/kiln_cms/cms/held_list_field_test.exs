@@ -271,6 +271,33 @@ defmodule KilnCMS.CMS.HeldListFieldTest do
     end
   end
 
+  describe "a content import" do
+    # An import carries another site's map (`custom_fields_held: :drop`): a
+    # held list's value is dropped like any undeclared key — with the warning.
+    test "drops a value under a held list, with the dropped-keys warning", ctx do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          post =
+            CMS.create_post!(
+              %{
+                title: "Imported",
+                slug: "imported-#{uniq()}",
+                custom_fields: %{ctx.name => [1, 2], ctx.motto.name => "kept"}
+              },
+              actor: ctx.admin,
+              context: %{custom_fields: :drop, custom_fields_held: :drop}
+            )
+
+          send(self(), {:post, post})
+        end)
+
+      assert_received {:post, post}
+      assert stored(post.id)[ctx.motto.name] == "kept"
+      refute Map.has_key?(stored(post.id), ctx.name)
+      assert log =~ "custom_fields: dropped #{inspect(ctx.name)}"
+    end
+  end
+
   describe "what it is not asked for" do
     test "required is not demanded of a held list", ctx do
       hold!(ctx.field, %{required: true})

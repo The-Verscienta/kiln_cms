@@ -160,6 +160,10 @@ defmodule Kiln.FieldType do
       `c:input_type/0` and `c:input_attrs/1`. `c:input_hook/1` is not attached
       to a list field's item inputs. Pasting several lines adds one item per
       line, except for a picker `c:input_type/0` (date, time, color, …).
+    * Every write splits a string item on line breaks, as for KilnCMS's own
+      list types: an API client sending `["a\\nb"]` stores two items, each
+      cast on its own. A type whose single value may contain a line break
+      should not take lists.
     * Repeated items are kept unless `c:unique_items?/0` returns `true`; then
       items equal after `c:cast/2` are dropped, keeping the first.
     * Both answers are read when KilnCMS compiles, not per request, and must

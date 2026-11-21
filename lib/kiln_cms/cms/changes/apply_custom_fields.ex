@@ -479,7 +479,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     # After the formulas, so none of them reads a held value (#2605).
     {cleaned, errors} = hold(held, changeset, supplied, mode, {cleaned, errors})
 
-    {refused, dropped} = undefined(all_defs ++ held, supplied, existing, mode)
+    # `defs ++ held`, not `all_defs`: under an import's `:drop` a held list is
+    # in neither, so its value is dropped WITH the warning `note_dropped/2` logs.
+    {refused, dropped} = undefined(defs ++ held, supplied, existing, mode)
     errors = Enum.map(refused, &undefined_error(&1, all_defs)) ++ errors
 
     changeset

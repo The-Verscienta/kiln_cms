@@ -354,7 +354,7 @@ defmodule KilnCMSWeb.ContentEditor.CustomFieldsPanel do
         <span id={"custom-field-#{@definition.name}-label"} class="text-sm font-medium">
           {@definition.label}
         </span>
-        <span :if={@items != []} class="text-xs tabular-nums text-base-content/60">
+        <span :if={@items != []} class="text-xs tabular-nums text-base-content/70">
           {ngettext("%{count} item", "%{count} items", length(@items))}
         </span>
       </div>

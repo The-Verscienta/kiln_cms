@@ -999,6 +999,35 @@ defmodule Kiln.PluginsTest do
       refute problems =~ ":shapeshifter"
     end
 
+    test "flags a type that says multiple? but the host's compile-time probe rejects" do
+      defmodule OptionsReadingListType do
+        use Kiln.FieldType
+        def name, do: :options_reading_list
+        def cast(value, _definition), do: {:ok, to_string(value)}
+        def multiple?, do: true
+        # Reads a key the host's probe map does not carry: a KeyError there.
+        def input_parts(definition), do: if(definition.options, do: [], else: [])
+      end
+
+      defmodule ProbePlugin do
+        use Kiln.Plugin
+        def name, do: "probe_plugin"
+        def summary, do: "Probe."
+        def field_types, do: [OptionsReadingListType]
+      end
+
+      refute KilnCMS.CMS.FieldTypes.Capability.list_capable?(OptionsReadingListType)
+
+      assert [problem] =
+               Mix.Tasks.Kiln.Plugins.Doctor.field_type_list_problems(
+                 [ProbePlugin],
+                 %{ProbePlugin => ProbePlugin.field_types()}
+               )
+
+      assert problem =~ ":options_reading_list multiple?/0 returns true, but the host's probe"
+      assert problem =~ "stays single-valued"
+    end
+
     test "notes unique_items?/0 without multiple?/0, and a hooked list type, without failing" do
       defmodule UniqueOnlyType do
         use Kiln.FieldType
