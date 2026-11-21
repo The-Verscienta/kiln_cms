@@ -264,6 +264,29 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="locale-followups"></a>
+
+- **Locale follow-ups from #2465: embedded forms, newsletter confirmation, and an unconfigured record locale (#2597).**
+  - **Embedded forms.** `embed.js` takes an optional `data-kiln-locale`
+    attribute and loads `/forms/<slug>/embed?locale=<value>`. The server
+    accepts a supported locale and gives anything else the site default; a
+    path prefix (`/es/forms/…`) still wins, and the session is never read,
+    so a shared cache keys on the URL. A snippet without the attribute loads
+    exactly what it did. See [docs/forms.md](../forms.md).
+  - **Newsletter confirmation.** The email is built while the sign-up request
+    runs, so it now goes through gettext in that request's locale (es, fr):
+    subject, body and a confirm link pinned to the same prefix, and the
+    confirm page's button keeps it. On a multilingual site even a
+    default-locale link carries its prefix (`/en/…`).
+  - **A record whose locale is no longer configured** gets the site default
+    in the article's `lang` and in `og:locale`; the `x-kiln-locale` header
+    still names the stored value.
+  - Lock and paywall pages were left as they are: since #2646 their chrome
+    follows the reader's URL and only the document's words carry its
+    language, which is what that change decided.
+  No migration.
+  ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597))
+
 <a id="public-html-etag-render-inputs"></a>
 
 - **A public page's `ETag` now covers everything the page is rendered from, so a revalidation can no longer get a `304` for a page that has changed (#2765).**
