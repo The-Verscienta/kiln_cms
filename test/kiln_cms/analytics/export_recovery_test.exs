@@ -75,6 +75,9 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
 
   # today/0: one memoized clock read per test — see KilnCMS.Test.StableDay (#1358).
 
+  # Referrer rows are exported for completed days only (#2989).
+  defp completed_day, do: Date.add(today(), -1)
+
   # One content item on one day: the exact view total the export prints, and the
   # referrer breakdown that sums to it. Every classified arrival writes one hit
   # alongside its view, so `views` is the sum — seeding it any other way would
@@ -86,7 +89,7 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
     Ash.Seed.seed!(ContentViewDay, %{
       content_type: "page",
       content_id: id,
-      day: today(),
+      day: completed_day(),
       views: total
     })
 
@@ -94,7 +97,7 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
       Ash.Seed.seed!(ReferrerDay, %{
         content_type: "page",
         content_id: id,
-        day: today(),
+        day: completed_day(),
         source: source,
         hits: hits
       })
@@ -109,7 +112,7 @@ defmodule KilnCMS.Analytics.ExportRecoveryTest do
       |> Phoenix.ConnTest.init_test_session(%{})
       |> AshAuthentication.Plug.Helpers.store_in_session(admin())
       |> get(
-        ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+        ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(completed_day()), to: Date.to_iso8601(completed_day())]}"
       )
       |> Map.fetch!(:resp_body)
 

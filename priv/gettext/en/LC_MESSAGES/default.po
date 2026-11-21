@@ -36,6 +36,11 @@ msgstr ""
 msgid "\"fr, en\" tries French, then English, then stops. Navigation menus follow a chain you write here, but never fall back to the default locale on their own. A headless request can narrow the chain with ?fallback=false or ?fallback_locale=, and every response says which locale it served."
 msgstr ""
 
+#: lib/kiln_cms_web/live/analytics_live.ex
+#, elixir-autogen, elixir-format
+msgid "\"hidden\" means that on at least one day in this range, too few readers arrived that way to show the day's count safely (fewer than %{n}, or a count that could be deduced from one that small). A total that included that day could be compared with the daily figures in the export to recover it, so the total is hidden too."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
 msgid "%B %-d, %Y"
@@ -7480,11 +7485,6 @@ msgstr ""
 #: lib/kiln_cms_web/live/experiments_live.ex
 #, elixir-autogen, elixir-format
 msgid "Counts as a conversion"
-msgstr ""
-
-#: lib/kiln_cms_web/live/analytics_live.ex
-#, elixir-autogen, elixir-format
-msgid "Counts below %{n} show as \"< %{n}\" rather than an exact number — a very small count can describe a single visitor's arrival."
 msgstr ""
 
 #: lib/kiln_cms_web/live/translations_live.ex
@@ -18473,6 +18473,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
 msgid "Referrer breakdown"
+msgstr ""
+
+#: lib/kiln_cms_web/live/analytics_live.ex
+#, elixir-autogen, elixir-format
+msgid "Referrer counts cover completed UTC days only, so today's arrivals appear tomorrow."
 msgstr ""
 
 #: lib/kiln_cms_web/live/analytics_live.ex

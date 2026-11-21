@@ -36,6 +36,11 @@ msgstr "\"auto\" para Cloudflare R2."
 msgid "\"fr, en\" tries French, then English, then stops. Navigation menus follow a chain you write here, but never fall back to the default locale on their own. A headless request can narrow the chain with ?fallback=false or ?fallback_locale=, and every response says which locale it served."
 msgstr "\"fr, en\" prueba francés, luego inglés, y se detiene. Los menús de navegación siguen una cadena escrita aquí, pero nunca recurren por sí solos al idioma predeterminado. Una solicitud headless puede acotar la cadena con ?fallback=false o ?fallback_locale=, y cada respuesta indica qué idioma sirvió."
 
+#: lib/kiln_cms_web/live/analytics_live.ex
+#, elixir-autogen, elixir-format
+msgid "\"hidden\" means that on at least one day in this range, too few readers arrived that way to show the day's count safely (fewer than %{n}, or a count that could be deduced from one that small). A total that included that day could be compared with the daily figures in the export to recover it, so the total is hidden too."
+msgstr "«oculto» significa que, al menos un día de este periodo, llegaron por esa vía demasiado pocos lectores para mostrar el recuento de ese día con seguridad (menos de %{n}, o un recuento que podría deducirse de otro tan pequeño). Un total que incluyera ese día podría compararse con las cifras diarias de la exportación para recuperarlo, así que el total también se oculta."
+
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
 msgid "%B %-d, %Y"
@@ -7481,11 +7486,6 @@ msgstr "Los recuentos están limitados por tipo de contenido: puede haber más d
 #, elixir-autogen, elixir-format
 msgid "Counts as a conversion"
 msgstr "Cuenta como conversión"
-
-#: lib/kiln_cms_web/live/analytics_live.ex
-#, elixir-autogen, elixir-format
-msgid "Counts below %{n} show as \"< %{n}\" rather than an exact number — a very small count can describe a single visitor's arrival."
-msgstr "Los recuentos por debajo de %{n} se muestran como «< %{n}» en lugar de un número exacto: un recuento muy pequeño puede describir la llegada de un único visitante."
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -18474,6 +18474,11 @@ msgstr "Referencia (ticket / id de documento)"
 #, elixir-autogen, elixir-format
 msgid "Referrer breakdown"
 msgstr "Desglose de referentes"
+
+#: lib/kiln_cms_web/live/analytics_live.ex
+#, elixir-autogen, elixir-format
+msgid "Referrer counts cover completed UTC days only, so today's arrivals appear tomorrow."
+msgstr "Los recuentos de procedencia solo abarcan días UTC completos, así que las llegadas de hoy aparecerán mañana."
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format

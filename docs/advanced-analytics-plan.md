@@ -126,6 +126,13 @@ Two mitigations, both cheap, both required of any phase that ships a breakdown:
   buckets would make thin cells the norm rather than the exception; day grain is
   the finest this design goes, for that reason as well as for storage.
 
+Shipping taught a third (#2989): **suppress once, at one grain.** A referrer
+breakdown is decided per content item per completed day, and any wider figure
+(a span, the site-wide chart) is derived from those per-day displays: their sum
+when every day shows the category as a number, `hidden` otherwise. Suppressing a
+span from its own raw sum let it be subtracted from the per-day export. See
+[ADR 0080](decisions/0080-a-referrer-figure-wider-than-one-item-day-is-derived-from-the-per-day-displays-and-only-completed-days-are-published.md).
+
 ### Accuracy caveats (true of the baseline, inherited by everything below)
 
 These are not defects to fix later; they are properties of server-side,

@@ -109,6 +109,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Analytics referrers: every figure wider than one item-day is derived from the per-day displays (a source reads `hidden` for the range if any day hid it), and only completed UTC days are shown or exported, so published figures can no longer be differenced to recover a suppressed count; low-traffic sites will see far more `hidden`, now explained on the dashboard (#2989, #2990).**
+  ([long form](docs/changelog/unreleased.md#referrer-exact-or-hidden))
+
 - **Search: when `query_budget` cuts a search, running sections get `cut_grace` (new, default 100 ms) to stop on their own before they are killed, so a query that finishes keeps its database connection; a cut search may answer up to that much later. New metrics `kiln_cms_search_budget_cut_returned`/`_killed`.**
   ([#3162](https://github.com/The-Verscienta/kiln_cms/pull/3162) · [long form](docs/changelog/unreleased.md#search-budget-cut-grace))
 

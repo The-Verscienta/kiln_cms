@@ -23,10 +23,10 @@ end
 
 # ## Low-count suppression threshold (#620, phase 3 of docs/advanced-analytics-plan.md)
 #
-# A referrer category's hit count below this renders — in the dashboard and
-# the export — as "< n" rather than an exact number, because a single-digit
-# bucket can describe one visitor's arrival (design doc, "Where 'aggregate'
-# gets thin: low counts"). Runtime-readable for the same reason as the gate
+# A referrer category's hit count below this renders in the export's per-day
+# rows as "< n" (the dashboard's wider figures show "hidden", #2989), because
+# a single-digit bucket can describe one visitor's arrival (design doc, "Where
+# 'aggregate' gets thin: low counts"). Runtime-readable for the same reason as the gate
 # above: an operator tightening or loosening this must not need a rebuild.
 # `Env.positive_integer/1`, the shared reader (#1009) — an unparseable or
 # non-positive value keeps the default and warns rather than being
