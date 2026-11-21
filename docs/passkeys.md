@@ -25,7 +25,9 @@ ID, Windows Hello, a phone, a security key) and signs in without a password.
   `/account/two-factor`
   ([Where second factors are managed](two-factor-auth.md#where-second-factors-are-managed)).
 - **Sign in** at `/sign-in` → "Use a passkey" (the button appears only in
-  WebAuthn-capable browsers). The browser offers your saved passkeys, with no
+  WebAuthn-capable browsers, and only on the main host or a console host:
+  a site's own sign-in page has no passkey button, since a browser refuses
+  the passkey there). The browser offers your saved passkeys, with no
   email or password typed. If the ceremony fails, the page says "Passkey
   sign-in failed. Use another method."
 - **Finish a two-step sign-in** at `/sign-in/verify` → "Use a passkey": an
@@ -50,7 +52,11 @@ signs it in on that site:
 
 - on the main or console host, the password (or a magic link, or single
   sign-on) stops at `/sign-in/verify`, which says "Confirm it's you with your
-  passkey." and offers **Use a passkey**;
+  passkey." and offers **Use a passkey**. In a browser that can't use a
+  passkey, or with JavaScript off, the button is not shown and the page says
+  "This browser can't use a passkey. Sign in again from a browser or device
+  that can, or ask an administrator of your site to check your account's
+  sign-in methods.";
 - on a site's own host, where the passkey cannot run, the password is refused
   with "Your account's second factor is a passkey, which works at (main host).
   Sign in there, or add an authenticator app.";
@@ -214,7 +220,8 @@ them, and refuse with `KilnCMS.Accounts.Errors.PasskeyLimitReached` and
 - **Sign-in** is a two-step JSON ceremony (`POST /auth/passkey/options` →
   `POST /auth/passkey/verify`, `KilnCMSWeb.PasskeyController`) driven by
   progressive-enhancement JS on `/sign-in`: `KilnCMSWeb.SignInLive` renders
-  the "Use a passkey" block hidden, and the `PasskeySignIn` hook
+  the "Use a passkey" block hidden, only on a host where the ceremony can run
+  (`KilnCMS.Accounts.WebAuthn.ceremony_host?/1`), and the `PasskeySignIn` hook
   (`assets/js/passkeys.js`) reveals it only where `PublicKeyCredential`
   exists. Challenges park **server-side** and are
   consumed atomically — the session carries only an opaque nonce, so a
@@ -268,8 +275,8 @@ them, and refuse with `KilnCMS.Accounts.Errors.PasskeyLimitReached` and
 - Passkeys are scoped to the endpoint's canonical host (`rp_id`). On
   multi-site (#336) deployments, sign-in happens on the main host as usual,
   or on a console host under it (`KILN_CONSOLE_HOST`). A passkey ceremony
-  cannot run on a site's own host, so the code prompt there does not offer
-  one, and passkeys are added there neither on `/editor/settings` nor on
+  cannot run on a site's own host, so neither the sign-in page nor the code
+  prompt there offers one, and passkeys are added there neither on `/editor/settings` nor on
   `/account/two-factor`, which is not served on a site's own host at all.
   A console host outside `PHX_HOST` serves both pages, but can't register or
   use a passkey: `/account/two-factor` there lists and removes passkeys only,

@@ -176,28 +176,38 @@ const stepUpWithPasskey = async (statusEl) => {
 // hidden, only for an account that has a passkey and on a host where the
 // ceremony can run; this reveals it where WebAuthn exists and wires the click.
 export const initPasskeyStepUp = (root = document) => {
-  if (!supported()) return
-
   let revealed = false
 
-  root.querySelectorAll("[data-passkey-step-up]").forEach((block) => {
-    const button = block.querySelector("[data-role=passkey-step-up]")
-    const status = block.querySelector("[data-role=passkey-status]")
-    if (!button) return
+  if (supported()) {
+    root.querySelectorAll("[data-passkey-step-up]").forEach((block) => {
+      const button = block.querySelector("[data-role=passkey-step-up]")
+      const status = block.querySelector("[data-role=passkey-status]")
+      if (!button) return
 
-    block.hidden = false
-    revealed = true
-    button.addEventListener("click", () => {
-      if (status) status.textContent = ""
-      stepUpWithPasskey(status)
+      block.hidden = false
+      revealed = true
+      button.addEventListener("click", () => {
+        if (status) status.textContent = ""
+        stepUpWithPasskey(status)
+      })
     })
-  })
+  }
 
   // The "or use a passkey" line beside the code prompt: shown only with a
   // button it can point at.
   if (revealed) {
     root.querySelectorAll("[data-passkey-step-up-hint]").forEach((hint) => {
       hint.hidden = false
+    })
+  }
+
+  // A passkey-only account's way forward (#2887): the server draws it, hidden,
+  // where the passkey is the only factor, and it is shown exactly when no
+  // button was revealed, so the page never asks for a passkey it gives no way
+  // to use.
+  if (!revealed) {
+    root.querySelectorAll("[data-passkey-step-up-unsupported]").forEach((note) => {
+      note.hidden = false
     })
   }
 }
