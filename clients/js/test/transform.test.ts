@@ -2,11 +2,13 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createClient,
   DEFAULT_TRANSFORM_SIZES,
+  isKilnError,
+  KilnConfigError,
   signedTransformPath,
   signedTransformSrcset,
   snapTransformSize,
@@ -141,6 +143,60 @@ describe("transform builders", () => {
     await expect(signedTransformPath(photo, { width: 800 }, "")).rejects.toThrow(/signing key/);
   });
 
+  it("rejects a missing signing key with KilnConfigError missing_image_transform_key", async () => {
+    for (const call of [
+      () => signedTransformPath(photo, { width: 800 }, ""),
+      () => signedTransformSrcset(photo, { widths: [300] }, ""),
+      () => signedTransformPath(photo, { width: 800 }, undefined as unknown as string),
+    ]) {
+      const error = await call().catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(KilnConfigError);
+      expect(isKilnError(error)).toBe(true);
+      expect((error as KilnConfigError).code).toBe("missing_image_transform_key");
+      expect((error as KilnConfigError).message).toBe(
+        "Kiln image transform: a signing key is required for signed URLs.",
+      );
+    }
+  });
+
+  it("checks the key before the dimensions: unknown size without a key still rejects", async () => {
+    const unsized = { id: photo.id };
+
+    for (const key of ["", undefined as unknown as string]) {
+      const error = await signedTransformSrcset(unsized, { widths: [300] }, key).catch(
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(KilnConfigError);
+      expect((error as KilnConfigError).code).toBe("missing_image_transform_key");
+    }
+
+    await expect(
+      signedTransformSrcset(unsized, { widths: [300] }, vectors.signing_key),
+    ).resolves.toBeNull();
+  });
+
+  describe("without WebCrypto", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("rejects signing with KilnConfigError webcrypto_unavailable", async () => {
+      vi.stubGlobal("crypto", undefined);
+
+      const error = await signedTransformPath(photo, { width: 800 }, vectors.signing_key).catch(
+        (caught: unknown) => caught,
+      );
+
+      expect(error).toBeInstanceOf(KilnConfigError);
+      expect(isKilnError(error)).toBe(true);
+      expect((error as KilnConfigError).code).toBe("webcrypto_unavailable");
+      expect((error as KilnConfigError).message).toBe(
+        "Kiln image transform: signing needs WebCrypto (globalThis.crypto.subtle) — " +
+          "Node 19+, or Node 18 with --experimental-global-webcrypto.",
+      );
+    });
+  });
+
   it("ignores a height passed to a srcset by a plain-JS caller", () => {
     const withHeight = { widths: [640], height: 300 } as TransformSrcsetOptions;
     expect(transformSrcset(photo, withHeight)).toBe(transformSrcset(photo, { widths: [640] }));
@@ -188,5 +244,26 @@ describe("KilnClient image helpers", () => {
       /imageTransformKey/,
     );
     await expect(kiln.signedImageSrcset(photo)).rejects.toThrow(/imageTransformKey/);
+  });
+
+  it("refuses a missing key with KilnConfigError missing_image_transform_key", async () => {
+    const message =
+      "Signed image URLs need the imageTransformKey client option (the server's KILN_IMAGE_TRANSFORM_KEY).";
+
+    for (const kiln of [
+      createClient({ baseUrl: origin }),
+      createClient({ baseUrl: origin, imageTransformKey: "" }),
+    ]) {
+      for (const call of [
+        () => kiln.signedImageUrl(photo, { width: 800 }),
+        () => kiln.signedImageSrcset(photo),
+      ]) {
+        const error = await call().catch((caught: unknown) => caught);
+        expect(error).toBeInstanceOf(KilnConfigError);
+        expect(isKilnError(error)).toBe(true);
+        expect((error as KilnConfigError).code).toBe("missing_image_transform_key");
+        expect((error as KilnConfigError).message).toBe(message);
+      }
+    }
   });
 });

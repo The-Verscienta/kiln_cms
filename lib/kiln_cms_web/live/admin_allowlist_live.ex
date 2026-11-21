@@ -413,12 +413,12 @@ defmodule KilnCMSWeb.AdminAllowlistLive do
       <div class="mt-10 max-w-2xl space-y-3 rounded-lg bg-base-200 p-4 text-sm text-base-content/70">
         <p :if={not @restrict_sign_in?} id="admin-allowlist-scope">
           {gettext(
-            "From any other network, the console answers \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, sign-in, API keys, existing app tokens, previews and media are not affected, except that the security posture endpoint for monitoring (GET /api/security/posture) also answers only to listed networks."
+            "From any other network, the console answers \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, sign-in, API keys, existing app tokens, previews and media are not affected, except that the monitoring endpoints under /api/security (GET /api/security/posture and GET /api/security/plugin-health) also answer only to listed networks."
           )}
         </p>
         <p :if={@restrict_sign_in?} id="admin-allowlist-scope">
           {gettext(
-            "From any other network, the console and every sign-in page answer \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, API keys, existing app tokens, previews and media are not affected, except that the security posture endpoint for monitoring (GET /api/security/posture) also answers only to listed networks."
+            "From any other network, the console and every sign-in page answer \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, API keys, existing app tokens, previews and media are not affected, except that the monitoring endpoints under /api/security (GET /api/security/posture and GET /api/security/plugin-health) also answer only to listed networks."
           )}
         </p>
         <p :if={@restrict_sign_in?} id="admin-allowlist-members">

@@ -111,6 +111,18 @@ defmodule KilnCMS.Accounts.AddOrInviteTest do
       assert memberships[site.id] == :viewer
     end
 
+    test "a legacy editor added to the default site at a lower tier gets the tier the admin chose (#2574)" do
+      admin = user(:admin)
+      legacy = user(:editor)
+
+      assert {:ok, %{outcome: :added, membership: membership}} =
+               add_or_invite(admin, default_org(), to_string(legacy.email), %{role: :viewer})
+
+      # A deliberate act, unlike an invitation the invitee accepts: the
+      # dropdown's choice is written, and the notice names it.
+      assert membership.role == :viewer
+    end
+
     test "a pending invitation for the address on this site goes with the direct add" do
       admin = user(:admin)
       email = address()

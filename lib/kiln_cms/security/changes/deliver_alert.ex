@@ -205,6 +205,7 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
       window: window(dispatch),
       count: dispatch.threshold_count || 1
     })
+    |> put_destination(dispatch)
     |> then(fn data ->
       if event,
         do: Map.put(data, :event, event_data(event, dispatch.channel, settings)),
@@ -236,13 +237,23 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
       channel: Atom.to_string(dispatch.channel),
       site_id: org.id,
       site_name: KilnCMS.Branding.for_org(org).site_name,
-      console_url: ConsoleHost.org_url(console_path(phase), org)
+      console_url: ConsoleHost.org_url(console_path(phase, dispatch.kind), org)
     }
   end
 
-  # A notice is about the alert settings or a webhook, not an event in the log.
-  defp console_path("notice"), do: "/editor/security-alerts"
-  defp console_path(_phase), do: "/editor/security-log"
+  # A notice is about the alert settings or a webhook, not an event in the
+  # log. A changed SFTP host key is in the instance log (#2222).
+  defp console_path("notice", _kind), do: "/editor/security-alerts"
+  defp console_path(_phase, "backup_host_key_changed"), do: "/editor/instance-security-log"
+  defp console_path(_phase, _kind), do: "/editor/security-log"
+
+  # The SFTP destination a `backup_host_key_changed` alert is about, which
+  # the claim kept on the row (its event is in the instance log).
+  defp put_destination(data, %{kind: "backup_host_key_changed", notice: %{"destination" => name}})
+       when is_binary(name),
+       do: Map.put(data, :destination, name)
+
+  defp put_destination(data, _dispatch), do: data
 
   defp window(dispatch),
     do: %{started_at: iso(dispatch.window_started_at), ends_at: iso(dispatch.window_ends_at)}

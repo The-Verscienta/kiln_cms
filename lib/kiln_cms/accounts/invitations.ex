@@ -53,11 +53,13 @@ defmodule KilnCMS.Accounts.Invitations do
   """
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.AccountLock
   alias KilnCMS.Accounts.Errors.InvitationRefused
   alias KilnCMS.Accounts.Errors.RegistrationRefused
   alias KilnCMS.Accounts.Invitation
   alias KilnCMS.Accounts.LegacyAffiliation
   alias KilnCMS.Accounts.OrgMembership
+  alias KilnCMS.Accounts.RoleGrant
   alias KilnCMS.AfterCommit
 
   @ttl_days 7
@@ -154,6 +156,15 @@ defmodule KilnCMS.Accounts.Invitations do
   Before an account's first membership on another site, its legacy
   default-site tier is carried onto a membership of its own
   (`KilnCMS.Accounts.LegacyAffiliation`), so accepting never demotes it there.
+  The same holds on the default site itself (#2574): an account with no
+  membership whose standing `User.role` outranks the invited tier has that tier
+  carried first, and the invitation then reads like one to an existing member,
+  `:already_member`, never `:joined` at a lower tier. An equal or higher invited
+  tier is a plain `:joined` at the invited tier, with no carry. Only the
+  standing `User.role` is protected, read fresh under the account's row lock; a
+  live temporary grant above it is not (it is carried with its expiry only when
+  the standing tier is carried). An invited custom role on a swallowed lower
+  tier is not applied.
 
   `context` is the Ash context to write with (the request's client address, for
   the audit event). Approving a registration or raising a membership evicts the
@@ -176,7 +187,7 @@ defmodule KilnCMS.Accounts.Invitations do
     opts = [authorize?: false, context: context]
 
     with {:ok, memberships} <- memberships(user),
-         :ok <- maybe_carry(user, memberships, invitation.organization_id, opts, grant_opts) do
+         {:ok, memberships} <- maybe_carry(user, memberships, invitation, opts, grant_opts) do
       case Enum.find(memberships, &(&1.organization_id == invitation.organization_id)) do
         nil ->
           create(user, invitation, opts)
@@ -307,10 +318,19 @@ defmodule KilnCMS.Accounts.Invitations do
 
   defp invalid, do: {:error, InvitationRefused.exception(field: :token, reason: :invalid)}
 
-  defp maybe_carry(user, memberships, org_id, opts, grant_opts) do
-    if Keyword.get(grant_opts, :carry_legacy?, true),
-      do: carry_legacy_tier(user, memberships, org_id, opts),
-      else: :ok
+  # `{:ok, memberships}`: the list the invitation is judged against, re-read
+  # when a carry wrote the account's first row (the stale list would send the
+  # accept down the create path onto a row that now exists, #2574).
+  defp maybe_carry(user, memberships, invitation, opts, grant_opts) do
+    if Keyword.get(grant_opts, :carry_legacy?, true) do
+      case carry(user, memberships, invitation.organization_id, invitation.role, opts) do
+        {:ok, :carried} -> memberships(user)
+        {:ok, :skipped} -> {:ok, memberships}
+        {:error, error} -> {:error, error}
+      end
+    else
+      {:ok, memberships}
+    end
   end
 
   defp memberships(user) do
@@ -323,16 +343,71 @@ defmodule KilnCMS.Accounts.Invitations do
   @doc """
   Before `user`'s first membership on `org_id`, carry its legacy default-site
   tier onto a membership of its own (`LegacyAffiliation.ensure_default_membership/2`),
-  written with `opts`. `memberships` is every membership it holds now. On the
-  default site the membership about to be written IS that first one, at the
-  tier the admin chose, so only another site needs the carry.
+  written with `opts`. `memberships` is every membership it holds now.
+
+  On another site the carry always happens. On the default site the membership
+  about to be written IS the account's first one, so it is carried only when a
+  `target_role` is given and the account's standing `User.role` outranks it
+  (#2574): the invitation must not leave the account below the tier it held, and
+  the caller then finds the carried row and judges the invitation against it. The
+  comparison is on the standing tier, never `RoleGrant.effective_role/1`
+  (a live grant would become permanent), and on the user row re-read after
+  `AccountLock.share/1`, so a tier changed since the caller read the struct
+  (before the transaction) is neither lost nor resurrected. The lock is
+  `FOR KEY SHARE`: it guards against an erased or deleted account, not against
+  a `:manage_access` demotion committing between the re-read and the write
+  (that takes `FOR NO KEY UPDATE`, which does not conflict with it). That path
+  must run inside a transaction. Without a `target_role` (an admin's deliberate add) the default
+  site is left alone: the tier the admin chose is written.
   """
-  @spec carry_legacy_tier(map(), list(), Ash.UUID.t(), keyword()) :: :ok | {:error, term()}
-  def carry_legacy_tier(user, memberships, org_id, opts) do
-    if LegacyAffiliation.unaffiliated?(memberships) and org_id != Accounts.default_org_id() do
-      with {:ok, _carried} <- LegacyAffiliation.ensure_default_membership(user, opts), do: :ok
-    else
-      :ok
+  @spec carry_legacy_tier(
+          map(),
+          list(),
+          Ash.UUID.t(),
+          keyword(),
+          (:admin | :editor | :viewer) | nil
+        ) ::
+          :ok | {:error, term()}
+  def carry_legacy_tier(user, memberships, org_id, opts, target_role \\ nil) do
+    with {:ok, _carried_or_skipped} <- carry(user, memberships, org_id, target_role, opts),
+         do: :ok
+  end
+
+  defp carry(user, memberships, org_id, target_role, opts) do
+    cond do
+      not LegacyAffiliation.unaffiliated?(memberships) ->
+        {:ok, :skipped}
+
+      org_id != Accounts.default_org_id() ->
+        write_carry(user, opts)
+
+      is_nil(target_role) ->
+        {:ok, :skipped}
+
+      true ->
+        carry_above(user, target_role, opts)
     end
+  end
+
+  # Default site: the standing role, re-read after the key-share lock, decides.
+  # The lock excludes an erasure, not a concurrent tier change (see the doc).
+  defp carry_above(user, target_role, opts) do
+    with :ok <- AccountLock.share(user.id),
+         # authorize?: false — a system re-read of the invitee's own row under
+         # the lock, for the standing tier; nothing is returned to a caller.
+         {:ok, fresh} <- Accounts.get_user(user.id, authorize?: false) do
+      if RoleGrant.elevation?(fresh.role, target_role),
+        do: write_carry(fresh, opts),
+        else: {:ok, :skipped}
+    else
+      # An erased or vanished account: the membership write refuses it.
+      {:error, reason} when reason in [:erased, :not_found] -> {:ok, :skipped}
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  defp write_carry(user, opts) do
+    with {:ok, _carried} <- LegacyAffiliation.ensure_default_membership(user, opts),
+         do: {:ok, :carried}
   end
 end

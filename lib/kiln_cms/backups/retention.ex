@@ -200,10 +200,11 @@ defmodule KilnCMS.Backups.Retention do
        destination that is, contains or is inside `BACKUP_RCLONE_REMOTE`, or
        another stored destination; nor on one whose location can't be told
        (a plugin's kind) or can't be compared with an rclone remote (an S3
-       bucket, #2221) while `BACKUP_RCLONE_REMOTE` is set, since nothing can
-       show the two apart. The env remote is pruned only while every stored
-       destination, enabled or not, has a location that can be told, is not
-       an S3 bucket, and does not overlap it.
+       bucket, #2221, or an SFTP server, #2222) while `BACKUP_RCLONE_REMOTE`
+       is set, since nothing can show the two apart. The env remote is pruned
+       only while every stored destination, enabled or not, has a location
+       that can be told, is neither an S3 bucket nor an SFTP server, and does
+       not overlap it.
     1. **Inventory.** The destination's `list/1`, through
        `KilnCMS.Backups.Destination.call/4`, grouped into units as `scan/1`
        groups the local disk (`destination_inventory/4`). Only whole backup
@@ -560,6 +561,11 @@ defmodule KilnCMS.Backups.Retention do
 
   def describe(:destination_overlap), do: "it overlaps another backup destination"
 
+  def describe(:destination_overlap_possible),
+    do:
+      "another S3 backup destination uses a bucket of the same name; the app can't tell " <>
+        "whether it is the same store"
+
   def describe(:destination_unknown),
     do:
       "a stored backup destination's location can't be told, so it can't be shown not to " <>
@@ -567,6 +573,14 @@ defmodule KilnCMS.Backups.Retention do
 
   def describe(:destination_s3),
     do: "an S3 backup destination can't be compared with BACKUP_RCLONE_REMOTE"
+
+  def describe(:destination_sftp),
+    do: "an SFTP backup destination can't be compared with BACKUP_RCLONE_REMOTE"
+
+  def describe(:destination_overlap_possible_sftp),
+    do:
+      "another SFTP backup destination uses a folder inside or around this one's; the app " <>
+        "can't tell whether it is the same server"
 
   def describe({:dir_id, reason}),
     do: "couldn't read the backup directory's id (#{inspect(reason)})"
@@ -1693,8 +1707,11 @@ defmodule KilnCMS.Backups.Retention do
           | :env_overlap
           | :env_overlap_unknown
           | :destination_overlap
+          | :destination_overlap_possible
+          | :destination_overlap_possible_sftp
           | :destination_unknown
           | :destination_s3
+          | :destination_sftp
           | :not_prunable
 
   @doc """
@@ -1711,9 +1728,17 @@ defmodule KilnCMS.Backups.Retention do
     * `:env_overlap` - it is, contains or is inside `BACKUP_RCLONE_REMOTE`;
     * `:env_overlap_unknown` - `BACKUP_RCLONE_REMOTE` is set and where it
       writes can't be told (a plugin's kind) or can't be compared with an
-      rclone remote (an S3 bucket, #2221);
+      rclone remote (an S3 bucket, #2221, or an SFTP server, #2222);
     * `:destination_overlap` - it overlaps another stored destination (one
-      whose location can't be told overlaps nothing that can).
+      whose location can't be told overlaps nothing that can);
+    * `:destination_overlap_possible` - another stored S3 destination names
+      a bucket of the same name, one prefix inside the other, on another
+      endpoint host or port: it may be the same bucket under another name
+      (`Destination.possible_overlap?/2`, #3088);
+    * `:destination_overlap_possible_sftp` - another stored SFTP
+      destination's path is inside or around this one's, on any host, port
+      or login: it may be the same folder (`Destination.possible_overlap?/2`,
+      #2222).
 
   For `:env`, the env destination, which may share a place with any of them
   unseen:
@@ -1723,6 +1748,8 @@ defmodule KilnCMS.Backups.Retention do
       told (a plugin's);
     * `:destination_s3` - a stored destination is an S3 bucket, which the
       remote may name under any name;
+    * `:destination_sftp` - a stored destination is an SFTP server, which
+      the remote may name under any name;
     * `:destination_overlap` - a stored destination overlaps it.
 
   Whether pruning is turned on at all (a row's `prune`,
@@ -1740,18 +1767,34 @@ defmodule KilnCMS.Backups.Retention do
     location = Destination.location(config)
 
     cond do
-      not Destination.supports?(config, [:list, :delete]) -> :unsupported
-      blocker = env_blocker(location, env) -> blocker
-      overlaps_another?(location, config.id, rows) -> :destination_overlap
-      true -> nil
+      not Destination.supports?(config, [:list, :delete]) ->
+        :unsupported
+
+      blocker = env_blocker(location, env) ->
+        blocker
+
+      overlaps_another?(location, config.id, rows, &Destination.overlap?/2) ->
+        :destination_overlap
+
+      overlaps_another?(location, config.id, rows, &Destination.possible_overlap?/2) ->
+        possible_overlap(location)
+
+      true ->
+        nil
     end
   end
+
+  defp possible_overlap({:sftp, _host, _port, _user, _segments}),
+    do: :destination_overlap_possible_sftp
+
+  defp possible_overlap(_location), do: :destination_overlap_possible
 
   defp row_location(row),
     do: Destination.location(%Config{kind: row.kind, settings: row.settings})
 
   defp env_row_blocker(:unknown, _env), do: :destination_unknown
   defp env_row_blocker({:s3, _host, _port, _bucket, _prefix}, _env), do: :destination_s3
+  defp env_row_blocker({:sftp, _host, _port, _user, _path}, _env), do: :destination_sftp
 
   defp env_row_blocker(location, env),
     do: if(Destination.overlap?(location, env), do: :destination_overlap)
@@ -1763,13 +1806,17 @@ defmodule KilnCMS.Backups.Retention do
   # the same bucket under any name (#2221, decided conservative per ADR 0064).
   defp env_blocker({:s3, _host, _port, _bucket, _prefix}, _env), do: :env_overlap_unknown
 
+  # So can an SFTP server's folder, which the remote may reach as any
+  # `sftp` remote (#2222).
+  defp env_blocker({:sftp, _host, _port, _user, _path}, _env), do: :env_overlap_unknown
+
   defp env_blocker(location, env),
     do: if(Destination.overlap?(location, env), do: :env_overlap)
 
-  defp overlaps_another?(:unknown, _id, _rows), do: false
+  defp overlaps_another?(:unknown, _id, _rows, _overlap?), do: false
 
-  defp overlaps_another?(location, id, rows) do
-    Enum.any?(rows, &(&1.id != id and Destination.overlap?(location, row_location(&1))))
+  defp overlaps_another?(location, id, rows, overlap?) do
+    Enum.any?(rows, &(&1.id != id and overlap?.(location, row_location(&1))))
   end
 
   # Whose units the ownership rule (step 4) accepts: in-app runs of THIS

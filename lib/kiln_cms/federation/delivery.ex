@@ -1,6 +1,13 @@
 defmodule KilnCMS.Federation.Delivery do
   @moduledoc """
-  One attempted delivery of one activity to one follower's inbox (#491).
+  One attempted delivery of one activity to one inbox (#491).
+
+  One row per **distinct inbox** a fan-out reaches, not per follower (#2753):
+  every follower on an instance with a `sharedInbox` is reached by one POST
+  there. `follower_id` names whose bookkeeping the outcome lands on — set, it
+  is exactly that follower (an inbox with one follower, and every `Accept`);
+  `nil`, it is everyone whose deliveries go to `inbox_uri` when the delivery
+  settles. See `KilnCMS.Federation.deliver_to_followers/5`.
 
   The same ledger shape `KilnCMS.CMS.WebhookDelivery` uses, and for the same
   reason: an outbound POST to somebody else's server either happened or it did
@@ -59,7 +66,7 @@ defmodule KilnCMS.Federation.Delivery do
     end
   end
 
-  # The fan-out writes a ledger row per follower and the delivery worker
+  # The fan-out writes a ledger row per distinct inbox and the delivery worker
   # re-reads and settles it (#1659), as `KilnCMS.SystemActor`. Narrowed to
   # those: pruning the ledger is the scheduled trigger's job, and a system
   # actor cannot delete a row that records whether a POST went out.
@@ -93,6 +100,9 @@ defmodule KilnCMS.Federation.Delivery do
       public? false
     end
 
+    # Set: the one follower this delivery's outcome is recorded against. Nil:
+    # several followers shared `inbox_uri`, and the outcome is all of theirs
+    # (#2753; `KilnCMS.Federation.DeliveryWorker`).
     attribute :follower_id, :uuid, public?: true
 
     # Denormalized: the follower row may be dropped (a dead instance) while the

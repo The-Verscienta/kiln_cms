@@ -14,10 +14,15 @@
  *     │  └─ KilnServerError        5xx
  *     ├─ KilnNetworkError          fetch itself failed (DNS, refused, TLS…), or
  *     │                            the body stream broke off mid-read
- *     ├─ KilnUnexpectedBodyError   a 2xx whose body is not JSON (a proxy's or
- *     │                            captive portal's HTML page) — not an HTTP error
+ *     ├─ KilnUnexpectedBodyError   a 2xx whose body is not JSON, is empty, or is
+ *     │                            JSON of the wrong shape (a proxy's or captive
+ *     │                            portal's HTML page, an empty answer to a read,
+ *     │                            `null` where a document was due) — not an
+ *     │                            HTTP error
  *     ├─ KilnGraphQLError          `/gql` answered with `errors`
- *     └─ KilnConfigError           refused client-side (a write with no API key)
+ *     └─ KilnConfigError           refused client-side: the client lacks what the
+ *                                  call needs (a write with no API key, a signed
+ *                                  image URL with no transform key, no WebCrypto)
  *
  * Aborts are the one thing deliberately *not* wrapped: a caller's own
  * `AbortSignal` (or the client's timeout) rejects with the platform's
@@ -203,6 +208,17 @@ export class KilnNetworkError extends KilnError {
  * 2xx status received. `body` holds the start of the raw text (at most 1 KiB),
  * kept out of `message` so an HTML page never lands in a log line whole;
  * `cause` is the `SyntaxError` from parsing it.
+ *
+ * An empty 2xx body is one too, on every call but a write: no read (nor
+ * `graphql`, `submitForm`, `mintPreview`, `restoreRevision`) answers one, so
+ * `body` is `""` and there is no `cause`. A write's empty answer (a 204
+ * soft-delete) is not an error.
+ *
+ * So is valid JSON of the wrong shape on a read that promises one (`null` or
+ * `{}` where a JSON:API document, a sync page or a `{data: …}` envelope was
+ * due): the message says "a JSON body of the wrong shape", `body` is the raw
+ * text, and there is no `cause`. Before, those resolved an empty list,
+ * `null` or a bogus record, or crashed with a `TypeError`.
  */
 export class KilnUnexpectedBodyError extends KilnError {
   declare readonly status: number;
@@ -210,8 +226,17 @@ export class KilnUnexpectedBodyError extends KilnError {
   /** The raw body text, truncated to its first 1 KiB (UTF-8). */
   readonly body: string;
 
-  constructor(status: number, url: string, body: string, cause: unknown) {
-    super(`Kiln answered ${status} ${url} with a body that is not JSON`, {
+  /**
+   * `wrongShape` marks a body that parsed as JSON but is not the shape the
+   * call expects; it changes only the message.
+   */
+  constructor(status: number, url: string, body: string, cause: unknown, wrongShape = false) {
+    const what = wrongShape
+      ? "a JSON body of the wrong shape"
+      : body === ""
+        ? "an empty body"
+        : "a body that is not JSON";
+    super(`Kiln answered ${status} ${url} with ${what}`, {
       status,
       code: "unexpected_body",
       cause,
@@ -257,7 +282,14 @@ export class KilnGraphQLError extends KilnError {
   }
 }
 
-/** Refused before any request was sent — the client is not configured for it. */
+/**
+ * Refused before any request was sent — the client is not configured for the
+ * call. `code` names what is missing: `missing_api_key` (a write with no
+ * `apiKey`), `missing_image_transform_key` (a signed image URL with no
+ * `imageTransformKey`, or an empty key passed to a signed builder),
+ * `webcrypto_unavailable` (signing in a runtime without
+ * `globalThis.crypto.subtle`).
+ */
 export class KilnConfigError extends KilnError {
   constructor(message: string, code: string) {
     super(message, { code });

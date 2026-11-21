@@ -159,7 +159,7 @@ defmodule KilnCMSWeb.ReferencePickerSelectionTest do
 
     test "a field-equality condition is evaluated on the server", ctx do
       CMS.create_field_definition!(
-        %{content_type: :page, name: "diet", label: "Diet", field_type: :string},
+        %{content_type: :page, name: "rps_diet", label: "Diet", field_type: :string},
         actor: ctx.admin
       )
 
@@ -168,13 +168,13 @@ defmodule KilnCMSWeb.ReferencePickerSelectionTest do
           %{
             title: "#{ctx.word} Vegan",
             slug: "rps-#{uniq()}",
-            custom_fields: %{"diet" => "vegan"}
+            custom_fields: %{"rps_diet" => "vegan"}
           },
           actor: ctx.admin
         )
 
       field!(ctx.admin, "vegan_only", %{
-        "by_type" => %{"page" => %{"fields" => %{"diet" => "vegan"}}}
+        "by_type" => %{"page" => %{"fields" => %{"rps_diet" => "vegan"}}}
       })
 
       lv = open_editor(build_conn(), ctx.admin, ctx.post)
@@ -213,10 +213,10 @@ defmodule KilnCMSWeb.ReferencePickerSelectionTest do
     end
 
     test "a field without a selection shows no footer", ctx do
-      field!(ctx.admin, "plain", nil)
+      field!(ctx.admin, "rps_plain", nil)
       lv = open_editor(build_conn(), ctx.admin, ctx.post)
-      lv |> element("#custom-field-plain-search") |> render_focus()
-      refute has_element?(lv, "#custom-field-plain-filter")
+      lv |> element("#custom-field-rps_plain-search") |> render_focus()
+      refute has_element?(lv, "#custom-field-rps_plain-filter")
     end
 
     test "a deleted tag condition is dropped, not shown", ctx do
@@ -278,7 +278,7 @@ defmodule KilnCMSWeb.ReferencePickerSelectionTest do
       CMS.create_field_definition!(
         %{
           type_definition_id: type.id,
-          name: "diet",
+          name: "rps_diet",
           label: "Diet",
           field_type: :string
         },
@@ -292,7 +292,7 @@ defmodule KilnCMSWeb.ReferencePickerSelectionTest do
               title: title,
               slug: "rps-#{uniq()}",
               type_definition_id: type.id,
-              custom_fields: %{"diet" => diet}
+              custom_fields: %{"rps_diet" => diet}
             },
             actor: ctx.admin
           )
@@ -306,7 +306,7 @@ defmodule KilnCMSWeb.ReferencePickerSelectionTest do
       field!(
         ctx.admin,
         "ingredient",
-        %{"by_type" => %{type.name => %{"fields" => %{"diet" => "vegan"}}}},
+        %{"by_type" => %{type.name => %{"fields" => %{"rps_diet" => "vegan"}}}},
         %{
           target_type: type.name
         }
@@ -490,12 +490,12 @@ defmodule KilnCMSWeb.ReferencePickerSelectionTest do
 
     test "equality conditions are written onto the new record", ctx do
       CMS.create_field_definition!(
-        %{content_type: :page, name: "level", label: "Level", field_type: :integer},
+        %{content_type: :page, name: "rps_level", label: "Level", field_type: :integer},
         actor: ctx.admin
       )
 
       creating_field!(ctx, "lvl", %{
-        "by_type" => %{"page" => %{"fields" => %{"level" => 3}}}
+        "by_type" => %{"page" => %{"fields" => %{"rps_level" => 3}}}
       })
 
       lv = open_editor(build_conn(), ctx.admin, ctx.post)
@@ -504,16 +504,16 @@ defmodule KilnCMSWeb.ReferencePickerSelectionTest do
       lv |> element("#custom-field-lvl-create-typed") |> render_click()
 
       assert [created] = pages_titled(name, ctx.admin, ctx.post.org_id)
-      assert created.custom_fields["level"] == 3
+      assert created.custom_fields["rps_level"] == 3
     end
 
     test "is hidden when the actor may not write a field it would fill", ctx do
       CMS.create_field_definition!(
-        %{content_type: :page, name: "grade", label: "Grade", field_type: :integer},
+        %{content_type: :page, name: "rps_grade", label: "Grade", field_type: :integer},
         actor: ctx.admin
       )
 
-      creating_field!(ctx, "grd", %{"by_type" => %{"page" => %{"fields" => %{"grade" => 2}}}})
+      creating_field!(ctx, "grd", %{"by_type" => %{"page" => %{"fields" => %{"rps_grade" => 2}}}})
 
       restricted =
         authed_user(:editor, %{
@@ -529,7 +529,7 @@ defmodule KilnCMSWeb.ReferencePickerSelectionTest do
       CMS.create_field_definition!(
         %{
           content_type: :page,
-          name: "blurb",
+          name: "rps_blurb",
           label: "Blurb",
           field_type: :string,
           required: true

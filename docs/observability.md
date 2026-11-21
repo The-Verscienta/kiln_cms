@@ -407,7 +407,11 @@ alert on the posture itself (a line turning **Fix now**), poll
 see [Monitor the posture from a script](security-posture.md#monitor-the-posture-from-a-script)
 and the [API guide](api.md#security-posture-monitoring). A run for that
 endpoint emits the same events, at most once per site and scope set every
-30 seconds on each node.
+30 seconds on each node. To alert on a particular plugin (a new security
+notice, a changed package on Hex), poll `GET /api/security/plugin-health`
+with a platform administrator's read-only key
+([API guide](api.md#plugin-health-monitoring)); it runs no check and emits
+none of these events.
 
 ## Security log and alerts
 
@@ -528,6 +532,35 @@ and the schedules'
 `[:kiln_cms, :backups, :schedule, …]` and
 `[:kiln_cms, :backups, :status, :schedules_unreadable]` under
 [The scheduler job](backups.md#the-scheduler-job).
+
+## Search budget cuts
+
+A search whose `query_budget` runs out stops its content sections: the ones
+still running get `cut_grace` (100 ms by default) to return on their own, and
+the rest are killed (#2614; how the budget and the grace work is in
+[performance.md](performance.md#search-and-the-pool)). A sweep whose deadline
+passes with sections still running emits
+`[:kiln_cms, :search, :budget, :cut]` once, from
+[`search/budget.ex`](../lib/kiln_cms/search/budget.ex), with measurements
+`returned` and `killed` and empty metadata. It fires only when sections run
+concurrently (`section_concurrency` above 1, the default), and not for a
+search that finished inside its budget.
+
+| Metric | Type | Label | Counts |
+|--------|------|-------|--------|
+| `kiln_cms_search_budget_cut_returned` | sum of `returned` | none | Sections that returned on their own after the deadline, mostly inside the grace. Each kept its database connection. |
+| `kiln_cms_search_budget_cut_killed` | sum of `killed` | none | Sections still running after the grace, killed. |
+
+A killed section that was mid-query costs one database connection: Postgrex
+cancels the query in Postgres, and DBConnection drops the connection and
+opens a new one. Each such kill logs, at `info` level,
+`Postgrex.Protocol (#PID<…>) disconnected: ** (DBConnection.ConnectionError) client #PID<…> exited`.
+A killed section that was between queries or waiting for a connection costs
+nothing but its unfinished legs, so the reconnects are at most `killed`.
+When `killed` keeps rising next to `returned`, the queries in flight at the
+deadline run longer than the grace; the per-leg times in `Server-Timing` on a
+partial `GET /api/search` response
+([api.md](api.md#search-budget-and-server-timing)) show which leg is slow.
 
 ## Where the metrics go
 

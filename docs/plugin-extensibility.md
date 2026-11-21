@@ -943,7 +943,13 @@ agility of a live marketplace while staying compile-time-safe:
   [Choose how editors fill in a field](extending-content.md#choose-how-editors-fill-in-a-field)).
   The optional `graphql_kind/1` (`kiln_plugin` 1.4) names how the GraphQL API
   types the stored value (`:string`, `:int`, `:float`, `:boolean`, `:date`,
-  `:datetime` or `:json`); a type without it is served as `:json`.
+  `:datetime` or `:json`); a type without it is served as `:json`. A scalar
+  type can also opt into holding a **list** with the optional `multiple?/0`
+  (`kiln_plugin` 1.6), and drop repeated items with `unique_items?/0`; the
+  fields admin then offers **A list** for it, and `cast/2` runs once per
+  item. Kiln reads both when it compiles. A list field whose type later
+  stops taking lists keeps its stored lists, read-only. See
+  [Let a plugin field type take a list](extending-content.md#let-a-plugin-field-type-take-a-list).
 
   A type that needs behaviour in the browser (an address type-ahead, a map
   picker) declares `input_hook/1` (#1918): the editor wraps its widget in an

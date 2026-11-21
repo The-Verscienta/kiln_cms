@@ -47,6 +47,7 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMSWeb.EventIndex
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.Plugs.ChallengeCsp
+  alias KilnCMSWeb.Plugs.PublicJsBundle
   alias KilnCMSWeb.Plugs.UrlLocale
   alias KilnCMSWeb.SharedCache
   alias KilnCMSWeb.StructuredData
@@ -56,6 +57,12 @@ defmodule KilnCMSWeb.ContentController do
   # (#2595): most are `public` and shared-cacheable under that URL. See
   # `KilnCMSWeb.Plugs.UrlLocale`.
   plug UrlLocale
+
+  # Every page here is a dead render in `Layouts.public` — the stock home it
+  # falls through to included — so it loads `public.js`, not app.js (#2402).
+  # Here and not in the `:delivery` pipeline, which also serves LiveViews:
+  # see `KilnCMSWeb.Plugs.PublicJsBundle`.
+  plug PublicJsBundle
 
   # The site root. A site whose Home page (slug `home`, see
   # `KilnCMS.CMS.StarterContent`) is published serves it here, through the
@@ -976,8 +983,13 @@ defmodule KilnCMSWeb.ContentController do
   # is known, so the narrower test isn't available at the decision point, and the
   # wrong guess would file a locked body under the anonymous key. The cost lands
   # on the handful of visitors who unlocked something, for the life of the grant.
+  #
+  # The digest the ETag hashes (`payload_digest/1`) is computed here, once per
+  # cache miss and stored with the payload, so a hit pays nothing for it. Only
+  # this anonymous shape gets one at build time: a gated or unlocked render is
+  # private and carries no ETag (`render_content/6`).
   defp fetch_payload(org_id, type, slug, locale, [], [], fun),
-    do: Cache.fetch_published_payload(org_id, type, slug, locale, fun)
+    do: Cache.fetch_published_payload(org_id, type, slug, locale, fn -> with_digest(fun.()) end)
 
   defp fetch_payload(_org_id, _type, _slug, _locale, _audiences, _unlocks, fun), do: fun.()
 
@@ -1011,6 +1023,31 @@ defmodule KilnCMSWeb.ContentController do
           bylines: KilnCMS.Firing.Bylines.for_document(record)
         }
     end
+  end
+
+  defp with_digest(nil), do: nil
+  defp with_digest(payload), do: Map.put(payload, :digest, payload_digest(payload))
+
+  # What the ETag knows of the payload (#2765): a hash of all of it, so every
+  # input the render reads from it moves the validator — a fragment's blocks,
+  # resolved media, a sibling translation, an inherited field, a byline, the
+  # author's name, the category an SEO pattern names. None of those moves the
+  # record's `updated_at`, and each has its own payload bust, so the next build
+  # after one of them hashes differently.
+  #
+  # The whole map rather than the fields a template reads, so an input added to
+  # the payload later is covered without anyone remembering this function. It
+  # covers more than is rendered (whole sibling records, the author and media
+  # structs), which can only cost a 200 where a 304 would have done, never a
+  # stale 304. `:deterministic` and the sorted translations
+  # (`translations/4`) keep two builds of the same data on the same digest.
+  defp payload_digest(payload), do: term_digest(Map.delete(payload, :digest))
+
+  defp term_digest(term) do
+    :sha256
+    |> :crypto.hash(:erlang.term_to_binary(term, [:deterministic]))
+    |> Base.encode16(case: :lower)
+    |> binary_part(0, 16)
   end
 
   # The first hit of `fetch` along the site's fallback chain for `locale`
@@ -1077,10 +1114,21 @@ defmodule KilnCMSWeb.ContentController do
     conn = widen_for_forms(conn, BlockComponents.block_forms(blocks), challenge)
     forms_digest = forms_digest(blocks, challenge)
 
+    # Only a shared render gets an ETag, so only it pays for the digests. A
+    # payload built outside the cache (an aliased page, `serve_alias/2`) has
+    # none stored and is hashed here.
+    validators =
+      if not private?,
+        do: %{
+          forms: forms_digest,
+          payload: Map.get_lazy(payload, :digest, fn -> payload_digest(payload) end),
+          menus: menus_digest(conn)
+        }
+
     conn =
       if private?,
         do: put_private_delivery_headers(conn),
-        else: put_delivery_cache_headers(conn, record, forms_digest)
+        else: put_delivery_cache_headers(conn, record, validators)
 
     # Both before the 304 branch below, so a conditional hit carries them too.
     conn = put_served_locales(conn, record.locale)
@@ -1091,7 +1139,7 @@ defmodule KilnCMSWeb.ContentController do
     start = System.monotonic_time()
 
     result =
-      if not private? and delivery_fresh?(conn, record, forms_digest) do
+      if not private? and delivery_fresh?(conn, record, validators) do
         send_resp(conn, :not_modified, "")
       else
         render_content_body(conn, template, record, blocks, translations, bylines, ct, variant)
@@ -1308,11 +1356,16 @@ defmodule KilnCMSWeb.ContentController do
     # filters published + audience + unlock itself (no unlocks are passed, so
     # a locked variant is simply not listed), and `tenant:` scopes it to this
     # site.
-    ContentTypes.list_translations(ct.type, slug,
+    # Sorted by locale (#2765): the read has no order of its own, and the
+    # hreflang links, the payload digest and so the ETag must not depend on
+    # the order Postgres happened to return the rows in.
+    ct.type
+    |> ContentTypes.list_translations(slug,
       audiences: audiences,
       authorize?: false,
       tenant: org_id
     )
+    |> Enum.sort_by(& &1.locale)
   rescue
     _ -> []
   end
@@ -1621,11 +1674,11 @@ defmodule KilnCMSWeb.ContentController do
     |> put_resp_header("vary", "Cookie, Accept-Language")
   end
 
-  defp put_delivery_cache_headers(conn, record, forms_digest) do
+  defp put_delivery_cache_headers(conn, record, validators) do
     conn
     |> SharedCache.put_public()
     |> put_resp_header("vary", "Accept-Language")
-    |> put_resp_header("etag", etag(record, current_org_id(conn), forms_digest, locale(conn)))
+    |> put_resp_header("etag", etag(record, current_org_id(conn), validators, locale(conn)))
   end
 
   # `Content-Language` names the reader's language, the URL's: the chrome and
@@ -1650,8 +1703,15 @@ defmodule KilnCMSWeb.ContentController do
   # but are not columns on the content row, so a settings save must move the
   # ETag or a revalidating client keeps a 304 body whose links are already wrong.
   #
-  # `forms_digest` (#2249, `forms_digest/2`) is appended only when the page
-  # renders a form, so every page without one keeps the ETag it had.
+  # `validators.forms` (#2249, `forms_digest/2`) is appended only when the page
+  # renders a form. It stays apart from the payload digest because it also
+  # names the human-verification config, which is runtime, not payload.
+  #
+  # `validators.payload` (#2765, `payload_digest/1`) is everything the render
+  # reads from the cached payload that is not a column on the row: fragments,
+  # resolved media, sibling translations, inherited fields, bylines, the
+  # author and category. `validators.menus` (`menus_digest/1`) is the header
+  # and footer navigation, whose links follow their targets' published paths.
   #
   # The build is named last (#2463, `KilnCMSWeb.BuildFingerprint`): the page is
   # rendered by this request's code, so a deploy that changes a template or a
@@ -1661,24 +1721,40 @@ defmodule KilnCMSWeb.ContentController do
   # The chrome's locale is named too (#2595): `/fr/x` and `/x` can be answered
   # by the same record, around it French chrome at one and English at the
   # other, and a validator from one must never 304 a request for the other.
-  defp etag(record, org_id, forms_digest, chrome_locale) do
+  defp etag(record, org_id, validators, chrome_locale) do
     raw =
       "#{record.id}:#{record.locale}:#{record.updated_at}:#{record.published_version_id}" <>
         ":#{record.seo_title}:#{record.seo_description}" <>
         ":#{KilnCMSWeb.Robots.directive(record)}" <>
         ":#{KilnCMS.Cache.head_generation(org_id)}" <>
-        if(forms_digest == "", do: "", else: ":" <> forms_digest) <>
+        if(validators.forms == "", do: "", else: ":" <> validators.forms) <>
         ":chrome=#{chrome_locale}" <>
+        ":p=#{validators.payload}:m=#{validators.menus}" <>
         ":" <> KilnCMSWeb.BuildFingerprint.fingerprint()
 
     digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)
     ~s("#{digest}")
   end
 
-  defp delivery_fresh?(conn, record, forms_digest) do
+  defp delivery_fresh?(conn, record, validators) do
     case get_req_header(conn, "if-none-match") do
       [] -> false
-      validators -> etag(record, current_org_id(conn), forms_digest, locale(conn)) in validators
+      tags -> etag(record, current_org_id(conn), validators, locale(conn)) in tags
     end
+  end
+
+  # The header and footer menus as `Layouts.public/1` renders them (#2765):
+  # the same keys, locale and cached trees, so this is two cache hits. A
+  # `:content` item's URL is its target's current published path and an
+  # unpublished target drops out, neither of which moves anything on this
+  # page's row.
+  defp menus_digest(conn) do
+    org = KilnCMSWeb.Tenant.current_org(conn)
+    brand = KilnCMS.Branding.for_org(org)
+    locale = locale(conn)
+
+    [brand.header_menu_key, brand.footer_menu_key]
+    |> Enum.map(&(&1 && KilnCMS.CMS.Menus.public_tree(&1, locale, org.id)))
+    |> term_digest()
   end
 end

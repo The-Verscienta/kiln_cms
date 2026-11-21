@@ -214,7 +214,10 @@ the package (it is the trust root the registry plan named anyway) and
 **kilncms.dev's security notices feed** (#1873) for advisories. Operators read
 it at **Operations → System → Plugins** and in the Security posture line
 `core.plugin_health`; how to read the badges is in
-[Security posture](security-posture.md#check-your-installed-plugins).
+[Security posture](security-posture.md#check-your-installed-plugins). A
+monitor reads the same answer per plugin, from the node's cache and without
+asking anything, at `GET /api/security/plugin-health` (#2571, platform
+administrators only; [API guide](api.md#plugin-health-monitoring)).
 
 ### The trust chain, and where this sits in it
 
@@ -276,8 +279,14 @@ needs every dimension to have answered positively.
 ### Caching and egress
 
 Modeled on `Kiln.Updates`: `check/1` fetches on a cold cache (or `force: true`,
-floored at one round a minute), `cached/1` never touches the network, `warm/0`
-runs one background check per node. The fetched data, not the verdict, sits in
+floored at one round a minute), `cached/1` never touches the network, `warm/1`
+starts a check in the background without waiting. Every round runs in one
+supervised warmer per node (#2565): `check/1` joins the round in flight or
+starts one and waits up to 90 s for it, so System, Security posture and
+**Check plugins now** share one round of requests, and a page closed
+mid-check doesn't kill it. A round has one 75 s limit for Hex and the notices
+feed together; a package not started by then is not asked and reads unknown,
+and whatever came back is cached for 15 minutes. The fetched data, not the verdict, sits in
 `:persistent_term` for 24 hours (15 minutes after a failure), so staleness is
 re-evaluated on each read. No table, no Oban job, no request at boot, no
 alert (alerting is #2245); a fresh check that finds a failing plugin logs one
@@ -285,6 +294,8 @@ warning. The requests, what each reveals and how to turn them off are in
 [data flows](data-flows.md) and
 [the variables](environment-variables.md#plugin-health-check-2244).
 
-`mix kiln.plugins.list --health` runs the same check from the project. The
+`mix kiln.plugins.list --health` runs the same check from the project,
+inline (`check(force: true, inline: true)`), since no application and so no
+warmer is running there. The
 doctor stays offline: it runs in precommit and CI, which must not depend on
 hex.pm.

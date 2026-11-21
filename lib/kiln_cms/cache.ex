@@ -679,8 +679,9 @@ defmodule KilnCMS.Cache do
   Cache key for a site's delivery-`<head>` generation token (#1079).
 
   Folded into the public HTML ETag so a settings write that changes feed
-  autodiscovery, branding, code injection, or type-driven calendar links moves
-  the validator even when no content row changed. Without it a browser holding
+  autodiscovery, branding, code injection, navigation, type-driven calendar
+  links, or the language switcher's fallback chains moves the validator even
+  when no content row changed. Without it a browser holding
   `If-None-Match` keeps a 304 body whose `<link rel="alternate">` still points
   at a feed that now 404s.
   """
@@ -706,7 +707,9 @@ defmodule KilnCMS.Cache do
   Mint a new head-generation token for `org_id` and put it on every node.
 
   Called from the same settings writes that already bust layout-facing caches
-  (`BustBranding`, `BustCodeInjection`, `BustFeedSettings`, `BustTypeRegistry`).
+  (`BustBranding`, `BustCodeInjection`, `BustFeedSettings`, `BustPublicMenus`,
+  `BustTypeRegistry`) and from `bust_locale_fallbacks/1`, whose chains decide the language
+  switcher every page renders.
   A put, not a delete: a delete would leave every node to mint its own token on
   the next read, so the cluster would disagree until each node had one.
   """
@@ -1178,6 +1181,10 @@ defmodule KilnCMS.Cache do
   record, so there is nothing narrower to aim at. Navigation trees move by
   their generation token. Fired artifact bodies are keyed by record id and are
   unaffected: a chain changes *which* record is served, never a record's body.
+
+  The head generation moves too (#2765): the language switcher on every page is
+  built from the chains at render time, so a page whose payload is unchanged
+  still renders different links, and its ETag must not validate the old ones.
   """
   @spec bust_locale_fallbacks(Ash.UUID.t()) :: :ok
   def bust_locale_fallbacks(org_id) do
@@ -1189,6 +1196,7 @@ defmodule KilnCMS.Cache do
       end
 
       bump_menus_generation(org_id)
+      bump_head_generation(org_id)
     end
 
     :ok
@@ -1263,7 +1271,20 @@ defmodule KilnCMS.Cache do
   every site's payloads.
   """
   @spec bust_form_payloads(Ash.UUID.t() | nil) :: :ok
-  def bust_form_payloads(org_id) do
+  def bust_form_payloads(org_id), do: bust_payloads(org_id)
+
+  @doc """
+  Drop a site's cached delivery payloads on every node, by prefix, for a write
+  whose result is embedded in pages it cannot name (#2765): a category rename
+  (`KilnCMS.CMS.Changes.BustTaxonomyPayloads`; a tag rename drops nothing), an
+  author's display name (`KilnCMS.Accounts.Changes.BustAuthorPayloads`). The next build of each
+  payload hashes differently, which is what moves the page's ETag.
+
+  `nil` drops every site's payloads: a user's name is shown on every site they
+  author for. Records, other shapes and the fired-artifact cache are left alone.
+  """
+  @spec bust_payloads(Ash.UUID.t() | nil) :: :ok
+  def bust_payloads(org_id) do
     if enabled?() do
       ClusterBust.broadcast_prefix(
         if org_id, do: "published:payload:#{org_id}:", else: "published:payload:"

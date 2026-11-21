@@ -92,7 +92,9 @@ defmodule KilnCMS.MixProject do
       dialyzer: [
         # :excoveralls is `runtime: false`, so it is not in the PLT by default —
         # and `mix kiln.coverage.merge` (test/support) calls it directly.
-        plt_add_apps: [:mix, :ex_unit, :excoveralls],
+        # :esbuild is `runtime: Mix.env() == :dev`, so it is not in the test PLT
+        # either — and `mix kiln.assets.budget` (#2402) calls it directly.
+        plt_add_apps: [:mix, :ex_unit, :excoveralls, :esbuild],
         plt_local_path: "priv/plts",
         plt_core_path: "priv/plts",
         ignore_warnings: ".dialyzer_ignore.exs",
@@ -696,8 +698,9 @@ defmodule KilnCMS.MixProject do
     [
       mod: {KilnCMS.Application, []},
       # `:image` (and its libvips NIF backend) is listed explicitly so it starts
-      # and is included in the Dialyzer PLT.
-      extra_applications: [:logger, :runtime_tools, :image]
+      # and is included in the Dialyzer PLT. `:ssh` and `:public_key` are
+      # OTP's own, for the SFTP backup destination (#2222).
+      extra_applications: [:logger, :runtime_tools, :image, :public_key, :ssh]
     ]
   end
 
@@ -894,7 +897,8 @@ defmodule KilnCMS.MixProject do
       {:hammer, "~> 7.0"},
       {:remote_ip, "~> 1.2"},
       {:phoenix_live_reload, "~> 1.2", only: :dev},
-      {:phoenix_live_view, "~> 1.2.0"},
+      # 1.2.14 is the floor: EEF-CVE-2026-126334 (#3190).
+      {:phoenix_live_view, "~> 1.2.14"},
       # Held below 0.1.14: that release needs `fine ~> 0.2.0`, and EXLA 1.0.0's
       # NIF does not compile against fine 0.2 (`try_decode` is not a member of
       # `fine::Decoder<xla::Shape>`) although its own requirement, `~> 0.1`,
@@ -1092,12 +1096,14 @@ defmodule KilnCMS.MixProject do
         "compile",
         "tailwind kiln_cms",
         "esbuild kiln_cms",
-        "esbuild kiln_challenge_embed"
+        "esbuild kiln_challenge_embed",
+        "esbuild kiln_public"
       ],
       "assets.deploy": [
         "tailwind kiln_cms --minify",
         "esbuild kiln_cms --minify",
         "esbuild kiln_challenge_embed --minify",
+        "esbuild kiln_public --minify",
         "phx.digest"
       ],
       precommit:

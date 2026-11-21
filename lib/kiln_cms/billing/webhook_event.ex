@@ -4,9 +4,38 @@ defmodule KilnCMS.Billing.WebhookEvent do
 
   This row **is** the idempotency lock. The receiver inserts it first; the unique
   identity on `{provider, provider_event_id}` means a concurrent duplicate
-  delivery loses the race, gets no Oban job, and is acked with a 200. The worker
-  then claims the row atomically, so an Oban re-execution after a crash cannot
+  delivery loses the race and does not insert a second row. The worker then
+  claims the row atomically, so an Oban re-execution after a crash cannot
   process it twice either.
+
+  ## Recorded and enqueued atomically (#2748)
+
+  `:receive` inserts the row **and** the `KilnCMS.Billing.WebhookWorker` job in
+  one transaction. If the enqueue fails the row rolls back with it, the receiver
+  answers 500 and the provider's redelivery starts from scratch. A row therefore
+  never exists without a job having been created for it; `:received` means "a
+  job was enqueued".
+
+  ## Status lifecycle
+
+  | Status | Meaning | Redelivery |
+  |---|---|---|
+  | `:received` | recorded, job enqueued | re-enqueues (unique job: no-op while one is pending) |
+  | `:processing` | claimed by a worker | re-enqueues only once the claim is older than `reclaim_after_ms/0` |
+  | `:failed` | last attempt errored | re-enqueues |
+  | `:processed` / `:ignored` | settled | acked, nothing enqueued |
+
+  `:claim` accepts `:received` and `:failed`, and also a `:processing` row whose
+  `updated_at` (which the claim bumped) is older than `reclaim_after_ms/0`: a
+  worker that died mid-run (node kill, an exception that escaped) must not strand
+  the event. The age test is part of the claim's single filtered `UPDATE`, so two
+  workers can never both win a reclaim. The threshold is deliberately longer than
+  the worker's 3-minute run timeout, so a live run is never reclaimed.
+
+  A reclaimed event is re-applied from the start. If the first run had already
+  committed its membership transition before dying, the replay appends a second
+  `MembershipEvent` for an unchanged status. Entitlements are recomputed from
+  state, so access is not double-granted; ordering and replay guards are #2749's.
 
   ## Deliberately tenant-less
 
@@ -31,6 +60,10 @@ defmodule KilnCMS.Billing.WebhookEvent do
     authorizers: [Ash.Policy.Authorizer]
 
   @statuses [:received, :processing, :processed, :failed, :ignored]
+
+  # How long a `:processing` claim may sit before another worker may take it over.
+  # Must stay strictly above `WebhookWorker.timeout/1` (a test pins it).
+  @reclaim_after :timer.minutes(10)
   @statuses_sql Enum.map_join(@statuses, ", ", &"'#{&1}'")
 
   postgres do
@@ -49,23 +82,49 @@ defmodule KilnCMS.Billing.WebhookEvent do
   actions do
     defaults [:read, :destroy]
 
+    # Record and enqueue in ONE transaction (#2748): `Oban.insert` shares the
+    # action's connection, so a failed enqueue rolls the row back and the
+    # provider's retry starts clean. Recording first and enqueuing separately
+    # left a `:received` row nothing would ever process.
     create :receive do
       accept [:provider, :provider_event_id, :type, :payload]
+
+      change after_action(fn _changeset, record, _context ->
+               case KilnCMS.Billing.WebhookWorker.enqueue(record) do
+                 {:ok, _job} -> {:ok, record}
+                 {:error, reason} -> {:error, reason}
+               end
+             end)
     end
 
     # Atomic claim: a filtered update. Oban can execute a job more than once (a
     # crash between execution and ack), so the worker claims before doing anything;
-    # zero rows updated means someone else already has it and the job cancels.
+    # zero rows updated means someone else already has it (a `StaleRecord`) and
+    # the job cancels.
     #
     # `:failed` is claimable as well as `:received`, so an Oban RETRY after a
-    # transient provider failure can pick the event back up. Without that, the
-    # first transient error would strand the event permanently: the retry would
-    # find a non-`:received` row and cancel.
+    # transient provider failure can pick the event back up. A `:processing` row
+    # is claimable too once it is older than `@reclaim_after`: its worker died
+    # (#2748) and nobody else will ever settle it. The age test lives in the same
+    # `UPDATE ... WHERE` as the status test, so concurrent reclaims have one winner.
     update :claim do
       accept []
       require_atomic? true
-      validate attribute_in(:status, [:received, :failed])
+
+      change filter(
+               expr(
+                 status in [:received, :failed] or
+                   (status == :processing and
+                      updated_at < ago(^@reclaim_after, :millisecond))
+               )
+             )
+
       change set_attribute(:status, :processing)
+
+      # A reclaim writes `:processing` over `:processing`, which Ash does not count
+      # as a change, so `updated_at` would not move and a second reclaimer would
+      # win too. Stamp it explicitly: the claim time IS the staleness clock.
+      change atomic_update(:updated_at, expr(now()))
     end
 
     update :mark_processed do
@@ -182,6 +241,23 @@ defmodule KilnCMS.Billing.WebhookEvent do
 
   @doc "Every valid status."
   def statuses, do: @statuses
+
+  @doc "Milliseconds after which a `:processing` claim may be taken over."
+  @spec reclaim_after_ms() :: pos_integer()
+  def reclaim_after_ms, do: @reclaim_after
+
+  @doc """
+  Whether a redelivery of this event should enqueue a job: it is not settled, and
+  if a worker holds it, that claim is stale. Mirrors the `:claim` filter; the
+  claim itself remains the guard against double processing.
+  """
+  @spec redeliverable?(%__MODULE__{}) :: boolean()
+  def redeliverable?(%__MODULE__{status: status}) when status in [:received, :failed], do: true
+
+  def redeliverable?(%__MODULE__{status: :processing, updated_at: updated_at}),
+    do: DateTime.diff(DateTime.utc_now(), updated_at, :millisecond) > @reclaim_after
+
+  def redeliverable?(%__MODULE__{}), do: false
 
   @doc """
   Whether `errors` indicate a duplicate-event conflict on the dedupe identity.

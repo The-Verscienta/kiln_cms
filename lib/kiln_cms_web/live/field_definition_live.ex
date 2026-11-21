@@ -293,6 +293,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> normalize(nil, old.form.source.data, socket.assigns.selection_catalog)
       |> put_rules(conds, params["field_type"], old.cond_siblings)
       |> Map.put("carry_section_layout?", "true")
+      # A held list (#2680) narrows only here, on the admin's own save, after
+      # the form warned that each record keeps its first item
+      # (`narrowing_warning({:held, _})`). Every other update keeps it a list.
+      |> Map.put("narrow_held_list?", "true")
 
     case AshPhoenix.Form.submit(old.form, params: submitted) do
       {:ok, _definition} ->
@@ -3560,14 +3564,20 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp list_change(stored, _type, _holds?, false), do: {stored, nil}
   defp list_change(_stored, _type, _holds?, true), do: {nil, nil}
 
-  # The list-capable type a form or a stored definition is, or nil.
+  # The list-capable type a form or a stored definition is, or nil. A stored
+  # held list (#2680: its type no longer takes lists) is `{:held, type}`, so
+  # any save of it narrows, with its own warning.
   defp list_type(nil), do: nil
 
   defp list_type(%Phoenix.HTML.Form{} = form),
     do: Map.get(@list_type_names, to_string(form[:field_type].value))
 
-  defp list_type(%{field_type: type, multiple: true}) do
-    if type in ClearMultiple.list_types(), do: type
+  defp list_type(%{field_type: type, multiple: true} = stored) do
+    cond do
+      type in ClearMultiple.list_types() -> type
+      FieldDefinition.held_list?(stored) -> {:held, type}
+      true -> nil
+    end
   end
 
   defp list_type(_stored), do: nil
@@ -3678,6 +3688,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
        gettext("Several records, in the order the editor arranges them."), "hero-queue-list"}
     ]
   end
+
+  defp narrowing_warning({:held, _type}),
+    do:
+      gettext(
+        "This field's type no longer takes a list. Saving keeps only the first item of each list already filled in; the other items are removed from the content."
+      )
 
   defp narrowing_warning(:media),
     do:
@@ -4857,6 +4873,18 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                         class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
                       >
                         {gettext("list")}
+                      </span>
+                      <span
+                        :if={FieldDefinition.held_list?(definition)}
+                        id={"field-#{definition.id}-held-list"}
+                        title={
+                          gettext(
+                            "Its type no longer takes a list: the stored lists are kept, read-only. Edit the field to save it as a single value."
+                          )
+                        }
+                        class="rounded bg-warning/20 px-1.5 py-0.5 text-xs text-warning-ink"
+                      >
+                        {gettext("list (held)")}
                       </span>
                       <span
                         :if={definition.field_type == :select and definition.multiple}

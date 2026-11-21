@@ -173,6 +173,45 @@ defmodule KilnCMSWeb.BillingWebhookControllerTest do
     |> Ash.read!()
   end
 
+  defp row_for(event_id), do: Enum.find(event_rows(), &(&1.provider_event_id == event_id))
+
+  # Makes a claim look `minutes` old without sleeping: the reclaim test is on
+  # `updated_at`, which the claim bumped.
+  defp age(row, minutes) do
+    at = DateTime.add(DateTime.utc_now(), -minutes * 60, :second)
+
+    import Ecto.Query
+
+    {1, _} =
+      KilnCMS.Repo.update_all(from(e in Billing.WebhookEvent, where: e.id == ^row.id),
+        set: [updated_at: at]
+      )
+
+    :ok
+  end
+
+  defp set_status(row, status) do
+    import Ecto.Query
+
+    {1, _} =
+      KilnCMS.Repo.update_all(from(e in Billing.WebhookEvent, where: e.id == ^row.id),
+        set: [status: status]
+      )
+
+    :ok
+  end
+
+  defp perform(row),
+    do: KilnCMS.Billing.WebhookWorker.perform(%Oban.Job{args: %{"webhook_event_id" => row.id}})
+
+  defp event_jobs do
+    import Ecto.Query
+
+    KilnCMS.Repo.all(
+      from(j in Oban.Job, where: j.worker == "KilnCMS.Billing.WebhookWorker", select: j)
+    )
+  end
+
   defp membership_events(membership_id) do
     Billing.membership_events!(membership_id, authorize?: false, tenant: default_org_id())
   end
@@ -532,6 +571,164 @@ defmodule KilnCMSWeb.BillingWebhookControllerTest do
     end
   end
 
+  # #2749: a provider event is not applied over newer state or another
+  # subscription's state.
+  describe "event ordering and subscription identity" do
+    defp event_status(event),
+      do: Enum.find(event_rows(), &(&1.provider_event_id == event["id"]))
+
+    test "a deleted event for an abandoned subscription is settled :ignored", %{conn: conn} do
+      u = member()
+
+      m =
+        Ash.Seed.seed!(Billing.Membership, %{
+          org_id: default_org_id(),
+          user_id: u.id,
+          tier_id: tier().id,
+          status: :active,
+          provider_subscription_id: "sub_paid"
+        })
+
+      {:ok, _delta} = KilnCMS.Billing.Entitlements.recompute(u.id)
+
+      event =
+        subscription_event("customer.subscription.deleted", m, %{
+          "id" => "sub_abandoned",
+          "status" => "canceled"
+        })
+
+      assert post_event(conn, event).status == 200
+      KilnCMS.DataCase.drain_oban()
+
+      assert %{status: :ignored, error: "other_subscription"} = event_status(event)
+      reloaded = Billing.get_membership!(m.id, authorize?: false, tenant: m.org_id)
+      assert reloaded.status == :active
+      assert reloaded.provider_subscription_id == "sub_paid"
+      assert audiences_of(u.id) == [@gated]
+    end
+
+    test "a retried event older than the applied one is settled :ignored", %{conn: conn} do
+      u = member()
+
+      m =
+        Ash.Seed.seed!(Billing.Membership, %{
+          org_id: default_org_id(),
+          user_id: u.id,
+          tier_id: tier().id,
+          status: :active,
+          provider_subscription_id: "sub_paid"
+        })
+
+      now = System.os_time(:second)
+
+      deleted =
+        "customer.subscription.deleted"
+        |> subscription_event(m, %{"id" => "sub_paid", "status" => "canceled"})
+        |> Map.put("created", now)
+
+      late =
+        "customer.subscription.updated"
+        |> subscription_event(m, %{"id" => "sub_paid", "status" => "active"})
+        |> Map.put("created", now - 60)
+
+      assert post_event(conn, deleted).status == 200
+      KilnCMS.DataCase.drain_oban()
+      assert post_event(conn, late).status == 200
+      KilnCMS.DataCase.drain_oban()
+
+      assert %{status: :processed} = event_status(deleted)
+      assert %{status: :ignored, error: "out_of_order"} = event_status(late)
+
+      assert Billing.get_membership!(m.id, authorize?: false, tenant: m.org_id).status ==
+               :canceled
+    end
+
+    test "checkout completion for another subscription on a paying row is ignored" do
+      stub_subscription()
+      u = member()
+
+      m =
+        Ash.Seed.seed!(Billing.Membership, %{
+          org_id: default_org_id(),
+          user_id: u.id,
+          tier_id: tier().id,
+          status: :active,
+          provider_subscription_id: "sub_paid"
+        })
+
+      event = put_in(checkout_event(m), ["data", "object", "subscription"], "sub_stub")
+
+      assert {:ignored, :other_subscription} = Billing.Subscriptions.apply(event)
+
+      reloaded = Billing.get_membership!(m.id, authorize?: false, tenant: m.org_id)
+      assert reloaded.provider_subscription_id == "sub_paid"
+    end
+
+    test "an event in the same second as the checkout, or later with a fast local clock, still applies" do
+      stub_subscription()
+
+      # `created` values a few seconds in the past: the local clock is ahead of
+      # the provider's, as it can be. The old stamp (`utc_now`) put the row's
+      # mark ahead of these and dropped the cancellation.
+      for {session_at, later_at} <- [{10, 10}, {10, 5}] do
+        m =
+          Ash.Seed.seed!(Billing.Membership, %{
+            org_id: default_org_id(),
+            user_id: member().id,
+            tier_id: tier().id,
+            status: :incomplete
+          })
+
+        now = System.os_time(:second)
+
+        checkout =
+          m
+          |> checkout_event()
+          |> put_in(["data", "object", "subscription"], "sub_stub")
+          |> Map.put("created", now - session_at)
+
+        assert {:ok, _} = Billing.Subscriptions.apply(checkout)
+
+        canceled =
+          "customer.subscription.deleted"
+          |> subscription_event(m, %{"id" => "sub_stub", "status" => "canceled"})
+          |> Map.put("created", now - later_at)
+
+        assert {:ok, _} = Billing.Subscriptions.apply(canceled)
+
+        assert Billing.get_membership!(m.id, authorize?: false, tenant: m.org_id).status ==
+                 :canceled
+      end
+    end
+
+    test "checkout completion is a live state: exempt from the stale check, stamped with its own created" do
+      stub_subscription()
+      u = member()
+
+      m =
+        Ash.Seed.seed!(Billing.Membership, %{
+          org_id: default_org_id(),
+          user_id: u.id,
+          tier_id: tier().id,
+          status: :incomplete,
+          provider_subscription_id: "sub_stub",
+          last_provider_event_at: DateTime.add(DateTime.utc_now(), 1, :day)
+        })
+
+      event =
+        m
+        |> checkout_event()
+        |> put_in(["data", "object", "subscription"], "sub_stub")
+        |> Map.put("created", System.os_time(:second) - 3600)
+
+      assert {:ok, _} = Billing.Subscriptions.apply(event)
+
+      reloaded = Billing.get_membership!(m.id, authorize?: false, tenant: m.org_id)
+      assert reloaded.status == :active
+      assert DateTime.to_unix(reloaded.last_provider_event_at) == event["created"]
+    end
+  end
+
   describe "governance visibility" do
     test "the entitlement change appears in the governance trail", %{conn: conn} do
       # The acceptance criterion "every entitlement change is visible in the
@@ -658,6 +855,307 @@ defmodule KilnCMSWeb.BillingWebhookControllerTest do
       # exists at all.
       assert post_event(conn, checkout_event(m)).status == 404
       assert event_rows() == []
+    end
+  end
+
+  describe "atomic record + enqueue (#2748)" do
+    setup do
+      on_exit(fn -> Application.delete_env(:kiln_cms, :billing_webhook_insert) end)
+    end
+
+    test "a failed enqueue leaves no row and answers 500; the retry succeeds end to end",
+         %{conn: conn} do
+      stub_subscription()
+      u = member()
+      m = membership(u, tier())
+      event = checkout_event(m)
+
+      # The seam: the enqueue fails inside `:receive`'s transaction.
+      Application.put_env(:kiln_cms, :billing_webhook_insert, fn _changeset ->
+        {:error, :pool_timeout}
+      end)
+
+      assert post_event(conn, event).status == 500
+      assert event_rows() == [], "the row must roll back with the failed enqueue"
+      assert event_jobs() == []
+
+      # The provider's redelivery inserts fresh and is processed.
+      Application.delete_env(:kiln_cms, :billing_webhook_insert)
+      assert post_event(build_conn(), event).status == 200
+      assert [%{status: :received}] = event_rows()
+      assert [_one_job] = event_jobs()
+
+      KilnCMS.DataCase.drain_oban()
+      assert [%{status: :processed}] = event_rows()
+      assert audiences_of(u.id) == [@gated]
+    end
+
+    test "recording the event creates its job in the same step", %{conn: conn} do
+      m = membership(member(), tier())
+      assert post_event(conn, checkout_event(m)).status == 200
+
+      [row] = event_rows()
+      assert [%{args: %{"webhook_event_id" => id}}] = event_jobs()
+      assert id == row.id
+    end
+
+    test "the job is unique per event: two inserts make one job" do
+      row_id = Ecto.UUID.generate()
+
+      assert {:ok, first} = KilnCMS.Billing.WebhookWorker.enqueue(%{id: row_id})
+      assert {:ok, second} = KilnCMS.Billing.WebhookWorker.enqueue(%{id: row_id})
+
+      assert second.conflict?
+      assert second.id == first.id
+      assert length(event_jobs()) == 1
+    end
+
+    test "a job whose run is in flight does not block a fresh one (`:executing` is not unique)" do
+      row_id = Ecto.UUID.generate()
+      assert {:ok, first} = KilnCMS.Billing.WebhookWorker.enqueue(%{id: row_id})
+
+      import Ecto.Query
+
+      {1, _} =
+        KilnCMS.Repo.update_all(from(j in Oban.Job, where: j.id == ^first.id),
+          set: [state: "executing"]
+        )
+
+      assert {:ok, second} = KilnCMS.Billing.WebhookWorker.enqueue(%{id: row_id})
+      refute second.conflict?
+      assert second.id != first.id
+    end
+
+    test "the run timeout stays strictly below the stale-claim threshold" do
+      assert KilnCMS.Billing.WebhookWorker.timeout(%Oban.Job{}) <
+               Billing.WebhookEvent.reclaim_after_ms()
+    end
+  end
+
+  describe "duplicate redelivery re-enqueues unsettled events (#2748)" do
+    test "a duplicate of a `:received` event enqueues its job and is processed", %{conn: conn} do
+      stub_subscription()
+      u = member()
+      m = membership(u, tier())
+      event = checkout_event(m)
+
+      assert post_event(conn, event).status == 200
+      # The first job is lost (e.g. a pre-fix row, or a purged queue).
+      KilnCMS.Repo.delete_all(Oban.Job)
+      assert event_jobs() == []
+
+      assert post_event(build_conn(), event).status == 200
+      assert [_job] = event_jobs()
+
+      KilnCMS.DataCase.drain_oban()
+      assert audiences_of(u.id) == [@gated]
+      assert [%{status: :processed}] = event_rows()
+    end
+
+    test "a duplicate while the job is still pending adds no second job", %{conn: conn} do
+      m = membership(member(), tier())
+      event = checkout_event(m)
+
+      assert post_event(conn, event).status == 200
+      assert post_event(build_conn(), event).status == 200
+      assert length(event_jobs()) == 1
+    end
+
+    test "a duplicate of a `:failed` event re-enqueues", %{conn: conn} do
+      stub_subscription()
+      u = member()
+      m = membership(u, tier())
+      event = checkout_event(m)
+
+      assert post_event(conn, event).status == 200
+      KilnCMS.DataCase.drain_oban()
+      row = row_for(event["id"])
+      set_status(row, :failed)
+      KilnCMS.Repo.delete_all(Oban.Job)
+
+      assert post_event(build_conn(), event).status == 200
+      assert [_job] = event_jobs()
+    end
+
+    test "a duplicate of a `:processed` event enqueues nothing", %{conn: conn} do
+      stub_subscription()
+      m = membership(member(), tier())
+      event = checkout_event(m)
+
+      assert post_event(conn, event).status == 200
+      KilnCMS.DataCase.drain_oban()
+      KilnCMS.Repo.delete_all(Oban.Job)
+
+      assert post_event(build_conn(), event).status == 200
+      assert event_jobs() == []
+    end
+
+    test "a duplicate of an `:ignored` event enqueues nothing", %{conn: conn} do
+      event = %{
+        "id" => "evt_orphan_#{System.unique_integer([:positive])}",
+        "type" => "customer.subscription.deleted",
+        "data" => %{"object" => %{"object" => "subscription", "id" => "sub_nobody"}}
+      }
+
+      assert post_event(conn, event).status == 200
+      KilnCMS.DataCase.drain_oban()
+      assert [%{status: :ignored}] = event_rows()
+      KilnCMS.Repo.delete_all(Oban.Job)
+
+      assert post_event(build_conn(), event).status == 200
+      assert event_jobs() == []
+    end
+
+    test "a duplicate of a freshly claimed `:processing` event enqueues nothing", %{conn: conn} do
+      m = membership(member(), tier())
+      event = checkout_event(m)
+
+      assert post_event(conn, event).status == 200
+      row = row_for(event["id"])
+      Billing.claim_webhook_event!(row, actor: Billing.system())
+      KilnCMS.Repo.delete_all(Oban.Job)
+
+      assert post_event(build_conn(), event).status == 200
+      assert event_jobs() == []
+    end
+
+    test "a duplicate of a stale `:processing` event re-enqueues", %{conn: conn} do
+      m = membership(member(), tier())
+      event = checkout_event(m)
+
+      assert post_event(conn, event).status == 200
+      row = row_for(event["id"])
+      Billing.claim_webhook_event!(row, actor: Billing.system())
+      age(row, 11)
+      KilnCMS.Repo.delete_all(Oban.Job)
+
+      assert post_event(build_conn(), event).status == 200
+      assert [_job] = event_jobs()
+    end
+
+    test "a duplicate whose re-enqueue fails answers 500", %{conn: conn} do
+      m = membership(member(), tier())
+      event = checkout_event(m)
+
+      assert post_event(conn, event).status == 200
+      KilnCMS.Repo.delete_all(Oban.Job)
+
+      Application.put_env(:kiln_cms, :billing_webhook_insert, fn _ -> {:error, :down} end)
+      on_exit(fn -> Application.delete_env(:kiln_cms, :billing_webhook_insert) end)
+
+      assert post_event(build_conn(), event).status == 500
+    end
+  end
+
+  describe "stale `:processing` reclaim and crash settlement (#2748)" do
+    test "a stale `:processing` claim is reclaimed by a retry", %{conn: conn} do
+      stub_subscription()
+      u = member()
+      m = membership(u, tier())
+      event = checkout_event(m)
+
+      assert post_event(conn, event).status == 200
+      row = row_for(event["id"])
+
+      # A worker claimed it and died: the row is `:processing` and old.
+      Billing.claim_webhook_event!(row, actor: Billing.system())
+      age(row, 11)
+
+      assert :ok = perform(row)
+      assert [%{status: :processed}] = event_rows()
+      assert audiences_of(u.id) == [@gated]
+    end
+
+    test "a fresh `:processing` claim is still refused", %{conn: conn} do
+      m = membership(member(), tier())
+      event = checkout_event(m)
+
+      assert post_event(conn, event).status == 200
+      row = row_for(event["id"])
+      Billing.claim_webhook_event!(row, actor: Billing.system())
+      age(row, 9)
+
+      assert {:cancel, :already_claimed} = perform(row)
+      assert [%{status: :processing}] = event_rows()
+    end
+
+    test "two concurrent reclaims: exactly one wins", %{conn: conn} do
+      m = membership(member(), tier())
+      event = checkout_event(m)
+
+      assert post_event(conn, event).status == 200
+      row = row_for(event["id"])
+      Billing.claim_webhook_event!(row, actor: Billing.system())
+      age(row, 11)
+
+      results =
+        1..2
+        |> Task.async_stream(
+          fn _ -> Billing.claim_webhook_event(row, actor: Billing.system()) end,
+          max_concurrency: 2
+        )
+        |> Enum.map(fn {:ok, result} -> result end)
+
+      assert [_winner] = Enum.filter(results, &match?({:ok, _}, &1))
+
+      assert [{:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{} | _]}}] =
+               Enum.filter(results, &match?({:error, _}, &1))
+    end
+
+    test "an exception inside the transition settles `:failed`; the retry succeeds", %{conn: conn} do
+      u = member()
+      m = membership(u, tier())
+      event = checkout_event(m)
+
+      assert post_event(conn, event).status == 200
+      row = row_for(event["id"])
+
+      KilnCMS.StubBillingProvider.put(:subscription, {:raise, "provider exploded"})
+      assert {:error, {:exception, "provider exploded"}} = perform(row)
+      assert [%{status: :failed, error: error}] = event_rows()
+      assert error =~ "provider exploded"
+      assert audiences_of(u.id) == []
+
+      stub_subscription()
+      assert :ok = perform(row)
+      assert [%{status: :processed}] = event_rows()
+      assert audiences_of(u.id) == [@gated]
+    end
+
+    test "a throw inside the transition settles `:failed` too", %{conn: conn} do
+      m = membership(member(), tier())
+      event = checkout_event(m)
+
+      assert post_event(conn, event).status == 200
+      row = row_for(event["id"])
+
+      KilnCMS.StubBillingProvider.put(:subscription, {:throw, :nope})
+      assert {:error, {:throw, _}} = perform(row)
+      assert [%{status: :failed}] = event_rows()
+    end
+
+    test "replaying a reclaimed event whose transition already committed appends a second audit row",
+         %{conn: conn} do
+      # Documented, accepted behavior (deferred to #2749's ordering guard): a
+      # worker that dies after the membership transition but before settling
+      # leaves a stale `:processing` row, and the reclaim re-applies it.
+      # Access itself is not double-granted.
+      stub_subscription()
+      u = member()
+      m = membership(u, tier())
+      event = checkout_event(m)
+
+      assert post_event(conn, event).status == 200
+      KilnCMS.DataCase.drain_oban()
+      row = row_for(event["id"])
+      assert length(membership_events(m.id)) == 1
+
+      set_status(row, :processing)
+      age(row, 11)
+
+      assert :ok = perform(row)
+      assert audiences_of(u.id) == [@gated]
+      assert length(membership_events(m.id)) == 2
     end
   end
 end

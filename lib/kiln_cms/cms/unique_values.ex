@@ -60,6 +60,7 @@ defmodule KilnCMS.CMS.UniqueValues do
 
   alias Ash.Error.Changes.InvalidAttribute
   alias KilnCMS.CMS.FieldConstraints
+  alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.Preparations.CustomFieldQuery
 
   @type claim :: %{name: String.t(), label: String.t(), value: term()}
@@ -77,7 +78,8 @@ defmodule KilnCMS.CMS.UniqueValues do
   def register(changeset, defs, opts \\ []) do
     opts = Keyword.put_new(opts, :kind, kind(changeset))
 
-    case Enum.filter(defs, &unique_def?/1) do
+    # A held list (#2680) is never changed by a write, so it claims nothing.
+    case Enum.filter(defs, &(unique_def?(&1) and not FieldDefinition.held_list?(&1))) do
       [] ->
         changeset
 

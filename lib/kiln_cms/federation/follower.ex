@@ -48,6 +48,23 @@ defmodule KilnCMS.Federation.Follower do
       end
     end
 
+    # Every follower a delivery to `inbox_uri` reaches (#2753): the inverse of
+    # `delivery_inbox/1`, and it must stay that — a follower whose shared inbox
+    # is the URI, or one with no usable shared inbox (nil or "") whose personal
+    # inbox is. The fan-out writes one ledger row per distinct inbox, and the
+    # delivery worker reads this to credit or charge everyone that one POST
+    # stood for.
+    read :at_inbox do
+      description "Followers whose deliveries go to the given inbox."
+      argument :inbox_uri, :string, allow_nil?: false
+
+      filter expr(
+               (shared_inbox_uri == ^arg(:inbox_uri) and shared_inbox_uri != "") or
+                 ((is_nil(shared_inbox_uri) or shared_inbox_uri == "") and
+                    inbox_uri == ^arg(:inbox_uri))
+             )
+    end
+
     create :follow do
       description "Record (or refresh) a remote actor's follow."
       upsert? true
@@ -66,15 +83,17 @@ defmodule KilnCMS.Federation.Follower do
       change set_attribute(:consecutive_failures, 0)
     end
 
+    # Both bookkeeping updates are atomic (#2753): a delivery to a shared inbox
+    # charges or credits every follower there in one `UPDATE ... SET
+    # consecutive_failures = consecutive_failures + 1`, so two deliveries
+    # settling at once cannot lose an increment.
     update :record_failure do
-      require_atomic? false
       accept []
       change increment(:consecutive_failures)
       change set_attribute(:last_failed_at, &DateTime.utc_now/0)
     end
 
     update :record_success do
-      require_atomic? false
       accept []
       change set_attribute(:consecutive_failures, 0)
       change set_attribute(:last_delivered_at, &DateTime.utc_now/0)

@@ -13,6 +13,20 @@ read for a plugin contract:
 Releases are tagged `kiln_plugin-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## 1.6.0
+
+### Added
+
+- **`c:Kiln.FieldType.multiple?/0` and `c:Kiln.FieldType.unique_items?/0`
+  (kiln_cms#2680).** A field type that returns `true` from `multiple?/0` can
+  hold a list of values, like a core scalar type: the fields admin offers "A
+  list", `cast/2` runs once per item and must return one string or number,
+  and the editor, API filters and schema export treat it as a list. The type
+  must be a scalar (`input_parts/1` returns `[]`). `unique_items?/0` drops
+  repeated items. Both are optional and not defaulted by `use
+  Kiln.FieldType`; a type without them holds one value, as before. A plugin
+  using them should require `{:kiln_plugin, "~> 1.6"}`.
+
 ## 1.5.0
 
 ### Added

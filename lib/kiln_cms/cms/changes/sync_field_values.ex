@@ -86,6 +86,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   """
   use Ash.Resource.Change
 
+  alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FlexiblePath
 
   require Logger
@@ -272,8 +273,12 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     # one to another type narrows it too (ClearMultiple drops the flag), so it
     # keeps its first item like any other narrowing rather than leaving lists
     # under a key that cannot hold one.
-    was_list? = list?(previous)
-    list? = list?(definition)
+    #
+    # A held list (`FieldDefinition.held_list?/1`, #2680) counts as a list on
+    # both sides: it stays one through every update (`ClearMultiple`), and the
+    # fields admin's narrowing save keeps each record's first item.
+    was_list? = list_or_held?(previous)
+    list? = list_or_held?(definition)
 
     reshape =
       cond do
@@ -374,6 +379,8 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
       _missing -> nil
     end
   end
+
+  defp list_or_held?(definition), do: list?(definition) or FieldDefinition.held_list?(definition)
 
   defp list?(%{field_type: type, multiple: multiple}),
     do: multiple == true and type in KilnCMS.CMS.Changes.ClearMultiple.list_types()

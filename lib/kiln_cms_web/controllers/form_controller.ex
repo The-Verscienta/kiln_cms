@@ -53,6 +53,7 @@ defmodule KilnCMSWeb.FormController do
   alias KilnCMSWeb.Embed
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.Plugs.ChallengeCsp
+  alias KilnCMSWeb.Plugs.PublicJsBundle
   alias KilnCMSWeb.Plugs.UrlLocale
   alias KilnCMSWeb.Tenant
 
@@ -60,6 +61,13 @@ defmodule KilnCMSWeb.FormController do
   # language is the URL's, never the session's (#2595). Not the submissions:
   # a POST is never cached, and its locale already comes from the pinned path.
   plug UrlLocale when action in [:embed]
+
+  # The on-site thank-you, not-found and refused re-render pages load
+  # `public.js`, not app.js (#2402): dead renders in `Layouts.public` whose
+  # only script is the challenge mount. The embed loads neither (its root
+  # layout is its own), and the JSON actions render no page. See
+  # `KilnCMSWeb.Plugs.PublicJsBundle`.
+  plug PublicJsBundle
 
   # The embed page is public and changes only when an admin edits the form, so a
   # short shared-cache window is safe; a deactivated form disappears within it.

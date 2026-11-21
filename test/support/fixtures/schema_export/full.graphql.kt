@@ -715,6 +715,8 @@ public data class ReviewDocument(
     @Serializable
     public data class CustomFields(
         public val score: Long? = null,
+        /** The items, in the order the editor arranged them. */
+        public val scores: List<Long>? = null,
         public val verdict: String? = null,
     )
 
@@ -1060,7 +1062,7 @@ public data class ReviewCustomFields(
         public val FRAGMENT: String = """
             fragment ReviewCustomFields on Entry {
               verdict: customString(name: "verdict")
-              fields(names: ["score"]) {
+              fields(names: ["score", "scores"]) {
                 __typename
                 name
                 ... on StringValue { asString: value }

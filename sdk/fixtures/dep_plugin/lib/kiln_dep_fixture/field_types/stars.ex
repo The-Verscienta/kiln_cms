@@ -4,11 +4,17 @@ defmodule KilnDepFixture.FieldTypes.Stars do
 
   Declares `c:Kiln.FieldType.json_schema/1` so the schema-export goldens cover
   a plugin's own schema for its delivered value, not only the widget inference.
+
+  Takes lists (`c:Kiln.FieldType.multiple?/0`, kiln_plugin 1.6), keeping
+  repeats: a list of scores may repeat one.
   """
   use Kiln.FieldType
 
   @impl Kiln.FieldType
   def input_type, do: "number"
+
+  @impl Kiln.FieldType
+  def multiple?, do: true
 
   @impl Kiln.FieldType
   def input_attrs(_definition), do: %{min: 1, max: 5, step: 1}

@@ -229,6 +229,49 @@ seconds and treats a timeout as failure, so handling inline would be a latency b
 against an external API on a path whose failure mode is "the provider disables
 your endpoint".
 
+### Webhook delivery and recovery
+
+Recording an event and enqueueing its job are **one transaction**. If the
+enqueue fails, nothing is recorded: the receiver answers `500` and the
+provider's retry starts clean. A `received` event therefore always has a job.
+
+An event row moves through these statuses:
+
+| Event status | Meaning | If the provider redelivers it |
+|---|---|---|
+| `received` | recorded, job enqueued | acked after re-enqueueing its job (a job already waiting is not doubled) |
+| `processing` | a worker has claimed it | acked only, unless the claim is more than 10 minutes old, then re-enqueued |
+| `failed` | the last attempt errored | acked after re-enqueueing its job |
+| `processed`, `ignored` | settled | acked only |
+
+How the worker recovers on its own:
+
+- A run is limited to 3 minutes. An exception, exit or throw inside it is caught,
+  the event is settled as `failed`, and Oban retries (up to 8 attempts).
+- A claim older than 10 minutes can be taken over by a new job. The takeover is
+  one atomic update, so two jobs cannot both win it.
+- The job is unique on the event id while it is available, scheduled or
+  retryable, but not while executing. A node killed mid-run leaves its job
+  `executing` until `Oban.Lifeline` rescues it (180 minutes by default), so a
+  redelivery in the meantime can enqueue a fresh job.
+
+A crash **after** the `200` is never redelivered by the provider. Recovery there
+is the rescue above, Oban's retry and the 10-minute takeover.
+
+A taken-over event is applied again from the start. If the first run had already
+committed its membership change before dying, a second `MembershipEvent` row
+(audit trail) is appended for an unchanged status. Access is not granted twice,
+because entitlements are recomputed from current state. Ordering between events
+is a separate concern (#2749).
+
+Three windows are still open and wait for the sweeper in #3159: a job that uses
+all its attempts leaves the event `failed` until the provider redelivers it; a
+`processed` stamp that fails to save leaves the event `processing` (the
+10-minute takeover covers it only once something re-enqueues it); and `received`
+rows recorded before this change have no job. Upgrading needs no migration or
+config, and a rolling deploy is safe: an old node enqueues a non-unique job,
+which the claim then catches.
+
 **Diagnosing "the member paid but has no access"** starts with the recorded
 events: each one carries its status and, on failure, the reason. Every entitlement
 change also appears in the governance trail with the audience delta and the
@@ -243,10 +286,79 @@ event metadata (verified against the stored membership), then the subscription i
 then the customer id disambiguated by price. Nothing resolvable is acknowledged
 and ignored rather than guessed.
 
+What each outcome does to the event row in `/editor/billing`:
+
+| Outcome | Event status | What happens next |
+|---|---|---|
+| Resolved | `processed` | Membership written. |
+| Nothing we hold matches, or the customer's tiers can't be told apart | `ignored` (`unresolvable`, `ambiguous_customer`) | Acknowledged, nothing written. Purged on the normal retention schedule. |
+| Metadata names a `membership_id` whose stored row belongs to a different user than the metadata `user_id` | `ignored` (`metadata_mismatch`) | Nothing written, and the ladder **stops**: it does not fall through to the subscription or customer lookups, which could name a different row. |
+| A malformed identifier in the payload (a `membership_id` or `org_id` that is not a UUID) | `ignored` | A retry cannot change it, so it is not retried. |
+| A lookup that failed for a reason that is not the event's fault: a database fault, a timeout, a refused read | `failed` | Oban retries (8 attempts, with backoff). A later attempt that succeeds settles the event; failed rows are not purged until you resolve them. |
+
+Before this, a database fault during resolution was recorded as `ignored`,
+which is final and purgeable, so a payment event could be dropped by a blip.
+A `metadata_mismatch` is a signature-verified event that contradicts our own
+record, so treat a burst of them as worth investigating. An event that names a
+different organization than the row it found cannot occur: the lookup is
+filtered by that organization.
+
 Because credentials are instance-wide, checkout stamps the organization onto both
 the checkout session **and** the subscription it creates: session metadata does
 not propagate to the subscription, and the subscription is what carries every
 later event.
+
+### Late, repeated and foreign events
+
+Finding the membership row is not the same as knowing the event belongs to the
+subscription that row holds. The provider delivers late and retries, and one row
+can see two subscriptions over its life (a checkout abandoned, then retried and
+paid). So once an event resolves, Kiln checks it before applying it. An event
+that fails the check is acknowledged, nothing is written, and the event row in
+`/editor/billing` is `ignored` with the reason:
+
+| Reason | When | Notes |
+|---|---|---|
+| `other_subscription` | The membership is entitling (`active` or `past_due`) and holds a subscription id, and the event is about a different subscription. Also a row that does not entitle, in the cases under the list below, and a cancellation (`customer.subscription.deleted`) for a subscription other than the stored one, on any row. | Logged at warning. It can mean the provider is still billing a subscription this membership no longer holds: check the provider's dashboard. A cancellation for a different subscription never overwrites the stored subscription id. |
+| `out_of_order` | The event is older than the last one applied to the **same** subscription. | Compared with the provider's `created` stamp, kept on the row. |
+| `comped_not_provider_managed` | The membership is `comped`. | Every provider event for a comped row is ignored. Comping a paying member does **not** cancel their provider subscription (#3156): cancel it in the provider's dashboard, or the person stays billed. |
+
+Details worth knowing:
+
+- A row that does not entitle (`incomplete`, `canceled`) accepts a different
+  subscription only in three cases: the row is `incomplete` (an abandoned
+  checkout replaced by a paid one), the state was retrieved live at checkout (a
+  canceled member resubscribing), or the event is strictly newer than the last
+  one applied. A late, non-cancelling event for the old subscription of a
+  `canceled` row is ignored (`other_subscription`), so it cannot revive access
+  on a dead subscription. Ordering restarts with an admitted new subscription: a
+  delayed event for it is not judged against the old one's stamp.
+- An event with no subscription id, or an entitling row with no stored
+  subscription id, is applied: there is nothing to compare, so the check fails
+  open.
+- Events with an equal `created` stamp are applied, except that an event that
+  would not cancel never revives a `canceled` row at the same stamp. The
+  provider's stamp has one-second resolution, so two *different* events in the
+  same second delivered in the wrong order remain a residual window.
+- Checkout completion applies the state Kiln just retrieved from the provider,
+  which is newer than any event: it is exempt from the ordering check, and the
+  row is stamped with the checkout event's own `created` (the provider's clock,
+  the same one later events carry), not the server's clock.
+- `invoice.payment_failed` carries its subscription id at
+  `parent.subscription_details.subscription` on the newer Stripe API shape, and
+  at `subscription` on the older one. Both are read.
+- The check runs again inside the write transaction, under the row lock, so two
+  workers racing on one membership cannot both pass. If the row moved and the
+  event is now superseded, it settles as `ignored` as above. If the row moved but
+  the event still applies, the write errors and Oban retries it (the event ends
+  `failed` if every attempt does).
+- Replaying an event that was already applied still appends a second `reconciled`
+  audit row; the status does not change.
+
+The stamp lives in a private column, `billing_memberships.last_provider_event_at`
+(nullable; not in the API). It is added by an expand-only migration with no
+config. A node still on the previous release simply does not stamp it, which only
+makes ordering more permissive, so rolling back is safe.
 
 ### When the member was erased
 
@@ -350,6 +462,24 @@ work with JavaScript disabled and survive a dropped socket.
 Return URLs are built from the **request's** host, so a member on a
 custom-domain site returns to that domain — otherwise their session cookie
 wouldn't be there.
+
+### Choosing a tier you already hold
+
+Choosing "join" on a tier whose membership is `active`, `past_due` or `comped`
+does not start a second checkout, and it does not touch the membership. Nothing
+is sent to the provider, so the member cannot be billed twice, and their
+audience and audit trail are left alone. Instead the member is sent to `/account` with the notice "You already have this
+membership." The account page has the "Manage billing" button, which opens the
+provider's billing portal for a billed member.
+
+Only an `incomplete` or `canceled` membership restarts: its status goes back to
+`incomplete` and the member gets a fresh checkout. Before this guard, a second
+click on a live membership reset it to `incomplete`, which dropped the audience
+until the webhook restored it (#2747). The guard is part of the `:start` action
+itself (an `upsert_condition` on the row's status), so a second browser tab
+racing the first is covered too. Calling `Billing.start_membership/2` on a live
+row returns that row unchanged, with `upsert_skipped` set in its metadata
+(`Ash.Resource.get_metadata(row, :upsert_skipped)`), instead of an error.
 
 ### Coming back from checkout
 

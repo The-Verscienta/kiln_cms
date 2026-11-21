@@ -12,6 +12,13 @@
   transient one);
   [ADR 0068](0068-a-resumable-backup-upload-is-recorded-by-the-installation-that-started-it-and-only-it-aborts-it.md)
   (what a permanent failure does to a recorded upload).
+  Amended 2026-11-20 for
+  [#2222](https://github.com/The-Verscienta/kiln_cms/issues/2222): the host
+  rule now lives in `KilnCMS.Backups.Destination.HostPolicy`, shared by the
+  S3 and SFTP adapters, each with its own exact-name variable
+  (`BACKUP_S3_PRIVATE_HOSTS`, `BACKUP_SFTP_PRIVATE_HOSTS`); S3's refusals
+  read as before. See
+  [ADR 0079](0079-an-sftp-destinations-host-key-is-trusted-once-by-a-platform-admin-and-a-changed-key-fails-the-destination.md).
 - **Changelog** — the Unreleased section of
   [CHANGELOG.md](../../CHANGELOG.md): Added
   ([long form](../changelog/v1.11.0.md#s3-backup-destination)).
@@ -150,7 +157,9 @@ deadline, which then answers `{:error, :deadline}` with the progress saved.
   operator searching the docs for one finds it.
 - Two names for one store (`s3.amazonaws.com` and
   `s3.us-east-1.amazonaws.com`, a MinIO by name and by IP) are two stores
-  to the overlap check: it compares the endpoint as entered.
+  to the overlap check when saving: it compares the endpoint as entered.
+  Retention treats them as a possible overlap and prunes neither (#3088,
+  ADR 0064).
 
 ## When to revisit
 
@@ -159,3 +168,6 @@ deadline, which then answers `{:error, :deadline}` with the progress saved.
 - If a store Kiln supports answers a common `4xx` code that no retry fixes,
   add it to the permanent table rather than changing the default.
 - If DNS resolution learns IPv6, AAAA-only hosts can be saved.
+- A new network adapter (WebDAV, #2222) takes the rule from
+  `KilnCMS.Backups.Destination.HostPolicy` with a variable of its own,
+  rather than a copy of it.

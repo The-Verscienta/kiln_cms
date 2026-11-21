@@ -14,10 +14,12 @@ defmodule KilnCMSWeb.SystemLiveTest do
   @moduletag :capture_log
 
   import Phoenix.LiveViewTest
+  import KilnCMS.PostureFixtures, only: [context: 1]
 
   alias Kiln.Plugins.Health
   alias Kiln.Updates
   alias KilnCMS.Accounts.User
+  alias KilnCMS.Test.Eventually
 
   @password "password123456"
 
@@ -432,7 +434,7 @@ defmodule KilnCMSWeb.SystemLiveTest do
 
       assert contribution_counts(html) == %{
                "Blocks" => "5",
-               "Field types" => "4",
+               "Field types" => "6",
                "Image backends" => "1",
                "Nav items" => "1",
                "Admin routes" => "1",
@@ -485,6 +487,12 @@ defmodule KilnCMSWeb.SystemLiveTest do
       Health.clear_cache()
 
       on_exit(fn ->
+        # The node's plugin check outlives the page that started it; let it
+        # finish (blocked stubs give up after 5 s) before resetting.
+        Eventually.eventually(fn -> Process.whereis(Health.warmer_name()) == nil end,
+          timeout_ms: 15_000
+        )
+
         Application.put_env(:kiln_cms, Health, original)
         Application.put_env(:kiln_cms, Kiln.SecurityNotices, notices)
         Health.clear_cache()
@@ -573,6 +581,54 @@ defmodule KilnCMSWeb.SystemLiveTest do
       lv |> element("#check-plugins-now") |> render_click()
       render_async(lv, 2000)
       assert_received {:health_request, _path}
+    end
+
+    # #2565: the page waits on the node's one check, which Security posture
+    # joins rather than starting its own. (The suite has no Hex plugin, and
+    # the notices feed already makes one request per node, so what tells the
+    # two apart is the shared warmer.)
+    test "System and Security posture loading together share one check", %{conn: conn} do
+      enable_health()
+      blocking_stub_health()
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+      assert_receive {:health_request, _path, fetcher}, 2_000
+      Eventually.eventually(fn -> is_pid(Process.whereis(Health.warmer_name())) end)
+
+      assert %{facts: %{pending: true}} =
+               KilnCMS.Security.Posture.Checks.PluginHealth.run(context(nil))
+
+      send(fetcher, :release)
+      html = render_async(lv, 5_000)
+
+      assert health_of(html, "KilnDepFixture.Plugin") == "unverifiable"
+      refute_received {:health_request, _path, _pid}
+      assert %Health.Report{state: :fresh} = Health.cached()
+    end
+
+    test "check plugins now while posture's check is in flight joins it", %{conn: conn} do
+      enable_health()
+      stub_health()
+      Health.put_cache(%{hex: %{}, notices: {:ok, []}})
+      {:ok, lv, _html} = live(conn, ~p"/editor/system")
+
+      Health.clear_cache()
+      blocking_stub_health()
+      assert Health.warm() == :started
+      assert_receive {:health_request, _path, fetcher}, 2_000
+      warmer = Process.whereis(Health.warmer_name())
+
+      lv |> element("#check-plugins-now") |> render_click()
+
+      Eventually.eventually(fn ->
+        match?({:monitored_by, [_ | _]}, Process.info(warmer, :monitored_by))
+      end)
+
+      send(fetcher, :release)
+      html = render_async(lv, 5_000)
+
+      assert health_of(html, "KilnDepFixture.Plugin") == "unverifiable"
+      refute_received {:health_request, _path, _pid}
     end
 
     test "check plugins now with checks off asks nothing", %{conn: conn} do
@@ -847,6 +903,25 @@ defmodule KilnCMSWeb.SystemLiveTest do
     stub_both(fn conn ->
       send(test, {:health_request, conn.request_path})
       Req.Test.json(conn, notices)
+    end)
+  end
+
+  # Like `stub_health/1`, but every request waits for `:release` (5 s at
+  # most), so a check stays in flight while the test brings in another
+  # caller.
+  defp blocking_stub_health do
+    test = self()
+
+    stub_both(fn conn ->
+      send(test, {:health_request, conn.request_path, self()})
+
+      receive do
+        :release -> :ok
+      after
+        5_000 -> :ok
+      end
+
+      Req.Test.json(conn, %{"data" => []})
     end)
   end
 

@@ -58,6 +58,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             GRAPHQL_INTROSPECTION_ENABLED KILN_API_REJECT_INVALID_BEARER
             BACKUP_ENABLED OEMBED_ENABLED BACKUP_MEDIA_PART_MB BACKUP_MEDIA_EXCLUDE
             BACKUP_LOCK_WAIT_SECONDS BACKUP_RCLONE_REMOTE_PRUNE
+            BACKUP_S3_PRIVATE_HOSTS BACKUP_SFTP_PRIVATE_HOSTS
             KILN_READING_TIME_WPM BACKUP_KEEP_DAYS BACKUP_STALE_AFTER_HOURS
             KILN_EXPERIMENTS_STICKY_DAYS REQUIRE_AV_METADATA_STRIP
             BRAND_PRIMARY_COLOR ASK_RERANK SEARCH_CHUNK_LONG_DOCUMENTS
@@ -374,6 +375,28 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
 
     test "an unrecognized value writes nothing rather than reading as on" do
       assert introspection("enabled") == nil
+    end
+  end
+
+  # #2222: SFTP's private hosts are a list of their own, so allowing a host
+  # for S3 opens none of its SSH ports, and the other way round.
+  describe "BACKUP_SFTP_PRIVATE_HOSTS" do
+    test "unset writes nothing" do
+      assert get_in(eval(%{}), [:kiln_cms, KilnCMS.Backups.Destination.Sftp]) == nil
+    end
+
+    test "a list of exact names, apart from S3's" do
+      config =
+        eval(%{
+          "BACKUP_SFTP_PRIVATE_HOSTS" => " NAS.lan, 10.0.0.5, sftp://x.lan ",
+          "BACKUP_S3_PRIVATE_HOSTS" => "minio.lan"
+        })
+
+      assert get_in(config, [:kiln_cms, KilnCMS.Backups.Destination.Sftp, :private_hosts]) ==
+               ["nas.lan", "10.0.0.5"]
+
+      assert get_in(config, [:kiln_cms, KilnCMS.Backups.Destination.S3, :private_hosts]) ==
+               ["minio.lan"]
     end
   end
 

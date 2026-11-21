@@ -323,6 +323,7 @@ msgid_plural "%{count} aren't indexed yet, so they aren't grouped."
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #: lib/kiln_cms_web/components/content_editor/flexible_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
@@ -1034,6 +1035,11 @@ msgstr ""
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "%{label}: %{count} in this alert window"
+msgstr ""
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "%{label}: %{destination}"
 msgstr ""
 
 #: lib/kiln_cms_web/components/block_components.ex
@@ -1843,6 +1849,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "A backup or another re-send is running. Re-send this backup once it finishes: a re-send is never queued."
+msgstr ""
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "A backup server's host key changed"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
@@ -3780,6 +3791,11 @@ msgstr ""
 msgid "An OpenAPI spec and a browsable API explorer"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "An SFTP destination stays disabled until you confirm its host key, from its row once it is saved."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "An accordion is a heading editors open and close; a fieldset is always open; tabs show one section at a time, and every tab section of the type joins one tab set at the place of the first. Sections keep the order of their first field."
@@ -3970,6 +3986,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
 msgid "Announcements appear here after content is published."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Another admin trusted a host key for this destination meanwhile. Nothing was saved; check it again."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -4791,6 +4812,16 @@ msgstr ""
 msgid "Backup schedule deleted"
 msgstr ""
 
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Backup server host key changed"
+msgstr ""
+
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Backup server host key trusted"
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Backup started — this page updates when it finishes."
@@ -5540,6 +5571,7 @@ msgstr ""
 msgid "Characters"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
@@ -5554,6 +5586,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "Check for near-duplicates at review"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Check host key"
 msgstr ""
 
 #: lib/kiln_cms_web/live/link_report_live.ex
@@ -6211,6 +6248,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Compare %{version}"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Compare it with the server's own, e.g. ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub run on the server. Trust it only if they match."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inspector_history_component.ex
@@ -7679,7 +7721,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Cron's scripts/backup.sh prune removed these files: they are older than the BACKUP_KEEP_DAYS it records in manifest.json, and a newer backup of the same kind is on disk."
+msgid "Cron's scripts/backup.sh prune removed these files: a later cron backup recorded a BACKUP_KEEP_DAYS they are older than (or, if none ran since, the one in manifest.json), and a newer backup of the same kind is on disk."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -10992,12 +11034,12 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format
-msgid "From any other network, the console and every sign-in page answer \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, API keys, existing app tokens, previews and media are not affected, except that the security posture endpoint for monitoring (GET /api/security/posture) also answers only to listed networks."
+msgid "From any other network, the console and every sign-in page answer \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, API keys, existing app tokens, previews and media are not affected, except that the monitoring endpoints under /api/security (GET /api/security/posture and GET /api/security/plugin-health) also answer only to listed networks."
 msgstr ""
 
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format
-msgid "From any other network, the console answers \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, sign-in, API keys, existing app tokens, previews and media are not affected, except that the security posture endpoint for monitoring (GET /api/security/posture) also answers only to listed networks."
+msgid "From any other network, the console answers \"Not available from this network\", and open console pages are sent away as soon as you save. The public site, sign-in, API keys, existing app tokens, previews and media are not affected, except that the monitoring endpoints under /api/security (GET /api/security/posture and GET /api/security/plugin-health) also answer only to listed networks."
 msgstr ""
 
 #: lib/kiln_cms/cms/computed/recipes.ex
@@ -11656,9 +11698,24 @@ msgstr ""
 msgid "Home"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Host"
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
 msgid "Host cron also backs up %{components} here, and this schedule keeps backups past BACKUP_KEEP_DAYS. Replace the host's scripts/backup.sh with this release's copy first: an older copy deletes them after BACKUP_KEEP_DAYS."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Host key not confirmed: nothing is sent to this server until it is."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Host key trusted. The destination can be enabled now."
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
@@ -12553,6 +12610,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "Its review date passed over a week ago: check it now."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Its type no longer takes a list: the stored lists are kept, read-only. Edit the field to save it as a single value."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_live.ex
@@ -13475,6 +13537,11 @@ msgstr ""
 msgid "Long slug — search engines and shared links favor short URLs (≤ 6 words)."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Look for it"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "Loop"
@@ -13953,7 +14020,7 @@ msgstr "Most items of this kind"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
-msgid "Most likely removed by cron's scripts/backup.sh prune: they are older than this app's retention, and a newer backup of the same kind is on disk. Cron hasn't recorded its own BACKUP_KEEP_DAYS here, so this is an estimate."
+msgid "Most likely removed by cron's scripts/backup.sh prune: they are older than cron's last known retention (or this app's), and a newer backup of the same kind is on disk. The BACKUP_KEEP_DAYS cron pruned with since then isn't recorded here, so this is an estimate."
 msgstr ""
 
 #: lib/kiln_cms_web/live/analytics_live.ex
@@ -16706,6 +16773,11 @@ msgstr ""
 msgid "Or only these fields"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Or the fingerprint you expect"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Or type a name below to add one."
@@ -17033,6 +17105,7 @@ msgstr ""
 msgid "Passphrase"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/invite_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -17489,6 +17562,7 @@ msgstr ""
 msgid "Poor"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
 msgid "Port"
@@ -17722,6 +17796,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
 msgid "Private fields of %{type} they can read"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Private key"
 msgstr ""
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
@@ -23648,6 +23727,11 @@ msgstr ""
 msgid "The change could not be saved."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "The check didn't finish. Try again."
+msgstr ""
+
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
 msgid "The check expired. Complete it again."
@@ -24327,9 +24411,19 @@ msgstr ""
 msgid "The server allows at most %{percent}% here."
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "The server offers this %{algorithm} key:"
+msgstr ""
+
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
 msgid "The server operator can turn checking on with %{variable}."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "The server presented no key with that fingerprint. Nothing was trusted."
 msgstr ""
 
 #: lib/kiln_cms_web/live/password_policy_live.ex
@@ -25073,6 +25167,16 @@ msgstr[1] ""
 msgid "This field only accepts records that match: %{conditions}."
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
+#, elixir-autogen, elixir-format
+msgid "This field's type no longer takes a list, so the list is kept as it is and can't be edited here. An admin can change the field in Fields."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "This field's type no longer takes a list. Saving keeps only the first item of each list already filled in; the other items are removed from the content."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_sync_live.ex
 #, elixir-autogen, elixir-format
 msgid "This file cannot be imported"
@@ -25362,6 +25466,20 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "This schedule changed since you opened it, so it wasn't saved. The form now holds the stored values, with what you entered beside them: re-enter the changes you still want and save."
 msgstr ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "This schedule keeps about %{count} backup of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgid_plural "This schedule keeps about %{count} backups of each component (about %{size}), more than the backup directory has room for: %{free} free and %{held} in the backups already there."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/backup_schedule_live.ex
+#, elixir-autogen, elixir-format
+msgid "This schedule keeps about %{count} backup of each component. Check that the backup directory has room for them, or keep fewer."
+msgid_plural "This schedule keeps about %{count} backups of each component. Check that the backup directory has room for them, or keep fewer."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
@@ -26049,6 +26167,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Trigram glyphs: three lines per item — published at the bottom, translated in the middle, scheduled on top; solid means yes. Hover one for its reading."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Trust this key"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Trusted %{algorithm} key %{fingerprint}, since %{at}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/search_synonym_live.ex
@@ -26892,6 +27020,7 @@ msgstr ""
 msgid "User"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/site_mail_live.ex
 #, elixir-autogen, elixir-format
@@ -27929,6 +28058,11 @@ msgstr ""
 msgid "Yes, unsubscribe"
 msgstr ""
 
+#: lib/kiln_cms_web/controllers/billing_controller.ex
+#, elixir-autogen, elixir-format
+msgid "You already have this membership."
+msgstr ""
+
 #: lib/kiln_cms_web/live/inbox_live.ex
 #, elixir-autogen, elixir-format
 msgid "You are all caught up."
@@ -28816,6 +28950,11 @@ msgstr ""
 msgid "an S3 destination can't be compared with it"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "an SFTP destination can't be compared with it"
+msgstr ""
+
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format
 msgid "an admin"
@@ -28858,6 +28997,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "and %{count} more"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "another S3 destination uses a bucket of the same name; the app can't tell whether it is the same store"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server"
 msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex
@@ -29967,6 +30116,11 @@ msgstr ""
 msgid "list"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "list (held)"
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
 msgid "locale discovery for building language switchers."
@@ -30463,9 +30617,29 @@ msgstr ""
 msgid "release goes live"
 msgstr ""
 
+#: lib/kiln_cms/cms/validations/release_within_size_limit.ex
+#, elixir-autogen, elixir-format
+msgid "release is full (%{cap} items); ship or split it"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/release_open_for_edit.ex
+#, elixir-autogen, elixir-format
+msgid "release is no longer open for changes"
+msgstr ""
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "release shipped"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/release_within_size_limit.ex
+#, elixir-autogen, elixir-format
+msgid "release size could not be checked"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/release_open_for_edit.ex
+#, elixir-autogen, elixir-format
+msgid "release was not found"
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex

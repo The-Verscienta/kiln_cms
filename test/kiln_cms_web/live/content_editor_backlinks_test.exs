@@ -55,7 +55,7 @@ defmodule KilnCMSWeb.ContentEditorBacklinksTest do
     CMS.create_field_definition!(
       %{
         content_type: :post,
-        name: "hero",
+        name: "ceb_hero",
         label: "Hero page",
         field_type: :reference,
         target_type: "page"
@@ -68,7 +68,7 @@ defmodule KilnCMSWeb.ContentEditorBacklinksTest do
 
     post =
       CMS.create_post!(
-        %{title: "Spring launch", slug: slug(), custom_fields: %{"hero" => page.id}},
+        %{title: "Spring launch", slug: slug(), custom_fields: %{"ceb_hero" => page.id}},
         actor: admin
       )
 
@@ -87,7 +87,7 @@ defmodule KilnCMSWeb.ContentEditorBacklinksTest do
              "Spring launch"
            )
 
-    assert has_element?(lv, "#backlinks", "via hero")
+    assert has_element?(lv, "#backlinks", "via ceb_hero")
     assert has_element?(lv, ~s(button[phx-value-action="unpublish"][data-confirm*="links here"]))
   end
 
@@ -114,6 +114,6 @@ defmodule KilnCMSWeb.ContentEditorBacklinksTest do
     {:ok, lv, _html} =
       ctx.conn |> log_in(ctx.admin) |> live(~p"/editor/content/post/#{ctx.post.id}")
 
-    assert has_element?(lv, "#broken-reference-hero", "Hero page")
+    assert has_element?(lv, "#broken-reference-ceb_hero", "Hero page")
   end
 end

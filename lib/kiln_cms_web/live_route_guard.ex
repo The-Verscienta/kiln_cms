@@ -19,6 +19,17 @@ defmodule KilnCMSWeb.LiveRouteGuard do
   `data-phx-session` blob, scraped from any page the caller is served
   legitimately — a token that outlives both the visit and a later demotion.
 
+  ## Since phoenix_live_view 1.2.14
+
+  The framework now closes this itself (EEF-CVE-2026-126334, GHSA-v4p7-3pm2-wq6c,
+  #3190): its channel refuses a url-less join of a router-mounted LiveView with
+  `:unauthorized` before mounting, keyed off a signed `route_required?` flag on
+  the session token. Kiln was not exposed before that fix, because of this
+  guard, and keeps the guard as a second line: it costs one pattern match per
+  connected mount, and it holds if a dependency pin ever goes back below 1.2.14.
+  No real join reaches it on 1.2.14, so its own tests drive `on_mount/4`
+  directly.
+
   ## Why this is a hook on the view rather than in the router
 
   It has to be, because the router's hooks are exactly what does not run. What

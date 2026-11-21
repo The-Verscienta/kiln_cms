@@ -127,7 +127,7 @@ defmodule Kiln.Plugins.LockRecordTest do
     end
 
     test "records the path fixture plugin's SDK requirement from Mix's graph" do
-      assert %{"kiln_dep_fixture" => "~> 1.5"} = LockRecord.sdk_requirements()
+      assert %{"kiln_dep_fixture" => "~> 1.6"} = LockRecord.sdk_requirements()
     end
 
     test "a missing lockfile records nothing" do

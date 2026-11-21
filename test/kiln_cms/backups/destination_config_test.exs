@@ -446,6 +446,35 @@ defmodule KilnCMS.Backups.DestinationConfigTest do
       # Whole segments: a/bc is a place of its own.
       assert {:ok, _} = local(Path.join(root, "a/bc"))
     end
+
+    # #3088: only an exact overlap is refused. A bucket of the same name on
+    # another host may be another store, so it saves; retention then keeps
+    # off both (`Retention.prune_blocker/3`).
+    test "an S3 bucket of the same name on another host saves; on the same host it doesn't" do
+      s3 = fn endpoint, prefix ->
+        Backups.create_backup_destination(
+          %{
+            name: "Bucket #{System.unique_integer([:positive])}",
+            kind: "s3",
+            settings: %{
+              "endpoint" => endpoint,
+              "region" => "us-east-1",
+              "bucket" => "kiln",
+              "prefix" => prefix
+            },
+            secrets: %{"access_key_id" => "AKIDTEST", "secret_access_key" => "s3-secret-test"}
+          },
+          actor: platform_admin()
+        )
+      end
+
+      assert {:ok, _} = s3.("https://s3.amazonaws.com", "site")
+
+      assert {:error, error} = s3.("https://s3.amazonaws.com", "site/inner")
+      assert messages(error) =~ "another destination"
+
+      assert {:ok, _} = s3.("https://s3.us-east-1.amazonaws.com", "site")
+    end
   end
 
   describe "an uninstalled adapter's destination" do

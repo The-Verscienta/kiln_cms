@@ -107,7 +107,10 @@ must fail on a refused import.
   turn a list (`multiple`) into a single value. Nothing is written until you
   pass `--allow-data-loss`, which then behaves exactly as the same edit in the
   console (a delete purges the key from every record). A link or group
-  sub-field is judged by its parent's key.
+  sub-field is judged by its parent's key. A
+  [held list](extending-content.md#narrow-a-list-field-whose-type-stopped-taking-lists)
+  (a list field whose plugin type no longer takes lists) stays a list
+  through any other change the file makes to it.
 - **A field of an unknown type is invisible to both directions.** A field
   whose type this release doesn't know (after a rollback, or once its plugin
   is removed) is left out of the export, and an import neither updates nor

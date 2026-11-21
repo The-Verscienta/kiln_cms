@@ -111,6 +111,8 @@ defmodule KilnCMS.Backups do
       define :get_run, action: :read, get_by: [:id]
       define :get_run_by_stamp, action: :by_stamp, args: [:stamp], not_found_error?: false
       define :list_runs_sent_to_destination, action: :sent_to_destination, args: [:key]
+      define :list_run_prune_windows, action: :prune_windows, args: [:after]
+      define :newest_imported_run, action: :newest_import, not_found_error?: false
       define :list_running_runs, action: :running
       define :mark_run_pruned, action: :mark_pruned
       define :cancel_run, action: :cancel
@@ -168,6 +170,12 @@ defmodule KilnCMS.Backups do
       define :list_enabled_backup_destinations, action: :enabled
       define :record_backup_destination_test, action: :record_test_result
       define :adopt_backup_directories, action: :adopt_directories
+
+      # A platform admin trusting an SFTP server's host key (#2222), with
+      # what `scan_destination_host_key/2` read.
+      define :trust_backup_destination_host_key,
+        action: :trust_host_key,
+        args: [:algorithm, :fingerprint, :how]
     end
 
     resource KilnCMS.Backups.NodeBeat do
@@ -370,6 +378,99 @@ defmodule KilnCMS.Backups do
        label: entry["label"],
        at: DateTime.utc_now()
      }}
+  end
+
+  # A scan connects this long at most per host key type, and as long as
+  # every type a pasted fingerprint is looked for under takes, in all.
+  @host_key_connect_timeout :timer.seconds(10)
+  @host_key_scan_timeout :timer.seconds(30)
+  @host_key_match_timeout :timer.seconds(90)
+
+  @doc """
+  Reads the host key the SFTP destination `id`'s server offers (#2222, ADR
+  0079), behind the Destinations tab's **Check host key**: connects, records
+  the key the server signs with, and refuses it, so no password or key is
+  ever sent.
+
+    1. The row is read as `opts[:actor]` with `authorize_with: :error`, and
+       the actor must be allowed to trust a key
+       (`can_trust_backup_destination_host_key?/2`, a platform admin): anyone
+       else is refused before any network I/O.
+    2. Without `opts[:fingerprint]` it reads the key the server prefers;
+       with one (what the admin expects, from `ssh-keygen -lf`), it asks for
+       each type Kiln trusts in turn until one matches, and answers
+       `{:error, :no_match}` when none does.
+    3. Bounded through `KilnCMS.Backups.Destination.call/4` (30 s, or 90 s
+       for a fingerprint: six types at 10 s each). Nothing is written: the
+       admin trusts what this answered with
+       `trust_backup_destination_host_key/5`.
+
+  Returns `{:ok, %{algorithm: type, fingerprint: fingerprint,
+  previous_fingerprint: stored_or_nil, scanned_for: server}}`, where
+  `scanned_for` is the server and login the key was read from
+  (`Sftp.Target.server/1`), which trusting it must pass back;
+  `{:error, :not_found}`, `{:error, :not_sftp}`,
+  `{:error, %Ash.Error.Forbidden{}}`, or the scan's error.
+  """
+  @spec scan_destination_host_key(String.t(), keyword()) ::
+          {:ok,
+           %{
+             algorithm: String.t(),
+             fingerprint: String.t(),
+             previous_fingerprint: String.t() | nil,
+             scanned_for: map()
+           }}
+          | {:error, term()}
+  def scan_destination_host_key(id, opts) do
+    actor = Keyword.fetch!(opts, :actor)
+
+    with {:ok, %DestinationConfig{} = row} <-
+           found(get_backup_destination(id, actor: actor, authorize_with: :error)),
+         :ok <- may_trust(actor, row),
+         :ok <- sftp(row),
+         {:ok, {algorithm, fingerprint}} <- scan_host_key(row, Keyword.get(opts, :fingerprint)) do
+      {:ok,
+       %{
+         algorithm: algorithm,
+         fingerprint: fingerprint,
+         previous_fingerprint: (row.host_key || %{})["fingerprint"],
+         scanned_for: KilnCMS.Backups.Destination.Sftp.Target.server(row.settings)
+       }}
+    end
+  end
+
+  defp may_trust(actor, row) do
+    # The policy reads no argument: any well-formed ones ask the question.
+    if can_trust_backup_destination_host_key?(
+         actor,
+         row,
+         "ssh-ed25519",
+         "SHA256:" <> String.duplicate("A", 43),
+         :scanned,
+         %{scanned_for: %{}}
+       ),
+       do: :ok,
+       else: {:error, Ash.Error.Forbidden.exception([])}
+  end
+
+  defp sftp(%DestinationConfig{kind: "sftp"}), do: :ok
+  defp sftp(_row), do: {:error, :not_sftp}
+
+  # Settings only: a scan sends no credential, so none is decrypted.
+  defp scan_host_key(row, nil) do
+    config = %Kiln.BackupDestination.Config{id: row.id, kind: row.kind, settings: row.settings}
+
+    Destination.call(config, :scan, [nil, [timeout: @host_key_connect_timeout]],
+      timeout: @host_key_scan_timeout
+    )
+  end
+
+  defp scan_host_key(row, expected) do
+    config = %Kiln.BackupDestination.Config{id: row.id, kind: row.kind, settings: row.settings}
+
+    Destination.call(config, :match, [expected, [timeout: @host_key_connect_timeout]],
+      timeout: @host_key_match_timeout
+    )
   end
 
   defp run_destination_test(destination, timeout) do
@@ -716,7 +817,14 @@ defmodule KilnCMS.Backups do
   @type component :: :db | :media
 
   @type component_status :: %{
-          last_good: %{at: DateTime.t(), stamp: String.t() | nil, source: :run | :manifest} | nil,
+          last_good:
+            %{
+              at: DateTime.t(),
+              stamp: String.t() | nil,
+              source: :run | :manifest,
+              bytes: non_neg_integer()
+            }
+            | nil,
           last_attempt:
             %{at: DateTime.t(), ok?: boolean(), stamp: String.t() | nil, source: :run | :manifest}
             | nil,
@@ -1038,7 +1146,9 @@ defmodule KilnCMS.Backups do
 
     * `last_good`: the newest succeeded run that covered it and has a verified
       artifact of that kind, or the manifest when it is newer (or the only
-      source); `nil` when there is none.
+      source); `nil` when there is none. Its `bytes` is the size of that
+      backup's files of the component (every part of a media set), what the
+      Schedule tab's disk warning multiplies (#2984).
     * `last_attempt`: the newest run that covered it and succeeded or failed,
       or the manifest, whichever is newer. A failed manifest that doesn't say
       what it covered counts against every component, and so does a failed
@@ -1735,7 +1845,9 @@ defmodule KilnCMS.Backups do
     name = Atom.to_string(component)
     runs = runs || %{good: nil, attempt: nil}
 
-    last_good = newer(run_point(runs.good), manifest_good(manifest, name))
+    last_good =
+      newer(good_point(runs.good, component), manifest_good(manifest, name))
+
     last_attempt = newer(run_point(runs.attempt), manifest_attempt(manifest, name))
     hours = rule.hours
 
@@ -1762,6 +1874,19 @@ defmodule KilnCMS.Backups do
     }
   end
 
+  # The newest good run, with the size of its files of `component`.
+  defp good_point(nil, _component), do: nil
+
+  defp good_point(run, component) do
+    bytes =
+      run.artifacts
+      |> Enum.filter(&(&1.kind == component))
+      |> Enum.map(& &1.bytes)
+      |> Enum.sum()
+
+    run |> run_point() |> Map.put(:bytes, bytes)
+  end
+
   # An ok manifest vouches for a component it covered with a verified file of
   # that kind.
   defp manifest_good(%Manifest{ok: true, finished_at: %DateTime{} = at} = manifest, name) do
@@ -1769,10 +1894,14 @@ defmodule KilnCMS.Backups do
       name in Manifest.components(manifest) and
         Enum.any?(manifest.artifacts, &(&1.kind == name and &1.verified))
 
-    if covered?, do: %{at: at, ok?: true, stamp: nil, source: :manifest}
+    if covered?,
+      do: %{at: at, ok?: true, stamp: nil, source: :manifest, bytes: kind_bytes(manifest, name)}
   end
 
   defp manifest_good(_manifest, _name), do: nil
+
+  defp kind_bytes(%Manifest{artifacts: artifacts}, name),
+    do: artifacts |> Enum.filter(&(&1.kind == name)) |> Enum.map(& &1.bytes) |> Enum.sum()
 
   # A failed manifest that doesn't say what it covered (cron's, or one with no
   # artifacts) counts against every component: failing closed.

@@ -16,6 +16,12 @@ defmodule KilnCMSWeb.LiveJoinWithoutUrlTest do
   was served legitimately, which is why "they had to be let in once" is not a
   defence: the token outlives the visit, and outlives a demotion.
 
+  Since phoenix_live_view 1.2.14 (EEF-CVE-2026-126334, #3190) the framework
+  refuses these joins in the channel, before any `on_mount` runs, so the
+  behavioural tests see its `"unauthorized"` reply. `KilnCMSWeb.LiveRouteGuard`
+  stays behind it as a second line; "the guard's condition" below tests it
+  directly, since no real join reaches it any more.
+
   `async: false` — `KilnCMS.DataCase.setup_sandbox` only shares the sandbox
   connection for non-async cases, and the channel processes `subscribe_and_join`
   spawns are not sandbox-allowed owners otherwise.
@@ -133,11 +139,12 @@ defmodule KilnCMSWeb.LiveJoinWithoutUrlTest do
 
       # A clean, deliberate refusal — not the `KeyError` on the assign the
       # skipped hook was supposed to set, which is how this failed before #688.
-      # `reason: "reload"` is what the channel returns for a 4xx raised during
-      # mount; it stops the channel without a crash report, and a real client
-      # reloads through the router, where the gates run.
-      assert reply.reason == "reload"
-      assert reply.status == 404
+      # Since phoenix_live_view 1.2.14 (EEF-CVE-2026-126334, #3190) the channel
+      # refuses this itself, before mount, so the reply is the framework's
+      # `"unauthorized"` rather than `KilnCMSWeb.LiveRouteGuard`'s 404 reload.
+      # Pinned exactly: a lock that went back below 1.2.14 shows up here, not
+      # only in `mix hex.audit`.
+      assert reply == %{reason: "unauthorized"}
     end
 
     test "still renders for an ordinary connected mount, which does carry a url", %{conn: conn} do
@@ -178,7 +185,7 @@ defmodule KilnCMSWeb.LiveJoinWithoutUrlTest do
 
           outcome =
             case join_without_url(live_socket(path), id, session) do
-              {:error, %{reason: "reload", status: 404}} -> :refused
+              {:error, %{reason: "unauthorized"}} -> :refused
               other -> other
             end
 
@@ -216,7 +223,7 @@ defmodule KilnCMSWeb.LiveJoinWithoutUrlTest do
 
           outcome =
             case join_without_url(live_socket(path), id, session) do
-              {:error, %{reason: "reload", status: 404}} -> :refused
+              {:error, %{reason: "unauthorized"}} -> :refused
               other -> other
             end
 

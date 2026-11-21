@@ -65,7 +65,7 @@ defmodule KilnCMS.Security.AlertGate do
   SELECT gen_random_uuid(), $1::text, $2::text, $3::text, $4::text::uuid, w.idx,
          to_timestamp((w.idx * $5::bigint)::float8 / 1000) AT TIME ZONE 'UTC',
          to_timestamp(((w.idx + 1) * $5::bigint)::float8 / 1000) AT TIME ZONE 'UTC',
-         $6::text::uuid, $7::bigint, '{}'::jsonb,
+         $6::text::uuid, $7::bigint, $10::jsonb,
          to_timestamp((((w.idx + 1) * $5::bigint) + $9::bigint)::float8 / 1000) AT TIME ZONE 'UTC',
          clock_timestamp() AT TIME ZONE 'UTC'
   FROM (SELECT coalesce($8::bigint,
@@ -106,6 +106,10 @@ defmodule KilnCMS.Security.AlertGate do
       failed-sign-in tally's, so the alert and the tally agree on the window.
     * `:threshold_count` — the count that crossed the threshold.
     * `:window_ms` — the window length (default `Alerts.window_ms/0`).
+    * `:details` — what the alert says beyond its kind, kept in the row's
+      `notice` column for an alert whose event its delivery can't read: the
+      SFTP `backup_host_key_changed` alert's `destination` name (#2222).
+      Never an address, URL, token or email.
   """
   @spec claim(
           String.t(),
@@ -129,7 +133,8 @@ defmodule KilnCMS.Security.AlertGate do
       event_id,
       Keyword.get(opts, :threshold_count),
       Keyword.get(opts, :window_index),
-      @keep_ms
+      @keep_ms,
+      Keyword.get(opts, :details, %{})
     ]
 
     result =

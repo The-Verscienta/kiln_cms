@@ -13,7 +13,8 @@ defmodule KilnCMSWeb.DevAssets do
   So a dev boot starts a one-shot check. It waits out a grace period long
   enough for the watchers' first build, then looks at what is on disk:
 
-    * a missing stylesheet or script bundle;
+    * a missing stylesheet or script bundle — app.js, or the `public.js` the
+      site's signed-out pages load (#2402);
     * a stylesheet that lacks a custom property `assets/css/app.css` declares
       — the build predates the source. Content, not timestamps: Tailwind does
       not rewrite an output that comes out identical, so a touched or
@@ -94,6 +95,7 @@ defmodule KilnCMSWeb.DevAssets do
     css_source = Path.join(root, "assets/css/app.css")
     css_built = Path.join(root, "priv/static/assets/css/app.css")
     js_built = Path.join(root, "priv/static/assets/js/app.js")
+    public_built = Path.join(root, "priv/static/assets/js/public.js")
     node_modules = Path.join(root, "assets/node_modules")
 
     css =
@@ -107,7 +109,7 @@ defmodule KilnCMSWeb.DevAssets do
         _unreadable -> if File.exists?(css_built), do: [], else: [{:missing, css_built}]
       end
 
-    js = if File.exists?(js_built), do: [], else: [{:missing, js_built}]
+    js = for path <- [js_built, public_built], not File.exists?(path), do: {:missing, path}
     deps = if File.dir?(node_modules), do: [], else: [:no_node_modules]
 
     css ++ js ++ deps

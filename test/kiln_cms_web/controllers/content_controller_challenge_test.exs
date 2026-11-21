@@ -144,28 +144,23 @@ defmodule KilnCMSWeb.ContentControllerChallengeTest do
   end
 
   describe "the ETag" do
-    test "a page without a form keeps the ETag it had", %{plain: plain} do
+    # The forms segment is appended only when the page renders a form, so a
+    # page without one is untouched by the challenge config. This used to pin
+    # the whole formula; the payload and menu digests (#2765) cannot be
+    # recomputed outside the controller, so the property is asserted instead.
+    test "a page without a form keeps its ETag through a challenge config change",
+         %{required: required} do
       bare = page!([])
-      with_plain = page!([form_block(plain)])
+      with_form = page!([form_block(required)])
 
-      # The pre-#2249 formula, with no forms segment, the chrome's locale
-      # (#2595, the default at an unprefixed URL) and the build named last
-      # (#2463).
-      expected = fn record ->
-        raw =
-          "#{record.id}:#{record.locale}:#{record.updated_at}:#{record.published_version_id}" <>
-            ":#{record.seo_title}:#{record.seo_description}" <>
-            ":#{KilnCMSWeb.Robots.directive(record)}" <>
-            ":#{KilnCMS.Cache.head_generation(record.org_id)}" <>
-            ":chrome=#{KilnCMS.I18n.default_locale()}" <>
-            ":#{KilnCMSWeb.BuildFingerprint.fingerprint()}"
+      bare_tag = etag(fetch(bare.slug))
+      form_tag = etag(fetch(with_form.slug))
 
-        digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)
-        ~s("#{digest}")
-      end
+      enable!(site_key: "rotated-site-key")
 
-      assert etag(fetch(bare.slug)) == expected.(bare)
-      refute etag(fetch(with_plain.slug)) == expected.(with_plain)
+      assert etag(fetch(bare.slug)) == bare_tag
+      assert fetch(bare.slug, bare_tag).status == 304
+      refute etag(fetch(with_form.slug)) == form_tag
     end
 
     test "304 while nothing changed", %{required: required} do

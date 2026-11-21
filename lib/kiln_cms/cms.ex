@@ -187,6 +187,29 @@ defmodule KilnCMS.CMS do
     tool :create_category, KilnCMS.CMS.Category, :create do
       description "Create a category (check read_categories first to avoid duplicates)."
     end
+
+    # Payload links (R8): the same `:create_link` / `:update_link` actions
+    # `/api/json/content-links` serves, so a link is authorized as an edit of
+    # its source record and `kind: :reference` is refused. No destroy tool,
+    # like every other resource here: removing a link stays a human's act.
+    tool :read_content_links, KilnCMS.CMS.ContentLink, :read do
+      description "List links between records. Filter on source_id for a record's outgoing " <>
+                    "links, target_id for its incoming ones, and kind for one relation. " <>
+                    "A link is visible only when the key may read both ends. " <>
+                    "Read before create_content_link to avoid duplicates."
+    end
+
+    tool :create_content_link, KilnCMS.CMS.ContentLink, :create_link do
+      description "Link two records: source_id → target_id, with a kind naming the relation " <>
+                    "(e.g. see_also) and optional position, label and metadata. Allowed when " <>
+                    "the key may edit the source. A link on a published source shows at once. " <>
+                    "kind reference is refused: write the reference custom field instead."
+    end
+
+    tool :update_content_link, KilnCMS.CMS.ContentLink, :update_link do
+      description "Change a link's position, label or metadata. Its ends and kind are fixed; " <>
+                    "to point elsewhere, create a new link."
+    end
   end
 
   # Domain code interfaces are the contract for calling into these resources —

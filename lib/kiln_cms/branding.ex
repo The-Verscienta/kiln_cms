@@ -99,11 +99,37 @@ defmodule KilnCMS.Branding do
     # One read-and-degrade rule for every per-org settings resolver (#1080):
     # a transient failure degrades to the operator defaults for one request
     # rather than for the whole TTL, and "no row" is cached as `build(nil)`.
+    KilnCMS.OrgSettings.resolve(org_id, resolve_opts(org_id))
+  end
+
+  def for_org(_), do: defaults()
+
+  @doc """
+  The resolved tokens for one org, or `:error` when its row could not be read
+  (#2577).
+
+  `for_org/1` answers a failed read with the operator defaults, which is right
+  for a page that must render. It is wrong for a response a shared cache keeps:
+  `GET /api/site` would hand every visitor of a branded site the stock name for
+  a minute. This reads the same cache entry and never answers the degraded
+  value.
+
+  Takes the organization itself, never `nil` or a bare id: there is no
+  "default org" answer here to fall back to.
+  """
+  @spec fetch_for_org(Accounts.Organization.t()) :: {:ok, t()} | :error
+  def fetch_for_org(%Accounts.Organization{id: org_id}) when is_binary(org_id) do
+    KilnCMS.OrgSettings.fetch(org_id, resolve_opts(org_id))
+  end
+
+  # Shared by `for_org/1` and `fetch_for_org/1`, so the two read one cache
+  # entry built one way.
+  defp resolve_opts(org_id) do
     # The actor is taken here, in the caller, because a cache miss runs
     # `read` on a Cachex courier process (see `KilnCMS.OrgSettings`).
     actor = KilnCMS.OrgSettings.system(:branding)
 
-    KilnCMS.OrgSettings.resolve(org_id,
+    [
       cache_key: KilnCMS.Cache.branding_key(org_id),
       ttl: @ttl,
       # A system read (#1659): the layout renders for anonymous visitors with
@@ -119,10 +145,8 @@ defmodule KilnCMS.Branding do
       build: &build/1,
       fallback: &defaults/0,
       label: "branding"
-    )
+    ]
   end
-
-  def for_org(_), do: defaults()
 
   @doc """
   The site's app icon as `{url, edge}`, or `nil` when there isn't a usable one

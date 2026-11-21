@@ -12,8 +12,25 @@ defmodule Kiln.Plugins.Health do
       one request round per minute) and returns a `Kiln.Plugins.Health.Report`;
     * `cached/1` **never touches the network** — it answers from the cache,
       or `nil` on a miss — so a page that must not wait (Security posture)
-      reads it and calls `warm/0` on a miss;
-    * `warm/0` starts one background `check/1`, at most one in flight per node.
+      reads it and calls `warm/1` on a miss;
+    * `warm/1` starts one background check, for a caller that must not wait.
+
+  ## One round per node
+
+  Every round of requests runs in one supervised process per node, the
+  warmer (#2565). `check/1` on a cold cache starts it, or joins the one
+  already running, and answers from the cache once it has finished; `warm/1`
+  starts it without waiting. So System, Security posture and a second
+  admin's page loading together make one round between them, and a page
+  that goes away mid-check doesn't take the round with it. A forced check
+  while a round is in flight joins that round rather than asking again.
+
+  A round has one time limit, 75 seconds in all (`:fetch_budget_ms`): a
+  package not yet asked when it runs out is not asked, one still being asked
+  is cut off, and either reads as unknown. Whatever came back is cached all
+  the same — 15 minutes, since something failed — so the next page load
+  doesn't ask again. A caller waits up to 90 seconds for the round, longer
+  than its limit; one that still has no answer reads every plugin as unknown.
 
   Only the fetched data is cached, never the verdict: every read re-evaluates
   it against the current time, so staleness does not freeze at fetch time.
@@ -38,6 +55,9 @@ defmodule Kiln.Plugins.Health do
 
   Both go through `KilnCMS.SafeFetch` with a bare `KilnCMS` user-agent.
 
+  The monitoring endpoint `GET /api/security/plugin-health` (#2571) reads
+  `cached/1` only: it never asks, and never starts a check.
+
   ## Configuration
 
   `config :kiln_cms, Kiln.Plugins.Health` — see `config/runtime/updates.exs`:
@@ -46,7 +66,8 @@ defmodule Kiln.Plugins.Health do
       `KILN_UPDATE_CHECK=false` turns this off too; `KILN_PLUGIN_HEALTH_CHECK`
       overrides it either way;
     * `:stale_after_months` — default 24 (`KILN_PLUGIN_STALE_MONTHS`);
-    * `:hex_api_url`, `:req_options` — for tests and mirrors.
+    * `:hex_api_url`, `:req_options` — for tests and mirrors;
+    * `:fetch_budget_ms` — a round's time limit, default 75 000; a test seam.
 
   The notices feed's own settings (`KILN_SECURITY_NOTICES_URL`) are
   `Kiln.SecurityNotices`'s; see `Kiln.SecurityNotices.url/0`.
@@ -73,14 +94,26 @@ defmodule Kiln.Plugins.Health do
   @default_hex_api_url "https://hex.pm/api"
   @default_stale_after_months 24
 
-  # Per-package budget: two requests of up to 10 s each, plus slack.
+  # Per-package limit: two requests of up to 10 s each, plus slack.
   @hex_timeout_ms 25_000
   @hex_concurrency 4
-  # `Kiln.SecurityNotices` bounds its own request at 60 s, but a caller that
-  # waited on another's request (one in flight per node) can return up to
-  # ~8 s after it, `:global`'s back-off between lock attempts; this leaves
-  # room for both.
-  @notices_timeout_ms 75_000
+
+  # The whole round's limit, Hex and the notices feed together, counted from
+  # its start. The order matters, and the code below keeps it:
+  #
+  #   * the notices request is given `@notices_fetch_timeout_ms` at most, and
+  #     less when the limit is short, keeping `@lock_backoff_ms` spare: a
+  #     caller that waited on another's notices request (one in flight per
+  #     node, `Kiln.SecurityNotices`) can return up to ~8 s after it,
+  #     `:global`'s back-off between lock attempts. So the feed stores its
+  #     own answer, a timeout included, before this side stops waiting;
+  #   * a caller of `check/1` waits `@await_ms` for the round, longer than
+  #     the limit, so a round that ran to its limit has stored what it got
+  #     before anyone gives up on it.
+  @fetch_budget_ms 75_000
+  @notices_fetch_timeout_ms 60_000
+  @lock_backoff_ms 8_000
+  @await_ms 90_000
 
   @warmer Module.concat(__MODULE__, Warmer)
 
@@ -92,21 +125,35 @@ defmodule Kiln.Plugins.Health do
   SDK check still run) or when no plugin comes from Hex, git or a path
   (`state: :nothing_to_check`).
 
-  Options: `force: true` bypasses the cache, at most once a minute (a forced
-  call inside the floor is served from the cache like any other); `:installed`
-  and `:now` are test seams.
+  A fetch runs in the node's one warmer (see "One round per node" above):
+  this joins the round in flight, or starts one, and answers from what it
+  cached. A round that left nothing cached (it crashed, or outran the
+  caller's 90-second wait) answers every plugin unknown, never OK.
+
+  Options:
+
+    * `force: true` bypasses the cache, at most once a minute (a forced call
+      inside the floor is served from the cache like any other). While a
+      round is in flight it joins that round instead of starting another;
+    * `inline: true` runs the round in the calling process instead, for a
+      caller with no application running (`mix kiln.plugins.list --health`,
+      which has no `KilnCMS.TaskSupervisor` to start a warmer under). It
+      neither joins nor blocks a warmer;
+    * `:installed` and `:now` are test seams.
   """
   @spec check(keyword()) :: Report.t()
   def check(opts \\ []) do
     installed = Keyword.get_lazy(opts, :installed, &Installed.all/0)
     now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
+    force? = opts[:force] == true
 
     cond do
       not enabled?() -> local_report(installed, now, :disabled)
       not dependency_plugins?(installed) -> local_report(installed, now, :nothing_to_check)
-      opts[:force] -> forced_check(installed, now)
-      entry = cached_entry(installed) -> report(installed, entry, cached_notices(), now)
-      true -> fetch_and_report(installed, now, false)
+      opts[:inline] -> run_check(installed, now, force?)
+      force? -> shared_check(installed, now, true)
+      report = cached_report(installed, now) -> report
+      true -> shared_check(installed, now, false)
     end
   end
 
@@ -124,39 +171,90 @@ defmodule Kiln.Plugins.Health do
     cond do
       not enabled?() -> local_report(installed, now, :disabled)
       not dependency_plugins?(installed) -> local_report(installed, now, :nothing_to_check)
-      entry = cached_entry(installed) -> report(installed, entry, cached_notices(), now)
-      true -> nil
+      true -> cached_report(installed, now)
     end
   end
 
   @doc """
-  Fill the cache in the background: one non-forced `check/1` in a supervised
-  task, for a caller that must not wait. Answers `:started`, `:in_flight`,
-  `:cached`, `:disabled` or `:nothing_to_check`.
+  Fill the cache in the background: start the node's warmer for one
+  non-forced round, for a caller that must not wait. Answers `:started`,
+  `:in_flight`, `:cached`, `:disabled` or `:nothing_to_check`. Takes the
+  same `:installed` seam as `check/1`.
   """
-  @spec warm() :: :started | :in_flight | :cached | :disabled | :nothing_to_check
-  def warm do
-    installed = Installed.all()
+  @spec warm(keyword()) :: :started | :in_flight | :cached | :disabled | :nothing_to_check
+  def warm(opts \\ []) do
+    installed = Keyword.get_lazy(opts, :installed, &Installed.all/0)
 
     cond do
       not enabled?() -> :disabled
       not dependency_plugins?(installed) -> :nothing_to_check
       cached_entry(installed) -> :cached
       Process.whereis(@warmer) -> :in_flight
-      true -> start_warmer()
+      true -> warm_result(start_warmer(installed, false))
     end
   end
 
-  defp start_warmer do
-    case Task.Supervisor.start_child(KilnCMS.TaskSupervisor, &warm_once/0) do
-      {:ok, _pid} -> :started
-      {:error, _full} -> :in_flight
+  defp warm_result({:started, _pid}), do: :started
+  defp warm_result(:error), do: :in_flight
+
+  # Join the round in flight, or start one, and wait for it to finish: the
+  # warmer is only monitored, never linked, so a caller that goes away (a
+  # closed page) leaves the round running, and a round that crashes reaches
+  # the caller as a `:DOWN`, not an exit.
+  defp shared_check(installed, now, force?) do
+    _done_or_timeout = await(warmer(installed, force?), @await_ms)
+    cached_report(installed, now) || unknown_report(installed, now)
+  end
+
+  # The warmer in flight, or a new one; `nil` when none could be started
+  # and none is running (the supervisor is full), which answers unknown.
+  defp warmer(installed, force?) do
+    with nil <- Process.whereis(@warmer),
+         {:started, pid} <- start_warmer(installed, force?) do
+      pid
+    else
+      pid when is_pid(pid) -> pid
+      :error -> Process.whereis(@warmer)
+    end
+  end
+
+  defp start_warmer(installed, force?) do
+    case Task.Supervisor.start_child(KilnCMS.TaskSupervisor, fn ->
+           warm_once(installed, force?)
+         end) do
+      {:ok, pid} -> {:started, pid}
+      {:error, _full} -> :error
+    end
+  end
+
+  defp await(nil, _timeout), do: :ok
+
+  defp await(pid, timeout) do
+    ref = Process.monitor(pid)
+
+    receive do
+      {:DOWN, ^ref, :process, _pid, _reason} -> :ok
+    after
+      timeout ->
+        Process.demonitor(ref, [:flush])
+        :timeout
     end
   end
 
   # The registered name is the one-in-flight guard, as in `Kiln.Updates`.
-  defp warm_once do
-    if register_warmer(), do: check()
+  # Two callers can each start a warmer before either registers; the one
+  # that loses waits on the winner, so its own waiters wait for the round
+  # too, and nobody asks twice. A non-forced round re-reads the cache after
+  # registering: a round that finished between a caller's miss and this
+  # point has already answered. A forced one asks again, floored at once a
+  # minute.
+  defp warm_once(installed, force?) do
+    if register_warmer() do
+      _report = run_check(installed, DateTime.utc_now(), force?)
+      :ok
+    else
+      await(Process.whereis(@warmer), @await_ms)
+    end
   end
 
   defp register_warmer do
@@ -240,15 +338,41 @@ defmodule Kiln.Plugins.Health do
     }
   end
 
+  # The round itself, in the warmer (or the caller, with `inline: true`).
+  # Never `check/1`: that would start another warmer.
+  defp run_check(installed, now, true), do: forced_check(installed, now)
+
+  defp run_check(installed, now, false),
+    do: cached_report(installed, now) || fetch_and_report(installed, now, false)
+
+  defp cached_report(installed, now) do
+    case cached_entry(installed) do
+      nil -> nil
+      entry -> report(installed, entry, cached_notices(), now)
+    end
+  end
+
+  # What a caller answers when the round it waited on left nothing cached:
+  # every remote source as not answered, so each plugin reads unknown, never
+  # OK. Never stored: the next caller asks again.
+  defp unknown_report(installed, now) do
+    hex = Map.new(hex_targets(installed), &{&1.package, {:error, :timeout}})
+    fetched = %{hex: hex, notices: {:error, :timeout}}
+
+    %Report{
+      plugins: Evaluate.evaluate(installed, fetched, eval_opts(now)),
+      checked_at: nil,
+      state: :partial,
+      notices: :unknown
+    }
+  end
+
   defp forced_check(installed, now) do
     mono = System.monotonic_time(:millisecond)
     last = :persistent_term.get(@force_key, nil)
 
     if last && mono - last < @min_force_interval_ms do
-      case cached_entry(installed) do
-        nil -> fetch_and_report(installed, now, false)
-        entry -> report(installed, entry, cached_notices(), now)
-      end
+      run_check(installed, now, false)
     else
       :persistent_term.put(@force_key, mono)
       fetch_and_report(installed, now, true)
@@ -257,6 +381,8 @@ defmodule Kiln.Plugins.Health do
 
   # The notices this read uses are the ones just fetched, so a fetch that
   # timed out on this side reads `{:error, :timeout}` for this read only.
+  # Hex's answers are stored whatever came back, a round cut short by its
+  # time limit included: nobody kills the warmer, so this always runs.
   defp fetch_and_report(installed, now, force?) do
     %{hex: hex, notices: notices} = fetch(installed, force?)
     entry = store(hex)
@@ -331,10 +457,10 @@ defmodule Kiln.Plugins.Health do
     |> Enum.uniq_by(& &1.package)
   end
 
-  # The fetch tasks are linked to the caller (a LiveView, the warmer, or a Mix
-  # task that has no supervisor to lean on), so each body turns its own crash
-  # into an error: a crash is a source that did not answer — unknown — and must
-  # never take the caller down with it.
+  # The fetch tasks are linked to the caller (the warmer, or a Mix task that
+  # has no supervisor to lean on), so each body turns its own crash into an
+  # error: a crash is a source that did not answer — unknown — and must never
+  # take the caller down with it.
   defp guarded(fun) do
     fun.()
   rescue
@@ -343,28 +469,56 @@ defmodule Kiln.Plugins.Health do
     kind, _reason -> {:error, {:crashed, kind}}
   end
 
+  # One deadline for the round, Hex and the notices feed alike (see
+  # `@fetch_budget_ms`).
   defp fetch(installed, force?) do
-    notices = Task.async(fn -> guarded(fn -> SecurityNotices.fetch(force: force?) end) end)
-    hex = fetch_hex(hex_targets(installed))
+    budget = fetch_budget_ms()
+    deadline = System.monotonic_time(:millisecond) + budget
+    notices_opts = [force: force?, timeout: notices_timeout(budget)]
+
+    notices = Task.async(fn -> guarded(fn -> SecurityNotices.fetch(notices_opts) end) end)
+    hex = fetch_hex(hex_targets(installed), deadline)
 
     notices =
-      case Task.yield(notices, @notices_timeout_ms) || Task.shutdown(notices, :brutal_kill) do
+      case Task.yield(notices, remaining(deadline)) || Task.shutdown(notices, :brutal_kill) do
         {:ok, result} -> result
-        _timeout -> {:error, :timeout}
+        _timeout -> notices_cut_off()
       end
 
     %{hex: hex, notices: notices}
   end
 
-  defp fetch_hex(targets) do
+  # The feed's task was cut off at the round's deadline. If it never got to
+  # store (it was still waiting on `SecurityNotices`' lock, behind a holder
+  # that died or ran long), the feed's cache is empty, and `cached_entry/1`
+  # would then refuse the Hex half this round just stored: the next load
+  # would ask hex.pm again. Store the timeout for the feed, so its 15-minute
+  # failure lifetime applies as if its own request had timed out.
+  defp notices_cut_off do
+    if SecurityNotices.cached() == nil, do: SecurityNotices.put_cache({:error, :timeout})
+    {:error, :timeout}
+  end
+
+  # The feed's own limit, shortened to leave the lock back-off spare inside
+  # the round's; half the round when that is too short to leave it (a test's
+  # limit).
+  defp notices_timeout(budget) do
+    min(@notices_fetch_timeout_ms, max(budget - @lock_backoff_ms, div(budget, 2)))
+  end
+
+  defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
+
+  # Every target stays a key, answered or not, so the stored fetch still
+  # covers every installed package. A package whose turn comes after the
+  # deadline is not asked at all: fewer names reach hex.pm, and it reads
+  # unknown like one that timed out.
+  defp fetch_hex(targets, deadline) do
     opts = [base_url: hex_api_url(), req_options: req_options()]
 
     targets
-    |> Task.async_stream(
-      fn target -> guarded(fn -> Hex.fetch(target.package, target.version, opts) end) end,
+    |> Task.async_stream(&fetch_package(&1, opts, deadline),
       max_concurrency: @hex_concurrency,
-      timeout: @hex_timeout_ms,
-      on_timeout: :kill_task,
+      timeout: :infinity,
       ordered: true
     )
     |> Enum.zip(targets)
@@ -372,6 +526,31 @@ defmodule Kiln.Plugins.Health do
       {{:ok, result}, target} -> {target.package, result}
       {{:exit, _reason}, target} -> {target.package, {:error, :timeout}}
     end)
+  end
+
+  defp fetch_package(target, opts, deadline) do
+    case remaining(deadline) do
+      0 -> {:error, :timeout}
+      left -> bounded(fn -> Hex.fetch(target.package, target.version, opts) end, left)
+    end
+  end
+
+  # `fun` in a task, cut off at the per-package limit or `left`, whichever
+  # comes first.
+  defp bounded(fun, left) do
+    task = Task.async(fn -> guarded(fun) end)
+
+    case Task.yield(task, min(@hex_timeout_ms, left)) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
+      _timeout -> {:error, :timeout}
+    end
+  end
+
+  defp fetch_budget_ms do
+    case Keyword.get(config(), :fetch_budget_ms) do
+      ms when is_integer(ms) and ms >= 0 -> ms
+      _unset -> @fetch_budget_ms
+    end
   end
 
   defp hex_api_url, do: Keyword.get(config(), :hex_api_url, @default_hex_api_url)

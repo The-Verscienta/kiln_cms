@@ -205,6 +205,13 @@ defmodule KilnCMSWeb.SecurityLog do
   def type_label(:backup_destination_adoptions_changed),
     do: gettext("Backup destination's adopted backup directories changed")
 
+
+  def type_label(:backup_destination_host_key_trusted),
+    do: gettext("Backup server host key trusted")
+
+  def type_label(:backup_destination_host_key_mismatch),
+    do: gettext("Backup server host key changed")
+
   def type_label(:platform_alerts_changed), do: gettext("Platform security alerts changed")
   def type_label(:api_key_reuse_detected), do: gettext("Rotated API key used again")
   def type_label(:ip_block_refused), do: gettext("Blocked address refused")

@@ -60,7 +60,12 @@ defmodule KilnCMSWeb.FieldConditionsAdminTest do
     admin = sign_in(:admin)
 
     kind =
-      field!(admin, %{name: "kind", label: "Kind", field_type: :select, options: ["a", "other"]})
+      field!(admin, %{
+        name: "fca_kind",
+        label: "Kind",
+        field_type: :select,
+        options: ["a", "other"]
+      })
 
     %{conn: conn, admin: admin, kind: kind, lv: open(conn, admin)}
   end
@@ -82,7 +87,7 @@ defmodule KilnCMSWeb.FieldConditionsAdminTest do
         label: "Other detail",
         field_type: "string",
         conditions: %{
-          visible_when: %{rows: rule_row(0, "kind", "eq", "other")}
+          visible_when: %{rows: rule_row(0, "fca_kind", "eq", "other")}
         }
       }
     )
@@ -94,7 +99,7 @@ defmodule KilnCMSWeb.FieldConditionsAdminTest do
         &(&1.name == "other_detail")
       )
 
-    assert definition.visible_when == %{"field" => "kind", "op" => "eq", "value" => "other"}
+    assert definition.visible_when == %{"field" => "fca_kind", "op" => "eq", "value" => "other"}
     assert definition.required_when == nil
   end
 
@@ -109,7 +114,7 @@ defmodule KilnCMSWeb.FieldConditionsAdminTest do
     |> form("#new-field-form",
       field_definition: %{
         scopes: ["post"],
-        conditions: %{required_when: %{rows: rule_row(1, "kind", "in", "")}}
+        conditions: %{required_when: %{rows: rule_row(1, "fca_kind", "in", "")}}
       }
     )
     |> render_change()
@@ -124,7 +129,11 @@ defmodule KilnCMSWeb.FieldConditionsAdminTest do
         conditions: %{
           required_when: %{
             mode: "any",
-            rows: Map.merge(rule_row(0, "kind", "eq", "other"), rule_row(1, "kind", "in", "a, b"))
+            rows:
+              Map.merge(
+                rule_row(0, "fca_kind", "eq", "other"),
+                rule_row(1, "fca_kind", "in", "a, b")
+              )
           }
         }
       }
@@ -136,8 +145,8 @@ defmodule KilnCMSWeb.FieldConditionsAdminTest do
 
     assert definition.required_when == %{
              "any" => [
-               %{"field" => "kind", "op" => "eq", "value" => "other"},
-               %{"field" => "kind", "op" => "in", "value" => ["a", "b"]}
+               %{"field" => "fca_kind", "op" => "eq", "value" => "other"},
+               %{"field" => "fca_kind", "op" => "in", "value" => ["a", "b"]}
              ]
            }
   end
@@ -154,7 +163,7 @@ defmodule KilnCMSWeb.FieldConditionsAdminTest do
         label: "Broken",
         field_type: "string",
         # "is one of" with nothing to be one of.
-        conditions: %{visible_when: %{rows: rule_row(0, "kind", "in", "")}}
+        conditions: %{visible_when: %{rows: rule_row(0, "fca_kind", "in", "")}}
       }
     )
     |> render_submit()
@@ -171,10 +180,10 @@ defmodule KilnCMSWeb.FieldConditionsAdminTest do
   test "an existing rule is shown, edited and removed", ctx do
     note =
       field!(ctx.admin, %{
-        name: "note",
+        name: "fca_note",
         label: "Note",
         field_type: :string,
-        required_when: %{"field" => "kind", "op" => "eq", "value" => "other"}
+        required_when: %{"field" => "fca_kind", "op" => "eq", "value" => "other"}
       })
 
     lv = reopen(ctx)
@@ -196,9 +205,9 @@ defmodule KilnCMSWeb.FieldConditionsAdminTest do
 
   test "a rule can't read the field itself or a private one", ctx do
     secret =
-      field!(ctx.admin, %{name: "secret", label: "Secret", field_type: :string, private: true})
+      field!(ctx.admin, %{name: "fca_secret", label: "Secret", field_type: :string, private: true})
 
-    note = field!(ctx.admin, %{name: "note", label: "Note", field_type: :string})
+    note = field!(ctx.admin, %{name: "fca_note", label: "Note", field_type: :string})
 
     lv = reopen(ctx)
     lv |> element("#field-#{note.id} button[phx-click=edit]") |> render_click()
@@ -207,13 +216,18 @@ defmodule KilnCMSWeb.FieldConditionsAdminTest do
     html = lv |> element("#edit-field-conditions-#{note.id}") |> render()
     assert html =~ "Kind"
     refute html =~ "Secret"
-    refute html =~ ~s(value="note")
+    refute html =~ ~s(value="fca_note")
     refute is_nil(secret)
   end
 
   test "a group sub-field's conditions read its siblings", ctx do
     group =
-      field!(ctx.admin, %{name: "dosages", label: "Dosages", field_type: :group, multiple: true})
+      field!(ctx.admin, %{
+        name: "fca_dosages",
+        label: "Dosages",
+        field_type: :group,
+        multiple: true
+      })
 
     sub = fn attrs ->
       CMS.create_field_definition!(Map.put(attrs, :group_of_id, group.id), actor: ctx.admin)

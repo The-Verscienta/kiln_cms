@@ -169,9 +169,11 @@ UI" workflow, scoped to fields.
   repeats one already in the list once both are tidied (`#FFF` and `#ffffff`
   are one colour). The full rules, the editor and the filters are in
   [Make a field hold a list of values](#make-a-field-hold-a-list-of-values).
-  Record-level fields only. `:boolean`, `:text`, `:json`, `:user`,
-  `:computed`, `:recurrence`, the composite types and plugin types cannot be
-  lists; for a list of composite values use a repeating `:group`.
+  Record-level fields only. A plugin field type can be a list too when it
+  opts in ([Let a plugin field type take a list](#let-a-plugin-field-type-take-a-list)).
+  `:boolean`, `:text`, `:json`, `:user`, `:computed`, `:recurrence`, the
+  composite types and plugin types that don't opt in cannot be lists; for a
+  list of composite values use a repeating `:group`.
 - **Rich or plain text**: a `:text` field's `format` is `:rich` by default —
   the editor shows TipTap with a short toolbar (paragraphs, bold, italic,
   links, bulleted and numbered lists), and the HTML is sanitized on write to
@@ -679,8 +681,10 @@ administrative_area and postal_code* (an unknown key).
 
 A number, date, date-time, time, link, email, phone, colour or slug field can
 hold a list instead of one value: the dates an event runs on, the sizes a shoe
-comes in. You need the admin role to set it up; any editor who may edit the
-record fills it in.
+comes in. So can a field of a plugin's type when the plugin says the type
+takes lists ([Let a plugin field type take a list](#let-a-plugin-field-type-take-a-list)).
+You need the admin role to set it up; any editor who may edit the record
+fills it in.
 
 1. Open `/editor/fields`. Under **Add a field**, keep **This field holds** on
    **A value**, tick the content types under **Content types**, and fill in
@@ -699,6 +703,10 @@ record fills it in.
      Enter or click **Add** beside the box. Picking a date alone adds nothing,
      so a half-picked date is never added. A colour is typed as a hex value
      (`#ff8800`).
+   - For a plugin's type, each item is the type's own input (a number box
+     with its bounds, say). It adds like a number, by Enter with one item
+     per pasted line, unless the input is a date, time, color, month or
+     week picker, which adds like a date.
 
    Each item appears as its own input, with a count above the list. Edit an
    item in place, remove it with ×, or drag it by its handle to reorder. At
@@ -729,7 +737,8 @@ How a list behaves:
   string.
 - **Repeats.** An integer or float list keeps repeats (`[3, 3, 7]`): a
   quantity may repeat on purpose. Every other list drops an item equal to one
-  before it once both are tidied, so `#FFF` after `#ffffff` is dropped.
+  before it once both are tidied, so `#FFF` after `#ffffff` is dropped. A
+  plugin type's list keeps repeats unless the type says otherwise.
 - **Shapes a write may send.** A JSON array; a bare value (stored as a
   one-item list); a string item with line breaks (one item per line). Blank
   items drop out, and an empty list clears the field. An object or boolean
@@ -779,9 +788,12 @@ Reading and filtering it:
 - **GraphQL** serves a `ListValue` of `IntValue`, `DateValue`, … items, and
   `customWhere` takes the item's kind (`int: {eq: 10}`); see
   [headless-graphql-api.md](headless-graphql-api.md#typed-filters-customwhere).
+  A plugin type's items take the kind its `graphql_kind/1` names; with none,
+  they are `JsonValue`s and only `customFilter` filters the list.
 - **The schema export** describes it as an array of the single field's
-  schema, with `uniqueItems: true` except on integer and float lists, and
-  `x-kiln-min-items` / `x-kiln-max-items` when set:
+  schema, with `uniqueItems: true` except on integer and float lists and on
+  a plugin type's list that keeps repeats, and `x-kiln-min-items` /
+  `x-kiln-max-items` when set:
 
   ```json
   "event_dates": {
@@ -799,6 +811,7 @@ What can go wrong when saving (the field's label and name come first, as
 | Message | Meaning |
 |---|---|
 | `item 2 must be a date (YYYY-MM-DD)` | The second item, counting from 1, is not a value of the field's type. The rest of the message is the single field's own. |
+| `item 2 must be one value: the field type returned …` | A plugin type's `cast/2` turned the second item into something other than one string or number. The plugin's bug; nothing is stored until it is fixed. |
 | `must be a list of values (got …)` | An item is an object, a boolean or another list. |
 | `holds a JSON-encoded list — send the items as a list instead` | A string such as `"[1, 2]"` was sent; send `[1, 2]`. |
 | `needs at least 2 items (has 1)` / `can have at most 10 items (has 11)` | Outside **Minimum** / **Maximum**. |
@@ -2499,6 +2512,79 @@ passes `context: KilnCMS.CMS.FieldDefinition.all_types_context()`, and
 `KilnCMS.CMS.FieldDefinition.unknown_type?/1` tells them apart. Relationship
 loads (`link_fields`, `group_fields`) stay filtered either way.
 
+### Narrow a list field whose type stopped taking lists
+
+A list field of a plugin's type ([Let a plugin field type take a list](#let-a-plugin-field-type-take-a-list))
+can outlive the type's support for lists: a new version of the plugin may
+drop `multiple?/0`, or answer `false` from it. Kiln calls such a field a
+**held list** (#2680). Kiln knows the type, but not how to check a list of it, so
+it keeps every stored list as it is and stops anything from changing it:
+
+- delivery, the JSON:API and GraphQL serve the stored list unchanged
+  (GraphQL as a `ListValue`);
+- the content editor shows the items as text under the field's label, with
+  the note *This field's type no longer takes a list, so the list is kept as
+  it is and can't be edited here. An admin can change the field in Fields.*
+  Saving the record keeps the list;
+- a content write that leaves the field out, or sends back exactly the list
+  stored, passes. Any other value is refused, including an empty list,
+  `null` and a reordered list. A create that names the field is refused too;
+- a restore, publishing a working copy and a duplicate carry the list. A
+  content import drops it, with the same warning as for any field this site
+  doesn't define;
+- **Required** is not asked of it, and a searchable one stays in the search
+  text;
+- filtering or sorting on it is a `400`, on JSON:API, GraphQL and the MCP
+  read tools alike;
+- the schema export describes it as a read-only array of unconstrained items:
+  `{"type": ["array", "null"], "items": {}, "readOnly": true}`;
+- reordering fields, renaming a field whose condition reads it, and a field
+  sync file that only changes its label all leave it a list.
+
+You have three ways out. Install a plugin version whose type takes lists
+again, and the field works as a list once more with its values intact. Or
+delete the field, which deletes its values. Or make it a single-value field,
+which keeps the first item of each record's list. You need the admin role
+for the last two. To make it a single-value field:
+
+1. Open **Fields** (`/editor/fields`). The field's row carries a
+   **list (held)** badge. Hovering it reads *Its type no longer takes a list:
+   the stored lists are kept, read-only. Edit the field to save it as a single
+   value.*
+2. If you want to keep the other items, back up the database first. The
+   narrowing can't be undone.
+3. Click **Edit** on the field. The form shows the warning *This
+   field's type no longer takes a list. Saving keeps only the first item of
+   each list already filled in; the other items are removed from the
+   content.*
+4. Click **Save**. You see *Saved.*, and the **list (held)** badge is gone.
+   Every record now holds the first item of its list as stored, and a record
+   whose list was empty holds no value.
+
+The same from code is an update of the definition with the
+`narrow_held_list?` argument; without it, an update keeps the field a list
+whatever `multiple` it sends:
+
+```elixir
+field = KilnCMS.CMS.get_field_definition!(id, actor: admin)
+KilnCMS.CMS.FieldDefinition.held_list?(field)
+#=> true
+
+{:ok, field} =
+  KilnCMS.CMS.update_field_definition(field, %{narrow_held_list?: true}, actor: admin)
+
+field.multiple
+#=> false
+```
+
+**What can go wrong**
+
+| You see | Meaning |
+|---|---|
+| `can't be changed: its field type (rating) no longer takes a list of values. The stored list is kept. An admin can save the field as a single value (keeping each record's first item) or delete it` | A content write (JSON:API, GraphQL, MCP, a code interface call) sent the field with a value other than the stored list. Leave the key out, or send back exactly the list you read. |
+| `custom field "scores" holds lists its field type (rating) no longer takes; it can't be filtered or sorted until an admin saves it as a single value or the plugin takes lists again` | A `custom_filter`, `custom_where`, `customWhere` or `custom_sort` named the field. Every operator is refused, `null` included. |
+| `it stops being a list, so each record keeps only its first item` | A field sync import (`mix kiln.fields.import` or the field sync screen) was given a file that makes the field single-valued. The change is blocked as data loss: pass `--allow-data-loss`, or tick *Allow changes that drop values records already hold*, to narrow it as the fields admin does. |
+
 ## 2. Relations that carry data
 
 `KilnCMS.CMS.ContentLink` links any two content records by id with a named
@@ -2780,7 +2866,11 @@ must filter with the stored spelling. The built-in format types (`email`,
 `not_eq` and `in` operands also match as a save would store them
 ([json-api.md](json-api.md) → "Custom fields"). A value that is an object or
 a list reaches your `cast/2` unchanged, as before: refusing it there, with
-`{:error, message}`, is your type's decision.
+`{:error, message}`, is your type's decision. Two exceptions, for a type that
+takes lists ([Let a plugin field type take a list](#let-a-plugin-field-type-take-a-list)):
+on a list field each operand **is** passed through `cast/2`, as each stored
+item was; and a single field of such a type keeps the first item of a list
+sent to it, as a core scalar does, so your `cast/2` sees that item.
 
 **Choosing a field type's GraphQL kind.** The GraphQL API serves every custom
 field through typed readers ([headless-graphql-api.md](headless-graphql-api.md#read-custom-fields-typed-by-kind)).
@@ -2874,6 +2964,141 @@ domains registered, no block/field-type/queue collisions, well-formed paths.
 domain, a block and a field type declared on the contract. A real deployment's
 plugin lives in its own downstream repo and is overlaid onto `projects/` at
 image-build time (see projects/README.md for the overlay pattern).
+
+### Let a plugin field type take a list
+
+A core number or date field can hold a list
+([Make a field hold a list of values](#make-a-field-hold-a-list-of-values)).
+From `kiln_plugin` 1.6 a plugin's `Kiln.FieldType` can opt into the same
+(#2680): its fields get the **A list** choice in the fields admin, and a list
+of them is written, edited, filtered and exported like a core list. This
+walk-through starts from a plugin with a working single-value field type and
+ends with a list field of it in the editor. Writing the type is a
+developer's job; making a field a list needs the admin role.
+
+1. **Opt in, in the type's module.** Define `multiple?/0` to return `true`.
+   Define `unique_items?/0` to return `true` as well if a repeated item means
+   nothing (tags, codes); leave it out to keep repeats (scores, quantities).
+
+   ```elixir
+   defmodule Ratings.FieldTypes.Tag do
+     use Kiln.FieldType
+
+     @impl Kiln.FieldType
+     def multiple?, do: true
+
+     @impl Kiln.FieldType
+     def unique_items?, do: true
+
+     @impl Kiln.FieldType
+     def graphql_kind(_definition), do: :string
+
+     @impl Kiln.FieldType
+     def json_schema(_definition), do: %{"type" => "string", "maxLength" => 40}
+
+     @impl Kiln.FieldType
+     def cast(value, _definition) when is_binary(value) do
+       tag = value |> String.trim() |> String.downcase()
+
+       cond do
+         tag == "" -> {:error, "must not be blank"}
+         String.length(tag) > 40 -> {:error, "must be at most 40 characters"}
+         true -> {:ok, tag}
+       end
+     end
+
+     def cast(_value, _definition), do: {:error, "must be a tag"}
+   end
+   ```
+
+   Both callbacks are optional and `use Kiln.FieldType` does not define them,
+   so a type without them holds one value, as before.
+2. **Require the SDK that has them.** A plugin installed as a dependency
+   declares `{:kiln_plugin, "~> 1.6"}` in its `mix.exs`.
+3. **Run `mix kiln.plugins.doctor`.** It ends with `N plugin(s) OK: …` when
+   the type can hold a list. It fails on a `multiple?/0` or `unique_items?/0`
+   that answers something other than `true` or `false` or raises, on a type
+   whose `input_parts/1` is not `[]` for some editor input it offers, on a
+   `cast/2` that turns a sample value into anything but one string or number,
+   and on a type the host's own check leaves single-valued. It prints a
+   `note:` line, without failing, for `unique_items?/0` without
+   `multiple?/0`, and for a list type that has an `input_hook/1`.
+4. **Build and deploy Kiln with the plugin.** Kiln reads the two answers when
+   it compiles, not per request, so the type takes lists only in a build
+   made after the change.
+5. **Make a field a list.** In **Fields** (`/editor/fields`), add a field of
+   the type, or edit one. A **Holds** choice appears with **One value** and
+   **A list**; choose **A list**, fill in the item bounds if you want them,
+   and save. The field's row carries a **list** badge. A single-value field
+   made a list wraps each stored value in a one-item list.
+6. **Fill it in.** In the content editor each item is the type's own input,
+   with its `input_type/0` and `input_attrs/1`. Type a value and press Enter;
+   pasting several lines adds one item per line. Save, and the record stores
+   the items in screen order.
+
+A write of the list, and what it stores:
+
+```elixir
+CMS.update_post!(post, %{custom_fields: %{"tags" => ["Red", "red ", "Blue"]}},
+  actor: editor
+).custom_fields["tags"]
+#=> ["red", "blue"]
+```
+
+The rules a list of a plugin type follows:
+
+- **`cast/2` runs once per item**, with a definition whose `multiple` is
+  `false`, so it casts one value exactly as for a single field. Blank items
+  drop out first, and on every write a string item is split on its line
+  breaks, as for core lists: `["a\nb"]` stores two items. A type whose single
+  value may contain a line break should not take lists.
+- **An item must cast to one string or one number.** Any other result (a
+  map, a list, a boolean) refuses the whole write, and Kiln logs a warning
+  naming your `cast/2` once per type.
+- **The type must be a scalar.** `input_parts/1` must be `[]`; a composite
+  value is a repeating `:group`'s job. A type whose `input_parts/1` returns
+  parts, or raises on the bare definition Kiln checks it with, stays
+  single-valued.
+- **Repeats** are kept unless `unique_items?/0` is `true`; then an item equal
+  to one before it after `cast/2` is dropped, and the schema export marks the
+  array `uniqueItems`.
+- **The schema and the GraphQL kind describe one item.** Kiln wraps
+  `json_schema/1` in an array, taking `null` out of the item, and serves a
+  `ListValue` of the `graphql_kind/1` kind. With no `graphql_kind/1` the
+  items are `JsonValue`s, and GraphQL's `customWhere` refuses the field
+  (`customWhere does not support a list of json values; use customFilter`).
+- **Filtering** takes the list operators (`eq`, `in`, `has`, `has_all`,
+  `has_none`, `count`, `null`), each operand passed through `cast/2`, so
+  `custom_filter[tags]=RED` finds `red`. Comparing items and sorting are
+  refused, as on any list ([Lists of values](json-api.md#lists-of-values)).
+- **The editor** doesn't attach `input_hook/1` to a list field's item
+  inputs, and doesn't offer the type's `widgets/1`: the list input is
+  Kiln's own. A date, time, color, month or week `input_type/0` adds an item
+  by Enter or **Add** and doesn't split pasted lines.
+- **The content list** doesn't offer a plugin type's field under
+  **Columns**, list or not.
+- **A single field of the type** sent a list keeps its first non-blank item,
+  as a core scalar does, and is refused an empty list (`must be a single
+  value, not an object or a list`).
+
+**Turning lists off again.** A later version of the plugin that drops
+`multiple?/0` loses no data. Existing list fields of the type become
+[held lists](#narrow-a-list-field-whose-type-stopped-taking-lists): their
+stored lists are kept and served, but can't be changed until an admin saves
+the field as a single value or deletes it. Plugin fields of a type that
+never took lists stay single-valued as before: a field sync file or a code
+update that asks for `multiple: true` on one is cleared.
+
+**What can go wrong**
+
+| You see | Meaning |
+|---|---|
+| No **Holds** choice for the type in the fields admin | The build doesn't have the change, or the type isn't list-capable. Run `mix kiln.plugins.doctor`, then rebuild. A link field or a group sub-field never takes a list. |
+| `item 2 must be one value: the field type returned %{…}` | Your `cast/2` returned a map or a list for the second item. Return one string or number per item. |
+| `item 2 must be at most 40 characters` | Your `cast/2` refused the second item, counting from 1; the rest of the message is yours. |
+| `must be a list of values (got …)` | An item sent was an object, a boolean or a list. |
+| `custom field "tags" (a list) is not sortable` | A `custom_sort` named a list field. |
+| `customWhere does not support a list of json values; use customFilter` | The type has no `graphql_kind/1`. Filter the list with `customFilter`. |
 
 ## 6. Nested layout: columns (#335)
 

@@ -31,8 +31,12 @@ defmodule KilnCMS.Security.InstanceEvent do
   Append-only: a `record` create and reads, plus the `:security` system actor's
   `anonymize_actor` (erasure) and `prune` (retention,
   `KilnCMS.Security.instance_retention_days/0`). No person, a platform admin
-  included, can create, update or destroy an event. No instance event raises a
-  security alert.
+  included, can create, update or destroy an event. Only one instance event
+  raises a security alert: `backup_destination_host_key_mismatch`, an SFTP
+  server presenting a key other than the one trusted, which is no person's
+  act and may be an interception (#2222, ADR 0079). Its alert is the
+  platform kind `backup_host_key_changed`
+  (`KilnCMS.Backups.Destination.Sftp.HostKeyAlert`).
 
   Not an API surface: absent from JSON:API, GraphQL and MCP.
   """
@@ -61,6 +65,14 @@ defmodule KilnCMS.Security.InstanceEvent do
     # A platform admin let retention on a destination delete another backup
     # directory's backups there, or stopped it (`:adopt_directories`).
     :backup_destination_adoptions_changed,
+    # A platform admin trusted an SFTP destination's host key (#2222): its
+    # type and fingerprint, the one it replaced, and whether a scan showed it
+    # or the admin typed the fingerprint they expected.
+    :backup_destination_host_key_trusted,
+    # An SFTP server offered a host key other than the trusted one (#2222).
+    # No actor: the server's act. Written at most once per destination per
+    # hour, and raises the platform alert `backup_host_key_changed`.
+    :backup_destination_host_key_mismatch,
     # A platform admin saved the platform's security alert settings (#2245):
     # which platform alert kinds are off (`KilnCMS.Security.PlatformAlertSettings`).
     :platform_alerts_changed
@@ -83,13 +95,17 @@ defmodule KilnCMS.Security.InstanceEvent do
     backup_destination_tested: ~w(name kind ok node),
     # `adopted` / `removed`: backup-directory ids, comma-joined, or "none".
     backup_destination_adoptions_changed: ~w(name kind adopted removed),
+    backup_destination_host_key_trusted:
+      ~w(name kind algorithm fingerprint previous_fingerprint how),
+    backup_destination_host_key_mismatch: ~w(name kind offered_fingerprint trusted_fingerprint),
     # `disabled_kinds`: the platform kinds off after the save, comma-joined,
     # or "none".
     platform_alerts_changed: ~w(disabled_kinds)
   }
 
-  # Alerts: none of these types raises one today. Instance events could carry
-  # alerts later (`AlertDispatch.first_event_id` has no foreign key).
+  # Alerts: only `backup_destination_host_key_mismatch` raises one, claimed by
+  # `Sftp.HostKeyAlert` in the event's transaction, naming no event (the
+  # alert's delivery reads the site log, not this one).
 
   @doc "Every instance event type."
   @spec types() :: [atom()]

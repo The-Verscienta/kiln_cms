@@ -296,8 +296,10 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
   - Range operators (`gt`, `gte`, `lt`, `lte`) and `ilike`, `contains` and
     `starts_with` take the operand as sent: a time's tidy drops its seconds,
     which would move a range bound, and a pattern is not a value.
-  - A `text` field and a plugin's field type compare the operand as the text
-    sent; numbers, booleans, dates and date-times are cast as above.
+  - A `text` field and a single field of a plugin's type compare the
+    operand as the text sent; numbers, booleans, dates and date-times are
+    cast as above. A list of a plugin's type passes each operand through the
+    type's `cast/2` ([Lists of values](#lists-of-values)).
   - An operand the field could never hold (`custom_filter[email]=foo` on an
     email field) matches nothing. It is not a `400`.
 - **One value per operator, a list only for `in`.** An object operand
@@ -332,7 +334,7 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
   test membership: `eq` matches a list holding that id, `not_eq` one that
   doesn't, `in` one holding any of the listed ids.
 - A **list of values** (`multiple` on a string, select, number, date, link,
-  … field) reads the same way for its items and also takes `has`,
+  … field, or a plugin type that takes lists) reads the same way for its items and also takes `has`,
   `has_all`, `has_none` and `count`; see [Lists of values](#lists-of-values).
 - Records without the field are excluded by every comparison (they're SQL
   `NULL`), and a record whose stored value has another JSON type simply
@@ -557,7 +559,9 @@ GET /api/json/posts?custom_where[][name]=price&custom_where[][int][in][]=10&cust
 A custom field with `multiple: true` of a scalar type holds a JSON array: a
 list of strings or select terms, or a typed list of integers, floats, dates,
 date-times, times, URLs, emails, phone numbers, colours or slugs
-([extending-content.md](extending-content.md#make-a-field-hold-a-list-of-values)).
+([extending-content.md](extending-content.md#make-a-field-hold-a-list-of-values)),
+or of a plugin's field type that takes lists
+([Let a plugin field type take a list](extending-content.md#let-a-plugin-field-type-take-a-list)).
 Write it as an array; read it back as the array the field stored, tidied and
 in order:
 
@@ -601,8 +605,10 @@ GET /api/json/posts?custom_filter[scores][count][gte]=2
 - **Operands are tidied as the items were.** On a typed list each operand is
   checked and tidied as a stored item is, so `#FFF` finds `#ffffff`, `9:30`
   finds `09:30`, `a@Example.com` finds `a@example.com`, `"10"` finds the
-  number `10` on an integer list, and `10` finds `10.0` on a float list. An
-  operand the field could never hold is a `400` (`invalid date value`).
+  number `10` on an integer list, and `10` finds `10.0` on a float list. On
+  a plugin type's list the operand goes through the type's `cast/2`, so
+  `RED` finds a tag the type stored as `red`. An operand the field could
+  never hold is a `400` (`invalid date value`).
   A single email, color, telephone, time, slug, string, URL or select field
   tidies its `eq`, `not_eq` and `in` operands too, and also matches them as
   sent (see "Equality operands also match the value as a save stores it"
@@ -629,6 +635,16 @@ GET /api/json/posts?custom_filter[scores][count][gte]=2
 - **A single field sent an array** keeps the array's first non-blank item,
   so send one value. An object item there is refused (`must be a single
   value`).
+- **A held list** is a list field whose plugin type no longer takes lists
+  ([Narrow a list field whose type stopped taking lists](extending-content.md#narrow-a-list-field-whose-type-stopped-taking-lists)).
+  It is read as stored, and every `custom_filter` operator on it, `null`
+  included, and `custom_sort` on it are a `400`: `custom field "scores"
+  holds lists its field type (rating) no longer takes; it can't be filtered
+  or sorted until an admin saves it as a single value or the plugin takes
+  lists again`. GraphQL and the MCP read tools refuse it with the same
+  message. A write may leave it out or send back exactly the stored list;
+  any other value is a `400` (`can't be changed: its field type (rating) no
+  longer takes a list of values. …`).
 
 ### Address and flexible values
 

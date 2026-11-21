@@ -17378,7 +17378,7 @@
       "name": "KilnCMS",
       "url": "https://github.com/The-Verscienta/kiln_cms"
     },
-    "description": "The [JSON:API](https://jsonapi.org/)-compliant headless surface of\n**KilnCMS**: reads, search and — since #330 — writes, for the core content\ntypes **Page** and **Post**, admin-defined types through **Entry**\n(`/api/json/entries`, described by `/api/json/type-definitions`), the\n**MediaItem** library, and the taxonomy (**Tag**, **TagGroup**, **Category**)\nplus **Redirect**.\n\n## Authentication\n\nRequests are **anonymous by default** and resolved through each resource's read\npolicy, so an unauthenticated caller only ever sees **published** content — no\ncredentials are required for the public delivery use case.\n\nA credential widens that, as far as its account's role allows. Both kinds go\nin the same header:\n\n```\nAuthorization: Bearer <credential>\n```\n\n  * **API key** (`kiln_…`, the `apiKeyAuth` scheme) — minted at\n    `/editor/api-keys`, acting as the account that minted it and bounded by\n    the key's `access` scope. A `read` key reads what its account may read;\n    a `read_write` key may also **write**: create and update drafts, submit\n    for review, and — on an admin account — publish, unpublish, return to\n    draft and soft-delete. A `draft_write` key may only create drafts and\n    edit its own drafts (no review, publishing, deletes or media). The key\n    for server-to-server use.\n  * **User JWT** (the `bearerAuth` scheme) — an AshAuthentication token from\n    **`POST /api/auth/sign_in`** (documented below), with that user's role.\n\nEither credential also authenticates the GraphQL endpoint (`POST /gql`) and\nits WebSocket. See `docs/api.md` and, for the write routes, `docs/json-api.md`\n→ \"Writing\".\n\n## Content negotiation\n\nEvery request and response uses the JSON:API media type:\n\n```\nAccept: application/vnd.api+json\nContent-Type: application/vnd.api+json\n```\n\n## Filtering, sorting & pagination\n\nCollection routes accept `filter[<field>]=`, `sort=<field>` (prefix `-` for\ndescending) and the `page[...]` family (`page[limit]` defaults to 25, capped\nat 100; `page[offset]`, `page[after]`/`page[before]` keyset cursors,\n`page[count]=true`). Full reference: `docs/json-api.md`.\n\n## Beyond JSON:API\n\nThe JSON:API router is one of several headless surfaces. Those with an\noperation below are marked; the rest are in `docs/api.md`.\n\n  * **GraphQL** delivery, search and authoring at `POST /gql`\n    (`docs/headless-graphql-api.md`); its schema as SDL at\n    `GET /api/graphql/schema.graphql` (operation below).\n  * **Fired artifacts** — the rendered block tree — at\n    `GET /api/content/:type/:slug` (operation below).\n  * **Media upload** at `POST /api/media` (multipart), `POST /api/media/import-url`\n    and the presigned direct-upload pair under `/api/media/uploads`\n    (`docs/api.md` → \"Uploading media\"). Metadata edits are the JSON:API\n    `PATCH /api/json/media-items/{id}` below.\n  * **Search, resolve, menus, locales, forms, related, ask, provenance** under\n    `/api/*`.\n  * **Security posture** for monitoring at `GET /api/security/posture`\n    (operation below): a site administrator's checks as JSON, behind the\n    site's admin allowlist.\n  * **MCP** for LLM authoring clients at `/mcp` (`docs/mcp.md`).\n  * **Outbound webhooks** (HMAC-signed) on publish/unpublish/update.\n  * **Signed preview URLs** for unpublished content at `GET /preview/:token`\n    (operation below).\n\n## This document\n\nA production build serves it only to a caller holding an API key, unless the\noperator turns the public documentation on (`API_DOCS_ENABLED`). The copy\ncommitted at `docs/api/openapi.json` describes the stock build.\n",
+    "description": "The [JSON:API](https://jsonapi.org/)-compliant headless surface of\n**KilnCMS**: reads, search and — since #330 — writes, for the core content\ntypes **Page** and **Post**, admin-defined types through **Entry**\n(`/api/json/entries`, described by `/api/json/type-definitions`), the\n**MediaItem** library, and the taxonomy (**Tag**, **TagGroup**, **Category**)\nplus **Redirect**.\n\n## Authentication\n\nRequests are **anonymous by default** and resolved through each resource's read\npolicy, so an unauthenticated caller only ever sees **published** content — no\ncredentials are required for the public delivery use case.\n\nA credential widens that, as far as its account's role allows. Both kinds go\nin the same header:\n\n```\nAuthorization: Bearer <credential>\n```\n\n  * **API key** (`kiln_…`, the `apiKeyAuth` scheme) — minted at\n    `/editor/api-keys`, acting as the account that minted it and bounded by\n    the key's `access` scope. A `read` key reads what its account may read;\n    a `read_write` key may also **write**: create and update drafts, submit\n    for review, and — on an admin account — publish, unpublish, return to\n    draft and soft-delete. A `draft_write` key may only create drafts and\n    edit its own drafts (no review, publishing, deletes or media). The key\n    for server-to-server use.\n  * **User JWT** (the `bearerAuth` scheme) — an AshAuthentication token from\n    **`POST /api/auth/sign_in`** (documented below), with that user's role.\n\nEither credential also authenticates the GraphQL endpoint (`POST /gql`) and\nits WebSocket. See `docs/api.md` and, for the write routes, `docs/json-api.md`\n→ \"Writing\".\n\n## Content negotiation\n\nEvery request and response uses the JSON:API media type:\n\n```\nAccept: application/vnd.api+json\nContent-Type: application/vnd.api+json\n```\n\n## Filtering, sorting & pagination\n\nCollection routes accept `filter[<field>]=`, `sort=<field>` (prefix `-` for\ndescending) and the `page[...]` family (`page[limit]` defaults to 25, capped\nat 100; `page[offset]`, `page[after]`/`page[before]` keyset cursors,\n`page[count]=true`). Full reference: `docs/json-api.md`.\n\n## Beyond JSON:API\n\nThe JSON:API router is one of several headless surfaces. Those with an\noperation below are marked; the rest are in `docs/api.md`.\n\n  * **GraphQL** delivery, search and authoring at `POST /gql`\n    (`docs/headless-graphql-api.md`); its schema as SDL at\n    `GET /api/graphql/schema.graphql` (operation below).\n  * **Fired artifacts** — the rendered block tree — at\n    `GET /api/content/:type/:slug` (operation below).\n  * **Media upload** at `POST /api/media` (multipart), `POST /api/media/import-url`\n    and the presigned direct-upload pair under `/api/media/uploads`\n    (`docs/api.md` → \"Uploading media\"). Metadata edits are the JSON:API\n    `PATCH /api/json/media-items/{id}` below.\n  * **Site defaults** for link previews at `GET /api/site` (operation\n    below): the site's name, X (Twitter) handle and default share image.\n  * **Search, resolve, menus, locales, forms, related, ask, provenance** under\n    `/api/*`.\n  * **Security posture** for monitoring at `GET /api/security/posture`\n    (operation below): a site administrator's checks as JSON, behind the\n    site's admin allowlist.\n  * **Plugin health** for monitoring at `GET /api/security/plugin-health`\n    (operation below): the installed plugins' cached health, for a platform\n    administrator, behind the site's admin allowlist.\n  * **MCP** for LLM authoring clients at `/mcp` (`docs/mcp.md`).\n  * **Outbound webhooks** (HMAC-signed) on publish/unpublish/update.\n  * **Signed preview URLs** for unpublished content at `GET /preview/:token`\n    (operation below).\n\n## This document\n\nA production build serves it only to a caller holding an API key, unless the\noperator turns the public documentation on (`API_DOCS_ENABLED`). The copy\ncommitted at `docs/api/openapi.json` describes the stock build.\n",
     "license": {
       "name": "MIT",
       "url": "https://github.com/The-Verscienta/kiln_cms/blob/main/LICENSE"
@@ -33069,6 +33069,404 @@
         ]
       }
     },
+    "/api/security/plugin-health": {
+      "get": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "The installed plugins' health as JSON, for monitoring (#2571): integrity against hex.pm, security notices and abandonment, per plugin. Needs a bearer JWT or API key of a platform administrator (not a `draft_write` key); a site administrator is refused. Behind the host site's admin allowlist. Answers from the answering node's cache only and never asks hex.pm or the notices feed, nor starts a check: a node with no fresh check answers `state: not_checked`. The same body on every site's host. Additive only: read plugins by `id`, read `state` before `plugins`, and tolerate values and `counts` keys you do not know. Every answer is `Cache-Control: private, no-store`.",
+        "operationId": "getPluginHealth",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "checked_at": {
+                      "description": "When the oldest remote data was fetched, on the answering node; `null` when nothing was",
+                      "format": "date-time",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "counts": {
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "description": "How many plugins have each `overall`: `fail`, `warn`, `unknown`, `unverifiable`, `not_applicable`, `ok` today, every one present",
+                      "properties": {
+                        "fail": {
+                          "type": "integer"
+                        },
+                        "not_applicable": {
+                          "type": "integer"
+                        },
+                        "ok": {
+                          "type": "integer"
+                        },
+                        "unknown": {
+                          "type": "integer"
+                        },
+                        "unverifiable": {
+                          "type": "integer"
+                        },
+                        "warn": {
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "fail",
+                        "warn",
+                        "unknown",
+                        "unverifiable",
+                        "not_applicable",
+                        "ok"
+                      ],
+                      "type": "object"
+                    },
+                    "notices": {
+                      "description": "The security notices feed: `ok`, `unknown` or `disabled` today; `null` when `not_checked`",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "plugins": {
+                      "description": "One per installed plugin, sorted by `name` then `id` (not part of the contract)",
+                      "items": {
+                        "properties": {
+                          "abandonment": {
+                            "properties": {
+                              "known": {
+                                "description": "`false` when a source it needs was unavailable",
+                                "type": "boolean"
+                              },
+                              "reasons": {
+                                "description": "Every key present on each, `null` where it does not apply",
+                                "items": {
+                                  "properties": {
+                                    "bundled": {
+                                      "description": "For `sdk_unsupported`: the `kiln_plugin` this core bundles",
+                                      "nullable": true,
+                                      "type": "string"
+                                    },
+                                    "kind": {
+                                      "description": "`retired`, `stale`, `sdk_unsupported` or `sdk_requirement_invalid` today",
+                                      "type": "string"
+                                    },
+                                    "last_release_at": {
+                                      "description": "For `stale`: the last release on Hex",
+                                      "format": "date-time",
+                                      "nullable": true,
+                                      "type": "string"
+                                    },
+                                    "requirement": {
+                                      "description": "For `sdk_unsupported` and `sdk_requirement_invalid`: the plugin's `kiln_plugin` requirement",
+                                      "nullable": true,
+                                      "type": "string"
+                                    },
+                                    "retirement": {
+                                      "description": "For `retired`: `security`, `deprecated`, `invalid`, `renamed` or `other` today",
+                                      "nullable": true,
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "retirement",
+                                    "last_release_at",
+                                    "requirement",
+                                    "bundled"
+                                  ],
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "known",
+                              "reasons"
+                            ],
+                            "type": "object"
+                          },
+                          "id": {
+                            "description": "The plugin's module, e.g. `MyApp.MyPlugin`; unique. Key on this",
+                            "type": "string"
+                          },
+                          "integrity": {
+                            "properties": {
+                              "reason": {
+                                "description": "For `unverifiable`: `git`, `path`, `private_repo`, `no_checksum` or `unknown_source` today",
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "status": {
+                                "description": "`ok`, `mismatch`, `not_found`, `unverifiable`, `not_applicable`, `unknown` or `disabled` today",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "status",
+                              "reason"
+                            ],
+                            "type": "object"
+                          },
+                          "latest_version": {
+                            "description": "The latest version on Hex, when known",
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "name": {
+                            "description": "The plugin's own name; may repeat",
+                            "type": "string"
+                          },
+                          "notices": {
+                            "properties": {
+                              "complete": {
+                                "description": "`false` when a source did not answer: `items` is what was found, not a clean bill",
+                                "type": "boolean"
+                              },
+                              "items": {
+                                "description": "Security notices covering the installed version",
+                                "items": {
+                                  "properties": {
+                                    "aliases": {
+                                      "description": "Other ids it is known by (CVE, GHSA)",
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "type": "array"
+                                    },
+                                    "id": {
+                                      "description": "The advisory's id",
+                                      "type": "string"
+                                    },
+                                    "severity": {
+                                      "description": "`low`, `medium`, `high`, `critical` or `unknown` today",
+                                      "type": "string"
+                                    },
+                                    "source": {
+                                      "description": "`kiln` (kilncms.dev's notices feed) or `hex` today",
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "description": "An `http(s)://` page about the advisory",
+                                      "nullable": true,
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "aliases",
+                                    "severity",
+                                    "source",
+                                    "url"
+                                  ],
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "complete",
+                              "items"
+                            ],
+                            "type": "object"
+                          },
+                          "overall": {
+                            "description": "`fail`, `warn`, `unknown`, `unverifiable`, `not_applicable` or `ok` today; read a value you do not know as unknown",
+                            "type": "string"
+                          },
+                          "package": {
+                            "description": "The Hex package, for `source: hex`",
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "source": {
+                            "description": "`hex`, `git`, `path`, `overlay` or `unknown` today",
+                            "type": "string"
+                          },
+                          "version": {
+                            "description": "The installed version",
+                            "nullable": true,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "source",
+                          "package",
+                          "version",
+                          "latest_version",
+                          "overall",
+                          "integrity",
+                          "notices",
+                          "abandonment"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "state": {
+                      "description": "`fresh`, `partial`, `disabled`, `nothing_to_check` or `not_checked` today. An empty `plugins` is never a clean bill: read this first",
+                      "type": "string"
+                    },
+                    "version": {
+                      "description": "`1`. Changes only for a change that breaks this shape.",
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "version",
+                    "state",
+                    "checked_at",
+                    "notices",
+                    "counts",
+                    "plugins"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The installed plugins' cached health"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "No credential (`unauthenticated`), or one that does not verify (`invalid_token`)"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not a platform administrator, or a `draft_write` key (`forbidden`); or an address outside the site's admin allowlist (`network_not_allowed`)"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "`api` bucket spent — see `Retry-After`"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "`temporarily_unavailable`: the site's admin allowlist could not be read (`Retry-After: 30`)"
+          }
+        },
+        "security": [
+          {
+            "apiKeyAuth": []
+          },
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the installed plugins' cached health",
+        "tags": [
+          "Monitoring"
+        ]
+      }
+    },
     "/api/security/posture": {
       "get": {
         "callbacks": {},
@@ -33350,6 +33748,122 @@
         "summary": "Read the site's security posture",
         "tags": [
           "Monitoring"
+        ]
+      }
+    },
+    "/api/site": {
+      "get": {
+        "callbacks": {},
+        "deprecated": false,
+        "description": "The site-level values a headless front end falls back to for its Open Graph and X (Twitter) card tags when a document's own `social` object has none: the values this site's own pages carry. Every key is always present. Public; a credential is accepted and changes nothing, but an invalid one is a 401. Anonymous responses are shared-cacheable for 60 seconds with an ETag, and a branding save purges the site's CDN key. A 503 with `Retry-After` means the site's branding could not be read.",
+        "operationId": "getSite",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "site_name": {
+                      "description": "The site's name, as its pages' `<title>` carries it. An unbranded site answers the operator's default name, or `KilnCMS`",
+                      "type": "string"
+                    },
+                    "social_image_url": {
+                      "description": "The default share image, an absolute http(s) URL on the site's own host (or a CDN's), or `null`",
+                      "format": "uri",
+                      "nullable": true,
+                      "type": "string"
+                    },
+                    "twitter_site": {
+                      "description": "The site's X (Twitter) handle as `@handle`, or `null`",
+                      "nullable": true,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "site_name",
+                    "twitter_site",
+                    "social_image_url"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The site's link-preview defaults"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "An invalid credential (API key or bearer token)"
+          },
+          "404": {
+            "description": "No site serves this host (strict host matching)"
+          },
+          "429": {
+            "description": "Rate limited — see `Retry-After`"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The site's branding could not be read (`temporarily_unavailable`) — retry after the `Retry-After` delay"
+          }
+        },
+        "security": [],
+        "summary": "Fetch the site's link-preview defaults",
+        "tags": [
+          "Delivery"
         ]
       }
     },

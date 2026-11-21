@@ -17,6 +17,15 @@ defmodule KilnCMS.Federation.DeliveryWorker do
       row, so past `KilnCMS.Federation.drop_follower_after/0` it is deleted and
       the remote server is free to follow again.
 
+  ## One POST, every follower behind it
+
+  A delivery is per inbox, not per follower (#2753), so its outcome is
+  recorded against everyone that inbox stands for: with `follower_id` set,
+  exactly that follower; with it `nil`, every follower whose deliveries go to
+  the row's `inbox_uri` when the delivery settles (`Follower`'s `:at_inbox`).
+  A success resets all of them and an exhausted failure charges each one, in a
+  single atomic `UPDATE`, and drops those it takes to the ceiling.
+
   Requests go through `KilnCMS.SafeFetch`, which pins the resolved address and
   restores the real hostname in a `Host` header. The signature is computed
   against that real host — see `KilnCMS.Federation.HttpSignature` — so this
@@ -27,9 +36,11 @@ defmodule KilnCMS.Federation.DeliveryWorker do
   alias KilnCMS.Federation
   alias KilnCMS.Federation.Actor
   alias KilnCMS.Federation.Delivery
+  alias KilnCMS.Federation.Follower
   alias KilnCMS.Federation.HttpSignature
   alias KilnCMS.Federation.SiteFederation
 
+  require Ash.Query
   require Logger
 
   @accepted_statuses 200..299
@@ -158,11 +169,23 @@ defmodule KilnCMS.Federation.DeliveryWorker do
       :ok
   end
 
-  defp record_success(%{follower_id: nil}, _org_id), do: :ok
-
   defp record_success(delivery, org_id) do
-    with {:ok, follower} <- follower(delivery, org_id) do
-      Federation.record_follower_success(follower, actor: Federation.system(), tenant: org_id)
+    case delivery
+         |> covered_followers(org_id)
+         |> Federation.record_follower_success(
+           actor: Federation.system(),
+           tenant: org_id,
+           bulk_options: [strategy: :atomic]
+         ) do
+      %Ash.BulkResult{status: :success} ->
+        :ok
+
+      # Not crediting them leaves their failure count standing, and the
+      # ceiling may later drop them: say so rather than lose it.
+      %Ash.BulkResult{errors: errors} ->
+        Logger.warning(
+          "Federation delivery #{delivery.id} could not credit its followers: #{inspect(errors)}"
+        )
     end
 
     # The site's own "last federated" line (#967) — system-side, its own
@@ -174,19 +197,47 @@ defmodule KilnCMS.Federation.DeliveryWorker do
     :ok
   end
 
-  defp record_failure(%{follower_id: nil}, _org_id), do: :ok
-
   defp record_failure(delivery, org_id) do
-    with {:ok, follower} <- follower(delivery, org_id),
-         {:ok, updated} <-
-           Federation.record_follower_failure(follower,
-             actor: Federation.system(),
-             tenant: org_id
-           ) do
-      drop_if_dead(updated, org_id)
+    case delivery
+         |> covered_followers(org_id)
+         |> Federation.record_follower_failure(
+           actor: Federation.system(),
+           tenant: org_id,
+           bulk_options: [strategy: :atomic, return_records?: true]
+         ) do
+      %Ash.BulkResult{status: :success, records: followers} ->
+        Enum.each(followers, &drop_if_dead(&1, org_id))
+
+      %Ash.BulkResult{errors: errors} ->
+        Logger.warning(
+          "Federation delivery #{delivery.id} could not charge its followers: #{inspect(errors)}"
+        )
     end
 
     :ok
+  end
+
+  # Whose bookkeeping a delivery's outcome lands on (#2753), as a query the
+  # atomic updates above run against:
+  #
+  #   * `follower_id` set — exactly that follower. An inbox only one follower
+  #     used when the row was written, and every `Accept`. A follower dropped
+  #     since matches nothing, which is the right amount of bookkeeping.
+  #   * `follower_id` nil — everyone whose deliveries go to `inbox_uri` when
+  #     the delivery settles: the shared inbox the one POST reached. A follower
+  #     who arrived at that inbox after the row was written is counted too; it
+  #     is the same endpoint, and its outcome is theirs as much as anyone's.
+  defp covered_followers(%{follower_id: nil, inbox_uri: inbox_uri}, org_id) do
+    Ash.Query.for_read(Follower, :at_inbox, %{inbox_uri: inbox_uri},
+      actor: Federation.system(),
+      tenant: org_id
+    )
+  end
+
+  defp covered_followers(%{follower_id: follower_id}, org_id) do
+    Follower
+    |> Ash.Query.for_read(:read, %{}, actor: Federation.system(), tenant: org_id)
+    |> Ash.Query.filter(id == ^follower_id)
   end
 
   # Deleted rather than flagged: there is no admin on the other side to notice,
@@ -207,17 +258,6 @@ defmodule KilnCMS.Federation.DeliveryWorker do
   # One query for the three callers (#967) — `Federation.active_settings/2`;
   # this one signs, so it needs the private key.
   defp site_settings(org_id), do: Federation.active_settings(org_id, require_key?: true)
-
-  # The follower a delivery was addressed to, or `:error` when its row is gone
-  # (a dropped dead instance). Read through the domain's list interface rather
-  # than `Ash.get/3` so this stays on the code-interface contract AGENTS.md
-  # sets; the list is bounded by the per-site follower ceiling.
-  defp follower(%{follower_id: id}, org_id) do
-    case Federation.get_follower(id, actor: Federation.system(), tenant: org_id) do
-      {:ok, follower} -> {:ok, follower}
-      _other -> :error
-    end
-  end
 
   defp truncate(nil), do: nil
   defp truncate(error), do: String.slice(to_string(error), 0, 500)

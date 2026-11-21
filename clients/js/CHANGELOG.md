@@ -7,6 +7,80 @@ tagged `client-js-vX.Y.Z` in the
 
 ## Unreleased
 
+### Changed
+
+- **An empty 2xx body throws `KilnUnexpectedBodyError`, except on a content
+  or media write (kiln_cms#3129).** No read route answers a 2xx with an empty body, so an
+  empty one is not Kiln's answer, but the client took it as one. JSON:API
+  collection reads such as `list()` and `releases()` resolved an empty list,
+  `one()` resolved `null`, `release()` an object holding only `included`,
+  and the plain-JSON reads (`search()`, `syncPage()`, `menus()`, `locales()`,
+  `artifact()`, `preview()`, `resolvePath()`, `schema()`, `related()` and
+  the rest) resolved `null`. `revision()`, `sync()` and `restoreRevision()`
+  threw a `TypeError`; `graphql()` resolved `{}`; `mintPreview()` and
+  `submitForm()` resolved `null`. Each of these now throws
+  `KilnUnexpectedBodyError` with `code: "unexpected_body"`, the 2xx
+  `status`, `url`, `body: ""` and no `cause`; its message ends "with an
+  empty body".
+
+  `one()` therefore throws on an empty 2xx where it used to resolve `null`.
+  A real empty match, `{"data": []}`, still resolves `null`.
+
+  The content and media writes are unchanged. `delete()` still resolves on a 204 or an empty 200.
+  The other content writes and the media writes still throw `KilnError` with
+  `code: "empty_response"`. `beginDirectUpload()` now throws that same
+  `empty_response` error on an empty answer instead of a `TypeError`.
+
+- **A missing image transform key throws `KilnConfigError`
+  (kiln_cms#3130).** `signedImageUrl()` and `signedImageSrcset()` on a client
+  created without `imageTransformKey` threw a plain `Error`; they now throw
+  `KilnConfigError` with `code: "missing_image_transform_key"`. The exported
+  `signedTransformPath()` and `signedTransformSrcset()` reject with the same
+  error for an empty key, and with `code: "webcrypto_unavailable"` in a
+  runtime without `globalThis.crypto.subtle`. The messages are unchanged and
+  the errors are still `instanceof Error`, so a check on the message keeps
+  working; branch on `code` instead.
+
+- **A 2xx JSON body of the wrong shape throws `KilnUnexpectedBodyError` on
+  every read that promises a shape (kiln_cms#3151).** A body that is valid
+  JSON but not what the route answers (`null`, `{}`) used to pass for an
+  answer: `list()`, `byIds()`, `textSearch()`, `semanticSearch()`,
+  `autocomplete()`, `releases()` and `releaseItems()` resolved an empty
+  list, `one()` resolved `null`, `release()` resolved a record holding only
+  `included`, the plain-JSON reads resolved the decoded value, and `sync()`,
+  `revision()` and `restoreRevision()` threw a `TypeError`. Each now throws
+  `KilnUnexpectedBodyError` with `code: "unexpected_body"`, the 2xx
+  `status`, `url`, the raw text (its first 1 KiB) in `body` and no `cause`;
+  its message ends "with a JSON body of the wrong shape". What each read
+  requires:
+
+  | Read                                                                                                                                  | A 2xx body must be                                                                                                                                  |
+  | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `list()`, `one()`, `byIds()`, `textSearch()`, `semanticSearch()`, `autocomplete()`, `releases()`, `releaseItems()`                    | a JSON:API document: an object whose `data` is `null`, an object or an array of objects, and whose `included`, when present, is an array of objects |
+  | `release()`, `revision()`, `restoreRevision()`                                                                                        | an object whose `data` is an object                                                                                                                 |
+  | `sync()`, `syncPage()`                                                                                                                | an object with an `items` array and a `cursor` key                                                                                                  |
+  | `listRevisions()`                                                                                                                     | an object whose `data` is an array                                                                                                                  |
+  | `search()`                                                                                                                            | an object whose `results` is an object                                                                                                              |
+  | `resolvePath()`                                                                                                                       | an object with a `status` key                                                                                                                       |
+  | `artifact()`, `contentAsOf()`, `preview()`, `schema()`, `schemaComponents()`, `menus()`, `menu()`, `locales()`, `related()`, `form()` | an object                                                                                                                                           |
+
+  A document with no resources, `{"data": []}`, is still a valid empty
+  result, and `one()` still resolves `null` on it. Writes are unchanged: a
+  content or media write answered `200 {}` still throws `KilnError` with
+  `code: "empty_response"`, and `graphql()`, `mintPreview()` and
+  `submitForm()` check no shape.
+
+  To migrate: code that treated an empty list or `null` from a `{}` answer
+  as "no results" now gets the error; catch `KilnUnexpectedBodyError` and
+  treat it as a broken answer, not an empty one.
+
+- **`KilnUnexpectedBodyError`'s constructor takes an optional fifth
+  parameter, `wrongShape` (default `false`).** It only changes the message,
+  to "a JSON body of the wrong shape". Code that constructs the error itself,
+  in a test double for example, keeps working unchanged.
+
+### Fixed
+
 - **Fix: a 2xx answer that isn't JSON throws `KilnUnexpectedBodyError`
   (kiln_cms#2735).** A captive portal, a CDN error page or a proxy answering
   `200 text/html` in Kiln's place made the client throw the raw `SyntaxError`
@@ -15,8 +89,8 @@ tagged `client-js-vX.Y.Z` in the
   first 1 KiB of the text in `body` (cut on a UTF-8 character boundary, kept
   out of `message`) and the `SyntaxError` as `cause`. It is not a
   `KilnHttpError`, which stays reserved for non-2xx answers, so
-  `isKilnHttpError(err)` is false for it. An empty 2xx still resolves to
-  `null`.
+  `isKilnHttpError(err)` is false for it. An empty 2xx body throws it too,
+  except on a content or media write (kiln_cms#3129, under Changed).
 - **Fix: a body that breaks off mid-read throws `KilnNetworkError`.** When
   the connection dropped after the headers arrived, reading the body rejected
   with the platform's own error. It is now a `KilnNetworkError` with that
@@ -49,6 +123,30 @@ tagged `client-js-vX.Y.Z` in the
   browsers and Cloudflare Workers reject with `TypeError: Illegal
 invocation`, so every request failed as a `KilnNetworkError` unless a
   `fetch` option was passed. Node does not check, so it went unnoticed.
+- **Fix: `signedTransformSrcset()` checks the key before the media's size
+  (kiln_cms#3153).** With an empty key and media whose `width`/`height` are
+  unknown, it resolved `null`, so a missing key showed up only on items of
+  known size. It now rejects with `KilnConfigError`
+  `code: "missing_image_transform_key"` whatever the media, and with
+  `code: "webcrypto_unavailable"` in a runtime without
+  `globalThis.crypto.subtle`. When both the key and the options are bad, the
+  key error is the one thrown. With a key, media of unknown size still
+  resolves `null`. `signedImageSrcset()` on the client already checked its
+  key first.
+
+### Added
+
+- **`site()` and the `Site` type, for `GET /api/site` (kiln_cms#3168).** It
+  resolves the site's link-preview defaults, for the Open Graph and X card
+  tags a front end renders when a document's own `social` object leaves them
+  out: `{ site_name, twitter_site, social_image_url }`. Every key is always
+  present; `twitter_site` (`"@handle"`) and `social_image_url` (an absolute
+  URL) are `null` when unset. A 2xx missing one of the three throws
+  `KilnUnexpectedBodyError`. It is sent without the client's API key, even
+  when one is configured: the answer is the same either way, and only an
+  anonymous one can be shared by a cache. A 503 throws `KilnServerError` with
+  `retryAfter`. The route comes with kiln_cms#3167, so `site()` needs a
+  server that includes it.
 
 ## 0.5.0
 

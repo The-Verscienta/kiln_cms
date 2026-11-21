@@ -460,7 +460,12 @@ defmodule KilnClientTest do
     test "list_revisions/3 and revision/4 send a per-call key" do
       Req.Test.stub(KilnClient, fn conn ->
         send(self(), {:auth, conn.request_path, Plug.Conn.get_req_header(conn, "authorization")})
-        Req.Test.json(conn, %{"data" => @revision, "meta" => %{}})
+
+        # The history is a list, one revision a map.
+        data =
+          if String.ends_with?(conn.request_path, "/revisions"), do: [@revision], else: @revision
+
+        Req.Test.json(conn, %{"data" => data, "meta" => %{}})
       end)
 
       assert {:ok, _} = KilnClient.list_revisions("page", "p1", api_key: "kiln_editor")
@@ -612,6 +617,218 @@ defmodule KilnClientTest do
 
       assert {:error, %KilnClient.Error{reason: :unexpected_body}} =
                KilnClient.artifact("posts", "hello")
+    end
+  end
+
+  # #3129: an empty 2xx used to pass `request/3` as `{:ok, ""}`, which
+  # `list/2` flattened to an empty collection and `sync/1`/`release/2`
+  # crashed on. No route a read calls answers an empty body by design.
+  describe "an empty 2xx body on a read" do
+    defp stub_empty(content_type \\ "application/json") do
+      Req.Test.stub(KilnClient, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type(content_type)
+        |> Plug.Conn.send_resp(200, "")
+      end)
+    end
+
+    test "list/2 returns :unexpected_body rather than an empty list" do
+      stub_empty()
+
+      assert {:error,
+              %KilnClient.Error{
+                reason: :unexpected_body,
+                status: 200,
+                method: :get,
+                path: "/api/json/posts/published",
+                body: ""
+              }} = KilnClient.list("posts")
+    end
+
+    test "one/3 returns :unexpected_body rather than :not_found" do
+      stub_empty()
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body, status: 200, body: ""}} =
+               KilnClient.one("posts", %{slug: "hello"})
+    end
+
+    test "sync/1 and release/2 return the error instead of crashing" do
+      stub_empty()
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body, body: "", path: "/api/sync"}} =
+               KilnClient.sync(retries: 0)
+
+      assert {:error,
+              %KilnClient.Error{reason: :unexpected_body, body: "", path: "/api/json/releases/r1"}} =
+               KilnClient.release("r1")
+    end
+
+    test "a plain-JSON read (menus/1) returns :unexpected_body, not an empty string" do
+      stub_empty()
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body, path: "/api/menus", body: ""}} =
+               KilnClient.menus()
+    end
+
+    test "artifact/3's llm surface is text, but an empty one is still an error" do
+      stub_empty("text/markdown")
+
+      assert {:error, %KilnClient.Error{reason: :unexpected_body, status: 200, body: ""}} =
+               KilnClient.artifact("posts", "hello", surface: "llm", retry: false)
+    end
+  end
+
+  # #3129: a 2xx JSON body of the wrong shape (`null`, `{}`) used to crash
+  # `sync/1` (no matching clause) and `release/2` (a failed match).
+  describe "a 2xx JSON body of the wrong shape" do
+    for {label, json} <- [{"null", "null"}, {"{}", "{}"}] do
+      test "sync/1 and release/2 return :unexpected_body on #{label}" do
+        stub_status(200, unquote(json))
+        decoded = Jason.decode!(unquote(json))
+
+        assert {:error,
+                %KilnClient.Error{reason: :unexpected_body, body: ^decoded, path: "/api/sync"}} =
+                 KilnClient.sync(retries: 0)
+
+        assert {:error,
+                %KilnClient.Error{
+                  reason: :unexpected_body,
+                  body: ^decoded,
+                  method: :get,
+                  path: "/api/json/releases/r1"
+                }} = KilnClient.release("r1")
+      end
+    end
+  end
+
+  # #3151: every read that promises a shape checks it. A JSON:API index used
+  # to flatten `null` or `{}` to an empty collection, `sync_page/2` and
+  # `revision/4` returned `{:ok, nil}`, and `"data": "x"` crashed.
+  describe "a 2xx JSON body of the wrong shape, on every read that promises one" do
+    @json_api_bad [
+      "null",
+      "{}",
+      "[]",
+      ~s({"data":"x"}),
+      ~s({"data":[1]}),
+      ~s({"data":[],"included":null}),
+      ~s({"data":[],"included":[1]})
+    ]
+
+    @reads [
+      {"list/2", "/api/json/posts/published", @json_api_bad, quote(do: KilnClient.list("posts"))},
+      {"one/3", "/api/json/posts/published", @json_api_bad,
+       quote(do: KilnClient.one("posts", %{slug: "a"}))},
+      {"text_search/3", "/api/json/posts/search/published", @json_api_bad,
+       quote(do: KilnClient.text_search("posts", "q"))},
+      {"semantic_search/3", "/api/json/posts/semantic-search/published", @json_api_bad,
+       quote(do: KilnClient.semantic_search("posts", "q"))},
+      {"autocomplete/3", "/api/json/posts/autocomplete/published", @json_api_bad,
+       quote(do: KilnClient.autocomplete("posts", "q"))},
+      {"list_releases/1", "/api/json/releases", @json_api_bad,
+       quote(do: KilnClient.list_releases())},
+      {"list_release_items/1", "/api/json/release-items", @json_api_bad,
+       quote(do: KilnClient.list_release_items())},
+      {"release/2", "/api/json/releases/r1",
+       @json_api_bad ++ [~s({"data":null}), ~s({"data":[]})],
+       quote(do: KilnClient.release("r1"))},
+      {"sync_page/2", "/api/sync", ["null", "{}", "[]", ~s({"items":"x","cursor":"c"})],
+       quote(do: KilnClient.sync_page())},
+      {"sync/1", "/api/sync", ["null", "{}", "[]", ~s({"items":"x","cursor":"c"})],
+       quote(do: KilnClient.sync(retries: 0))},
+      {"list_revisions/3", "/api/content/post/p1/revisions",
+       ["null", "{}", "[]", ~s({"data":{}})], quote(do: KilnClient.list_revisions("post", "p1"))},
+      {"revision/4", "/api/content/post/p1/revisions/v1",
+       ["null", "{}", "[]", ~s({"data":"x"}), ~s({"data":[]})],
+       quote(do: KilnClient.revision("post", "p1", "v1"))},
+      {"search/2", "/api/search", ["null", "{}", "[]", ~s({"results":[]})],
+       quote(do: KilnClient.search("q"))},
+      {"resolve_path/2", "/api/resolve", ["null", "{}", "[]"],
+       quote(do: KilnClient.resolve_path("/a"))},
+      {"artifact/3", "/api/content/posts/a", ["null", "[]", "1"],
+       quote(do: KilnClient.artifact("posts", "a", retry: false))},
+      {"content_as_of/3", "/api/content/post", ["null", "[]"],
+       quote(do: KilnClient.content_as_of("post", ~D[2026-01-01]))},
+      {"schema/1", "/api/schema", ["null", "[]"], quote(do: KilnClient.schema())},
+      {"menus/1", "/api/menus", ["null", "[]"], quote(do: KilnClient.menus())},
+      {"menu/2", "/api/menus/main", ["null", "[]"], quote(do: KilnClient.menu("main"))},
+      {"locales/1", "/api/locales", ["null", "[]", "true"], quote(do: KilnClient.locales())},
+      {"related/3", "/api/content/post/a/related", ["null", "[]"],
+       quote(do: KilnClient.related("post", "a"))},
+      {"form/2", "/api/forms/contact", ["null", "[]"], quote(do: KilnClient.form("contact"))},
+      {"restore_revision/4", "/api/content/post/p1/revisions/v1/restore",
+       ["null", "{}", "[]", ~s({"data":[]})],
+       quote(do: KilnClient.restore_revision("post", "p1", "v1", api_key: "kiln_writer")), :post}
+    ]
+
+    for read <- @reads do
+      {name, path, bodies, call, method} =
+        case read do
+          {name, path, bodies, call} -> {name, path, bodies, call, :get}
+          {_, _, _, _, _} = read -> read
+        end
+
+      for json <- bodies do
+        test "#{name} returns :unexpected_body on #{json}" do
+          stub_status(200, unquote(json))
+          decoded = Jason.decode!(unquote(json))
+
+          assert {:error,
+                  %KilnClient.Error{
+                    reason: :unexpected_body,
+                    status: 200,
+                    body: ^decoded,
+                    method: unquote(method),
+                    path: unquote(path)
+                  }} = unquote(call)
+        end
+      end
+    end
+
+    test "the log line names the wrong shape, not a body that is not JSON" do
+      stub_status(200, "{}")
+
+      log = ExUnit.CaptureLog.capture_log(fn -> KilnClient.list("posts") end)
+
+      assert log =~
+               "Kiln get /api/json/posts/published returned 200 with a JSON body of the wrong shape"
+
+      refute log =~ "not JSON"
+    end
+
+    test "a JSON:API document with no resources is still a valid empty result" do
+      stub_status(200, ~s({"data":[]}))
+      assert {:ok, %{items: [], included: %{}, total: nil}} = KilnClient.list("posts")
+      assert {:ok, %{items: []}} = KilnClient.text_search("posts", "q")
+      assert {:ok, %{items: []}} = KilnClient.list_releases()
+
+      stub_status(200, ~s({"data":null}))
+      assert {:ok, %{items: []}} = KilnClient.list("posts")
+    end
+
+    test "one/3 on a document with no resources is still :not_found" do
+      stub_status(200, ~s({"data":[]}))
+
+      assert {:error, %KilnClient.Error{reason: :not_found, status: 404}} =
+               KilnClient.one("posts", %{slug: "a"})
+    end
+
+    test "the documented shapes still pass" do
+      stub_status(200, ~s({"items":[],"cursor":"c","has_more":false}))
+      assert {:ok, %{"items" => [], "cursor" => "c"}} = KilnClient.sync_page()
+      assert {:ok, %{items: [], cursor: "c"}} = KilnClient.sync(retries: 0)
+
+      stub_status(200, ~s({"results":{},"suggestion":null}))
+      assert {:ok, %{"results" => %{}}} = KilnClient.search("q")
+
+      stub_status(200, ~s({"status":"ok","type":"post"}))
+      assert {:ok, %{"status" => "ok"}} = KilnClient.resolve_path("/a")
+
+      stub_status(200, ~s({"data":[],"meta":{"next_cursor":null}}))
+      assert {:ok, %{"data" => []}} = KilnClient.list_revisions("post", "p1")
+
+      stub_status(200, ~s({}))
+      assert {:ok, %{}} = KilnClient.menus()
     end
   end
 

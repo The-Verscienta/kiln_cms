@@ -98,6 +98,8 @@ describe("uploadMedia", () => {
     for (const answer of [
       { status: 201, body: { data: [] } },
       { status: 204, text: "" },
+      { status: 201, text: "{}" },
+      { status: 201, text: "null" },
     ]) {
       const stub = stubFetch(answer);
 
@@ -249,5 +251,22 @@ describe("direct uploads", () => {
       status: 403,
     });
     expect(stub.calls).toHaveLength(2);
+  });
+
+  it("throws KilnError empty_response when the begin answer carries no upload", async () => {
+    for (const answer of [
+      { status: 200, text: "" },
+      { status: 201, body: {} },
+    ]) {
+      const stub = stubFetch(answer);
+
+      const error = await client(stub)
+        .beginDirectUpload("big.mp4", 3)
+        .catch((caught: unknown) => caught);
+
+      expect(isKilnError(error)).toBe(true);
+      expect(isKilnHttpError(error)).toBe(false);
+      expect((error as KilnError).code).toBe("empty_response");
+    }
   });
 });

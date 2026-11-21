@@ -117,6 +117,13 @@ defmodule KilnCMS.CMS.Workers.ReleaseWorker do
     :ok
   end
 
+  # An admin's `:abandon` won against this run (#3075): nothing shipped and the
+  # abandon recorded the outcome, so it is not an error to alert on.
+  defp report({:error, :abandoned}, release, what) do
+    Logger.info("Release #{release.id} #{what} stopped: abandoned while the worker ran")
+    :ok
+  end
+
   defp report({:error, reason}, release, what) do
     Logger.error("Release #{release.id} #{what} failed: #{inspect(reason)}")
     :ok

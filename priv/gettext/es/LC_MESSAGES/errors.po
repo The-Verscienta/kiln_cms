@@ -105,6 +105,11 @@ msgstr "%{name} debe ser texto"
 msgid "Slack endpoints can only receive security events"
 msgstr "los endpoints de Slack solo pueden recibir eventos de seguridad"
 
+#: lib/kiln_cms/backups/destination_config/validations/adapter_settings.ex
+#, elixir-autogen, elixir-format
+msgid "an SFTP destination stays disabled until its host key is confirmed"
+msgstr "un destino SFTP permanece desactivado hasta que se confirme su clave de host"
+
 msgid "are still associated with this entry"
 msgstr "todavía están asociados a esta entrada"
 

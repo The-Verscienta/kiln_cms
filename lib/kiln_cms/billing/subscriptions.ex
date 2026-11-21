@@ -36,6 +36,22 @@ defmodule KilnCMS.Billing.Subscriptions do
   would let a late-arriving invoice event demote a subscription the member has
   already fixed.
 
+  ## Late, retried and foreign events (#2749)
+
+  Metadata resolves an event to a membership row, not to a subscription, and the
+  provider delivers late and retries. Before anything is written,
+  `KilnCMS.Billing.EventGuard` ignores an event that is older than the last one
+  applied to the same subscription (`:out_of_order`), one about a different
+  subscription than a paying row holds (`:other_subscription`, logged at
+  warning), a different subscription taking over a dead row without being
+  newer, and any event for a `:comped` row (logged at warning: an operator who
+  comped a member who was paying cancels the provider subscription in the
+  provider's dashboard, #3156). The row stores the provider's
+  `created` stamp (`last_provider_event_at`); a state retrieved at checkout is
+  newer than any event and is stamped with the checkout event's own `created` instead. The
+  action repeats the check under the row lock
+  (`KilnCMS.Billing.Changes.GuardProviderEvent`). Ignored events are acked.
+
   Deliberately unhandled: `invoice.paid` / `invoice.payment_succeeded` (a renewal
   already arrives as `subscription.updated` carrying the new period) and
   `customer.subscription.created` (checkout's completion plus the retrieve covers
@@ -44,6 +60,7 @@ defmodule KilnCMS.Billing.Subscriptions do
   require Logger
 
   alias KilnCMS.Billing
+  alias KilnCMS.Billing.EventGuard
 
   @handled ~w(
     checkout.session.completed
@@ -171,7 +188,8 @@ defmodule KilnCMS.Billing.Subscriptions do
           current_period_end: period_end(subscription),
           cancel_at_period_end: !!subscription["cancel_at_period_end"]
         },
-        event
+        event,
+        :live
       )
     end
   end
@@ -184,17 +202,128 @@ defmodule KilnCMS.Billing.Subscriptions do
     end
   end
 
-  defp apply_state(membership, attrs, event) do
-    attrs = Map.put(attrs, :provider_event_id, event["id"])
+  # `kind` is `:event` for a delivered event and `:live` for a state retrieved
+  # from the provider just now (checkout completion): that is newer than any
+  # event, so it is exempt from the stale check and stamped with the retrieval
+  # time instead of the session's `created`.
+  defp apply_state(membership, attrs, event, kind \\ :event) do
+    target = %{
+      kind: kind,
+      subscription_id: event_subscription_id(event),
+      created_at: created_at(event),
+      target_status: attrs.status
+    }
 
-    # As the billing system actor (#1659): `Membership` closes
-    # `:apply_provider_state` to every person and admits this actor by name.
-    # A refusal is an `{:error, _}`, which the worker records and retries.
-    Billing.apply_provider_state(membership, attrs,
-      actor: Billing.system(),
-      tenant: membership.org_id
-    )
+    with :ok <- check(membership, target, event) do
+      attrs = Map.put(attrs, :provider_event_id, event["id"])
+
+      # As the billing system actor (#1659): `Membership` closes
+      # `:apply_provider_state` to every person and admits this actor by name.
+      # A refusal is an `{:error, _}`, which the worker records and retries.
+      #
+      # The action repeats the check under the row lock
+      # (`Changes.GuardProviderEvent`) and reports a superseded event as
+      # metadata on the row it returns.
+      membership
+      |> Billing.apply_provider_state(
+        attrs
+        |> put_stamp(stamp(target))
+        |> Map.put(:event_kind, kind)
+        |> Map.put(:event_subscription_id, target.subscription_id)
+        |> Map.put(:event_created_at, target.created_at),
+        actor: Billing.system(),
+        tenant: membership.org_id
+      )
+      |> ignored_or_ok()
+    end
   end
+
+  defp check(membership, target, event) do
+    if target.kind == :event and is_nil(target.created_at) do
+      Logger.warning(
+        "billing: event #{inspect(event["id"])} carries no usable `created`; " <>
+          "applying it without an ordering check."
+      )
+    end
+
+    case EventGuard.check(membership, target) do
+      :ok ->
+        :ok
+
+      {:ignore, :other_subscription = reason} ->
+        # An operator signal: the provider is still billing a subscription this
+        # membership does not hold, or an event arrived for an abandoned one.
+        Logger.warning(
+          "billing: ignoring #{inspect(event["type"])} #{inspect(event["id"])} for " <>
+            "subscription #{inspect(target.subscription_id)}; membership #{membership.id} " <>
+            "holds #{inspect(membership.provider_subscription_id)}."
+        )
+
+        {:ignored, reason}
+
+      {:ignore, :comped_not_provider_managed = reason} ->
+        # The provider may still be billing this member. Comping a paying member
+        # does not cancel their subscription (#3156): the operator cancels it in
+        # the provider's dashboard.
+        Logger.warning(
+          "billing: ignoring #{inspect(event["type"])} #{inspect(event["id"])} for " <>
+            "subscription #{inspect(target.subscription_id)}: membership #{membership.id} " <>
+            "is comped and not provider-managed."
+        )
+
+        {:ignored, reason}
+
+      {:ignore, reason} ->
+        {:ignored, reason}
+    end
+  end
+
+  # An event with no usable `created` leaves the stamp where it was.
+  defp put_stamp(attrs, nil), do: attrs
+  defp put_stamp(attrs, stamp), do: Map.put(attrs, :last_provider_event_at, stamp)
+
+  # Both clocks the stamp is later compared with are the provider's, in whole
+  # seconds. A retrieved state is stamped with the checkout event's `created`;
+  # the local clock (microseconds, possibly ahead) would make a same-second
+  # later event look older and drop it, a `canceled` among them. Without a
+  # `created`, now truncated to the second is the best available.
+  defp stamp(%{kind: :live, created_at: nil}), do: DateTime.truncate(DateTime.utc_now(), :second)
+  defp stamp(%{created_at: nil}), do: nil
+  defp stamp(%{created_at: created_at}), do: created_at
+
+  defp ignored_or_ok({:ok, membership}) do
+    case Ash.Resource.get_metadata(membership, :event_ignored) do
+      nil -> {:ok, membership}
+      reason -> {:ignored, reason}
+    end
+  end
+
+  defp ignored_or_ok(other), do: other
+
+  # The event's own `created`, in seconds. Missing or not an integer: `nil`,
+  # accepted without an ordering check.
+  defp created_at(%{"created" => seconds}) when is_integer(seconds) and seconds >= 0,
+    do: DateTime.from_unix!(seconds)
+
+  defp created_at(_event), do: nil
+
+  # The subscription an event is about. `invoice.payment_failed` carries it on
+  # the invoice: at `parent.subscription_details.subscription` on the pinned
+  # `2025-04-30.basil` API, at `subscription` before it.
+  defp event_subscription_id(%{"type" => "customer.subscription." <> _} = event),
+    do: id_of(object(event)["id"])
+
+  defp event_subscription_id(event) do
+    case object(event) do
+      %{"parent" => %{"subscription_details" => %{"subscription" => sub}}} -> id_of(sub)
+      %{"subscription" => sub} -> id_of(sub)
+      _object -> nil
+    end
+  end
+
+  defp id_of(id) when is_binary(id), do: id
+  defp id_of(%{"id" => id}) when is_binary(id), do: id
+  defp id_of(_other), do: nil
 
   defp status_of(%{"status" => provider_status}) do
     case membership_status(provider_status) do

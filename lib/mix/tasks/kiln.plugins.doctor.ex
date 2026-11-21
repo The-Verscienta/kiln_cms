@@ -56,6 +56,12 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       a list of machine-name atoms or `{name, label}` pairs, with no name
       twice. The host drops a malformed entry without a word, so the fields
       admin would simply not offer it;
+    * a field type's list capability (`c:Kiln.FieldType.multiple?/0` and
+      `c:Kiln.FieldType.unique_items?/0`, #2680) answers a boolean without
+      raising, and one that takes lists is a scalar: its `input_parts/1` is
+      `[]` for every editor input it offers, and its `cast/2` of a sample
+      value answers one string or number. The host otherwise leaves the type
+      single-valued, or refuses every write of the list;
     * a plugin's staging scrub declaration (`c:Kiln.Plugin.staging_scrub/0`,
       #2975) is usable: a list of well-formed entries, each naming an
       AshPostgres resource of the plugin's own domains (not a core table, not
@@ -79,6 +85,11 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   Exits non-zero with every violation listed, so it can gate CI/precommit.
 
   It also **notes**, without failing:
+
+    * a field type with `c:Kiln.FieldType.unique_items?/0` but not
+      `c:Kiln.FieldType.multiple?/0` (it has no effect), or with both
+      `c:Kiln.FieldType.multiple?/0` and `c:Kiln.FieldType.input_hook/1` (the
+      hook is not attached to a list field's item inputs) (#2680);
 
     * a plugin that doesn't say what it does: no `c:Kiln.Plugin.summary/0`,
       or the `TODO:` placeholder `mix kiln.gen.plugin` scaffolds. The
@@ -136,6 +147,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
         field_type_schema_problems(plugins, field_types_by_plugin) ++
         field_type_hook_problems(plugins, field_types_by_plugin) ++
         field_type_widget_problems(plugins, field_types_by_plugin) ++
+        field_type_list_problems(plugins, field_types_by_plugin) ++
         sdk_requirement_problems(sdk_version(), sdk_requirements(declared_deps())) ++
         project_lock_problems(File.cwd!())
 
@@ -147,6 +159,10 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
           "adds; it's shown in System → Plugins and by mix kiln.plugins.list"
       )
     end)
+
+    plugins
+    |> field_type_list_notes(field_types_by_plugin)
+    |> Enum.each(&Mix.shell().info("note: " <> &1))
 
     project_deps = Mix.Project.config()[:kiln_project_deps] || []
 
@@ -1261,6 +1277,179 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
     end
   rescue
     e -> raised_problem(plugin, "field type #{inspect(mod)}", "listing its widgets/1", e)
+  end
+
+  @doc false
+  # #2680: `multiple?/0` and `unique_items?/0` are read once, at compile time
+  # (`KilnCMS.CMS.FieldTypes.list_capable/0`), where a raise or an answer that
+  # is not `true` quietly leaves the type single-valued. A type that does take
+  # lists must be a scalar for every editor input it offers, and cast a sample
+  # to one string or number — the write path refuses a list whose items cast
+  # to anything else. Public so a test can hand it inline modules.
+  @spec field_type_list_problems([module()], %{module() => [module()]}) :: [String.t()]
+  def field_type_list_problems(plugins, field_types_by_plugin) do
+    for plugin <- plugins,
+        mod <- Map.get(field_types_by_plugin, plugin, []),
+        field_type_module?(mod),
+        problem <- list_problems(plugin, mod),
+        do: problem
+  end
+
+  defp list_problems(plugin, mod) do
+    subject = "#{plugin.name()}: field type #{inspect(mod.name())}"
+
+    answers =
+      for callback <- [:multiple?, :unique_items?],
+          function_exported?(mod, callback, 0),
+          do: {callback, list_answer(plugin, mod, callback)}
+
+    shape_problems =
+      for {callback, {:ok, other}} <- answers, not is_boolean(other) do
+        "#{subject} #{callback}/0 returned #{inspect(other)}; expected true or false"
+      end
+
+    raised = for {_callback, {:raised, problem}} <- answers, do: problem
+
+    list? = match?({:ok, true}, Keyword.get(answers, :multiple?))
+
+    problems =
+      shape_problems ++
+        raised ++ if(list?, do: scalar_list_problems(plugin, mod, subject), else: [])
+
+    problems ++ probe_problems(list?, problems, mod, subject)
+  end
+
+  # The host decides list capability once, at compile time, probing
+  # `input_parts/1` with a bare definition map rather than a
+  # `FieldDefinition` struct; a type whose `input_parts/1` raises on that map
+  # is quietly left single-valued. Say so, since nothing else would.
+  defp probe_problems(true = _list?, [] = _problems, mod, subject) do
+    if KilnCMS.CMS.FieldTypes.Capability.list_capable?(mod),
+      do: [],
+      else: [
+        "#{subject} multiple?/0 returns true, but the host's probe of input_parts/1 " <>
+          "(a definition map with only name, label, field_type, widget and multiple) " <>
+          "raised or returned parts, so the type stays single-valued; make input_parts/1 " <>
+          "return [] without reading other definition keys"
+      ]
+  end
+
+  defp probe_problems(_list?, _problems, _mod, _subject), do: []
+
+  defp list_answer(plugin, mod, callback) do
+    {:ok, apply(mod, callback, [])}
+  rescue
+    e ->
+      {:raised,
+       hd(raised_problem(plugin, "field type #{inspect(mod)}", "answering #{callback}/0", e))}
+  end
+
+  # Every editor input the type offers, and none: `input_parts/1` must be `[]`
+  # under each (a composite value is a repeating group's job), and a sample
+  # of its single input must cast to one string or number.
+  defp scalar_list_problems(plugin, mod, subject) do
+    definitions =
+      for widget <- [nil | offered_widget_names(mod)] do
+        struct(FieldDefinition,
+          name: "sample_field",
+          label: "Sample field",
+          field_type: mod.name(),
+          required: false,
+          multiple: false,
+          widget: widget,
+          content_type: probe_content_type()
+        )
+      end
+
+    composite =
+      for definition <- definitions,
+          SchemaExport.parts(mod, %{definition | multiple: true}) != [] do
+        "#{subject} multiple?/0 is true, but its input_parts/1 is not [] " <>
+          if(definition.widget, do: "for its #{inspect(definition.widget)} input", else: "") <>
+          "; a list holds one scalar per item — use a repeating group field for composite values"
+      end
+
+    case Enum.uniq(composite) do
+      [] -> sample_cast_problems(mod, hd(definitions), subject)
+      composite -> composite
+    end
+  rescue
+    e -> raised_problem(plugin, "field type #{inspect(mod)}", "checking it can hold a list", e)
+  end
+
+  # A sample of the type's single input, cast as one item of a list is: it
+  # must answer one string or number. A refusal is the sample's fault, not a
+  # problem (`field_type_divergence/2` says the same).
+  defp sample_cast_problems(mod, definition, subject) do
+    html_type = if function_exported?(mod, :input_type, 0), do: mod.input_type(), else: "text"
+
+    case mod.cast(widget_sample(html_type), definition) do
+      {:ok, value} when not (is_binary(value) or is_number(value)) ->
+        [
+          "#{subject} multiple?/0 is true, but cast/2 of a sample value returned " <>
+            "#{inspect(value)}; each item of a list must cast to one string or number"
+        ]
+
+      _scalar_or_refused ->
+        []
+    end
+  end
+
+  defp offered_widget_names(mod) do
+    if function_exported?(mod, :widgets, 1) do
+      probe = struct(FieldDefinition, name: "sample_field", field_type: mod.name())
+
+      for entry <- List.wrap(mod.widgets(probe)),
+          name = widget_entry_name(entry),
+          name != nil,
+          uniq: true,
+          do: Atom.to_string(name)
+    else
+      []
+    end
+  rescue
+    _exception -> []
+  end
+
+  @doc false
+  # #2680: what `field_type_list_problems/2` does not fail on but an author
+  # should hear. Public for the same reason.
+  @spec field_type_list_notes([module()], %{module() => [module()]}) :: [String.t()]
+  def field_type_list_notes(plugins, field_types_by_plugin) do
+    for plugin <- plugins,
+        mod <- Map.get(field_types_by_plugin, plugin, []),
+        field_type_module?(mod),
+        note <- list_notes(plugin, mod),
+        do: note
+  end
+
+  defp list_notes(plugin, mod) do
+    subject = "#{plugin.name()}: field type #{inspect(mod.name())}"
+    list? = KilnCMS.CMS.FieldTypes.Capability.list_capable?(mod)
+
+    unique? =
+      function_exported?(mod, :unique_items?, 0) and
+        KilnCMS.CMS.FieldTypes.Capability.unique_items?(mod)
+
+    hooked? = list? and hook?(mod)
+
+    Enum.reject(
+      [
+        (unique? and not list?) &&
+          "#{subject} has unique_items?/0 but does not take lists (multiple?/0), so it has no effect",
+        hooked? &&
+          "#{subject} takes lists and has an input_hook/1; the hook is not attached to a list " <>
+            "field's item inputs, so a list field of it works without it"
+      ],
+      &(&1 == false)
+    )
+  end
+
+  defp hook?(mod) do
+    function_exported?(mod, :input_hook, 1) and
+      mod.input_hook(struct(FieldDefinition, name: "sample_field", field_type: mod.name())) != nil
+  rescue
+    _exception -> false
   end
 
   # The widget's name when `entry` is one the SDK allows, else nil.

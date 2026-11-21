@@ -74,6 +74,7 @@ defmodule KilnCMS.Federation do
       define :list_followers, action: :read
       define :get_follower, action: :read, get_by: [:id]
       define :deliverable_followers, action: :deliverable
+      define :followers_at_inbox, action: :at_inbox, args: [:inbox_uri]
       define :follow, action: :follow, args: [:actor_uri, :inbox_uri]
       define :destroy_follower, action: :destroy
       define :record_follower_failure, action: :record_failure
@@ -148,44 +149,126 @@ defmodule KilnCMS.Federation do
     end
   end
 
+  # Ledger rows per `bulk_create` batch and DeliveryWorker jobs per
+  # `Oban.insert_all`. `insert_all` does not chunk on its own, and one INSERT of
+  # a big site's fan-out would pass Postgres's 65,535-parameter limit — which,
+  # inside the transaction below, would roll the whole fan-out back on every
+  # retry. The same size `KilnCMS.Firing.Sweep` enqueues in.
+  @fan_out_batch 500
+
   @doc """
   Queue `activity` for every deliverable follower of `org_id`: one ledger row
-  and one `KilnCMS.Federation.DeliveryWorker` job each. The fan-out
-  `AnnounceWorker` (a document's `Create`/`Update`/`Delete`) and
-  `ActorUpdateWorker` (the actor's own `Update` after a re-key, #1487) share.
+  and one `KilnCMS.Federation.DeliveryWorker` job per **distinct inbox**
+  (#2753). The fan-out `AnnounceWorker` (a document's `Create`/`Update`/
+  `Delete`) and `ActorUpdateWorker` (the actor's own `Update` after a re-key,
+  #1487) share.
 
   `:deliverable` (#967) is the read that names who gets it, rather than the
   rule restated here. The signature is added by the delivery worker at send
   time, with whatever key the site holds then.
+
+  ## One POST per inbox
+
+  Followers on an instance that publishes a `sharedInbox` all deliver to it
+  (`Follower.delivery_inbox/1`), and one POST there reaches every one of them —
+  everything sent through here is addressed to the public collection and the
+  followers collection, which is what a shared inbox fans out on. The row's
+  `follower_id` says whose bookkeeping its outcome lands on:
+
+    * set — the inbox had exactly one follower when the row was written, and
+      the outcome is exactly that follower's;
+    * `nil` — several followers shared the inbox, and the outcome is every
+      follower whose `delivery_inbox/1` is the row's `inbox_uri` when the
+      delivery settles (`Follower`'s `:at_inbox`).
+
+  ## All or nothing
+
+  The ledger rows and the jobs are written in one transaction, so a failure
+  part-way leaves nothing behind and the calling worker's retry starts clean
+  instead of re-sending to everyone already queued. Returns `:ok`, or
+  `{:error, reason}` when the ledger write failed and was rolled back — the
+  callers return that as their job result, so Oban retries. A database error
+  inserting the jobs raises out of the transaction, which rolls it back the
+  same way.
+
+  What this does not close: the worker dying after the commit and before Oban
+  records its success. The retry then fans out a second time — one extra POST
+  per inbox, carrying a document activity id the receiver has already seen.
+
+  `opts`: `:batch_size` (default #{@fan_out_batch}) — rows per ledger batch and
+  jobs per insert.
   """
-  @spec deliver_to_followers(map(), atom(), Ash.UUID.t() | nil, Ash.UUID.t()) :: :ok
-  def deliver_to_followers(activity, activity_type, document_id, org_id) do
+  @spec deliver_to_followers(map(), atom(), Ash.UUID.t() | nil, Ash.UUID.t(), keyword()) ::
+          :ok | {:error, term()}
+  def deliver_to_followers(activity, activity_type, document_id, org_id, opts \\ []) do
+    batch_size = Keyword.get(opts, :batch_size, @fan_out_batch)
+
     # This runs inside a worker, as the system, after the gates that matter
     # have passed (federation on for the deployment and the site). The
     # follower read and the ledger writes are scoped by `tenant: org_id`, and
     # the system actor is admitted to exactly those (#1659).
-    followers = deliverable_followers!(actor: system(), tenant: org_id)
+    inputs =
+      deliverable_followers!(actor: system(), tenant: org_id)
+      |> Enum.group_by(&KilnCMS.Federation.Follower.delivery_inbox/1)
+      # Sorted so the batches are the same on every attempt.
+      |> Enum.sort_by(fn {inbox, _followers} -> inbox end)
+      |> Enum.map(fn {inbox, followers} ->
+        %{
+          follower_id: covered_follower_id(followers),
+          inbox_uri: inbox,
+          activity_type: activity_type,
+          activity: activity,
+          document_id: document_id
+        }
+      end)
 
-    Enum.each(followers, fn follower ->
-      {:ok, delivery} =
-        create_federation_delivery(
-          %{
-            follower_id: follower.id,
-            inbox_uri: KilnCMS.Federation.Follower.delivery_inbox(follower),
-            activity_type: activity_type,
-            activity: activity,
-            document_id: document_id
-          },
-          actor: system(),
-          tenant: org_id
-        )
+    case inputs do
+      [] -> :ok
+      inputs -> queue_deliveries(inputs, org_id, batch_size)
+    end
+  end
 
-      %{"org_id" => org_id, "delivery_id" => delivery.id}
-      |> KilnCMS.Federation.DeliveryWorker.new()
-      |> Oban.insert()
+  # A group of one keeps its follower: an inbox only that follower uses gets
+  # the per-follower bookkeeping it always had, and the delivery worker's
+  # org-wide `:at_inbox` read is left to the inboxes that actually are shared.
+  defp covered_follower_id([follower]), do: follower.id
+  defp covered_follower_id(_followers), do: nil
+
+  defp queue_deliveries(inputs, org_id, batch_size) do
+    KilnCMS.Repo.transaction(fn ->
+      case create_federation_delivery(inputs,
+             actor: system(),
+             tenant: org_id,
+             # Only the ids come back: the jobs need nothing else, and the
+             # full rows would decode one copy of the activity per inbox.
+             bulk_options: [
+               batch_size: batch_size,
+               return_records?: true,
+               select: [:id],
+               return_errors?: true,
+               stop_on_error?: true
+             ]
+           ) do
+        %Ash.BulkResult{status: :success, records: deliveries} ->
+          insert_delivery_jobs(deliveries, org_id, batch_size)
+
+        %Ash.BulkResult{errors: errors} ->
+          KilnCMS.Repo.rollback(Ash.Error.to_error_class(errors))
+      end
     end)
+    |> case do
+      {:ok, :ok} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
-    :ok
+  defp insert_delivery_jobs(deliveries, org_id, batch_size) do
+    deliveries
+    |> Enum.map(
+      &KilnCMS.Federation.DeliveryWorker.new(%{"org_id" => org_id, "delivery_id" => &1.id})
+    )
+    |> Enum.chunk_every(batch_size)
+    |> Enum.each(&Oban.insert_all/1)
   end
 
   @doc """

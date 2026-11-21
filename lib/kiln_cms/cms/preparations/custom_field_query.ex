@@ -81,7 +81,13 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   no value, `not_eq` does not. Items are cast as a single field of their
   type would be. Comparing items (`gt`…) and matching text in them are not
   supported yet, and a list is not sortable — see
-  `KilnCMS.CMS.Preparations.CustomFieldQuery.Lists`.
+  `KilnCMS.CMS.Preparations.CustomFieldQuery.Lists`. A plugin field type that
+  takes lists (`c:Kiln.FieldType.multiple?/0`, #2680) reads the same way, its
+  operands cast by its own `cast/2`; in `custom_where` its items take the kind
+  its `graphql_kind/1` gives, and one with no such kind is `custom_filter`'s
+  alone. A **held list** (`KilnCMS.CMS.FieldDefinition.held_list?/1`: its type
+  no longer takes lists) is refused by every operator and by `custom_sort`
+  (400), until an admin saves it as a single value.
 
   A
   reference also takes the
@@ -288,18 +294,32 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # as every owner agrees on the value type (the SQL cast is the same) and,
   # for a typed list (#2289), on whether it is one: a list's operators are not
   # a single value's.
+  #
+  # A held list (#2680: its type no longer takes lists) is neither filtered nor
+  # sorted, under any owner: its stored items no longer match what the type
+  # casts an operand to, so any answer would be a guess.
   defp resolve(defs, name) do
     case Enum.filter(defs, &(&1.name == name)) do
       [] ->
         {:error, "unknown custom field #{inspect(name)}"}
 
       [definition | _] = matches ->
-        if matches |> Enum.map(&value_shape/1) |> Enum.uniq() |> length() == 1 do
-          {:ok, definition}
-        else
-          {:error,
-           "custom field #{inspect(name)} has a different type per content type — " <>
-             "scope the query with filter[type_name] (or type_definition_id)"}
+        held = Enum.find(matches, &KilnCMS.CMS.FieldDefinition.held_list?/1)
+
+        cond do
+          held ->
+            {:error,
+             "custom field #{inspect(name)} holds lists its field type (#{held.field_type}) " <>
+               "no longer takes; it can't be filtered or sorted until an admin saves it as a " <>
+               "single value or the plugin takes lists again"}
+
+          matches |> Enum.map(&value_shape/1) |> Enum.uniq() |> length() == 1 ->
+            {:ok, definition}
+
+          true ->
+            {:error,
+             "custom field #{inspect(name)} has a different type per content type — " <>
+               "scope the query with filter[type_name] (or type_definition_id)"}
         end
     end
   end
@@ -1210,6 +1230,12 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     name = definition.name
 
     cond do
+      # A plugin type with no `graphql_kind/1` (#2680) has no typed condition.
+      item == :json ->
+        {:error,
+         "custom field #{inspect(name)}: customWhere does not support a list of json values; " <>
+           "use customFilter"}
+
       item != given ->
         {:error,
          "custom field #{inspect(name)} is a list of #{camel(actual_key(item))} values, " <>

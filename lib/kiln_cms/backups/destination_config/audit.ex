@@ -1,7 +1,7 @@
 defmodule KilnCMS.Backups.DestinationConfig.Audit do
   @moduledoc """
   The instance security log entries of a `KilnCMS.Backups.DestinationConfig`
-  create, update, destroy, Test (#2220) and adopted backup directories: their target, metadata and, for a
+  create, update, destroy, Test (#2220), host-key trust (#2222) and adopted backup directories: their target, metadata and, for a
   Test, who pressed it. Each type's keys are in
   `KilnCMS.Security.InstanceEvent`'s allowlist.
 
@@ -84,6 +84,23 @@ defmodule KilnCMS.Backups.DestinationConfig.Audit do
       "kind" => record.kind,
       "ok" => record.last_test_ok,
       "node" => record.last_test_node
+    }
+  end
+
+  @doc false
+  # A host key trusted (#2222): the key, and the one it replaced, by
+  # fingerprint only.
+  def host_key_trusted(record, changeset) do
+    before = changeset.data.host_key || %{}
+    host_key = record.host_key || %{}
+
+    %{
+      "name" => record.name,
+      "kind" => record.kind,
+      "algorithm" => host_key["algorithm"],
+      "fingerprint" => host_key["fingerprint"],
+      "previous_fingerprint" => before["fingerprint"] || "none",
+      "how" => host_key["how"]
     }
   end
 

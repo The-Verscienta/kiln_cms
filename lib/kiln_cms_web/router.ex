@@ -83,7 +83,7 @@ defmodule KilnCMSWeb.Router do
     # Introspection is refused by the document pipeline (`KilnCMSWeb.GraphqlLimits`),
     # which replaced the `DisableGraphqlIntrospection` plug that stood here.
     plug KilnCMSWeb.Plugs.GraphqlBatchLimit, :gql
-    plug :load_from_bearer
+    plug KilnCMSWeb.Plugs.LoadFromBearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
     plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
@@ -142,7 +142,7 @@ defmodule KilnCMSWeb.Router do
   pipeline :api do
     plug :accepts, ["json"]
     plug KilnCMSWeb.Plugs.RateLimit, :api
-    plug :load_from_bearer
+    plug KilnCMSWeb.Plugs.LoadFromBearer
     plug :set_actor, :user
     # API keys (`Authorization: Bearer kiln_…`) as an alternative to a JWT.
     plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
@@ -165,7 +165,7 @@ defmodule KilnCMSWeb.Router do
   pipeline :feed do
     plug KilnCMSWeb.FeedStream.JoinBudget
     plug KilnCMSWeb.Plugs.RateLimit, :api
-    plug :load_from_bearer
+    plug KilnCMSWeb.Plugs.LoadFromBearer
     plug :set_actor, :user
     plug KilnCMSWeb.Plugs.ApiKeyAuth, loads_bearer: true
     plug KilnCMSWeb.Plugs.SecondFactorBearer
@@ -220,9 +220,7 @@ defmodule KilnCMSWeb.Router do
     plug :accepts, ["json"]
     plug KilnCMSWeb.Plugs.RateLimit, :api
 
-    plug AshAuthentication.Strategy.ApiKey.Plug,
-      resource: KilnCMS.Accounts.User,
-      required?: true
+    plug KilnCMSWeb.Plugs.RequireApiKey
 
     # The key that plug verified, remembered on this node so a later `:api`
     # refusal of it can alert (`KilnCMS.Security.ApiKeyTrip`).
@@ -464,7 +462,8 @@ defmodule KilnCMSWeb.Router do
     plug KilnCMSWeb.Plugs.AdminAllowlist, :html
   end
 
-  # The same gate on the security posture, answering in JSON.
+  # The same gate on the monitoring endpoints under `/api/security` (posture
+  # and plugin health), answering in JSON.
   pipeline :admin_allowlist_api do
     plug KilnCMSWeb.Plugs.AdminAllowlist, :json
   end
@@ -948,15 +947,20 @@ defmodule KilnCMSWeb.Router do
     post "/sign_in/verify", ApiAuthController, :verify
   end
 
-  # Security posture for monitoring (#2521): an administrator's JWT or API
-  # key, behind the site's admin allowlist (first, as on the headless
-  # sign-in, so an off-list caller learns nothing about its credential), on
-  # `:api`'s bucket. The checks behind it run at most once per site and scope
-  # set every 30 s per node (`KilnCMS.Security.Posture.snapshot/2`).
+  # Monitoring endpoints: an administrator's JWT or API key, behind the
+  # host site's admin allowlist (first, as on the headless sign-in, so an
+  # off-list caller learns nothing about its credential), on `:api`'s bucket.
+  #
+  #   * Security posture (#2521), a site administrator's: the checks behind it
+  #     run at most once per site and scope set every 30 s per node
+  #     (`KilnCMS.Security.Posture.snapshot/2`).
+  #   * Plugin health (#2571), a platform administrator's: read from this
+  #     node's cache only, never asking hex.pm or the notices feed.
   scope "/api/security", KilnCMSWeb do
     pipe_through [:admin_allowlist_api, :no_store, :api]
 
     get "/posture", SecurityPostureController, :show
+    get "/plugin-health", PluginHealthController, :show
   end
 
   # A drafts-only key exchanging itself for a fresh one (ADR 0012). On the
@@ -1024,13 +1028,16 @@ defmodule KilnCMSWeb.Router do
 
   # Hybrid search (keyword + semantic RRF, reranked when enabled) — not
   # expressible as one Ash action, so it gets a thin controller (roadmap #4).
-  # Its own scope for `:public_cache`: actorless (#1013), so its anonymous
+  # And the site's link-preview defaults (#2577): name, X handle, default share
+  # image, the values its public `<head>` already carries. Their own scope for
+  # `:public_cache`: both are actorless (#1013 for search), so the anonymous
   # answer is the same for everyone at this URL. Declared before the scope
   # below; the paths do not overlap.
   scope "/api", KilnCMSWeb do
     pipe_through [:api, :public_cache]
 
     get "/search", SearchApiController, :index
+    get "/site", SiteController, :show
   end
 
   # The reads that render a draft for a preview token (#1887), in their own

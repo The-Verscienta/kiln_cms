@@ -55,7 +55,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     |> form("#new-field-form",
       field_definition: %{
         scopes: ["page"],
-        name: "heel_height",
+        name: "fdl_heel_height",
         label: "Heel",
         field_type: "string"
       }
@@ -64,11 +64,11 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
     html = render(lv)
     assert html =~ "Heel"
-    assert html =~ "heel_height"
+    assert html =~ "fdl_heel_height"
 
     assert :page
            |> CMS.field_definitions_for!(authorize?: false)
-           |> Enum.any?(&(&1.name == "heel_height"))
+           |> Enum.any?(&(&1.name == "fdl_heel_height"))
   end
 
   test "an admin flags a field as naming the record", %{conn: conn} do
@@ -714,7 +714,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     CMS.create_field_definition!(
       %{
         content_type: :page,
-        name: "heel_height",
+        name: "fdl_heel_height",
         label: "Heel height",
         field_type: :string
       },
@@ -730,7 +730,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
     assert html =~ "Custom fields"
     assert html =~ "Heel height"
-    assert html =~ "custom_fields][heel_height]"
+    assert html =~ "custom_fields][fdl_heel_height]"
   end
 
   test "a broken formula is refused when the computed field is defined", %{conn: conn} do
@@ -856,7 +856,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
       field =
         CMS.create_field_definition!(
-          %{content_type: :page, name: "venue", label: "Venue", field_type: :geolocation},
+          %{content_type: :page, name: "fdl_venue", label: "Venue", field_type: :geolocation},
           actor: admin
         )
 
@@ -900,8 +900,8 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       assert name_value(lv) == "shoe_size_eu"
 
       # Retyping the label moves the suggestion with it.
-      label_change(lv, "Heel height", "shoe_size_eu")
-      assert name_value(lv) == "heel_height"
+      label_change(lv, "Fdl heel height", "shoe_size_eu")
+      assert name_value(lv) == "fdl_heel_height"
 
       # Typing into the name takes it over: the label no longer rewrites it.
       lv
@@ -953,7 +953,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
   describe "a duplicate machine name" do
     test "is flagged while typing and refused on submit", %{conn: conn} do
       admin = authed_user(:admin)
-      create_field!(admin, :page, "heel_height")
+      create_field!(admin, :page, "fdl_heel_height")
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
       html =
@@ -961,7 +961,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
         |> form("#new-field-form")
         |> render_change(%{
           "_target" => ["field_definition", "label"],
-          "field_definition" => %{"scopes" => ["", "page"], "label" => "Heel height"}
+          "field_definition" => %{"scopes" => ["", "page"], "label" => "Fdl heel height"}
         })
 
       assert html =~ "is already a field on Page"
@@ -971,7 +971,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
         |> form("#new-field-form",
           field_definition: %{
             scopes: ["page"],
-            name: "heel_height",
+            name: "fdl_heel_height",
             label: "Heel height again",
             field_type: "string"
           }
@@ -984,7 +984,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       assert [_only_the_original] =
                :page
                |> CMS.field_definitions_for!(authorize?: false)
-               |> Enum.filter(&(&1.name == "heel_height"))
+               |> Enum.filter(&(&1.name == "fdl_heel_height"))
     end
 
     test "on one ticked type writes nothing to the others", %{conn: conn} do
@@ -1171,7 +1171,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
         CMS.create_field_definition!(
           %{
             content_type: :page,
-            name: "size",
+            name: "fdl_size",
             label: "Size",
             field_type: :select,
             options: ["S", "M"],
@@ -1293,7 +1293,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       |> form("#new-field-form",
         field_definition: %{
           scopes: ["page"],
-          label: "Size",
+          label: "Fdl size",
           field_type: "select",
           options: "Small\nLarge",
           default: "Large"
@@ -1304,7 +1304,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       assert [%{options: ["Small", "Large"], default: "Large"}] =
                :page
                |> CMS.field_definitions_for!(authorize?: false)
-               |> Enum.filter(&(&1.name == "size"))
+               |> Enum.filter(&(&1.name == "fdl_size"))
     end
 
     test "a ticked yes-or-no default is saved as true", %{conn: conn} do
@@ -1316,7 +1316,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       |> form("#new-field-form",
         field_definition: %{
           scopes: ["page"],
-          label: "Featured",
+          label: "Fdl Featured",
           field_type: "boolean",
           default: "true"
         }
@@ -1326,7 +1326,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       assert [%{default: "true"}] =
                :page
                |> CMS.field_definitions_for!(authorize?: false)
-               |> Enum.filter(&(&1.name == "featured"))
+               |> Enum.filter(&(&1.name == "fdl_featured"))
     end
 
     test "picking another type clears it", %{conn: conn} do
@@ -1357,7 +1357,13 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
       field =
         CMS.create_field_definition!(
-          %{content_type: :page, name: "hero", label: "Hero", field_type: :string, default: "x"},
+          %{
+            content_type: :page,
+            name: "fdl_hero",
+            label: "Hero",
+            field_type: :string,
+            default: "x"
+          },
           actor: admin
         )
 
@@ -1662,7 +1668,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
         CMS.create_field_definition!(
           %{
             type_definition_id: ctx.recipe.id,
-            name: "dosages",
+            name: "fdl_dosages",
             label: "Dosages",
             field_type: :group
           },
@@ -1841,7 +1847,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       admin = authed_user(:admin)
 
       CMS.create_field_definition!(
-        %{content_type: :page, name: "price", label: "Price", field_type: :integer},
+        %{content_type: :page, name: "fdl_price", label: "Price", field_type: :integer},
         actor: admin
       )
 
@@ -1849,7 +1855,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
         %{
           title: "Pricey",
           slug: "fd-#{System.unique_integer([:positive])}",
-          custom_fields: %{"price" => 150}
+          custom_fields: %{"fdl_price" => 150}
         },
         actor: admin
       )
@@ -1857,14 +1863,14 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
       computed_change(lv, %{"builder" => %{"mode" => "recipe", "recipe" => "conditional"}})
-      assert has_element?(lv, ~s|#new-field-slot-value option[value="price"]|, "Price")
+      assert has_element?(lv, ~s|#new-field-slot-value option[value="fdl_price"]|, "Price")
 
       computed_change(lv, %{
         "builder" => %{
           "mode" => "recipe",
           "recipe" => "conditional",
           "slots" => %{
-            "value" => "price",
+            "value" => "fdl_price",
             "operator" => "greater_than",
             "compare" => "100",
             "then" => "Premium",
@@ -1875,7 +1881,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
       assert has_element?(
                lv,
-               ~s|#new-field-compute[value='{{ if(greater_than(price, 100), "Premium", "Standard") }}']|
+               ~s|#new-field-compute[value='{{ if(greater_than(fdl_price, 100), "Premium", "Standard") }}']|
              )
 
       assert has_element?(lv, "#new-field-preview output", "Premium")
@@ -2135,7 +2141,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       |> form("#new-field-form",
         field_definition: %{
           scopes: ["page"],
-          name: "sku",
+          name: "fdl_sku",
           label: "SKU",
           field_type: "string",
           validation: %{
@@ -2150,7 +2156,9 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       |> render_submit()
 
       field =
-        :page |> CMS.field_definitions_for!(authorize?: false) |> Enum.find(&(&1.name == "sku"))
+        :page
+        |> CMS.field_definitions_for!(authorize?: false)
+        |> Enum.find(&(&1.name == "fdl_sku"))
 
       assert field.validation == %{
                "min_length" => 3,
@@ -2189,7 +2197,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       |> form("#new-field-form",
         field_definition: %{
           scopes: ["page"],
-          name: "accent",
+          name: "fdl_accent",
           label: "Accent",
           field_type: "color",
           validation: %{palette: "#FFF, #2563eb\n#f59e0b"}
@@ -2200,7 +2208,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       color =
         :page
         |> CMS.field_definitions_for!(authorize?: false)
-        |> Enum.find(&(&1.name == "accent"))
+        |> Enum.find(&(&1.name == "fdl_accent"))
 
       assert color.validation == %{"palette" => ["#FFF", "#2563eb", "#f59e0b"]}
       assert lv |> element("#field-#{color.id}-validation") |> render() =~ "Limited to 3 colors."
@@ -2213,7 +2221,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       |> form("#new-field-form",
         field_definition: %{
           scopes: ["page"],
-          name: "spec",
+          name: "fdl_spec",
           label: "Spec",
           field_type: "json",
           validation: %{json_schema: "{not json"}
@@ -2227,7 +2235,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       |> form("#new-field-form",
         field_definition: %{
           scopes: ["page"],
-          name: "spec",
+          name: "fdl_spec",
           label: "Spec",
           field_type: "json",
           validation: %{json_schema: ~s({"type": "object", "required": ["id"]})}
@@ -2236,7 +2244,9 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       |> render_submit()
 
       spec =
-        :page |> CMS.field_definitions_for!(authorize?: false) |> Enum.find(&(&1.name == "spec"))
+        :page
+        |> CMS.field_definitions_for!(authorize?: false)
+        |> Enum.find(&(&1.name == "fdl_spec"))
 
       assert spec.validation == %{"json_schema" => %{"type" => "object", "required" => ["id"]}}
     end
@@ -2362,7 +2372,7 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
 
       group =
         CMS.create_field_definition!(
-          %{content_type: :page, name: "dosages", label: "Dosages", field_type: :group},
+          %{content_type: :page, name: "fdl_dosages", label: "Dosages", field_type: :group},
           actor: admin
         )
 
@@ -2912,5 +2922,58 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     |> Ash.load!(:group_fields, authorize?: false)
     |> Map.fetch!(:group_fields)
     |> Enum.map(& &1.id)
+  end
+
+  # #2680: a list of a plugin type that no longer takes lists is held; the
+  # fields admin badges it, warns that a save narrows it, and only its own
+  # save (`narrow_held_list?`) does.
+  test "a held list is badged, warned about, and narrowed only by the admin's save", %{
+    conn: conn
+  } do
+    admin = authed_user(:admin)
+    name = "fdl_held_#{System.unique_integer([:positive])}"
+
+    field =
+      CMS.create_field_definition!(
+        %{content_type: :page, name: name, label: "Held", field_type: :rating},
+        actor: admin
+      )
+
+    KilnCMS.Repo.query!("UPDATE field_definitions SET multiple = true WHERE id = $1", [
+      Ecto.UUID.dump!(field.id)
+    ])
+
+    page =
+      CMS.create_page!(
+        %{title: "Held", slug: "fdl-held-#{System.unique_integer([:positive])}"},
+        actor: admin
+      )
+
+    KilnCMS.Repo.query!(
+      "UPDATE pages SET custom_fields = custom_fields || $1 WHERE id = $2",
+      [%{name => [3, 4]}, Ecto.UUID.dump!(page.id)]
+    )
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+    assert has_element?(lv, "#field-#{field.id}-held-list", "list (held)")
+
+    lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+    assert has_element?(
+             lv,
+             "#edit-field-multiple-#{field.id}-narrowing",
+             "This field's type no longer takes a list"
+           )
+
+    lv
+    |> form("#edit-field-#{field.id}", field_definition: %{label: "Rated"})
+    |> render_submit()
+
+    saved = CMS.get_field_definition!(field.id, authorize?: false)
+    refute saved.multiple
+    assert saved.label == "Rated"
+    assert CMS.get_page!(page.id, actor: admin).custom_fields[name] == 3
+    refute has_element?(lv, "#field-#{field.id}-held-list")
   end
 end

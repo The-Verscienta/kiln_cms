@@ -233,6 +233,8 @@ defmodule KilnCMS.Accounts do
       # system-only, pass `authorize?: false`.
       define :list_legacy_audience_accounts, action: :legacy_audience_accounts
       define :update_notification_prefs, action: :update_notification_prefs
+      # The display name (the public byline) — self, or an admin; pass `actor:`.
+      define :update_profile, action: :update_profile
       # The console sidebar preset — self only; pass `actor: user`.
       define :set_nav_preset, action: :set_nav_preset, args: [:nav_preset]
       # The content list's status marks — self only; pass `actor: user`.

@@ -122,23 +122,74 @@ defmodule KilnCMSWeb.ApiDocsTest do
              end)
     end
 
-    test "the security posture is described, with a credential required", %{conn: conn} do
+    test "the monitoring endpoints are described, with a credential required", %{conn: conn} do
       conn = conn |> put_req_header("accept", "application/json") |> get(@spec_path)
       paths = Jason.decode!(response(conn, 200))["paths"]
 
-      assert %{"get" => %{"operationId" => "getSecurityPosture"} = op} =
-               paths["/api/security/posture"]
+      for {path, operation_id} <- [
+            {"/api/security/posture", "getSecurityPosture"},
+            {"/api/security/plugin-health", "getPluginHealth"}
+          ] do
+        assert %{"get" => %{"operationId" => ^operation_id} = op} = paths[path],
+               "expected #{path} to be described"
 
-      # No empty requirement: unlike the document's default, auth is not optional.
-      assert op["security"] == [%{"apiKeyAuth" => []}, %{"bearerAuth" => []}]
-      refute %{} in op["security"]
+        # No empty requirement: unlike the document's default, auth is not optional.
+        assert op["security"] == [%{"apiKeyAuth" => []}, %{"bearerAuth" => []}]
+        refute %{} in op["security"]
 
-      for status <- ~w(200 401 403 429 503),
+        for status <- ~w(200 401 403 429 503),
+            do: assert(Map.has_key?(op["responses"], status), "#{path}: no #{status} response")
+
+        # Value sets are open: no field of the response pins an enum.
+        schema = get_in(op, ["responses", "200", "content", "application/json", "schema"])
+        refute Jason.encode!(schema) =~ ~s("enum"), "#{path} pins an enum"
+      end
+
+      # The plugin health body's top-level fields are all required (#2571).
+      schema =
+        get_in(paths, [
+          "/api/security/plugin-health",
+          "get",
+          "responses",
+          "200",
+          "content",
+          "application/json",
+          "schema"
+        ])
+
+      assert Enum.sort(schema["required"]) ==
+               ~w(checked_at counts notices plugins state version)
+    end
+  end
+
+  describe "the site defaults route (#2577)" do
+    setup do
+      set_api_docs(true)
+      :ok
+    end
+
+    test "is described as public delivery, every key required", %{conn: conn} do
+      conn = conn |> put_req_header("accept", "application/json") |> get(@spec_path)
+      paths = Jason.decode!(response(conn, 200))["paths"]
+
+      assert %{"get" => %{"operationId" => "getSite", "tags" => ["Delivery"]} = op} =
+               paths["/api/site"]
+
+      assert op["security"] == []
+
+      for status <- ~w(200 401 503),
           do: assert(Map.has_key?(op["responses"], status), "no #{status} response")
 
-      # Value sets are open: no field of the response pins an enum.
       schema = get_in(op, ["responses", "200", "content", "application/json", "schema"])
-      refute Jason.encode!(schema) =~ ~s("enum")
+      assert Enum.sort(schema["required"]) == ~w(site_name social_image_url twitter_site)
+
+      assert Enum.sort(Map.keys(schema["properties"])) ==
+               ~w(site_name social_image_url twitter_site)
+
+      refute schema["properties"]["site_name"]["nullable"]
+      assert schema["properties"]["twitter_site"]["nullable"]
+      assert schema["properties"]["social_image_url"]["nullable"]
+      assert schema["properties"]["social_image_url"]["format"] == "uri"
     end
   end
 

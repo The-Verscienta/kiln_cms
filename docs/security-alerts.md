@@ -45,6 +45,7 @@ Platform alerts:
 | `new_api_key` | An API key is minted. Rotating a key into its successor is not an alert | No |
 | `api_key_abuse` | A rotated-away API key is presented to `POST /api/keys/rotate` again more than 120 seconds after its rotation: two parties held the key, and Kiln revoked the whole chain ([self-rotation](headless-consumer-guide.md#keeping-the-key-alive-self-rotation)) | No |
 | `api_key_rate_limited` | A verified API key goes over a rate limit (see [API keys over a rate limit](#api-keys-over-a-rate-limit)) | Yes, by a platform admin. On by default |
+| `backup_host_key_changed` | An SFTP backup destination's server presented a host key other than the one a platform admin trusted, so the destination failed (#2222). Names the destination and links to the instance security log. At most once an hour per destination, and once per alert window across destinations. Its event is in the instance security log (`backup_destination_host_key_mismatch`); see [backups.md](backups.md#when-the-servers-host-key-changes) | No |
 
 ### What does not raise an alert
 
@@ -841,7 +842,8 @@ ways.
   no side effect, so the scanner guard asking it raises nothing.
 - `KilnCMS.Security.ApiKeyTrip`: the node-local cache of verified keys
   (`remember/2`, called by `KilnCMSWeb.Plugs.ApiKeyAuth` and, on `/mcp`, by
-  `KilnCMSWeb.Plugs.RememberApiKey`) and `note/2`, called from the refusal
+  `KilnCMSWeb.Plugs.RememberApiKey` once `KilnCMSWeb.Plugs.RequireApiKey` has
+  verified the key) and `note/2`, called from the refusal
   branch of `KilnCMSWeb.Plugs.RateLimit` and
   `KilnCMSWeb.Plugs.GraphqlBatchLimit`. `buckets/0` lists the limits it
   covers. A new rate-limited API surface that should alert needs its bucket

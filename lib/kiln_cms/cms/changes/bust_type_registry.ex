@@ -195,11 +195,19 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   # (another org's cached registry is unaffected). After the commit, for
   # `bust_feeds/2`'s first reason — this used to be an `after_action`, where a
   # registry read between the bust and the COMMIT re-cached the old type set.
+  #
+  # The head generation too (#2765): a page's feed and calendar `<link>`s and
+  # its type's label come from the registry at render time, not from anything
+  # on the row, so without it a revalidating client kept a 304 for the old
+  # `<head>`. #1208 added this bump (#1079) and #1227 lost it. It fires on every type
+  # and field write, which costs each page of the site one 200; those writes
+  # are rare.
   defp bust_registry(_changeset, {:ok, record} = result) do
     KilnCMS.AfterCommit.run(fn ->
       KilnCMS.Cache.bust_type_registry(record.org_id)
       KilnCMS.Cache.bust_sitemap(record.org_id)
       KilnCMS.Cache.bust_llms(record.org_id)
+      KilnCMS.Cache.bump_head_generation(record.org_id)
     end)
 
     result

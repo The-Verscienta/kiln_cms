@@ -6,7 +6,8 @@ defmodule KilnCMS.Backups.Destination do
 
   The behaviour every adapter implements is `Kiln.BackupDestination`, in the
   plugin SDK, so Kiln's own adapters (`KilnCMS.Backups.Destination.Rclone`,
-  `KilnCMS.Backups.Destination.Local`, `KilnCMS.Backups.Destination.S3`) and
+  `KilnCMS.Backups.Destination.Local`, `KilnCMS.Backups.Destination.S3`,
+  `KilnCMS.Backups.Destination.Sftp`) and
   a plugin's are the same kind of thing. This module is the core's side of it:
 
     * `registry/0` — every installed adapter, by `kind/0`;
@@ -34,13 +35,13 @@ defmodule KilnCMS.Backups.Destination do
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups
   alias KilnCMS.Backups.{Artifact, DestinationConfig, RcloneRemote, Redact, RunDestination}
-  alias KilnCMS.Backups.Destination.{Local, Rclone, S3}
+  alias KilnCMS.Backups.Destination.{Local, Rclone, S3, Sftp}
 
   require Logger
 
   # Kiln's own adapters. First in the registry, so a plugin can never take
   # over the kind a stored destination of Kiln's carries.
-  @core [Rclone, Local, S3]
+  @core [Rclone, Local, S3, Sftp]
 
   # The bound on one adapter call made outside a backup step (a Test, a
   # task), unless the caller passes `:timeout` or `:deadline`. A step passes
@@ -81,7 +82,7 @@ defmodule KilnCMS.Backups.Destination do
   A module that does not load, does not implement `Kiln.BackupDestination`,
   or answers no usable `kind/0` is left out, and so is one whose kind an
   earlier module already has: the first one listed keeps it, so a plugin
-  cannot displace Kiln's own `local`, `rclone` or `s3` (`core_kinds/0`). `mix kiln.plugins.doctor`
+  cannot displace Kiln's own `local`, `rclone`, `s3` or `sftp` (`core_kinds/0`). `mix kiln.plugins.doctor`
   reports both.
   """
   @spec registry() :: [module()]
@@ -99,8 +100,8 @@ defmodule KilnCMS.Backups.Destination do
   end
 
   @doc """
-  The kinds of Kiln's own adapters: `"rclone"`, `"local"` and `"s3"`. No
-  plugin can take one over.
+  The kinds of Kiln's own adapters: `"rclone"`, `"local"`, `"s3"` and
+  `"sftp"`. No plugin can take one over.
   """
   @spec core_kinds() :: [String.t()]
   def core_kinds, do: Enum.map(@core, & &1.kind())
@@ -390,6 +391,7 @@ defmodule KilnCMS.Backups.Destination do
   @type location ::
           Rclone.location()
           | {:s3, String.t(), non_neg_integer(), String.t(), [String.t()]}
+          | {:sftp, String.t(), non_neg_integer(), String.t(), [String.t()]}
           | :unknown
 
   @doc """
@@ -407,8 +409,8 @@ defmodule KilnCMS.Backups.Destination do
 
   @doc """
   Where `config` writes, normalized for `overlap?/2`: `{:rclone, name,
-  segments}`, `{:local, segments}` or `{:s3, host, port, bucket, segments}`
-  for Kiln's own adapters, `:unknown` for a plugin's, whose settings mean
+  segments}`, `{:local, segments}`, `{:s3, host, port, bucket, segments}` or
+  `{:sftp, host, port, username, segments}` for Kiln's own adapters, `:unknown` for a plugin's, whose settings mean
   nothing here. Retention's `KilnCMS.Backups.Retention.prune_blocker/3`
   decides from these whether a destination may be pruned.
   """
@@ -416,6 +418,7 @@ defmodule KilnCMS.Backups.Destination do
   def location(%Config{kind: "rclone"} = config), do: Rclone.location(config)
   def location(%Config{kind: "local"} = config), do: Local.location(config)
   def location(%Config{kind: "s3"} = config), do: S3.location(config)
+  def location(%Config{kind: "sftp"} = config), do: Sftp.location(config)
   def location(%Config{}), do: :unknown
 
   @doc """
@@ -428,6 +431,7 @@ defmodule KilnCMS.Backups.Destination do
   def location_fields("rclone"), do: ["remote_name", "path"]
   def location_fields("local"), do: ["path"]
   def location_fields("s3"), do: ["endpoint", "bucket", "prefix"]
+  def location_fields("sftp"), do: ["host", "port", "username", "path"]
   def location_fields(_kind), do: []
 
   @doc """
@@ -445,7 +449,38 @@ defmodule KilnCMS.Backups.Destination do
   # An S3 location is never compared with an rclone remote, which may name
   # the same bucket under any name: retention treats that pair as unknown.
   def overlap?({:s3, host, port, bucket, a}, {:s3, host, port, bucket, b}), do: nested?(a, b)
+
+  # The same server, port and login, one path inside the other (#2222).
+  def overlap?({:sftp, host, port, user, a}, {:sftp, host, port, user, b}), do: nested?(a, b)
   def overlap?(_a, _b), do: false
+
+  @doc """
+  Whether two locations may be the same place though `overlap?/2` can't
+  show it (#3088): two S3 locations naming a bucket of the same name, one
+  prefix inside the other, whatever their endpoint host or port; two SFTP
+  locations one path inside the other, whatever their host, port or user
+  (#2222). One bucket
+  answers to many hosts (AWS's global and regional endpoints, an R2
+  account's jurisdiction hosts, a MinIO by name and by IP), and the app
+  can't tell those from two stores that each hold a bucket of that name.
+  Retention treats such a pair as overlapping; creating one is still
+  allowed, since only an exact `overlap?/2` is refused. True of every pair
+  `overlap?/2` is true of, too.
+  """
+  @spec possible_overlap?(location(), location()) :: boolean()
+  def possible_overlap?({:s3, _host_a, _port_a, bucket, a}, {:s3, _host_b, _port_b, bucket, b}),
+    do: nested?(a, b)
+
+  # One SFTP server answers to many names and logins (a NAS by name and by
+  # IP, two users on one disk), so two SFTP paths one inside the other may
+  # be the same folder whatever host, port or user they name (#2222).
+  def possible_overlap?(
+        {:sftp, _host_a, _port_a, _user_a, a},
+        {:sftp, _host_b, _port_b, _user_b, b}
+      ),
+      do: nested?(a, b)
+
+  def possible_overlap?(a, b), do: overlap?(a, b)
 
   defp nested?(a, b), do: List.starts_with?(a, b) or List.starts_with?(b, a)
 
