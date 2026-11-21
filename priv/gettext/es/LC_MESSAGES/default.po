@@ -5291,6 +5291,21 @@ msgstr "¿No puedes completar la comprobación? Pide a un administrador del siti
 
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
+msgid "Can't complete the check? Email yourself a sign-in link instead."
+msgstr "¿No puedes completar la comprobación? Envíate un enlace de inicio de sesión por correo."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Email yourself a sign-in link or use your site's single sign-on."
+msgstr "¿No puedes completar la comprobación? Envíate un enlace de inicio de sesión por correo o usa el inicio de sesión único de tu sitio."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Reload the page and try it again."
+msgstr "¿No puedes completar la comprobación? Vuelve a cargar la página e inténtalo de nuevo."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
 msgid "Can't complete the check? Use a passkey instead."
 msgstr "¿No puedes completar la comprobación? Usa una llave de acceso."
 
@@ -5308,6 +5323,11 @@ msgstr "¿No puedes completar la comprobación? Usa una llave de acceso o el ini
 #, elixir-autogen, elixir-format
 msgid "Can't complete the check? Use a passkey, email yourself a sign-in link, or use your site's single sign-on."
 msgstr "¿No puedes completar la comprobación? Usa una llave de acceso, envíate un enlace de inicio de sesión por correo o usa el inicio de sesión único de tu sitio."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Use your site's single sign-on instead."
+msgstr "¿No puedes completar la comprobación? Usa el inicio de sesión único de tu sitio."
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -24965,6 +24985,11 @@ msgstr "Este bloque fue eliminado. Se conservan el debate y sus tareas."
 #, elixir-autogen, elixir-format
 msgid "This browser can't receive push notifications. On iPhone and iPad they need iOS 16.4 or later and the app added to your home screen."
 msgstr "Este navegador no puede recibir notificaciones push. En iPhone y iPad necesitan iOS 16.4 o posterior y la aplicación añadida a la pantalla de inicio."
+
+#: lib/kiln_cms_web/controllers/two_factor_html.ex
+#, elixir-autogen, elixir-format
+msgid "This browser can't use a passkey. Sign in again from a browser or device that can, or ask an administrator of your site to check your account's sign-in methods."
+msgstr "Este navegador no puede usar una clave de acceso. Vuelve a iniciar sesión desde un navegador o dispositivo que sí pueda, o pide a un administrador de tu sitio que revise los métodos de inicio de sesión de tu cuenta."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format

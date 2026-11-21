@@ -5291,6 +5291,21 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
+msgid "Can't complete the check? Email yourself a sign-in link instead."
+msgstr ""
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Email yourself a sign-in link or use your site's single sign-on."
+msgstr ""
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Reload the page and try it again."
+msgstr ""
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
 msgid "Can't complete the check? Use a passkey instead."
 msgstr ""
 
@@ -5307,6 +5322,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
 msgid "Can't complete the check? Use a passkey, email yourself a sign-in link, or use your site's single sign-on."
+msgstr ""
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Use your site's single sign-on instead."
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex
@@ -24964,6 +24984,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "This browser can't receive push notifications. On iPhone and iPad they need iOS 16.4 or later and the app added to your home screen."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/two_factor_html.ex
+#, elixir-autogen, elixir-format
+msgid "This browser can't use a passkey. Sign in again from a browser or device that can, or ask an administrator of your site to check your account's sign-in methods."
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
