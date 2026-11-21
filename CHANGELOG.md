@@ -126,6 +126,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A newsletter confirmation email, its link and the confirm page are in the language the reader signed up in, and a record whose locale is no longer configured gets the site default in its `lang` and `og:locale` (#2597).**
   ([long form](docs/changelog/unreleased.md#locale-followups))
 
+- **An event's recurrence rule with a date-time UNTIL now ends at that instant (a `Z` time in UTC, a floating time in the event's zone), as RFC 5545 says, instead of on its UTC date; rules saved before this release keep their old date until re-saved (#2861).**
+  ([long form](docs/changelog/unreleased.md#recurrence-until-instant))
+
 - **The sign-in page no longer offers "Use a passkey" on a site's own host, where the browser refuses it, and a passkey-only account on `/sign-in/verify` in a browser that can't use a passkey is told to use another browser or device, or ask an administrator (#2827, #2887).**
   ([long form](docs/changelog/unreleased.md#passkey-fallbacks))
 

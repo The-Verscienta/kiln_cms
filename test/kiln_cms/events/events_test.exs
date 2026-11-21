@@ -549,6 +549,34 @@ defmodule KilnCMS.EventsTest do
       assert ics =~ ~r/RRULE:[^\r]*UNTIL=20260405(;|\r)/
     end
 
+    test "a date-time UNTIL is saved as typed and cuts at its instant (#2861)", ctx do
+      add_recurrence(ctx.td, ctx.admin)
+
+      event =
+        event!(ctx, %{
+          "when" => %{"start" => "2026-03-15T08:00", "time_zone" => "Asia/Tokyo"},
+          "repeats" => %{"rrule" => "FREQ=DAILY;UNTIL=20260320T000000"}
+        })
+
+      # Not cut to its date on save: the floating time is read in the event's
+      # zone when the rule is expanded.
+      assert event.custom_fields["repeats"]["rrule"] == "FREQ=DAILY;UNTIL=20260320T000000"
+
+      occurrences =
+        Occurrences.for_record(
+          event,
+          ~U[2026-03-01 00:00:00Z],
+          ~U[2026-04-01 00:00:00Z],
+          org_id: ctx.org
+        )
+
+      # 08:00 JST on the 20th is after local midnight that day.
+      assert List.last(occurrences).starts_at == ~U[2026-03-18 23:00:00Z]
+
+      # The subscriber's calendar gets the same instant, in UTC.
+      assert ICS.event(event, org_id: ctx.org) =~ "UNTIL=20260319T150000Z"
+    end
+
     test "a zone that bypassed the field-type cast cannot inject calendar lines", ctx do
       # `schedule_value/2` reads jsonb directly, so a seed, an importer or an
       # overlay can put a string there that `cast/2` would have refused.
