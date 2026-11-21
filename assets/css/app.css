@@ -1669,6 +1669,12 @@ pre[tabindex="0"]:focus-visible {
   outline: 2px solid var(--color-primary-ink);
   outline-offset: -2px;
 }
+/* A carousel gallery scrolls sideways, so it takes keyboard focus too (#2590).
+   Outset, like the table wrapper: the ring sits on the page background. */
+.kiln-gallery-items[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--color-primary-ink);
+  outline-offset: 2px;
+}
 .kiln-block pre code {
   background: none;
   padding: 0;
