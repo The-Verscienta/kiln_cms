@@ -7,6 +7,12 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="plugin-list-field-types-upgrade"></a>
+
+- **Plugin field types can hold lists from this release; rolling back past it needs preparation (#2680).** Upgrading needs nothing: no migration, no configuration. Rolling back is where the care goes. v1.11 and earlier treat a list field of a plugin type as a single value that happens to store an array. Their editor renders the list run together in one input, and saving such a record there can replace the list with one value or be refused. Restore, publishing a working copy and duplicate fail for a record holding one when the type's `cast/2` refuses a list. Saving or reordering the field in the fields admin clears its `multiple` flag (the arrays stay). Before rolling back, find those fields with the query in [docs/releasing.md → Rolling back past plugin list fields](../releasing.md#rolling-back-past-plugin-list-fields), then leave their records alone until you roll forward, or make each field single-valued (keeping the first item) or delete it on this release, after a backup.
+  - **Rolling deploys:** don't make a plugin field a list until every node runs this release.
+  - **Rollbacks after this one:** this release holds any `multiple` field whose type it can't list (see [Added](#plugin-list-field-types)), so a later release can make a type list-capable without this preparation for a rollback to this one or later.
+
 <a id="backup-s3-same-bucket-overlap-upgrade"></a>
 
 - **Two S3 destinations on one bucket name stop pruning (#3088).** After the upgrade, an installation with two S3 destinations that name the same bucket, one prefix inside the other, on different hosts skips retention on both. Each pass leaves a "Retention on … skipped" notice, and the storage grows until you act. Give the two destinations prefixes side by side, or untick "Delete its old backups (retention)" on one of them if they really are separate stores.
@@ -70,6 +76,16 @@ carries the reasoning.
   ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165))
 
 ## Added
+
+<a id="plugin-list-field-types"></a>
+
+- **A plugin field type can hold a list of values (#2680, `kiln_plugin` 1.6).** A `Kiln.FieldType` that defines the new optional `multiple?/0` to return `true` gets what the core scalar types have had since #2289: the fields admin offers **A list** with item bounds, and a list field stores a JSON array. Guide: [Let a plugin field type take a list](../extending-content.md#let-a-plugin-field-type-take-a-list).
+  - **Write rules:** `cast/2` runs once per item with `multiple: false`. Blank items drop out, and a string item splits on line breaks on every write, as for core lists. An item whose cast is not one string or number refuses the write, and the host logs it once per type. Repeats are kept unless the new optional `unique_items?/0` returns `true`. The type must be a scalar (`input_parts/1` returns `[]`). A single field of such a type sent a list keeps its first item, and is refused `[]`.
+  - **Everywhere else:** the editor's list input uses the type's `input_type/0` and `input_attrs/1`, without its `input_hook/1` or `widgets/1`. `custom_filter` takes the list operators with operands cast by the type's `cast/2`. GraphQL serves a `ListValue` of the `graphql_kind/1` kind, and `customWhere` refuses a type without one ("use customFilter"). The schema export wraps `json_schema/1` in an array, with `uniqueItems` only when the type drops repeats. The content list's columns don't offer plugin types yet.
+  - **Built-in types:** `email`, `telephone`, `color`, `slug` and `time` now declare their list support through the same callbacks; nothing changes for them.
+  - **A list whose type stops taking lists is held, not dropped.** `FieldDefinition.held_list?/1` names it. Its lists are kept, served, searched and carried by restore, promote and duplicate. A write that changes one (an empty list or `null` included) is refused, and a content import drops it with the dropped-keys warning. It is never required, the editor shows it read-only, and the fields admin badges it **list (held)**. Filtering or sorting on it is a `400` on JSON:API, GraphQL and MCP. The schema export describes it as `{"type": ["array", "null"], "items": {}, "readOnly": true}`. Only the fields admin's save narrows it to each record's first item, after a warning; it passes the new `narrow_held_list?` argument of the field definition's update. A reorder, a rename elsewhere, a field sync or any other update keeps it a list, and a field sync file that narrows it is blocked as data loss without `--allow-data-loss`. See [Narrow a list field whose type stopped taking lists](../extending-content.md#narrow-a-list-field-whose-type-stopped-taking-lists).
+  - **`mix kiln.plugins.doctor`** fails on a `multiple?/0` or `unique_items?/0` answer that isn't a boolean, or that raises; on a list type whose `input_parts/1` isn't `[]` under any editor input it offers; on a sample `cast/2` that answers a non-scalar; and on a type the host's compile-time check leaves single-valued. It notes `unique_items?/0` without `multiple?/0`, and a list type with an `input_hook/1`.
+  - **Compile time:** the capability is read when Kiln compiles, and an edit to a plugin field type now recompiles the registries that bake it.
 
 <a id="backup-sftp-destination"></a>
 

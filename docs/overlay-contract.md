@@ -56,7 +56,7 @@ you*).
 | The `_type` and `_version` attributes | Injected on every block, and the discriminator a stored block map is resolved by |
 | `Kiln.Block.Renderer` | The `:web`, `:json` and `:json_ld` surfaces, and that an implementation returning `nil` for an unhandled surface is correct |
 | `Kiln.Block.Info` | Introspection over a block's definition, version, fields and migrations |
-| `Kiln.FieldType` | `cast/2` stays required; the optional callbacks stay optional; `parse_float/1` keeps `Float.parse/1`'s return shape and stays total (it is how a `cast/2` parses a number without inheriting `Float.parse/1`'s toolchain-dependent raise) |
+| `Kiln.FieldType` | `cast/2` stays required; the optional callbacks stay optional; `parse_float/1` keeps `Float.parse/1`'s return shape and stays total (it is how a `cast/2` parses a number without inheriting `Float.parse/1`'s toolchain-dependent raise). Since `kiln_plugin` 1.6, a type whose `multiple?/0` answers `true` may hold a list, with `cast/2` run once per item and each item one string or number, and a list field whose type stops answering `true` keeps its stored lists read-only rather than losing them |
 | `Kiln.Advisory`, `Kiln.Forms.SpamCheck` | Their `check/1` callbacks, outcome shapes, and registries |
 | `Kiln.Plugins`, `Kiln.Version`, `Kiln.Updates`, `Kiln.Tokens` | Their documented functions and return shapes |
 | `Kiln.SafeFetch` | Since KilnCMS 1.6 (`kiln_plugin` 1.3, #2047): `get/2`, `head/2`, `post/3` and `request/3`, their documented options and `{:ok, %{status, headers, body}}` / `{:error, reason}` shapes, and the guarantees in its moduledoc — the address checked and pinned, redirects followed only on request and re-checked per hop, the body capped. The wording of `reason` is not covered. This is how a plugin fetches a URL it didn't write; `KilnCMS.SafeFetch`, the core implementation behind it, is not itself covered |
@@ -348,7 +348,8 @@ Stated rather than discovered later.
   behaviour here.** `Kiln.Plugin` declares no optional callbacks at all, and
   `Kiln.FieldType` marks only its late additions optional (`input_parts/1`,
   `tokens/1`, `json_schema/1`, `graphql_kind/1`, `description/0`,
-  `input_hook/1`, `handle_input_event/3`, `widgets/1`) — the rest are
+  `input_hook/1`, `handle_input_event/3`, `widgets/1`, `multiple?/0`,
+  `unique_items?/0`) — the rest are
   required-but-defaulted, exactly like `Kiln.Plugin`'s. So a module that
   declares `@behaviour` instead of using the `use` form gets missing-callback
   warnings when a callback is added, which `--warnings-as-errors` turns into a
