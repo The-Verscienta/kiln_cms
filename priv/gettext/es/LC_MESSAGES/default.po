@@ -97,6 +97,13 @@ msgid_plural "%{count} administrators have no authenticator app. A passkey doesn
 msgstr[0] "%{count} administrador no tiene aplicación de autenticación. Una llave de acceso no protege el inicio de sesión con contraseña."
 msgstr[1] "%{count} administradores no tienen aplicación de autenticación. Una llave de acceso no protege el inicio de sesión con contraseña."
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} backup, the last on %{at}"
+msgid_plural "%{count} backups, the last on %{at}"
+msgstr[0] "%{count} copia de seguridad, la última el %{at}"
+msgstr[1] "%{count} copias de seguridad, la última el %{at}"
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} block with an unresolved discussion"
@@ -4765,6 +4772,11 @@ msgstr "Destino de copias de seguridad eliminado"
 msgid "Backup destination tested"
 msgstr "Destino de copias de seguridad probado"
 
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Backup destination's adopted backup directories changed"
+msgstr "Directorios de copias adoptados de un destino modificados"
+
 #: lib/kiln_cms_web/live/backup_destinations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Backup destinations"
@@ -4833,6 +4845,11 @@ msgstr[1] "Las copias de seguridad se conservan BACKUP_KEEP_DAYS (%{count} días
 #, elixir-autogen, elixir-format
 msgid "Backups aren't set up yet — turn them on before you go live."
 msgstr "Las copias de seguridad aún no están configuradas — actívalas antes de publicar el sitio."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backups from other backup directories (%{count})"
+msgstr "Copias de seguridad de otros directorios de copias (%{count})"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -7212,6 +7229,11 @@ msgstr "No se pudieron leer los destinos de las copias de seguridad. Inténtalo 
 #, elixir-autogen, elixir-format
 msgid "Couldn't read this server's backup status. Reload the page to try again."
 msgstr "No se pudo leer el estado de las copias de seguridad de este servidor. Recarga la página para intentarlo de nuevo."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't read which other backup directories sent backups here."
+msgstr "No se pudo saber qué otros directorios de copias enviaron copias aquí."
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -12043,6 +12065,11 @@ msgstr "Estado del servicio de imágenes"
 msgid "Image backends"
 msgstr "Servicios de imágenes"
 
+#: lib/kiln_cms/blocks/gallery.ex
+#, elixir-autogen, elixir-format
+msgid "Image gallery"
+msgstr "Galería de imágenes"
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Image shown when this page is shared on social media."
@@ -13251,6 +13278,11 @@ msgstr "Permitir que los editores publiquen"
 #, elixir-autogen, elixir-format
 msgid "Let people sign in to this site through your own identity provider."
 msgstr "Permite iniciar sesión en este sitio con tu propio proveedor de identidad."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Let this server prune these backups — only if that server is retired or this installation moved here."
+msgstr "Permitir que este servidor elimine estas copias antiguas — solo si ese servidor está retirado o esta instalación se trasladó aquí."
 
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
@@ -15924,6 +15956,11 @@ msgstr "Nada sin leer."
 #, elixir-autogen, elixir-format
 msgid "Nothing was applied. See the problems below."
 msgstr "No se aplicó nada. Vea los problemas abajo."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nothing was changed: %{reason}."
+msgstr "No se cambió nada: %{reason}."
 
 #: lib/kiln_cms_web/live/automation_live/preview.ex
 #, elixir-autogen, elixir-format
@@ -19461,8 +19498,13 @@ msgstr "Retención"
 
 #: lib/kiln_cms_web/live/backup_destinations_live.ex
 #, elixir-autogen, elixir-format
-msgid "Retention here deletes only backups this installation sent to this destination, by the same rules as on this server, and only on destinations that can list and delete."
-msgstr "Aquí la retención solo elimina las copias que esta instalación envió a este destino, con las mismas reglas que en este servidor, y solo en destinos que pueden listar y eliminar."
+msgid "Retention here deletes only backups that in-app backups of this server's backup directory sent to this destination, by the same rules as on this server, and only on destinations that can list and delete."
+msgstr "La retención aquí elimina solo las copias que las copias de la aplicación del directorio de copias de este servidor enviaron a este destino, con las mismas reglas que en este servidor, y solo en destinos que pueden listar y eliminar."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Retention here deletes only the backups this server's backup directory sent. These came from another backup directory: another server, or this installation before it moved here."
+msgstr "La retención aquí elimina solo las copias que envió el directorio de copias de este servidor. Estas vinieron de otro directorio de copias: otro servidor, o esta instalación antes de trasladarse aquí."
 
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
@@ -25506,6 +25548,16 @@ msgstr "Este servidor no comprueba si un cliente es realmente el buscador que di
 msgid "This server isn't enforcing the admin allowlist (KILN_ADMIN_ALLOWLIST_DISABLED is set). The list is saved but not applied."
 msgstr "Este servidor no aplica la lista de redes permitidas (KILN_ADMIN_ALLOWLIST_DISABLED está definida). La lista se guarda pero no se aplica."
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "This server no longer prunes that backup directory's backups there."
+msgstr "Este servidor ya no elimina allí las copias de ese directorio de copias."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "This server now prunes that backup directory's backups there."
+msgstr "Este servidor ahora elimina allí las copias antiguas de ese directorio de copias."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "This server's backup directory didn't answer within %{count} second (a slow or hung mount), so the app claims nothing about these files. Reload the page to check again."
@@ -28773,6 +28825,11 @@ msgstr "Opción predeterminada sin mantenimiento: genere una clave aquí mismo. 
 msgid "Zero-ops default: paste the secret here. Encrypted with a key derived from SECRET_KEY_BASE — rotate that secret only as the secrets rotation guide describes, or it is lost."
 msgstr "Opción predeterminada sin configuración: pegue el secreto aquí. Cifrado con una clave derivada de SECRET_KEY_BASE: rote ese secreto solo como describe la guía de rotación de secretos, o se pierde."
 
+#: lib/kiln_cms/backups/destination_config/changes/adopt.ex
+#, elixir-autogen, elixir-format
+msgid "a backup directory is adopted twice"
+msgstr "un directorio de copias está adoptado dos veces"
+
 #: lib/kiln_cms/cms/validations/form_field_config.ex
 #, elixir-autogen, elixir-format
 msgid "a checkboxes field can have at most %{max} options"
@@ -28787,6 +28844,11 @@ msgstr "un campo de casillas debe tener al menos una opción"
 #, elixir-autogen, elixir-format
 msgid "a date an editor suggested. Nothing is published until an admin confirms it and it becomes a scheduled publish."
 msgstr "una fecha que propuso un editor. No se publica nada hasta que un administrador la confirma y pasa a ser una publicación programada."
+
+#: lib/kiln_cms/backups/destination_config/changes/adopt.ex
+#, elixir-autogen, elixir-format
+msgid "a destination can adopt at most %{max} backup directories"
+msgstr "un destino puede adoptar como máximo %{max} directorios de copias"
 
 #: lib/kiln_cms_web/live/backup_destinations_live.ex
 #, elixir-autogen, elixir-format
@@ -28932,6 +28994,11 @@ msgstr "un administrador"
 #, elixir-autogen, elixir-format
 msgid "an administrator"
 msgstr "un administrador"
+
+#: lib/kiln_cms/backups/destination_config/changes/adopt.ex
+#, elixir-autogen, elixir-format
+msgid "an adopted backup directory is not well formed"
+msgstr "un directorio de copias adoptado no está bien formado"
 
 #: lib/kiln_cms_web/live/automation_live/preview.ex
 #: lib/kiln_cms_web/live/invite_live.ex
@@ -29343,6 +29410,11 @@ msgstr "no se pudo volver a leer el archivo de prueba del bucket privado (%{deta
 #, elixir-autogen, elixir-format
 msgid "couldn't read this server's backup directory"
 msgstr "no se pudo leer el directorio de copias de seguridad de este servidor"
+
+#: lib/kiln_cms/backups/destination_config/changes/adopt.ex
+#, elixir-autogen, elixir-format
+msgid "couldn't tell which backup directories running servers use"
+msgstr "no se pudo saber qué directorios de copias usan los servidores en marcha"
 
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
@@ -29812,6 +29884,11 @@ msgstr "no es"
 msgid "is not %{value}"
 msgstr "no es %{value}"
 
+#: lib/kiln_cms/backups/destination_config/changes/adopt.ex
+#, elixir-autogen, elixir-format
+msgid "is not a backup directory id"
+msgstr "no es un identificador de directorio de copias"
+
 #: lib/kiln_cms/cms/field_schema.ex
 #, elixir-autogen, elixir-format
 msgid "is not a valid JSON Schema"
@@ -30231,6 +30308,11 @@ msgstr "sin actividad reciente registrada"
 #, elixir-autogen, elixir-format
 msgid "no restriction"
 msgstr "sin restricción"
+
+#: lib/kiln_cms/backups/destination_config/changes/adopt.ex
+#, elixir-autogen, elixir-format
+msgid "no running server reports a backup directory"
+msgstr "ningún servidor en marcha informa de un directorio de copias"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
@@ -30842,6 +30924,11 @@ msgstr "taxonomía"
 #, elixir-autogen, elixir-format
 msgid "text"
 msgstr "texto"
+
+#: lib/kiln_cms/backups/destination_config/changes/adopt.ex
+#, elixir-autogen, elixir-format
+msgid "that backup directory belongs to a running server, which prunes its own backups"
+msgstr "ese directorio de copias pertenece a un servidor en marcha, que elimina sus propias copias antiguas"
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format

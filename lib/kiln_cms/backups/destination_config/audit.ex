@@ -1,7 +1,7 @@
 defmodule KilnCMS.Backups.DestinationConfig.Audit do
   @moduledoc """
   The instance security log entries of a `KilnCMS.Backups.DestinationConfig`
-  create, update, destroy, Test (#2220) and host-key trust (#2222): their target, metadata and, for a
+  create, update, destroy, Test (#2220), host-key trust (#2222) and adopted backup directories: their target, metadata and, for a
   Test, who pressed it. Each type's keys are in
   `KilnCMS.Security.InstanceEvent`'s allowlist.
 
@@ -45,6 +45,32 @@ defmodule KilnCMS.Backups.DestinationConfig.Audit do
 
   @doc false
   def changed?(record, changeset), do: changed_fields(record, changeset) != []
+
+  @doc false
+  # The backup-directory ids adopted (or bound afresh) and no longer adopted
+  # (`Changes.Adopt`), comma-joined, or "none".
+  def adoptions(record, changeset) do
+    changes = adoption_changes(changeset)
+
+    %{
+      "name" => record.name,
+      "kind" => record.kind,
+      "adopted" => joined(changes.adopted),
+      "removed" => joined(changes.removed)
+    }
+  end
+
+  @doc false
+  def adoptions_changed?(_record, changeset) do
+    changes = adoption_changes(changeset)
+    changes.adopted != [] or changes.removed != []
+  end
+
+  defp adoption_changes(changeset),
+    do: changeset.context[:adoption_changes] || %{adopted: [], removed: []}
+
+  defp joined([]), do: "none"
+  defp joined(ids), do: Enum.join(ids, ",")
 
   @doc false
   def deleted(record, _changeset) do

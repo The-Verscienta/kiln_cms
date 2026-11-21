@@ -3834,7 +3834,8 @@ try again."
 fields (a directory's **Path**; a remote's **Remote name** and **Path**; an
 S3 destination's **Endpoint**, **Bucket** and **Prefix**) are read-only, with "Where a destination writes can't be changed. To move
 it, add a new destination and delete this one." Retention deletes only what
-was sent to a destination, recorded against the destination itself, so
+this server's backup directory sent to a destination, recorded against the
+destination itself, so
 letting it point somewhere new would let it delete what it never sent
 there ([ADR 0064](decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md)).
 For the same reason a new destination may not be, contain or sit inside
@@ -4690,14 +4691,74 @@ verified or newest complete backup of each component that destination
 holds. A `.keep` recovery point in `BACKUP_DIR` keeps that backup on every
 destination too. The markers themselves are never copied to a destination.
 
-**It deletes only what this installation sent there.** A backup is deleted
-from a destination only when its History row records it being sent to that
-destination. Anything else that looks like a Kiln backup there (another
-installation sharing the bucket, a cron backup copied by hand) is left
+**It deletes only what this server's backup directory sent there.** A
+backup is deleted from a destination only when its History row was made by
+an in-app backup (not imported from a cron backup), records it being sent
+to that destination, and was made in the backup directory whose
+`.kiln-dir-id` this server has now
+([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)), or
+in a directory the destination adopted for it (below). Anything else that
+looks like a Kiln backup there (another installation sharing the bucket, a
+cron backup copied by hand, a History row with no backup directory) is left
 alone, and each run's log names it: "Retention on NAS left 2 old backup(s)
-this installation has no record of sending there: db 20261101-031700,
+no in-app backup of this backup directory sent there: db 20261101-031700,
 media 20261101-031700". The reasoning is in
 [ADR 0064](decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md).
+
+The backup directory matters because the destinations and the History rows
+live in the database: a database restored on another server brings both
+with it. Without the directory rule, that server's in-app backups would
+prune the original server's backups on every destination as if they were
+its own. With it, the restored copy's backup directory has an id of its
+own, so it deletes nothing the original server sent.
+
+**Backups another backup directory sent are kept, and said so.** The run's
+log has "Retention on NAS kept 3 backup(s) sent by another backup directory
+(see Destinations)", and the destination's row on the **Destinations** tab
+lists those directories under **Backups from other backup directories**:
+the first 8 characters of each directory's id (the whole id on hover), how
+many backups it sent there, and when the last one started. A directory a
+running server still reports is never listed: that server prunes its own
+backups.
+
+<a id="adopt-another-backup-directory"></a>
+
+**Adopt a directory only when its server is gone.** Tick **Let this server
+prune these backups — only if that server is retired or this installation
+moved here.** next to a directory, and from the next pass this server's
+retention deletes that directory's old backups on that destination too, by
+the same keep rules. Untick it to stop; a pass already running reads the
+row again just before it prunes, and again before deleting each backup an
+adopted directory sent, so either change is obeyed by the backup in flight. Each change is in the instance security log
+(`backup_destination_adoptions_changed`).
+
+- **An adoption counts only on the servers running when it was made.** It
+  records the backup directories every live server reported at that
+  moment, and a server whose `.kiln-dir-id` is not among them ignores it.
+  A database restored on another server therefore inherits no adoption;
+  adopt again there if that server is really the one that should prune.
+- **A directory in use can't be adopted.** One a server reported in the
+  last three minutes is refused ("that backup directory belongs to a
+  running server, which prunes its own backups"), and so is one when the
+  servers can't be read. Stop the old server first.
+- At most 50 directories per destination. Only a platform admin can adopt
+  one.
+
+**Pruning a destination needs a `BACKUP_DIR` that persists.** A container
+whose `BACKUP_DIR` is not on a persistent volume gets a new `.kiln-dir-id`
+each time it is replaced, and from then on its earlier backups belong to
+"another backup directory" and are kept. Put `BACKUP_DIR` on a volume that
+survives a deploy. If it was not, adopt the old ids once from the
+Destinations tab.
+
+**Moving to a new server.** Retire the old server first, so it stops
+backing up and pruning. Then either copy the old `BACKUP_DIR`'s
+`.kiln-dir-id` (with the rest of the directory) to the new server before
+its first in-app backup, so it carries on as the same directory, or let the
+new server start a directory of its own and adopt the old one on each
+destination. Don't run both servers against one id: they would prune each
+other's backups. The env remote has no row to adopt on: for it, copy
+`.kiln-dir-id`.
 
 It never runs on a destination whose adapter can't list and delete files
 (a plugin's says so), and on `BACKUP_RCLONE_REMOTE` only when you turn it on
@@ -4713,6 +4774,8 @@ is on the run's log:
 | Log line | Meaning |
 |---|---|
 | "Retention on NAS removed 4 file(s) from 2 backup(s)" | Those backups were deleted there, and are marked `pruned` for that destination in History. |
+| "Retention on NAS kept 3 backup(s) sent by another backup directory (see Destinations)" | Old enough to go, but an in-app backup of another backup directory sent them. Adopt that directory on the Destinations tab if its server is retired ([above](#adopt-another-backup-directory)). |
+| "Retention on NAS skipped: couldn't read the backup directory's id (…); nothing was deleted" | `BACKUP_DIR` has no `.kiln-dir-id` yet, or one that isn't an id. The first in-app backup creates it; a file that holds something else must be fixed or removed by hand. |
 | "Retention on NAS skipped: it overlaps BACKUP_RCLONE_REMOTE; nothing was deleted" | The destination is, contains or is inside the env remote, which changed since the destination was added. Point the two at separate places. |
 | "Retention on NAS skipped: it overlaps another backup destination; nothing was deleted" | Two destinations share a place. Delete one. |
 | "Retention on Bucket skipped: another S3 backup destination uses a bucket of the same name; the app can't tell whether it is the same store; nothing was deleted" | Another S3 destination names a bucket of the same name on another endpoint host or port, with a prefix inside or around this one ([Retention on an S3 bucket](#retention-on-an-s3-bucket)). Give the two separate prefixes, or untick retention on both. |
@@ -4758,7 +4821,10 @@ made in the backup directory whose `.kiln-dir-id` this server has now.
 Backups that `scripts/backup.sh` copied there, or that another server or
 installation sent, are left and named in the log: "Retention on r2:kiln
 left 3 old backup(s) no in-app backup of this backup directory sent
-there: …". Prune those yourself, or with a lifecycle rule.
+there: …". Prune those yourself, or with a lifecycle rule. The env remote
+has no row on the Destinations tab, so another directory can't be adopted
+there: when you move to a new server, copy `.kiln-dir-id` with the rest of
+`BACKUP_DIR` ([Moving to a new server](#adopt-another-backup-directory)).
 
 - **It does nothing on a cron-only install.** Only the app's own off-site
   step reads the switch; `scripts/backup.sh` never prunes the remote.
@@ -4977,6 +5043,15 @@ tried again later" when some aborts failed. The pass is also the
 destination was reached, rows that closed (`completed` or `aborted`) more
 than 30 days ago are deleted, and so is every row of a deleted destination
 once it is 30 days old.
+
+The sweep aborts only uploads that a step of this server's backup directory
+opened or took over, or of a directory the destination adopted for this
+server ([above](#adopt-another-backup-directory)). An upload that records no
+directory (opened before this was recorded) is resumed by no backup, which
+sends that file whole instead, and is aborted by the sweep only once it has
+been untouched for four days. A database restored on another server carries
+the original server's upload rows; its backups neither resume nor abort
+those uploads, and send that file whole instead.
 
 **Time limits.**
 

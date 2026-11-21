@@ -71,6 +71,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The destination kind `sftp` is now Kiln's own, and SFTP has its own private-host list.** A plugin destination of kind `sftp` is now answered by Kiln's adapter; delete such rows and add them again under **SFTP server**. List LAN SFTP servers in `BACKUP_SFTP_PRIVATE_HOSTS` (`BACKUP_S3_PRIVATE_HOSTS` doesn't count). Apply the `add_backup_destination_host_key` migration.
   ([#3198](https://github.com/The-Verscienta/kiln_cms/pull/3198) · [long form](docs/changelog/unreleased.md#backup-sftp-destination-upgrade))
 
+- **Destination retention now deletes only this server's backups: older backups and a container's earlier ones may stop being pruned.** Backups made before v1.10.0, and those sent from a `BACKUP_DIR` that didn't survive a redeploy, are kept from now on, so storage can grow. Adopt an old backup directory on the Destinations tab, or prune those backups by hand. Apply the `destination_prune_ownership` migration.
+  ([GHSA-rx2c-h7cx-wmfj](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-rx2c-h7cx-wmfj) · [#3204](https://github.com/The-Verscienta/kiln_cms/pull/3204) · [long form](docs/changelog/unreleased.md#backup-destination-prune-ownership-upgrade))
+
 - **Custom asset builds and overlay Dockerfiles that don't run `mix assets.deploy`: also run `mix esbuild kiln_public --minify` before `phx.digest`. Without it signed-out pages fall back to app.js and keep working. No migration; rolling back is safe.**
   ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle-upgrade))
 
@@ -119,6 +122,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The sign-in page no longer offers "Use a passkey" on a site's own host, where the browser refuses it, and a passkey-only account on `/sign-in/verify` in a browser that can't use a passkey is told to use another browser or device, or ask an administrator (#2827, #2887).**
   ([long form](docs/changelog/unreleased.md#passkey-fallbacks))
+
+- **A gallery in the carousel layout can be scrolled with the keyboard: Tab reaches it, the arrow keys scroll it, and it has a focus ring and an "Image gallery" label (#2590).**
+  ([long form](docs/changelog/unreleased.md#gallery-carousel-keyboard))
 
 - **A revalidating browser or CDN no longer gets a `304` for a public page whose fragments, media, translations, inherited fields, bylines, author name, category or menu links changed: the HTML `ETag` now hashes the cached payload and the menus, and type, field and locale-settings saves move every page's tag.**
   ([#3202](https://github.com/The-Verscienta/kiln_cms/pull/3202) · [long form](docs/changelog/unreleased.md#public-html-etag-render-inputs))
@@ -181,6 +187,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3112](https://github.com/The-Verscienta/kiln_cms/pull/3112) · [long form](docs/changelog/unreleased.md#backup-schedule-tab-followups))
 
 ### Security
+
+- **A database restored on another server no longer prunes the original server's backups on its destinations: retention deletes only what this server's backup directory sent, plus directories a platform admin adopts (GHSA-rx2c-h7cx-wmfj).**
+  ([GHSA-rx2c-h7cx-wmfj](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-rx2c-h7cx-wmfj) · [#3204](https://github.com/The-Verscienta/kiln_cms/pull/3204) · [long form](docs/changelog/unreleased.md#backup-destination-prune-ownership))
 
 - **phoenix_live_view 1.2.14 fixes EEF-CVE-2026-126334 (a LiveView joined without `"url"` skipped its `live_session` `on_mount` hooks); Kiln was not exposed, because `KilnCMSWeb.LiveRouteGuard` already refused those joins (#688).**
   ([#3190](https://github.com/The-Verscienta/kiln_cms/issues/3190) · [long form](docs/changelog/unreleased.md#liveview-url-less-join))
