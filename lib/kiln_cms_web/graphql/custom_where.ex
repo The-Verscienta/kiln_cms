@@ -13,7 +13,9 @@ defmodule KilnCMSWeb.Graphql.CustomWhere do
   `{_and: [...]}` or `{_not: {...}}`, nesting the same way `customFilter`'s
   groups do and under the same limits (4 deep, 50 members in all). At most
   `KilnCMSWeb.GraphqlLimits.max_custom_conditions/0` of them at the top, and `in` takes at most `KilnCMSWeb.GraphqlLimits.max_custom_in_values/0`
-  values.
+  values (1000 in all, across every condition and group). A `dateTime` operand
+  is a `NaiveDateTime`: a wall-clock time compared as written, its offset
+  ignored as a write ignores it (#2678).
   """
   use Absinthe.Schema.Notation
 
@@ -94,15 +96,20 @@ defmodule KilnCMSWeb.Graphql.CustomWhere do
     field :is_null, :boolean
   end
 
-  @desc "Operators for a `datetime` custom field."
+  @desc """
+  Operators for a `datetime` custom field. Operands are wall-clock times, compared
+  as written: a UTC offset is ignored, as it is when the field is saved, so
+  `2026-06-01T12:00:00+02:00` matches a stored `2026-06-01T12:00:00`. Fractional
+  seconds match however many digits the value was saved with.
+  """
   input_object :date_time_filter do
-    field :eq, :datetime
-    field :not_eq, :datetime
-    field :in, list_of(non_null(:datetime))
-    field :gt, :datetime
-    field :gte, :datetime
-    field :lt, :datetime
-    field :lte, :datetime
+    field :eq, :naive_datetime
+    field :not_eq, :naive_datetime
+    field :in, list_of(non_null(:naive_datetime))
+    field :gt, :naive_datetime
+    field :gte, :naive_datetime
+    field :lt, :naive_datetime
+    field :lte, :naive_datetime
     field :is_null, :boolean
   end
 end

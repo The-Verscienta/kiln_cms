@@ -79,6 +79,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Breaking
 
+- **GraphQL `customWhere` `dateTime` operands are now `NaiveDateTime` and compare wall clock, as values are stored: a filter's UTC offset is dropped instead of converted, and a variable for them must be declared `NaiveDateTime` (`$t: DateTime` now fails validation; inline literals keep working) (#2678).**
+  ([long form](docs/changelog/unreleased.md#customwhere-datetime-wall-clock))
+
 - **`/ws/gql` reads an `authorization` connect param under `Bearer` in any case: a lowercase valid JWT connects as its user, and lowercase garbage or a bare `Bearer` is refused (`403`) instead of connecting anonymously (#2632).**
   ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#ws-gql-bearer-scheme-any-case))
 
@@ -119,6 +122,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/unreleased.md#referrer-suppression-sweep))
 
 ### Fixed
+
+- **Datetime custom-field filters (JSON:API, GraphQL, MCP; single, link and list fields) match stored values with fractional seconds under any spelling and compare ranges below one second; `in` takes at most 1000 values per request (#2678).**
+  ([long form](docs/changelog/unreleased.md#custom-filter-datetime-fractions))
 
 - **A revalidating browser or CDN no longer gets a `304` for a public page whose fragments, media, translations, inherited fields, bylines, author name, category or menu links changed: the HTML `ETag` now hashes the cached payload and the menus, and type, field and locale-settings saves move every page's tag.**
   ([#3202](https://github.com/The-Verscienta/kiln_cms/pull/3202) · [long form](docs/changelog/unreleased.md#public-html-etag-render-inputs))
