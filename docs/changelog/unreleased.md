@@ -302,6 +302,23 @@ carries the reasoning.
     [upgrade note](#staging-scrub-safety-upgrade).
   ([#2973](https://github.com/The-Verscienta/kiln_cms/issues/2973), [#2974](https://github.com/The-Verscienta/kiln_cms/issues/2974), [#2977](https://github.com/The-Verscienta/kiln_cms/issues/2977))
 
+<a id="passkey-fallbacks"></a>
+
+- **No passkey offer where a passkey can't work, and a way forward for a passkey-only account in a browser without one (#2827, #2887).**
+  A passkey belongs to the main host, and a browser refuses the ceremony on a
+  site's own host, yet `/sign-in` drew "Use a passkey" everywhere. It now draws
+  it only where `KilnCMS.Accounts.WebAuthn.ceremony_host?/1` holds (the main
+  host or a passkey-capable console host), judged from the host the socket's
+  mount vouched for. The human-verification fallback line stops naming a
+  passkey on those hosts too, and reads "Reload the page and try it again"
+  when no other way exists. On `/sign-in/verify`, an account whose only second
+  factor is a passkey, in a browser without WebAuthn or with JavaScript off,
+  used to see an empty page; it now sees "This browser can't use a passkey.
+  Sign in again from a browser or device that can, or ask an administrator of
+  your site to check your account's sign-in methods." The second factor is
+  unchanged: no recovery path is added. Strings in es and fr. No migration.
+  ([#2827](https://github.com/The-Verscienta/kiln_cms/issues/2827), [#2887](https://github.com/The-Verscienta/kiln_cms/issues/2887))
+
 <a id="automation-job-payload-sealed"></a>
 
 - **Automation jobs store the event payload sealed (#2992).**

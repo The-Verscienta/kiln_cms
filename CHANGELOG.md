@@ -126,6 +126,9 @@ Every summary line below that was shortened links to its own entry there.
 - **The staging scrub removes production's S3 storage credentials (existing media still loads from production's public URLs; new uploads go to staging's own storage) and its content-signing key (staging generates its own), and `staging.sh`/`mix kiln.staging.scrub` can no longer migrate or scrub the wrong database (#2973, #2974, #2977).**
   ([long form](docs/changelog/unreleased.md#staging-scrub-safety))
 
+- **The sign-in page no longer offers "Use a passkey" on a site's own host, where the browser refuses it, and a passkey-only account on `/sign-in/verify` in a browser that can't use a passkey is told to use another browser or device, or ask an administrator (#2827, #2887).**
+  ([long form](docs/changelog/unreleased.md#passkey-fallbacks))
+
 - **Automation jobs now store the event payload (the document snapshot, drafts included) sealed, so a pending job's row and Oban's log lines no longer show it; jobs a 1.11 node queued still run (#2992).**
   ([long form](docs/changelog/unreleased.md#automation-job-payload-sealed))
 

@@ -8,6 +8,10 @@
 //   * a browser with `PublicKeyCredential` shows the button, and revealing it
 //     trips no CSP rule (the hook is bundled JS, no inline script);
 //   * one without it never does — no button that cannot work.
+//
+// The e2e server is the main host, where the ceremony can run. On a site's own
+// host the block is not rendered at all (#2827), which
+// `KilnCMSWeb.SignInKitTest` covers.
 const { test, expect, waitForLiveConnected } = require("./fixtures");
 
 const passkeyButton = (page) => page.getByRole("button", { name: "Use a passkey" });
