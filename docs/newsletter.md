@@ -178,6 +178,13 @@ confirmed subscriber is not re-mailed (that would make this a way to mail an
 arbitrary address on demand), and an unsubscribed one is neither mailed nor
 resurrected.
 
+**The confirmation email is in the language of the sign-up.** A sign-up block
+on a French page posts to `/fr/newsletter/subscribe`, so the email's subject
+and text are in French, and its link opens `/fr/newsletter/confirm/<token>`,
+whose page and button are in French too. A hand-written form picks the
+language the same way, through the prefix on its `action`. Without a prefix,
+the email is in the visitor's own language setting, or the site's default.
+
 Unsubscribe tokens are **stored and non-expiring**, so links in old newsletters
 keep working. Unsubscribe is treated as *consent* and is deliberately separate
 from the mail pipeline's bounce-*suppression* list (a deliverability signal).

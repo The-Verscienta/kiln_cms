@@ -89,6 +89,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Added
 
+- **An embedded form can be shown in a chosen language: `data-kiln-locale` on the `embed.js` snippet (`?locale=` on `/forms/:slug/embed`); an unsupported value gets the site default and existing snippets are unchanged (#2597).**
+  ([long form](docs/changelog/unreleased.md#embedded-form-locale))
+
 - **A plugin field type can hold a list (`multiple?/0`, `unique_items?/0`, `kiln_plugin` 1.6), with the same editor input, write rules, API filters and schema export as core lists. A list whose type later stops taking lists is kept read-only (a "held list") instead of being dropped.**
   ([#3203](https://github.com/The-Verscienta/kiln_cms/pull/3203) · [long form](docs/changelog/unreleased.md#plugin-list-field-types))
 
@@ -119,6 +122,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/unreleased.md#referrer-suppression-sweep))
 
 ### Fixed
+
+- **A newsletter confirmation email, its link and the confirm page are in the language the reader signed up in, and a record whose locale is no longer configured gets the site default in its `lang` and `og:locale` (#2597).**
+  ([long form](docs/changelog/unreleased.md#locale-followups))
 
 - **An event's recurrence rule with a date-time UNTIL now ends at that instant (a `Z` time in UTC, a floating time in the event's zone), as RFC 5545 says, instead of on its UTC date; rules saved before this release keep their old date until re-saved (#2861).**
   ([long form](docs/changelog/unreleased.md#recurrence-until-instant))

@@ -142,6 +142,68 @@ defmodule KilnCMS.Newsletter.ConfirmationMailTest do
     end
   end
 
+  describe "the confirmation email's language (#2597)" do
+    # `:subscribe` runs in the sign-up's request, whose Gettext locale is the
+    # page's. The mail is built there, so it is in that language.
+    setup do
+      on_exit(fn -> Gettext.put_locale(KilnCMSWeb.Gettext, "en") end)
+    end
+
+    defp mail_in(locale, name) do
+      Gettext.put_locale(KilnCMSWeb.Gettext, locale)
+      address = email_for(name)
+      {:ok, subscriber} = subscribe(%{email: address})
+      {subscriber, KilnCMS.Mail.from_args(queued_mail(address).args)}
+    end
+
+    test "a French sign-up is mailed in French, linking a French page" do
+      {subscriber, email} = mail_in("fr", "fr")
+
+      assert email.subject =~ "Confirmez votre abonnement à "
+      assert email.html_body =~ ~s(lang="fr")
+      assert email.html_body =~ "Confirmez cette adresse"
+      refute email.html_body =~ "Confirm this address"
+      assert email.html_body =~ "/fr/newsletter/confirm/#{subscriber.confirm_token}"
+    end
+
+    test "a Spanish sign-up is mailed in Spanish, linking a Spanish page" do
+      {subscriber, email} = mail_in("es", "es")
+
+      assert email.subject =~ "Confirma tu suscripción a "
+      assert email.html_body =~ ~s(lang="es")
+      assert email.html_body =~ "Confirma esta dirección"
+      refute email.html_body =~ "Confirm this address"
+      assert email.html_body =~ "/es/newsletter/confirm/#{subscriber.confirm_token}"
+    end
+
+    test "a locale the site does not serve is mailed in the default" do
+      {subscriber, email} = mail_in("de", "de")
+
+      assert email.subject =~ "Confirm your subscription to "
+      assert email.html_body =~ ~s(lang="en")
+      assert email.html_body =~ "/en/newsletter/confirm/#{subscriber.confirm_token}"
+    end
+
+    test "the site's name is escaped inside a translated sentence" do
+      site = KilnCMS.OrgFixtures.org("confirm-escape")
+
+      KilnCMS.CMS.save_site_branding!(%{site_name: "<b>Bold</b> & Co"},
+        actor: user(:admin),
+        tenant: site
+      )
+
+      Gettext.put_locale(KilnCMSWeb.Gettext, "fr")
+      address = email_for("escape")
+
+      assert {:ok, _} =
+               Newsletter.subscribe(%{email: address}, authorize?: false, tenant: site.id)
+
+      email = KilnCMS.Mail.from_args(queued_mail(address).args)
+      assert email.html_body =~ "&lt;b&gt;Bold&lt;/b&gt; &amp; Co"
+      refute email.html_body =~ "<b>Bold</b>"
+    end
+  end
+
   describe "self-service consent policy" do
     # `/account` calls `:for_user`, `:resubscribe` and `:unsubscribe` with the
     # member as actor. As plain policies those self-grants were AND-narrowed to

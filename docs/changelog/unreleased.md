@@ -84,6 +84,17 @@ carries the reasoning.
 
 ## Added
 
+<a id="embedded-form-locale"></a>
+
+- **An embedded form can be shown in a chosen language (#2597).**
+  `embed.js` takes an optional `data-kiln-locale` attribute and loads
+  `/forms/<slug>/embed?locale=<value>`. The server accepts a supported locale
+  and gives anything else the site default; a path prefix (`/es/forms/…`)
+  still wins, and the session is never read, so a shared cache keys on the
+  URL. A snippet without the attribute loads exactly what it did. See
+  [docs/forms.md](../forms.md).
+  ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597))
+
 <a id="plugin-list-field-types"></a>
 
 - **A plugin field type can hold a list of values (#2680, `kiln_plugin` 1.6).** A `Kiln.FieldType` that defines the new optional `multiple?/0` to return `true` gets what the core scalar types have had since #2289: the fields admin offers **A list** with item bounds, and a list field stores a JSON array. Guide: [Let a plugin field type take a list](../extending-content.md#let-a-plugin-field-type-take-a-list).
@@ -263,6 +274,23 @@ carries the reasoning.
   The "no all-hidden breakdown leaves a category a single value" rule (#2981) was found by a search run outside the suite, so a change to `referrer_sources/0` or to `KilnCMS.Analytics.suppress_referrer_group/1` had nothing wide to re-check against. The search is now in `test/kiln_cms/analytics/referrer_suppression_test.exs` behind the `slow_sweep` tag, which the default suite excludes. Run it with `mix test --only slow_sweep test/kiln_cms/analytics/referrer_suppression_test.exs` after touching either. It covers thresholds 2 to 20 with four, five and six categories, bounded at view totals of 40, 30 and 20; the original hand search went to 50, and the committed one does not re-run totals above these bounds. A second test in the sweep checks that the criterion can fail (three categories at a threshold of 3 still do). To let the sweep vary the number of categories, `suppress_referrer_group/2` takes an explicit category list; `/1` is `/2` over `referrer_sources/0`, and a default-suite test pins that. Nothing published changes: the dashboard and the export still call `/1`, and no setting or output differs. Operators have nothing to do. The decision record for the rule (ADR 0075) is on a separate open pull request.
 
 ## Fixed
+
+<a id="locale-followups"></a>
+
+- **Locale follow-ups from #2465: newsletter confirmation and an unconfigured record locale (#2597).**
+  - **Newsletter confirmation.** The email is built while the sign-up request
+    runs, so it now goes through gettext in that request's locale (es, fr):
+    subject, body and a confirm link pinned to the same prefix, and the
+    confirm page's button keeps it. On a multilingual site even a
+    default-locale link carries its prefix (`/en/…`).
+  - **A record whose locale is no longer configured** gets the site default
+    in the article's `lang` and in `og:locale`; the `x-kiln-locale` header
+    still names the stored value.
+  - Lock and paywall pages were left as they are: since #2646 their chrome
+    follows the reader's URL and only the document's words carry its
+    language, which is what that change decided.
+  No migration.
+  ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597))
 
 <a id="recurrence-until-instant"></a>
 

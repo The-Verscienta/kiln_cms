@@ -473,6 +473,23 @@ The builder's **Embed** tab hands out a one-line snippet
 (`<script src=".../embed.js" data-kiln-form="<slug>">`) that drops a
 self-sizing iframe of `GET /forms/<slug>/embed` onto a third-party page.
 
+**Choosing the form's language.** Without anything else the embedded form is
+in the site's default language. On a multilingual site, add
+`data-kiln-locale` to the snippet to pick another:
+
+```html
+<script src="https://cms.example.com/embed.js" data-kiln-form="contact" data-kiln-locale="fr"></script>
+```
+
+The frame then loads `/forms/contact/embed?locale=fr`: the labels Kiln adds
+(the default **Submit**, the error messages) are in French, and the form
+posts back to `/fr/forms/contact`, so a refused submission and the thank-you
+message stay in French. The value is checked against the languages the site
+serves. One it doesn't serve, or a typo, gets the default language rather
+than an empty frame. A snippet without the attribute works as before. A
+language prefix on the address itself (`/fr/forms/contact/embed`) still wins
+over `?locale=`.
+
 That route serves its own CSP, because the site-wide `frame-ancestors 'self'`
 would block the iframe. Which parents may frame it is set **on the form**, in
 the Embed tab's *Who may embed this form* control, falling back through this
