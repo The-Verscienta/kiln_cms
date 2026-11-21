@@ -73,7 +73,8 @@ Once it boots, the surfaces worth opening:
 - **`sdk/kiln_plugin/`** — the extension points a downstream project or plugin
   builds against: `Kiln.Plugin`, `Kiln.Block`, `Kiln.FieldType`,
   `Kiln.Advisory`, since `kiln_plugin` 1.4 `Kiln.Challenge.Provider` and
-  `Kiln.Security.Check`, and since 1.5 `Kiln.BackupDestination`, published to
+  `Kiln.Security.Check`, since 1.5 `Kiln.BackupDestination`, and since 1.6
+  field types that hold lists (the `multiple?` callback), published to
   Hex as `kiln_plugin`. **`lib/kiln/`**
   holds the core side: the plugin registry and its health checks,
   `Kiln.Version`, `Kiln.Updates`, `Kiln.SecurityNotices`.
@@ -96,13 +97,12 @@ Kiln's APIs, or an operator running a site, follow
 [Reading paths by role](reading-paths.md). It is the one list of those, and
 the kilncms.dev `/docs` index shows the same tracks.
 
-New in 1.11, each in the guide for its area:
-[flexible content fields](extending-content.md#build-flexible-content-in-the-admin),
-[address fields](extending-content.md#address-fields),
-[titles built from a record's fields](extending-content.md#build-record-titles-from-fields),
-[backups sent to several destinations](backups.md#send-backups-to-several-destinations),
-[S3-compatible storage](backups.md#back-up-to-s3-compatible-storage) among them,
-and [alerts when a webhook stops getting through](webhooks.md#failure-alerts).
+New in 1.12, each in the guide for its area:
+[backups sent to an SFTP server](backups.md#back-up-to-an-sftp-server),
+[plugin field types that hold lists](extending-content.md#let-a-plugin-field-type-take-a-list),
+[`GET /api/site` for a headless front end's link previews](api.md#site-defaults),
+[`/mcp` tools for the links between records](mcp.md#tools),
+and [`GET /api/security/plugin-health` for monitoring plugins](security-posture.md#monitor-each-plugin-from-a-script).
 
 Working on Kiln itself needs a few more:
 

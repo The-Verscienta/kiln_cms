@@ -220,7 +220,7 @@ is neither that type nor explained, so the list cannot fall behind the code.
 | `secret_encrypted` | `KilnCMS.CMS.WebhookEndpoint` (one per endpoint) | Outbound webhook deliveries are refused — the ledger says `"delivery failed: signing secret unreadable"` and the endpoint row reports the secret unreadable | `/editor/webhooks`: *Rotate secret* on each endpoint (the old ciphertext is never opened), then give its receiver the new secret |
 | `secret_access_key_encrypted` | `KilnCMS.CMS.StorageProfile` (one per bucket a site has stored files in) | That site's uploads are **refused**, and its files in that bucket can't be read, derived or deleted (downloads 404, variant jobs retry). Nothing is written to, or read from, the operator's storage instead | `/editor/site-storage` on each such site: enter the secret access key again. A profile the site has since moved away from has no form; move the site back to that bucket, re-enter the key, then move it forward again |
 | `private_key_encrypted` | `KilnCMS.Federation.SiteFederation` | The site can no longer sign ActivityPub deliveries | `/editor/federation` → *Re-key*, or `mix kiln.federation rekey`. See [Re-keying the ActivityPub actor](#re-keying-the-activitypub-actor) |
-| `secrets_encrypted` | `KilnCMS.Backups.DestinationConfig` (one per backup destination whose adapter has secret fields: an **S3-compatible storage** destination's access key ID and secret access key, or a plugin's; Kiln's own Local and Rclone destinations have none) | In-app backups stop reaching that destination: each records it failed with "credentials can't be decrypted (was SECRET_KEY_BASE changed?); re-enter them", and reads partly off-site (or fails, when it was the only destination) | Backups → **Destinations**: **Edit** the destination, enter every secret field again, **Save destination** ([backups.md](backups.md#keep-destination-credentials-outside-kiln)) |
+| `secrets_encrypted` | `KilnCMS.Backups.DestinationConfig` (one per backup destination whose adapter has secret fields: an **S3-compatible storage** destination's access key ID and secret access key, an **SFTP server** destination's password and private key, or a plugin's; Kiln's own Local and Rclone destinations have none) | In-app backups stop reaching that destination: each records it failed with "credentials can't be decrypted (was SECRET_KEY_BASE changed?); re-enter them", and reads partly off-site (or fails, when it was the only destination) | Backups → **Destinations**: **Edit** the destination, enter every secret field again, **Save destination** ([backups.md](backups.md#keep-destination-credentials-outside-kiln)) |
 | `users.totp_secret_encrypted`, `users.totp_pending_secret_encrypted` | `KilnCMS.Accounts.User` (one per account with an authenticator app) | The account's authenticator codes are refused, so it signs in with a recovery code or a passkey; an enrollment in progress can't be confirmed | The person turns the authenticator app off and sets it up again under **Settings → Two-step verification**, after signing in with a recovery code. An admin can't do it for them |
 
 One more thing is sealed under this secret but is not a column: the subject
@@ -606,8 +606,10 @@ serving existing objects throughout, because that path uses no credentials.
 An **S3-compatible storage** backup destination holds its own access key ID
 and secret access key, entered on the Backups page and stored encrypted under
 `SECRET_KEY_BASE` (the `secrets_encrypted` row of the table under
-`SECRET_KEY_BASE`). A plugin's destination may hold secret fields the same
-way. They are not environment variables, so a restart changes nothing.
+`SECRET_KEY_BASE`). An **SFTP server** destination holds its password,
+its private key, or both, the same way ([below](#an-sftp-destinations-login)),
+and a plugin's destination may hold secret fields too. They are not
+environment variables, so a restart changes nothing.
 Rotate them in the app, as a platform admin, with no restart:
 
 1. **Create a second key** at the provider with the same bucket access as the
@@ -630,6 +632,30 @@ Rotate them in the app, as a platform admin, with no restart:
 If the key leaked, delete it at the provider first. Until step 4, each backup
 records that destination failed and reads **Partly off-site** (or fails, when
 it was the only destination); backups to the others carry on.
+
+<a id="an-sftp-destinations-login"></a>
+
+**An SFTP destination's login.** Rotate it the same way, as a platform
+admin, with no restart:
+
+1. On the server, add the new public key to the backup account's
+   `~/.ssh/authorized_keys` (or set a new password, if the destination logs
+   in with one and the old one may stay valid until step 4).
+2. On **Backups → Destinations**, click **Edit** on the destination and
+   paste the new **Private key** (the whole file, without a passphrase), or
+   enter the new **Password**. A box left blank keeps the stored value.
+3. Click **Save destination**, then **Test** on the row. "`<name>`: the
+   test passed (on `<node>`)." proves the new login can write, read and
+   delete under the path; a refused one reads "the server refused the
+   username and credentials"
+   ([What can go wrong with an SFTP destination](backups.md#what-can-go-wrong-with-an-sftp-destination)).
+4. Remove the old public key from `authorized_keys`, or retire the old
+   password.
+
+The server's host key is not a secret of Kiln's: it is trusted on the row,
+and a server whose host key you regenerate fails the destination until a
+platform admin trusts the new one
+([When the server's host key changes](backups.md#when-the-servers-host-key-changes)).
 
 An **Rclone remote** destination stores no credential in Kiln: rotate it in
 rclone's configuration, as the off-site row of the next table says.
@@ -749,7 +775,7 @@ to be exercised.
 | Kubernetes / other orchestrator | Secret → env | Roll the deployment; instances restart one at a time |
 | Backup cron | `/etc/cron.d/kiln-backup` (`DATABASE_URL`, `BACKUP_RCLONE_REMOTE`) | Next scheduled run — test it by hand first |
 | In-app backups and backup schedules | The app's own environment (`DATABASE_URL` or `BACKUP_DATABASE_URL`, `BACKUP_RCLONE_REMOTE`, `RCLONE_CONFIG*`) | Restart the app; test with **Back up now** on `/editor/backups` |
-| Backup destinations' secret fields (an S3-compatible storage destination's keys) | The database, entered on Backups → **Destinations** | **Save destination**, no restart; test with the row's **Test** ([Backup destination keys](#backup-destination-keys)) |
+| Backup destinations' secret fields (an S3-compatible storage destination's keys, an SFTP server destination's password or private key) | The database, entered on Backups → **Destinations** | **Save destination**, no restart; test with the row's **Test** ([Backup destination keys](#backup-destination-keys)) |
 | rclone off-site remote | `rclone.conf` on the host | Next run — test with `./scripts/backup.sh all` |
 
 Keep the password-manager snapshot as the source of truth for all of them:

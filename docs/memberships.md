@@ -273,9 +273,10 @@ config, and a rolling deploy is safe: an old node enqueues a non-unique job,
 which the claim then catches.
 
 **Diagnosing "the member paid but has no access"** starts with the recorded
-events: each one carries its status and, on failure, the reason. Every entitlement
-change also appears in the governance trail with the audience delta and the
-provider event that caused it.
+events: each one carries its status and, when it was ignored or failed, the
+reason ([Find out why a billing event was ignored](#find-out-why-a-billing-event-was-ignored)).
+Every entitlement change also appears in the governance trail with the audience
+delta and the provider event that caused it.
 
 ### Organizations
 
@@ -286,18 +287,19 @@ event metadata (verified against the stored membership), then the subscription i
 then the customer id disambiguated by price. Nothing resolvable is acknowledged
 and ignored rather than guessed.
 
-What each outcome does to the event row in `/editor/billing`:
+What each outcome does to the event's row (its `status` and `error` columns in
+`billing_webhook_events`):
 
-| Outcome | Event status | What happens next |
+| Outcome | Event status (`error`) | What happens next |
 |---|---|---|
 | Resolved | `processed` | Membership written. |
-| Nothing we hold matches, or the customer's tiers can't be told apart | `ignored` (`unresolvable`, `ambiguous_customer`) | Acknowledged, nothing written. Purged on the normal retention schedule. |
-| Metadata names a `membership_id` whose stored row belongs to a different user than the metadata `user_id` | `ignored` (`metadata_mismatch`) | Nothing written, and the ladder **stops**: it does not fall through to the subscription or customer lookups, which could name a different row. |
-| A malformed identifier in the payload (a `membership_id` or `org_id` that is not a UUID) | `ignored` | A retry cannot change it, so it is not retried. |
-| A lookup that failed for a reason that is not the event's fault: a database fault, a timeout, a refused read | `failed` | Oban retries (8 attempts, with backoff). A later attempt that succeeds settles the event; failed rows are not purged until you resolve them. |
+| Nothing we hold matches, or the customer's tiers can't be told apart | `ignored` (`unresolvable`) | Acknowledged, nothing written. A customer whose tiers can't be told apart also logs a warning ("… memberships match this customer and the event does not single one out; ignoring."). |
+| Metadata names a `membership_id` whose stored row belongs to a different user than the metadata `user_id` | `ignored` (`metadata_mismatch`) | Nothing written, and the ladder **stops**: it does not fall through to the subscription or customer lookups, which could name a different row. Logged at warning. |
+| A malformed identifier in the payload (a `membership_id` or `org_id` that is not a UUID) | `ignored` (`unresolvable`, unless the subscription or customer id still finds the row) | A retry cannot change it, so it is not retried. |
+| A lookup that failed for a reason that is not the event's fault: a database fault, a timeout, a refused read | `failed` (the error, as Elixir prints it) | Oban retries (8 attempts, with backoff). A later attempt that succeeds settles the event as `processed`. |
 
 Before this, a database fault during resolution was recorded as `ignored`,
-which is final and purgeable, so a payment event could be dropped by a blip.
+which is final, so a payment event could be dropped by a blip.
 A `metadata_mismatch` is a signature-verified event that contradicts our own
 record, so treat a burst of them as worth investigating. An event that names a
 different organization than the row it found cannot occur: the lookup is
@@ -314,8 +316,8 @@ Finding the membership row is not the same as knowing the event belongs to the
 subscription that row holds. The provider delivers late and retries, and one row
 can see two subscriptions over its life (a checkout abandoned, then retried and
 paid). So once an event resolves, Kiln checks it before applying it. An event
-that fails the check is acknowledged, nothing is written, and the event row in
-`/editor/billing` is `ignored` with the reason:
+that fails the check is acknowledged, nothing is written, and the event's row
+is `ignored` with the reason in its `error` column:
 
 | Reason | When | Notes |
 |---|---|---|
@@ -359,6 +361,72 @@ The stamp lives in a private column, `billing_memberships.last_provider_event_at
 (nullable; not in the API). It is added by an expand-only migration with no
 config. A node still on the previous release simply does not stamp it, which only
 makes ordering more permissive, so rolling back is safe.
+
+### Find out why a billing event was ignored
+
+The console does not list recorded provider events yet: `/editor/billing` holds
+the credentials and the tiers only. Each event is a row in the
+`billing_webhook_events` table, with its `status` and, when it was ignored or
+failed, the reason in `error`. You need read access to the database.
+
+1. In the provider's dashboard, open the event the member's payment produced
+   and copy its id (`evt_…`). If you don't have it, skip to step 3 and look
+   through the latest rows instead.
+2. Connect to the database with `psql` (or your platform's database console).
+3. Look the event up:
+
+   ```sql
+   SELECT provider_event_id, type, status, error
+   FROM billing_webhook_events
+   WHERE provider_event_id = 'evt_…'   -- or: WHERE status IN ('ignored', 'failed')
+   ORDER BY inserted_at DESC
+   LIMIT 50;
+   ```
+
+   You see one row per event. A subscription update that arrived after the
+   cancellation it predates, for example, reads:
+
+   ```text
+    provider_event_id |             type              |  status   |    error
+   -------------------+-------------------------------+-----------+--------------
+    evt_…             | customer.subscription.updated | ignored   | out_of_order
+    evt_…             | customer.subscription.deleted | processed |
+   ```
+
+   The row also has `membership_id` and `org_id` once the event resolved, and
+   `inserted_at` and `processed_at`.
+
+4. Read `error` against the tables above, and against the rest of the reasons:
+
+   | `error` | Meaning |
+   |---|---|
+   | `unresolvable`, `metadata_mismatch` | The event names no membership Kiln holds, or contradicts the one it names ([Organizations](#organizations)). |
+   | `other_subscription`, `out_of_order`, `comped_not_provider_managed` | The event was late, about another subscription, or for a comped member ([Late, repeated and foreign events](#late-repeated-and-foreign-events)). |
+   | `not_active` | An `invoice.payment_failed` for a membership that is not `active`: only an active membership is moved to `past_due`. |
+   | `not_a_subscription` | A `checkout.session.completed` whose checkout was not a subscription (a one-off payment), which no tier sells. |
+   | `no_subscription_on_session`, `unknown_status`, `no_status` | The provider's object had no subscription, or no status or one Kiln does not map (`unknown_status` also logs a warning with the status). |
+
+5. For a `failed` row, `error` holds the last attempt's error and the server
+   log has a matching line, `billing webhook evt_… failed: …` (or `… raised: …`
+   for an exception). Oban retries it (8 attempts, with backoff) and the row
+   becomes `processed` when one succeeds. Once the attempts run out it stays
+   `failed` until the provider redelivers the event.
+
+What you can run into:
+
+- **No row at all.** Kiln answered the delivery without recording it: billing
+  was not configured (`404`), the signature did not verify (`400`), or the
+  event type is not one of the four in [Webhook setup](#webhook-setup) (`200`,
+  nothing recorded). The provider's dashboard shows the response code for each
+  delivery.
+- **A row stuck at `received`, `failed` or `processing`.** Its job has not
+  run, ran out of attempts, or the worker died. Resending the event from the
+  provider's dashboard re-enqueues a `received` or `failed` row, and a
+  `processing` one once its claim is more than 10 minutes old
+  ([Webhook delivery and recovery](#webhook-delivery-and-recovery)).
+- **Old rows are all still there.** Nothing purges recorded events yet,
+  `processed` and `ignored` ones included, and each row keeps the event's
+  payload, which carries the customer's email and amounts.
 
 ### When the member was erased
 
@@ -465,12 +533,15 @@ wouldn't be there.
 
 ### Choosing a tier you already hold
 
-Choosing "join" on a tier whose membership is `active`, `past_due` or `comped`
-does not start a second checkout, and it does not touch the membership. Nothing
-is sent to the provider, so the member cannot be billed twice, and their
-audience and audit trail are left alone. Instead the member is sent to `/account` with the notice "You already have this
-membership." The account page has the "Manage billing" button, which opens the
-provider's billing portal for a billed member.
+On `/membership`, a tier the reader already holds (`active`, `past_due` or
+`comped`) is marked **Your plan** and offers **Manage membership** instead of
+**Join**. A **Join** pressed anyway, from a page opened before the membership
+went live or from a second tab, does not start a second checkout and does not
+touch the membership. Nothing is sent to the provider, so the member cannot be
+billed twice, and their audience and audit trail are left alone. Instead the
+member is sent to `/account` with the notice "You already have this
+membership." The account page has the **Manage billing** button, which opens
+the provider's billing portal for a billed member.
 
 Only an `incomplete` or `canceled` membership restarts: its status goes back to
 `incomplete` and the member gets a fresh checkout. Before this guard, a second

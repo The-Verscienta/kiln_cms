@@ -437,7 +437,7 @@ Rolling back to a release before the schedules fires none of them, so keep
 cron ready if you might roll back
 ([Schedule backups in the app](backups.md#schedule-backups-in-the-app)).
 
-Four more things the two paths need from a deployment:
+Five more things the two paths need from a deployment:
 
 - **Keep the host's `scripts/backup.sh` at the release you run.** Cron runs a
   copy outside the image, so an upgrade does not update it. Since v1.9.0 the
@@ -489,7 +489,22 @@ Four more things the two paths need from a deployment:
   An **S3-compatible storage** endpoint on your own network, or reached over
   `http://`, must be named in `BACKUP_S3_PRIVATE_HOSTS`
   ([Reach a store on your own network](backups.md#reach-a-store-on-your-own-network)).
+  An **SFTP server** on your own network must be named in
+  `BACKUP_SFTP_PRIVATE_HOSTS`, its own list: `BACKUP_S3_PRIVATE_HOSTS` doesn't
+  open a host to SFTP
+  ([Reach an SFTP server on your own network](backups.md#reach-an-sftp-server-on-your-own-network)).
+  Each node then needs outbound SSH to that server, on port 22 unless the
+  destination names another.
   `scripts/backup.sh` never sends to these destinations.
+- **A `BACKUP_DIR` that survives a redeploy, for destination retention.**
+  Retention on a destination deletes only what this backup directory's
+  in-app backups sent there, by the id in `BACKUP_DIR/.kiln-dir-id`. A
+  `BACKUP_DIR` that is replaced with the container starts a new id, and the
+  backups the earlier one sent are kept from then on, so the destination's
+  storage grows. Keep it on a persistent volume, and when you move to a new
+  server, carry `.kiln-dir-id` over or adopt the old directory on the
+  **Destinations** tab
+  ([Adopt another backup directory](backups.md#adopt-another-backup-directory)).
 
 ## Optional infrastructure
 

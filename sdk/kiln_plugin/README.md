@@ -7,7 +7,7 @@ the behaviours and macros a plugin `use`s.
 | --- | --- |
 | `Kiln.Plugin` | The entry module: `use Kiln.Plugin`, override the callbacks you need |
 | `Kiln.Block` (+ `Kiln.Block.Renderer`, `Kiln.Block.Info`, …) | A typed content block: `use Kiln.Block` and its `block`/`field`/`migrate` DSL |
-| `Kiln.FieldType` (+ `Kiln.Tokens`) | A custom-field value type admins can pick |
+| `Kiln.FieldType` (+ `Kiln.Tokens`) | A custom-field value type admins can pick; since 1.6 it can also hold a list (`multiple?/0`) |
 | `Kiln.Forms.SpamCheck` (+ `Kiln.Forms.SpamCheck.Context`) | A heuristic run on every public form submission |
 | `Kiln.ImageBackend` (`check/0` since 1.2) | An external image service new uploads can go to |
 | `Kiln.Challenge.Provider`, since 1.4 | A human-verification widget and its check, which the operator can pick instead of Turnstile or reCAPTCHA |

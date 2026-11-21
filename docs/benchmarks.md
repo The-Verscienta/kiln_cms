@@ -814,8 +814,9 @@ The metric is recorded as missed, not as met.
   answer 503 until `KilnCMS.Search.Warmup` has run one search through the
   embedding and reranker servings, so a platform that swaps on "healthy"
   does not move traffic onto a node whose first searches would stall. And
-  each search answers within `query_budget`, so one that arrives early anyway
-  is bounded. Measured below, under [Search across a restart](#search-across-a-restart).
+  each search answers within `query_budget` (plus `cut_grace`, 100 ms by
+  default, for a cut search's running sections to stop on their own since
+  #2614), so one that arrives early anyway is bounded. Measured below, under [Search across a restart](#search-across-a-restart).
 - **Multi-node correctness.** Cache purges reach every node (#1138),
   rate-limited auth buckets are counted cluster-wide, and Oban coordinates
   through Postgres. Two releases can run side by side.

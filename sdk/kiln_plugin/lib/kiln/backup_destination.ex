@@ -2,8 +2,8 @@ defmodule Kiln.BackupDestination do
   @moduledoc """
   The contract for a **backup destination** (kiln_cms#2220): somewhere an
   in-app backup copies its finished files, beside the copy it keeps in
-  `BACKUP_DIR`. Kiln's own Local and Rclone destinations implement it, and so
-  can a plugin's.
+  `BACKUP_DIR`. Kiln's own Local, Rclone, S3 and SFTP destinations implement
+  it, and so can a plugin's.
 
   A plugin contributes one from its entry module:
 
@@ -63,7 +63,10 @@ defmodule Kiln.BackupDestination do
 
   Retention (deleting a destination's old backups) only runs on a
   destination whose `supports/0` includes both `:list` and `:delete`, and
-  only ever deletes files Kiln recorded sending there.
+  only ever deletes files Kiln recorded sending there from the server's own
+  backup directory, or from one a platform admin adopted for the destination
+  (KilnCMS 1.12). Another installation's files in a shared store are never
+  deleted.
 
   ## What `put/3` answers
 
@@ -240,7 +243,7 @@ defmodule Kiln.BackupDestination do
   The stable identifier stored on each destination of this adapter. Rows
   outlive module names, so this must never change once destinations carry
   it. Lowercase letters, digits and `_`, at most 32 characters. `local`,
-  `rclone` and `s3` are Kiln's own.
+  `rclone`, `s3` and `sftp` are Kiln's own (`sftp` since KilnCMS 1.12).
   """
   @callback kind() :: String.t()
 

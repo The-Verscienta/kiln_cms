@@ -2408,8 +2408,9 @@ site's host and names no site.
    own cache (24 hours, 15 minutes after a request failed, lost on restart).
    Behind a load balancer, or after a deploy, have the same key call
    `GET /api/security/posture` too: on a server with nothing cached, that
-   call starts the check in the background, and a plugin health call a
-   minute or so later on that server has the answer. That posture call is
+   call starts the check in the background, and a plugin health call on that
+   server has the answer once the check ends, at most 75 seconds later (a
+   check's time limit). That posture call is
    what asks hex.pm and the notices feed ([what is sent](data-flows.md)).
 5. **Call it on any site's host.** The answer is the same everywhere; the
    host only decides whose allowlist applies.

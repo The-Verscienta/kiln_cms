@@ -477,7 +477,7 @@ carries a token, user or address.
 
 | Event | Emitted when | Measurements | Metadata |
 |-------|--------------|--------------|----------|
-| `[:kiln_cms, :api, :invalid_bearer]` | A `Bearer` token that does not verify reached `/api/*` or `/gql`, or a `token` connect param that does not verify reached `/ws/gql` (#2161, #2634). Emitted whether or not it is refused (`KILN_API_REJECT_INVALID_BEARER`) | `count` (always `1`) | `enforced` (refused or not), `surface` (`:json_api`, `:graphql`, `:media`, `:other`; `/ws/gql` is `:graphql`), `read?`, `reason` (`:expired`, `:malformed`, `:invalid`) |
+| `[:kiln_cms, :api, :invalid_bearer]` | A `Bearer` token that does not verify reached `/api/*` or `/gql`, or a `token` or bearer `authorization` connect param that does not verify reached `/ws/gql` (#2161, #2634, #2632). Emitted whether or not it is refused (`KILN_API_REJECT_INVALID_BEARER`) | `count` (always `1`) | `enforced` (refused or not), `surface` (`:json_api`, `:graphql`, `:media`, `:other`; `/ws/gql` is `:graphql`), `read?`, `reason` (`:expired`, `:malformed`, `:invalid`) |
 | `[:kiln_cms, :api, :second_factor_required]` | A verified user JWT on `/api/*`, `/gql` or `/api/feed` was refused `403` because the site requires a second factor of its account and the deadline has passed (#2247). Not emitted for `/ws/gql` or `/ws/collab` refusals | `count` (always `1`) | `surface` (`:json_api`, `:graphql`, `:feed`, `:other`) |
 
 A steady `second_factor_required` rate after a site turns on a requirement is
@@ -625,7 +625,7 @@ A scrape reveals traffic shape, editorial volume and your route table, so
 |---|---|---|
 | Scraper or agent on the same host / in the same pod (Grafana Alloy, a Prometheus sidecar) | `KILN_METRICS_BIND=loopback` (default) | Nothing off-box can reach it. Scrape `127.0.0.1:9568`, not `localhost`, which may resolve to `::1`. |
 | Scraper on a private network (docker compose network, Fly 6PN, k8s pod IP) | `KILN_METRICS_BIND=all` | Do **not** publish the port. None of the one-click templates do. On Fly, `[metrics] port = 9568, path = "/metrics"` in `fly.toml` scrapes it over 6PN. |
-| Anything that can't be kept off a shared network | `KILN_METRICS_BIND=all` + `KILN_METRICS_TOKEN` | The token is compared in constant time. A missing or wrong token gets `401`. |
+| Anything that can't be kept off a shared network | `KILN_METRICS_BIND=all` + `KILN_METRICS_TOKEN` | The token is compared in constant time. Send it as the request's only `Authorization` value, `Bearer <token>` with the scheme in any case (#2632). A missing or wrong token, or a second `Authorization` value, gets `401`. |
 
 `KILN_METRICS_BIND=all` without a token logs a warning at boot rather than
 refusing to start. Some platform scrapers (Fly's) cannot send a header, and on

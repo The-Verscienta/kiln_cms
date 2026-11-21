@@ -171,13 +171,14 @@ among them; `trashed` counts those, and their writes fire nothing.
 
 A list field (`multiple: true` on a `:string`, `:integer`, `:float`, `:date`,
 `:datetime`, `:time`, `:url`, `:email`, `:telephone`, `:color` or `:slug`
-field, see
+field, or on a plugin's type that takes lists, see
 [Make a field hold a list of values](extending-content.md#make-a-field-hold-a-list-of-values))
 takes a JSON array of its items, or that array encoded again. A list of
 phrases takes strings (`["fatigue","insomnia"]`); a typed list takes its own
 values (`[3, 5]`, `["2026-03-01","2026-03-08"]`). Each item is checked and
 tidied exactly as the field's own save would, so a list of colors stores
-`#FFF` as `#ffffff`, repeats drop out except in a number list, and
+`#FFF` as `#ffffff`, repeats drop out except in a number list (or a plugin
+type's list that keeps them), and
 `min_items` / `max_items` apply. An item that does not fit makes the record
 invalid, and the report names it by its position from 1: `item 2 must be a
 date (YYYY-MM-DD)`.

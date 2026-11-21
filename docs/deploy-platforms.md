@@ -334,3 +334,17 @@ cover:
   Keep the bucket's details and keys outside Kiln as well, since the
   database that lists them is one of the files the bucket holds
   ([Keep destination credentials outside Kiln](backups.md#keep-destination-credentials-outside-kiln)).
+  An **SFTP server** destination works the same way, for a storage box or
+  a server you reach over SSH
+  ([Back up to an SFTP server](backups.md#back-up-to-an-sftp-server)).
+
+**Retention on a destination, with a `BACKUP_DIR` the platform wipes.** A
+destination's retention deletes only the backups this backup directory's
+in-app backups sent, by the id the app keeps in `BACKUP_DIR/.kiln-dir-id`.
+On the container's own disk, each deploy starts a new id, and the backups
+earlier containers sent are kept from then on, so the destination grows.
+Mount `BACKUP_DIR` on a volume, or, after a deploy, adopt the earlier ids on
+the **Destinations** tab
+([Adopt another backup directory](backups.md#adopt-another-backup-directory)),
+or prune the old backups with the store's own tools, such as a bucket
+lifecycle rule.

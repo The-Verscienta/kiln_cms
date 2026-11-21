@@ -12,7 +12,7 @@ signed-out content pages (see [Which script a page loads](#which-script-a-page-l
 
 | Dependency | Channel | Pinned at | Why |
 | --- | --- | --- | --- |
-| TipTap (`@tiptap/core`, `@tiptap/pm`, `@tiptap/starter-kit`) | **npm** → bundled by esbuild | `assets/package.json` + `assets/package-lock.json` | Multi-module package with a real transitive tree; semver + a committed lockfile matter |
+| TipTap 3 (`@tiptap/core`, `@tiptap/pm`, `@tiptap/starter-kit`, the link, table and collaboration extensions) and Yjs | **npm** → bundled by esbuild | `assets/package.json` + `assets/package-lock.json` | Multi-module package with a real transitive tree; semver + a committed lockfile matter |
 | SortableJS `1.15.6` | **vendored** single file | `assets/vendor/sortable.js` | One stable UMD file; not worth an npm transitive tree |
 | topbar | **vendored** single file | `assets/vendor/topbar.js` | phx.new default; one tiny file |
 | heroicons `v2.2.0` | **mix dep** + Tailwind plugin | `mix.exs` (`:heroicons`) + `@plugin "../vendor/heroicons"` | SVGs consumed as `hero-*` classes at build time |
@@ -231,10 +231,15 @@ Each problem is printed on its own line, and the task ends with
 
 [`assets/js/app.js`](../assets/js/app.js) wires them into LiveView hooks:
 
-- **TipTap** (`Editor` + `StarterKit`, plus `@tiptap/extension-link` and the
-  `@tiptap/extension-table*` set — StarterKit v2 carries neither) powers the
-  `RichText` hook for rich-text blocks; the editor's HTML is mirrored into a
-  hidden input so it saves through the normal form submit.
+- **TipTap** (`Editor` + `StarterKit`, plus `@tiptap/extension-link` and
+  `@tiptap/extension-table`) powers the `RichText` hook for rich-text blocks.
+  StarterKit 3 has a Link mark of its own; Kiln switches it off and registers
+  its own Link, gated by the same href rules as the server, and adds tables,
+  which StarterKit lacks. The editor's content is mirrored into a hidden input
+  so it saves through the normal form submit. The editor code lives in
+  [`assets/js/rich_text.js`](../assets/js/rich_text.js) and loads through
+  `import()` the first time a rich-text block mounts, so it is a separate
+  chunk, not part of `app.js`'s first load.
 - **SortableJS** powers the `Sortable` hook for drag-and-drop block reordering,
   pushing a `reorder` event with the new `data-sort-id` order.
 - **topbar** shows the live-navigation progress bar.

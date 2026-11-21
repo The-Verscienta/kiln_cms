@@ -46,9 +46,9 @@ You read Kiln's content from your own site or app, or extend Kiln itself.
    content fields that hold items of different kinds.
 6. [The overlay contract](overlay-contract.md): what your own project may rely
    on across Kiln releases.
-7. [Plugins](plugin-extensibility.md): adding blocks, field types,
-   endpoints, checks and backup destinations with a plugin, which is compiled
-   in, never loaded at run time.
+7. [Plugins](plugin-extensibility.md): adding blocks, field types (lists
+   among them), endpoints, checks and backup destinations with a plugin,
+   which is compiled in, never loaded at run time.
 
 ## Operator
 
@@ -62,8 +62,8 @@ You install, run and upgrade a Kiln site.
 3. [Environment variables](environment-variables.md): every setting, and
    which ones you must set.
 4. [Backups and restore](backups.md): what to back up, how to schedule it in
-   the app or with cron, where to send it (a directory, an rclone remote or
-   S3-compatible storage), and how to bring a site back.
+   the app or with cron, where to send it (a directory, an rclone remote,
+   S3-compatible storage or an SFTP server), and how to bring a site back.
 5. [Observability](observability.md): telemetry and performance profiling
    for the editor, with an optional Prometheus exporter.
 6. [Account administration](account-administration.md): adding people,

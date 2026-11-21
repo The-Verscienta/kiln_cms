@@ -909,7 +909,8 @@ marker sync (`KilnCMS.Backups.MarkerSyncWorker`, every 15 minutes) reads it on
 each node's own backup directory and shows `skipped` and `partial` as a line on
 **Backups** and **Home** (above), dated by the prune, until a clean prune's
 `ok` is read. It never reads the file while a page loads. A file it can't
-use (not that JSON, larger than 4 KB, or dated ahead of the node's clock) is
+use (not that JSON, larger than 4 KB, or dated more than five minutes
+ahead of the node's clock) is
 ignored with a warning in the server log ("Ignored …/.kiln-prune-status.json:
 …") and leaves the line as it was. A file older than eight days, or no file
 at all, clears the line: cron is no longer reporting on that directory, and
@@ -3735,8 +3736,8 @@ An in-app backup keeps its files in `BACKUP_DIR` and, when it is set,
 copies them to `BACKUP_RCLONE_REMOTE`. On the **Destinations** tab of the
 Backups page a platform admin adds more places to copy them to (#2220): a
 directory on this server (a NAS mount, a second disk), a remote already
-named in rclone's configuration, an S3-compatible bucket, or a kind a plugin
-adds. Each backup is
+named in rclone's configuration, an S3-compatible bucket, a folder on an
+SFTP server, or a kind a plugin adds. Each backup is
 then sent to every enabled destination, one after another, and a
 destination that fails doesn't stop the others.
 
@@ -3759,6 +3760,11 @@ and what the kind of destination needs:
 - **S3-compatible storage:** a bucket and an access key for it, and
   `BACKUP_S3_PRIVATE_HOSTS` for a store on your own network
   ([Back up to S3-compatible storage](#back-up-to-s3-compatible-storage)).
+- **SFTP server:** an account on the server, its host key fingerprint, the
+  `add_backup_destination_host_key` migration, and
+  `BACKUP_SFTP_PRIVATE_HOSTS` for a server on your own network. Its fields
+  and the host-key step are in
+  [Back up to an SFTP server](#back-up-to-an-sftp-server).
 
 1. Open **Backups** (`/editor/backups`) and click the **Destinations** tab.
    The page is headed **Backup destinations**. When `BACKUP_RCLONE_REMOTE`
@@ -3773,7 +3779,7 @@ and what the kind of destination needs:
    only."
 2. Click **Add a destination**. Under **What kind of destination?** pick
    **Directory on this server**, **Rclone remote**, **S3-compatible
-   storage**, or a plugin's kind.
+   storage**, **SFTP server**, or a plugin's kind.
    **Directory on this server** is missing, with "A directory on this server
    can be added once BACKUP_LOCAL_DESTINATION_ROOTS lists where it may
    write.", until that variable is set.
@@ -4375,15 +4381,20 @@ Kiln refuses symbolic links where its own files and folders go (`db`,
 `media`, a backup file, a `.partial`), and never follows them. Your
 **Path** itself may run through a link, as NAS shares often do.
 
+<a id="retention-on-an-sftp-server"></a>
+
 #### Retention on an SFTP server
 
 As on any destination ([Retention on a destination](#retention-on-a-destination)),
 with these limits:
 
 - **Not while `BACKUP_RCLONE_REMOTE` is set**, which can name the same
-  server under any name ("an SFTP destination can't be compared with
-  BACKUP_RCLONE_REMOTE"), and the env remote is not pruned while an SFTP
-  destination exists.
+  server under any name. The row shows **Not pruned:** "it can't be
+  compared with BACKUP_RCLONE_REMOTE", and each pass logs "can't confirm it
+  doesn't overlap BACKUP_RCLONE_REMOTE". The env remote is not pruned while
+  any SFTP destination exists, enabled or not: with
+  `BACKUP_RCLONE_REMOTE_PRUNE` on, its row says "… nothing is pruned here:
+  an SFTP destination can't be compared with it".
 - **Two SFTP destinations overlap** when they have the same host, port and
   username and one path is inside the other. Such a destination can't be
   saved.
@@ -4452,8 +4463,9 @@ IO.inspect(Map.take(d, [:name, :kind, :enabled, :prune, :settings, :last_test_ok
 `kind` is `"local"`, `"rclone"` (settings `"remote_name"` and `"path"`),
 `"s3"` (settings `"endpoint"`, `"region"`, `"bucket"`, `"prefix"` and
 `"path_style"`, a boolean; secrets `"access_key_id"` and
-`"secret_access_key"`), or a plugin's kind; secret fields go in a
-`secrets:` map beside `settings`. A refused save is `{:error, %Ash.Error.Invalid{}}` with the
+`"secret_access_key"`), `"sftp"` (settings `"host"`, `"port"`,
+`"username"` and `"path"`; secrets `"password"` and `"private_key"`), or a
+plugin's kind; secret fields go in a `secrets:` map beside `settings`. A refused save is `{:error, %Ash.Error.Invalid{}}` with the
 messages in the table [below](#what-can-go-wrong-with-a-destination). The
 other calls, each with `actor: admin`:
 `KilnCMS.Backups.list_backup_destinations/1`,
@@ -4464,6 +4476,35 @@ record `update` returns; an older copy is refused as changed meanwhile
 (`Ash.Error.Changes.StaleRecord`, #2952). A test that fails still
 returns `{:ok, d}`, with `last_test_ok: false` and the reason in
 `last_test_error`.
+
+An SFTP destination must be created with `enabled: false` and its host key
+trusted before it is enabled, as on the tab
+([Back up to an SFTP server](#back-up-to-an-sftp-server)). Read the key,
+compare `scanned.fingerprint` with what `ssh-keygen -lf` prints on the
+server, and only then trust it:
+
+```elixir
+{:ok, scanned} = KilnCMS.Backups.scan_destination_host_key(d.id, actor: admin)
+# scanned.algorithm, scanned.fingerprint ("SHA256:…"), scanned.previous_fingerprint
+
+{:ok, d} =
+  KilnCMS.Backups.trust_backup_destination_host_key(
+    d,
+    scanned.algorithm,
+    scanned.fingerprint,
+    :scanned,
+    %{previous_fingerprint: scanned.previous_fingerprint, scanned_for: scanned.scanned_for},
+    actor: admin
+  )
+
+{:ok, d} = KilnCMS.Backups.update_backup_destination(d, %{enabled: true}, actor: admin)
+```
+
+`scan_destination_host_key(d.id, actor: admin, fingerprint: "SHA256:…")`
+looks for the key with the fingerprint you expect instead, as **Look for
+it** does, and answers `{:error, :no_match}` when the server has none.
+Trust a key found that way with `:entered` in place of `:scanned`, which
+the security log records.
 
 ### When a backup reaches only some destinations
 
@@ -4699,7 +4740,8 @@ to that destination, and was made in the backup directory whose
 ([Several nodes and the backup lock](#several-nodes-and-the-backup-lock)), or
 in a directory the destination adopted for it (below). Anything else that
 looks like a Kiln backup there (another installation sharing the bucket, a
-cron backup copied by hand, a History row with no backup directory) is left
+cron backup copied by hand, a History row with no backup directory, as
+every backup made before v1.10.0 has) is left
 alone, and each run's log names it: "Retention on NAS left 2 old backup(s)
 no in-app backup of this backup directory sent there: db 20261101-031700,
 media 20261101-031700". The reasoning is in
@@ -4744,6 +4786,57 @@ adopted directory sent, so either change is obeyed by the backup in flight. Each
 - At most 50 directories per destination. Only a platform admin can adopt
   one.
 
+To adopt one, as a platform admin, once the server that used it is
+stopped for good:
+
+1. Open **Backups** (`/editor/backups`) and choose the **Destinations** tab.
+2. On the destination's row, open **Backups from other backup directories
+   (N)**. Each directory shows the first 8 characters of its id, and "12
+   backups, the last on 2026-11-01 03:17 UTC".
+3. Tick **Let this server prune these backups — only if that server is
+   retired or this installation moved here.** next to the directory. The
+   page says "This server now prunes that backup directory's backups
+   there."
+4. Do the same on each other destination that holds that directory's
+   backups: an adoption is per destination.
+
+From the next backup on, that destination's retention line in the run's
+log no longer counts those backups as kept for another backup directory,
+and its old ones go by the keep rules. To undo it, untick the box ("This
+server no longer prunes that backup directory's backups there.").
+
+The same from a release console, with `admin` and the destination `d`
+fetched as in
+[Manage destinations from a release console](#manage-destinations-from-a-release-console),
+and the whole id, which the row shows when you hover over the short one
+(`release:` instead of `adopt:` undoes it):
+
+```elixir
+{:ok, d} =
+  KilnCMS.Backups.adopt_backup_directories(
+    d,
+    %{adopt: ["0b5e1c7a-6f1d-4c55-9a2b-3f8e2d7c9a10"]},
+    actor: admin
+  )
+
+d.adoptions
+# [%{"dir_id" => "0b5e1c7a-6f1d-4c55-9a2b-3f8e2d7c9a10",
+#    "adopted_by" => ["<this server's .kiln-dir-id>", …],
+#    "adopted_at" => "2026-11-21T09:12:00Z"}]
+```
+
+A refused change leaves the adoptions as they were. The page says "Nothing
+was changed: …" with one of these messages, and a console call returns
+`{:error, %Ash.Error.Invalid{}}` carrying it:
+
+| Message | Meaning |
+|---|---|
+| "that backup directory belongs to a running server, which prunes its own backups" | A server reported that directory in the last three minutes. Stop it, wait three minutes and try again. |
+| "no running server reports a backup directory" | No server has a backup directory id yet, so there is nothing to bind the adoption to. Run an in-app backup first. |
+| "couldn't tell which backup directories running servers use" | The servers' heartbeats couldn't be read. Try again. |
+| "a destination can adopt at most 50 backup directories" | Untick one first. |
+| "is not a backup directory id" | From a console: the id isn't a lowercase UUID (capitals and surrounding spaces are fixed for you). |
+
 **Pruning a destination needs a `BACKUP_DIR` that persists.** A container
 whose `BACKUP_DIR` is not on a persistent volume gets a new `.kiln-dir-id`
 each time it is replaced, and from then on its earlier backups belong to
@@ -4766,9 +4859,10 @@ It never runs on a destination whose adapter can't list and delete files
 Destinations tab shows **Prunes its old backups** on a row only when a pass
 there would prune; a row whose retention is ticked but can't run shows
 **Not pruned:** and why (it overlaps `BACKUP_RCLONE_REMOTE` or another
-destination, another S3 destination uses a bucket of the same name, it
-can't be compared with `BACKUP_RCLONE_REMOTE`, or its adapter can't list
-and delete), the same check each pass makes. What it did
+destination, another S3 destination uses a bucket of the same name,
+another SFTP destination uses a folder inside or around it, it can't be
+compared with `BACKUP_RCLONE_REMOTE`, or its adapter can't list and
+delete), the same check each pass makes. What it did
 is on the run's log:
 
 | Log line | Meaning |
@@ -4779,7 +4873,8 @@ is on the run's log:
 | "Retention on NAS skipped: it overlaps BACKUP_RCLONE_REMOTE; nothing was deleted" | The destination is, contains or is inside the env remote, which changed since the destination was added. Point the two at separate places. |
 | "Retention on NAS skipped: it overlaps another backup destination; nothing was deleted" | Two destinations share a place. Delete one. |
 | "Retention on Bucket skipped: another S3 backup destination uses a bucket of the same name; the app can't tell whether it is the same store; nothing was deleted" | Another S3 destination names a bucket of the same name on another endpoint host or port, with a prefix inside or around this one ([Retention on an S3 bucket](#retention-on-an-s3-bucket)). Give the two separate prefixes, or untick retention on both. |
-| "Retention on NAS skipped: can't confirm it doesn't overlap BACKUP_RCLONE_REMOTE; nothing was deleted" | A plugin's destination, whose location Kiln can't compare, or an S3 destination, which can't be compared with an rclone remote, while `BACKUP_RCLONE_REMOTE` is set ([Retention on an S3 bucket](#retention-on-an-s3-bucket)). Untick retention on it and prune it yourself, or unset the env remote. |
+| "Retention on NAS skipped: another SFTP backup destination uses a folder inside or around this one's; the app can't tell whether it is the same server; nothing was deleted" | Another SFTP destination's path is inside or around this one's, on any host, port or login ([Retention on an SFTP server](#retention-on-an-sftp-server)). Give the two folders side by side, or untick retention on both. |
+| "Retention on NAS skipped: can't confirm it doesn't overlap BACKUP_RCLONE_REMOTE; nothing was deleted" | A plugin's destination, whose location Kiln can't compare, or an S3 or SFTP destination, which can't be compared with an rclone remote, while `BACKUP_RCLONE_REMOTE` is set ([Retention on an S3 bucket](#retention-on-an-s3-bucket), [Retention on an SFTP server](#retention-on-an-sftp-server)). Untick retention on it and prune it yourself, or unset the env remote. |
 | "Retention on NAS skipped: couldn't list the destination (…); nothing was deleted" | The listing failed, or took longer than 10 minutes ("… timed out after 10 min"). Nothing is deleted on a guess. |
 | "Retention on NAS removed … , then stopped: couldn't delete … (…)" | A delete failed, or took longer than 60 seconds; the pass stopped there. The next backup tries again. A delete stopped at its time limit may still have removed that file at the store: the next pass no longer lists it, so nothing is lost. |
 
@@ -4831,7 +4926,8 @@ there: when you move to a new server, copy `.kiln-dir-id` with the rest of
 - **It is refused while any stored destination could share the remote's
   place.** Every row on the Destinations tab counts, enabled or not: one
   that overlaps the remote, an S3 destination (the remote could name the
-  same bucket), or a plugin's destination (whose location can't be told).
+  same bucket), an SFTP destination (the remote could reach the same
+  server), or a plugin's destination (whose location can't be told).
   Each pass is then skipped with "Retention on r2:kiln skipped: …;
   nothing was deleted", and the env row on the Destinations tab says
   "BACKUP_RCLONE_REMOTE_PRUNE is on, but nothing is pruned here: …".
@@ -4862,6 +4958,11 @@ where it writes, and its credentials.
 - **An S3 destination's** endpoint, bucket, prefix and region are on its
   row; keep them, and the key pair (or a way to make a new one), outside
   Kiln. Its two keys are secret fields, stored as below.
+- **An SFTP destination's** host, port, username and path are on its row,
+  and so is the host key a platform admin trusted. Keep them, the password
+  or private key, and the server's fingerprint (`ssh-keygen -lf` on the
+  server) outside Kiln. Its password and private key are secret fields,
+  stored as below.
 - **A plugin's destination** may have secret fields. Those are stored in
   the database, encrypted with a key derived from `SECRET_KEY_BASE`, and
   never shown again. Rotating `SECRET_KEY_BASE` keeps them with
@@ -4875,7 +4976,9 @@ where it writes, and its credentials.
 ### What can go wrong with a destination
 
 An S3 destination's own messages are in
-[What can go wrong with an S3 destination](#what-can-go-wrong-with-an-s3-destination).
+[What can go wrong with an S3 destination](#what-can-go-wrong-with-an-s3-destination),
+and an SFTP destination's in
+[What can go wrong with an SFTP destination](#what-can-go-wrong-with-an-sftp-destination).
 
 When saving (the form shows the message under the field, or above the form):
 
@@ -6013,6 +6116,9 @@ The app reads them in production only.
 | `BACKUP_TRIGGER` | backup | label recorded in the manifest (default `cron`) |
 | `BACKUP_RCLONE_REMOTE` | backup + app | off-site rclone remote (strongly recommended). Each file is re-hashed before its copy; a refused copy fails the run, and so does a failed one, unless an in-app backup reached another [destination](#send-backups-to-several-destinations) (then it is partly off-site). The official image ships `rclone`; set without it, an in-app run fails ([above](#it-needs-the-client-tools-in-the-image)) |
 | `BACKUP_LOCAL_DESTINATION_ROOTS` | app | comma-separated absolute directories a **Directory on this server** destination may be under (default unset: that kind isn't offered). One relative or `..` entry drops the whole list with a boot warning ([details](#let-backups-be-written-to-a-directory-on-this-server)). Read in production and development |
+| `BACKUP_RCLONE_REMOTE_PRUNE` | app | `true` lets in-app backups prune `BACKUP_RCLONE_REMOTE`, deleting only what this backup directory's in-app backups sent there (default `false`; `scripts/backup.sh` never prunes the remote) ([details](#pruning-backup_rclone_remote)) |
+| `BACKUP_S3_PRIVATE_HOSTS` | app | comma-separated exact host names or IP addresses an **S3-compatible storage** destination may reach on a private or loopback address, or over `http://` (default unset) ([details](#reach-a-store-on-your-own-network)). Read in every environment |
+| `BACKUP_SFTP_PRIVATE_HOSTS` | app | the same for an **SFTP server** destination, its own list: a host in `BACKUP_S3_PRIVATE_HOSTS` is not open to SFTP (default unset) ([details](#reach-an-sftp-server-on-your-own-network)). Read in every environment |
 | `BACKUP_S3_PRIVATE_HOSTS` | app | comma-separated host names (or IP addresses) an **S3-compatible storage** destination may reach over `http://` or at a private or loopback address (default unset: public `https://` only). Read in every environment ([details](#reach-a-store-on-your-own-network)) |
 | `BACKUP_PING_URL` | backup | dead-man's-switch ping on success |
 | `BACKUP_DATABASE_URL` | app | connection string the in-app backup dumps, for a connection the app cannot derive from `DATABASE_URL` or the Repo config (a unix-socket repo). Unset, it uses `DATABASE_URL` when that names the connected database, else a URL rebuilt from the Repo. Any of them may be `ecto://`; `ssl=false` becomes `sslmode=disable` and Ecto's pool options are dropped ([connection URLs](#which-database-url-the-backup-tools-accept-2719)). The tools' TLS follows the app's unless this URL sets `sslmode` ([TLS](#how-the-backup-tools-choose-tls-2830)) |

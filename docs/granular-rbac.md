@@ -54,9 +54,11 @@ The scope is judged on the site being worked in: a member of a non-default site
 is held to the `editable_types` of their membership on that site. The content
 list's **New** buttons and the translations dashboard's Missing chips and
 translation actions follow the same site, so they offer what the policy allows.
-In code, `KilnCMS.Accounts.Scoping.permitted?/4` takes a bare org id, an
-`%Organization{}`, or a query, changeset or map carrying `:tenant`; `nil` means
-the default site, and any other shape raises `ArgumentError`.
+In code, `KilnCMS.Accounts.Scoping.permitted?/4` and `explicitly_permits?/4`
+take as their second argument a bare org id, an `%Organization{}`, or a query,
+changeset, action input or map carrying `:tenant`; `nil` or a tenant-less
+subject means the default site, and any other shape (an integer, an atom, a
+list) raises `ArgumentError`.
 
 Phase 1 scoped authoring only; read scoping arrived with `readable_types` in
 Phase 2, slice 2 (below).

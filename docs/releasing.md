@@ -943,7 +943,7 @@ atom:
   value-keeping write covers top-level fields only.
 
 **The types that may be `multiple`** (`KilnCMS.CMS.ScalarLists.types/0`,
-`Changes.ClearMultiple.list_types/0`, which since the release after v1.11.0
+`Changes.ClearMultiple.list_types/0`, which since v1.12.0
 include every `Kiln.FieldType` whose `multiple?/0` answers `true`) needed the
 same until that release. From it on, a release that meets a `multiple` field
 of a type it can't list **holds** it (`FieldDefinition.held_list?/1`, #2680):
@@ -1050,7 +1050,7 @@ it hides a field of a type it doesn't know and keeps the field's values
 
 ### Rolling back past plugin list fields
 
-From the release after v1.11.0 (#2680), a plugin field type can hold a list
+From v1.12.0 (#2680), a plugin field type can hold a list
 (`c:Kiln.FieldType.multiple?/0`, `kiln_plugin` 1.6). v1.11 and earlier don't
 know that a plugin type can be a list, and they hold a field only when its
 type is unknown, so a list field of a plugin type is an ordinary
@@ -1096,11 +1096,11 @@ first item, or delete the field, which deletes its values. Back up the
 database before either.
 
 **Rolling deploys.** Don't make a plugin field a list until every node runs
-the new release: a node still on v1.11 treats it as above.
+v1.12.0 or later: a node still on v1.11 treats it as above.
 
 ### Rolling back past backup destinations
 
-Backup destinations (#2220, the release after v1.10.0) record a stored
+Backup destinations (#2220, v1.11.0) record a stored
 destination's results under a `dest:<uuid>` key in each backup run's
 artifacts. v1.10 and earlier validate those keys on every write to a run
 and know only `local` and `rclone:`, so they refuse to write a run that
@@ -1128,6 +1128,26 @@ a run's `offsite_status` and each destination's status as
 without breaking it. A new kind of artifact destination key, or a new
 status inside an artifact's `destinations` map, would still be refused by
 it the same way.
+
+### Rolling back past SFTP destinations and prune ownership
+
+v1.12.0 adds two backup changes whose migrations only add columns, so a
+rollback to v1.11 needs nothing run first. What changes once you are back,
+read from v1.11's code rather than tried on a v1.11 deployment:
+
+- **SFTP destinations** (#2222, the `add_backup_destination_host_key`
+  migration). v1.11 has no adapter for the `sftp` kind, so it treats an SFTP
+  destination as one whose plugin was removed: the row stays listed, and
+  each backup records it failed until a platform admin disables or deletes
+  it. The `host_key` column and `BACKUP_SFTP_PRIVATE_HOSTS` are ignored.
+  Rolling forward again brings the destination back with its trusted key.
+- **Prune ownership** (GHSA-rx2c-h7cx-wmfj, the `destination_prune_ownership`
+  migration). v1.11 ignores `backup_destinations.adoptions` and
+  `backup_uploads.dir_id` and prunes a destination as before: everything
+  any backup run recorded sending there, including runs a database restored
+  from another server carries. On a server whose database came from another
+  server's backup, untick "Delete its old backups (retention)" on the
+  shared destinations for as long as it runs v1.11.
 
 ### Rolling back past backup directory queues
 

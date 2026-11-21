@@ -139,12 +139,50 @@ read and write payload links between any two records, the same links
 an editor key may link from anything it may update. Filter
 `read_content_links` on `source_id` to see what a record already links to
 before adding more. A link is not part of its source's document, so one on a
-published record shows at once, with no version and no review. Two limits:
+published record shows at once, with no version and no review. Three limits:
 
 - `kind: reference` is refused. Those edges mirror a reference custom field;
   write the field instead.
+- `kind` takes a name the server already knows (`related`, the default, and
+  the kinds Kiln uses); an unknown name is refused rather than created, as on
+  JSON:API ([json-api.md](json-api.md)). The tool's own description suggests
+  `see_also`, which a server does not know unless something in it uses that
+  kind.
 - There is no delete tool, as for every other resource here. A link created
   in error is removed by a person, not by the model.
+
+A read key is offered `read_content_links` only; the two write tools are
+listed for a write key whose owner is an editor or admin of the site, so a
+viewer's write key and a `draft_write` key can't write links. A key whose
+owner is an editor or admin reads every link on the site; any other key reads
+a link only when it may read both of its ends. `update_content_link` changes
+`position`, `label` and `metadata`: a link's ends and its `kind` are fixed,
+so to point somewhere else, create a new link.
+
+To link a post to background reading, check what it already links to, add
+the link, then relabel it:
+
+```json
+{"name": "read_content_links", "arguments": {
+  "filter": {"field": "source_id", "operator": "eq", "value": "<post id>"}}}
+```
+
+```json
+{"name": "create_content_link", "arguments": {"input": {
+  "source_id": "<post id>", "target_id": "<other record id>",
+  "kind": "related", "position": 2, "label": "Background"}}}
+```
+
+The created link comes back as the tool result's text, a JSON object with
+its `id`. Pass that id to change the link:
+
+```json
+{"name": "update_content_link", "arguments": {"id": "<link id>",
+  "input": {"label": "Further reading", "position": 0}}}
+```
+
+A `kind: reference` link comes back with `isError: true`, and nothing is
+written.
 
 > **Custom fields on a write.** `create_*` and `update_*` take
 > `custom_fields` under `input`, checked as a JSON:API write is
@@ -246,7 +284,9 @@ A downstream project can expose MCP tools for its own content types without
 touching the core: add a `tools` block (via the `AshAi` extension) to your
 content domain, then override `:mcp_tools` in your project config. As with
 `ash_domains`, the override replaces the list — restate the core tools and
-append your own.
+append your own. An override written before 1.12 lacks `read_content_links`,
+`create_content_link` and `update_content_link`, so `/mcp` doesn't serve them
+until you add the three names.
 
 ## Connecting a client
 
