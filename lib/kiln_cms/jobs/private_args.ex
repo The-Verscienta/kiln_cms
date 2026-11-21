@@ -16,9 +16,9 @@ defmodule KilnCMS.Jobs.PrivateArgs do
     * `KilnCMS.Automation.DispatchWorker` and `KilnCMS.Automation.RuleWorker`
       carry the event's `payload`, the serialized document (drafts included),
       as it was when the event fired. A rule's reaction needs that snapshot, so
-      it cannot be read back by id. Readers accept it either in the clear
-      (`"payload"`) or sealed (`"sealed"`, `seal/1`), so a later release can
-      switch the writers to the sealed form while a rolling deploy runs both.
+      it cannot be read back by id. It is written sealed (`"sealed"`,
+      `seal/1`); readers still accept it in the clear (`"payload"`), the shape
+      a job queued by a release before 1.12 carries.
     * `KilnCMS.Notifications.WorkflowMailWorker` and
       `KilnCMS.Notifications.TaskMailWorker` carried the recipient's address,
       the content's title, the actor's name and a comment excerpt or task note
