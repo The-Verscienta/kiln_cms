@@ -120,6 +120,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **An event's recurrence rule with a date-time UNTIL now ends at that instant (a `Z` time in UTC, a floating time in the event's zone), as RFC 5545 says, instead of on its UTC date; rules saved before this release keep their old date until re-saved (#2861).**
+  ([long form](docs/changelog/unreleased.md#recurrence-until-instant))
+
 - **The sign-in page no longer offers "Use a passkey" on a site's own host, where the browser refuses it, and a passkey-only account on `/sign-in/verify` in a browser that can't use a passkey is told to use another browser or device, or ask an administrator (#2827, #2887).**
   ([long form](docs/changelog/unreleased.md#passkey-fallbacks))
 
