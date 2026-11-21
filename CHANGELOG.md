@@ -62,6 +62,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Plugin field types can now hold lists: no migration, nothing to do to upgrade. Before rolling back past this release, find plugin list fields (query in docs/releasing.md, "Rolling back past plugin list fields"): older releases treat them as single values, and saving such a record there can replace the list. Don't make a plugin field a list until every node is upgraded.**
+  ([#3203](https://github.com/The-Verscienta/kiln_cms/pull/3203) · [long form](docs/changelog/unreleased.md#plugin-list-field-types-upgrade))
+
 - **Two S3 destinations on one bucket name now stop pruning.** If two S3 destinations name the same bucket with one prefix inside the other on different hosts, retention on both is skipped after the upgrade, with a notice on every pass, and their storage grows until you act. Give them prefixes side by side, or untick "Delete its old backups (retention)" on one of them.
   ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap-upgrade))
 
@@ -82,6 +85,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/unreleased.md#plugin-health-tail-packages-unknown))
 
 ### Added
+
+- **A plugin field type can hold a list (`multiple?/0`, `unique_items?/0`, `kiln_plugin` 1.6), with the same editor input, write rules, API filters and schema export as core lists. A list whose type later stops taking lists is kept read-only (a "held list") instead of being dropped.**
+  ([#3203](https://github.com/The-Verscienta/kiln_cms/pull/3203) · [long form](docs/changelog/unreleased.md#plugin-list-field-types))
 
 - **Backups: a native SFTP destination.** Back up to any SSH server with a password or a key (Ed25519, ECDSA, RSA). A platform admin confirms the server's host key before it is used, and a changed key fails the destination and alerts platform admins. Uploads resume; retention and rescan work as for S3.
   ([#3198](https://github.com/The-Verscienta/kiln_cms/pull/3198) · [long form](docs/changelog/unreleased.md#backup-sftp-destination))

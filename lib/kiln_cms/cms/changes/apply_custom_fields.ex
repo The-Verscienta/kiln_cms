@@ -156,6 +156,18 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   back as stored. Under `:strict`, a supplied value must equal the stored one
   (a whole-map round-trip); under `:drop`, a supplied value is carried
   verbatim. `definitions/3` still answers the registered definitions only.
+
+  ## A list its type no longer takes
+
+  A **held list** (`FieldDefinition.held_list?/1`, #2680) is a `multiple`
+  field whose type can no longer hold a list: a plugin type whose
+  `c:Kiln.FieldType.multiple?/0` stopped answering `true`. Its stored lists
+  are held exactly as an unknown type's values are — kept, never coerced,
+  out of the formulas', the conditions' and `required`'s sight — and a write
+  that changes one is refused with a message saying how to get out (an admin
+  saves the field as a single value, or deletes it). Unlike an unknown type's,
+  the definition stays in `stashed_definitions/1`, so the search text still
+  indexes the list.
   """
   use Ash.Resource.Change
 
@@ -388,13 +400,15 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp merge_base(changeset), do: stringify_keys(changeset.data.custom_fields || %{})
 
   defp apply_definitions(changeset, existing, mode, context, supplied \\ nil) do
-    {defs, held} = scope_for(changeset)
+    {all_defs, held} = scope_for(changeset)
+    # A held list (#2680) is held beside the unknown types, but stays declared.
+    {stale, defs} = Enum.split_with(all_defs, &FieldDefinition.held_list?/1)
 
     # A content import carries ANOTHER site's map (`custom_fields_held:
     # :drop`): a value under a held name was written by that site's field,
     # which may share only the name with this one. Not carried — dropped with
     # a warning like any key this site does not declare.
-    held = if changeset.context[:custom_fields_held] == :drop, do: [], else: held
+    held = if changeset.context[:custom_fields_held] == :drop, do: [], else: held ++ stale
 
     # The writing org (epic #336). `:media`/`:reference` fields resolve a snapshot
     # by id under this tenant, so a value pointing at another site's media/content
@@ -465,13 +479,15 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     # After the formulas, so none of them reads a held value (#2605).
     {cleaned, errors} = hold(held, changeset, supplied, mode, {cleaned, errors})
 
+    # `defs ++ held`, not `all_defs`: under an import's `:drop` a held list is
+    # in neither, so its value is dropped WITH the warning `note_dropped/2` logs.
     {refused, dropped} = undefined(defs ++ held, supplied, existing, mode)
-    errors = Enum.map(refused, &undefined_error(&1, defs)) ++ errors
+    errors = Enum.map(refused, &undefined_error(&1, all_defs)) ++ errors
 
     changeset
     |> Ash.Changeset.force_change_attribute(:custom_fields, cleaned)
-    |> stash(defs)
-    |> stash_held(held)
+    |> stash(all_defs)
+    |> stash_held(held -- stale)
     |> stash_supplied(supplied)
     |> stash_defaulted(defaulted)
     |> note_dropped(dropped)
@@ -557,9 +573,12 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     {defs, held} = scope_for(changeset)
     changeset = changeset |> stash(defs) |> stash_held(held)
 
+    # A held list (#2680) is kept as stored, as an unknown type's value is.
+    {stale, defs} = Enum.split_with(defs, &FieldDefinition.held_list?/1)
+
     case Enum.filter(defs, &(&1.field_type == :computed)) do
       [] -> changeset
-      computed -> recompute(changeset, {defs, held}, computed)
+      computed -> recompute(changeset, {defs, held ++ stale}, computed)
     end
   end
 
@@ -770,11 +789,20 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp held_base(changeset), do: stringify_keys(changeset.data.custom_fields || %{})
 
   defp held_error(def) do
-    error(
-      def,
-      "can't be changed: its field type (#{def.field_type}) is not one this release " <>
-        "knows. Upgrade Kiln or reinstall the plugin that provides it, or delete the field"
-    )
+    if FieldDefinition.held_list?(def) do
+      error(
+        def,
+        "can't be changed: its field type (#{def.field_type}) no longer takes a list of " <>
+          "values. The stored list is kept. An admin can save the field as a single value " <>
+          "(keeping each record's first item) or delete it"
+      )
+    else
+      error(
+        def,
+        "can't be changed: its field type (#{def.field_type}) is not one this release " <>
+          "knows. Upgrade Kiln or reinstall the plugin that provides it, or delete the field"
+      )
+    end
   end
 
   # The keys the caller actually sent, before the merge and the defaults
@@ -824,7 +852,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
       |> stringify_keys()
 
     defs
-    |> Enum.reject(&(&1.field_type == :computed))
+    |> Enum.reject(&(&1.field_type == :computed or FieldDefinition.held_list?(&1)))
     |> Conditions.apply_to(values, required_when: true)
     |> Enum.filter(&(&1.required and blank_for?(&1, Map.get(values, &1.name))))
     |> Enum.map(&error(&1, "is required before publishing"))
@@ -1787,21 +1815,53 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   end
 
   # Each item coerced as the single field (`single`) would coerce it, in
-  # order; the first refusal is named by its position.
+  # order; the first refusal is named by its position. An item must coerce to
+  # one string or one number: a plugin type's `cast/2` (#2680) answering a
+  # map or a list for an item refuses the write rather than storing a value
+  # no list filter or schema describes.
   defp coerce_each(raw, single) do
     raw
     |> Enum.flat_map(&split_item/1)
     |> Enum.with_index(1)
     |> Enum.reduce_while({:ok, []}, fn {item, position}, {:ok, acc} ->
       case coerce(item, single) do
-        {:ok, coerced} -> {:cont, {:ok, [coerced | acc]}}
-        {:error, message} -> {:halt, {:error, "item #{position} #{message}"}}
+        {:ok, coerced} when is_binary(coerced) or is_number(coerced) ->
+          {:cont, {:ok, [coerced | acc]}}
+
+        {:ok, other} ->
+          note_non_scalar(single, other)
+
+          {:halt,
+           {:error,
+            "item #{position} must be one value: the field type returned #{inspect(other)}"}}
+
+        {:error, message} ->
+          {:halt, {:error, "item #{position} #{message}"}}
       end
     end)
     |> case do
       {:ok, items} -> {:ok, Enum.reverse(items)}
       error -> error
     end
+  end
+
+  # Say once per field type module, not once per write, that its `cast/2`
+  # answers something a list item cannot be: the plugin's bug, which every
+  # write of such a list will keep refusing until it is fixed.
+  defp note_non_scalar(%{field_type: type}, value) do
+    module = KilnCMS.CMS.FieldTypes.get(type)
+    key = {__MODULE__, :non_scalar_item, module}
+
+    if module && :persistent_term.get(key, false) == false do
+      :persistent_term.put(key, true)
+
+      Logger.warning(
+        "custom_fields: #{inspect(module)}.cast/2 returned #{inspect(value)} for one item " <>
+          "of a #{type} list; a list item must be one string or number, so the write was refused"
+      )
+    end
+
+    :ok
   end
 
   defp split_item(item) when is_binary(item) do

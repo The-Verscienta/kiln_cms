@@ -138,6 +138,13 @@ defmodule KilnCMS.CMS.FieldWidgetsTest do
       assert FieldWidgets.default(rating) == "number"
     end
 
+    # #2680: a `multiple` plugin field is the generic list input, which no
+    # widget of the type's single input shapes — a list type, or a held list.
+    test "a multiple plugin field has no choice" do
+      assert FieldWidgets.allowed(field(%{field_type: :rating, multiple: true})) == []
+      assert FieldWidgets.allowed(field(%{field_type: :tag, multiple: true})) == []
+    end
+
     test "a plugin type without widgets/1 has no choice" do
       assert FieldWidgets.allowed(field(%{field_type: :tokenless})) == []
     end

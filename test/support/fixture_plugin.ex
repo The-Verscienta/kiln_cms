@@ -363,6 +363,71 @@ defmodule KilnCMS.FixturePlugin.FieldTypes.Lookup do
   end
 end
 
+defmodule KilnCMS.FixturePlugin.FieldTypes.Tag do
+  @moduledoc """
+  A plugin field type that takes lists and drops repeats (test fixture,
+  #2680): a short tag, trimmed and lowercased, at most 40 characters. Typed
+  for GraphQL as a string, and described by its own `json_schema/1`.
+
+  It borrows `Lookup`'s client hook, so a list field of a hooked type has a
+  case to prove the hook is left off its item inputs.
+  """
+  use Kiln.FieldType
+
+  @impl Kiln.FieldType
+  def multiple?, do: true
+
+  @impl Kiln.FieldType
+  def unique_items?, do: true
+
+  @impl Kiln.FieldType
+  def graphql_kind(_definition), do: :string
+
+  @impl Kiln.FieldType
+  def json_schema(_definition), do: %{"type" => "string", "maxLength" => 40}
+
+  @impl Kiln.FieldType
+  def input_hook(_definition),
+    do: %{hook: Kiln.FieldType.colocated_hook(KilnCMS.FixturePlugin.FieldTypes.Lookup, "Suggest")}
+
+  @impl Kiln.FieldType
+  def cast(value, _definition) when is_binary(value) do
+    case value |> String.trim() |> String.downcase() do
+      "" ->
+        {:error, "must not be blank"}
+
+      tag ->
+        if String.length(tag) > 40,
+          do: {:error, "must be at most 40 characters"},
+          else: {:ok, tag}
+    end
+  end
+
+  def cast(_value, _definition), do: {:error, "must be a tag"}
+end
+
+defmodule KilnCMS.FixturePlugin.FieldTypes.Shapeshifter do
+  @moduledoc """
+  A plugin field type that takes lists but whose `cast/2` answers a map for
+  a value starting with `{` (test fixture, #2680): the case that proves the
+  write path refuses a list item that is not one string or number, rather
+  than storing it. Its `json_schema/1` is an `anyOf` with a `null` member,
+  for the schema export's item normaliser.
+  """
+  use Kiln.FieldType
+
+  @impl Kiln.FieldType
+  def multiple?, do: true
+
+  @impl Kiln.FieldType
+  def json_schema(_definition),
+    do: %{"anyOf" => [%{"type" => "string"}, %{"type" => "object"}, %{"type" => "null"}]}
+
+  @impl Kiln.FieldType
+  def cast("{" <> _rest = value, _definition), do: {:ok, %{"raw" => value}}
+  def cast(value, _definition), do: {:ok, value |> to_string() |> String.trim()}
+end
+
 defmodule KilnCMS.FixturePlugin.PanelLive do
   @moduledoc "A plugin admin panel (test fixture) mounted via `admin_routes/0`."
   use KilnCMSWeb, :live_view
@@ -531,7 +596,9 @@ defmodule KilnCMS.FixturePlugin do
       KilnCMS.FixturePlugin.FieldTypes.Rating,
       KilnCMS.FixturePlugin.FieldTypes.Tokenless,
       KilnCMS.FixturePlugin.FieldTypes.Exploding,
-      KilnCMS.FixturePlugin.FieldTypes.Lookup
+      KilnCMS.FixturePlugin.FieldTypes.Lookup,
+      KilnCMS.FixturePlugin.FieldTypes.Tag,
+      KilnCMS.FixturePlugin.FieldTypes.Shapeshifter
     ]
 
   @impl true

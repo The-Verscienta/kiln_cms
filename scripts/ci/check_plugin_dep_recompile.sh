@@ -12,8 +12,12 @@
 # `BlockUnion.subtype_constraints/0`: `Ash.Type.NewType` evaluates its
 # constraints at runtime, so it would pass with no recompile at all.)
 #
+# The same for a field type's list capability (#2680): `KilnCMS.CMS.FieldTypes`
+# bakes `multiple?/0` at compile time, so turning it off on the fixture's
+# `Stars` must take `:stars` out of `ClearMultiple.list_types/0`.
+#
 # Run from anywhere, under MIX_ENV=test (the fixture is a `:test` dependency and
-# config/test.exs registers it). The fixture file is restored on every exit.
+# config/test.exs registers it). The fixture files are restored on every exit.
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
@@ -23,9 +27,14 @@ file=sdk/fixtures/dep_plugin/lib/kiln_dep_fixture/plugin.ex
 backup="$(mktemp)"
 cp "$file" "$backup"
 
+stars=sdk/fixtures/dep_plugin/lib/kiln_dep_fixture/field_types/stars.ex
+stars_backup="$(mktemp)"
+cp "$stars" "$stars_backup"
+
 restore() {
   cp "$backup" "$file"
-  rm -f "$backup"
+  cp "$stars_backup" "$stars"
+  rm -f "$backup" "$stars_backup"
   # Leave the build matching the restored source for whatever runs next.
   mix compile >/dev/null 2>&1 || true
 }
@@ -60,3 +69,31 @@ if [ "$after" != "true" ]; then
 fi
 
 echo "OK: a dependency plugin's new block reached the compile-time block registries without --force."
+
+# Prints true/false: may a `:stars` field be a list?
+stars_listable() {
+  mix run --no-start -e \
+    'IO.puts(:stars in KilnCMS.CMS.Changes.ClearMultiple.list_types())' |
+    tail -n 1
+}
+
+before="$(stars_listable)"
+if [ "$before" != "true" ]; then
+  echo "::error:::stars is not a list type before the edit ($before); the check proves nothing"
+  exit 1
+fi
+
+perl -pi -e 's/def multiple\?, do: true/def multiple?, do: false/' "$stars"
+if ! grep -q 'def multiple?, do: false' "$stars"; then
+  echo "::error::Could not rewrite multiple?/0 in $stars; update this script with the fixture"
+  exit 1
+fi
+
+mix compile
+after="$(stars_listable)"
+if [ "$after" != "false" ]; then
+  echo "::error::Turning off a dependency field type's multiple?/0 did not reach ClearMultiple.list_types/0 without --force (got: $after). See Kiln.Plugins.__mix_recompile__?/0."
+  exit 1
+fi
+
+echo "OK: a dependency field type's list capability reached the compile-time registries without --force."

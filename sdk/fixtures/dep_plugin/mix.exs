@@ -21,12 +21,12 @@ defmodule KilnDepFixture.MixProject do
       app: :kiln_dep_fixture,
       version: "0.1.0",
       elixir: "~> 1.20",
-      # 1.5 is the minimum on purpose: the fixture declares
-      # `backup_destinations/0` (kiln_cms#2220), so it also proves a plugin can
-      # require exactly that minor. `plug` is the one extra dependency a plug
-      # route needs.
+      # 1.6 is the minimum on purpose: the fixture's field type takes lists
+      # (`multiple?/0`, kiln_cms#2680), so it also proves a plugin can require
+      # exactly that minor. `plug` is the one extra dependency a plug route
+      # needs.
       deps: [
-        {:kiln_plugin, "~> 1.5", path: "../../kiln_plugin"},
+        {:kiln_plugin, "~> 1.6", path: "../../kiln_plugin"},
         {:plug, "~> 1.14"}
       ]
     ]

@@ -1541,6 +1541,13 @@ Notable properties:
   item type's keys and, when it has settings, `_settings`. The items are typed
   as generic objects for now, with `x-kiln-min-items` / `x-kiln-max-items`
   when the field sets bounds;
+- a list field of a plugin's type that takes lists is an array of the type's
+  own `json_schema/1` for one item, its `null` removed, with `uniqueItems`
+  only when the type drops repeats. A **held list**, one whose plugin type
+  no longer takes lists, is `{"type": ["array", "null"], "items": {},
+  "readOnly": true}`: the stored items need not match the type's schema
+  today, and a write that changes them is refused
+  ([Narrow a list field whose type stopped taking lists](extending-content.md#narrow-a-list-field-whose-type-stopped-taking-lists));
 - a field's value rules are annotations, not assertions, because a stored
   value may predate the rule: besides `x-kiln-minimum` and its siblings, a
   color field with a palette carries `x-kiln-palette` (its hex values,

@@ -316,6 +316,7 @@ msgid_plural "%{count} aren't indexed yet, so they aren't grouped."
 msgstr[0] "%{count} n'est pas encore indexé, il n'est donc pas regroupé."
 msgstr[1] "%{count} ne sont pas encore indexés, ils ne sont donc pas regroupés."
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #: lib/kiln_cms_web/components/content_editor/flexible_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
@@ -12588,6 +12589,11 @@ msgstr "Sa date de relecture approche."
 #, elixir-autogen, elixir-format
 msgid "Its review date passed over a week ago: check it now."
 msgstr "Sa date de relecture est passée depuis plus d’une semaine : vérifiez-le maintenant."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Its type no longer takes a list: the stored lists are kept, read-only. Edit the field to save it as a single value."
+msgstr "Son type n'accepte plus de liste : les listes enregistrées sont conservées, en lecture seule. Modifiez le champ pour l'enregistrer comme valeur unique."
 
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
@@ -25124,6 +25130,16 @@ msgstr[1] "Ce champ demande au moins %{count} lignes."
 msgid "This field only accepts records that match: %{conditions}."
 msgstr "Ce champ n'accepte que les enregistrements qui correspondent : %{conditions}."
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
+#, elixir-autogen, elixir-format
+msgid "This field's type no longer takes a list, so the list is kept as it is and can't be edited here. An admin can change the field in Fields."
+msgstr "Le type de ce champ n'accepte plus de liste : la liste est conservée telle quelle et ne peut pas être modifiée ici. Un administrateur peut changer le champ dans Champs."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "This field's type no longer takes a list. Saving keeps only the first item of each list already filled in; the other items are removed from the content."
+msgstr "Le type de ce champ n'accepte plus de liste. L'enregistrement ne conserve que le premier élément de chaque liste déjà remplie ; les autres éléments sont retirés du contenu."
+
 #: lib/kiln_cms_web/live/field_sync_live.ex
 #, elixir-autogen, elixir-format
 msgid "This file cannot be imported"
@@ -30027,6 +30043,11 @@ msgstr "enregistrement lié"
 #, elixir-autogen, elixir-format
 msgid "list"
 msgstr "liste"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "list (held)"
+msgstr "liste (conservée)"
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format

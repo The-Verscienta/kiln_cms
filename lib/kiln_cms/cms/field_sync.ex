@@ -1219,7 +1219,7 @@ defmodule KilnCMS.CMS.FieldSync do
         {:ok, Map.put(ids, op.path, record)}
 
       params ->
-        params = with_widget(params, op.attrs)
+        params = params |> with_widget(op.attrs) |> narrow_held(record, changes)
 
         with {:ok, field} <- CMS.update_field_definition(record, params, opts) do
           {:ok, Map.put(ids, op.path, field)}
@@ -1286,6 +1286,15 @@ defmodule KilnCMS.CMS.FieldSync do
       {:ok, widget} -> Map.put_new(params, "widget", widget)
       :error -> params
     end
+  end
+
+  # A held list (#2680) stays a list through every update but one that asks
+  # to narrow it. A file that says it is not a list asks; the narrowing was
+  # reported as blocked data loss (`data_loss/1`) unless it holds nothing.
+  defp narrow_held(params, record, changes) do
+    if match?({true, false}, changes["multiple"]) and FieldDefinition.held_list?(record),
+      do: Map.put(params, "narrow_held_list?", true),
+      else: params
   end
 
   # The ids that tie a new field to its owner, resolved from what the earlier

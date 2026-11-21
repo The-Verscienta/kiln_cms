@@ -32,6 +32,13 @@ defmodule KilnCMS.CMS.FieldTypes.Telephone do
   @impl Kiln.FieldType
   def input_attrs(_definition), do: %{placeholder: "+44 20 7946 0958"}
 
+  # A list of these is a typed list (#2289), its repeats dropped after cast.
+  @impl Kiln.FieldType
+  def multiple?, do: true
+
+  @impl Kiln.FieldType
+  def unique_items?, do: true
+
   @impl Kiln.FieldType
   def graphql_kind(_definition), do: :string
 

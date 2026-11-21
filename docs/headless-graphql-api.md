@@ -113,7 +113,9 @@ consumers never need the plain, credential-widened list.
 > field) takes the same names for its items: `customFilter: {scores: {has:
 > [3, 7], count: {gte: 2}}, event_dates: "2026-03-01"}`. `has_none` matches a
 > record with no value; `not_eq` does not. See
-> [json-api.md → Lists of values](json-api.md#lists-of-values).
+> [json-api.md → Lists of values](json-api.md#lists-of-values). A held list
+> (a list field whose plugin type no longer takes lists) is an error in
+> `customFilter`, `customWhere` and `customSort` alike.
 >
 > `customFilter` also takes boolean groups: `customFilter: {_or: [{price: {gt:
 > 100}}, {color: "red"}]}`, `_and`, `_not: {color: "red"}`, and `_native: {title:
@@ -186,7 +188,10 @@ reads):
   `notEq` (does not contain), `in` (contains any) and `isNull`. A list of
   integers is `int: {eq: 10}`, a list of dates `date: {in: ["2026-03-01",
   "2026-03-08"]}`; a list of URLs, emails, phone numbers, colours, slugs or
-  times is `string`. Another kind is refused (`custom field "scores" is a
+  times is `string`, and a list of a plugin's type takes the kind its
+  `graphql_kind/1` names. A plugin type with no `graphql_kind/1` is refused
+  (`customWhere does not support a list of json values; use customFilter`).
+  Another kind is refused (`custom field "scores" is a
   list of int values, not string; use the int condition`), as is any other
   operator (`customWhere supports only eq, notEq, in and isNull on it
   (customFilter also takes has, has_all, has_none and count)`).
@@ -360,7 +365,9 @@ generated types [below](#generate-types-and-fragments-for-your-site).
   the same.
 - A field with `multiple` is a `ListValue`, whatever its item type: a list
   of integers is a `ListValue` of `IntValue`s, a list of dates of
-  `DateValue`s, a list of URLs or emails of `StringValue`s. A group
+  `DateValue`s, a list of URLs or emails of `StringValue`s. A list of a
+  plugin's type has items of the kind its `graphql_kind/1` names, else
+  `JsonValue`s. A group
   is a `GroupValue` of its sub-fields (a repeating group is a `ListValue` of
   `GroupValue`s), nested to depth 3.
 - A `geolocation` field is a `GeolocationValue`: `lat` and `lng` are floats,

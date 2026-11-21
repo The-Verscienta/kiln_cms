@@ -933,7 +933,7 @@ is not on its reviewed list. Use `KnownAtom`, add `one_of`, or add the
 attribute to the list with the reason an unknown value can't reach it. A
 downstream project's own domains are not checked.
 
-Two widenings need the same two-release treatment although they add no
+One widening needs the same two-release treatment although it adds no
 atom:
 
 - **`FieldDefinition.link_field_types/0`.** Link fields and group sub-fields
@@ -941,10 +941,21 @@ atom:
   filters out is missing from its parent's definition there, so a save of
   the parent's value from the editor drops that key from each row: the
   value-keeping write covers top-level fields only.
-- **The types that may be `multiple`** (`KilnCMS.CMS.ScalarLists.types/0`,
-  `Changes.ClearMultiple.list_types/0`). An older release treats the field
-  as single-valued, so a record holding a list in it can fail to save or to
-  open in the editor there.
+
+**The types that may be `multiple`** (`KilnCMS.CMS.ScalarLists.types/0`,
+`Changes.ClearMultiple.list_types/0`, which since the release after v1.11.0
+include every `Kiln.FieldType` whose `multiple?/0` answers `true`) needed the
+same until that release. From it on, a release that meets a `multiple` field
+of a type it can't list **holds** it (`FieldDefinition.held_list?/1`, #2680):
+the stored lists are kept and served, a write that changes one is refused,
+the editor shows it read-only, and filtering or sorting on it is a `400`.
+Only an admin's save in the fields admin narrows it; a reorder, a field sync
+or another field's rename leaves it a list. So a type can become
+list-capable in one release, and a rollback to a release that holds lists
+needs no preparation for it. A plugin's `multiple?/0` follows the plugin's
+version, not Kiln's, which is why this one release ships both the callback
+and the holding. Rolling back to a release before it does need preparation:
+see [Rolling back past plugin list fields](#rolling-back-past-plugin-list-fields).
 
 #### Rolling back to v1.8.0
 
@@ -1015,7 +1026,9 @@ because deleting a field deletes the values every record holds in it:
    with a value in one ("has an unregistered field type"), and a map value
    (`range`, `link`, a `json` object) can stop its editor opening the
    record. The same goes for a `multiple` field of type `integer`, `float`,
-   `date`, `datetime` or `url` (scalar lists, #2289). Delete those fields as
+   `date`, `datetime` or `url` (scalar lists, #2289), and for a list field
+   of a plugin type ([Rolling back past plugin list fields](#rolling-back-past-plugin-list-fields)
+   has the query). Delete those fields as
    in step 3, or leave the records that use them alone until you roll
    forward. To find them:
 
@@ -1034,6 +1047,56 @@ of this for that column: the older release shows the row as unrecognized.
 For field definitions that is every release from the one that fixed #2605:
 it hides a field of a type it doesn't know and keeps the field's values
 (see [Delete a field of an unknown type](extending-content.md#delete-a-field-of-an-unknown-type)).
+
+### Rolling back past plugin list fields
+
+From the release after v1.11.0 (#2680), a plugin field type can hold a list
+(`c:Kiln.FieldType.multiple?/0`, `kiln_plugin` 1.6). v1.11 and earlier don't
+know that a plugin type can be a list, and they hold a field only when its
+type is unknown, so a list field of a plugin type is an ordinary
+single-value field there that happens to store arrays. What that means,
+read from v1.11's code rather than tried on a v1.11 deployment:
+
+- **Delivery** serves the stored arrays unchanged, but the **schema export**
+  describes a single value, so a typed client generated from it is wrong
+  for those fields.
+- **The content editor** renders the type's single input with the whole
+  list in it: text items run together, numbers come out as characters, and
+  a number above 255 can stop the record opening. Saving the record sends
+  what that input shows through the type's `cast/2`, which either refuses
+  the save or replaces the list with one value.
+- **Writes** that leave the field out keep the list. A write that sends an
+  array hands the whole array to `cast/2`, which most types refuse.
+- **Restore, publishing a working copy and duplicate** carry a record's
+  values through `cast/2` too, so they fail for a record holding a plugin
+  list when the type refuses a list.
+- **Filtering** the field by a value matches no record: the operand is
+  compared with the whole stored array.
+- **The fields admin** offers no list choice for a plugin type, and saving
+  the field there, or reordering the fields around it, clears its `multiple`
+  flag while every record keeps its array. After rolling forward again, edit
+  the field and choose **A list** to make it a list once more; the stored
+  arrays are kept as they are.
+
+Before rolling back, find those fields:
+
+```sql
+SELECT org_id, content_type, type_definition_id, name, field_type
+FROM field_definitions
+WHERE multiple AND link_of_id IS NULL AND group_of_id IS NULL AND flex_of_id IS NULL
+  AND field_type NOT IN ('media', 'reference', 'group', 'flexible', 'string', 'select',
+                         'integer', 'float', 'date', 'datetime', 'url', 'email',
+                         'telephone', 'color', 'slug', 'time');
+```
+
+Then, for each, either leave its records, and the fields admin, alone until
+you roll forward, or remove the lists on the current release first: edit the
+field in **Fields**, choose **One value** and save, which keeps each record's
+first item, or delete the field, which deletes its values. Back up the
+database before either.
+
+**Rolling deploys.** Don't make a plugin field a list until every node runs
+the new release: a node still on v1.11 treats it as above.
 
 ### Rolling back past backup destinations
 

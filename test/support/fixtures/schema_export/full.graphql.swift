@@ -1477,10 +1477,13 @@ public struct ReviewDocument: Codable, Hashable, Sendable {
 
     public struct CustomFields: Codable, Hashable, Sendable {
         public let score: Int?
+        /// The items, in the order the editor arranged them.
+        public let scores: [Int]?
         public let verdict: String?
 
-        public init(score: Int? = nil, verdict: String? = nil) {
+        public init(score: Int? = nil, scores: [Int]? = nil, verdict: String? = nil) {
             self.score = score
+            self.scores = scores
             self.verdict = verdict
         }
     }
@@ -1913,7 +1916,7 @@ public struct ReviewCustomFields: Codable, Hashable, Sendable {
     public static let fragment = """
         fragment ReviewCustomFields on Entry {
           verdict: customString(name: "verdict")
-          fields(names: ["score"]) {
+          fields(names: ["score", "scores"]) {
             __typename
             name
             ... on StringValue { asString: value }

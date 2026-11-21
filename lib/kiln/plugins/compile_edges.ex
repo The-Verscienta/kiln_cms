@@ -15,11 +15,20 @@ defmodule Kiln.Plugins.CompileEdges do
   # only an export dependency, which a changed function body never trips), so
   # expanding this in `Kiln.Plugins`'s body makes an edit to a plugin module
   # recompile `Kiln.Plugins` and, through it, those registries.
+  #
+  # Each field type is called by name too (#2680): `KilnCMS.CMS.FieldTypes`
+  # bakes a type's `multiple?/0` answer, and a call on a module held in a
+  # variable records no edge. An edit to a field type compiled in the same
+  # project (the test fixture plugin, `projects/`) would otherwise leave the
+  # list-capable types stale.
   defmacro call_configured do
     for plugin <- Application.get_env(:kiln_cms, :plugins, []) do
+      field_types = for type <- plugin.field_types(), is_atom(type), do: type
+
       quote do
         _ = unquote(plugin).blocks()
         _ = unquote(plugin).field_types()
+        unquote_splicing(for type <- field_types, do: quote(do: _ = unquote(type).name()))
       end
     end
   end

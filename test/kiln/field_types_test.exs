@@ -101,4 +101,63 @@ defmodule Kiln.FieldTypesTest do
     assert {:error, error} = CMS.create_page(%{title: "Must", slug: slug()}, actor: actor)
     assert Exception.message(error) =~ "(#{required.name}) is required"
   end
+
+  describe "list capability (#2680)" do
+    test "list_capable/0 holds the opting built-in and plugin types, in registry order" do
+      assert FieldTypes.list_capable() ==
+               [:email, :telephone, :color, :slug, :time, :tag, :shapeshifter, :stars]
+
+      for type <- [:rating, :geolocation, :recurrence, :json, :lookup] do
+        refute type in FieldTypes.list_capable(), "#{type} should hold one value"
+      end
+    end
+
+    test "ScalarLists.types/0 is the core lists, then the opting types, with no repeats" do
+      assert KilnCMS.CMS.ScalarLists.types() ==
+               [:string, :select, :integer, :float, :date, :datetime, :url] ++
+                 FieldTypes.list_capable()
+    end
+
+    test "unique_items?/1 and ScalarLists.distinct?/1 follow unique_items?/0" do
+      assert FieldTypes.unique_items?(:tag)
+      refute FieldTypes.unique_items?(:stars)
+      refute FieldTypes.unique_items?(:rating)
+
+      assert KilnCMS.CMS.ScalarLists.distinct?(:tag)
+      assert KilnCMS.CMS.ScalarLists.distinct?(:email)
+      refute KilnCMS.CMS.ScalarLists.distinct?(:stars)
+      refute KilnCMS.CMS.ScalarLists.distinct?(:shapeshifter)
+      refute KilnCMS.CMS.ScalarLists.distinct?(:integer)
+      refute KilnCMS.CMS.ScalarLists.distinct?(:rating)
+    end
+
+    defmodule Raising do
+      use Kiln.FieldType
+      def cast(value, _definition), do: {:ok, value}
+      def multiple?, do: raise("boom")
+    end
+
+    defmodule Truthy do
+      use Kiln.FieldType
+      def cast(value, _definition), do: {:ok, value}
+      def multiple?, do: :yes
+    end
+
+    defmodule Composite do
+      use Kiln.FieldType
+      def cast(value, _definition), do: {:ok, value}
+      def multiple?, do: true
+      def input_parts(_definition), do: [%{key: "a", label: "A"}]
+    end
+
+    test "a raise, an answer other than true, or a composite type is not list-capable" do
+      alias KilnCMS.CMS.FieldTypes.Capability
+
+      refute Capability.list_capable?(Raising)
+      refute Capability.list_capable?(Truthy)
+      refute Capability.list_capable?(Composite)
+      refute Capability.list_capable?(Rating)
+      assert Capability.list_capable?(KilnCMS.FixturePlugin.FieldTypes.Tag)
+    end
+  end
 end

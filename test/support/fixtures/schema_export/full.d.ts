@@ -306,7 +306,7 @@ export interface PostDocument {
 /** A published `Review` as fired to the `:json` surface. */
 export interface ReviewDocument {
   blocks: Array<KilnBlock>;
-  custom_fields: { score?: number | null; verdict?: string | null };
+  custom_fields: { score?: number | null; scores?: Array<number> | null; verdict?: string | null };
   id: string;
   inherited_fields?: Record<string, unknown>;
   locale: string | null;

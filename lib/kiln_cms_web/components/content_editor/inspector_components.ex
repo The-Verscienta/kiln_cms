@@ -29,6 +29,8 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # colour box holds one whole value and adds it by Enter or its Add button.
   @list_input_types KilnCMS.CMS.ScalarLists.types() -- [:select]
   @whole_value_types [:date, :datetime, :time, :color]
+  # A plugin type's list (#2680) is whole-value when its input is a picker.
+  @whole_value_inputs ~w(date datetime-local time color month week)
 
   require Logger
 
@@ -690,8 +692,11 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # or change: a picker fires those while the value is half chosen.
   #
   # No vocabulary and no suggestions — a multiple `:select` keeps its tag
-  # picker below. The inputs post `name[]` in screen order behind the same
-  # blank sentinel as the tag picker. An item emptied in place keeps its row
+  # picker below. A plugin type that takes lists (#2680) renders here too, each
+  # item input of its `input_type/0` with its `input_attrs/1`, and without its
+  # `input_hook/1`: a hook is written for the type's single input. The inputs
+  # post `name[]` in screen order behind the same blank sentinel as the tag
+  # picker. An item emptied in place keeps its row
   # while the form holds it (`list_items/1`) — dropping it on the next patch
   # would take the input out from under the author retyping it — and is
   # dropped on save.
@@ -707,7 +712,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
       |> assign(:full?, full?(assigns.definition, length(items)))
       |> assign(:input_type, input_type)
       |> assign(:item_attrs, item_attrs)
-      |> assign(:whole?, type in @whole_value_types)
+      |> assign(:whole?, type in @whole_value_types or input_type in @whole_value_inputs)
       |> assign(:entry_placeholder, Map.get(extra, :placeholder))
 
     ~H"""

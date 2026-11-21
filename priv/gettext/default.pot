@@ -316,6 +316,7 @@ msgid_plural "%{count} aren't indexed yet, so they aren't grouped."
 msgstr[0] ""
 msgstr[1] ""
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
 #: lib/kiln_cms_web/components/content_editor/flexible_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
@@ -12587,6 +12588,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "Its review date passed over a week ago: check it now."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Its type no longer takes a list: the stored lists are kept, read-only. Edit the field to save it as a single value."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_live.ex
@@ -25124,6 +25130,16 @@ msgstr[1] ""
 msgid "This field only accepts records that match: %{conditions}."
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/custom_fields_panel.ex
+#, elixir-autogen, elixir-format
+msgid "This field's type no longer takes a list, so the list is kept as it is and can't be edited here. An admin can change the field in Fields."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "This field's type no longer takes a list. Saving keeps only the first item of each list already filled in; the other items are removed from the content."
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_sync_live.ex
 #, elixir-autogen, elixir-format
 msgid "This file cannot be imported"
@@ -30026,6 +30042,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "list"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "list (held)"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
