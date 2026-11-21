@@ -6,7 +6,7 @@ defmodule KilnCMS.Backups.DestinationConfig.Changes.Adopt do
 
   Each id is trimmed and lowercased, and must then be a backup-directory id
   (`KilnCMS.Backups.DirId.valid?/1`). An adopted entry is bound to the
-  backup directories of the nodes alive now (`KilnCMS.Backups.live_dir_ids/0`:
+  backup directories of the nodes alive now (the `KilnCMS.Backups` domain's `live_dir_ids`:
   every recent heartbeat's, and this node's own): only a node with one of
   those ids prunes the adopted directory's backups. Adopting an id again
   binds it afresh. A directory a live node still reports is refused: its own

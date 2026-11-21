@@ -205,7 +205,6 @@ defmodule KilnCMSWeb.SecurityLog do
   def type_label(:backup_destination_adoptions_changed),
     do: gettext("Backup destination's adopted backup directories changed")
 
-
   def type_label(:backup_destination_host_key_trusted),
     do: gettext("Backup server host key trusted")
 
