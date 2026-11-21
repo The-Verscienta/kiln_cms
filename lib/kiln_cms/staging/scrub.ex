@@ -10,9 +10,9 @@ defmodule KilnCMS.Staging.Scrub do
   of the same data the retention jobs already treat as sensitive.
 
   Everything here is a purge or a de-activation — it never sends mail, fires a
-  webhook, or contacts a subprocessor. See `KilnCMS.Staging.scrub!/1` for the
-  guarded, operator-facing entry point and `docs/staging-environments.md` for
-  the full flow.
+  webhook, or contacts a subprocessor. See
+  `KilnCMS.Staging.scrub!/1` for the guarded, operator-facing entry point and
+  `docs/staging-environments.md` for the full flow.
 
   ## Which tables it handles
 
@@ -41,6 +41,11 @@ defmodule KilnCMS.Staging.Scrub do
   `mix kiln.staging.scrub` boots Oban inert and `KilnCMS.Staging.scrub!/1`
   refuses a node whose queues are live.
 
+  One job is queued after the last purge, on purpose: when the scrub removed
+  production's content-signing key, `KilnCMS.Provenance.GenerateKeyWorker`,
+  which gives the staging application a key of its own once it serves. It
+  carries no args.
+
   > This is destructive by design. It must only run against a throwaway clone,
   > never production — the guards live in `KilnCMS.Staging.scrub!/1`.
   """
@@ -53,7 +58,12 @@ defmodule KilnCMS.Staging.Scrub do
 
   @typedoc "What the scrub does to a table (see `dispositions/0`)."
   @type disposition ::
-          :purged | :anonymized | :via_anonymization | :scrubbed | :deactivated | :paused
+          :purged
+          | :anonymized
+          | :via_anonymization
+          | :scrubbed
+          | :deactivated
+          | :paused
 
   @typedoc """
   What `run/1` did, by key. A plugin table's count is under
@@ -92,6 +102,9 @@ defmodule KilnCMS.Staging.Scrub do
           vapid_keys_purged: non_neg_integer(),
           social_accounts_deactivated: non_neg_integer(),
           automation_rules_disabled: non_neg_integer(),
+          storage_credentials_scrubbed: non_neg_integer(),
+          site_storages_disabled: non_neg_integer(),
+          provenance_key_removed: non_neg_integer(),
           webhook_deliveries_purged: non_neg_integer(),
           mail_relays_purged: non_neg_integer(),
           sso_providers_purged: non_neg_integer(),
@@ -114,6 +127,17 @@ defmodule KilnCMS.Staging.Scrub do
   # careless change away from acting on a real payment account, so the keys are
   # removed before the rest of the scrub runs.
   @credentials_first {:billing_settings_purged, KilnCMS.Billing.Settings}
+
+  # Then, for the same reason, the rest of what lets a clone act as production
+  # on someone else's infrastructure: the keys to each site's own object
+  # storage (#2973), where a clone could write or delete production's files,
+  # and the content-signing key (#2974), with which it signs as production.
+  # Each has a `rewrite/1` clause below.
+  @identities_next [
+    {:storage_credentials_scrubbed, :scrubbed, KilnCMS.CMS.StorageProfile},
+    {:site_storages_disabled, :deactivated, KilnCMS.CMS.SiteStorage},
+    {:provenance_key_removed, :purged, KilnCMS.Provenance.Settings}
+  ]
 
   # Whole-table purges, in the order they run: a child before its parent, so
   # each count is the rows of that table rather than whatever a cascade took.
@@ -218,6 +242,11 @@ defmodule KilnCMS.Staging.Scrub do
     {:automation_rules_disabled, :deactivated, KilnCMS.Automation.Rule}
   ]
 
+  # What a scrubbed storage profile's access key id reads (#2973). The column
+  # is NOT NULL, and a tombstone says on the settings page why the profile
+  # no longer connects.
+  @scrubbed_access_key_id "scrubbed"
+
   # Tables the `:anonymize` action empties of the anonymized account's rows
   # (`KilnCMS.Accounts.Changes.AnonymizeUser`). Every account is anonymized,
   # so nothing personal survives in them.
@@ -262,6 +291,8 @@ defmodule KilnCMS.Staging.Scrub do
     {credentials_key, credentials} = @credentials_first
     {credentials_purged, _} = Repo.delete_all(credentials)
 
+    identities = Map.new(@identities_next, fn {key, _kind, _resource} -> {key, rewrite(key)} end)
+
     # Queued jobs go before anything else in the core runs, so none of
     # production's work is left to pick up while the scrub is under way.
     jobs_purged_first = purge_oban_jobs()
@@ -278,7 +309,12 @@ defmodule KilnCMS.Staging.Scrub do
     # today) would carry that account as production had it.
     jobs_purged_last = purge_oban_jobs()
 
+    # After that last purge, or it would take this job too: staging generates
+    # its own signing key, under its own SECRET_KEY_BASE, once it serves.
+    if identities.provenance_key_removed > 0, do: enqueue_key_generation()
+
     plugin_counts
+    |> Map.merge(identities)
     |> Map.merge(purged)
     |> Map.merge(rewritten)
     |> Map.merge(%{
@@ -346,7 +382,9 @@ defmodule KilnCMS.Staging.Scrub do
       end)
 
     rewrites =
-      Map.new(@rewrites, fn {key, kind, resource} -> {table(resource), {kind, key}} end)
+      Map.new(@identities_next ++ @rewrites, fn {key, kind, resource} ->
+        {table(resource), {kind, key}}
+      end)
 
     anonymized =
       Map.new(@via_anonymization, &{table(&1), {:via_anonymization, :users_anonymized}})
@@ -488,6 +526,83 @@ defmodule KilnCMS.Staging.Scrub do
       )
 
     count
+  end
+
+  # A site's own object storage (#2973) keeps its profiles, minus what reaches
+  # the bucket: the access key id becomes a tombstone and the encrypted secret
+  # an empty value, which decrypts under no `SECRET_KEY_BASE`. Every operation
+  # on a file in that bucket (a delete, a variant, a purge of the trash) then
+  # refuses with `:credentials_unreadable` before it connects, so a clone
+  # started with production's key base still cannot write to or delete from
+  # production's bucket.
+  #
+  # Not deleted: the files already uploaded are served from the profile's
+  # public base URL, which every media row stores and the site's CSP allows
+  # from these rows (`KilnCMS.Storage.SiteProfiles.csp_origins/1`). Without
+  # them a page would keep the image URL and the browser would refuse to load
+  # it. The private bucket's files (gated documents) need the credentials and
+  # stop downloading until the site configures storage of its own.
+  defp rewrite(:storage_credentials_scrubbed) do
+    {count, _} =
+      Repo.update_all(
+        from(p in KilnCMS.CMS.StorageProfile,
+          where:
+            p.access_key_id != ^@scrubbed_access_key_id or
+              p.secret_access_key_encrypted != ^<<>>
+        ),
+        set: [access_key_id: @scrubbed_access_key_id, secret_access_key_encrypted: <<>>]
+      )
+
+    count
+  end
+
+  # And the switch that sends a site's new uploads to its own store is turned
+  # off, so they go to the staging host's operator storage (the Local adapter
+  # unless staging sets `S3_*`) until someone gives staging a bucket of its
+  # own. Switched back on as it is, the scrubbed profile refuses the upload
+  # rather than falling back (`KilnCMS.Storage.SiteProfiles`).
+  defp rewrite(:site_storages_disabled) do
+    {count, _} =
+      Repo.update_all(
+        from(s in KilnCMS.CMS.SiteStorage, where: s.enabled == true),
+        set: [enabled: false]
+      )
+
+    count
+  end
+
+  # The content-signing key (#2974) is production's identity: a clone holding
+  # it signs versions, anchors and manifests that verify as production's. The
+  # row is deleted, and the clone gets a key of its own from
+  # `KilnCMS.Provenance.GenerateKeyWorker`, queued at the end of `run/1`. Not
+  # generated here: a key is sealed under the `SECRET_KEY_BASE` of the process
+  # that generates it, and the scrub may run with production's, which the
+  # staging application must not have, so staging could never read it.
+  #
+  # Everything production signed then verifies as `:unknown` / `:unverifiable`
+  # on the clone, which is the truth: the clone cannot vouch for it.
+  defp rewrite(:provenance_key_removed) do
+    # The signer caches the decrypted key for the life of the VM (node-local).
+    # Forgotten before, so nothing on this node signs with production's key
+    # while the row goes, and after, so a signature made in between can't put
+    # it back. Other nodes of a running cluster keep their cache until they
+    # restart: a live scrub (`allow_live?`) needs every node restarted.
+    KilnCMS.Provenance.forget_stored_key()
+    {count, _} = Repo.delete_all(KilnCMS.Provenance.Settings)
+    KilnCMS.Provenance.forget_stored_key()
+    count
+  end
+
+  # Straight into the table, as the release path runs with no Oban at all;
+  # the staging application's own Oban runs it once it serves.
+  defp enqueue_key_generation do
+    prefix = :kiln_cms |> Application.get_env(Oban, []) |> Keyword.get(:prefix, "public")
+
+    %{}
+    |> KilnCMS.Provenance.GenerateKeyWorker.new()
+    |> Repo.insert!(prefix: prefix)
+
+    :ok
   end
 
   # Anonymize every account that isn't already scrubbed, via the real GDPR

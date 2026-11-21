@@ -71,7 +71,9 @@ defmodule KilnCMS.Provenance do
   end
 
   @doc false
-  # Tests that generate and drop keys.
+  # Tests that generate and drop keys; the staging scrub, which removes the key
+  # on a clone (`KilnCMS.Staging.Scrub`, #2974); and the worker that generates
+  # staging's own. Node-local: other nodes keep their cache until restarted.
   def forget_stored_key, do: :persistent_term.erase({__MODULE__, :stored_key})
 
   @doc """

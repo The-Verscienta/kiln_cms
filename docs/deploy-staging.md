@@ -65,9 +65,14 @@ Full flow, recipe, and the serve step live in
       otherwise, which is the seat-belt against scrubbing prod. (`--force` /
       `KILN_STAGING_FORCE=true` overrides, so don't set those casually.)
 - [ ] Run `./scripts/staging.sh up` (dump → restore → migrate → **scrub**). With
-      the default `KILN_BIN=mix`, export `MIX_ENV=prod` and the variables a prod
-      boot requires (`SECRET_KEY_BASE`, `TOKEN_SIGNING_SECRET`) first: under any
-      other `MIX_ENV`, Mix ignores `DATABASE_URL` and migrates your dev database
+      the default `KILN_BIN=mix`, export the variables a prod boot requires
+      (`SECRET_KEY_BASE`, `TOKEN_SIGNING_SECRET`) first, and
+      `DATABASE_SSL=false` for a local Postgres without TLS. The script checks
+      the prod config loads before it copies anything, runs Mix with
+      `MIX_ENV=prod` when `MIX_ENV` is unset and refuses any other value,
+      since only the prod config reads `DATABASE_URL`. If migrate or the
+      scrub fails after the copy, it drops the clone, which then holds
+      unscrubbed production data
       ([staging-environments.md](staging-environments.md#running-the-scrub)).
       Or set `KILN_BIN` to a release's `bin/kiln_cms`.
 - [ ] Confirm the scrub summary printed non-zero `users anonymized` and, if you
@@ -75,7 +80,18 @@ Full flow, recipe, and the serve step live in
 - [ ] Serve it as a **second** Coolify app from the **same image/repo**, differing
       only by: `DATABASE_URL` → the clone, a **fresh** `SECRET_KEY_BASE`, a staging
       hostname, and outbound integrations left **off** (no `MAIL_MODE`; Meilisearch
-      `enabled: false`; `KilnCMS.Storage.Local`). Leaving a variable unset
+      `enabled: false`; `KilnCMS.Storage.Local`). Never give it production's
+      `S3_*`, `KILN_PROVENANCE_PRIVATE_KEY` / `KILN_PROVENANCE_KEY_FILE`
+      (a mounted key signs as production, whatever the scrub removed) or
+      `KILN_GOVERNANCE_WITNESS*` (staging's checkpoints would be published
+      beside production's)
+      ([Serving the clone](staging-environments.md#serving-the-clone)).
+      The clone generates a signing key of its own from its first boot.
+      The scrub has removed each site's own bucket credentials and switched
+      its own storage off, so existing media loads read-only from
+      production's public URLs and new uploads stay on staging
+      ([Media on a scrubbed clone](staging-environments.md#media-on-a-scrubbed-clone)).
+      Leaving a variable unset
       does not turn off the calls Kiln makes by default: set
       `KILN_UPDATE_CHECK=false`, `KILN_CRAWLER_VERIFICATION=false` and
       `BREACHED_PASSWORD_CHECK=false`, and leave `KILN_PLUGIN_HEALTH_CHECK`
@@ -102,7 +118,9 @@ Full flow, recipe, and the serve step live in
       and both security logs (the sites' and the instance's), pauses every
       in-app backup schedule, and deletes every queued job, newsletter
       subscriber, form submission, suppression list entry, federation
-      follower and per-site integration (mail relay, SSO, AI, Meilisearch). The confirmation flag +
+      follower and per-site integration (mail relay, SSO, AI, Meilisearch),
+      removes every site's storage credentials and deletes the generated
+      content-signing key. The confirmation flag +
       ephemeral-name guard exist to prevent a mistyped `DATABASE_URL` — respect them.
 - [ ] **Scrub before exposing** the staging box. `scripts/staging.sh up` and the
       `bin/kiln_cms eval 'KilnCMS.Release.scrub_staging()'` path both scrub *before*
@@ -113,8 +131,8 @@ Full flow, recipe, and the serve step live in
       restart it.
 - [ ] Before sharing the clone, read
       [what the scrub keeps](staging-environments.md#what-the-scrub-keeps):
-      media storage settings, the content-signing key, staff free text, and
-      the plugin tables a plugin keeps. An overlay whose domains own a table
+      where production's media is (without its credentials), staff free text,
+      and the plugin tables a plugin keeps. An overlay whose domains own a table
       with no `staging_scrub/0` entry makes the scrub refuse, with nothing
       changed ([Plugin tables](staging-environments.md#plugin-tables)).
 - [ ] **Re-scrub a clone made before 1.11 before you share it.** An older scrub
@@ -124,6 +142,11 @@ Full flow, recipe, and the serve step live in
       Run `./scripts/staging.sh scrub` (this release's copy) against the
       clone, or one of the other paths in
       [Running the scrub](staging-environments.md#running-the-scrub).
+- [ ] **Re-scrub a clone made before 1.12 before you share it.** An older scrub
+      kept each site's storage credentials and the content-signing key, so a
+      clone started with production's `SECRET_KEY_BASE` could write to and
+      delete from production's buckets and sign as production. Run
+      `./scripts/staging.sh scrub` against it.
 - [ ] A **distinct staging `SECRET_KEY_BASE`** is what invalidates cloned session
       cookies and prod-signed preview tokens — generate a fresh one, don't reuse
       prod's.

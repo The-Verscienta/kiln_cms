@@ -62,6 +62,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Re-scrub every staging clone made before 1.12 (`./scripts/staging.sh scrub`): older clones still hold production's S3 storage credentials and content-signing key. `staging.sh` with `KILN_BIN=mix` now runs under `MIX_ENV=prod` and needs `SECRET_KEY_BASE`, `TOKEN_SIGNING_SECRET` (and `DATABASE_SSL=false` for a local Postgres without TLS).**
+  ([long form](docs/changelog/unreleased.md#staging-scrub-safety-upgrade))
+
 - **Plugin field types can now hold lists: no migration, nothing to do to upgrade. Before rolling back past this release, find plugin list fields (query in docs/releasing.md, "Rolling back past plugin list fields"): older releases treat them as single values, and saving such a record there can replace the list. Don't make a plugin field a list until every node is upgraded.**
   ([#3203](https://github.com/The-Verscienta/kiln_cms/pull/3203) · [long form](docs/changelog/unreleased.md#plugin-list-field-types-upgrade))
 
@@ -119,6 +122,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/unreleased.md#referrer-suppression-sweep))
 
 ### Fixed
+
+- **The staging scrub removes production's S3 storage credentials (existing media still loads from production's public URLs; new uploads go to staging's own storage) and its content-signing key (staging generates its own), and `staging.sh`/`mix kiln.staging.scrub` can no longer migrate or scrub the wrong database (#2973, #2974, #2977).**
+  ([long form](docs/changelog/unreleased.md#staging-scrub-safety))
 
 - **A revalidating browser or CDN no longer gets a `304` for a public page whose fragments, media, translations, inherited fields, bylines, author name, category or menu links changed: the HTML `ETag` now hashes the cached payload and the menus, and type, field and locale-settings saves move every page's tag.**
   ([#3202](https://github.com/The-Verscienta/kiln_cms/pull/3202) · [long form](docs/changelog/unreleased.md#public-html-etag-render-inputs))

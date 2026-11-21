@@ -98,6 +98,9 @@ so that nothing on the clone does so later on production's behalf.
 | **Web Push (VAPID) keys** | purged (`vapid_keys_purged`) | Each site's push identity, production's. |
 | **Social accounts** | deactivated (`social_accounts_deactivated`) | Switched off and their stored credential removed, so the clone cannot post as production. Not deleted, because deleting an account deletes its post history with it. |
 | **Automation rules** | deactivated (`automation_rules_disabled`) | Every rule is switched off, and a `send_email` rule loses its `to` address, a production inbox. The rules stay so you can see them. |
+| **Storage profiles** (a site's own object storage) | scrubbed (`storage_credentials_scrubbed`) | Each profile's access key id becomes `scrubbed` and its encrypted secret is emptied, so nothing on the clone can write to, read through or delete from production's buckets, even with production's `SECRET_KEY_BASE`. The endpoint, bucket and public URL stay: the files production uploaded keep loading from there (#2973, [Media on a scrubbed clone](#media-on-a-scrubbed-clone)). |
+| **Site storage settings** | deactivated (`site_storages_disabled`) | Each site's own object storage is switched off, so new uploads go to the staging host's storage until you give staging a bucket of its own (#2973). |
+| **Content-signing key** | purged (`provenance_key_removed`) | The generated provenance key is production's signing identity. The scrub deletes it and queues a job that generates the clone's own once the staging application runs it, under staging's own `SECRET_KEY_BASE`, with no one having to press anything. Staging then signs versions, anchors and manifests as itself: nothing it signs verifies against production's public key (#2974). A key **mounted** in the environment (`KILN_PROVENANCE_PRIVATE_KEY`, `KILN_PROVENANCE_KEY_FILE`) wins over the database and is out of the scrub's reach: never give the staging application production's ([Serving the clone](#serving-the-clone)). The scrub prints a warning when one resolves where it runs. |
 | **Per-site mail relays** | purged (`mail_relays_purged`) | Production's relay host, username, encrypted password and From address. A site with no row falls back to the staging host's own mail configuration, as the mail settings purge does. |
 | **Per-site SSO providers** | purged (`sso_providers_purged`) | Production's identity provider (issuer, client id) and its encrypted client secret. |
 | **Per-site AI providers** | purged (`ai_providers_purged`) | Production's AI provider, base URL and encrypted API key. |
@@ -115,19 +118,74 @@ returns. The summary the scrub prints lists every one of them, sorted, with the
 underscores as spaces (`oban jobs purged`), then the staging admin.
 
 The scrub is **idempotent** — re-running it anonymizes only accounts that aren't already
-anonymized and re-purges empty tables cheaply.
+anonymized and re-purges empty tables cheaply. The one exception is the content-signing
+key: every run removes the key the clone has by then (its own, generated after the last
+scrub) and queues a new one, so a re-scrub leaves what staging signed before it
+unverifiable on staging.
+
+### Serving the clone
+
+The scrub cleans the database; the staging application's **environment** is yours to
+keep apart from production's. Give it a fresh `SECRET_KEY_BASE`, and never copy these
+from production:
+
+- **`S3_*`**: uploads to a site without a bucket of its own would land in production's
+  operator bucket ([Media on a scrubbed clone](#media-on-a-scrubbed-clone)).
+- **`KILN_PROVENANCE_PRIVATE_KEY` / `KILN_PROVENANCE_KEY_FILE`**: a mounted signing key
+  wins over the database, so staging would sign as production whatever the scrub
+  removed. Leave them unset (staging generates a key of its own, below) or mount a
+  staging key. The scrub prints "Warning: a provenance signing key is mounted in this
+  environment" when one resolves where it runs.
+- **`KILN_GOVERNANCE_WITNESS*`**: the witness publishes each governance checkpoint
+  outside the database. Staging's would land in production's bucket, directory or
+  endpoint, beside production's own. Leave `KILN_GOVERNANCE_WITNESS` unset (or `none`)
+  on staging, or point it at a staging sink.
+
+**Staging's signing key.** When the scrub removes production's generated key, it queues
+one job (`KilnCMS.Provenance.GenerateKeyWorker`) as its very last step. The staging
+application runs it from its own queue once it boots and generates a key sealed under
+staging's `SECRET_KEY_BASE`. The scrub can't generate that key itself: it may run with
+production's `SECRET_KEY_BASE` (a release `eval` on the production host), and a key
+sealed under it is one staging could never read. The job does nothing when a key already
+resolves, such as one staging mounts. If it can't run, the console's overview shows the
+usual "no signing key" strip, whose **Generate** button does the same.
+
+### Media on a scrubbed clone
+
+Production's sites may store their media in their own buckets (`/editor/site-storage`).
+The scrub leaves those buckets reachable for reading only, through their public URLs:
+
+- **Existing media keeps loading.** Each media item stores the public URL its file was
+  uploaded to, and the site's content security policy still allows that bucket's
+  origin, so pages and the media library show production's images from production's
+  bucket. Nothing on the clone needs a credential for that.
+- **Nothing on the clone can change production's bucket.** Every operation on a file
+  there (deleting it, purging the trash, regenerating variants, editing an image,
+  downloading a gated document) needs the bucket's credentials, which are gone. It fails
+  on the clone, with "its storage secret could not be decrypted (was SECRET_KEY_BASE
+  rotated?) and must be re-entered" in the log, before it connects to the bucket. Gated
+  documents in a private bucket stop downloading.
+- **New uploads stay on staging.** Each site's own storage is switched off, so uploads go
+  to the staging host's operator storage: the Local adapter, unless you set `S3_*` on
+  staging. Never give staging production's `S3_*` values, or uploads to sites without a
+  bucket of their own land in production's.
+- **To give staging a bucket of its own,** open **Site storage** on the clone, enter the
+  new bucket's endpoint, bucket and credentials, and switch it on. A different bucket
+  becomes a new profile; the scrubbed one stays, so production's files keep loading.
+  Switching the site's storage back on without changing anything refuses uploads rather
+  than sending them anywhere else.
 
 ### What the scrub keeps
 
 A scrubbed clone still holds a few things to know about before you share it:
 
-- **Media storage settings.** Storage profiles (`storage_profiles`, `site_storages`)
-  keep their S3 endpoint, bucket names and access key id, and the secret access key
-  encrypted under production's `SECRET_KEY_BASE`. Media breaks without them, so they
-  stay. A clone with its own `SECRET_KEY_BASE` cannot decrypt the secret, but it still
-  names production's buckets: point staging at its own storage before anyone uploads.
-- **The content-signing key** (`provenance_settings`), for the same reason and under the
-  same encryption: removing it would break governance on the clone.
+- **Where production's media is.** Storage profiles keep their endpoint, bucket names
+  and public URL, without their credentials ([Media on a scrubbed clone](#media-on-a-scrubbed-clone)).
+- **What production signed.** Content history keeps the signatures production made, but
+  the clone no longer holds the key that made them, so they read as unverifiable there,
+  not as tampered.
+- **Your environment.** The scrub can't see the staging application's variables. See
+  [Serving the clone](#serving-the-clone).
 - **Webhook endpoints** are de-activated, not deleted: their URLs and encrypted signing
   secrets stay.
 - **Free text written by staff.** Comment bodies, task notes and the `grantor` of a
@@ -269,12 +327,16 @@ STAGING_ADMIN_EMAIL=you@example.com STAGING_ADMIN_PASSWORD='a-strong-password' \
 `KILN_BIN` names a release's `bin/kiln_cms`.
 
 **Path 1 reads `DATABASE_URL` only under `MIX_ENV=prod`.** The dev configuration
-hard-codes the `kiln_cms_dev` database, so without `MIX_ENV=prod` the task ignores
-`DATABASE_URL` and targets your dev database instead. The scrub then refuses, because
-`kiln_cms_dev` doesn't look ephemeral, but `scripts/staging.sh`'s `mix ecto.migrate`
-step has already run against it. A prod boot also needs the variables it always
-requires, `SECRET_KEY_BASE` and `TOKEN_SIGNING_SECRET` among them
-([environment-variables.md](environment-variables.md)). The task starts the
+hard-codes the `kiln_cms_dev` database, so under any other `MIX_ENV` Mix would target
+your dev database instead of the clone. Both guard against it (#2977):
+`mix kiln.staging.scrub` refuses, before it starts the application, when `DATABASE_URL`
+names a different server (host and port; `localhost`, `127.0.0.1` and `::1` count as
+one) or database from the one the repo is configured for, and `scripts/staging.sh` runs
+Mix with `MIX_ENV=prod` when `MIX_ENV` is unset and refuses any other value before it
+creates or copies anything. A prod boot also needs the variables it always requires,
+`SECRET_KEY_BASE` and `TOKEN_SIGNING_SECRET` among them
+([environment-variables.md](environment-variables.md)). The prod config connects over
+TLS unless `DATABASE_SSL=false`: set that for a local Postgres without TLS. The task starts the
 application with Oban inert (`KilnCMS.Staging.inert_oban_config/1`: no queue runs a job
 and no Oban plugin runs) and the backup heartbeat off, so no job cloned from production
 can run before the scrub deletes it. Path 2 starts the repo alone, with no Oban at all.
@@ -284,8 +346,11 @@ serving node's queues could execute the clone's copy of production's jobs (mail,
 webhooks, federation deliveries) before the scrub deletes them, so on a fresh clone use
 path 1 or 2. With `allow_live?: true`, the scrub first pauses every queue on every node
 of the cluster and prints "Oban is live on this node: every queue is now paused.
-Restart the application after the scrub to resume them." The queues stay paused until
-you do: restart the staging application once the scrub finishes. The
+Restart the application after the scrub, on every node, to resume them and to drop
+production's signing key from each node's cache." The queues stay paused until you do:
+restart the staging application, on every node, once the scrub finishes. The signer
+caches its key in each node's memory, and the scrub can only clear the cache of the node
+it runs on, so another node keeps signing with the old key until it restarts. The
 [plugin table check](#plugin-tables) runs before the pause, so a scrub refused for an
 undeclared table leaves a live node's queues running. A node counts as live in any
 Oban `testing` mode but `:manual`, `:inline` included.
@@ -325,7 +390,10 @@ laptop and on the production VPS.
 | `PROD_DATABASE_URL` | yes (`up`) | Source to `pg_dump`. Read-only; the script never writes to it. |
 | `STAGING_DATABASE_URL` | yes | Throwaway target. Its **name must look ephemeral** (see guards). |
 | `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD` | recommended | Seed one usable admin; without them you can't sign in to staging. |
-| `KILN_BIN` | no (default `mix`) | How to run migrate + scrub: `mix` for a checkout, or a release bin path like `/app/bin/kiln_cms` in Docker. With `mix`, also export `MIX_ENV=prod` and the variables a prod boot needs, or migrate and scrub target your dev database (see [Running the scrub](#running-the-scrub)). |
+| `KILN_BIN` | no (default `mix`) | How to run migrate + scrub: `mix` for a checkout, or a release bin path like `/app/bin/kiln_cms` in Docker. With `mix`, also export the variables a prod boot needs (see [Running the scrub](#running-the-scrub)). |
+| `MIX_ENV` | no | With `KILN_BIN=mix`: leave it unset (the script runs Mix with `prod`) or set `prod`. Any other value is refused before anything runs, because only the prod configuration reads `DATABASE_URL`. Ignored with a release `KILN_BIN`. |
+| `SECRET_KEY_BASE` / `TOKEN_SIGNING_SECRET` | with `KILN_BIN=mix` | What every prod boot needs: fresh values, never production's. Checked before anything is created or copied, and so is the rest of the prod configuration (`mix run --no-start`). |
+| `DATABASE_SSL` | no | Reaches migrate and scrub, not `pg_dump`/`psql`. The prod configuration connects over TLS unless it is `false`: set `DATABASE_SSL=false` for a local Postgres without TLS. |
 
 Both URLs may be `postgres://`, `postgresql://` or `ecto://`. The script gives
 each password only to its own `pg_dump` or `psql`, as `PGPASSWORD`, never as an
@@ -340,8 +408,14 @@ prints and the URL it hands to migrate and scrub keep your query as written. A
 key's passphrase, which libpq can only read from the command line), is refused
 before anything runs
 ([backups.md](backups.md#which-database-url-the-backup-tools-accept-2719)).
-The script does not read `DATABASE_SSL`: to require TLS for the copy, put
+`pg_dump` and `psql` do not read `DATABASE_SSL`: to require TLS for the copy, put
 `sslmode=require` (or `verify-full`) in the URL.
+
+If migrate or the scrub fails after `up` has copied production, the clone holds
+production's data unscrubbed. The script says so ("holds UNSCRUBBED production data")
+and drops the database, or, if it can't, tells you to drop it yourself. A failed
+`scrub` against an existing clone is reported the same way but not dropped: treat that
+clone as unscrubbed until a scrub succeeds.
 
 `up` dumps production with `--exclude-table-data=oban_jobs`: the clone gets the job
 table but none of production's queued jobs. The scrub purges the table anyway, for a
@@ -393,7 +467,10 @@ scrubbed database — no new build, no new service definition:
    - a staging hostname,
    - **`KILN_ENV_LABEL=staging`** (and optionally `KILN_ENV_COLOR`) — see below,
    - outbound integrations left **off** (default): no `MAIL_MODE`, `KilnCMS.Search.Meilisearch`
-     `enabled: false`, `KilnCMS.Storage.Local`.
+     `enabled: false`, `KilnCMS.Storage.Local`,
+   - **none** of production's `S3_*`, `KILN_PROVENANCE_PRIVATE_KEY` /
+     `KILN_PROVENANCE_KEY_FILE` or `KILN_GOVERNANCE_WITNESS*` (see
+     [Serving the clone](#serving-the-clone)).
    - **not** production's backup settings: leave `BACKUP_RCLONE_REMOTE` and any
      `RCLONE_CONFIG*` variables unset (or point them at a staging remote), and give
      the clone its own `BACKUP_DIR`, or set `BACKUP_ENABLED=false`. A backup taken on
@@ -478,7 +555,8 @@ the gaps the *data* carries — the *config* is already inert:
   `PREVIOUS_SECRET_KEY_BASE` is not production's: leave it unset on staging. The scrub
   also deletes the DKIM key, the billing keys (before anything else), each site's
   ActivityPub key, VAPID keys, mail relay, SSO and AI provider and Meilisearch settings,
-  and social account credentials outright, and clears every account's authenticator
+  each site's storage credentials, the generated content-signing key, and social account
+  credentials outright, and clears every account's authenticator
   app, recovery codes and passkeys as it anonymizes the account (`KilnCMS.Accounts.Changes.AnonymizeUser`).
 - **A distinct `SECRET_KEY_BASE`** invalidates every cloned session cookie and every
   production-signed preview token automatically.

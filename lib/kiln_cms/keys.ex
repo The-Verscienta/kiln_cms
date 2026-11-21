@@ -113,6 +113,25 @@ defmodule KilnCMS.Keys do
     end
   end
 
+  @doc """
+  Whether a provenance signing key is **mounted** in this environment and
+  resolves: `KILN_PROVENANCE_PRIVATE_KEY`, `KILN_PROVENANCE_KEY_FILE`, or a
+  configured `{:env, …}` / `{:file, …}` source. A mounted key wins over the
+  generated one (`fetch(:provenance)`), so the staging scrub warns when one
+  resolves: a staging application given production's would sign as
+  production whatever the scrub did to the database (#2974).
+  """
+  @spec provenance_key_mounted?() :: boolean()
+  def provenance_key_mounted? do
+    case Application.get_env(:kiln_cms, KilnCMS.Provenance, [])[:signing_key] do
+      {provider, config} when provider in [:env, :file] ->
+        match?({:ok, _pem}, provider!(provider).fetch(config))
+
+      _generated_or_dkim ->
+        false
+    end
+  end
+
   # The generated key, or the configured source's own error when there is none
   # (so the operator still reads which variable to set).
   defp stored_provenance_key(fallback) do

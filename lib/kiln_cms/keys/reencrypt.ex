@@ -209,6 +209,11 @@ defmodule KilnCMS.Keys.Reencrypt do
 
   defp classify(nil, _current, _old), do: :empty
 
+  # The staging scrub empties a storage profile's secret (`<<>>`, #2973): the
+  # column is NOT NULL, and an empty ciphertext opens under no key by design.
+  # It holds nothing to rotate, so it counts as empty, not unreadable.
+  defp classify(<<>>, _current, _old), do: :empty
+
   defp classify(ciphertext, current, old) do
     case Vault.decrypt(ciphertext, current) do
       {:ok, _plaintext} -> :current

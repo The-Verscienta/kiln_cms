@@ -32,7 +32,7 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
     on_exit(fn -> File.rm_rf!(tmp) end)
 
     # One line per call: the tool, PGPASSWORD (or `-`), then each argument.
-    for tool <- ["createdb", "pg_dump", "psql", "kiln"] do
+    for tool <- ["createdb", "dropdb", "pg_dump", "psql", "kiln"] do
       extra =
         case tool do
           "pg_dump" -> "echo 'select 1;'"
@@ -185,6 +185,148 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
     refute out =~ "stage-pw"
   end
 
+  # #2977: only the prod config reads DATABASE_URL, so `mix` under any other
+  # MIX_ENV migrated the developer's own database instead of the clone.
+  describe "KILN_BIN=mix (the default)" do
+    # What a prod boot needs, as the operator exports it.
+    @prod_boot [
+      {"KILN_BIN", nil},
+      {"SECRET_KEY_BASE", "fresh-secret-key-base"},
+      {"TOKEN_SIGNING_SECRET", "fresh-token-signing-secret"}
+    ]
+
+    @urls [
+      prod: "postgres://prod@prod-db/kiln_prod",
+      staging: "postgres://stage@stage-db/kiln_staging"
+    ]
+
+    setup ctx do
+      mix_stub!(ctx)
+      :ok
+    end
+
+    # Logs MIX_ENV and DATABASE_URL with its argv, so a test can see which
+    # database each mix run was pointed at, and in which environment. Exits 1
+    # for the mix task named `fail` (`run` is the preflight).
+    defp mix_stub!(ctx, fail \\ "") do
+      stub!(ctx.bin, "mix", """
+      #!/bin/sh
+      line="$(printf 'mix|%s|%s' "${MIX_ENV--}" "${DATABASE_URL--}"; printf '|%s' "$@")"
+      printf '%s\\n' "$line" >> "#{ctx.log}"
+      [ "$1" = "#{fail}" ] && exit 1
+      exit 0
+      """)
+    end
+
+    defp mix_calls(ctx), do: Enum.filter(calls(ctx), &(hd(&1) == "mix"))
+
+    test "with MIX_ENV unset, checks the prod config, then migrates and scrubs under MIX_ENV=prod",
+         ctx do
+      assert {out, 0} = up(ctx, @urls ++ [env: [{"MIX_ENV", nil} | @prod_boot]])
+
+      assert out =~ "running mix with MIX_ENV=prod"
+      staging = "postgres://stage@stage-db/kiln_staging"
+
+      assert [
+               ["mix", "prod", ^staging, "run", "--no-start", "-e", ":ok"],
+               ["mix", "prod", ^staging, "ecto.migrate"],
+               ["mix", "prod", ^staging, "kiln.staging.scrub", "--yes"]
+             ] = mix_calls(ctx)
+
+      # The preflight runs before anything is created or copied.
+      assert ["mix" | _] = hd(calls(ctx))
+    end
+
+    test "with MIX_ENV=prod, runs as given", ctx do
+      assert {_out, 0} = up(ctx, @urls ++ [env: [{"MIX_ENV", "prod"} | @prod_boot]])
+
+      assert for(["mix", mix_env | _] <- calls(ctx), do: mix_env) == ["prod", "prod", "prod"]
+    end
+
+    test "any other MIX_ENV is refused before anything is created or copied", ctx do
+      for {command, mix_env} <- [{"up", "dev"}, {"up", "test"}, {"scrub", "dev"}] do
+        assert {out, status} =
+                 run(ctx, command, @urls ++ [env: [{"MIX_ENV", mix_env} | @prod_boot]])
+
+        assert status != 0, "#{command} ran under MIX_ENV=#{mix_env}"
+        assert out =~ "KILN_BIN=mix needs MIX_ENV=prod (or unset), not MIX_ENV=#{mix_env}"
+        refute File.exists?(ctx.log), "a tool ran for #{command} under MIX_ENV=#{mix_env}"
+      end
+    end
+
+    test "a missing SECRET_KEY_BASE or TOKEN_SIGNING_SECRET is refused before anything runs",
+         ctx do
+      for {command, unset} <- [
+            {"up", ["SECRET_KEY_BASE"]},
+            {"up", ["TOKEN_SIGNING_SECRET"]},
+            {"scrub", ["SECRET_KEY_BASE", "TOKEN_SIGNING_SECRET"]}
+          ] do
+        env = Enum.reduce(unset, @prod_boot, &List.keystore(&2, &1, 0, {&1, nil}))
+        assert {out, status} = run(ctx, command, @urls ++ [env: [{"MIX_ENV", nil} | env]])
+
+        assert status != 0
+        assert out =~ "KILN_BIN=mix boots the prod config, which needs: #{Enum.join(unset, " ")}."
+        assert out =~ "nothing was created or copied"
+        refute File.exists?(ctx.log), "a tool ran for #{command} without #{inspect(unset)}"
+      end
+    end
+
+    test "a prod config that does not load is refused before anything is created or copied",
+         ctx do
+      mix_stub!(ctx, "run")
+
+      assert {out, status} = up(ctx, @urls ++ [env: [{"MIX_ENV", nil} | @prod_boot]])
+
+      assert status != 0
+      assert out =~ "the prod config does not load under MIX_ENV=prod"
+      assert [["mix", "prod", _url, "run" | _]] = calls(ctx)
+    end
+
+    test "a failed migrate after the copy says the clone is unscrubbed, and drops it", ctx do
+      mix_stub!(ctx, "ecto.migrate")
+
+      assert {out, status} = up(ctx, @urls ++ [env: [{"MIX_ENV", nil} | @prod_boot]])
+
+      assert status != 0
+      assert out =~ "migrate failed after production was copied into kiln_staging"
+      assert out =~ "kiln_staging holds UNSCRUBBED production data"
+      assert out =~ "Dropped kiln_staging"
+      assert ["dropdb", _pw, "--if-exists", "kiln_staging"] = List.last(calls(ctx))
+      refute Enum.any?(mix_calls(ctx), &("kiln.staging.scrub" in &1))
+    end
+
+    test "a failed scrub after the copy says so, and says how to drop it when dropdb fails",
+         ctx do
+      mix_stub!(ctx, "kiln.staging.scrub")
+      stub!(ctx.bin, "dropdb", "#!/bin/sh\nexit 1\n")
+
+      assert {out, status} = up(ctx, @urls ++ [env: [{"MIX_ENV", nil} | @prod_boot]])
+
+      assert status != 0
+      assert out =~ "the scrub failed after production was copied into kiln_staging"
+      assert out =~ "Could not drop kiln_staging: drop it yourself NOW"
+      refute out =~ "Staging is ready"
+    end
+
+    test "a failed re-scrub says the clone may hold unscrubbed data, and keeps it", ctx do
+      mix_stub!(ctx, "kiln.staging.scrub")
+
+      assert {out, status} = run(ctx, "scrub", @urls ++ [env: [{"MIX_ENV", nil} | @prod_boot]])
+
+      assert status != 0
+      assert out =~ "the scrub failed. Treat the clone as holding UNSCRUBBED"
+      refute Enum.any?(calls(ctx), &(hd(&1) == "dropdb"))
+    end
+
+    test "a release KILN_BIN ignores MIX_ENV and the prod-boot variables", ctx do
+      assert {_out, 0} =
+               up(ctx, @urls ++ [env: [{"MIX_ENV", "dev"}, {"SECRET_KEY_BASE", nil}]])
+
+      assert Enum.any?(calls(ctx), &(hd(&1) == "kiln"))
+      refute Enum.any?(calls(ctx), &(hd(&1) == "mix"))
+    end
+  end
+
   defp calls(ctx) do
     ctx.log
     |> File.read!()
@@ -192,7 +334,9 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
     |> Enum.map(&String.split(&1, "|"))
   end
 
-  defp up(ctx, opts) do
+  defp up(ctx, opts), do: run(ctx, "up", opts)
+
+  defp run(ctx, command, opts) do
     env =
       [
         {"PROD_DATABASE_URL", opts[:prod]},
@@ -205,7 +349,7 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
     env =
       Enum.reduce(opts[:env] || [], env, fn {k, v}, acc -> List.keystore(acc, k, 0, {k, v}) end)
 
-    System.cmd("bash", [@script, "up"], env: env, stderr_to_stdout: true)
+    System.cmd("bash", [@script, command], env: env, stderr_to_stdout: true)
   end
 
   defp stub!(bin, name, body) do
