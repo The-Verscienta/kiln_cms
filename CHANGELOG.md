@@ -126,6 +126,9 @@ Every summary line below that was shortened links to its own entry there.
 - **Datetime custom-field filters (JSON:API, GraphQL, MCP; single, link and list fields) match stored values with fractional seconds under any spelling and compare ranges below one second; `in` takes at most 1000 values per request (#2678).**
   ([long form](docs/changelog/unreleased.md#custom-filter-datetime-fractions))
 
+- **Automation jobs now store the event payload (the document snapshot, drafts included) sealed, so a pending job's row and Oban's log lines no longer show it; jobs a 1.11 node queued still run (#2992).**
+  ([long form](docs/changelog/unreleased.md#automation-job-payload-sealed))
+
 - **A gallery in the carousel layout can be scrolled with the keyboard: Tab reaches it, the arrow keys scroll it, and it has a focus ring and an "Image gallery" label (#2590).**
   ([long form](docs/changelog/unreleased.md#gallery-carousel-keyboard))
 
