@@ -568,6 +568,97 @@ defmodule KilnCMSWeb.ChromeLocaleTest do
     assert header(conn, "x-kiln-locale") == ["en"]
   end
 
+  # `embed.js` turns `data-kiln-locale="fr"` into `?locale=fr` (#2597): the
+  # snippet cannot know which prefixes a site serves, so the server checks.
+  describe "the form embed's ?locale=" do
+    setup ctx do
+      %{form: form!(%{}, actor: ctx.admin, tenant: ctx.org.id)}
+    end
+
+    defp embed(ctx, path), do: ctx |> fresh() |> get(path) |> html_response(200)
+
+    test "picks a language the site serves", ctx do
+      html = embed(ctx, "/forms/#{ctx.form.slug}/embed?locale=fr")
+
+      assert html_lang(html) == "fr"
+      assert html =~ ~r/>\s*Soumettre\s*</
+      assert attr(html, "form.kiln-form", "action") == ["/fr/forms/#{ctx.form.slug}"]
+    end
+
+    test "falls back to the default for one it doesn't serve", ctx do
+      for value <- ["de", "xx-<b>", ""] do
+        path = "/forms/#{ctx.form.slug}/embed?locale=#{URI.encode_www_form(value)}"
+        html = embed(ctx, path)
+
+        assert html_lang(html) == "en", value
+        assert html =~ ~r/>\s*Submit\s*</, value
+        assert attr(html, "form.kiln-form", "action") == ["/en/forms/#{ctx.form.slug}"], value
+      end
+    end
+
+    test "a list-shaped value is the default, not a crash", ctx do
+      html = embed(ctx, "/forms/#{ctx.form.slug}/embed?locale[]=fr")
+
+      assert html_lang(html) == "en"
+    end
+
+    test "loses to the URL's own prefix", ctx do
+      html = embed(ctx, "/es/forms/#{ctx.form.slug}/embed?locale=fr")
+
+      assert html_lang(html) == "es"
+      assert attr(html, "form.kiln-form", "action") == ["/es/forms/#{ctx.form.slug}"]
+    end
+
+    test "never reads the session", ctx do
+      html =
+        ctx
+        |> fresh()
+        |> french()
+        |> get("/forms/#{ctx.form.slug}/embed?locale=es")
+        |> html_response(200)
+
+      assert html_lang(html) == "es"
+    end
+
+    test "names the language of a missing form's message too", ctx do
+      html = ctx |> fresh() |> get("/forms/no-such-form/embed?locale=fr") |> html_response(404)
+
+      assert html =~ "Formulaire introuvable."
+    end
+  end
+
+  # A record whose locale the site no longer serves (#2597): Gettext inside
+  # the article falls back to the default, so its `lang` does too, rather than
+  # naming a language none of Kiln's words are in. Delivery URLs cannot reach
+  # one (a chain holds only served locales); the unlock form's `locale` can.
+  test "a record in a locale the site no longer serves is marked in the default", %{
+    admin: admin
+  } do
+    page =
+      CMS.create_page!(
+        %{
+          title: "Gesperrt",
+          slug: "chrome-de-#{uniq()}",
+          locale: "de",
+          access_password: @passphrase
+        },
+        actor: admin
+      )
+
+    CMS.publish_page!(page, actor: admin)
+    KilnCMS.DataCase.drain_oban()
+
+    conn = unlock(build_conn(), "/_unlock", page, "wrong")
+    html = html_response(conn, 401)
+
+    assert html =~ "Gesperrt"
+    assert attr(html, "h1.public-title", "lang") == ["en"]
+    assert attr(html, ~s(meta[property="og:locale"]), "content") == ["en"]
+    assert html_lang(html) == "en"
+    # The header names the stored record, as the headless APIs do.
+    assert header(conn, "x-kiln-locale") == ["de"]
+  end
+
   # The session-following surfaces keep following it: only public delivery
   # changed.
   test "the sign-in screen still follows the session's locale" do

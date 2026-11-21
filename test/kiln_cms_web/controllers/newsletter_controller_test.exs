@@ -2,6 +2,8 @@ defmodule KilnCMSWeb.NewsletterControllerTest do
   @moduledoc "Public newsletter subscribe/confirm/unsubscribe endpoints."
   use KilnCMSWeb.ConnCase, async: true
 
+  use Oban.Testing, repo: KilnCMS.Repo
+
   require Ash.Query
 
   alias KilnCMS.Newsletter
@@ -275,6 +277,53 @@ defmodule KilnCMSWeb.NewsletterControllerTest do
                Phoenix.Router.routes(KilnCMSWeb.Router),
                &(&1.path == "/newsletter/subscribe" and &1.verb != :post)
              )
+    end
+  end
+
+  describe "the language of the confirmation (#2597)" do
+    defp queued_confirmation(address) do
+      [job] =
+        Enum.filter(
+          all_enqueued(worker: KilnCMS.Mail.DeliveryWorker),
+          &match?([_name, ^address], &1.args["to"])
+        )
+
+      KilnCMS.Mail.from_args(job.args)
+    end
+
+    test "a sign-up under /fr/ is mailed in French, linking the French page", %{conn: conn} do
+      email = "signup-fr-#{System.unique_integer([:positive])}@example.com"
+
+      conn |> post("/fr/newsletter/subscribe", %{"email" => email}) |> html_response(200)
+
+      mail = queued_confirmation(email)
+      assert mail.subject =~ "Confirmez votre abonnement"
+      assert mail.html_body =~ "/fr/newsletter/confirm/"
+    end
+
+    test "a sign-up under /es/ is mailed in Spanish", %{conn: conn} do
+      email = "signup-es-#{System.unique_integer([:positive])}@example.com"
+
+      conn |> post("/es/newsletter/subscribe", %{"email" => email}) |> html_response(200)
+
+      mail = queued_confirmation(email)
+      assert mail.subject =~ "Confirma tu suscripción"
+      assert mail.html_body =~ "/es/newsletter/confirm/"
+    end
+
+    test "the French link's page is French and posts back under /fr/", %{conn: conn} do
+      sub = subscriber()
+
+      html = conn |> get("/fr/newsletter/confirm/#{sub.confirm_token}") |> html_response(200)
+
+      assert html =~ "Oui, abonnez-moi"
+      assert html =~ ~s(action="/fr/newsletter/confirm/#{sub.confirm_token}")
+
+      html =
+        build_conn() |> post("/fr/newsletter/confirm/#{sub.confirm_token}") |> html_response(200)
+
+      assert html =~ "Abonnement confirmé"
+      assert reload(sub).status == :confirmed
     end
   end
 end

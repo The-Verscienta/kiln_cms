@@ -23,7 +23,7 @@
         <p class="text-base-content/70">
           {gettext("Start sending newsletters to %{email}?", email: @email)}
         </p>
-        <form action={~p"/newsletter/confirm/#{@token}"} method="post">
+        <form action={@action} method="post">
           <input type="hidden" name="_csrf_token" value={get_csrf_token()} />
           <button type="submit" class="btn btn-primary w-full">
             {gettext("Yes, subscribe me")}

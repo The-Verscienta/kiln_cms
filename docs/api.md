@@ -1995,6 +1995,10 @@ Optional attributes:
   `Form`).
 - `data-kiln-height`: the height in px before the first resize (default
   `480`).
+- `data-kiln-locale`: the language to render the form in, such as `fr`. The
+  frame loads `GET /forms/:slug/embed?locale=fr` and posts back under that
+  language's prefix. A language the site does not serve gets the site's
+  default (`docs/forms.md`, "Embedding on another site").
 
 **Schema.** `GET /api/forms/:slug` returns each field as `name`, `label`,
 `type`, `required`, `options`, `help_text`, `placeholder`, `default_value`,
