@@ -182,6 +182,45 @@ defmodule KilnCMSWeb.TwoFactorPasskeyTest do
       assert count(html, "#two-factor-passkey-hint") == 0
       refute html =~ "Enter the 6-digit code"
     end
+
+    # #2887: the passkey button ships hidden, so a browser without WebAuthn (or
+    # with JavaScript off) would see "use your passkey" and no way to. A
+    # passkey has no recovery codes, so the page names what is left.
+    test "tells a passkey-only account where to go when the browser can't use a passkey", %{
+      conn: conn
+    } do
+      {user, _cred} = passkey_only()
+      {conn, _token} = pending(conn, user)
+
+      html = conn |> get(~p"/sign-in/verify") |> html_response(200)
+
+      # Shipped hidden for the script to reveal where it reveals no button...
+      assert count(
+               html,
+               "#two-factor-passkey-unsupported[data-passkey-step-up-unsupported][hidden]"
+             ) == 1
+
+      # ...and drawn for a browser with JavaScript off, where it never runs.
+      assert count(html, "noscript #two-factor-passkey-noscript") == 1
+
+      assert html =~ "This browser can&#39;t use a passkey."
+      assert html =~ "ask an administrator of your site"
+      # No recovery-code form to point at: a passkey has none.
+      assert count(html, "#two-factor-recovery") == 0
+      refute html =~ "recovery code"
+    end
+
+    test "an account with the authenticator app gets no such note: the code form is its way",
+         %{conn: conn} do
+      {user, _secret, _cred} = both_factors()
+      {conn, _token} = pending(conn, user)
+
+      html = conn |> get(~p"/sign-in/verify") |> html_response(200)
+
+      assert count(html, "#two-factor-passkey-unsupported") == 0
+      assert count(html, "#two-factor-passkey-noscript") == 0
+      refute html =~ "This browser can&#39;t use a passkey."
+    end
   end
 
   describe "the code form requires the authenticator app" do

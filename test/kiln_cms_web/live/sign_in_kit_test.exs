@@ -8,7 +8,9 @@ defmodule KilnCMSWeb.SignInKitTest do
       Kiln's own templates draw one button and one input.
     * **The passkey button is server-rendered** — in the page's markup, with
       translated copy, hidden until the `PasskeySignIn` hook finds WebAuthn.
-      It used to be injected by app.js, which no test could see.
+      It used to be injected by app.js, which no test could see. Only on a
+      host where the ceremony can run — the main or a console host, never a
+      site's own (#2827).
   """
   use KilnCMSWeb.ConnCase, async: true
 
@@ -30,7 +32,7 @@ defmodule KilnCMSWeb.SignInKitTest do
 
   describe "the passkey button" do
     test "is in the server-rendered markup, hidden until the hook reveals it", %{conn: conn} do
-      conn = unique_ip(conn)
+      conn = conn |> unique_ip() |> main_host_conn()
 
       # Disconnected (the HTML a browser first receives) and connected alike.
       dead = conn |> get(~p"/sign-in") |> html_response(200)
@@ -61,6 +63,7 @@ defmodule KilnCMSWeb.SignInKitTest do
       html =
         conn
         |> unique_ip()
+        |> main_host_conn()
         |> init_test_session(%{"locale" => "es"})
         |> get(~p"/sign-in")
         |> html_response(200)
@@ -69,8 +72,26 @@ defmodule KilnCMSWeb.SignInKitTest do
       assert html =~ "Usar una clave de acceso"
     end
 
-    test "is offered on /sign-in only, not on /register or /reset", %{conn: conn} do
+    # #2827: a passkey belongs to the main host, and a browser refuses it on a
+    # site's own host (ConnCase's default `www.example.com` stands for one), so
+    # a button there could only fail.
+    test "is not offered on a site's own host, where the ceremony can't run", %{conn: conn} do
       conn = unique_ip(conn)
+
+      dead = conn |> get(~p"/sign-in") |> html_response(200)
+      {:ok, lv, _html} = live(conn, ~p"/sign-in")
+
+      for html <- [dead, render(lv)] do
+        assert html |> LazyHTML.from_document() |> count("#passkey-sign-in") == 0
+        refute html =~ "Use a passkey"
+      end
+
+      # The page is otherwise the sign-in page.
+      assert has_element?(lv, "input[name='user[password]']")
+    end
+
+    test "is offered on /sign-in only, not on /register or /reset", %{conn: conn} do
+      conn = conn |> unique_ip() |> main_host_conn()
 
       {:ok, lv, _html} = live(conn, ~p"/reset")
       refute has_element?(lv, "#passkey-sign-in")
