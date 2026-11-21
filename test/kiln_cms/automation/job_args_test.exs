@@ -1,9 +1,10 @@
 defmodule KilnCMS.Automation.JobArgsTest do
   @moduledoc """
-  An automation job's `payload` — the event's serialized document, drafts
-  included — leaves the job's row once the job is finished (#2992), and the
-  readers accept it sealed (`KilnCMS.Jobs.PrivateArgs.seal/1`) as well as in
-  the clear, so a later release can switch the writers to the sealed shape.
+  An automation job's payload — the event's serialized document, drafts
+  included — is written sealed (`KilnCMS.Jobs.PrivateArgs.seal/1`), so the
+  pending row holds no document text, and it leaves the job's row once the
+  job is finished (#2992). The readers still accept it in the clear, the
+  shape a job queued by a release before 1.12 carries.
 
   Jobs are inserted and drained rather than `perform_job/3`'d: the worker's
   write to its own row is the behavior under test, and a job with no id has
@@ -67,19 +68,20 @@ defmodule KilnCMS.Automation.JobArgsTest do
         assert [row] = rows(worker)
         assert row.state == "completed"
         refute Map.has_key?(row.args, "payload")
+        refute Map.has_key?(row.args, "sealed")
         refute inspect(row.args) =~ "Draft secret"
       end
     end
 
     test "a rule deleted or disabled since the event fired: done, and forgotten" do
       disabled = rule(%{trigger_event: :published, action: :broadcast, enabled: false})
-      job = rule_job!(disabled, %{"payload" => payload()})
+      job = rule_job!(disabled, %{"sealed" => PrivateArgs.seal(payload())})
 
       drain()
 
       row = Repo.get!(Oban.Job, job.id)
       assert row.state == "completed"
-      refute Map.has_key?(row.args, "payload")
+      refute Map.has_key?(row.args, "sealed")
       assert row.args["rule_id"] == disabled.id
     end
 
@@ -91,7 +93,7 @@ defmodule KilnCMS.Automation.JobArgsTest do
 
       assert [row] = rows(DispatchWorker)
       assert row.state == "retryable"
-      assert row.args["payload"]["title"] == "Draft secret"
+      assert {:ok, %{"title" => "Draft secret"}} = Automation.job_payload(row.args)
     end
 
     test "failing the last attempt forgets it" do
@@ -106,11 +108,95 @@ defmodule KilnCMS.Automation.JobArgsTest do
 
       row = Repo.get!(Oban.Job, row.id)
       assert row.state == "discarded"
+      refute Map.has_key?(row.args, "sealed")
+    end
+  end
+
+  describe "a pending job holds no payload text" do
+    test "the dispatch job seals the payload and keeps the event and site in the clear" do
+      Automation.handle_event("post.published", payload(), org_id())
+
+      assert [row] = rows(DispatchWorker)
+      assert row.state == "available"
+      refute Map.has_key?(row.args, "payload")
+      refute inspect(row.args) =~ "Draft secret"
+      refute inspect(row.args) =~ "draft-secret"
+      assert %{"event" => "post.published", "sealed" => sealed} = row.args
+      assert row.args["org_id"] == org_id()
+      assert {:ok, %{"title" => "Draft secret"}} = PrivateArgs.open(sealed)
+    end
+
+    test "the rule job seals it too and keeps what its uniqueness compares" do
+      r = rule(%{trigger_event: :published, action: :broadcast})
+      snapshot = payload()
+
+      assert :ok = Automation.dispatch("post.published", snapshot, org_id())
+
+      assert [row] = rows(RuleWorker)
+      refute Map.has_key?(row.args, "payload")
+      refute inspect(row.args) =~ "Draft secret"
+      assert row.args["rule_id"] == r.id
+      assert row.args["event"] == "post.published"
+      assert row.args["document_id"] == snapshot["id"]
+      assert {:ok, ^snapshot} = Automation.job_payload(row.args)
+    end
+
+    test "a duplicate event still collapses onto the pending rule job" do
+      rule(%{trigger_event: :published, action: :broadcast})
+      snapshot = payload()
+
+      # Each seal has its own nonce, so the two jobs' args differ; uniqueness
+      # compares the clear keys only.
+      assert :ok = Automation.dispatch("post.published", snapshot, org_id())
+      assert :ok = Automation.dispatch("post.published", snapshot, org_id())
+      assert [_one] = rows(RuleWorker)
+
+      assert :ok = Automation.dispatch("post.published", payload(), org_id())
+      assert [_one, _two] = rows(RuleWorker)
+    end
+  end
+
+  describe "a clear payload (a job queued by a release before 1.12)" do
+    test "a dispatch job still matches, fans out, and forgets it" do
+      topic = "job-args-legacy-#{System.unique_integer([:positive])}"
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, "automation:#{topic}")
+      rule(%{trigger_event: :published, action: :broadcast, config: %{"topic" => topic}})
+
+      %{"event" => "post.published", "org_id" => org_id(), "payload" => payload()}
+      |> DispatchWorker.new()
+      |> Oban.insert!()
+
+      drain()
+
+      assert_receive {:automation_event, "post.published", %{"title" => "Draft secret"}}, 2_000
+
+      for worker <- [DispatchWorker, RuleWorker] do
+        assert [row] = rows(worker)
+        assert row.state == "completed"
+        refute Map.has_key?(row.args, "payload")
+      end
+    end
+
+    test "a rule job's email renders the snapshot" do
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :send_email,
+          config: %{"to" => "team@example.com", "subject" => "Live: {{title}}"}
+        })
+
+      job = rule_job!(r, %{"payload" => payload(%{"title" => "Clear news"})})
+      drain()
+
+      assert_email_sent(fn email -> assert email.subject == "Live: Clear news" end)
+
+      row = Repo.get!(Oban.Job, job.id)
+      assert row.state == "completed"
       refute Map.has_key?(row.args, "payload")
     end
   end
 
-  describe "a sealed payload (the shape the next release writes)" do
+  describe "a sealed payload" do
     test "a rule's email renders the snapshot as it does from a plain payload" do
       r =
         rule(%{
