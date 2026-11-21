@@ -12045,6 +12045,11 @@ msgstr "Estado del servicio de imágenes"
 msgid "Image backends"
 msgstr "Servicios de imágenes"
 
+#: lib/kiln_cms/blocks/gallery.ex
+#, elixir-autogen, elixir-format
+msgid "Image gallery"
+msgstr "Galería de imágenes"
+
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
 msgid "Image shown when this page is shared on social media."
