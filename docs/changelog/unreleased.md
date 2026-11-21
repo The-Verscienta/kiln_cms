@@ -84,6 +84,17 @@ carries the reasoning.
 
 ## Added
 
+<a id="embedded-form-locale"></a>
+
+- **An embedded form can be shown in a chosen language (#2597).**
+  `embed.js` takes an optional `data-kiln-locale` attribute and loads
+  `/forms/<slug>/embed?locale=<value>`. The server accepts a supported locale
+  and gives anything else the site default; a path prefix (`/es/forms/…`)
+  still wins, and the session is never read, so a shared cache keys on the
+  URL. A snippet without the attribute loads exactly what it did. See
+  [docs/forms.md](../forms.md).
+  ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597))
+
 <a id="plugin-list-field-types"></a>
 
 - **A plugin field type can hold a list of values (#2680, `kiln_plugin` 1.6).** A `Kiln.FieldType` that defines the new optional `multiple?/0` to return `true` gets what the core scalar types have had since #2289: the fields admin offers **A list** with item bounds, and a list field stores a JSON array. Guide: [Let a plugin field type take a list](../extending-content.md#let-a-plugin-field-type-take-a-list).
@@ -266,13 +277,7 @@ carries the reasoning.
 
 <a id="locale-followups"></a>
 
-- **Locale follow-ups from #2465: embedded forms, newsletter confirmation, and an unconfigured record locale (#2597).**
-  - **Embedded forms.** `embed.js` takes an optional `data-kiln-locale`
-    attribute and loads `/forms/<slug>/embed?locale=<value>`. The server
-    accepts a supported locale and gives anything else the site default; a
-    path prefix (`/es/forms/…`) still wins, and the session is never read,
-    so a shared cache keys on the URL. A snippet without the attribute loads
-    exactly what it did. See [docs/forms.md](../forms.md).
+- **Locale follow-ups from #2465: newsletter confirmation and an unconfigured record locale (#2597).**
   - **Newsletter confirmation.** The email is built while the sign-up request
     runs, so it now goes through gettext in that request's locale (es, fr):
     subject, body and a confirm link pinned to the same prefix, and the

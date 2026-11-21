@@ -90,7 +90,7 @@ Every summary line below that was shortened links to its own entry there.
 ### Added
 
 - **An embedded form can be shown in a chosen language: `data-kiln-locale` on the `embed.js` snippet (`?locale=` on `/forms/:slug/embed`); an unsupported value gets the site default and existing snippets are unchanged (#2597).**
-  ([long form](docs/changelog/unreleased.md#locale-followups))
+  ([long form](docs/changelog/unreleased.md#embedded-form-locale))
 
 - **A plugin field type can hold a list (`multiple?/0`, `unique_items?/0`, `kiln_plugin` 1.6), with the same editor input, write rules, API filters and schema export as core lists. A list whose type later stops taking lists is kept read-only (a "held list") instead of being dropped.**
   ([#3203](https://github.com/The-Verscienta/kiln_cms/pull/3203) · [long form](docs/changelog/unreleased.md#plugin-list-field-types))
