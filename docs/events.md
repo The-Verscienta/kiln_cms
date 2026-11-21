@@ -81,10 +81,27 @@ start other than Monday — is **rejected at the form**, never silently ignored:
 an editor who writes a rule Kiln cannot honor should find out then, not from a
 subscriber asking why the calendar is wrong.
 
-`UNTIL` is a **date**, inclusive, in the event's own zone: `UNTIL=20261231`
-keeps an occurrence on 31 December at any time of day. A date-time `UNTIL`
-(`20261231T000000Z`) is accepted, but only its date is read, and the form saves
-it as that date.
+`UNTIL` is inclusive, and it is saved as you type it:
+
+- A **date** is read in the event's own zone: `UNTIL=20261231` keeps an
+  occurrence on 31 December at any time of day.
+- A **date-time in UTC** (`UNTIL=20261231T000000Z`) is that instant: an
+  occurrence that starts after it is not in the series. A daily 08:00 Tokyo
+  event with `UNTIL=20261230T230000Z` ends on 31 December, because 08:00 there
+  is 23:00 UTC the day before; with `UNTIL=20261231T000000Z` it also ends on
+  the 31st, and a 20:00 New York event ends on the 29th (midnight UTC is 19:00
+  the evening before in New York).
+- A **floating date-time** (`UNTIL=20261231T090000`, no `Z`) is wall-clock
+  time in the event's own zone, so it moves with the event if the zone changes.
+  On a DST changeover it resolves the way an occurrence does: a time skipped by
+  the spring-forward moves past the gap, and a time that happens twice is the
+  first one. An occurrence at exactly the `UNTIL` time is kept.
+
+This is what RFC 5545 and calendar clients do. Earlier releases saved a
+date-time `UNTIL` as its UTC date, which could end the series a day early east
+of UTC and a day late west of it. Rules saved that way are stored as dates and
+keep meaning what they did; save the rule again with the date-time to get the
+exact cut.
 
 Expansion is **wall-clock**, so "every Tuesday at 19:00" stays at 19:00 local
 across a DST boundary rather than drifting to 18:00 or 20:00. Where a local time
@@ -159,10 +176,6 @@ Where Kiln knowingly differs from RFC 5545:
 - **A local time that doesn't exist** (the spring-forward gap) moves forward
   past the gap; the RFC drops that occurrence.
 - **The start date**, as above.
-- **A date-time `UNTIL`** is read as the date it names and compared
-  inclusively in local time: `UNTIL=20261224T000000Z` keeps a 09:00 New York
-  occurrence on 24 December, which the RFC drops. Write `UNTIL` as a date and
-  the question doesn't arise.
 
 A rule the form refuses says why. The messages an editor can see include:
 
@@ -214,6 +227,11 @@ day ends at 23:00 UTC), so an occurrence at any time on 5 April is in the
 series in both Kiln and the subscriber's calendar, and none on the 6th is. If the event's zone isn't one the
 server knows, the `UNTIL` falls back to the DATE form rather than failing the
 feed.
+
+A date-time `UNTIL` is exported as its own instant in UTC: `UNTIL=20261230T230000Z`
+unchanged, and a floating `UNTIL=20261231T000000` on a Tokyo event as
+`UNTIL=20261230T150000Z`. On an all-day event it is exported as the date that
+instant falls on in the event's zone.
 
 ## What's on: the occurrence-sorted index
 

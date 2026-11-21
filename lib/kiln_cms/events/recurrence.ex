@@ -69,7 +69,15 @@ defmodule KilnCMS.Events.Recurrence do
     * **Invalid dates are skipped**, not rolled over: `FREQ=YEARLY` from 29
       February recurs in leap years only, and `COUNT` counts real dates.
     * **`COUNT`, then `EXDATE`.** `COUNT` is counted from DTSTART, before
-      `EXDATE` subtracts. `UNTIL` is an inclusive date in the event's zone.
+      `EXDATE` subtracts.
+    * **`UNTIL` keeps its value type** (#2861). A date (`UNTIL=20261231`) is
+      an inclusive date in the event's zone: an occurrence at any time that
+      day is kept. A date-time is an inclusive *instant*: `…T000000Z` is UTC,
+      and a floating `…T000000` is local time in the event's own zone,
+      resolved the way an occurrence is (a DST gap shifts forward, an
+      ambiguous time is the first), so an occurrence at exactly the `UNTIL`
+      wall time is kept on a changeover day too. The zone is the one
+      expansion already walks in, so no zone is stored with the rule.
 
   ## Known divergences from RFC 5545
 
@@ -81,9 +89,6 @@ defmodule KilnCMS.Events.Recurrence do
       §3.3.10 counts it as the first instance. This module follows
       python-dateutil and rrule.js; some clients (Google Calendar) show DTSTART
       as an extra instance.
-    * **A timed `UNTIL` is read as a date.** `UNTIL=19971224T000000Z` is
-      truncated to its UTC date and compared inclusively in local time, so a
-      09:00 New York occurrence on 24 December is kept where the RFC drops it.
   """
 
   @default_max 200
@@ -96,7 +101,7 @@ defmodule KilnCMS.Events.Recurrence do
           freq: :daily | :weekly | :monthly | :yearly,
           interval: pos_integer(),
           count: pos_integer() | nil,
-          until: Date.t() | nil,
+          until: Date.t() | DateTime.t() | NaiveDateTime.t() | nil,
           by_day: [{integer() | nil, 1..7}],
           by_month_day: [integer()],
           by_month: [1..12],
@@ -114,7 +119,7 @@ defmodule KilnCMS.Events.Recurrence do
 
   # See `engine_version/0`. Bump it with any change to what `expand/6` returns
   # for a rule `parse/1` accepts.
-  @engine_version 2
+  @engine_version 3
 
   @doc "The default ceiling on how many occurrences a single expansion returns."
   @spec default_max() :: pos_integer()
@@ -168,17 +173,26 @@ defmodule KilnCMS.Events.Recurrence do
   @doc """
   Render a rule back to an RRULE string — what ICS and storage carry.
 
-  `:until` picks `UNTIL`'s value type: `:date` (the default, and what storage
-  round-trips through `parse/1`) or `:datetime`. RFC 5545 §3.3.10 requires
-  `UNTIL` to match `DTSTART`'s value type, so a timed event's rule must render
-  the datetime form — a date-only `UNTIL` against a DATE-TIME `DTSTART` is
-  malformed.
+  `:until` picks `UNTIL`'s value type. Left out, `UNTIL` renders as it was
+  parsed (a date as a date, a `Z` date-time in UTC, a floating date-time
+  floating), which is what storage round-trips through `parse/1` (#2861).
+  `:date` and `:datetime` force one type: RFC 5545 §3.3.10 requires `UNTIL` to
+  match `DTSTART`'s value type, so a timed event's rule must render the
+  datetime form (a date-only `UNTIL` against a DATE-TIME `DTSTART` is
+  malformed) and an all-day event's rule the date form.
 
-  The datetime form is the **last instant of the stored date in the event's
-  zone**, in UTC, because that is how expansion reads `until`: an inclusive
-  local date. So `until: :datetime` also needs `:time_zone`, a zone name, and
-  raises `ArgumentError` without one (`nil` included) — a UTC default renders the end of the UTC day,
-  which drops the last occurrence west of UTC and adds one east of it (#2751).
+  The datetime form of a **date** `UNTIL` is the **last instant of that date in
+  the event's zone**, in UTC, because that is how expansion reads it: an
+  inclusive local date. A date-time `UNTIL` is already an instant and renders
+  as that instant in UTC, a floating one resolved in the event's zone. So
+  `until: :datetime` also needs `:time_zone`, a zone name, and raises
+  `ArgumentError` without one (`nil` included) — a UTC default renders the end
+  of the UTC day, which drops the last occurrence west of UTC and adds one east
+  of it (#2751).
+
+  The date form of a date-time `UNTIL` is the date that instant falls on in
+  `:time_zone` (its UTC date without one): the last date whose local midnight,
+  where an all-day occurrence starts, is inside the series.
 
   It is computed as local midnight of the next day, resolved by `to_utc/2`,
   minus one second. That is exact across DST: when midnight falls in a gap the
@@ -187,8 +201,9 @@ defmodule KilnCMS.Events.Recurrence do
   local 23:59:59 would be the first of two, and cut the second hour.
 
   A zone the database does not know falls back to the date form rather than
-  raising: a public feed must not fail on one record, and a date `UNTIL` is
-  what a lenient client reads best.
+  raising (a `Z` date-time needs no zone and keeps its form): a public feed
+  must not fail on one record, and a date `UNTIL` is what a lenient client
+  reads best.
   """
   @spec to_rrule(t(), keyword()) :: String.t()
   def to_rrule(%__MODULE__{} = rule, opts \\ []) do
@@ -206,7 +221,7 @@ defmodule KilnCMS.Events.Recurrence do
   end
 
   defp until_type(opts) do
-    case Keyword.get(opts, :until, :date) do
+    case Keyword.get(opts, :until, :as_parsed) do
       # `is_binary/1`, not `Keyword.has_key?/2`: `time_zone: nil` (a record
       # whose zone was never set) would otherwise reach `to_utc/2`, fail to
       # resolve and fall back to the date form without a word.
@@ -221,22 +236,47 @@ defmodule KilnCMS.Events.Recurrence do
     end
   end
 
-  defp render_until(date, :date, _opts), do: Calendar.strftime(date, "%Y%m%d")
+  defp render_until(%Date{} = date, type, _opts) when type in [:as_parsed, :date],
+    do: Calendar.strftime(date, "%Y%m%d")
 
-  defp render_until(date, :datetime, opts) do
+  defp render_until(%Date{} = date, :datetime, opts) do
     midnight = date |> Date.add(1) |> NaiveDateTime.new!(~T[00:00:00])
 
     case to_utc(midnight, Keyword.fetch!(opts, :time_zone)) do
-      {:ok, next_day} ->
-        next_day
-        |> DateTime.add(-1, :second)
-        |> DateTime.truncate(:second)
-        |> Calendar.strftime("%Y%m%dT%H%M%SZ")
-
-      :error ->
-        render_until(date, :date, opts)
+      {:ok, next_day} -> next_day |> DateTime.add(-1, :second) |> render_instant()
+      :error -> render_until(date, :date, opts)
     end
   end
+
+  defp render_until(%DateTime{} = instant, type, _opts) when type in [:as_parsed, :datetime],
+    do: render_instant(instant)
+
+  defp render_until(%NaiveDateTime{} = local, :as_parsed, _opts),
+    do: Calendar.strftime(local, "%Y%m%dT%H%M%S")
+
+  # Beside a TZID or UTC DTSTART, UNTIL must be UTC (RFC 5545 §3.3.10), so a
+  # floating one is resolved in the event's zone exactly as expansion does.
+  defp render_until(%NaiveDateTime{} = local, :datetime, opts) do
+    case to_utc(local, Keyword.fetch!(opts, :time_zone)) do
+      {:ok, instant} -> render_instant(instant)
+      :error -> render_until(NaiveDateTime.to_date(local), :date, opts)
+    end
+  end
+
+  defp render_until(%DateTime{} = instant, :date, opts) do
+    with zone when is_binary(zone) <- Keyword.get(opts, :time_zone),
+         {:ok, local} <- DateTime.shift_zone(instant, zone) do
+      render_until(DateTime.to_date(local), :date, opts)
+    else
+      _no_zone -> render_until(DateTime.to_date(instant), :date, opts)
+    end
+  end
+
+  defp render_until(%NaiveDateTime{} = local, :date, opts),
+    do: render_until(NaiveDateTime.to_date(local), :date, opts)
+
+  defp render_instant(instant),
+    do: instant |> DateTime.truncate(:second) |> Calendar.strftime("%Y%m%dT%H%M%SZ")
 
   @doc """
   Occurrences of `rule` starting at `dtstart`, within `[from, until]`, in
@@ -265,10 +305,12 @@ defmodule KilnCMS.Events.Recurrence do
     # day past the UTC date while the instant is still inside the window, and
     # the walk would stop one occurrence early. `in_window?/3` below does the
     # real filtering on instants, so the extra day costs one wasted candidate,
-    # never an extra result. The rule's own UNTIL is a local date already and
-    # needs no such padding.
+    # never an extra result. A date UNTIL is a local date already and needs no
+    # such padding; a date-time one is padded the same way and cut on its
+    # instant (`until_bound/2`).
     window_end = until |> DateTime.to_date() |> Date.add(1)
-    stop_date = earliest_date(rule.until, window_end)
+    {until_date, until_instant} = until_bound(rule.until, time_zone)
+    stop_date = earliest_date(until_date, window_end)
 
     start_date = NaiveDateTime.to_date(dtstart)
 
@@ -289,6 +331,7 @@ defmodule KilnCMS.Events.Recurrence do
     |> Stream.reject(&MapSet.member?(ex_dates, &1))
     |> Stream.map(&at_local_time(&1, NaiveDateTime.to_time(dtstart), time_zone))
     |> Stream.reject(&is_nil/1)
+    |> Stream.filter(&until_ok?(&1, until_instant))
     |> Stream.filter(&in_window?(&1, from, until))
     |> Enum.take(max)
   end
@@ -372,8 +415,8 @@ defmodule KilnCMS.Events.Recurrence do
   end
 
   defp put_part(rule, seen, "UNTIL", value) do
-    case parse_date(value) do
-      {:ok, date} -> {:cont, {:ok, %{rule | until: date}, seen}}
+    case parse_until(value) do
+      {:ok, until} -> {:cont, {:ok, %{rule | until: until}, seen}}
       :error -> {:halt, {:error, "UNTIL must be a date like 20260301"}}
     end
   end
@@ -509,8 +552,34 @@ defmodule KilnCMS.Events.Recurrence do
     end
   end
 
-  # `20260301` and `20260301T120000Z` both appear in the wild; only the date
-  # part matters here, since UNTIL is compared against candidate dates.
+  # UNTIL keeps its value type (#2861): `20260301T120000Z` is a UTC instant and
+  # `20260301T120000` a local time in the event's zone, read at expansion. Cut
+  # to its date, a date-time UNTIL ended the series a day early east of UTC and
+  # a day late west of it, against every client reading the same rule.
+  #
+  # Anything else with a date in front (`20260301T1200Z`) is still read as that
+  # date, as it always was: refusing it now would turn a rule that saved before
+  # into a form error.
+  defp parse_until(value) do
+    case Regex.run(~r/\A(\d{8})T(\d{2})(\d{2})(\d{2})(Z?)\z/, value) do
+      [_, date, h, m, s, zulu] -> until_datetime(date, h, m, s, zulu) || parse_date(value)
+      nil -> parse_date(value)
+    end
+  end
+
+  defp until_datetime(date, h, m, s, zulu) do
+    with {:ok, date} <- parse_date(date),
+         {:ok, time} <-
+           Time.new(String.to_integer(h), String.to_integer(m), String.to_integer(s)) do
+      local = NaiveDateTime.new!(date, time)
+      {:ok, if(zulu == "Z", do: DateTime.from_naive!(local, "Etc/UTC"), else: local)}
+    else
+      _invalid -> nil
+    end
+  end
+
+  # `20260301` and `20260301T120000Z` both appear in the wild; for EXDATE only
+  # the date part matters, since it is compared against candidate dates.
   defp parse_date(value) do
     case Regex.run(~r/\A(\d{4})(\d{2})(\d{2})/, value) do
       # `Date.new/3` answers `{:error, :invalid_date}`, not `:error`, so a real
@@ -720,6 +789,35 @@ defmodule KilnCMS.Events.Recurrence do
   defp in_window?(datetime, from, until) do
     DateTime.compare(datetime, from) != :lt and DateTime.compare(datetime, until) != :gt
   end
+
+  # `{last candidate date, last instant}` for the rule's UNTIL. A date bounds
+  # the walk and needs no instant. A date-time bounds the walk at the local
+  # date it falls on, plus a day for the same reason the window end is padded,
+  # and its instant makes the exact cut. A floating one that cannot be resolved
+  # (a zone the database does not know) is only its date: `at_local_time/3`
+  # resolves no occurrence in that zone either.
+  defp until_bound(nil, _time_zone), do: {nil, nil}
+  defp until_bound(%Date{} = date, _time_zone), do: {date, nil}
+
+  defp until_bound(%NaiveDateTime{} = local, time_zone) do
+    case resolve_local(local, time_zone) do
+      {:ok, instant} -> until_bound(instant, time_zone)
+      :error -> {NaiveDateTime.to_date(local), nil}
+    end
+  end
+
+  defp until_bound(%DateTime{} = instant, time_zone) do
+    local_date =
+      case DateTime.shift_zone(instant, time_zone) do
+        {:ok, local} -> DateTime.to_date(local)
+        {:error, _reason} -> DateTime.to_date(instant)
+      end
+
+    {Date.add(local_date, 1), instant}
+  end
+
+  defp until_ok?(_datetime, nil), do: true
+  defp until_ok?(datetime, until), do: DateTime.compare(datetime, until) != :gt
 
   defp earliest_date(nil, window_end), do: window_end
 
