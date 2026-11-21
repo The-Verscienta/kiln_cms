@@ -262,30 +262,45 @@ defmodule KilnCMSWeb.ChallengeComponents do
 
   @doc """
   The line offering another way in, naming only the ways this page has: a
-  passkey (always, where the browser supports one), a sign-in link by email
-  when the magic-link strategy is on, and the site's own single sign-on when it
-  has a usable one. Registration offers an invitation from a site's admin,
-  which needs no challenge.
+  passkey where the page draws its button (the main or a console host, never a
+  site's own, #2827; it reveals itself where the browser supports one), a
+  sign-in link by email when the magic-link strategy is on, and the site's own
+  single sign-on when it has a usable one. Registration offers an invitation
+  from a site's admin, which needs no challenge.
   """
   @spec fallback_text(Challenge.action(), [atom()]) :: String.t()
   def fallback_text(:register, _options),
     do: gettext("Can't complete the check? Ask a site administrator to invite you instead.")
 
   def fallback_text(:sign_in, options) do
-    case {:magic_link in options, :site_sso in options} do
-      {true, true} ->
+    case {:passkey in options, :magic_link in options, :site_sso in options} do
+      {true, true, true} ->
         gettext(
           "Can't complete the check? Use a passkey, email yourself a sign-in link, or use your site's single sign-on."
         )
 
-      {true, false} ->
+      {true, true, false} ->
         gettext("Can't complete the check? Use a passkey or email yourself a sign-in link.")
 
-      {false, true} ->
+      {true, false, true} ->
         gettext("Can't complete the check? Use a passkey or your site's single sign-on.")
 
-      {false, false} ->
+      {true, false, false} ->
         gettext("Can't complete the check? Use a passkey instead.")
+
+      {false, true, true} ->
+        gettext(
+          "Can't complete the check? Email yourself a sign-in link or use your site's single sign-on."
+        )
+
+      {false, true, false} ->
+        gettext("Can't complete the check? Email yourself a sign-in link instead.")
+
+      {false, false, true} ->
+        gettext("Can't complete the check? Use your site's single sign-on instead.")
+
+      {false, false, false} ->
+        gettext("Can't complete the check? Reload the page and try it again.")
     end
   end
 end

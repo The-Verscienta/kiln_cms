@@ -119,11 +119,9 @@ defmodule KilnCMSWeb.SignInLive do
       KilnCMSWeb.LiveUserAuth.on_mount(:assign_current_org, params, session, socket)
 
     socket =
-      assign(
-        socket,
-        :site_sso,
-        KilnCMS.Accounts.SiteSso.sign_in_option(resolved.assigns.current_org)
-      )
+      socket
+      |> assign(:site_sso, KilnCMS.Accounts.SiteSso.sign_in_option(resolved.assigns.current_org))
+      |> assign(:passkey?, passkey_host?(resolved))
 
     # The client and org the sign-in action's audit hook records (#2241).
     socket =
@@ -163,7 +161,7 @@ defmodule KilnCMSWeb.SignInLive do
   def render(assigns) do
     ~H"""
     {Upstream.render(assigns)}
-    <.passkey_sign_in :if={@live_action == :sign_in} />
+    <.passkey_sign_in :if={@live_action == :sign_in and @passkey?} />
     <.site_sso :if={@live_action == :sign_in} option={@site_sso} />
     <.unlock_link :if={@live_action == :sign_in} />
     """
@@ -189,6 +187,10 @@ defmodule KilnCMSWeb.SignInLive do
   # built by app.js with `innerHTML` after the LiveView root, which meant
   # English-only copy, a `location.pathname === "/sign-in"` test that missed a
   # locale-prefixed URL, and markup no test could see.
+  #
+  # Drawn only on a host where the ceremony can run (#2827,
+  # `passkey_host?/1`): a passkey belongs to the main host, and a browser
+  # refuses it on a site's own host, so a button there could only fail.
   #
   # Progressive enhancement is kept: the block ships `hidden`, and the
   # `PasskeySignIn` hook (assets/js/passkeys.js) reveals it only where
@@ -288,10 +290,12 @@ defmodule KilnCMSWeb.SignInLive do
   defp params_challenge?(%{"challenge" => "1"}), do: true
   defp params_challenge?(_params), do: false
 
-  # A passkey is always offered (the block reveals itself where WebAuthn
-  # exists); a sign-in link only while the magic-link strategy is compiled in;
-  # the site's own single sign-on only when it has a usable one.
+  # A passkey only where this page draws its button (the block reveals itself
+  # where WebAuthn exists); a sign-in link only while the magic-link strategy
+  # is compiled in; the site's own single sign-on only when it has a usable one.
   defp fallback_options(socket) do
+    passkey = if socket.assigns.passkey?, do: [:passkey], else: []
+
     magic_link =
       if match?({:ok, _}, AshAuthentication.Info.strategy(KilnCMS.Accounts.User, :magic_link)),
         do: [:magic_link],
@@ -299,8 +303,17 @@ defmodule KilnCMSWeb.SignInLive do
 
     site_sso = if match?({:ok, _}, socket.assigns[:site_sso]), do: [:site_sso], else: []
 
-    [:passkey] ++ magic_link ++ site_sso
+    passkey ++ magic_link ++ site_sso
   end
+
+  # Whether a passkey ceremony can run on this page's host (#2827): the main
+  # host or a console host, never a site's own. Read from the socket
+  # `:assign_current_org` vouched for, not this page's, whose `host_uri` on a
+  # connected mount is still the client's claim. A socket with no host (a
+  # nested `live_render`) offers none.
+  defp passkey_host?(resolved),
+    do:
+      KilnCMS.Accounts.WebAuthn.ceremony_host?(KilnCMSWeb.SecondFactorGate.socket_host(resolved))
 
   # A connected ROOT mount, which is the only socket that has a handshake to
   # read. `get_connect_info/2` raises `raise_root_and_mount_only!` when
