@@ -126,6 +126,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A newsletter confirmation email, its link and the confirm page are in the language the reader signed up in, and a record whose locale is no longer configured gets the site default in its `lang` and `og:locale` (#2597).**
   ([long form](docs/changelog/unreleased.md#locale-followups))
 
+- **The sign-in page no longer offers "Use a passkey" on a site's own host, where the browser refuses it, and a passkey-only account on `/sign-in/verify` in a browser that can't use a passkey is told to use another browser or device, or ask an administrator (#2827, #2887).**
+  ([long form](docs/changelog/unreleased.md#passkey-fallbacks))
+
 - **Automation jobs now store the event payload (the document snapshot, drafts included) sealed, so a pending job's row and Oban's log lines no longer show it; jobs a 1.11 node queued still run (#2992).**
   ([long form](docs/changelog/unreleased.md#automation-job-payload-sealed))
 
