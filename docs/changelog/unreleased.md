@@ -257,6 +257,19 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="gallery-carousel-keyboard"></a>
+
+- **A carousel gallery can be scrolled from the keyboard (#2590).**
+  The carousel layout scrolls sideways (`overflow-x: auto`), but nothing in it
+  could take focus, so a keyboard user couldn't scroll it (axe
+  `scrollable-region-focusable`). Its container now carries `tabindex="0"`,
+  `role="group"` and an "Image gallery" label (es, fr; in the content's
+  locale), with the same focus ring as scrolling tables, in both the block's
+  `:web` HTML and the LiveView renderer. Grid and masonry galleries are
+  unchanged. Pages fired before this release get it when they are next
+  published or refired. No migration.
+  ([#2590](https://github.com/The-Verscienta/kiln_cms/issues/2590))
+
 <a id="public-html-etag-render-inputs"></a>
 
 - **A public page's `ETag` now covers everything the page is rendered from, so a revalidation can no longer get a `304` for a page that has changed (#2765).**

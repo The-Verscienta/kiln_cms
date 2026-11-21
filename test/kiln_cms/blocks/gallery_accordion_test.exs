@@ -80,6 +80,25 @@ defmodule KilnCMS.Blocks.GalleryAccordionTest do
       assert Blocks.render(gallery([%{"alt" => "orphan"}]), :json_ld) == nil
     end
 
+    test ":web makes only the carousel a focusable, named scroll region (#2590)" do
+      images = [%{"url" => "/a.jpg", "alt" => "A"}]
+
+      html = fn layout ->
+        images |> gallery(%{layout: layout}) |> Blocks.render(:web) |> IO.iodata_to_binary()
+      end
+
+      assert html.("carousel") =~ ~s(tabindex="0" role="group" aria-label="Image gallery")
+
+      # Grid and masonry do not scroll; an unknown or missing layout is a grid.
+      for layout <- ["grid", "masonry", nil, "polaroid"] do
+        refute html.(layout) =~ "tabindex"
+        refute html.(layout) =~ "aria-label"
+      end
+
+      assert Gallery.scroll_label("carousel") == "Image gallery"
+      assert Gallery.scroll_label("grid") == nil
+    end
+
     test "layout_style/1 resolves through an allowlist, never the raw value" do
       assert Gallery.layout_style("masonry") =~ "column-count"
 
