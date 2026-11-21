@@ -647,6 +647,25 @@ carries the reasoning.
 
 ## Security
 
+<a id="phoenix-presence-serializer-advisories"></a>
+
+- **phoenix 1.8.17 fixes EEF-CVE-2026-128361 (GHSA-pvfx-rx4x-phrr, high) and
+  EEF-CVE-2026-129344 (GHSA-5vmc-qgf8-rw36, high).** The first: `Phoenix.Presence`
+  accepted any term as a presence key and failed only when listing presences, so
+  a key taken from a join payload could crash the tracker shard and every
+  channel and LiveView tracked on it. The second: a client that connects without
+  `vsn`, or with `vsn=1.0.0`, gets the V1 JSON serializer, which raises on a
+  `{:binary, data}` broadcast inside the PubSub dispatch loop and drops that
+  broadcast for every later subscriber. Kiln was not exposed to either. Its
+  Presence keys are built on the server (`KilnCMSWeb.Presence.track_editor/4`
+  uses the user's id, `track_preview_viewer/5` a server-made viewer key), and
+  nothing in Kiln broadcasts a binary payload. The bump clears the dependency
+  audit, which fails on both. `mix.exs` now requires `~> 1.8.17`, so a lock
+  cannot resolve back to an affected release; `examples/phoenix_showcase`
+  moves from 1.8.15 to 1.8.17 with the same floor. No other dependency moves.
+  No migration and no configuration.
+  ([#3205](https://github.com/The-Verscienta/kiln_cms/pull/3205))
+
 <a id="backup-destination-prune-ownership"></a>
 
 - **A database restored on another server no longer prunes the original server's backups on its destinations (GHSA-rx2c-h7cx-wmfj).**
