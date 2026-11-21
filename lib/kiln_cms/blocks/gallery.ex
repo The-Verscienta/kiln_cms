@@ -45,6 +45,7 @@ defmodule KilnCMS.Blocks.Gallery do
   one field an editor types freely.
   """
   use Kiln.Block
+  use Gettext, backend: KilnCMSWeb.Gettext
 
   block :gallery do
     # Optional heading rendered above the grid.
@@ -85,6 +86,20 @@ defmodule KilnCMS.Blocks.Gallery do
   @spec layout_style(String.t() | nil) :: String.t()
   def layout_style(layout), do: Map.get(@layouts, layout, @layouts[@default_layout])
 
+  @doc """
+  The accessible name for a gallery's scroll container, or `nil` when the
+  layout does not scroll. Only `carousel` scrolls (`overflow-x:auto`), and a
+  scroll container with nothing focusable inside cannot be scrolled from the
+  keyboard (axe `scrollable-region-focusable`, #2590). Its container therefore
+  gets `tabindex="0"`, `role="group"` and this label, the way
+  `KilnCMS.ScrollableTables` and `KilnCMS.CodeBlocks` do for tables and code.
+  Translated in the calling process's Gettext locale, which delivery and firing
+  set to the content's.
+  """
+  @spec scroll_label(String.t() | nil) :: String.t() | nil
+  def scroll_label("carousel"), do: gettext("Image gallery")
+  def scroll_label(_layout), do: nil
+
   # Match a plain variable, not %__MODULE__{} — see the note in divider.ex: the
   # block struct isn't available when these heads compile (clean-compile only).
   @impl Kiln.Block.Renderer
@@ -124,7 +139,9 @@ defmodule KilnCMS.Blocks.Gallery do
       title,
       "<div class=\"kiln-gallery-items\" style=\"",
       esc(layout_style(block.layout)),
-      "\">",
+      "\"",
+      scroll_attrs(block.layout),
+      ">",
       figures,
       "</div></section>"
     ]
@@ -157,6 +174,13 @@ defmodule KilnCMS.Blocks.Gallery do
             end)
         }
         |> put_if("name", block.title)
+    end
+  end
+
+  defp scroll_attrs(layout) do
+    case scroll_label(layout) do
+      nil -> []
+      label -> [" tabindex=\"0\" role=\"group\" aria-label=\"", esc(label), "\""]
     end
   end
 

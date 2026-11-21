@@ -179,6 +179,18 @@ This covers content tables only. The console's own wide tables sit in
 `overflow-x-auto` wrappers without these attributes, and no test scans for
 them the way `scrollable_code_focus_test.exs` scans `<pre>`s.
 
+### Scrolling galleries
+
+A gallery in the `carousel` layout is a horizontal scroll-snap row, so its
+`.kiln-gallery-items` container takes `tabindex="0"`, `role="group"` and an
+`aria-label` ("Image gallery") for the same reason
+([#2590](https://github.com/The-Verscienta/kiln_cms/issues/2590)). Both
+renderers add them, from `KilnCMS.Blocks.Gallery.scroll_label/1`: the block's
+`:web` serializer and `KilnCMSWeb.BlockComponents`. The `grid` and `masonry`
+layouts do not scroll and get nothing. The ring is
+`.kiln-gallery-items[tabindex="0"]:focus-visible` in `app.css`, outset like the
+table wrapper's.
+
 ## Component kit (`@layer components` in `app.css`)
 
 These are plain, token-driven CSS classes so a control looks identical whether
