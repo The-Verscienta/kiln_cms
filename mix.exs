@@ -849,7 +849,7 @@ defmodule KilnCMS.MixProject do
       {:kiln_dep_fixture, path: "sdk/fixtures/dep_plugin", only: :test},
       # Yjs CRDTs on the BEAM (collab-editing prototype — see the spike doc).
       {:y_ex, "~> 0.10.5"},
-      {:phoenix, "~> 1.8.16"},
+      {:phoenix, "~> 1.8.17"},
       {:phoenix_ecto, "~> 4.5"},
       {:ecto_sql, "~> 3.13"},
       {:postgrex, ">= 0.0.0"},

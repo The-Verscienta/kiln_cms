@@ -23,6 +23,7 @@ defmodule KilnCMSWeb.NewsletterController do
   require Logger
 
   alias KilnCMS.Forms
+  alias KilnCMS.I18n
   alias KilnCMS.Newsletter
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.Plugs.PublicJsBundle
@@ -259,6 +260,10 @@ defmodule KilnCMSWeb.NewsletterController do
     |> render(:confirm,
       state: state,
       token: token,
+      # The confirmation mail links under the sign-up's language prefix
+      # (#2597); the button posts back under the same one, so the confirmed
+      # page is in that language too. nil (no prefix) is the bare path.
+      action: I18n.pinned_path(conn.assigns[:path_locale], ~p"/newsletter/confirm/#{token}"),
       email: subscriber && to_string(subscriber.email)
     )
   end

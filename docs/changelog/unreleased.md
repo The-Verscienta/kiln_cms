@@ -109,6 +109,17 @@ carries the reasoning.
 
 ## Added
 
+<a id="embedded-form-locale"></a>
+
+- **An embedded form can be shown in a chosen language (#2597).**
+  `embed.js` takes an optional `data-kiln-locale` attribute and loads
+  `/forms/<slug>/embed?locale=<value>`. The server accepts a supported locale
+  and gives anything else the site default; a path prefix (`/es/forms/…`)
+  still wins, and the session is never read, so a shared cache keys on the
+  URL. A snippet without the attribute loads exactly what it did. See
+  [docs/forms.md](../forms.md).
+  ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597))
+
 <a id="plugin-list-field-types"></a>
 
 - **A plugin field type can hold a list of values (#2680, `kiln_plugin` 1.6).** A `Kiln.FieldType` that defines the new optional `multiple?/0` to return `true` gets what the core scalar types have had since #2289: the fields admin offers **A list** with item bounds, and a list field stores a JSON array. Guide: [Let a plugin field type take a list](../extending-content.md#let-a-plugin-field-type-take-a-list).
@@ -305,6 +316,23 @@ carries the reasoning.
   all, across every condition and group (got N)`); a large enough request
   used to hit Postgres' bind-parameter limit. No migration.
   ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678))
+
+<a id="locale-followups"></a>
+
+- **Locale follow-ups from #2465: newsletter confirmation and an unconfigured record locale (#2597).**
+  - **Newsletter confirmation.** The email is built while the sign-up request
+    runs, so it now goes through gettext in that request's locale (es, fr):
+    subject, body and a confirm link pinned to the same prefix, and the
+    confirm page's button keeps it. On a multilingual site even a
+    default-locale link carries its prefix (`/en/…`).
+  - **A record whose locale is no longer configured** gets the site default
+    in the article's `lang` and in `og:locale`; the `x-kiln-locale` header
+    still names the stored value.
+  - Lock and paywall pages were left as they are: since #2646 their chrome
+    follows the reader's URL and only the document's words carry its
+    language, which is what that change decided.
+  No migration.
+  ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597))
 
 <a id="recurrence-until-instant"></a>
 
@@ -688,6 +716,25 @@ carries the reasoning.
   ([#2983](https://github.com/The-Verscienta/kiln_cms/issues/2983), [#2985](https://github.com/The-Verscienta/kiln_cms/issues/2985), [#2986](https://github.com/The-Verscienta/kiln_cms/issues/2986))
 
 ## Security
+
+<a id="phoenix-presence-serializer-advisories"></a>
+
+- **phoenix 1.8.17 fixes EEF-CVE-2026-128361 (GHSA-pvfx-rx4x-phrr, high) and
+  EEF-CVE-2026-129344 (GHSA-5vmc-qgf8-rw36, high).** The first: `Phoenix.Presence`
+  accepted any term as a presence key and failed only when listing presences, so
+  a key taken from a join payload could crash the tracker shard and every
+  channel and LiveView tracked on it. The second: a client that connects without
+  `vsn`, or with `vsn=1.0.0`, gets the V1 JSON serializer, which raises on a
+  `{:binary, data}` broadcast inside the PubSub dispatch loop and drops that
+  broadcast for every later subscriber. Kiln was not exposed to either. Its
+  Presence keys are built on the server (`KilnCMSWeb.Presence.track_editor/4`
+  uses the user's id, `track_preview_viewer/5` a server-made viewer key), and
+  nothing in Kiln broadcasts a binary payload. The bump clears the dependency
+  audit, which fails on both. `mix.exs` now requires `~> 1.8.17`, so a lock
+  cannot resolve back to an affected release; `examples/phoenix_showcase`
+  moves from 1.8.15 to 1.8.17 with the same floor. No other dependency moves.
+  No migration and no configuration.
+  ([#3205](https://github.com/The-Verscienta/kiln_cms/pull/3205))
 
 <a id="backup-destination-prune-ownership"></a>
 
