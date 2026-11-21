@@ -126,6 +126,9 @@ Every summary line below that was shortened links to its own entry there.
 - **A newsletter confirmation email, its link and the confirm page are in the language the reader signed up in, and a record whose locale is no longer configured gets the site default in its `lang` and `og:locale` (#2597).**
   ([long form](docs/changelog/unreleased.md#locale-followups))
 
+- **Automation jobs now store the event payload (the document snapshot, drafts included) sealed, so a pending job's row and Oban's log lines no longer show it; jobs a 1.11 node queued still run (#2992).**
+  ([long form](docs/changelog/unreleased.md#automation-job-payload-sealed))
+
 - **A gallery in the carousel layout can be scrolled with the keyboard: Tab reaches it, the arrow keys scroll it, and it has a focus ring and an "Image gallery" label (#2590).**
   ([long form](docs/changelog/unreleased.md#gallery-carousel-keyboard))
 

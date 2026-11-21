@@ -1166,10 +1166,14 @@ involved; the job args are the contract.
   the job can end up discarded. That is harmless: the daily run, and the
   next boot, do the same work.
 
-The automation jobs change shape the same way one release later. This
-release already reads a sealed `"sealed"` payload as well as the plain
-`"payload"` it still writes, so the release that switches the writers can
-run beside it.
+The automation jobs change shape one release later (v1.12, #2992): they
+write the event payload sealed (`"sealed"`) instead of in the clear
+(`"payload"`). v1.11 already reads both, so a v1.12 node and a v1.11 node
+can run side by side, and rolling back to v1.11 runs the sealed jobs
+still queued. A release before v1.11 reads only `"payload"`, so before
+rolling back that far, let the `default` queue drain of
+`KilnCMS.Automation.DispatchWorker` and `KilnCMS.Automation.RuleWorker`
+jobs. A v1.12 node still runs a clear-payload job a v1.11 node queued.
 
 To drop the private args that finished jobs still hold, for instance after
 restoring a backup taken before the upgrade, run
