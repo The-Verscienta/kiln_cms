@@ -227,10 +227,20 @@ defmodule KilnCMSWeb.ChallengeAuthTest do
 
     test "the fallback names only ways in this page has" do
       {conn, _ip} = client_conn(build_conn())
-      {:ok, _view, html} = live(conn, ~p"/sign-in?challenge=1")
+      {:ok, _view, html} = live(main_host_conn(conn), ~p"/sign-in?challenge=1")
 
       assert html =~ "Use a passkey or email yourself a sign-in link."
       refute html =~ "single sign-on."
+    end
+
+    # #2827: a site's own host draws no passkey button, so the fallback must
+    # not offer one either.
+    test "on a site's own host the fallback offers no passkey" do
+      {conn, _ip} = client_conn(build_conn())
+      {:ok, _view, html} = live(conn, ~p"/sign-in?challenge=1")
+
+      assert html =~ "Can&#39;t complete the check? Email yourself a sign-in link instead."
+      refute html =~ "passkey"
     end
   end
 

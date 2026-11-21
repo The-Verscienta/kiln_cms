@@ -116,6 +116,28 @@
       </p>
     </div>
 
+    <%!-- The way forward when a passkey is the account's only factor and this
+          browser can't run it (#2887). A passkey has no recovery codes, so
+          this says where the account can still get in. Shipped `hidden` and
+          revealed by `initPasskeyStepUp` when it reveals no passkey button;
+          the `<noscript>` copy is for JavaScript off, where the button never
+          appears either. --%>
+    <div :if={!@code? && @passkey?}>
+      <p
+        id="two-factor-passkey-unsupported"
+        class="auth-muted mt-6 text-sm"
+        data-passkey-step-up-unsupported
+        hidden
+      >
+        {passkey_unsupported_text()}
+      </p>
+      <noscript>
+        <p id="two-factor-passkey-noscript" class="auth-muted mt-6 text-sm">
+          {passkey_unsupported_text()}
+        </p>
+      </noscript>
+    </div>
+
     <p class="mt-6 text-center">
       <a href={~p"/sign-in"} class="link auth-muted">{gettext("Back to sign in")}</a>
     </p>
