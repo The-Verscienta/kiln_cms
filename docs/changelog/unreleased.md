@@ -302,6 +302,26 @@ carries the reasoning.
     [upgrade note](#staging-scrub-safety-upgrade).
   ([#2973](https://github.com/The-Verscienta/kiln_cms/issues/2973), [#2974](https://github.com/The-Verscienta/kiln_cms/issues/2974), [#2977](https://github.com/The-Verscienta/kiln_cms/issues/2977))
 
+<a id="recurrence-until-instant"></a>
+
+- **A date-time UNTIL in a recurrence rule is an instant, not its UTC date (#2861).**
+  Saving a rule rewrote `UNTIL=20260331T000000` or `…T000000Z` to its UTC
+  date, so an event east of UTC could run a day longer, or one west of it a
+  day shorter, than the rule said. The rule now keeps UNTIL's form as typed:
+  a date (`YYYYMMDD`) still ends after that whole day in the event's zone, a
+  `Z` time is an inclusive instant in UTC, and a floating time is an
+  inclusive instant in the event's own zone (a time skipped by a DST change
+  moves past the gap; a repeated time is the first one). Timed ICS exports
+  emit the instant in UTC; all-day ones the date it falls on. The engine
+  version moves to 3, so the first boot queues one occurrence backfill,
+  which rewrites nothing on existing data: every rule saved before this
+  release already holds a date UNTIL, and those expand exactly as before. A
+  rule typed with a time before the upgrade keeps its old date until it is
+  saved again. API clients: a recurrence value's `rrule` can now carry a
+  date-time UNTIL (still valid RFC 5545). No migration; rolling back reads
+  such rules by their date, as before.
+  ([#2861](https://github.com/The-Verscienta/kiln_cms/issues/2861))
+
 <a id="passkey-fallbacks"></a>
 
 - **No passkey offer where a passkey can't work, and a way forward for a passkey-only account in a browser without one (#2827, #2887).**
