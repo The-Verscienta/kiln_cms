@@ -386,15 +386,18 @@ not. The rule behind the list, and the alternatives it rejected, is
   still delivered, Oban's logger prints them once more when it runs, and
   both are dropped from the row when the job finishes.
 - **Automation** (#2992). `DispatchWorker` and `RuleWorker` jobs carry the
-  event's `payload`: the serialized document as it was when the event fired,
+  event's payload: the serialized document as it was when the event fired,
   drafts included (an `in_review` or `returned_to_draft` event carries the
-  draft). It is dropped from the row when the job finishes. **In this
-  release the payload is still written in plain text**, so until a job
-  finishes it is readable in its pending row, and every run prints it in
-  Oban's `job:start` and `job:stop` log lines (and `job:exception` when the
-  run fails). The workers already read a sealed payload; a later release
-  writes it sealed, which leaves only ciphertext in the row and the log
-  lines. See [#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992).
+  draft). A reaction needs that snapshot, so it cannot be read back by id.
+  Since 1.12 it travels **sealed** (`"sealed"`, encrypted with a key derived
+  from `SECRET_KEY_BASE`), so a pending job's row and Oban's `job:start`,
+  `job:stop` and `job:exception` log lines hold ciphertext. The rule job
+  keeps the event, the rule id and the document id in the clear: they are
+  what its uniqueness check compares. The sealed payload is dropped from the
+  row when the job finishes. A job queued by an earlier release carries the
+  payload in the clear (`"payload"`); it still runs, Oban's logger prints the
+  payload once more when it does, and it is dropped from the row when the
+  job finishes. See [#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992).
 
 For a Sentry event raised by any of these form, automation, workflow mail or
 task mail jobs, the keys above are dropped from `extra.args`, and so are the

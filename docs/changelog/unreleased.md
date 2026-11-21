@@ -288,6 +288,23 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="automation-job-payload-sealed"></a>
+
+- **Automation jobs store the event payload sealed (#2992).**
+  `Automation.handle_event/3` and the rule fan-out used to queue
+  `DispatchWorker` and `RuleWorker` with the event's payload, the serialized
+  document with its drafts, in the clear: it sat in the `oban_jobs` row while
+  the job waited and appeared in Oban's `job:start`/`job:stop` log lines. Both
+  writers now put it under `"sealed"` (`KilnCMS.Jobs.PrivateArgs.seal/1`), as
+  form mail jobs already do; `event`, `org_id`, `rule_id` and `document_id`
+  stay readable, which is what the rule job's uniqueness compares, and the
+  payload is still dropped from the row once the job finishes. Readers keep
+  accepting the clear `"payload"`, so jobs a 1.11 node queued during a rolling
+  deploy still run, and a rollback to 1.11 runs the sealed ones. Before rolling
+  back past 1.11, let the automation jobs on the `default` queue finish
+  ([docs/releasing.md](../releasing.md)). No migration.
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992))
+
 <a id="gallery-carousel-keyboard"></a>
 
 - **A carousel gallery can be scrolled from the keyboard (#2590).**
