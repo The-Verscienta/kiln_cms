@@ -68,6 +68,20 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   (#2952); the `:update` action refuses a stale record as well, which covers
   a change landing between this page's read and its write.
 
+  ## Other backup directories
+
+  Retention on a destination deletes only backups that in-app backups of
+  this server's backup directory sent there
+  (`KilnCMS.Backups.Retention.run_on_destination/3`). Each row lists, in a
+  disclosure, the other backup directories whose in-app backups reached it
+  and that no running server reports (`Backups.other_backup_directories/2`,
+  read in a `start_async/3` task, so a long history doesn't hold up the
+  page), with the ones it adopted. Ticking one adopts it
+  (`Backups.adopt_backup_directories/3`, its `:adopt_directories` action):
+  this server's retention may then delete those backups too. The event
+  takes the destination's id and the directory's id from the client, and
+  the action checks both.
+
   ## An SFTP server's host key (#2222, ADR 0079)
 
   An SFTP destination is saved disabled and can't be enabled until a
@@ -109,6 +123,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
        |> assign(:testing, MapSet.new())
        |> assign(:host_keys, %{})
        |> assign(:env_test, nil)
+       |> assign(:other_dirs, %{})
        |> close_form()
        |> load()}
     else
@@ -125,7 +140,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
       else: deny(socket)
   end
 
-  @events ~w(new pick edit cancel validate save toggle delete move test test_env
+  @events ~w(new pick edit cancel validate save toggle delete move test test_env adopt
               scan_host_key match_host_key trust_host_key dismiss_host_key)
 
   # Every event asks again, whatever it is: see the moduledoc. An event this
@@ -148,6 +163,19 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
        |> update(:testing, &MapSet.delete(&1, :env))
        |> put_env_test(result)
        |> load()}
+    else
+      deny(socket)
+    end
+  end
+
+  # The other backup directories of every row, by id: `{:ok, dirs}` or
+  # `:error` for each.
+  def handle_async(:other_dirs, result, socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      case result do
+        {:ok, by_id} when is_map(by_id) -> {:noreply, assign(socket, :other_dirs, by_id)}
+        {:exit, _reason} -> {:noreply, assign(socket, :other_dirs, :error)}
+      end
     else
       deny(socket)
     end
@@ -320,6 +348,24 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
     end
   end
 
+  # Let this server's retention delete another backup directory's backups
+  # on a destination, or stop it. The directory's id is the action's to
+  # check.
+  defp event("adopt", %{"destination" => id, "dir" => dir, "adopt" => adopt}, socket)
+       when is_binary(id) and is_binary(dir) and adopt in ["true", "false"] do
+    with_destination(socket, id, fn row ->
+      args = if adopt == "true", do: %{adopt: [dir]}, else: %{release: [dir]}
+
+      case Backups.adopt_backup_directories(row, args, write_opts(socket)) do
+        {:ok, _row} ->
+          {:noreply, socket |> put_flash(:info, adopted_flash(adopt)) |> load()}
+
+        {:error, error} ->
+          {:noreply, socket |> put_flash(:error, adopt_error(error)) |> load()}
+      end
+    end)
+  end
+
   # Single-flight per destination, as a Test (#2222).
   defp event("scan_host_key", %{"id" => id}, socket) when is_binary(id),
     do: scan_host_key(socket, id, nil)
@@ -345,6 +391,12 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
 
   # A mangled payload is a no-op (#764).
   defp event(_event, _params, socket), do: {:noreply, socket}
+
+  defp adopted_flash("true"),
+    do: gettext("This server now prunes that backup directory's backups there.")
+
+  defp adopted_flash(_released),
+    do: gettext("This server no longer prunes that backup directory's backups there.")
 
   defp scan_host_key(socket, id, fingerprint) do
     case Ecto.UUID.cast(id) do
@@ -797,7 +849,23 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
     )
     |> assign(:adapters, offered_adapters())
     |> assign(:local_available?, Local.available?())
+    |> load_other_dirs(rows)
   end
+
+  # Read in a task (see the moduledoc), on the connected page only.
+  defp load_other_dirs(socket, rows) when is_list(rows) do
+    if connected?(socket) do
+      user = socket.assigns.current_user
+
+      start_async(socket, :other_dirs, fn ->
+        Map.new(rows, &{&1.id, Backups.other_backup_directories(&1, actor: user)})
+      end)
+    else
+      socket
+    end
+  end
+
+  defp load_other_dirs(socket, :unreadable), do: socket
 
   # Why each stored destination whose `prune` is on would not be pruned, by
   # id (#2950): the rule retention applies before every pass
@@ -880,6 +948,18 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   end
 
   defp write_error(_error), do: gettext("Couldn't change the backup destination.")
+
+  defp adopt_error(%Ash.Error.Invalid{errors: errors}) do
+    case Enum.flat_map(errors, &form_errors/1) do
+      [{_field, message, vars} | _] ->
+        gettext("Nothing was changed: %{reason}.", reason: translate_error({message, vars}))
+
+      [] ->
+        gettext("Couldn't change the backup destination.")
+    end
+  end
+
+  defp adopt_error(error), do: write_error(error)
 
   defp stale_write_error,
     do: gettext("That destination was changed meanwhile. Nothing was saved; try again.")
@@ -1202,6 +1282,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
             <.destination_row
               :for={{row, index} <- Enum.with_index(@rows)}
               row={row}
+              other_dirs={other_dirs_of(@other_dirs, row.id)}
               first?={index == 0}
               last?={index == length(@rows) - 1}
               testing?={MapSet.member?(@testing, row.id)}
@@ -1236,6 +1317,11 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   attr :form_open?, :boolean, required: true
   attr :user, :any, required: true
 
+  attr :other_dirs, :any,
+    default: nil,
+    doc:
+      "`{:ok, dirs}`, `:error`, or nil while they are read (`Backups.other_backup_directories/2`)"
+
   attr :host_key_state, :any,
     default: nil,
     doc: "an SFTP row's host key check: `:scanning`, `{:scanned, key}` or `{:failed, message}`"
@@ -1244,6 +1330,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
     assigns =
       assigns
       |> assign(:location, location_text(assigns.row))
+      |> assign(:directories, directories(assigns.other_dirs, assigns.row))
       |> assign(:can_update?, Backups.can_update_backup_destination?(assigns.user, assigns.row))
       |> assign(:can_destroy?, Backups.can_destroy_backup_destination?(assigns.user, assigns.row))
 
@@ -1374,8 +1461,101 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
           {gettext("Delete")}
         </button>
       </div>
+
+      <p
+        :if={@can_update? and @other_dirs == :error}
+        data-role="other-dirs-error"
+        class="text-xs text-warning-ink"
+      >
+        {gettext("Couldn't read which other backup directories sent backups here.")}
+      </p>
+
+      <details
+        :if={@can_update? and @directories != []}
+        id={"other-dirs-#{@row.id}"}
+        data-role="other-dirs"
+        phx-mounted={JS.ignore_attributes(["open"])}
+        class="group rounded-md border border-base-content/10"
+      >
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-xs font-medium">
+          <span>
+            {gettext("Backups from other backup directories (%{count})",
+              count: length(@directories)
+            )}
+          </span>
+          <.icon
+            name="hero-chevron-down-mini"
+            class="size-4 text-base-content/70 transition-transform group-open:rotate-180"
+          />
+        </summary>
+        <div class="space-y-3 border-t border-base-content/10 p-3 text-xs">
+          <p class="text-base-content/70">
+            {gettext(
+              "Retention here deletes only the backups this server's backup directory sent. These came from another backup directory: another server, or this installation before it moved here."
+            )}
+          </p>
+          <.form
+            :for={dir <- @directories}
+            for={%{}}
+            id={"adopt-#{@row.id}-#{dir.dir_id}"}
+            phx-change="adopt"
+            data-dir={dir.dir_id}
+            class="space-y-1"
+          >
+            <input type="hidden" name="destination" value={@row.id} />
+            <input type="hidden" name="dir" value={dir.dir_id} />
+            <p class="text-base-content/70">
+              <span class="font-mono" title={dir.dir_id}>{String.slice(dir.dir_id, 0, 8)}</span>
+              <span :if={dir.count}>
+                {ngettext(
+                  "%{count} backup, the last on %{at}",
+                  "%{count} backups, the last on %{at}",
+                  dir.count,
+                  at: stamp(dir.last_at)
+                )}
+              </span>
+            </p>
+            <.input
+              type="checkbox"
+              name="adopt"
+              id={"adopt-#{@row.id}-#{dir.dir_id}-box"}
+              value={dir.adopted?}
+              label={
+                gettext(
+                  "Let this server prune these backups — only if that server is retired or this installation moved here."
+                )
+              }
+            />
+          </.form>
+        </div>
+      </details>
     </li>
     """
+  end
+
+  defp other_dirs_of(:error, _id), do: :error
+
+  defp other_dirs_of(by_id, id) do
+    case Map.get(by_id, id) do
+      {:error, _error} -> :error
+      ok_or_loading -> ok_or_loading
+    end
+  end
+
+  # The directories a row lists: those whose backups reached it, then the
+  # ones it adopted that aren't among them (a server that came back, or whose
+  # runs are past the read's cap), each marked adopted or not.
+  defp directories({:ok, dirs}, row), do: with_adopted(dirs, row)
+  defp directories(_loading_or_error, row), do: with_adopted([], row)
+
+  defp with_adopted(dirs, row) do
+    adopted = for %{"dir_id" => id} <- row.adoptions || [], is_binary(id), do: id
+    listed = Enum.map(dirs, & &1.dir_id)
+
+    Enum.map(dirs, &Map.put(&1, :adopted?, &1.dir_id in adopted)) ++
+      for id <- adopted,
+          id not in listed,
+          do: %{dir_id: id, count: nil, last_at: nil, adopted?: true}
   end
 
   attr :row, DestinationConfig, required: true
@@ -1641,7 +1821,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
         />
         <p class="-mt-1 text-xs text-base-content/70">
           {gettext(
-            "Retention here deletes only backups this installation sent to this destination, by the same rules as on this server, and only on destinations that can list and delete."
+            "Retention here deletes only backups that in-app backups of this server's backup directory sent to this destination, by the same rules as on this server, and only on destinations that can list and delete."
           )}
         </p>
         <p :if={resumable?(@kind)} id="destination-resume-hint" class="text-xs text-base-content/70">

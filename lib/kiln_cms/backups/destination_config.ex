@@ -68,6 +68,20 @@ defmodule KilnCMS.Backups.DestinationConfig do
   another save fails with `Ash.Error.Changes.StaleRecord`. Neither a Test's
   result nor a reorder (`:reorder`, `position` only) moves `updated_at`, so
   neither makes an open form stale.
+
+  ## Adopted backup directories
+
+  Retention on a destination deletes only backups that an in-app backup of
+  this node's backup directory (`.kiln-dir-id`) sent there
+  (`KilnCMS.Backups.Retention.run_on_destination/3`). `adoptions` lets a
+  platform admin hand this server the backups another directory sent, once
+  the server that wrote them is retired or this installation moved here
+  (`:adopt_directories`, `Changes.Adopt`). Each entry is
+  `%{"dir_id" => id, "adopted_by" => ids, "adopted_at" => iso8601}`:
+  `adopted_by` is every backup directory a live node reported when it was
+  adopted, and the adoption counts only on a node whose `.kiln-dir-id` is
+  one of them. A database restored on another server, whose directory has
+  an id of its own, inherits no adoption.
   """
   use Ash.Resource,
     domain: KilnCMS.Backups,
@@ -79,6 +93,7 @@ defmodule KilnCMS.Backups.DestinationConfig do
   alias KilnCMS.Keys.Vault
 
   @max_enabled 8
+  @max_adoptions 50
 
   @editable [:name, :enabled, :position, :settings, :prune]
 
@@ -171,6 +186,30 @@ defmodule KilnCMS.Backups.DestinationConfig do
               metadata: &Audit.deleted/2}
     end
 
+    # Another backup directory's backups handed to this server's retention
+    # (`Changes.Adopt`). Only `adoptions` changes: not the edit form's
+    # action, so a Save can't overwrite them, and `updated_at` stays, so an
+    # open edit form isn't made stale.
+    update :adopt_directories do
+      accept []
+      require_atomic? false
+
+      # Backup-directory ids to adopt, and to stop adopting.
+      argument :adopt, {:array, :string}, default: []
+      argument :release, {:array, :string}, default: []
+
+      change Changes.Adopt
+      change Changes.KeepUpdatedAt
+
+      change {KilnCMS.Security.Changes.Record,
+              type: :backup_destination_adoptions_changed,
+              scope: :instance,
+              mode: :in_transaction,
+              target: &Audit.target/2,
+              metadata: &Audit.adoptions/2,
+              when: &Audit.adoptions_changed?/2}
+    end
+
     # A Test's outcome (`KilnCMS.Backups.test_destination/2`), recorded after
     # the adapter call and outside its transaction. The `:backups` system
     # actor's alone, so no person can mark a destination as tested. The
@@ -238,7 +277,7 @@ defmodule KilnCMS.Backups.DestinationConfig do
     end
 
     # A platform admin manages destinations; the pipeline never does.
-    policy action([:create, :update, :reorder, :destroy]) do
+    policy action([:create, :update, :reorder, :destroy, :adopt_directories]) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
 
@@ -308,6 +347,14 @@ defmodule KilnCMS.Backups.DestinationConfig do
       public? true
     end
 
+    # Other backup directories whose backups retention here may delete
+    # (`:adopt_directories`, see the moduledoc).
+    attribute :adoptions, {:array, :map} do
+      allow_nil? false
+      default []
+      public? true
+    end
+
     # The SFTP host key a platform admin trusted (#2222): written only by
     # `:trust_host_key`, never part of `settings`.
     attribute :host_key, :map, public?: true
@@ -338,6 +385,29 @@ defmodule KilnCMS.Backups.DestinationConfig do
   @doc "How many destinations may be enabled at once (decision E8)."
   @spec max_enabled() :: pos_integer()
   def max_enabled, do: @max_enabled
+
+  @doc "The most backup directories one destination may adopt."
+  @spec max_adoptions() :: pos_integer()
+  def max_adoptions, do: @max_adoptions
+
+  @doc """
+  The backup directories whose backups retention on a destination with
+  `adoptions` may delete, on a node whose own directory is `current`:
+  `current` itself, and each adopted directory whose `adopted_by` names
+  `current`. `[]` when `current` is nil: a node with no backup-directory id
+  deletes nothing.
+  """
+  @spec owners(String.t() | nil, [map()] | nil) :: [String.t()]
+  def owners(nil, _adoptions), do: []
+
+  def owners(current, adoptions) when is_binary(current) do
+    adopted =
+      for %{"dir_id" => id, "adopted_by" => by} <- adoptions || [],
+          is_binary(id) and is_list(by) and current in by,
+          do: id
+
+    Enum.uniq([current | adopted])
+  end
 
   @doc "The key a destination's results are recorded under: `\"dest:<id>\"`."
   @spec key(%__MODULE__{} | String.t()) :: String.t()

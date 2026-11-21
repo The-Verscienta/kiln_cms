@@ -181,6 +181,15 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
         assert_denied(BackupDestinationsLive.handle_event(event, params, socket))
       end
 
+      adopt = %{"destination" => row.id, "dir" => Ecto.UUID.generate(), "adopt" => "true"}
+
+      for socket <- sockets do
+        assert_denied(BackupDestinationsLive.handle_event("adopt", adopt, socket))
+      end
+
+      assert stored(row.id).adoptions == []
+      assert events(:backup_destination_adoptions_changed) == []
+
       assert [%{id: id, name: name, enabled: true}] = all_destinations()
       assert id == row.id
       assert name == row.name
@@ -198,6 +207,11 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
 
         assert_denied(
           BackupDestinationsLive.handle_async({:test, row.id}, {:exit, :boom}, socket)
+        )
+
+        # Nor which other backup directories sent backups there.
+        assert_denied(
+          BackupDestinationsLive.handle_async(:other_dirs, {:ok, %{row.id => {:ok, []}}}, socket)
         )
       end
     end
@@ -230,6 +244,62 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
 
       assert stored(row.id).enabled
       assert is_nil(stored(row.id).last_tested_at)
+    end
+
+    test "a pending list of other backup directories is not applied after a demotion", %{
+      conn: conn
+    } do
+      admin = platform_admin()
+      test = self()
+
+      # The read of the running servers, in the page's task, waits until
+      # the admin has been demoted.
+      put_backups(
+        live_beats_reader: fn _within_s ->
+          send(test, {:reading, self()})
+
+          receive do
+            :go -> {:ok, []}
+          end
+        end
+      )
+
+      lv = mount(conn, admin)
+      assert_receive {:reading, task}
+
+      :sys.replace_state(lv.pid, fn state ->
+        update_in(
+          state.socket,
+          &Phoenix.Component.assign(&1, :current_user, %{admin | role: :editor})
+        )
+      end)
+
+      send(task, :go)
+      assert_redirect(lv, "/access-denied?needs=platform")
+    end
+
+    test "a page whose admin lost the role can't adopt a backup directory", %{
+      conn: conn,
+      row: row
+    } do
+      admin = platform_admin()
+      lv = mount(conn, admin)
+
+      :sys.replace_state(lv.pid, fn state ->
+        update_in(
+          state.socket,
+          &Phoenix.Component.assign(&1, :current_user, %{admin | role: :editor})
+        )
+      end)
+
+      assert {:error, {:live_redirect, %{to: "/access-denied?needs=platform"}}} =
+               render_click(lv, "adopt", %{
+                 "destination" => row.id,
+                 "dir" => Ecto.UUID.generate(),
+                 "adopt" => "true"
+               })
+
+      assert stored(row.id).adoptions == []
     end
   end
 
@@ -713,6 +783,115 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
                "That destination no longer exists."
 
       refute has_element?(lv, "#backup-destination-#{row.id}")
+    end
+  end
+
+  describe "other backup directories" do
+    setup %{tmp_dir: tmp} do
+      {:ok, own} = KilnCMS.Backups.DirId.local(Path.join(tmp, "backups"))
+      %{own: own}
+    end
+
+    # An in-app run of backup directory `dir_id` that reached `row`.
+    defp sent!(row, dir_id, stamp) do
+      Backups.start_run!(
+        %{
+          stamp: stamp,
+          trigger: "manual",
+          started_at: ~U[2026-11-01 03:00:00Z],
+          dir_id: dir_id,
+          destinations: [%{key: "dest:" <> row.id, status: :ok}]
+        },
+        actor: Backups.system()
+      )
+      |> Backups.finish_run!(%{}, actor: Backups.system())
+    end
+
+    test "lists another directory's backups, and ticking it lets this server prune them", %{
+      conn: conn,
+      own: own
+    } do
+      row = fake!()
+      retired = Ecto.UUID.generate()
+      sent!(row, retired, "20261101-030000")
+      sent!(row, retired, "20261102-030000")
+      # This server's own are not listed.
+      sent!(row, own, "20261103-030000")
+
+      lv = mount(conn)
+      render_async(lv, 2_000)
+
+      form = "#adopt-#{row.id}-#{retired}"
+      assert has_element?(lv, "#other-dirs-#{row.id} summary", "(1)")
+      assert has_element?(lv, form, "2 backups, the last on 2026-11-01 03:00 UTC")
+      assert has_element?(lv, form, "only if that server is retired")
+      refute has_element?(lv, "#adopt-#{row.id}-#{own}")
+      refute has_element?(lv, "#{form} input[type=checkbox][checked]")
+
+      lv
+      |> form(form)
+      |> render_change(%{"destination" => row.id, "dir" => retired, "adopt" => "true"})
+
+      assert render(lv) =~ "This server now prunes that backup directory&#39;s backups there."
+      assert [%{"dir_id" => ^retired, "adopted_by" => [^own]}] = stored(row.id).adoptions
+
+      assert KilnCMS.Backups.DestinationConfig.owners(own, stored(row.id).adoptions) == [
+               own,
+               retired
+             ]
+
+      assert [_] = events(:backup_destination_adoptions_changed)
+
+      render_async(lv, 2_000)
+      assert has_element?(lv, "#{form} input[type=checkbox][checked]")
+
+      lv
+      |> form(form)
+      |> render_change(%{"destination" => row.id, "dir" => retired, "adopt" => "false"})
+
+      assert stored(row.id).adoptions == []
+    end
+
+    test "a directory a running server reports isn't offered, and a forged one is refused", %{
+      conn: conn
+    } do
+      row = fake!()
+      peer = Ecto.UUID.generate()
+      put_backups(live_beats_reader: fn _ -> {:ok, [%{dir_id: peer, last_dir_id: nil}]} end)
+      sent!(row, peer, "20261101-030000")
+
+      lv = mount(conn)
+      render_async(lv, 2_000)
+
+      refute has_element?(lv, "#other-dirs-#{row.id}")
+
+      render_click(lv, "adopt", %{"destination" => row.id, "dir" => peer, "adopt" => "true"})
+      assert render(lv) =~ "Nothing was changed"
+
+      render_click(lv, "adopt", %{"destination" => row.id, "dir" => "../etc", "adopt" => "true"})
+      assert stored(row.id).adoptions == []
+      assert events(:backup_destination_adoptions_changed) == []
+    end
+
+    test "when they can't be read, the row says so", %{conn: conn} do
+      row = fake!()
+      put_backups(live_beats_reader: fn _ -> {:error, :connection_refused} end)
+
+      lv = mount(conn)
+      render_async(lv, 2_000)
+
+      assert has_element?(
+               lv,
+               "#backup-destination-#{row.id} [data-role=other-dirs-error]",
+               "Couldn't read which other backup directories"
+             )
+    end
+
+    test "a destination with no other directory's backups shows no list", %{conn: conn} do
+      row = fake!()
+      lv = mount(conn)
+      render_async(lv, 2_000)
+      refute has_element?(lv, "#other-dirs-#{row.id}")
     end
   end
 

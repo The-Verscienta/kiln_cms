@@ -71,6 +71,7 @@ defmodule KilnCMS.Backups do
     Chain,
     Destination,
     DestinationConfig,
+    DirId,
     Heartbeat,
     Lock,
     Manifest,
@@ -109,6 +110,7 @@ defmodule KilnCMS.Backups do
       define :run_history, action: :history
       define :get_run, action: :read, get_by: [:id]
       define :get_run_by_stamp, action: :by_stamp, args: [:stamp], not_found_error?: false
+      define :list_runs_sent_to_destination, action: :sent_to_destination, args: [:key]
       define :list_run_prune_windows, action: :prune_windows, args: [:after]
       define :newest_imported_run, action: :newest_import, not_found_error?: false
       define :list_running_runs, action: :running
@@ -167,6 +169,7 @@ defmodule KilnCMS.Backups do
       define :destroy_backup_destination, action: :destroy
       define :list_enabled_backup_destinations, action: :enabled
       define :record_backup_destination_test, action: :record_test_result
+      define :adopt_backup_directories, action: :adopt_directories
 
       # A platform admin trusting an SFTP server's host key (#2222), with
       # what `scan_destination_host_key/2` read.
@@ -719,6 +722,75 @@ defmodule KilnCMS.Backups do
   def dir_id_live?(dir_id, within_s) do
     with {:ok, beats} <- live_beats(within_s) do
       {:ok, Enum.any?(beats, &(dir_id in [&1.dir_id, &1.last_dir_id]))}
+    end
+  end
+
+  @doc false
+  # The backup directories in use now: every one a node that beat within
+  # `Chain.stale_after_s/0` reports (its `dir_id`, or `last_dir_id` while its
+  # read is held up), and this node's own `.kiln-dir-id`. What an adoption is
+  # bound to, and what the Destinations tab never offers to adopt. Fails
+  # closed, as `live_beats/1`.
+  @spec live_dir_ids() :: {:ok, [String.t()]} | {:error, term()}
+  def live_dir_ids do
+    with {:ok, beats} <- live_beats(Chain.stale_after_s()) do
+      own =
+        case DirId.current(dir()) do
+          {:ok, id} -> [id]
+          {:error, _reason} -> []
+        end
+
+      ids =
+        beats
+        |> Enum.flat_map(&[&1.dir_id, &1.last_dir_id])
+        |> Enum.concat(own)
+        |> Enum.filter(&DirId.valid?/1)
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      {:ok, ids}
+    end
+  end
+
+  # At most this many of a destination's runs are read for
+  # `other_backup_directories/2`.
+  @other_dirs_runs 10_000
+
+  @doc """
+  The other backup directories whose in-app backups reached `destination`:
+  `%{dir_id: id, count: runs, last_at: started_at}` for each, newest first,
+  leaving out every directory in use now (`live_dir_ids/0`). What the
+  Destinations tab offers to adopt. Read as `actor`; fails closed.
+  """
+  @spec other_backup_directories(DestinationConfig.t(), keyword()) ::
+          {:ok, [%{dir_id: String.t(), count: pos_integer(), last_at: DateTime.t()}]}
+          | {:error, term()}
+  def other_backup_directories(%DestinationConfig{} = destination, opts) do
+    query =
+      Run
+      |> Ash.Query.select([:id, :dir_id, :started_at])
+      |> Ash.Query.limit(@other_dirs_runs)
+
+    with {:ok, live} <- live_dir_ids(),
+         {:ok, runs} <-
+           list_runs_sent_to_destination(
+             DestinationConfig.key(destination),
+             Keyword.merge(opts, query: query, authorize_with: :error)
+           ) do
+      dirs =
+        runs
+        |> Enum.reject(&(&1.dir_id in live))
+        |> Enum.group_by(& &1.dir_id)
+        |> Enum.map(fn {dir_id, runs} ->
+          %{
+            dir_id: dir_id,
+            count: length(runs),
+            last_at: runs |> Enum.map(& &1.started_at) |> Enum.max(DateTime)
+          }
+        end)
+        |> Enum.sort_by(& &1.last_at, {:desc, DateTime})
+
+      {:ok, dirs}
     end
   end
 

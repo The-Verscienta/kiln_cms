@@ -575,7 +575,7 @@ claimed window is never asked for again is argued in
 | Action | platform admin | editor | org admin (not platform admin) | viewer | anonymous | `:backups` system actor |
 |--------|:-----:|:------:|:-----:|:------:|:---------:|:-----:|
 | `read`, `enabled` | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| `create`, `update`, `reorder`, `destroy` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| `create`, `update`, `reorder`, `destroy`, `adopt_directories` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `record_test_result` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | `trust_host_key` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
@@ -584,8 +584,10 @@ Where in-app backups copy their files besides `BACKUP_DIR` and
 global role (`Accounts.Checks.PlatformAdmin`), never `OrgAdmin`: a destination
 receives every site's data. A platform admin manages destinations, each write
 audited in the instance security log (`backup_destination_created`,
-`backup_destination_changed`, `backup_destination_deleted`), with no setting's
-value or secret in the metadata. The credentials are vault-encrypted
+`backup_destination_changed`, `backup_destination_deleted`,
+`backup_destination_adoptions_changed`), with no setting's value or secret in
+the metadata. `adopt_directories` changes only which other backup
+directories' backups retention on the destination may delete. The credentials are vault-encrypted
 (`secrets_encrypted`, `sensitive?`, never writable or read back). The **Test**
 button (`Backups.test_destination/2`) reads the row as the admin, so anyone
 else is refused before any file or network I/O, and records the outcome as
