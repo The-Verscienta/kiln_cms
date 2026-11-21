@@ -20,6 +20,7 @@ defmodule KilnCMS.Automation do
   require Logger
 
   alias KilnCMS.CMS.WebhookEndpoint
+  alias KilnCMS.Jobs.PrivateArgs
 
   resources do
     resource KilnCMS.Automation.Rule do
@@ -44,8 +45,10 @@ defmodule KilnCMS.Automation do
   def handle_event(event, payload, org_id) when is_binary(event) do
     with {:ok, _type, _trigger, _scope} <- trigger(event) do
       # `org_id` rides into the dispatch worker so rules only fire for their own
-      # site (epic #336).
-      %{"event" => event, "payload" => payload, "org_id" => org_id}
+      # site (epic #336). The payload is the document snapshot, drafts
+      # included, so it travels sealed (#2992): the job's row and Oban's
+      # `job:start`/`job:stop` log lines hold ciphertext.
+      %{"event" => event, "sealed" => PrivateArgs.seal(payload), "org_id" => org_id}
       |> KilnCMS.Automation.DispatchWorker.new()
       |> Oban.insert()
     end
@@ -171,9 +174,9 @@ defmodule KilnCMS.Automation do
       "rule_id" => rule.id,
       "event" => event,
       # Top-level copy of the document id — Oban unique keys can only address
-      # top-level args.
+      # top-level args, and the payload itself is sealed (#2992).
       "document_id" => payload["id"],
-      "payload" => payload,
+      "sealed" => PrivateArgs.seal(payload),
       "org_id" => org_id
     }
 
@@ -205,10 +208,10 @@ defmodule KilnCMS.Automation do
 
   @doc """
   The event payload an automation job carries (#2992), from either shape:
-  `"payload"` in the clear, as this release still writes it, or `"sealed"`
-  (`KilnCMS.Jobs.PrivateArgs.seal/1`), which a later release will write
-  instead. Reading both now is what lets that release's jobs run on a node
-  of this one during a rolling deploy.
+  `"sealed"` (`KilnCMS.Jobs.PrivateArgs.seal/1`), as `handle_event/3` and the
+  rule fan-out write it since 1.12, or `"payload"` in the clear, as a job
+  queued by an earlier release carries it. Reading both is what lets those
+  jobs still run on a node of this release during a rolling deploy.
 
     * `{:error, :unreadable}` — the seal does not open under any
       `secret_key_base` this deployment knows;

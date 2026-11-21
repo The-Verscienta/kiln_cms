@@ -120,6 +120,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Fixed
 
+- **Automation jobs now store the event payload (the document snapshot, drafts included) sealed, so a pending job's row and Oban's log lines no longer show it; jobs a 1.11 node queued still run (#2992).**
+  ([long form](docs/changelog/unreleased.md#automation-job-payload-sealed))
+
 - **A revalidating browser or CDN no longer gets a `304` for a public page whose fragments, media, translations, inherited fields, bylines, author name, category or menu links changed: the HTML `ETag` now hashes the cached payload and the menus, and type, field and locale-settings saves move every page's tag.**
   ([#3202](https://github.com/The-Verscienta/kiln_cms/pull/3202) · [long form](docs/changelog/unreleased.md#public-html-etag-render-inputs))
 
