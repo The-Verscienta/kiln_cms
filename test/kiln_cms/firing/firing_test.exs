@@ -374,7 +374,7 @@ defmodule KilnCMS.Firing.FiringTest do
                   type: :gallery,
                   content: "Shots",
                   data: %{
-                    "layout" => "grid",
+                    "layout" => "carousel",
                     "images" => [%{"url" => "/a.jpg", "alt" => "A kiln", "caption" => "At work"}]
                   },
                   order: 0
@@ -406,6 +406,8 @@ defmodule KilnCMS.Firing.FiringTest do
       # Both still render, and both still project into search + the LLM surface.
       {:ok, %{"html" => html}} = Engine.read(org, :page, page.id, :web)
       assert html =~ "kiln-gallery"
+      # The carousel is a keyboard-scrollable region in the fired artifact (#2590).
+      assert html =~ ~s(tabindex="0" role="group" aria-label="Image gallery")
       assert html =~ "kiln-accordion"
 
       {:ok, %{"markdown" => md}} = Engine.read(org, :page, page.id, :llm)

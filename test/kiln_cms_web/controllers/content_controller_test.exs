@@ -463,6 +463,32 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ "object-position: 25% 75%"
     end
 
+    test "a carousel gallery is a focusable, named scroll region; a grid is not (#2590)", %{
+      conn: conn
+    } do
+      images = [%{"url" => "/uploads/a.jpg", "alt" => "A"}]
+
+      carousel =
+        page(%{
+          title: "Carousel Page",
+          blocks: [%{"_type" => "gallery", "layout" => "carousel", "images" => images}]
+        })
+
+      html = conn |> get(~p"/#{carousel.slug}") |> html_response(200)
+      assert html =~ ~r/class="kiln-gallery-items"[^>]*tabindex="0"[^>]*role="group"/
+      assert html =~ ~s(aria-label="Image gallery")
+
+      grid =
+        page(%{
+          title: "Grid Page",
+          blocks: [%{"_type" => "gallery", "layout" => "grid", "images" => images}]
+        })
+
+      html = conn |> get(~p"/#{grid.slug}") |> html_response(200)
+      assert html =~ "kiln-gallery-items"
+      refute html =~ "Image gallery"
+    end
+
     test "an accordion renders its panels on-site (#482)", %{conn: conn} do
       page =
         page(%{

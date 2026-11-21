@@ -202,6 +202,9 @@ defmodule KilnCMSWeb.SecurityLog do
   def type_label(:backup_destination_deleted), do: gettext("Backup destination deleted")
   def type_label(:backup_destination_tested), do: gettext("Backup destination tested")
 
+  def type_label(:backup_destination_adoptions_changed),
+    do: gettext("Backup destination's adopted backup directories changed")
+
   def type_label(:backup_destination_host_key_trusted),
     do: gettext("Backup server host key trusted")
 

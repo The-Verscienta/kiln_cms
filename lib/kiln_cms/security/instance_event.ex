@@ -62,6 +62,9 @@ defmodule KilnCMS.Security.InstanceEvent do
     :backup_destination_changed,
     :backup_destination_deleted,
     :backup_destination_tested,
+    # A platform admin let retention on a destination delete another backup
+    # directory's backups there, or stopped it (`:adopt_directories`).
+    :backup_destination_adoptions_changed,
     # A platform admin trusted an SFTP destination's host key (#2222): its
     # type and fingerprint, the one it replaced, and whether a scan showed it
     # or the admin typed the fingerprint they expected.
@@ -90,6 +93,8 @@ defmodule KilnCMS.Security.InstanceEvent do
     backup_destination_deleted: ~w(name kind enabled),
     # `node`: the node the Test ran on (a Local destination is that node's disk).
     backup_destination_tested: ~w(name kind ok node),
+    # `adopted` / `removed`: backup-directory ids, comma-joined, or "none".
+    backup_destination_adoptions_changed: ~w(name kind adopted removed),
     backup_destination_host_key_trusted:
       ~w(name kind algorithm fingerprint previous_fingerprint how),
     backup_destination_host_key_mismatch: ~w(name kind offered_fingerprint trusted_fingerprint),
