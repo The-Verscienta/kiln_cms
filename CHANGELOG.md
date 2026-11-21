@@ -179,6 +179,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Security
 
+- **phoenix 1.8.17 fixes EEF-CVE-2026-128361 (a non-string Presence key crashes the tracker) and EEF-CVE-2026-129344 (a client on the V1 serializer crashes binary broadcasts); Kiln was not exposed: its Presence keys are server-made strings and it broadcasts no binary payloads.**
+  ([long form](docs/changelog/unreleased.md#phoenix-presence-serializer-advisories))
+
 - **phoenix_live_view 1.2.14 fixes EEF-CVE-2026-126334 (a LiveView joined without `"url"` skipped its `live_session` `on_mount` hooks); Kiln was not exposed, because `KilnCMSWeb.LiveRouteGuard` already refused those joins (#688).**
   ([#3190](https://github.com/The-Verscienta/kiln_cms/issues/3190) · [long form](docs/changelog/unreleased.md#liveview-url-less-join))
 
