@@ -7,6 +7,10 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="staging-scrub-safety-upgrade"></a>
+
+- **Re-scrub staging clones made before 1.12, and give `staging.sh` a prod environment (#2973, #2974, #2977).** A clone scrubbed by an earlier release still holds production's S3 storage credentials and its content-signing key: run `./scripts/staging.sh scrub` (or `bin/kiln_cms eval 'KilnCMS.Release.scrub_staging()'` against the clone) once more. Serve staging with its own `SECRET_KEY_BASE`, and never give it production's `S3_*`, `KILN_PROVENANCE_PRIVATE_KEY`/`KILN_PROVENANCE_KEY_FILE` or `KILN_GOVERNANCE_WITNESS*` ([docs/staging-environments.md](../staging-environments.md)). With the default `KILN_BIN=mix`, `staging.sh` now runs migrate and the scrub under `MIX_ENV=prod` (an unset `MIX_ENV` is set to `prod`; any other value is refused), so it needs `SECRET_KEY_BASE` and `TOKEN_SIGNING_SECRET`, and `DATABASE_SSL=false` for a local Postgres without TLS. It checks that the prod config loads before it copies anything.
+
 <a id="plugin-list-field-types-upgrade"></a>
 
 - **Plugin field types can hold lists from this release; rolling back past it needs preparation (#2680).** Upgrading needs nothing: no migration, no configuration. Rolling back is where the care goes. v1.11 and earlier treat a list field of a plugin type as a single value that happens to store an array. Their editor renders the list run together in one input, and saving such a record there can replace the list with one value or be refused. Restore, publishing a working copy and duplicate fail for a record holding one when the type's `cast/2` refuses a list. Saving or reordering the field in the fields admin clears its `multiple` flag (the arrays stay). Before rolling back, find those fields with the query in [docs/releasing.md → Rolling back past plugin list fields](../releasing.md#rolling-back-past-plugin-list-fields), then leave their records alone until you roll forward, or make each field single-valued (keeping the first item) or delete it on this release, after a backup.
@@ -47,6 +51,31 @@ carries the reasoning.
 
 ## Breaking
 
+<a id="customwhere-datetime-wall-clock"></a>
+
+- **GraphQL `customWhere` compares `dateTime` operands as wall clock, and they are typed `NaiveDateTime` (#2678).**
+  A datetime custom field drops a written value's UTC offset and stores the
+  time as written, but GraphQL's `DateTime` scalar converted a filter value
+  to UTC before Kiln saw it, so `eq: "2026-06-01T12:00:00+02:00"` missed a
+  value saved as `12:00:00+02:00`. `DateTimeFilter`'s operands (`eq`,
+  `notEq`, `in`, `gt`, `gte`, `lt`, `lte`) are now `NaiveDateTime`, which
+  drops the offset exactly as writes do; JSON:API and MCP `custom_filter`
+  already did. Before and after:
+
+  ```graphql
+  # before: valid; after: a validation error
+  query ($from: DateTime) { publishedPosts(customWhere: [{name: "starts_at", dateTime: {gte: $from}}]) { results { id } } }
+  # after
+  query ($from: NaiveDateTime) { publishedPosts(customWhere: [{name: "starts_at", dateTime: {gte: $from}}]) { results { id } } }
+  ```
+
+  Inline string literals keep working, an offset-less value is now accepted,
+  and a value with an offset matches the time as written, not the instant.
+  Send the wall-clock time the field was saved with. Kiln's JS and Elixir
+  clients send raw documents and need no change; a client's own queries do.
+  `docs/api/schema.graphql` is regenerated.
+  ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678))
+
 <a id="ws-gql-bearer-scheme-any-case"></a>
 
 - **`/ws/gql` reads an `authorization` connect param under a `Bearer` scheme in any case, so lowercase garbage and a bare `Bearer` are now refused instead of connecting anonymously (#2632).**
@@ -83,6 +112,17 @@ carries the reasoning.
   ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165))
 
 ## Added
+
+<a id="embedded-form-locale"></a>
+
+- **An embedded form can be shown in a chosen language (#2597).**
+  `embed.js` takes an optional `data-kiln-locale` attribute and loads
+  `/forms/<slug>/embed?locale=<value>`. The server accepts a supported locale
+  and gives anything else the site default; a path prefix (`/es/forms/…`)
+  still wins, and the session is never read, so a shared cache keys on the
+  URL. A snippet without the attribute loads exactly what it did. See
+  [docs/forms.md](../forms.md).
+  ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597))
 
 <a id="plugin-list-field-types"></a>
 
@@ -215,6 +255,30 @@ carries the reasoning.
 
 ## Changed
 
+<a id="referrer-exact-or-hidden"></a>
+
+- **Referrer figures are exact-or-hidden, derived from the per-day displays, and cover completed days only (#2989, #2990).**
+  Small referrer counts are suppressed per publication, but different
+  publications of the same visits (a span total beside its days, the
+  site-wide chart beside the per-item bars, the 7-day beside the 30-day
+  window, today's bucket read twice) could be subtracted from each other to
+  recover a count that was suppressed. Suppression now decides only one
+  cell, one content item on one completed UTC day; every wider figure is
+  the sum of those cells' displays when they are all shown as numbers, and
+  `hidden` otherwise, never `< n` and never a raw sum. Referrers are
+  published through yesterday, on the dashboard and in the export (whose
+  columns and per-day values are unchanged; it just stops emitting today's
+  referrer rows; view rows still run to the end of the range). What admins
+  see: no `< n` on the dashboard; a source reads `hidden` for the range if
+  any day hid it for that item (for the site chart, any item); today's
+  arrivals appear tomorrow; and a note explains `hidden` whenever something
+  is. On a low-traffic site most figures will read `hidden`: that is the
+  cost of a guarantee that no combination of published figures narrows a
+  suppressed count (a brute-force test over the owner's simulation checks
+  it). [ADR 0080](../decisions/0080-a-referrer-figure-wider-than-one-item-day-is-derived-from-the-per-day-displays-and-only-completed-days-are-published.md)
+  records the decision. No migration.
+  ([#2989](https://github.com/The-Verscienta/kiln_cms/issues/2989), [#2990](https://github.com/The-Verscienta/kiln_cms/issues/2990))
+
 <a id="search-budget-cut-grace"></a>
 
 - **A search the budget cuts now gives its running sections 100 ms to stop on their own before killing them, so a query that finishes in time keeps its database connection (#2614).**
@@ -263,6 +327,141 @@ carries the reasoning.
   The "no all-hidden breakdown leaves a category a single value" rule (#2981) was found by a search run outside the suite, so a change to `referrer_sources/0` or to `KilnCMS.Analytics.suppress_referrer_group/1` had nothing wide to re-check against. The search is now in `test/kiln_cms/analytics/referrer_suppression_test.exs` behind the `slow_sweep` tag, which the default suite excludes. Run it with `mix test --only slow_sweep test/kiln_cms/analytics/referrer_suppression_test.exs` after touching either. It covers thresholds 2 to 20 with four, five and six categories, bounded at view totals of 40, 30 and 20; the original hand search went to 50, and the committed one does not re-run totals above these bounds. A second test in the sweep checks that the criterion can fail (three categories at a threshold of 3 still do). To let the sweep vary the number of categories, `suppress_referrer_group/2` takes an explicit category list; `/1` is `/2` over `referrer_sources/0`, and a default-suite test pins that. Nothing published changes: the dashboard and the export still call `/1`, and no setting or output differs. Operators have nothing to do. The decision record for the rule (ADR 0075) is on a separate open pull request.
 
 ## Fixed
+
+<a id="staging-scrub-safety"></a>
+
+- **The staging scrub no longer leaves a clone able to reach production's buckets or sign as production, and the staging tools can't hit the wrong database (#2973, #2974, #2977).**
+  - **Storage (#2973).** Each storage profile keeps where its files are
+    (endpoint, buckets, public URL, so the site's CSP still allows them and
+    existing media keeps loading read-only from production's public URLs) and
+    loses what reaches them: `access_key_id` becomes `scrubbed` and the secret
+    an empty ciphertext that opens under no key. Every operation on a
+    production file (fetch, delete, store, variants, trash purge, gated
+    downloads) now fails before connecting. Site storage is switched off, so
+    new uploads go to staging's own storage until an admin saves a staging
+    bucket. `mix kiln.vault.reencrypt` counts a scrubbed secret as empty.
+  - **Signing key (#2974).** The scrub deletes the stored provenance key and
+    queues a job that generates a fresh one when staging's own app runs it,
+    sealed under staging's `SECRET_KEY_BASE`, so staging signs, but never as
+    production; production's signatures read as unverifiable there, not as
+    tampered. Until that job runs, staging's publishes are unsigned. The
+    scrub warns when a provenance key is mounted in its environment
+    (`KILN_PROVENANCE_PRIVATE_KEY`/`_KEY_FILE`), which no scrub can remove.
+  - **Order.** Storage credentials and the signing key are now scrubbed right
+    after the billing credentials, before anything that could stop the run.
+  - **The tools (#2977).** `staging.sh` with `KILN_BIN=mix` used to run
+    migrate and the scrub under whatever `MIX_ENV` was set, so under `dev`
+    `mix ecto.migrate` migrated the dev database. It now runs them under
+    `prod`, checks the prod config loads before copying anything, and if
+    migrate or the scrub fails after the copy, drops the clone (or says
+    loudly to drop it, since it holds unscrubbed production data).
+    `mix kiln.staging.scrub` refuses when `DATABASE_URL` names a different
+    host, port or database than the one it would scrub.
+  - New scrub summary keys: `storage_credentials_scrubbed`,
+    `site_storages_disabled`, `provenance_key_removed`. No migration. See the
+    [upgrade note](#staging-scrub-safety-upgrade).
+  ([#2973](https://github.com/The-Verscienta/kiln_cms/issues/2973), [#2974](https://github.com/The-Verscienta/kiln_cms/issues/2974), [#2977](https://github.com/The-Verscienta/kiln_cms/issues/2977))
+
+<a id="custom-filter-datetime-fractions"></a>
+
+- **Datetime custom-field filters find values with fractional seconds (#2678).**
+  A filter operand was cast through Ecto's `:naive_datetime`, which
+  truncates to whole seconds, so `eq` missed a stored `12:00:00.25` (and
+  could match a stored `12:00:00` instead), and `eq` compared one spelling,
+  so `.25` missed a stored `.250`. Operands are now read the way a write
+  reads them, keeping microseconds; `eq`, `not_eq`, `in`, `has`, `has_all`
+  and `has_none` match every spelling a write can store, on single, link
+  and list fields; and range operators bind the spelling that orders right,
+  so they are exact below one second and keep using the range indexes. New
+  limit on every surface: at most 1000 `in` values per `custom_filter` or
+  `customWhere`, counted across groups (`in takes at most 1000 values in
+  all, across every condition and group (got N)`); a large enough request
+  used to hit Postgres' bind-parameter limit. No migration.
+  ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678))
+
+<a id="locale-followups"></a>
+
+- **Locale follow-ups from #2465: newsletter confirmation and an unconfigured record locale (#2597).**
+  - **Newsletter confirmation.** The email is built while the sign-up request
+    runs, so it now goes through gettext in that request's locale (es, fr):
+    subject, body and a confirm link pinned to the same prefix, and the
+    confirm page's button keeps it. On a multilingual site even a
+    default-locale link carries its prefix (`/en/…`).
+  - **A record whose locale is no longer configured** gets the site default
+    in the article's `lang` and in `og:locale`; the `x-kiln-locale` header
+    still names the stored value.
+  - Lock and paywall pages were left as they are: since #2646 their chrome
+    follows the reader's URL and only the document's words carry its
+    language, which is what that change decided.
+  No migration.
+  ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597))
+
+<a id="recurrence-until-instant"></a>
+
+- **A date-time UNTIL in a recurrence rule is an instant, not its UTC date (#2861).**
+  Saving a rule rewrote `UNTIL=20260331T000000` or `…T000000Z` to its UTC
+  date, so an event east of UTC could run a day longer, or one west of it a
+  day shorter, than the rule said. The rule now keeps UNTIL's form as typed:
+  a date (`YYYYMMDD`) still ends after that whole day in the event's zone, a
+  `Z` time is an inclusive instant in UTC, and a floating time is an
+  inclusive instant in the event's own zone (a time skipped by a DST change
+  moves past the gap; a repeated time is the first one). Timed ICS exports
+  emit the instant in UTC; all-day ones the date it falls on. The engine
+  version moves to 3, so the first boot queues one occurrence backfill,
+  which rewrites nothing on existing data: every rule saved before this
+  release already holds a date UNTIL, and those expand exactly as before. A
+  rule typed with a time before the upgrade keeps its old date until it is
+  saved again. API clients: a recurrence value's `rrule` can now carry a
+  date-time UNTIL (still valid RFC 5545). No migration; rolling back reads
+  such rules by their date, as before.
+  ([#2861](https://github.com/The-Verscienta/kiln_cms/issues/2861))
+
+<a id="passkey-fallbacks"></a>
+
+- **No passkey offer where a passkey can't work, and a way forward for a passkey-only account in a browser without one (#2827, #2887).**
+  A passkey belongs to the main host, and a browser refuses the ceremony on a
+  site's own host, yet `/sign-in` drew "Use a passkey" everywhere. It now draws
+  it only where `KilnCMS.Accounts.WebAuthn.ceremony_host?/1` holds (the main
+  host or a passkey-capable console host), judged from the host the socket's
+  mount vouched for. The human-verification fallback line stops naming a
+  passkey on those hosts too, and reads "Reload the page and try it again"
+  when no other way exists. On `/sign-in/verify`, an account whose only second
+  factor is a passkey, in a browser without WebAuthn or with JavaScript off,
+  used to see an empty page; it now sees "This browser can't use a passkey.
+  Sign in again from a browser or device that can, or ask an administrator of
+  your site to check your account's sign-in methods." The second factor is
+  unchanged: no recovery path is added. Strings in es and fr. No migration.
+  ([#2827](https://github.com/The-Verscienta/kiln_cms/issues/2827), [#2887](https://github.com/The-Verscienta/kiln_cms/issues/2887))
+
+<a id="automation-job-payload-sealed"></a>
+
+- **Automation jobs store the event payload sealed (#2992).**
+  `Automation.handle_event/3` and the rule fan-out used to queue
+  `DispatchWorker` and `RuleWorker` with the event's payload, the serialized
+  document with its drafts, in the clear: it sat in the `oban_jobs` row while
+  the job waited and appeared in Oban's `job:start`/`job:stop` log lines. Both
+  writers now put it under `"sealed"` (`KilnCMS.Jobs.PrivateArgs.seal/1`), as
+  form mail jobs already do; `event`, `org_id`, `rule_id` and `document_id`
+  stay readable, which is what the rule job's uniqueness compares, and the
+  payload is still dropped from the row once the job finishes. Readers keep
+  accepting the clear `"payload"`, so jobs a 1.11 node queued during a rolling
+  deploy still run, and a rollback to 1.11 runs the sealed ones. Before rolling
+  back past 1.11, let the automation jobs on the `default` queue finish
+  ([docs/releasing.md](../releasing.md)). No migration.
+  ([#2992](https://github.com/The-Verscienta/kiln_cms/issues/2992))
+
+<a id="gallery-carousel-keyboard"></a>
+
+- **A carousel gallery can be scrolled from the keyboard (#2590).**
+  The carousel layout scrolls sideways (`overflow-x: auto`), but nothing in it
+  could take focus, so a keyboard user couldn't scroll it (axe
+  `scrollable-region-focusable`). Its container now carries `tabindex="0"`,
+  `role="group"` and an "Image gallery" label (es, fr; in the content's
+  locale), with the same focus ring as scrolling tables, in both the block's
+  `:web` HTML and the LiveView renderer. Grid and masonry galleries are
+  unchanged. Pages fired before this release get it when they are next
+  published or refired. No migration.
+  ([#2590](https://github.com/The-Verscienta/kiln_cms/issues/2590))
 
 <a id="public-html-etag-render-inputs"></a>
 
@@ -580,6 +779,25 @@ carries the reasoning.
   ([#2983](https://github.com/The-Verscienta/kiln_cms/issues/2983), [#2985](https://github.com/The-Verscienta/kiln_cms/issues/2985), [#2986](https://github.com/The-Verscienta/kiln_cms/issues/2986))
 
 ## Security
+
+<a id="phoenix-presence-serializer-advisories"></a>
+
+- **phoenix 1.8.17 fixes EEF-CVE-2026-128361 (GHSA-pvfx-rx4x-phrr, high) and
+  EEF-CVE-2026-129344 (GHSA-5vmc-qgf8-rw36, high).** The first: `Phoenix.Presence`
+  accepted any term as a presence key and failed only when listing presences, so
+  a key taken from a join payload could crash the tracker shard and every
+  channel and LiveView tracked on it. The second: a client that connects without
+  `vsn`, or with `vsn=1.0.0`, gets the V1 JSON serializer, which raises on a
+  `{:binary, data}` broadcast inside the PubSub dispatch loop and drops that
+  broadcast for every later subscriber. Kiln was not exposed to either. Its
+  Presence keys are built on the server (`KilnCMSWeb.Presence.track_editor/4`
+  uses the user's id, `track_preview_viewer/5` a server-made viewer key), and
+  nothing in Kiln broadcasts a binary payload. The bump clears the dependency
+  audit, which fails on both. `mix.exs` now requires `~> 1.8.17`, so a lock
+  cannot resolve back to an affected release; `examples/phoenix_showcase`
+  moves from 1.8.15 to 1.8.17 with the same floor. No other dependency moves.
+  No migration and no configuration.
+  ([#3205](https://github.com/The-Verscienta/kiln_cms/pull/3205))
 
 <a id="backup-destination-prune-ownership"></a>
 

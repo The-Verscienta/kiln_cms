@@ -153,8 +153,9 @@ defmodule KilnCMS.Events.ICS do
 
   # `UNTIL` must carry the same value type as `DTSTART` (RFC 5545 §3.3.10), so
   # the rule renders against the same all-day flag the DTSTART used. A timed
-  # one is the end of the stored date in the event's own zone, which is how
-  # Kiln's expansion reads it (#2751), so the zone goes with it.
+  # one is the end of a stored date in the event's own zone, which is how
+  # Kiln's expansion reads it (#2751), or a stored date-time's own instant
+  # (#2861), so the zone goes with it.
   defp rrule_line(nil, _all_day?, _zone), do: nil
 
   defp rrule_line(rule, all_day?, zone),

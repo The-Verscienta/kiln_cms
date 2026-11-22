@@ -36,6 +36,11 @@ msgstr "« auto » pour Cloudflare R2."
 msgid "\"fr, en\" tries French, then English, then stops. Navigation menus follow a chain you write here, but never fall back to the default locale on their own. A headless request can narrow the chain with ?fallback=false or ?fallback_locale=, and every response says which locale it served."
 msgstr "\"fr, en\" essaie le français, puis l'anglais, puis s'arrête. Les menus de navigation suivent une chaîne écrite ici, mais ne se rabattent jamais d'eux-mêmes sur la langue par défaut. Une requête headless peut restreindre la chaîne avec ?fallback=false ou ?fallback_locale=, et chaque réponse indique la langue servie."
 
+#: lib/kiln_cms_web/live/analytics_live.ex
+#, elixir-autogen, elixir-format
+msgid "\"hidden\" means that on at least one day in this range, too few readers arrived that way to show the day's count safely (fewer than %{n}, or a count that could be deduced from one that small). A total that included that day could be compared with the daily figures in the export to recover it, so the total is hidden too."
+msgstr "« masqué » signifie qu'au moins un jour de cette période, trop peu de lecteurs sont arrivés par cette voie pour afficher le décompte de ce jour sans risque (moins de %{n}, ou un décompte qui pourrait se déduire d'un décompte aussi faible). Un total incluant ce jour pourrait être comparé aux chiffres quotidiens de l'export pour le retrouver : le total est donc masqué lui aussi."
+
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
 msgid "%B %-d, %Y"
@@ -5286,6 +5291,21 @@ msgstr "Impossible d’effectuer la vérification ? Demandez plutôt à un admin
 
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
+msgid "Can't complete the check? Email yourself a sign-in link instead."
+msgstr "Impossible d’effectuer la vérification ? Envoyez-vous plutôt un lien de connexion par e-mail."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Email yourself a sign-in link or use your site's single sign-on."
+msgstr "Impossible d’effectuer la vérification ? Envoyez-vous un lien de connexion par e-mail ou utilisez l’authentification unique de votre site."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Reload the page and try it again."
+msgstr "Impossible d’effectuer la vérification ? Rechargez la page et réessayez."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
 msgid "Can't complete the check? Use a passkey instead."
 msgstr "Impossible d’effectuer la vérification ? Utilisez plutôt une clé d’accès."
 
@@ -5303,6 +5323,11 @@ msgstr "Impossible d’effectuer la vérification ? Utilisez une clé d’accès
 #, elixir-autogen, elixir-format
 msgid "Can't complete the check? Use a passkey, email yourself a sign-in link, or use your site's single sign-on."
 msgstr "Impossible d’effectuer la vérification ? Utilisez une clé d’accès, envoyez-vous un lien de connexion par e-mail ou utilisez l’authentification unique de votre site."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Use your site's single sign-on instead."
+msgstr "Impossible d’effectuer la vérification ? Utilisez plutôt l’authentification unique de votre site."
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -6407,6 +6432,11 @@ msgstr "Confirmez que c'est bien vous avec votre clé d'accès."
 msgid "Confirm new password"
 msgstr "Confirmer le nouveau mot de passe"
 
+#: lib/kiln_cms/newsletter/changes/send_confirmation_email.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm this address to start receiving the newsletter from %{site}:"
+msgstr "Confirmez cette adresse pour commencer à recevoir la newsletter de %{site} :"
+
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Confirm with a code from your authenticator app, or sign in again with your passkey."
@@ -6438,6 +6468,11 @@ msgstr "Confirmez d’abord votre adresse e-mail : un administrateur ne peut pas
 #, elixir-autogen, elixir-format
 msgid "Confirm your subscription"
 msgstr "Confirmez votre abonnement"
+
+#: lib/kiln_cms/newsletter/changes/send_confirmation_email.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm your subscription to %{site}"
+msgstr "Confirmez votre abonnement à %{site}"
 
 #: lib/kiln_cms_web/live/field_sync_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -7481,11 +7516,6 @@ msgstr "Les décomptes sont plafonnés par type de contenu — il peut y en avoi
 #, elixir-autogen, elixir-format
 msgid "Counts as a conversion"
 msgstr "Compte comme conversion"
-
-#: lib/kiln_cms_web/live/analytics_live.ex
-#, elixir-autogen, elixir-format
-msgid "Counts below %{n} show as \"< %{n}\" rather than an exact number — a very small count can describe a single visitor's arrival."
-msgstr "Les nombres inférieurs à %{n} s'affichent comme « < %{n} » plutôt qu'un nombre exact — un très petit nombre peut décrire l'arrivée d'un seul visiteur."
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -12019,6 +12049,11 @@ msgstr "Si la vérification ne se charge pas, vous pouvez quand même envoyer ce
 msgid "If you copy backups off this host yourself, copy each backup's .sha256 files with it: without them a media backup in parts won't restore, and nothing can check the others. The built-in off-site copy already includes them."
 msgstr "Si vous copiez vous-même les sauvegardes hors de ce serveur, copiez avec chacune ses fichiers .sha256 : sans eux, une sauvegarde des médias en plusieurs parties ne se restaure pas, et rien ne peut vérifier les autres. La copie hors site intégrée les inclut déjà."
 
+#: lib/kiln_cms/newsletter/changes/send_confirmation_email.ex
+#, elixir-autogen, elixir-format
+msgid "If you didn't ask for this, ignore this email. The address is not subscribed and won't receive anything unless the link above is clicked."
+msgstr "Si vous n'avez rien demandé, ignorez cet e-mail. L'adresse n'est pas abonnée et ne recevra rien tant que personne ne clique sur le lien ci-dessus."
+
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "If … then …"
@@ -12044,6 +12079,11 @@ msgstr "État du service d’images"
 #, elixir-autogen, elixir-format
 msgid "Image backends"
 msgstr "Services d’images"
+
+#: lib/kiln_cms/blocks/gallery.ex
+#, elixir-autogen, elixir-format
+msgid "Image gallery"
+msgstr "Galerie d'images"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -18474,6 +18514,11 @@ msgstr "Référence (ticket / identifiant de document)"
 #, elixir-autogen, elixir-format
 msgid "Referrer breakdown"
 msgstr "Répartition des référents"
+
+#: lib/kiln_cms_web/live/analytics_live.ex
+#, elixir-autogen, elixir-format
+msgid "Referrer counts cover completed UTC days only, so today's arrivals appear tomorrow."
+msgstr "Les décomptes de provenance ne couvrent que les journées UTC terminées : les arrivées d'aujourd'hui apparaîtront demain."
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
@@ -24955,6 +25000,11 @@ msgstr "Ce bloc a été supprimé. La discussion et ses tâches sont conservées
 #, elixir-autogen, elixir-format
 msgid "This browser can't receive push notifications. On iPhone and iPad they need iOS 16.4 or later and the app added to your home screen."
 msgstr "Ce navigateur ne peut pas recevoir de notifications push. Sur iPhone et iPad, elles nécessitent iOS 16.4 ou version ultérieure et l'application ajoutée à l'écran d'accueil."
+
+#: lib/kiln_cms_web/controllers/two_factor_html.ex
+#, elixir-autogen, elixir-format
+msgid "This browser can't use a passkey. Sign in again from a browser or device that can, or ask an administrator of your site to check your account's sign-in methods."
+msgstr "Ce navigateur ne peut pas utiliser de clé d'accès. Reconnectez-vous depuis un navigateur ou un appareil qui le peut, ou demandez à un administrateur de votre site de vérifier les méthodes de connexion de votre compte."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format

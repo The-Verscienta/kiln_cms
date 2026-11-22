@@ -62,16 +62,29 @@ defmodule KilnCMSWeb.AnalyticsLive do
     # the breakdown is genuinely absent rather than merely hidden.
     referrers_enabled = Analytics.referrers_enabled?()
 
+    # Completed days only, and every figure on this page derived from the
+    # per-day breakdowns the export publishes (#2989) — see
+    # `Analytics.derive_referrer_group/1` for why a span is never suppressed
+    # from its own raw sum.
     {rows, referrer_chart_entries} =
       if referrers_enabled do
-        referrer_buckets = Analytics.referrers_since!(since, actor: actor, tenant: org)
-        by_content = referrer_by_content(referrer_buckets)
+        cells =
+          since
+          |> Analytics.referrers_since!(actor: actor, tenant: org)
+          |> Analytics.published_referrer_cells()
+
+        by_content =
+          Enum.group_by(cells, fn {{_day, type, id}, _} -> {type, id} end, &elem(&1, 1))
 
         {Enum.map(rows, &add_referrer_entries(&1, by_content)),
-         chart_entries(referrer_totals(referrer_buckets))}
+         chart_entries(Enum.map(cells, &elem(&1, 1)))}
       else
         {rows, []}
       end
+
+    # The site chart is derived from every cell any row's bar is, so a hidden
+    # category in any bar is hidden in the chart too (#2990).
+    referrers_hidden? = Enum.any?(referrer_chart_entries, & &1.hidden?)
 
     # Funnel reports (#622) — derived from the same bucket table as the rest
     # of the page, never a separate counter. Each funnel is independently
@@ -98,6 +111,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
      |> assign(:rows, rows)
      |> assign(:referrers_enabled, referrers_enabled)
      |> assign(:referrer_chart_entries, referrer_chart_entries)
+     |> assign(:referrers_hidden?, referrers_hidden?)
      |> assign(:low_count_threshold, Analytics.low_count_threshold())
      |> assign(:funnel_reports, funnel_reports)
      # Content gaps (#339): what on-site searchers asked for and got nothing
@@ -165,54 +179,34 @@ defmodule KilnCMSWeb.AnalyticsLive do
   defp add_window(row, window),
     do: Map.put(row, :window_views, Map.get(window, {row.type, row.id}, 0))
 
-  # Site-wide hits per source within the window, for the breakdown chart.
-  defp referrer_totals(buckets) do
-    Enum.reduce(buckets, %{}, fn bucket, acc ->
-      Map.update(acc, bucket.source, bucket.hits, &(&1 + bucket.hits))
-    end)
-  end
-
-  # Per-content-item hits per source within the window, for each row's
-  # breakdown bar.
-  defp referrer_by_content(buckets) do
-    Enum.reduce(buckets, %{}, fn bucket, acc ->
-      Map.update(
-        acc,
-        {bucket.content_type, bucket.content_id},
-        %{bucket.source => bucket.hits},
-        &Map.update(&1, bucket.source, bucket.hits, fn hits -> hits + bucket.hits end)
-      )
-    end)
-  end
-
+  # An item with no referrer buckets in the window has no cells, which derives
+  # to a zero in every category.
   defp add_referrer_entries(row, by_content) do
-    sources = Map.get(by_content, {row.type, row.id}, %{})
-    Map.put(row, :referrer_entries, chart_entries(sources))
+    cells = Map.get(by_content, {row.type, row.id}, [])
+    Map.put(row, :referrer_entries, chart_entries(cells))
   end
 
-  # The decision itself is `Analytics.suppress_referrer_group/1` — shared with
-  # the export (#777), which had the same arithmetic gap and no fix for it
-  # because the algorithm lived here. This is only the rendering.
-  defp chart_entries(totals) do
-    totals
-    |> Analytics.suppress_referrer_group()
-    |> Enum.map(fn {source, hits, display} -> chart_entry(source, hits, display) end)
+  # Each cell was decided by `Analytics.suppress_referrer_group/1` — shared
+  # with the export (#777) — and the span is derived from those decisions
+  # (#2989). This is only the rendering.
+  defp chart_entries(cells) do
+    cells
+    |> Analytics.derive_referrer_group()
+    |> Enum.map(fn {source, display} -> chart_entry(source, display) end)
   end
 
   # `display` is the only number a person ever sees, and it arrives already
-  # decided by `Analytics.suppress_referrer_group/1`.
+  # decided: the sum of the per-day displays, or `"hidden"`.
   #
-  # `bar_value` drives the bar's height/width and is deliberately never the
-  # raw hit count for a suppressed entry, natural or forced: comparing two
-  # suppressed bars' sizes would leak exactly the magnitude the label just
-  # hid. Every suppressed, nonzero entry clamps to the same fixed value — the
-  # largest a naturally-suppressed count could honestly be — so bars stay
-  # roughly proportionate without ever distinguishing one suppressed count
-  # from another. A true zero still renders as a flat bar: there is nothing
-  # to describe, so nothing to hide.
-  defp chart_entry(source, hits, display) do
-    threshold = Analytics.low_count_threshold()
-    bar_value = if is_binary(display), do: threshold - 1, else: hits
+  # `bar_value` drives the bar's height/width and is deliberately never a raw
+  # hit count for a hidden entry: comparing two hidden bars' sizes would leak
+  # exactly the magnitude the label just hid. Every hidden entry clamps to the
+  # same fixed value, the largest a naturally-suppressed count could honestly
+  # be, so bars stay roughly proportionate without ever distinguishing one
+  # hidden count from another. A true zero still renders as a flat bar: there
+  # is nothing to describe, so nothing to hide.
+  defp chart_entry(source, display) do
+    hidden? = is_binary(display)
 
     %{
       source: source,
@@ -220,8 +214,9 @@ defmodule KilnCMSWeb.AnalyticsLive do
       # The shared decision returns the untranslated `"hidden"` sentinel — it
       # is a value an export writes into a file as well as a word a person
       # reads, so the translation belongs at the render, not in the algorithm.
-      display: if(display == "hidden", do: gettext("hidden"), else: display),
-      bar_value: bar_value
+      display: if(hidden?, do: gettext("hidden"), else: display),
+      bar_value: if(hidden?, do: Analytics.low_count_threshold() - 1, else: display),
+      hidden?: hidden?
     }
   end
 
@@ -407,7 +402,18 @@ defmodule KilnCMSWeb.AnalyticsLive do
 
           <p class="mt-2 text-xs text-base-content/60">
             {gettext(
-              "Counts below %{n} show as \"< %{n}\" rather than an exact number — a very small count can describe a single visitor's arrival.",
+              "Referrer counts cover completed UTC days only, so today's arrivals appear tomorrow."
+            )}
+          </p>
+          <%!-- #2990: without this, a breakdown that is hidden whole reads
+                like missing data. Shown only when something is hidden. --%>
+          <p
+            :if={@referrers_hidden?}
+            id="referrers-hidden-note"
+            class="mt-1 text-xs text-base-content/70"
+          >
+            {gettext(
+              "\"hidden\" means that on at least one day in this range, too few readers arrived that way to show the day's count safely (fewer than %{n}, or a count that could be deduced from one that small). A total that included that day could be compared with the daily figures in the export to recover it, so the total is hidden too.",
               n: @low_count_threshold
             )}
           </p>

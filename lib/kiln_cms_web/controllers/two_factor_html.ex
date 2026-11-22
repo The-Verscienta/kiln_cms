@@ -30,4 +30,15 @@ defmodule KilnCMSWeb.TwoFactorHTML do
   # the ones that do not (the error line is only there after a refusal).
   @spec described_by([String.t() | false | nil]) :: String.t()
   def described_by(ids), do: ids |> Enum.filter(&is_binary/1) |> Enum.join(" ")
+
+  @doc false
+  # A passkey-only account in a browser that can't run the passkey (#2887).
+  # Names only what the account really has: no recovery codes (a passkey has
+  # none), so another browser or device, or an administrator.
+  @spec passkey_unsupported_text() :: String.t()
+  def passkey_unsupported_text,
+    do:
+      gettext(
+        "This browser can't use a passkey. Sign in again from a browser or device that can, or ask an administrator of your site to check your account's sign-in methods."
+      )
 end

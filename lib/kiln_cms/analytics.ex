@@ -267,15 +267,19 @@ defmodule KilnCMS.Analytics do
   views over a typical mix of sources, 0.1–4.1% of them move from a partial
   publication to hidden whole; at thirty views a day, none do.
 
-  > #### Two publications together are not covered {: .warning}
+  > #### One item, one completed day, and nothing wider {: .warning}
   >
-  > Everything above protects a breakdown **on its own**. Kiln publishes
-  > several breakdowns of overlapping traffic — a span on the dashboard and one
+  > Everything above protects a breakdown **on its own**, so it is only ever
+  > run on one content item's one completed UTC day. Kiln publishes several
+  > figures of overlapping traffic: a span on the dashboard and one breakdown
   > per day in the export, the site chart beside an item's bars, seven days
-  > beside thirty, today read twice as it fills — and a reader holding two of
-  > them can difference one against the other to recover a count both
-  > suppressed. That is tracked in #2989; short of turning referrer
-  > attribution off, nothing here prevents it.
+  > beside thirty. While each of those was suppressed from its own raw sum, a
+  > reader holding two of them could difference one against the other to
+  > recover a count both suppressed (#2989). So a figure wider than one
+  > item-day is never decided here: `derive_referrer_group/1` derives it from
+  > the per-day *displays*. And only completed days are published
+  > (`last_published_referrer_day/0`), so nobody can read today's bucket twice
+  > as it fills.
 
   > #### What this still does not do {: .neutral}
   >
@@ -303,7 +307,8 @@ defmodule KilnCMS.Analytics do
   `suppress_referrer_group/1` over an explicit category list instead of
   `referrer_sources/0`.
 
-  Nothing publishes through this arity: the dashboard and the export call
+  Nothing publishes through this arity: the dashboard (through
+  `published_referrer_cells/2`) and the export call
   `suppress_referrer_group/1`, which is this function with the live list. It
   exists so the exhaustive search described there can vary the number of
   categories without changing the schema (#3123).
@@ -336,6 +341,93 @@ defmodule KilnCMS.Analytics do
       true ->
         Enum.map(raw, fn {source, hits} -> {source, hits, "hidden"} end)
     end
+  end
+
+  @doc """
+  The last UTC day whose referrer breakdowns may be published: yesterday (#2989).
+
+  Today's buckets are still filling, and counts only grow. Two reads of the same
+  day, each suppressed on its own, can be differenced to pin the arrivals in
+  between. A completed day never changes again, so every read of it sees the
+  same breakdown. Today's arrivals appear tomorrow.
+  """
+  @spec last_published_referrer_day() :: Date.t()
+  def last_published_referrer_day, do: Date.add(Date.utc_today(), -1)
+
+  @doc """
+  Decide every `(day, content item)` referrer breakdown in `buckets`, keeping
+  completed days only: those on or before `last_day`, which defaults to
+  `last_published_referrer_day/0`.
+
+  `buckets` are rows with `:day`, `:content_type`, `:content_id`, `:source` and
+  `:hits`, as `ReferrerDay`'s reads return them. Returns one
+  `{{day, content_type, content_id}, breakdown}` pair per item-day, where
+  `breakdown` is `suppress_referrer_group/1`'s output for that cell. These cells
+  are the only thing referrer suppression decides. Anything wider is
+  `derive_referrer_group/1` over them.
+  """
+  @spec published_referrer_cells([map()], Date.t()) :: [
+          {{Date.t(), String.t(), Ecto.UUID.t()},
+           [{atom(), non_neg_integer(), non_neg_integer() | String.t()}]}
+        ]
+  def published_referrer_cells(buckets, last_day \\ last_published_referrer_day()) do
+    buckets
+    |> Enum.filter(&(Date.compare(&1.day, last_day) != :gt))
+    |> Enum.group_by(&{&1.day, &1.content_type, &1.content_id}, &{&1.source, &1.hits})
+    |> Enum.map(fn {key, hits} -> {key, suppress_referrer_group(Map.new(hits))} end)
+  end
+
+  @doc """
+  The referrer figure for a set of item-day breakdowns: a span, a site-wide
+  total, anything wider than one cell (#2989).
+
+  `cells` is a list of `suppress_referrer_group/1` outputs, one per item-day.
+  Each category is the **sum of its displays** when every cell shows it as an
+  integer, and `"hidden"` otherwise. A cell showing `"< n"` or `"hidden"` makes
+  the wider figure `"hidden"`, never `"< n"`, because the sum can be any size.
+  No cells at all is a zero in every category.
+
+  ## Why the displays, not the raw hits
+
+  Suppressing a raw sum publishes a second decision about the same arrivals,
+  and the two can be differenced. Day 1 `other: 1` and day 2 `other: 4` are
+  each hidden in the export, but a span suppressed from its raw sum showed
+  `other: 5` exactly, which pins both days. The same subtraction worked between
+  the site chart and an item's bar, between seven days and thirty, and between
+  two overlapping exports.
+
+  A figure computed only from what the per-day breakdowns already publish can
+  tell a reader nothing those breakdowns did not: every candidate the per-day
+  publications admit gives the same wider figure. So any combination of these
+  figures is as safe as one breakdown on its own, which is what
+  `suppress_referrer_group/1` guarantees.
+  `test/kiln_cms/analytics/referrer_differencing_test.exs` brute-forces that
+  claim, and shows the raw-sum version it replaced failing it.
+
+  The cost falls on small sites: one day with a suppressed category hides that
+  category for the whole span. The raw `hits` in each cell are ignored, and the
+  result carries none.
+  """
+  @spec derive_referrer_group([[{atom(), non_neg_integer(), non_neg_integer() | String.t()}]]) ::
+          [{atom(), non_neg_integer() | String.t()}]
+  def derive_referrer_group(cells), do: derive_referrer_group(cells, referrer_sources())
+
+  @doc """
+  `derive_referrer_group/1` over an explicit category list instead of
+  `referrer_sources/0`, for the same reason `suppress_referrer_group/2` exists.
+  """
+  @spec derive_referrer_group(
+          [[{atom(), non_neg_integer(), non_neg_integer() | String.t()}]],
+          [atom()]
+        ) :: [{atom(), non_neg_integer() | String.t()}]
+  def derive_referrer_group(cells, sources) do
+    Enum.map(sources, fn source ->
+      displays = for cell <- cells, {^source, _hits, display} <- cell, do: display
+
+      if Enum.all?(displays, &is_integer/1),
+        do: {source, Enum.sum(displays)},
+        else: {source, "hidden"}
+    end)
   end
 
   # Every category but at most one is naturally low, and the view total is no

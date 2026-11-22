@@ -62,6 +62,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
+- **Re-scrub every staging clone made before 1.12 (`./scripts/staging.sh scrub`): older clones still hold production's S3 storage credentials and content-signing key. `staging.sh` with `KILN_BIN=mix` now runs under `MIX_ENV=prod` and needs `SECRET_KEY_BASE`, `TOKEN_SIGNING_SECRET` (and `DATABASE_SSL=false` for a local Postgres without TLS).**
+  ([long form](docs/changelog/unreleased.md#staging-scrub-safety-upgrade))
+
 - **Plugin field types can now hold lists: no migration, nothing to do to upgrade. Before rolling back past this release, find plugin list fields (query in docs/releasing.md, "Rolling back past plugin list fields"): older releases treat them as single values, and saving such a record there can replace the list. Don't make a plugin field a list until every node is upgraded.**
   ([#3203](https://github.com/The-Verscienta/kiln_cms/pull/3203) · [long form](docs/changelog/unreleased.md#plugin-list-field-types-upgrade))
 
@@ -79,6 +82,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Breaking
 
+- **GraphQL `customWhere` `dateTime` operands are now `NaiveDateTime` and compare wall clock, as values are stored: a filter's UTC offset is dropped instead of converted, and a variable for them must be declared `NaiveDateTime` (`$t: DateTime` now fails validation; inline literals keep working) (#2678).**
+  ([long form](docs/changelog/unreleased.md#customwhere-datetime-wall-clock))
+
 - **`/ws/gql` reads an `authorization` connect param under `Bearer` in any case: a lowercase valid JWT connects as its user, and lowercase garbage or a bare `Bearer` is refused (`403`) instead of connecting anonymously (#2632).**
   ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#ws-gql-bearer-scheme-any-case))
 
@@ -88,6 +94,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/unreleased.md#plugin-health-tail-packages-unknown))
 
 ### Added
+
+- **An embedded form can be shown in a chosen language: `data-kiln-locale` on the `embed.js` snippet (`?locale=` on `/forms/:slug/embed`); an unsupported value gets the site default and existing snippets are unchanged (#2597).**
+  ([long form](docs/changelog/unreleased.md#embedded-form-locale))
 
 - **A plugin field type can hold a list (`multiple?/0`, `unique_items?/0`, `kiln_plugin` 1.6), with the same editor input, write rules, API filters and schema export as core lists. A list whose type later stops taking lists is kept read-only (a "held list") instead of being dropped.**
   ([#3203](https://github.com/The-Verscienta/kiln_cms/pull/3203) · [long form](docs/changelog/unreleased.md#plugin-list-field-types))
@@ -109,6 +118,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Changed
 
+- **Analytics referrers: every figure wider than one item-day is derived from the per-day displays (a source reads `hidden` for the range if any day hid it), and only completed UTC days are shown or exported, so published figures can no longer be differenced to recover a suppressed count; low-traffic sites will see far more `hidden`, now explained on the dashboard (#2989, #2990).**
+  ([long form](docs/changelog/unreleased.md#referrer-exact-or-hidden))
+
 - **Search: when `query_budget` cuts a search, running sections get `cut_grace` (new, default 100 ms) to stop on their own before they are killed, so a query that finishes keeps its database connection; a cut search may answer up to that much later. New metrics `kiln_cms_search_budget_cut_returned`/`_killed`.**
   ([#3162](https://github.com/The-Verscienta/kiln_cms/pull/3162) · [long form](docs/changelog/unreleased.md#search-budget-cut-grace))
 
@@ -119,6 +131,27 @@ Every summary line below that was shortened links to its own entry there.
   ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/unreleased.md#referrer-suppression-sweep))
 
 ### Fixed
+
+- **The staging scrub removes production's S3 storage credentials (existing media still loads from production's public URLs; new uploads go to staging's own storage) and its content-signing key (staging generates its own), and `staging.sh`/`mix kiln.staging.scrub` can no longer migrate or scrub the wrong database (#2973, #2974, #2977).**
+  ([long form](docs/changelog/unreleased.md#staging-scrub-safety))
+
+- **Datetime custom-field filters (JSON:API, GraphQL, MCP; single, link and list fields) match stored values with fractional seconds under any spelling and compare ranges below one second; `in` takes at most 1000 values per request (#2678).**
+  ([long form](docs/changelog/unreleased.md#custom-filter-datetime-fractions))
+
+- **A newsletter confirmation email, its link and the confirm page are in the language the reader signed up in, and a record whose locale is no longer configured gets the site default in its `lang` and `og:locale` (#2597).**
+  ([long form](docs/changelog/unreleased.md#locale-followups))
+
+- **An event's recurrence rule with a date-time UNTIL now ends at that instant (a `Z` time in UTC, a floating time in the event's zone), as RFC 5545 says, instead of on its UTC date; rules saved before this release keep their old date until re-saved (#2861).**
+  ([long form](docs/changelog/unreleased.md#recurrence-until-instant))
+
+- **The sign-in page no longer offers "Use a passkey" on a site's own host, where the browser refuses it, and a passkey-only account on `/sign-in/verify` in a browser that can't use a passkey is told to use another browser or device, or ask an administrator (#2827, #2887).**
+  ([long form](docs/changelog/unreleased.md#passkey-fallbacks))
+
+- **Automation jobs now store the event payload (the document snapshot, drafts included) sealed, so a pending job's row and Oban's log lines no longer show it; jobs a 1.11 node queued still run (#2992).**
+  ([long form](docs/changelog/unreleased.md#automation-job-payload-sealed))
+
+- **A gallery in the carousel layout can be scrolled with the keyboard: Tab reaches it, the arrow keys scroll it, and it has a focus ring and an "Image gallery" label (#2590).**
+  ([long form](docs/changelog/unreleased.md#gallery-carousel-keyboard))
 
 - **A revalidating browser or CDN no longer gets a `304` for a public page whose fragments, media, translations, inherited fields, bylines, author name, category or menu links changed: the HTML `ETag` now hashes the cached payload and the menus, and type, field and locale-settings saves move every page's tag.**
   ([#3202](https://github.com/The-Verscienta/kiln_cms/pull/3202) · [long form](docs/changelog/unreleased.md#public-html-etag-render-inputs))
@@ -181,6 +214,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3112](https://github.com/The-Verscienta/kiln_cms/pull/3112) · [long form](docs/changelog/unreleased.md#backup-schedule-tab-followups))
 
 ### Security
+
+- **phoenix 1.8.17 fixes EEF-CVE-2026-128361 (a non-string Presence key crashes the tracker) and EEF-CVE-2026-129344 (a client on the V1 serializer crashes binary broadcasts); Kiln was not exposed: its Presence keys are server-made strings and it broadcasts no binary payloads.**
+  ([#3205](https://github.com/The-Verscienta/kiln_cms/pull/3205) · [long form](docs/changelog/unreleased.md#phoenix-presence-serializer-advisories))
 
 - **A database restored on another server no longer prunes the original server's backups on its destinations: retention deletes only what this server's backup directory sent, plus directories a platform admin adopts (GHSA-rx2c-h7cx-wmfj).**
   ([GHSA-rx2c-h7cx-wmfj](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-rx2c-h7cx-wmfj) · [#3204](https://github.com/The-Verscienta/kiln_cms/pull/3204) · [long form](docs/changelog/unreleased.md#backup-destination-prune-ownership))

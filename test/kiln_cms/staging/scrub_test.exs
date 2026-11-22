@@ -740,6 +740,19 @@ defmodule KilnCMS.Staging.ScrubTest do
       assert admin_line =~ "NONE"
     end
 
+    # #2974: a mounted key wins over the database, out of the scrub's reach.
+    test "warns when a provenance signing key is mounted, and only then" do
+      test = self()
+      shell = &send(test, {:shell, &1})
+
+      Staging.scrub!(confirm?: true, force?: true, provenance_key_mounted?: true, shell: shell)
+      assert_received {:shell, "\nWarning: a provenance signing key is mounted" <> warning}
+      assert warning =~ "production's KILN_PROVENANCE_* variables"
+
+      Staging.scrub!(confirm?: true, force?: true, provenance_key_mounted?: false, shell: shell)
+      refute_received {:shell, "\nWarning: a provenance signing key is mounted" <> _}
+    end
+
     test "runs once confirmed and forced past the name check" do
       user = admin()
 

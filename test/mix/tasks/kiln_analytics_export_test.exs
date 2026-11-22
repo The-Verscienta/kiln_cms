@@ -41,6 +41,9 @@ defmodule Mix.Tasks.Kiln.Analytics.ExportTest do
 
   # today/0: one memoized clock read per test — see KilnCMS.Test.StableDay (#1358).
 
+  # Referrer rows are exported for completed days only (#2989).
+  defp completed_day, do: Date.add(today(), -1)
+
   test "writes a CSV export to stdout by default, with nothing else on stdout" do
     seed_bucket(%{day: today(), views: 5})
 
@@ -63,19 +66,19 @@ defmodule Mix.Tasks.Kiln.Analytics.ExportTest do
   test "includes referrer rows when the phase-2 gate is on, suppressed as \"< n\" when appropriate" do
     enable_referrers(5)
     id = Ash.UUID.generate()
-    seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 2})
+    seed_referrer_bucket(%{content_id: id, day: completed_day(), source: :search, hits: 2})
     # Something for the low count to hide behind: with four genuine zeros the
     # whole breakdown is suppressed instead, since nothing makes two views
     # ambiguous (#1073).
-    seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 40})
-    seed_referrer_bucket(%{content_id: id, day: today(), source: :other, hits: 50})
+    seed_referrer_bucket(%{content_id: id, day: completed_day(), source: :social, hits: 40})
+    seed_referrer_bucket(%{content_id: id, day: completed_day(), source: :other, hits: 50})
 
     output =
       capture_io(fn ->
-        Export.run(["--from=#{today()}", "--to=#{today()}"])
+        Export.run(["--from=#{completed_day()}", "--to=#{completed_day()}"])
       end)
 
-    assert output =~ "referrer,#{today()},page,#{id},(deleted),,search,< 5"
+    assert output =~ "referrer,#{completed_day()},page,#{id},(deleted),,search,< 5"
   end
 
   test "omits referrer rows when the phase-2 gate is off, even if buckets exist" do

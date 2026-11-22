@@ -36,6 +36,11 @@ msgstr "\"auto\" para Cloudflare R2."
 msgid "\"fr, en\" tries French, then English, then stops. Navigation menus follow a chain you write here, but never fall back to the default locale on their own. A headless request can narrow the chain with ?fallback=false or ?fallback_locale=, and every response says which locale it served."
 msgstr "\"fr, en\" prueba francés, luego inglés, y se detiene. Los menús de navegación siguen una cadena escrita aquí, pero nunca recurren por sí solos al idioma predeterminado. Una solicitud headless puede acotar la cadena con ?fallback=false o ?fallback_locale=, y cada respuesta indica qué idioma sirvió."
 
+#: lib/kiln_cms_web/live/analytics_live.ex
+#, elixir-autogen, elixir-format
+msgid "\"hidden\" means that on at least one day in this range, too few readers arrived that way to show the day's count safely (fewer than %{n}, or a count that could be deduced from one that small). A total that included that day could be compared with the daily figures in the export to recover it, so the total is hidden too."
+msgstr "«oculto» significa que, al menos un día de este periodo, llegaron por esa vía demasiado pocos lectores para mostrar el recuento de ese día con seguridad (menos de %{n}, o un recuento que podría deducirse de otro tan pequeño). Un total que incluyera ese día podría compararse con las cifras diarias de la exportación para recuperarlo, así que el total también se oculta."
+
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
 msgid "%B %-d, %Y"
@@ -5286,6 +5291,21 @@ msgstr "¿No puedes completar la comprobación? Pide a un administrador del siti
 
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
+msgid "Can't complete the check? Email yourself a sign-in link instead."
+msgstr "¿No puedes completar la comprobación? Envíate un enlace de inicio de sesión por correo."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Email yourself a sign-in link or use your site's single sign-on."
+msgstr "¿No puedes completar la comprobación? Envíate un enlace de inicio de sesión por correo o usa el inicio de sesión único de tu sitio."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Reload the page and try it again."
+msgstr "¿No puedes completar la comprobación? Vuelve a cargar la página e inténtalo de nuevo."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
 msgid "Can't complete the check? Use a passkey instead."
 msgstr "¿No puedes completar la comprobación? Usa una llave de acceso."
 
@@ -5303,6 +5323,11 @@ msgstr "¿No puedes completar la comprobación? Usa una llave de acceso o el ini
 #, elixir-autogen, elixir-format
 msgid "Can't complete the check? Use a passkey, email yourself a sign-in link, or use your site's single sign-on."
 msgstr "¿No puedes completar la comprobación? Usa una llave de acceso, envíate un enlace de inicio de sesión por correo o usa el inicio de sesión único de tu sitio."
+
+#: lib/kiln_cms_web/components/challenge_components.ex
+#, elixir-autogen, elixir-format
+msgid "Can't complete the check? Use your site's single sign-on instead."
+msgstr "¿No puedes completar la comprobación? Usa el inicio de sesión único de tu sitio."
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -6407,6 +6432,11 @@ msgstr "Confirma que eres tú con tu clave de acceso."
 msgid "Confirm new password"
 msgstr "Confirmar nueva contraseña"
 
+#: lib/kiln_cms/newsletter/changes/send_confirmation_email.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm this address to start receiving the newsletter from %{site}:"
+msgstr "Confirma esta dirección para empezar a recibir el boletín de %{site}:"
+
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Confirm with a code from your authenticator app, or sign in again with your passkey."
@@ -6438,6 +6468,11 @@ msgstr "Confirma primero tu dirección de correo: un administrador no puede apro
 #, elixir-autogen, elixir-format
 msgid "Confirm your subscription"
 msgstr "Confirma tu suscripción"
+
+#: lib/kiln_cms/newsletter/changes/send_confirmation_email.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm your subscription to %{site}"
+msgstr "Confirma tu suscripción a %{site}"
 
 #: lib/kiln_cms_web/live/field_sync_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -7481,11 +7516,6 @@ msgstr "Los recuentos están limitados por tipo de contenido: puede haber más d
 #, elixir-autogen, elixir-format
 msgid "Counts as a conversion"
 msgstr "Cuenta como conversión"
-
-#: lib/kiln_cms_web/live/analytics_live.ex
-#, elixir-autogen, elixir-format
-msgid "Counts below %{n} show as \"< %{n}\" rather than an exact number — a very small count can describe a single visitor's arrival."
-msgstr "Los recuentos por debajo de %{n} se muestran como «< %{n}» en lugar de un número exacto: un recuento muy pequeño puede describir la llegada de un único visitante."
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -12019,6 +12049,11 @@ msgstr "Si la comprobación no carga, puedes enviar este formulario igualmente: 
 msgid "If you copy backups off this host yourself, copy each backup's .sha256 files with it: without them a media backup in parts won't restore, and nothing can check the others. The built-in off-site copy already includes them."
 msgstr "Si copias tú mismo las copias de seguridad fuera de este servidor, copia con cada una sus archivos .sha256: sin ellos, una copia de seguridad de medios en varias partes no se restaura y nada puede comprobar las demás. La copia integrada fuera del servidor ya los incluye."
 
+#: lib/kiln_cms/newsletter/changes/send_confirmation_email.ex
+#, elixir-autogen, elixir-format
+msgid "If you didn't ask for this, ignore this email. The address is not subscribed and won't receive anything unless the link above is clicked."
+msgstr "Si no lo has pedido, ignora este correo. La dirección no está suscrita y no recibirá nada a menos que alguien haga clic en el enlace de arriba."
+
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "If … then …"
@@ -12044,6 +12079,11 @@ msgstr "Estado del servicio de imágenes"
 #, elixir-autogen, elixir-format
 msgid "Image backends"
 msgstr "Servicios de imágenes"
+
+#: lib/kiln_cms/blocks/gallery.ex
+#, elixir-autogen, elixir-format
+msgid "Image gallery"
+msgstr "Galería de imágenes"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #, elixir-autogen, elixir-format
@@ -18474,6 +18514,11 @@ msgstr "Referencia (ticket / id de documento)"
 #, elixir-autogen, elixir-format
 msgid "Referrer breakdown"
 msgstr "Desglose de referentes"
+
+#: lib/kiln_cms_web/live/analytics_live.ex
+#, elixir-autogen, elixir-format
+msgid "Referrer counts cover completed UTC days only, so today's arrivals appear tomorrow."
+msgstr "Los recuentos de procedencia solo abarcan días UTC completos, así que las llegadas de hoy aparecerán mañana."
 
 #: lib/kiln_cms_web/live/analytics_live.ex
 #, elixir-autogen, elixir-format
@@ -24955,6 +25000,11 @@ msgstr "Este bloque fue eliminado. Se conservan el debate y sus tareas."
 #, elixir-autogen, elixir-format
 msgid "This browser can't receive push notifications. On iPhone and iPad they need iOS 16.4 or later and the app added to your home screen."
 msgstr "Este navegador no puede recibir notificaciones push. En iPhone y iPad necesitan iOS 16.4 o posterior y la aplicación añadida a la pantalla de inicio."
+
+#: lib/kiln_cms_web/controllers/two_factor_html.ex
+#, elixir-autogen, elixir-format
+msgid "This browser can't use a passkey. Sign in again from a browser or device that can, or ask an administrator of your site to check your account's sign-in methods."
+msgstr "Este navegador no puede usar una clave de acceso. Vuelve a iniciar sesión desde un navegador o dispositivo que sí pueda, o pide a un administrador de tu sitio que revise los métodos de inicio de sesión de tu cuenta."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format

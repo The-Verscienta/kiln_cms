@@ -468,7 +468,7 @@ defmodule KilnCMSWeb.ContentController do
     |> assign(:robots, "noindex, nofollow")
     |> put_served_locales(teaser.locale)
     |> put_status(:unauthorized)
-    |> assign(:content_locale, teaser.locale)
+    |> assign(:content_locale, content_locale(teaser.locale))
     |> assign(:page_title, teaser.seo_title || teaser.title)
     |> assign(:meta_description, teaser.seo_description)
     |> assign(:og_image, teaser.seo_image)
@@ -543,7 +543,7 @@ defmodule KilnCMSWeb.ContentController do
     |> put_private_delivery_headers()
     |> KilnCMSWeb.Robots.put(teaser)
     |> put_served_locales(teaser.locale)
-    |> assign(:content_locale, teaser.locale)
+    |> assign(:content_locale, content_locale(teaser.locale))
     |> assign(:page_title, teaser.seo_title || teaser.title)
     |> assign(:meta_description, teaser.seo_description)
     |> assign(:og_image, teaser.seo_image)
@@ -1171,7 +1171,7 @@ defmodule KilnCMSWeb.ContentController do
     # which a fallback chain can make differ (`/fr/x` answered by an English
     # record). The templates mark that with `<article lang>`.
     |> assign(:locale, locale(conn))
-    |> assign(:content_locale, record.locale)
+    |> assign(:content_locale, content_locale(record.locale))
     |> assign(:page_title, record.seo_title || record.title)
     |> assign(:meta_description, record.seo_description)
     |> assign(:meta_keywords, record.seo_keywords)
@@ -1692,6 +1692,14 @@ defmodule KilnCMSWeb.ContentController do
     |> put_resp_header("content-language", locale(conn))
     |> put_resp_header("x-kiln-locale", content_locale)
   end
+
+  # The language the article is marked and rendered in: the record's, or the
+  # site's default once that locale is no longer supported (#2597). Gettext
+  # already falls back that way inside `BlockComponents.in_locale/1`, so a raw
+  # `lang` would name a language none of Kiln's words on the page are in.
+  # `x-kiln-locale` keeps the record's own value: it names the stored record,
+  # as the headless APIs do.
+  defp content_locale(record_locale), do: I18n.normalize(record_locale)
 
   # The resolved SEO fields are part of the raw string, not just the record's
   # own timestamps: with a type-level pattern (#805) two responses can differ

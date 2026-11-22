@@ -193,7 +193,9 @@ the same rules as a code:
 - **No Use a passkey button** (and no "You can also use a passkey."). The
   account has no passkey, you are on a site's own host rather than the main or
   console host, or the browser has no passkey support. The code and
-  recovery-code forms still work.
+  recovery-code forms still work. A passkey-only account has neither, so its
+  page says "This browser can't use a passkey…" and points to another
+  browser or device, or to an administrator of your site.
 - **"That passkey couldn't be verified. Try again or use another method."**
   The device prompt was canceled or timed out, or the passkey was refused (it
   belongs to another account, did not check the screen lock, or failed the
@@ -831,7 +833,11 @@ password alone must not sign it in once the deadline has passed:
 
 - **On the main or console host**, a password (or a magic link, or single
   sign-on) stops at `/sign-in/verify`, which says "Confirm it's you with your
-  passkey." and offers **Use a passkey**.
+  passkey." and offers **Use a passkey**. A passkey has no recovery codes, so
+  in a browser that can't use a passkey (or with JavaScript off) the page
+  says instead "This browser can't use a passkey. Sign in again from a
+  browser or device that can, or ask an administrator of your site to check
+  your account's sign-in methods."
 - **On a site's own host**, where a passkey cannot run, the password is
   refused: the sign-in page says "Your account's second factor is a passkey,
   which works at (main host). Sign in there, or add an authenticator app."
