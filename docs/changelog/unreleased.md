@@ -51,6 +51,31 @@ carries the reasoning.
 
 ## Breaking
 
+<a id="customwhere-datetime-wall-clock"></a>
+
+- **GraphQL `customWhere` compares `dateTime` operands as wall clock, and they are typed `NaiveDateTime` (#2678).**
+  A datetime custom field drops a written value's UTC offset and stores the
+  time as written, but GraphQL's `DateTime` scalar converted a filter value
+  to UTC before Kiln saw it, so `eq: "2026-06-01T12:00:00+02:00"` missed a
+  value saved as `12:00:00+02:00`. `DateTimeFilter`'s operands (`eq`,
+  `notEq`, `in`, `gt`, `gte`, `lt`, `lte`) are now `NaiveDateTime`, which
+  drops the offset exactly as writes do; JSON:API and MCP `custom_filter`
+  already did. Before and after:
+
+  ```graphql
+  # before: valid; after: a validation error
+  query ($from: DateTime) { publishedPosts(customWhere: [{name: "starts_at", dateTime: {gte: $from}}]) { results { id } } }
+  # after
+  query ($from: NaiveDateTime) { publishedPosts(customWhere: [{name: "starts_at", dateTime: {gte: $from}}]) { results { id } } }
+  ```
+
+  Inline string literals keep working, an offset-less value is now accepted,
+  and a value with an offset matches the time as written, not the instant.
+  Send the wall-clock time the field was saved with. Kiln's JS and Elixir
+  clients send raw documents and need no change; a client's own queries do.
+  `docs/api/schema.graphql` is regenerated.
+  ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678))
+
 <a id="ws-gql-bearer-scheme-any-case"></a>
 
 - **`/ws/gql` reads an `authorization` connect param under a `Bearer` scheme in any case, so lowercase garbage and a bare `Bearer` are now refused instead of connecting anonymously (#2632).**
@@ -312,6 +337,23 @@ carries the reasoning.
     `site_storages_disabled`, `provenance_key_removed`. No migration. See the
     [upgrade note](#staging-scrub-safety-upgrade).
   ([#2973](https://github.com/The-Verscienta/kiln_cms/issues/2973), [#2974](https://github.com/The-Verscienta/kiln_cms/issues/2974), [#2977](https://github.com/The-Verscienta/kiln_cms/issues/2977))
+
+<a id="custom-filter-datetime-fractions"></a>
+
+- **Datetime custom-field filters find values with fractional seconds (#2678).**
+  A filter operand was cast through Ecto's `:naive_datetime`, which
+  truncates to whole seconds, so `eq` missed a stored `12:00:00.25` (and
+  could match a stored `12:00:00` instead), and `eq` compared one spelling,
+  so `.25` missed a stored `.250`. Operands are now read the way a write
+  reads them, keeping microseconds; `eq`, `not_eq`, `in`, `has`, `has_all`
+  and `has_none` match every spelling a write can store, on single, link
+  and list fields; and range operators bind the spelling that orders right,
+  so they are exact below one second and keep using the range indexes. New
+  limit on every surface: at most 1000 `in` values per `custom_filter` or
+  `customWhere`, counted across groups (`in takes at most 1000 values in
+  all, across every condition and group (got N)`); a large enough request
+  used to hit Postgres' bind-parameter limit. No migration.
+  ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678))
 
 <a id="locale-followups"></a>
 

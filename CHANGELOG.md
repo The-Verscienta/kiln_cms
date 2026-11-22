@@ -82,6 +82,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Breaking
 
+- **GraphQL `customWhere` `dateTime` operands are now `NaiveDateTime` and compare wall clock, as values are stored: a filter's UTC offset is dropped instead of converted, and a variable for them must be declared `NaiveDateTime` (`$t: DateTime` now fails validation; inline literals keep working) (#2678).**
+  ([long form](docs/changelog/unreleased.md#customwhere-datetime-wall-clock))
+
 - **`/ws/gql` reads an `authorization` connect param under `Bearer` in any case: a lowercase valid JWT connects as its user, and lowercase garbage or a bare `Bearer` is refused (`403`) instead of connecting anonymously (#2632).**
   ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#ws-gql-bearer-scheme-any-case))
 
@@ -128,6 +131,9 @@ Every summary line below that was shortened links to its own entry there.
 
 - **The staging scrub removes production's S3 storage credentials (existing media still loads from production's public URLs; new uploads go to staging's own storage) and its content-signing key (staging generates its own), and `staging.sh`/`mix kiln.staging.scrub` can no longer migrate or scrub the wrong database (#2973, #2974, #2977).**
   ([long form](docs/changelog/unreleased.md#staging-scrub-safety))
+
+- **Datetime custom-field filters (JSON:API, GraphQL, MCP; single, link and list fields) match stored values with fractional seconds under any spelling and compare ranges below one second; `in` takes at most 1000 values per request (#2678).**
+  ([long form](docs/changelog/unreleased.md#custom-filter-datetime-fractions))
 
 - **A newsletter confirmation email, its link and the confirm page are in the language the reader signed up in, and a record whose locale is no longer configured gets the site default in its `lang` and `og:locale` (#2597).**
   ([long form](docs/changelog/unreleased.md#locale-followups))

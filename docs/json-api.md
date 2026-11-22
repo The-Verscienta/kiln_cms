@@ -277,7 +277,20 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
 - Values are cast to the field's declared type and compared **as jsonb**, so
   an `integer`/`float` field compares numerically (`9 < 10`), `boolean` as a
   boolean, and `date`/`datetime` (ISO-8601 strings) chronologically.
+- **A `datetime` operand is a wall-clock time, compared as written.** A save
+  stores the time without its UTC offset, and a filter drops the operand's
+  offset the same way: `custom_filter[starts_at]=2026-06-01T12:00:00+02:00`
+  finds a value saved as `2026-06-01T12:00:00`, not one saved as
+  `…T10:00:00Z`. The operand takes any shape a save takes, the
+  `2026-06-01T12:00` of an HTML `datetime-local` input included. Fractional
+  seconds are kept: `eq`, `not_eq` and each item of `in` match a value however
+  many digits it was saved with (`.25`, `.250`, `.250000`, and `12:00:00`
+  as `12:00:00.000`), on a single field, a link field and each item of a list,
+  and the range operators compare at microsecond precision.
 - `in` matches any of a list: `custom_filter[color][in][]=red&custom_filter[color][in][]=blue`.
+  One `custom_filter` takes at most 1000 `in` values in all, across every
+  field and group; more is a `400` (`in takes at most 1000 values in all,
+  across every condition and group (got 1200)`).
 - **Equality operands also match the value as a save stores it.** A save
   tidies some types: it trims a string or URL, stores a select option's
   value when given its label, and gives an email, color, telephone, time or

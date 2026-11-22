@@ -177,11 +177,61 @@ defmodule KilnCMSWeb.GraphqlCustomWhereTest do
       assert ids!(t.(%{"eq" => "2026-06-01T10:00:00Z"})) == sorted([p])
       assert ids!(t.(%{"gt" => "2026-06-01T10:00:00Z"})) == sorted([l])
       assert ids!(t.(%{"lte" => "2026-06-01T10:00:00Z"})) == sorted([a, p])
-      # An offset is an instant: 12:00+02:00 is 10:00Z.
-      assert ids!(t.(%{"eq" => "2026-06-01T12:00:00+02:00"})) == sorted([p])
+      # Wall clock (#2678): an offset is ignored, as the write ignored it, so
+      # 10:00+02:00 is the stored 10:00 and 12:00+02:00 is not.
+      assert ids!(t.(%{"eq" => "2026-06-01T10:00:00+02:00"})) == sorted([p])
+      assert ids!(t.(%{"eq" => "2026-06-01T12:00:00+02:00"})) == []
+      assert ids!(t.(%{"gt" => "2026-06-01T10:00:00-05:00"})) == sorted([l])
+      # No offset at all is a time as written, too.
+      assert ids!(t.(%{"eq" => "2026-06-01T10:00:00"})) == sorted([p])
 
       assert ids!(t.(%{"in" => ["2026-01-01T10:00:00Z", "2026-12-01T10:00:00Z"]})) ==
                sorted([a, l])
+    end
+
+    test "a dateTime operand variable is a NaiveDateTime", %{pear: p} do
+      query = fn type ->
+        """
+        query ($t: #{type}) {
+          publishedPosts(limit: 100, customWhere: [{name: "at", dateTime: {eq: $t}}]) {
+            results { id }
+          }
+        }
+        """
+      end
+
+      assert {:ok, %{data: data} = result} =
+               run(%{"t" => "2026-06-01T10:00:00"}, nil, query.("NaiveDateTime"))
+
+      refute Map.has_key?(result, :errors)
+      assert Enum.map(data["publishedPosts"]["results"], & &1["id"]) == [p.id]
+
+      assert {:ok, %{errors: [_ | _]}} =
+               run(%{"t" => "2026-06-01T10:00:00Z"}, nil, query.("DateTime"))
+    end
+
+    # #2678: the operand kept its fractional seconds, and every spelling a
+    # write could have stored is matched.
+    test "dateTime with fractional seconds", %{admin: admin, pear: p, plum: l} do
+      post = fn at ->
+        %{title: "Post", slug: slug(), custom_fields: %{"at" => at}}
+        |> CMS.create_post!(actor: admin)
+        |> then(&CMS.publish_post!(&1, %{}, actor: admin))
+      end
+
+      short = post.("2026-06-01T10:00:00.25")
+      full = post.("2026-06-01T10:00:00.250000")
+      t = fn op -> [%{"name" => "at", "dateTime" => op}] end
+
+      assert ids!(t.(%{"eq" => "2026-06-01T10:00:00.250Z"})) == sorted([short, full])
+      assert ids!(t.(%{"notEq" => "2026-06-01T10:00:00.25Z"})) |> Enum.member?(short.id) == false
+      assert ids!(t.(%{"gt" => "2026-06-01T10:00:00.25Z"})) == sorted([l])
+      assert ids!(t.(%{"gte" => "2026-06-01T10:00:00.25Z"})) == sorted([short, full, l])
+
+      assert ids!(t.(%{"gt" => "2026-06-01T10:00:00Z", "lt" => "2026-12-01T10:00:00Z"})) ==
+               sorted([short, full])
+
+      assert ids!(t.(%{"lte" => "2026-06-01T10:00:00Z"})) |> Enum.member?(p.id)
     end
 
     test "conditions are ANDed, also on one field", %{pear: p, plum: l} do

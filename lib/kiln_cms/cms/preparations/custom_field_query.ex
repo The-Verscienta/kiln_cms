@@ -49,6 +49,15 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   operand as sent. An operand of a shape no operator takes — an object, or a
   list beside anything but `in` — is a 400 (#2739).
 
+  A `datetime` operand is a wall-clock time (#2678): read as a write reads it
+  (`DateTimes.cast/1`), so its UTC offset is dropped, in `custom_filter` and
+  in `custom_where` alike, and its fractional seconds are kept. `eq`,
+  `not_eq` and `in` match every spelling a write could have stored for it
+  (`.25`, `.250`, …), and the range operators compare against the one
+  spelling that orders them all (`DateTimes.bound/2`). One `custom_filter`,
+  and one `custom_where`, takes at most 1000 `in` values in
+  all, across its fields and groups.
+
   On the shared entry tier the definitions in scope depend on the dynamic
   type, which we recover from the query's own `type_definition_id`/`type_name`
   equality filter; unscoped queries fall back to *all* dynamic-type fields and
@@ -121,6 +130,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   alias Ash.Error.Query.InvalidArgument
   alias KilnCMS.CMS.FieldValue
   alias KilnCMS.CMS.IndexedCustomFields
+  alias KilnCMS.CMS.Preparations.CustomFieldQuery.DateTimes
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.Lists
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.Relations
   alias KilnCMS.CMS.ScalarLists
@@ -136,6 +146,12 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   @max_group_depth 4
   @max_group_members 50
   @group_keys ~w(_or _and _not)
+
+  # The `in` values one `custom_filter` or `custom_where` holds in all, across
+  # its fields and groups (#2678). A date-time value is compared under up to
+  # seven spellings, a list item under two containments each, so this keeps
+  # the expanded predicate well inside Postgres' 65535 bind parameters.
+  @max_in_values 1000
 
   # A built-in column in a `custom_sort` (#2356): `_native:title`, `-_native:title`.
   @native_sort_prefix "_native:"
@@ -333,6 +349,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   defp apply_filter(query, filter, defs, ctx) when is_map(filter) do
     with :ok <- check_groups(filter),
+         :ok <- check_in_values(filter_in_values(filter)),
          {:ok, exprs} <- filter_exprs(filter, defs, ctx) do
       Enum.reduce(exprs, query, &Ash.Query.do_filter(&2, &1))
     else
@@ -483,6 +500,46 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   defp member_list(list) when is_list(list), do: list
   defp member_list(map) when is_map(map), do: Map.values(map)
   defp member_list(_other), do: []
+
+  # The `in` values of a whole `custom_filter` or `custom_where`, groups
+  # included, are capped together (#2678): an MCP or JSON body is unbounded.
+  defp check_in_values(count) when count > @max_in_values,
+    do:
+      {:error,
+       "in takes at most #{@max_in_values} values in all, across every condition and " <>
+         "group (got #{count})"}
+
+  defp check_in_values(_count), do: :ok
+
+  defp filter_in_values(map) when is_map(map) and not is_struct(map) do
+    Enum.reduce(map, 0, fn {key, value}, acc ->
+      acc +
+        case to_string(key) do
+          group when group in ~w(_or _and) ->
+            value |> member_list() |> Enum.map(&filter_in_values/1) |> Enum.sum()
+
+          "_not" ->
+            filter_in_values(value)
+
+          "_native" ->
+            0
+
+          _field ->
+            operand_in_values(value)
+        end
+    end)
+  end
+
+  defp filter_in_values(_other), do: 0
+
+  # The `in` operand among one field's operators (or one `customWhere` kind's).
+  defp operand_in_values(condition) when is_map(condition) and not is_struct(condition) do
+    Enum.reduce(condition, 0, fn {op, value}, acc ->
+      if to_string(op) == "in", do: acc + length(List.wrap(value)), else: acc
+    end)
+  end
+
+  defp operand_in_values(_condition), do: 0
 
   # A custom field wins a name it shares with a built-in relationship, so a
   # site's existing `custom_filter[tags]` keeps its meaning; otherwise
@@ -688,7 +745,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   defp link_condition(%{name: name} = link, op, raw, label) do
     with {:ok, value} <- cast_value(raw, ash_type(link), label) do
-      {:ok, jsonb_condition(:metadata, op, name, value)}
+      {:ok, jsonb_condition(:metadata, op, name, range_operand(link, op, value))}
     end
   end
 
@@ -843,9 +900,17 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # the order.
   defp condition(%{name: name} = definition, op, raw) do
     with {:ok, value} <- cast_value(raw, ash_type(definition), name) do
+      value = range_operand(definition, op, value)
       {:ok, jsonb_condition(:custom_fields, op, name, value, Map.get(definition, :index_table))}
     end
   end
+
+  # A date-time's range operand is the one stored spelling that orders every
+  # other spelling correctly (#2678, `DateTimes.bound/2`).
+  defp range_operand(%{field_type: :datetime}, op, %NaiveDateTime{} = value),
+    do: DateTimes.bound(op, value)
+
+  defp range_operand(_definition, _op, value), do: value
 
   # --- equality operands (#2677) -------------------------------------------------
 
@@ -865,7 +930,11 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # now a color) is still found by its own spelling — and, where it differs,
   # as a write would have stored it (`FieldValue.canonical/2`): `#FFF` finds a
   # stored `#ffffff`, a select's label its option's value. `values` are the
-  # cast operands of `raws`, item for item.
+  # cast operands of `raws`, item for item. A date-time matches every text a
+  # write could have stored for it (#2678, `DateTimes.spellings/1`).
+  defp equal_values(values, _raws, %{field_type: :datetime}),
+    do: values |> Enum.flat_map(&DateTimes.spellings/1) |> Enum.uniq()
+
   defp equal_values(values, raws, definition) do
     values
     |> Enum.zip(List.wrap(raws))
@@ -1033,6 +1102,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
     with :ok <- check_where_size(where, max),
          :ok <- check_group_stats(where_stats(where)),
+         :ok <- check_in_values(where_in_values(where)),
          {:ok, exprs} <- where_exprs(where, defs, ctx) do
       Enum.reduce(exprs, query, &Ash.Query.do_filter(&2, &1))
     else
@@ -1137,6 +1207,26 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   end
 
   defp group_stat(_key, _value), do: {0, 0}
+
+  # The `in` values of a `customWhere` list, counted under `custom_filter`'s cap.
+  defp where_in_values(nodes) when is_list(nodes),
+    do: nodes |> Enum.map(&node_in_values/1) |> Enum.sum()
+
+  defp where_in_values(_nodes), do: 0
+
+  defp node_in_values(node) when is_map(node) do
+    Enum.reduce(node, 0, fn {key, value}, acc ->
+      acc +
+        case to_string(key) do
+          group when group in ~w(_or _and) -> value |> member_list() |> where_in_values()
+          "_not" -> node_in_values(value)
+          "name" -> 0
+          _kind -> operand_in_values(value)
+        end
+    end)
+  end
+
+  defp node_in_values(_node), do: 0
 
   # The same `resolve/2` as `custom_filter`, over the same already
   # privacy-filtered `defs`: a missing and a private field answer alike.
@@ -1294,12 +1384,9 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     end
   end
 
-  # A datetime operand is an instant; custom datetimes are stored offset-less.
+  # A date-time operand is cast as `custom_filter`'s are (`DateTimes.cast/1`):
+  # its offset is dropped, as a write drops it (#2678).
   defp operand(values) when is_list(values), do: Enum.map(values, &operand/1)
-
-  defp operand(%DateTime{} = datetime),
-    do: datetime |> DateTime.shift_zone!("Etc/UTC") |> DateTime.to_naive()
-
   defp operand(value), do: value
 
   # --- sorting -----------------------------------------------------------------
@@ -1449,6 +1536,19 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       {:ok, to_string(raw)}
     else
       {:error, "invalid value for custom field #{inspect(name)}"}
+    end
+  end
+
+  # A date-time is read as a write reads it (#2678): the offset dropped, the
+  # fractional seconds kept. Ecto's `:naive_datetime` cast truncates them.
+  def cast_value(raw, :naive_datetime, name) do
+    case DateTimes.cast(raw) do
+      {:ok, value} ->
+        {:ok, value}
+
+      :error ->
+        {:error,
+         "invalid naive_datetime value for custom field #{inspect(name)}: #{inspect(raw)}"}
     end
   end
 
