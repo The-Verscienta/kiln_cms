@@ -56,6 +56,8 @@ else.
 
 ## [Unreleased]
 
+What's new, with examples and migration steps: [docs/whats-new/v1.12.md](docs/whats-new/v1.12.md).
+
 Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
@@ -92,6 +94,12 @@ Every summary line below that was shortened links to its own entry there.
 
 - **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check; check those on hex.pm by hand.**
   ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/unreleased.md#plugin-health-tail-packages-unknown))
+- **A site storage profile on a region ExAws doesn't know (Backblaze B2 `us-west-004`, Wasabi `us-central-1`) fails on every upload and read; keep such sites on the instance's storage until the fix.**
+  ([#3085](https://github.com/The-Verscienta/kiln_cms/issues/3085) · [long form](docs/changelog/unreleased.md#site-storage-unknown-region))
+- **Comping a member whose provider subscription is still active doesn't cancel it: the provider keeps charging, and its later events are ignored. Cancel the subscription at the provider before comping.**
+  ([#3156](https://github.com/The-Verscienta/kiln_cms/issues/3156) · [long form](docs/changelog/unreleased.md#comp-keeps-provider-subscription))
+- **A page opened at its path alias shows no reference byline and leaves inherited (`:fallback`) fields blank, though the same page at its slug shows both; link to the slug where that matters.**
+  ([#3193](https://github.com/The-Verscienta/kiln_cms/issues/3193) · [long form](docs/changelog/unreleased.md#alias-page-bylines-fallback))
 
 ### Added
 

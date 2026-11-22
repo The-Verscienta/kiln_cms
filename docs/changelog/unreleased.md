@@ -111,6 +111,24 @@ carries the reasoning.
   A plugin check now stops at 75 seconds and does not ask about packages it hasn't reached ([plugin check single-flight](#plugin-check-single-flight)). Packages are asked in a fixed order, so the ones at the end are the ones left out each round, while the rest are re-checked every 15 minutes. Affects platform administrators reading System or Security posture on a deployment with enough Hex plugins that a round doesn't finish in time (roughly 13 or more at hex.pm's slowest). Workaround: none needed for the plugins that answered; for the rest, check the package on hex.pm by hand until hex.pm answers in time. Unknown is never shown as OK.
   ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165))
 
+<a id="site-storage-unknown-region"></a>
+
+- **A site storage profile on a region ExAws doesn't know fails on every upload and read.**
+  The profile's client config starts from ExAws's per-region S3 defaults, which raise for a region outside ExAws's AWS list, such as Backblaze B2's `us-west-004` or Wasabi's `us-central-1`. Affects site admins and platform administrators who point a site's storage profile at such a provider. Workaround: leave that site on the instance's storage until the fix. Backup destinations on these providers are not affected either: they build their config another way.
+  ([#3085](https://github.com/The-Verscienta/kiln_cms/issues/3085))
+
+<a id="comp-keeps-provider-subscription"></a>
+
+- **Comping a member whose provider subscription is still active doesn't cancel it.**
+  `:comp` sets the membership to `comped` over an `active` or `past_due` row and leaves the provider subscription running, so the member keeps being charged. Since this release a `comped` row ignores every provider event ([webhook ordering and identity](#webhook-ordering-identity)), so a later cancel or failed payment doesn't reach it either. Affects site admins who comp a paying member. Workaround: cancel the subscription in the provider's dashboard first, then comp the member.
+  ([#3156](https://github.com/The-Verscienta/kiln_cms/issues/3156))
+
+<a id="alias-page-bylines-fallback"></a>
+
+- **A page opened at its path alias shows no reference byline and leaves inherited fields blank.**
+  The alias route builds its own page data instead of the one the slug route uses, so it has no bylines and doesn't fill fields set to inherit their value from the default locale (`:fallback`). The same page at its slug shows both. Affects readers of pages that have a `path_alias` and use reference bylines or `:fallback` fields. Workaround: link to the slug where the byline or inherited fields matter.
+  ([#3193](https://github.com/The-Verscienta/kiln_cms/issues/3193))
+
 ## Added
 
 <a id="embedded-form-locale"></a>
