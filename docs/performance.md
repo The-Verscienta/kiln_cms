@@ -290,6 +290,10 @@ Durations are histograms in milliseconds, so a p95 is
 - `kiln_cms.repo.query.queue_time` — DB pool pressure (pool-size signal)
 - `oban.job.stop.duration` / `oban.job.exception.count` (tags `queue`, `worker`) — queue
   throughput, latency, and failures (alert on queue backlog)
+- `kiln_cms.search.budget.cut.returned` / `kiln_cms.search.budget.cut.killed` — search
+  sections that stopped on their own inside `cut_grace` after the query budget's
+  deadline, and those killed after it; a steady `killed` rate means reconnects
+  ([Search and the pool](#search-and-the-pool))
 
 ## Running a basic load check
 

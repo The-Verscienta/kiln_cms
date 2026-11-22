@@ -370,7 +370,9 @@ More event names exist outside the `<type>.<verb>` pattern:
 - **`task.assigned`** / **`task.overdue`**, **`release.published`** /
   **`release.rolled_back`** / **`release.failed`**, and
   **`experiment.concluded`** — editorial tasks, content releases and A/B
-  experiments; opt in.
+  experiments; opt in. `experiment.concluded` is sent once per experiment: a
+  second **Conclude** (another tab, or `mix kiln.experiment conclude` on an
+  experiment the console already concluded) is refused and sends nothing.
 - **`tag.created`** / **`tag.updated`** / **`tag.deleted`**, the same three for
   **`tag_group`**, and the same three for **`category`** — taxonomy changes
   ([#1965](https://github.com/The-Verscienta/kiln_cms/issues/1965)); opt in. A

@@ -524,7 +524,16 @@ member's row on Team afterwards if you want it. Invitations to a site other
 than the default one already carried the legacy tier first. An admin's own
 **Add or invite** is different: the tier you pick in the dropdown is a
 deliberate choice and is written as picked, even below the account's legacy
-role (step 3 of [Invite someone](#invite-someone-to-a-site)).
+role (step 3 of [Invite someone](#invite-someone-to-a-site)). Whether it
+should be is still open as
+[#3178](https://github.com/The-Verscienta/kiln_cms/issues/3178). Approving a
+default-site registration that the site's own single sign-on queued for such an
+account may lower it too (**Approve** on **Registrations** lets it in as a
+viewer); that is not confirmed yet
+([#3179](https://github.com/The-Verscienta/kiln_cms/issues/3179)), so check
+its tier on Team after approving and raise it with **Edit** if it dropped. The
+custom role dropped from a lower-tier invitation is
+[#3180](https://github.com/The-Verscienta/kiln_cms/issues/3180).
 
 The comparison is with the member's **standing** tier. A
 [temporary role](#temporary-roles) above it is not counted, because it

@@ -189,10 +189,13 @@ lands before the claim is published with the release.
 The four refusals an add can hit (*release is no longer open for changes*,
 *release was not found*, *release is full (N items); ship or split it* and
 *release size could not be checked*) are translated in the content editor, in
-the editor's own language (English, Spanish, French). The JSON:API, GraphQL, MCP
-and the release worker have no viewer language and use the process's default
-locale, so their error text stays English. Match on the field (`release_id`),
-not on the wording.
+the editor's own language (English, Spanish, French). The JSON:API, GraphQL and
+MCP answer in the request's locale, like any other request: the
+`default_locale` of `config :kiln_cms, :i18n` (English out of the box), unless
+the path starts with one of the configured `locales` (`/fr/api/json/…`) or the
+request carries a session cookie whose language switcher chose another. The
+release worker always uses English. Match on the field (`release_id`), not on
+the wording.
 
 ## What "atomic" means here
 

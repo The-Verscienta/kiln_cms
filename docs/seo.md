@@ -511,7 +511,7 @@ clears it along with the rest of the branding.
 A headless front end that renders its own pages reads the same username, the
 Default social image and the site name from `GET /api/site`, so its cards match
 these
-([headless consumer guide](headless-consumer-guide.md#link-previews-the-social-object)).
+([Add the site-level tags](headless-consumer-guide.md#add-the-site-level-tags)).
 
 What can go wrong:
 

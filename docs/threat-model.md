@@ -467,6 +467,14 @@ build if a resource is ever registered without that authorizer.
   (401 without one). The tool allowlist is compile-time and deliberately omits
   publish and destroy, so an LLM client can author and submit for review but
   cannot publish or delete.
+- **Links that skip review** — accepted, bounded (#3191). `create_content_link`
+  and `update_content_link` write payload links, which are not part of their
+  source's document: a link on a published record shows at once, with no
+  version and no review, so a write key can change what a published page links
+  to. The bound is the payload-link route's: the write is authorized as an
+  edit of the source, `kind: reference` is refused (it mirrors a reference
+  field), a link is read only when the key may read both ends, and there is no
+  delete tool.
 
 ### Headless sign-in (`POST /api/auth/sign_in`)
 - **Credential stuffing / brute force** — mitigated on two axes: the per-IP

@@ -56,6 +56,8 @@ else.
 
 ## [Unreleased]
 
+What's new, with examples and migration steps: [docs/whats-new/v1.12.md](docs/whats-new/v1.12.md).
+
 Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
 the Unreleased entries as they were written when each change merged.
 Every summary line below that was shortened links to its own entry there.
@@ -92,6 +94,12 @@ Every summary line below that was shortened links to its own entry there.
 
 - **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check; check those on hex.pm by hand.**
   ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/unreleased.md#plugin-health-tail-packages-unknown))
+- **A site storage profile on a region ExAws doesn't know (Backblaze B2 `us-west-004`, Wasabi `us-central-1`) fails on every upload and read; keep such sites on the instance's storage until the fix.**
+  ([#3085](https://github.com/The-Verscienta/kiln_cms/issues/3085) · [long form](docs/changelog/unreleased.md#site-storage-unknown-region))
+- **Comping a member whose provider subscription is still active doesn't cancel it: the provider keeps charging, and its later events are ignored. Cancel the subscription at the provider before comping.**
+  ([#3156](https://github.com/The-Verscienta/kiln_cms/issues/3156) · [long form](docs/changelog/unreleased.md#comp-keeps-provider-subscription))
+- **A page opened at its path alias shows no reference byline and leaves inherited (`:fallback`) fields blank, though the same page at its slug shows both; link to the slug where that matters.**
+  ([#3193](https://github.com/The-Verscienta/kiln_cms/issues/3193) · [long form](docs/changelog/unreleased.md#alias-page-bylines-fallback))
 
 ### Added
 
@@ -159,7 +167,7 @@ Every summary line below that was shortened links to its own entry there.
 - **Federation: a publish sends one signed POST per remote inbox (a `sharedInbox` reaches all its followers) instead of one per follower, settled against every follower there; the fan-out is one transaction, so a retry no longer re-sends to inboxes already queued.**
   ([#3195](https://github.com/The-Verscienta/kiln_cms/pull/3195) · [long form](docs/changelog/unreleased.md#federation-shared-inbox-dedup))
 
-- **The release refusals ("release is no longer open for changes", "release is full", and two more) are translated in the content editor (es, fr; API callers still get English), and an admin's "Release a stuck claim" that wins against a running go-live or rollback now logs at info instead of error. `Releases.publish/1` and `roll_back/1` can return `{:error, :abandoned}`.**
+- **The release refusals ("release is no longer open for changes", "release is full", and two more) are translated in the content editor (es, fr; API answers use the request's locale, from a path prefix or the configured default), and an admin's "Release a stuck claim" that wins against a running go-live or rollback now logs at info instead of error. `Releases.publish/1` and `roll_back/1` can return `{:error, :abandoned}`.**
   ([long form](docs/changelog/unreleased.md#release-refusal-text-abandon-log))
 
 - **A valid `bearer`/`BEARER <jwt>` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing [1.9.0's `401`](docs/changelog/v1.9.0.md#bearer-401-hardening); `/mcp` and `POST /api/keys/rotate` take a `kiln_` key under any case or in a later `Authorization` value, and `/metrics` its token under any case (#2632).**
@@ -171,7 +179,7 @@ Every summary line below that was shortened links to its own entry there.
 - **Accepting an invitation to the default site at a lower tier no longer demotes an account with no membership but a legacy editor or admin role: its tier is carried into a membership first and the accept reports it already a member. An admin's own Add is unchanged.**
   ([long form](docs/changelog/unreleased.md#invitation-keeps-legacy-tier))
 
-- **Billing webhooks: an event older than the last one applied, about a different subscription than the membership holds, or for a `comped` membership is now ignored (with a reason in `/editor/billing`) instead of overwriting it; new nullable column `last_provider_event_at`, rollback-safe.**
+- **Billing webhooks: an event older than the last one applied, about a different subscription than the membership holds, or for a `comped` membership is now ignored (with the reason stored on its `billing_webhook_events` row) instead of overwriting it; new nullable column `last_provider_event_at`, rollback-safe.**
   ([long form](docs/changelog/unreleased.md#webhook-ordering-identity))
 
 - **Backups History: on a host where both cron and the app back up, an imported row no longer reads "probably expired" just because the app wrote the latest manifest; it reads "expired" only when a later cron prune, by its own keep days, would have removed it.**

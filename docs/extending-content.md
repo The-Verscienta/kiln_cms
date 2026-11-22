@@ -705,8 +705,8 @@ fills it in.
      (`#ff8800`).
    - For a plugin's type, each item is the type's own input (a number box
      with its bounds, say). It adds like a number, by Enter with one item
-     per pasted line, unless the input is a date, time, color, month or
-     week picker, which adds like a date.
+     per pasted line, unless the input is a date, date-time, time, color,
+     month or week picker, which adds like a date.
 
    Each item appears as its own input, with a count above the list. Edit an
    item in place, remove it with ×, or drag it by its handle to reorder. At
@@ -3066,15 +3066,18 @@ The rules a list of a plugin type follows:
   `json_schema/1` in an array, taking `null` out of the item, and serves a
   `ListValue` of the `graphql_kind/1` kind. With no `graphql_kind/1` the
   items are `JsonValue`s, and GraphQL's `customWhere` refuses the field
-  (`customWhere does not support a list of json values; use customFilter`).
-- **Filtering** takes the list operators (`eq`, `in`, `has`, `has_all`,
-  `has_none`, `count`, `null`), each operand passed through `cast/2`, so
-  `custom_filter[tags]=RED` finds `red`. Comparing items and sorting are
-  refused, as on any list ([Lists of values](json-api.md#lists-of-values)).
+  (`custom field "scores": customWhere does not support a list of json
+  values; use customFilter`).
+- **Filtering** takes the list operators (`eq`, `not_eq`, `in`, `has`,
+  `has_all`, `has_none`, `count`, `null`), each operand passed through
+  `cast/2`, so `custom_filter[tags]=RED` finds `red`. Comparing items and
+  sorting are refused, as on any list
+  ([Lists of values](json-api.md#lists-of-values)).
 - **The editor** doesn't attach `input_hook/1` to a list field's item
   inputs, and doesn't offer the type's `widgets/1`: the list input is
-  Kiln's own. A date, time, color, month or week `input_type/0` adds an item
-  by Enter or **Add** and doesn't split pasted lines.
+  Kiln's own. A `date`, `datetime-local`, `time`, `color`, `month` or `week`
+  `input_type/0` adds an item by Enter or **Add** and doesn't split pasted
+  lines.
 - **The content list** doesn't offer a plugin type's field under
   **Columns**, list or not.
 - **A single field of the type** sent a list keeps its first non-blank item,
@@ -3098,7 +3101,7 @@ update that asks for `multiple: true` on one is cleared.
 | `item 2 must be at most 40 characters` | Your `cast/2` refused the second item, counting from 1; the rest of the message is yours. |
 | `must be a list of values (got …)` | An item sent was an object, a boolean or a list. |
 | `custom field "tags" (a list) is not sortable` | A `custom_sort` named a list field. |
-| `customWhere does not support a list of json values; use customFilter` | The type has no `graphql_kind/1`. Filter the list with `customFilter`. |
+| `custom field "scores": customWhere does not support a list of json values; use customFilter` | The type has no `graphql_kind/1`. Filter the list with `customFilter`. |
 
 ## 6. Nested layout: columns (#335)
 

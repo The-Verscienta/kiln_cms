@@ -133,8 +133,17 @@ policies or web layer is an overlay.
    the security notices feed, and with the `kiln_plugin` this core bundles
    (does the plugin's requirement accept it). The Security posture page summarizes it
    as an Installed plugins line (#2244). **Check plugins now** re-asks
-   instead of waiting for the cache. `mix kiln.plugins.list --health` does
-   the same from the command line. There is no registry behind it: hex.pm
+   instead of waiting for the cache, at most once a minute. System, Security
+   posture and **Check plugins now** share one check per server: a page
+   opened while one runs waits for it (up to 90 seconds) instead of asking
+   hex.pm again, and closing the page doesn't stop it. A check stops at 75
+   seconds; a plugin it didn't reach by then reads Unknown, and what it got
+   is cached for 15 minutes (#2565). With many Hex plugins and a slow
+   hex.pm, the same plugins at the end of the list can read Unknown on every
+   check; check those on hex.pm by hand
+   ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165)).
+   `mix kiln.plugins.list --health` runs the same check from the command
+   line, on its own. There is no registry behind it: hex.pm
    and kilncms.dev's notices are the sources. An unreachable source makes a
    plugin unknown, never OK, and git and path plugins can't be checked
    against Hex. Asking hex.pm tells it the plugin's package name and
@@ -514,9 +523,11 @@ as declaring none.
 In-app backups copy their files to `BACKUP_DIR`, to `BACKUP_RCLONE_REMOTE`,
 and to every destination a platform admin adds on the Backups page's
 **Destinations** tab ([Send backups to several destinations](backups.md#send-backups-to-several-destinations)).
-Kiln's own kinds are a directory on the server, a named rclone remote and
-an S3-compatible bucket
-([Back up to S3-compatible storage](backups.md#back-up-to-s3-compatible-storage)). A
+Kiln's own kinds are a directory on the server, a named rclone remote, an
+S3-compatible bucket
+([Back up to S3-compatible storage](backups.md#back-up-to-s3-compatible-storage))
+and an SFTP server
+([Back up to an SFTP server](backups.md#back-up-to-an-sftp-server)). A
 plugin adds another store from its entry module, with
 `backup_destinations/0` (`kiln_plugin` 1.5; require
 `{:kiln_plugin, "~> 1.5"}`). It works from a Mix dependency: the contract,
@@ -584,16 +595,22 @@ What the core holds an adapter to:
 - **Error text is shown to the admin**, after the core removes the
   destination's secret values from it. That is a backstop: never put a
   secret in an error, a log line or `describe/1`.
-- **Retention runs only when `supports/0` lists `:list` and `:delete`**, and
-  deletes only files Kiln recorded sending to that destination
-  ([ADR 0064](decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md)).
-  `use Kiln.BackupDestination` defaults it to `[]`. Kiln can't tell where a
-  plugin's destination writes, so it can't check that it doesn't overlap
-  `BACKUP_RCLONE_REMOTE`: while that is set, retention on a plugin's
-  destination is skipped.
+- **Retention runs only when `supports/0` lists `:list` and `:delete`**
+  (`use Kiln.BackupDestination` defaults it to `[]`), and deletes only files
+  that an in-app backup of this server's backup directory (its
+  `.kiln-dir-id`), or of a directory a platform admin adopted for the
+  destination, recorded sending there
+  ([Adopt another backup directory](backups.md#adopt-another-backup-directory),
+  [ADR 0064](decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md)).
+  So `delete/2` is never handed a file another installation sharing the
+  store sent there. Kiln can't tell where a plugin's destination writes, so
+  it can't check that it doesn't overlap `BACKUP_RCLONE_REMOTE`: while that
+  is set, retention on a plugin's destination is skipped.
 - **`kind/0` is stored on every destination of the adapter**, so it never
   changes once released: lowercase letters, digits and `_`, at most 32
-  characters. `local`, `rclone` and `s3` are Kiln's, and of two modules declaring
+  characters. `local`, `rclone`, `s3` and `sftp` are Kiln's (`sftp` since
+  KilnCMS 1.12: rows a plugin saved under that kind are read by Kiln's own
+  adapter from then on, and must be added again), and of two modules declaring
   one kind the first registered wins. `mix kiln.plugins.doctor` reports a
   module that doesn't implement the behaviour, an unusable kind, and a kind
   that is taken; `mix kiln.plugins.list` counts each plugin's backup

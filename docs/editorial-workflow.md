@@ -56,7 +56,9 @@ review**.
 ## 1. Write a draft
 
 Open **Content**, choose **New**, then **New page** (or the type you need). The draft
-saves as you type.
+saves as you type. The menu lists only the types you may create on the site you
+are working in; if your admin limited you to some content types there, the rest
+are left out ([Granular RBAC](granular-rbac.md)).
 
 ![The content list as an editor sees it: the views above the list, and a draft row offering Submit for review.](images/editorial-workflow/1-content-list.webp)
 

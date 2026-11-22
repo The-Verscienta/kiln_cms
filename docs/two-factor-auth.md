@@ -868,8 +868,8 @@ grace period stops working at the deadline:
   `"second_factor": {"required": true, "deadline": "…"}`. An account with an
   authenticator app still gets the `200 two_factor_required` step.
 - `/api/*` (JSON:API, media, the content and posture routes), `/gql` and
-  `/api/feed` answer a held account's JWT `403` `second_factor_required`, on
-  public reads too: the token is no longer good, and the answer says so
+  `/api/feed` answer a held account's JWT `403` `second_factor_required`
+  under a `Bearer` scheme in any case (#2632), on public reads too: the token is no longer good, and the answer says so
   rather than serving the request as anonymous. Drop the header to read
   public content.
 - `/ws/gql` refuses the connect (the handshake answers `403`), closes a

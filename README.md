@@ -517,6 +517,20 @@ uploads that resume and a Re-send for a backup that reached only some
 notice and an email to a site's admins when one of its webhooks stops getting through
 ([`docs/webhooks.md`](docs/webhooks.md#failure-alerts)).
 
+Since 1.12, also: in-app backups sent to any SSH server over SFTP, with a password or
+a key and a host key a platform admin confirms first
+([`docs/backups.md`](docs/backups.md#back-up-to-an-sftp-server)); plugin field types
+that hold lists, like the built-in ones
+([`docs/extending-content.md`](docs/extending-content.md#let-a-plugin-field-type-take-a-list));
+`GET /api/site`, the site's name, X handle and default share image for a headless
+front end's link previews ([`docs/api.md`](docs/api.md#site-defaults)); tools on `/mcp`
+to read, create and update links between records ([`docs/mcp.md`](docs/mcp.md#tools));
+and `GET /api/security/plugin-health`, each installed plugin's health as JSON for
+monitoring
+([`docs/security-posture.md`](docs/security-posture.md#monitor-each-plugin-from-a-script)).
+Signed-out content pages now load a small `public.js` instead of the console's script
+([`docs/frontend-assets.md`](docs/frontend-assets.md#which-script-a-page-loads)).
+
 > **Note:** clone this project to a path **without spaces**. One dependency,
 > `picosat_elixir`, cannot compile under a spaced path such as iCloud Drive's
 > `Mobile Documents` (fixed upstream in

@@ -916,6 +916,9 @@ curl -X POST https://kiln.example.com/api/keys/rotate \
   failure; the old key still works, so retry later. This endpoint
   never treats a request as anonymous, with or without
   `KILN_API_REJECT_INVALID_BEARER`.
+* The scheme may be in any case (`bearer kiln_…` works), and the key need not
+  be the first `Authorization` value, so a proxy that adds its own doesn't
+  break rotation; if there is more than one key, the first decides (#2632).
 
 ### Telling reviewers who it was for: `X-Kiln-On-Behalf-Of`
 

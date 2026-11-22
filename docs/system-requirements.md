@@ -76,7 +76,8 @@ Opt-in calls, made only once you configure the feature: human verification
 (`challenges.cloudflare.com` for Turnstile, `www.recaptcha.net` for reCAPTCHA,
 from the server and from visitors' browsers), the `BACKUP_RCLONE_REMOTE`
 remote and every [backup destination](backups.md#send-backups-to-several-destinations)
-(Kiln calls an S3-compatible store itself, not through rclone),
+(Kiln calls an S3-compatible store itself, not through rclone, and an SFTP
+server over SSH, on port 22 unless the destination names another),
 `KILN_CDN_PURGE_URL`, webhooks (a Slack-format endpoint posts to the chat
 tool's incoming-webhook URL, such as `hooks.slack.com`), mail, S3,
 Meilisearch, Sentry, OpenTelemetry, and the AI providers.
