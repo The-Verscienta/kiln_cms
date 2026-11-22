@@ -49,6 +49,7 @@ defmodule KilnCMSWeb.FormController do
   alias KilnCMS.Challenge
   alias KilnCMS.Forms
   alias KilnCMS.Forms.EmbedPolicy
+  alias KilnCMS.I18n
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Embed
   alias KilnCMSWeb.Params
@@ -92,7 +93,9 @@ defmodule KilnCMSWeb.FormController do
   # a literal, translated string, and `embed_page/2` HTML-escapes every
   # interpolation anyway. No request data reaches the markup raw.
   # sobelow_skip ["XSS.HTML"]
-  def embed(conn, %{"slug" => slug}) do
+  def embed(conn, %{"slug" => slug} = params) do
+    conn = put_embed_locale(conn, params)
+
     # The deployment-wide policy goes on FIRST, then the form's replaces it once
     # the form is known. Two headers where one would do, but the first one is
     # what a 500 carries: `Tenant.current_org_id/1` raises by design when the
@@ -124,14 +127,31 @@ defmodule KilnCMSWeb.FormController do
         conn
         |> KilnCMSWeb.SharedCache.put_public("public, max-age=#{@embed_max_age_seconds}")
         # The page is rendered through gettext in the URL's locale
-        # (`Plugs.UrlLocale`, #2595). It used to fall back to the session's on
+        # (`Plugs.UrlLocale`, #2595), or the `?locale=` the snippet asked for
+        # (`put_embed_locale/2`, #2597). It used to fall back to the session's on
         # an unprefixed URL, which no `Vary` could key a shared cache on.
         # `Vary` is kept as the rule published HTML follows
         # (docs/performance.md).
         |> put_resp_header("vary", "accept-language")
         |> put_view(KilnCMSWeb.FormHTML)
-        |> render(:embed, form: form, action: pinned_action(UrlLocale.locale(conn), form))
+        |> render(:embed, form: form, action: pinned_action(conn.assigns.locale, form))
     end
+  end
+
+  # The embed's language. The URL's prefix (`/fr/forms/<slug>/embed`) wins, as
+  # on every delivery page (#2595). Unprefixed, `?locale=` picks one: what
+  # `embed.js` sends for a `data-kiln-locale` attribute (#2597), since the
+  # snippet cannot know which prefixes the site serves. A value the site does
+  # not support is the default locale, never a 404, so a typo still draws the
+  # form. It is part of the URL, so a shared cache keys on it.
+  defp put_embed_locale(%{assigns: %{path_locale: locale}} = conn, _params)
+       when is_binary(locale),
+       do: conn
+
+  defp put_embed_locale(conn, params) do
+    locale = params |> Params.string("locale") |> I18n.normalize()
+    Gettext.put_locale(KilnCMSWeb.Gettext, locale)
+    assign(conn, :locale, locale)
   end
 
   # Replace the site-wide CSP (frame-ancestors 'self') with the embed policy.
@@ -365,7 +385,7 @@ defmodule KilnCMSWeb.FormController do
   # unprefixed embed posts under a prefix. A submission's re-render passes the
   # prefix it was posted under, as before.
   defp pinned_action(locale, form),
-    do: KilnCMS.I18n.pinned_path(locale, "/forms/" <> form.slug)
+    do: I18n.pinned_path(locale, "/forms/" <> form.slug)
 
   # The re-render draws a fresh widget when the form asks for one (#2249), so
   # its policy must allow the provider; any other refusal keeps the strict one.

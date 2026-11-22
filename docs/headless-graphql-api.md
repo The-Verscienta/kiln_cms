@@ -160,11 +160,32 @@ reads):
 | `float` | `float` | same as `int` |
 | `boolean` | `boolean` | `eq`, `isNull` |
 | `date` | `date` | same as `int`, with `Date` operands |
-| `dateTime` | `datetime` | same as `int`, with `DateTime` operands |
+| `dateTime` | `datetime` | same as `int`, with `NaiveDateTime` operands (wall clock, below) |
 
 - Operands are real GraphQL scalars: `float: {gt: "abc"}` fails validation, not
   the database. Conditions (and the operators in one condition) are ANDed, and
   they are ANDed with `customFilter` if both are given.
+- **A `dateTime` operand is a wall-clock time, compared as written.** A save
+  stores a `datetime` field without its UTC offset, so the filter ignores the
+  operand's offset too: `{eq: "2026-06-01T12:00:00+02:00"}` and `{eq:
+  "2026-06-01T12:00:00"}` both find a value saved as `2026-06-01T12:00:00`
+  (or as `…T12:00:00Z`), and neither finds one saved as `…T10:00:00Z`.
+  Fractional seconds are kept, and `eq`, `notEq` and `in` match a value however
+  many digits it was saved with (`.25`, `.250`, `.250000`); the range
+  operators compare at microsecond precision. The operands are the
+  `NaiveDateTime` scalar, so a variable that carries one is declared
+  `NaiveDateTime`, not `DateTime`:
+
+  ```graphql
+  query ($from: NaiveDateTime) {
+    publishedPosts(customWhere: [{ name: "starts_at", dateTime: { gte: $from } }]) {
+      results { id }
+    }
+  }
+  ```
+
+  `customFilter` reads a date-time operand the same way
+  ([json-api.md](json-api.md) → "Custom fields", Filtering).
 - A wrong kind (`float:` on a string field), no kind key, or two of them is an
   error that names the field's kind. A name that is unknown, or private to the
   reader, is the same `unknown custom field` error.
@@ -225,7 +246,9 @@ reads):
   same `unknown custom field` error) and the site's own definitions.
 - Limits: at most 10 conditions at the top of the list and 50 values in an
   `in`. Groups share `customFilter`'s caps: 4 deep and 50 conditions in all
-  (the error text is the same). Each condition, at any depth, adds 5 to the
+  (the error text is the same), and at most 1000 `in` values in all, across
+  every condition and group (`in takes at most 1000 values in all, across
+  every condition and group (got 1050)`). Each condition, at any depth, adds 5 to the
   query's [complexity](#query-cost), so the 200 cap allows fewer than 50
   once the query's own fields are priced.
 - The errors a group can return, in `errors[].message`:

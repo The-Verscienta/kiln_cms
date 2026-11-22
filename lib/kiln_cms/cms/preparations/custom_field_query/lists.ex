@@ -37,6 +37,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Lists do
 
   alias KilnCMS.CMS.Changes.ApplyCustomFields
   alias KilnCMS.CMS.Preparations.CustomFieldQuery
+  alias KilnCMS.CMS.Preparations.CustomFieldQuery.DateTimes
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.Relations
 
   @operators ~w(eq not_eq in has has_all has_none count null)
@@ -57,22 +58,44 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Lists do
   def condition(definition, op, raw)
 
   def condition(%{name: name} = definition, "eq", raw) do
-    with {:ok, value} <- cast(raw, definition, "eq"), do: {:ok, contains_any(name, [value])}
+    with {:ok, value} <- cast(raw, definition, "eq"),
+         do: {:ok, contains_any(name, spellings(definition, [value]))}
   end
 
   def condition(%{name: name} = definition, "not_eq", raw) do
-    with {:ok, value} <- cast(raw, definition, "not_eq"),
-         do: {:ok, does_not_contain(name, value)}
+    with {:ok, value} <- cast(raw, definition, "not_eq") do
+      {:ok,
+       definition
+       |> spellings([value])
+       |> Enum.map(&does_not_contain(name, &1))
+       |> Enum.reduce(&expr(^&2 and ^&1))}
+    end
   end
 
   def condition(%{name: name} = definition, "in", raw) do
     with {:ok, values} <- cast_all(List.wrap(raw), definition, "in") do
-      {:ok, if(values == [], do: expr(false), else: contains_any(name, values))}
+      {:ok,
+       if(values == [],
+         do: expr(false),
+         else: contains_any(name, spellings(definition, values))
+       )}
     end
   end
 
   def condition(%{name: name} = definition, "has", raw) do
-    with {:ok, values} <- values(raw, definition, "has"), do: {:ok, contains_any(name, values)}
+    with {:ok, values} <- values(raw, definition, "has"),
+         do: {:ok, contains_any(name, spellings(definition, values))}
+  end
+
+  # A date-time is one of several spellings (#2678), so each value is its own
+  # "contains any of its spellings", all of them ANDed.
+  def condition(%{name: name, field_type: :datetime} = definition, "has_all", raw) do
+    with {:ok, values} <- values(raw, definition, "has_all") do
+      {:ok,
+       values
+       |> Enum.map(&contains_any(name, spellings(definition, [&1])))
+       |> Enum.reduce(&expr(^&2 and ^&1))}
+    end
   end
 
   def condition(%{name: name} = definition, "has_all", raw) do
@@ -82,7 +105,10 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Lists do
 
   def condition(%{name: name} = definition, "has_none", raw) do
     with {:ok, values} <- values(raw, definition, "has_none") do
-      {:ok, expr(not fragment("COALESCE(?, false)", ^contains_any(name, values)))}
+      {:ok,
+       expr(
+         not fragment("COALESCE(?, false)", ^contains_any(name, spellings(definition, values)))
+       )}
     end
   end
 
@@ -202,12 +228,20 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Lists do
 
   # --- operands -------------------------------------------------------------------
 
+  # The items the cast `values` are found as: a date-time under every text a
+  # write could have stored for it (#2678), any other value as itself.
+  defp spellings(%{field_type: :datetime}, values),
+    do: values |> Enum.flat_map(&DateTimes.spellings/1) |> Enum.uniq()
+
+  defp spellings(_definition, values), do: values
+
   # An operand is coerced exactly as the write path stored each item
   # (`ApplyCustomFields.coerce_item/2`): `#FFF` finds the stored `#ffffff`,
-  # `9:30` the stored `09:30`, a date-time keeps its fractional seconds.
-  # Containment compares JSON exactly, so anything looser misses. An operand
-  # the field could never hold falls back to the single field's cast, for
-  # its error.
+  # `9:30` the stored `09:30`. Containment compares JSON exactly, so anything
+  # looser misses. An operand the field could never hold falls back to the
+  # single field's cast, for its error. A date-time is cast as a single
+  # field's is, to the time it stands for, and matched under every spelling a
+  # write could have stored (`spellings/2`, #2678).
   #
   # An object or a list is refused first (#2739): an Ecto date cast would take
   # `%{"year" => …, "month" => …, "day" => …}` where a single field refuses it.
@@ -215,6 +249,9 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Lists do
     with :ok <- CustomFieldQuery.operand_shape(raw, op, "custom field #{inspect(name)}"),
          do: cast(raw, definition)
   end
+
+  defp cast(raw, %{name: name, field_type: :datetime}),
+    do: CustomFieldQuery.cast_value(raw, :naive_datetime, name)
 
   defp cast(raw, %{name: name, field_type: type} = definition)
        when type in @typed and (is_binary(raw) or is_number(raw)) do

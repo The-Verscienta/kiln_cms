@@ -79,6 +79,9 @@ Every summary line below that was shortened links to its own entry there.
 
 ### Breaking
 
+- **GraphQL `customWhere` `dateTime` operands are now `NaiveDateTime` and compare wall clock, as values are stored: a filter's UTC offset is dropped instead of converted, and a variable for them must be declared `NaiveDateTime` (`$t: DateTime` now fails validation; inline literals keep working) (#2678).**
+  ([long form](docs/changelog/unreleased.md#customwhere-datetime-wall-clock))
+
 - **`/ws/gql` reads an `authorization` connect param under `Bearer` in any case: a lowercase valid JWT connects as its user, and lowercase garbage or a bare `Bearer` is refused (`403`) instead of connecting anonymously (#2632).**
   ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#ws-gql-bearer-scheme-any-case))
 
@@ -88,6 +91,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/unreleased.md#plugin-health-tail-packages-unknown))
 
 ### Added
+
+- **An embedded form can be shown in a chosen language: `data-kiln-locale` on the `embed.js` snippet (`?locale=` on `/forms/:slug/embed`); an unsupported value gets the site default and existing snippets are unchanged (#2597).**
+  ([long form](docs/changelog/unreleased.md#embedded-form-locale))
 
 - **A plugin field type can hold a list (`multiple?/0`, `unique_items?/0`, `kiln_plugin` 1.6), with the same editor input, write rules, API filters and schema export as core lists. A list whose type later stops taking lists is kept read-only (a "held list") instead of being dropped.**
   ([#3203](https://github.com/The-Verscienta/kiln_cms/pull/3203) · [long form](docs/changelog/unreleased.md#plugin-list-field-types))
@@ -122,6 +128,15 @@ Every summary line below that was shortened links to its own entry there.
   ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/unreleased.md#referrer-suppression-sweep))
 
 ### Fixed
+
+- **Datetime custom-field filters (JSON:API, GraphQL, MCP; single, link and list fields) match stored values with fractional seconds under any spelling and compare ranges below one second; `in` takes at most 1000 values per request (#2678).**
+  ([long form](docs/changelog/unreleased.md#custom-filter-datetime-fractions))
+
+- **A newsletter confirmation email, its link and the confirm page are in the language the reader signed up in, and a record whose locale is no longer configured gets the site default in its `lang` and `og:locale` (#2597).**
+  ([long form](docs/changelog/unreleased.md#locale-followups))
+
+- **An event's recurrence rule with a date-time UNTIL now ends at that instant (a `Z` time in UTC, a floating time in the event's zone), as RFC 5545 says, instead of on its UTC date; rules saved before this release keep their old date until re-saved (#2861).**
+  ([long form](docs/changelog/unreleased.md#recurrence-until-instant))
 
 - **The sign-in page no longer offers "Use a passkey" on a site's own host, where the browser refuses it, and a passkey-only account on `/sign-in/verify` in a browser that can't use a passkey is told to use another browser or device, or ask an administrator (#2827, #2887).**
   ([long form](docs/changelog/unreleased.md#passkey-fallbacks))
@@ -193,6 +208,9 @@ Every summary line below that was shortened links to its own entry there.
   ([#3112](https://github.com/The-Verscienta/kiln_cms/pull/3112) · [long form](docs/changelog/unreleased.md#backup-schedule-tab-followups))
 
 ### Security
+
+- **phoenix 1.8.17 fixes EEF-CVE-2026-128361 (a non-string Presence key crashes the tracker) and EEF-CVE-2026-129344 (a client on the V1 serializer crashes binary broadcasts); Kiln was not exposed: its Presence keys are server-made strings and it broadcasts no binary payloads.**
+  ([#3205](https://github.com/The-Verscienta/kiln_cms/pull/3205) · [long form](docs/changelog/unreleased.md#phoenix-presence-serializer-advisories))
 
 - **A database restored on another server no longer prunes the original server's backups on its destinations: retention deletes only what this server's backup directory sent, plus directories a platform admin adopts (GHSA-rx2c-h7cx-wmfj).**
   ([GHSA-rx2c-h7cx-wmfj](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-rx2c-h7cx-wmfj) · [#3204](https://github.com/The-Verscienta/kiln_cms/pull/3204) · [long form](docs/changelog/unreleased.md#backup-destination-prune-ownership))

@@ -138,4 +138,41 @@ defmodule KilnCMSWeb.GraphqlScalarListsTest do
     # The input type has no `count`: GraphQL validation refuses it.
     assert error!([%{"name" => "scores", "int" => %{"count" => 2}}]) =~ "count"
   end
+
+  # #2678: the operand kept its fractional seconds only to the whole second,
+  # and a stored item is matched under whichever spelling the write kept.
+  test "a list of date-times is found by an item with fractional seconds" do
+    admin = user(:admin)
+
+    CMS.create_field_definition!(
+      %{
+        content_type: :post,
+        name: "times",
+        label: "Times",
+        field_type: :datetime,
+        multiple: true
+      },
+      actor: admin
+    )
+
+    post = fn times ->
+      %{title: "T", slug: "gsl-#{System.unique_integer([:positive])}", custom_fields: times}
+      |> CMS.create_post!(actor: admin)
+      |> then(&CMS.publish_post!(&1, %{}, actor: admin))
+    end
+
+    short = post.(%{"times" => ["2026-01-01T10:00:00.25"]})
+    full = post.(%{"times" => ["2026-01-01T10:00:00.250000", "2026-02-01T10:00:00"]})
+    _other = post.(%{"times" => ["2026-01-01T10:00:00"]})
+
+    where = fn op -> %{"w" => [%{"name" => "times", "dateTime" => op}]} end
+
+    assert ids!(where.(%{"eq" => "2026-01-01T10:00:00.250Z"})) == Enum.sort([short.id, full.id])
+
+    assert ids!(where.(%{"in" => ["2026-01-01T10:00:00.25Z", "2026-02-01T10:00:00Z"]})) ==
+             Enum.sort([short.id, full.id])
+
+    assert ids!(%{"f" => Jason.encode!(%{"times" => "2026-01-01T10:00:00.2500"})}) ==
+             Enum.sort([short.id, full.id])
+  end
 end

@@ -47,6 +47,31 @@ carries the reasoning.
 
 ## Breaking
 
+<a id="customwhere-datetime-wall-clock"></a>
+
+- **GraphQL `customWhere` compares `dateTime` operands as wall clock, and they are typed `NaiveDateTime` (#2678).**
+  A datetime custom field drops a written value's UTC offset and stores the
+  time as written, but GraphQL's `DateTime` scalar converted a filter value
+  to UTC before Kiln saw it, so `eq: "2026-06-01T12:00:00+02:00"` missed a
+  value saved as `12:00:00+02:00`. `DateTimeFilter`'s operands (`eq`,
+  `notEq`, `in`, `gt`, `gte`, `lt`, `lte`) are now `NaiveDateTime`, which
+  drops the offset exactly as writes do; JSON:API and MCP `custom_filter`
+  already did. Before and after:
+
+  ```graphql
+  # before: valid; after: a validation error
+  query ($from: DateTime) { publishedPosts(customWhere: [{name: "starts_at", dateTime: {gte: $from}}]) { results { id } } }
+  # after
+  query ($from: NaiveDateTime) { publishedPosts(customWhere: [{name: "starts_at", dateTime: {gte: $from}}]) { results { id } } }
+  ```
+
+  Inline string literals keep working, an offset-less value is now accepted,
+  and a value with an offset matches the time as written, not the instant.
+  Send the wall-clock time the field was saved with. Kiln's JS and Elixir
+  clients send raw documents and need no change; a client's own queries do.
+  `docs/api/schema.graphql` is regenerated.
+  ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678))
+
 <a id="ws-gql-bearer-scheme-any-case"></a>
 
 - **`/ws/gql` reads an `authorization` connect param under a `Bearer` scheme in any case, so lowercase garbage and a bare `Bearer` are now refused instead of connecting anonymously (#2632).**
@@ -83,6 +108,17 @@ carries the reasoning.
   ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165))
 
 ## Added
+
+<a id="embedded-form-locale"></a>
+
+- **An embedded form can be shown in a chosen language (#2597).**
+  `embed.js` takes an optional `data-kiln-locale` attribute and loads
+  `/forms/<slug>/embed?locale=<value>`. The server accepts a supported locale
+  and gives anything else the site default; a path prefix (`/es/forms/…`)
+  still wins, and the session is never read, so a shared cache keys on the
+  URL. A snippet without the attribute loads exactly what it did. See
+  [docs/forms.md](../forms.md).
+  ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597))
 
 <a id="plugin-list-field-types"></a>
 
@@ -287,6 +323,60 @@ carries the reasoning.
   The "no all-hidden breakdown leaves a category a single value" rule (#2981) was found by a search run outside the suite, so a change to `referrer_sources/0` or to `KilnCMS.Analytics.suppress_referrer_group/1` had nothing wide to re-check against. The search is now in `test/kiln_cms/analytics/referrer_suppression_test.exs` behind the `slow_sweep` tag, which the default suite excludes. Run it with `mix test --only slow_sweep test/kiln_cms/analytics/referrer_suppression_test.exs` after touching either. It covers thresholds 2 to 20 with four, five and six categories, bounded at view totals of 40, 30 and 20; the original hand search went to 50, and the committed one does not re-run totals above these bounds. A second test in the sweep checks that the criterion can fail (three categories at a threshold of 3 still do). To let the sweep vary the number of categories, `suppress_referrer_group/2` takes an explicit category list; `/1` is `/2` over `referrer_sources/0`, and a default-suite test pins that. Nothing published changes: the dashboard and the export still call `/1`, and no setting or output differs. Operators have nothing to do. The decision record for the rule (ADR 0075) is on a separate open pull request.
 
 ## Fixed
+
+<a id="custom-filter-datetime-fractions"></a>
+
+- **Datetime custom-field filters find values with fractional seconds (#2678).**
+  A filter operand was cast through Ecto's `:naive_datetime`, which
+  truncates to whole seconds, so `eq` missed a stored `12:00:00.25` (and
+  could match a stored `12:00:00` instead), and `eq` compared one spelling,
+  so `.25` missed a stored `.250`. Operands are now read the way a write
+  reads them, keeping microseconds; `eq`, `not_eq`, `in`, `has`, `has_all`
+  and `has_none` match every spelling a write can store, on single, link
+  and list fields; and range operators bind the spelling that orders right,
+  so they are exact below one second and keep using the range indexes. New
+  limit on every surface: at most 1000 `in` values per `custom_filter` or
+  `customWhere`, counted across groups (`in takes at most 1000 values in
+  all, across every condition and group (got N)`); a large enough request
+  used to hit Postgres' bind-parameter limit. No migration.
+  ([#2678](https://github.com/The-Verscienta/kiln_cms/issues/2678))
+
+<a id="locale-followups"></a>
+
+- **Locale follow-ups from #2465: newsletter confirmation and an unconfigured record locale (#2597).**
+  - **Newsletter confirmation.** The email is built while the sign-up request
+    runs, so it now goes through gettext in that request's locale (es, fr):
+    subject, body and a confirm link pinned to the same prefix, and the
+    confirm page's button keeps it. On a multilingual site even a
+    default-locale link carries its prefix (`/en/…`).
+  - **A record whose locale is no longer configured** gets the site default
+    in the article's `lang` and in `og:locale`; the `x-kiln-locale` header
+    still names the stored value.
+  - Lock and paywall pages were left as they are: since #2646 their chrome
+    follows the reader's URL and only the document's words carry its
+    language, which is what that change decided.
+  No migration.
+  ([#2597](https://github.com/The-Verscienta/kiln_cms/issues/2597))
+
+<a id="recurrence-until-instant"></a>
+
+- **A date-time UNTIL in a recurrence rule is an instant, not its UTC date (#2861).**
+  Saving a rule rewrote `UNTIL=20260331T000000` or `…T000000Z` to its UTC
+  date, so an event east of UTC could run a day longer, or one west of it a
+  day shorter, than the rule said. The rule now keeps UNTIL's form as typed:
+  a date (`YYYYMMDD`) still ends after that whole day in the event's zone, a
+  `Z` time is an inclusive instant in UTC, and a floating time is an
+  inclusive instant in the event's own zone (a time skipped by a DST change
+  moves past the gap; a repeated time is the first one). Timed ICS exports
+  emit the instant in UTC; all-day ones the date it falls on. The engine
+  version moves to 3, so the first boot queues one occurrence backfill,
+  which rewrites nothing on existing data: every rule saved before this
+  release already holds a date UNTIL, and those expand exactly as before. A
+  rule typed with a time before the upgrade keeps its old date until it is
+  saved again. API clients: a recurrence value's `rrule` can now carry a
+  date-time UNTIL (still valid RFC 5545). No migration; rolling back reads
+  such rules by their date, as before.
+  ([#2861](https://github.com/The-Verscienta/kiln_cms/issues/2861))
 
 <a id="passkey-fallbacks"></a>
 
@@ -650,6 +740,25 @@ carries the reasoning.
   ([#2983](https://github.com/The-Verscienta/kiln_cms/issues/2983), [#2985](https://github.com/The-Verscienta/kiln_cms/issues/2985), [#2986](https://github.com/The-Verscienta/kiln_cms/issues/2986))
 
 ## Security
+
+<a id="phoenix-presence-serializer-advisories"></a>
+
+- **phoenix 1.8.17 fixes EEF-CVE-2026-128361 (GHSA-pvfx-rx4x-phrr, high) and
+  EEF-CVE-2026-129344 (GHSA-5vmc-qgf8-rw36, high).** The first: `Phoenix.Presence`
+  accepted any term as a presence key and failed only when listing presences, so
+  a key taken from a join payload could crash the tracker shard and every
+  channel and LiveView tracked on it. The second: a client that connects without
+  `vsn`, or with `vsn=1.0.0`, gets the V1 JSON serializer, which raises on a
+  `{:binary, data}` broadcast inside the PubSub dispatch loop and drops that
+  broadcast for every later subscriber. Kiln was not exposed to either. Its
+  Presence keys are built on the server (`KilnCMSWeb.Presence.track_editor/4`
+  uses the user's id, `track_preview_viewer/5` a server-made viewer key), and
+  nothing in Kiln broadcasts a binary payload. The bump clears the dependency
+  audit, which fails on both. `mix.exs` now requires `~> 1.8.17`, so a lock
+  cannot resolve back to an affected release; `examples/phoenix_showcase`
+  moves from 1.8.15 to 1.8.17 with the same floor. No other dependency moves.
+  No migration and no configuration.
+  ([#3205](https://github.com/The-Verscienta/kiln_cms/pull/3205))
 
 <a id="backup-destination-prune-ownership"></a>
 

@@ -12,6 +12,9 @@
  *   data-kiln-origin  Base URL of the CMS (defaults to this script's own origin)
  *   data-kiln-title   iframe title for assistive tech (defaults to "Form")
  *   data-kiln-height  Initial height in px before the first resize (default 480)
+ *   data-kiln-locale  Language to render the form in, e.g. "fr" (defaults to the
+ *                     site's default language; one the site doesn't serve falls
+ *                     back to it too)
  *
  * No dependencies, no globals, safe to include more than once per page.
  */
@@ -58,7 +61,14 @@
     if (cms === null) return;
     var iframe = document.createElement("iframe");
 
-    iframe.src = cms.base + "/forms/" + encodeURIComponent(slug) + "/embed";
+    var src = cms.base + "/forms/" + encodeURIComponent(slug) + "/embed";
+    // A query parameter, not a `/<locale>/` prefix: the server checks it against
+    // the languages the site serves and falls back to its default, where an
+    // unknown prefix would be a 404 and a blank frame.
+    var locale = script.getAttribute("data-kiln-locale");
+    if (locale) src += "?locale=" + encodeURIComponent(locale);
+
+    iframe.src = src;
     iframe.title = script.getAttribute("data-kiln-title") || "Form";
     iframe.loading = "lazy";
     iframe.setAttribute("scrolling", "no");

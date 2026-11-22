@@ -11,8 +11,7 @@ defmodule KilnCMS.Events.RecurrenceTest.RFC do
   #     the set the week start moves no date, so the RFC's dates still hold.
   #   * The RFC's `EXDATE` property is written as Kiln's trailing `EXDATE=` part.
   #
-  # The examples Kiln refuses at parse time are in `refused/0`, and the one it
-  # expands differently is in `divergent/0`.
+  # The examples Kiln refuses at parse time are in `refused/0`.
 
   @doc "`{label, rrule, dtstart, expected local dates}`."
   def rows do
@@ -29,6 +28,11 @@ defmodule KilnCMS.Events.RecurrenceTest.RFC do
        ~N[1998-01-01 09:00:00], d(1998, 1, 1..31) ++ d(1999, 1, 1..31) ++ d(2000, 1, 1..31)},
       {"every day in January, for 3 years (daily)", "FREQ=DAILY;UNTIL=20000131T140000Z;BYMONTH=1",
        ~N[1998-01-01 09:00:00], d(1998, 1, 1..31) ++ d(1999, 1, 1..31) ++ d(2000, 1, 1..31)},
+      # Divergent until #2861: UNTIL was cut to its date, which kept 24
+      # December (09:00 EST, after the UTC instant the RFC names).
+      {"daily until December 24, 1997", "FREQ=DAILY;UNTIL=19971224T000000Z",
+       ~N[1997-09-02 09:00:00],
+       d(1997, 9, 2..30) ++ d(1997, 10, 1..31) ++ d(1997, 11, 1..30) ++ d(1997, 12, 1..23)},
       {"weekly for 10 occurrences", "FREQ=WEEKLY;COUNT=10", ~N[1997-09-02 09:00:00],
        d(1997, 9, [2, 9, 16, 23, 30]) ++ d(1997, 10, [7, 14, 21, 28]) ++ d(1997, 11, [4])},
       {"weekly until December 24, 1997", "FREQ=WEEKLY;UNTIL=19971224T000000Z",
@@ -160,23 +164,6 @@ defmodule KilnCMS.Events.RecurrenceTest.RFC do
     ]
   end
 
-  @doc """
-  The example Kiln expands differently, with the RFC's dates and Kiln's.
-
-  `UNTIL=19971224T000000Z` is truncated to its date and compared inclusively
-  in local time, so Kiln keeps 24 December (09:00 EST, after the UTC instant
-  the RFC names). A parse-side follow-up: fixing it needs the zone at cast
-  time, or storing UNTIL's value type.
-  """
-  def divergent do
-    rfc = d(1997, 9, 2..30) ++ d(1997, 10, 1..31) ++ d(1997, 11, 1..30) ++ d(1997, 12, 1..23)
-
-    [
-      {"daily until December 24, 1997", "FREQ=DAILY;UNTIL=19971224T000000Z",
-       ~N[1997-09-02 09:00:00], rfc, rfc ++ [~D[1997-12-24]]}
-    ]
-  end
-
   defp d(year, month, days), do: Enum.map(days, &Date.new!(year, month, &1))
 end
 
@@ -185,7 +172,8 @@ defmodule KilnCMS.Events.RecurrenceTest.Golden do
   # The frozen corpus behind the engine checksum. **Never edit a row**: the
   # checksum of each engine version was recorded against exactly these rules,
   # this window and this horizon, so an edit here is indistinguishable from an
-  # expansion change. Add coverage in a new engine version's corpus instead.
+  # expansion change. Add coverage in a new engine version's corpus instead,
+  # as `datetime_until_rows/0` did for engine 3.
   #
   # Every FREQ against every BY* part it accepts, #2750's behaviors (year-
   # scoped ordinals without BYMONTH, YEARLY BYMONTHDAY across the year,
@@ -257,6 +245,24 @@ defmodule KilnCMS.Events.RecurrenceTest.Golden do
       {"FREQ=YEARLY;INTERVAL=2;BYMONTH=1,2,3;BYMONTHDAY=10", ~N[2023-03-10 09:00:00], ny},
       {"FREQ=YEARLY;COUNT=5;BYMONTH=3,9;EXDATE=20250910", ~N[2024-03-10 12:00:00], ny},
       {"FREQ=YEARLY;UNTIL=20270101;BYMONTHDAY=31", ~N[2024-01-31 12:00:00], "Asia/Tokyo"}
+    ] ++ datetime_until_rows()
+  end
+
+  # Added with engine 3 (#2861), when a date-time UNTIL stopped being cut to
+  # its date: a `Z` UNTIL and a floating one, east and west of UTC, across a
+  # day boundary, and a floating UNTIL on a DST gap and a DST overlap. Engines 1
+  # and 2 were recorded before these rows existed.
+  defp datetime_until_rows do
+    ny = "America/New_York"
+    tokyo = "Asia/Tokyo"
+
+    [
+      {"FREQ=DAILY;UNTIL=20240410T000000", ~N[2024-04-01 08:00:00], tokyo},
+      {"FREQ=DAILY;UNTIL=20240409T230000Z", ~N[2024-04-01 08:00:00], tokyo},
+      {"FREQ=WEEKLY;BYDAY=TU;UNTIL=20240326T000000Z", ~N[2024-01-02 19:00:00], ny},
+      {"FREQ=DAILY;UNTIL=20240310T023000", ~N[2024-03-01 02:30:00], ny},
+      {"FREQ=DAILY;UNTIL=20241103T013000", ~N[2024-10-20 01:30:00], ny},
+      {"FREQ=MONTHLY;BYDAY=-1SU;UNTIL=20241027T003000Z", ~N[2024-01-28 01:30:00], "Europe/London"}
     ]
   end
 
@@ -865,6 +871,166 @@ defmodule KilnCMS.Events.RecurrenceTest do
     end
   end
 
+  describe "a date-time UNTIL is an instant, not its date (#2861)" do
+    @tokyo "Asia/Tokyo"
+    @window {~U[2026-01-01 00:00:00Z], ~U[2027-12-31 00:00:00Z]}
+
+    defp last_local(rrule, dtstart, zone) do
+      {from, until} = @window
+
+      rrule
+      |> rule!()
+      |> Recurrence.expand(dtstart, zone, from, until, max: 1_000)
+      |> List.last()
+      |> DateTime.shift_zone!(zone)
+      |> DateTime.to_naive()
+    end
+
+    test "parse keeps the value type, and storage round-trips it byte for byte" do
+      assert rule!("FREQ=DAILY;UNTIL=20261231T000000Z").until == ~U[2026-12-31 00:00:00Z]
+      assert rule!("FREQ=DAILY;UNTIL=20261231T090000").until == ~N[2026-12-31 09:00:00]
+      assert rule!("FREQ=DAILY;UNTIL=20261231").until == ~D[2026-12-31]
+
+      for rrule <- ~w(FREQ=DAILY;UNTIL=20261231T000000Z FREQ=DAILY;UNTIL=20261231T090000
+                      FREQ=DAILY;UNTIL=20261231) do
+        assert rrule |> rule!() |> Recurrence.to_rrule() == rrule
+      end
+    end
+
+    test "a malformed time after the date is still read as the date, as before" do
+      # The accept set does not shrink: this saved before #2861.
+      assert rule!("FREQ=DAILY;UNTIL=20261231T0900Z").until == ~D[2026-12-31]
+      assert rule!("FREQ=DAILY;UNTIL=20261231T250000Z").until == ~D[2026-12-31]
+      assert {:error, _} = Recurrence.parse("FREQ=DAILY;UNTIL=20260230T120000Z")
+    end
+
+    test "east of UTC, a floating UNTIL at local midnight drops that day's 08:00" do
+      # The bug: cut to its date, UNTIL=…31T000000 kept 31 December.
+      assert last_local("FREQ=DAILY;UNTIL=20261231T000000", ~N[2026-12-01 08:00:00], @tokyo) ==
+               ~N[2026-12-30 08:00:00]
+    end
+
+    test "east of UTC, a Z UNTIL on the previous UTC day still keeps the local day" do
+      # 23:00 UTC on the 30th is 08:00 JST on the 31st. Cut to its UTC date it
+      # ended the series on the 30th, a day early.
+      assert last_local("FREQ=DAILY;UNTIL=20261230T230000Z", ~N[2026-12-01 08:00:00], @tokyo) ==
+               ~N[2026-12-31 08:00:00]
+
+      assert last_local("FREQ=DAILY;UNTIL=20261230T225959Z", ~N[2026-12-01 08:00:00], @tokyo) ==
+               ~N[2026-12-30 08:00:00]
+    end
+
+    test "west of UTC, a Z UNTIL ends the series before its UTC date's evening" do
+      # 00:00 UTC on the 31st is 19:00 EST on the 30th, so 20:00 that evening
+      # is out. Cut to its date it ran to the 31st, a day late.
+      assert last_local(
+               "FREQ=DAILY;UNTIL=20261231T000000Z",
+               ~N[2026-12-01 20:00:00],
+               @new_york
+             ) == ~N[2026-12-29 20:00:00]
+    end
+
+    test "a date-only UNTIL is unchanged: the whole local day" do
+      assert last_local("FREQ=DAILY;UNTIL=20261231", ~N[2026-12-01 08:00:00], @tokyo) ==
+               ~N[2026-12-31 08:00:00]
+
+      assert last_local("FREQ=DAILY;UNTIL=20261231", ~N[2026-12-01 23:30:00], @new_york) ==
+               ~N[2026-12-31 23:30:00]
+    end
+
+    test "a floating UNTIL in a DST gap resolves like the occurrence it names" do
+      # 02:30 does not exist on 8 March in New York; both the occurrence and
+      # the UNTIL shift to 03:00 EDT, so the occurrence is kept.
+      assert last_local("FREQ=DAILY;UNTIL=20260308T023000", ~N[2026-03-01 02:30:00], @new_york) ==
+               ~N[2026-03-08 03:00:00]
+
+      assert last_local("FREQ=DAILY;UNTIL=20260308T015959", ~N[2026-03-01 02:30:00], @new_york) ==
+               ~N[2026-03-07 02:30:00]
+    end
+
+    test "a floating UNTIL at an ambiguous time is the first one, as the occurrence is" do
+      # 01:30 on 1 November happens twice in New York; the occurrence is the
+      # first (05:30 UTC), and so is the UNTIL.
+      assert last_local("FREQ=DAILY;UNTIL=20261101T013000", ~N[2026-10-20 01:30:00], @new_york) ==
+               ~N[2026-11-01 01:30:00]
+
+      assert last_local(
+               "FREQ=DAILY;UNTIL=20261101T052959Z",
+               ~N[2026-10-20 01:30:00],
+               @new_york
+             ) == ~N[2026-10-31 01:30:00]
+    end
+
+    test "a floating UNTIL follows the event's zone, which is not stored with the rule" do
+      rule = rule!("FREQ=DAILY;UNTIL=20261231T120000")
+      {from, until} = @window
+
+      for zone <- [@tokyo, @new_york, @london] do
+        last =
+          rule
+          |> Recurrence.expand(~N[2026-12-01 12:00:00], zone, from, until)
+          |> List.last()
+          |> DateTime.shift_zone!(zone)
+
+        assert DateTime.to_naive(last) == ~N[2026-12-31 12:00:00], zone
+      end
+    end
+
+    test "the timed ICS form is the UNTIL instant in UTC" do
+      # A Z UNTIL is passed through; a floating one is resolved in the zone.
+      assert rendered_until("FREQ=DAILY;UNTIL=20261230T230000Z", @tokyo) == "20261230T230000Z"
+      assert rendered_until("FREQ=DAILY;UNTIL=20261231T000000", @tokyo) == "20261230T150000Z"
+      assert rendered_until("FREQ=DAILY;UNTIL=20260308T023000", @new_york) == "20260308T070000Z"
+
+      # An unknown zone: a floating UNTIL falls back to its date, a Z one needs
+      # no zone.
+      assert rule!("FREQ=DAILY;UNTIL=20261231T000000")
+             |> Recurrence.to_rrule(until: :datetime, time_zone: "Nowhere/Atlantis") ==
+               "FREQ=DAILY;UNTIL=20261231"
+
+      assert rule!("FREQ=DAILY;UNTIL=20261230T230000Z")
+             |> Recurrence.to_rrule(until: :datetime, time_zone: "Nowhere/Atlantis") ==
+               "FREQ=DAILY;UNTIL=20261230T230000Z"
+    end
+
+    test "the all-day ICS form is the local date the UNTIL instant falls on" do
+      rule = rule!("FREQ=DAILY;UNTIL=20261230T230000Z")
+
+      assert Recurrence.to_rrule(rule, until: :date, time_zone: @tokyo) ==
+               "FREQ=DAILY;UNTIL=20261231"
+
+      assert Recurrence.to_rrule(rule, until: :date, time_zone: @new_york) ==
+               "FREQ=DAILY;UNTIL=20261230"
+
+      assert Recurrence.to_rrule(rule, until: :date) == "FREQ=DAILY;UNTIL=20261230"
+    end
+
+    test "a timed rule's rendered UNTIL agrees with Kiln's own expansion" do
+      # The #2751 property for a date-time UNTIL: a client reading the
+      # rendered rule shows exactly the occurrences Kiln does.
+      for zone <- [@tokyo, @new_york, @london, "America/Santiago", "Pacific/Chatham"],
+          until <- ~w(20260308T023000 20261101T013000 20261231T000000 20261230T230000Z),
+          time <- [~T[00:30:00], ~T[08:00:00], ~T[23:30:00]] do
+        rrule = "FREQ=DAILY;UNTIL=" <> until
+        limit = until_instant(rrule, zone)
+        dtstart = NaiveDateTime.new!(~D[2026-02-20], time)
+        {from, window_end} = @window
+
+        kiln = Recurrence.expand(rule!(rrule), dtstart, zone, from, window_end, max: 1_000)
+        assert kiln != []
+        assert Enum.all?(kiln, &(DateTime.compare(&1, limit) != :gt)), "#{zone} #{rrule} #{time}"
+
+        next =
+          "FREQ=DAILY"
+          |> rule!()
+          |> Recurrence.expand(dtstart, zone, from, window_end, max: 1_000)
+          |> Enum.find(&(&1 not in kiln))
+
+        assert DateTime.compare(next, limit) == :gt, "#{zone} #{rrule} #{time}"
+      end
+    end
+  end
+
   defp rendered_until(rrule, zone) do
     [_, until] =
       Regex.run(
@@ -1134,9 +1300,13 @@ defmodule KilnCMS.Events.RecurrenceTest do
       test label do
         expected = unquote(Macro.escape(expected))
 
+        # A finite rule is expanded uncapped, so an extra date past its end
+        # (the bug #2861 was) fails the row instead of hiding behind the cap.
+        cap = if unquote(rrule) =~ ~r/COUNT|UNTIL/, do: 1_000, else: length(expected)
+
         actual =
           unquote(rrule)
-          |> rfc_expand(unquote(Macro.escape(dtstart)), length(expected))
+          |> rfc_expand(unquote(Macro.escape(dtstart)), cap)
           |> local()
 
         assert Enum.map(actual, &DateTime.to_date/1) == expected
@@ -1149,18 +1319,6 @@ defmodule KilnCMS.Events.RecurrenceTest do
       test "refuses #{rrule}, naming #{part}" do
         assert {:error, message} = Recurrence.parse(unquote(rrule))
         assert message =~ unquote(part)
-      end
-    end
-
-    # A known divergence, not a pass: the RFC's dates are kept in the row so
-    # the follow-up that fixes the parse side can flip this to `rfc`.
-    @tag :rfc_divergence
-    for {label, rrule, dtstart, _rfc, kiln} <- RFC.divergent() do
-      test "diverges: #{label} (UNTIL=…T000000Z is read as an inclusive local date)" do
-        kiln = unquote(Macro.escape(kiln))
-        actual = unquote(rrule) |> rfc_expand(unquote(Macro.escape(dtstart)), 1_000) |> local()
-
-        assert Enum.map(actual, &DateTime.to_date/1) == kiln
       end
     end
   end
@@ -1179,9 +1337,15 @@ defmodule KilnCMS.Events.RecurrenceTest do
     # BYMONTH on DAILY rules, so its `FREQ=DAILY;BYMONTH=6` row reached the
     # cap; that is part of what it recorded, and the no-truncation test below
     # holds for the current engine.
+    #
+    # Engine 3 (#2861) reads a date-time UNTIL as an instant. It is recorded
+    # against the corpus with `datetime_until_rows/0` added; without those
+    # rows it reproduces engine 2's checksum exactly, so no date-only rule
+    # moved.
     @golden %{
       1 => "9c4b1bb6c0b0c91c2fbf9429280863a56a21d7db961eff2e59b182b7b43c4010",
-      2 => "6485393050e5c1781083b339cc1832bdaafea016aa5d5247a0e646233b214b40"
+      2 => "6485393050e5c1781083b339cc1832bdaafea016aa5d5247a0e646233b214b40",
+      3 => "aa6f3a632d93af1fe4df6cd4d5dda43ddc1d32096a5babd23ba763115a79a201"
     }
 
     test "the corpus checksum is the one recorded for this engine" do
