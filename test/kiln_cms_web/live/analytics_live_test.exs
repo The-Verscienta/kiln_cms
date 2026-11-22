@@ -192,12 +192,23 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
     # state — see analytics_live.ex), and the "Most viewed" table only shows
     # content with a ContentView row — so every test below records all three
     # counters, mirroring what `ViewTracking.record/4` does in one call.
-    defp record_referrers(page, source, count) do
+    #
+    # The referrer bucket is seeded on YESTERDAY: the dashboard publishes
+    # completed days only (#2989), so a bucket recorded today would not show.
+    defp record_referrers(page, source, count, day \\ Date.add(Date.utc_today(), -1)) do
       Analytics.record_view!("page", page.id, authorize?: false)
       Analytics.record_view_day!("page", page.id, authorize?: false)
+      seed_referrer(page, source, count, day)
+    end
 
-      for _ <- 1..count,
-          do: Analytics.record_referrer!("page", page.id, source, authorize?: false)
+    defp seed_referrer(page, source, hits, day \\ Date.add(Date.utc_today(), -1)) do
+      Ash.Seed.seed!(KilnCMS.Analytics.ReferrerDay, %{
+        content_type: "page",
+        content_id: page.id,
+        source: source,
+        day: day,
+        hits: hits
+      })
     end
 
     defp new_page(title) do
@@ -231,11 +242,16 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
       # needed here — nothing else is nonzero, so the SVG <title> renders the
       # exact count.
       assert html =~ "<title>Search: 6</title>"
+      # Nothing is hidden, so there is nothing to explain (#2990).
+      refute html =~ "referrers-hidden-note"
+      assert html =~ "completed UTC days only"
     end
 
-    test "suppresses a count below the threshold as \"< n\", not the exact number", %{
-      conn: conn
-    } do
+    # The export shows this day as `social: "< 5"`. The dashboard's figure is
+    # wider than one item-day, so it is derived from that display: a `"< n"`
+    # anywhere in the span hides the category for the span (#2989).
+    test "a count below the threshold shows as hidden, never exact, and the note explains it",
+         %{conn: conn} do
       enable_referrers(5)
       page = new_page("Quiet Page")
       record_referrers(page, :social, 2)
@@ -247,8 +263,57 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
 
       {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
 
-      assert html =~ "<title>Social: &lt; 5</title>"
+      assert html =~ "<title>Social: hidden</title>"
       refute html =~ "Social: 2"
+      refute html =~ "&lt; 5</title>"
+      assert html =~ "referrers-hidden-note"
+      assert html =~ "too few readers arrived that way"
+    end
+
+    # #2989's first route: each day hidden whole in the export, and a span
+    # suppressed from its raw sum showed `other: 5`, pinning both days.
+    test "a span is derived from its days, so two hidden days stay hidden", %{conn: conn} do
+      enable_referrers(5)
+      page = new_page("Two Quiet Days")
+      record_referrers(page, :other, 1, Date.add(Date.utc_today(), -2))
+      record_referrers(page, :other, 4, Date.add(Date.utc_today(), -1))
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      assert html =~ "<title>Other: hidden</title>"
+      refute html =~ "Other: 5"
+      assert html =~ "referrers-hidden-note"
+    end
+
+    # #2989's second route, on this page alone: item A's exact direct beside
+    # item B's suppressed one, and a site chart summed from the raw hits.
+    test "the site chart is derived from the items' bars", %{conn: conn} do
+      enable_referrers(5)
+      item_a = new_page("Item A")
+      record_referrers(item_a, :direct, 10)
+      item_b = new_page("Item B")
+      record_referrers(item_b, :direct, 1)
+      record_referrers(item_b, :search, 9)
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      assert html =~ ~s(title="Direct: 10")
+      assert html =~ "<title>Direct: hidden</title>"
+      refute html =~ "Direct: 11"
+    end
+
+    # #2989's last route: today's bucket grows, and two reads of it can be
+    # differenced. Completed days only, so today's arrivals appear tomorrow.
+    test "today's referrers are not published", %{conn: conn} do
+      enable_referrers()
+      page = new_page("Arrived Today")
+      record_referrers(page, :search, 9, Date.utc_today())
+
+      {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
+
+      assert html =~ "Where readers came from"
+      refute html =~ "Search: 9"
+      assert html =~ "<title>Search: 0</title>"
     end
 
     # The vulnerability the #620 review found: publishing exactly one
@@ -270,7 +335,7 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
 
       {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
 
-      assert html =~ "<title>Social: &lt; 5</title>"
+      assert html =~ "<title>Social: hidden</title>"
       assert html =~ "<title>Search: hidden</title>"
       # The smaller ones stay exact: hiding those was what made the residual
       # small enough to pin.
@@ -286,8 +351,8 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
       enable_referrers(5)
       page = new_page("Two Low")
       Analytics.record_view_day!("page", page.id, authorize?: false)
-      Analytics.record_referrer!("page", page.id, :search, authorize?: false)
-      Analytics.record_referrer!("page", page.id, :social, authorize?: false)
+      seed_referrer(page, :search, 1)
+      seed_referrer(page, :social, 1)
 
       {:ok, _lv, html} = conn |> log_in(authed_user(:editor)) |> live(~p"/editor/analytics")
 

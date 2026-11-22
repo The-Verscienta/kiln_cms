@@ -251,6 +251,30 @@ carries the reasoning.
 
 ## Changed
 
+<a id="referrer-exact-or-hidden"></a>
+
+- **Referrer figures are exact-or-hidden, derived from the per-day displays, and cover completed days only (#2989, #2990).**
+  Small referrer counts are suppressed per publication, but different
+  publications of the same visits (a span total beside its days, the
+  site-wide chart beside the per-item bars, the 7-day beside the 30-day
+  window, today's bucket read twice) could be subtracted from each other to
+  recover a count that was suppressed. Suppression now decides only one
+  cell, one content item on one completed UTC day; every wider figure is
+  the sum of those cells' displays when they are all shown as numbers, and
+  `hidden` otherwise, never `< n` and never a raw sum. Referrers are
+  published through yesterday, on the dashboard and in the export (whose
+  columns and per-day values are unchanged; it just stops emitting today's
+  referrer rows; view rows still run to the end of the range). What admins
+  see: no `< n` on the dashboard; a source reads `hidden` for the range if
+  any day hid it for that item (for the site chart, any item); today's
+  arrivals appear tomorrow; and a note explains `hidden` whenever something
+  is. On a low-traffic site most figures will read `hidden`: that is the
+  cost of a guarantee that no combination of published figures narrows a
+  suppressed count (a brute-force test over the owner's simulation checks
+  it). [ADR 0080](../decisions/0080-a-referrer-figure-wider-than-one-item-day-is-derived-from-the-per-day-displays-and-only-completed-days-are-published.md)
+  records the decision. No migration.
+  ([#2989](https://github.com/The-Verscienta/kiln_cms/issues/2989), [#2990](https://github.com/The-Verscienta/kiln_cms/issues/2990))
+
 <a id="search-budget-cut-grace"></a>
 
 - **A search the budget cuts now gives its running sections 100 ms to stop on their own before killing them, so a query that finishes in time keeps its database connection (#2614).**

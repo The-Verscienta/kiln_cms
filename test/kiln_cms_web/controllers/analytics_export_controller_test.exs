@@ -80,6 +80,10 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
 
   # today/0: one memoized clock read per test — see KilnCMS.Test.StableDay (#1358).
 
+  # Referrer rows are exported for completed days only (#2989), so the referrer
+  # tests seed and export yesterday.
+  defp yesterday, do: Date.add(today(), -1)
+
   describe "tier gate" do
     test "anonymous requests are forbidden", %{conn: conn} do
       conn = get(conn, ~p"/editor/analytics/export.csv")
@@ -254,6 +258,46 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
     end
 
     test "off by default: no referrer rows even when buckets exist", %{conn: conn} do
+      seed_referrer_bucket(%{day: yesterday(), source: :search, hits: 9})
+
+      body =
+        conn
+        |> log_in(authed_user(:admin))
+        |> get(
+          ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(yesterday()), to: Date.to_iso8601(yesterday())]}"
+        )
+        |> Map.fetch!(:resp_body)
+
+      refute body =~ "referrer,"
+    end
+
+    # Today's bucket is still growing: two exports an hour apart, each
+    # suppressed on its own, could be differenced (#2989). The view row for
+    # today is still exported; only its referrer breakdown waits for tomorrow.
+    test "today's referrer buckets are not exported, though today's views are", %{conn: conn} do
+      enable_referrers()
+      id = Ash.UUID.generate()
+      seed_bucket(%{content_id: id, day: today(), views: 9})
+      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 9})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :social, hits: 7})
+
+      rows =
+        conn
+        |> log_in(authed_user(:admin))
+        |> get(
+          ~p"/editor/analytics/export.json?#{[from: Date.to_iso8601(yesterday()), to: Date.to_iso8601(today())]}"
+        )
+        |> Map.fetch!(:resp_body)
+        |> Jason.decode!()
+
+      assert Enum.find(rows, &(&1["kind"] == "view" and &1["day"] == Date.to_iso8601(today())))
+
+      referrer_days = for %{"kind" => "referrer", "day" => day} <- rows, uniq: true, do: day
+      assert referrer_days == [Date.to_iso8601(yesterday())]
+    end
+
+    test "a span that is all today exports no referrer rows", %{conn: conn} do
+      enable_referrers()
       seed_referrer_bucket(%{day: today(), source: :search, hits: 9})
 
       body =
@@ -270,37 +314,37 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
     test "CSV: a referrer row is kind-tagged, with views left blank", %{conn: conn} do
       enable_referrers()
       id = Ash.UUID.generate()
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 9})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :search, hits: 9})
 
       body =
         conn
         |> log_in(authed_user(:admin))
         |> get(
-          ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+          ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(yesterday()), to: Date.to_iso8601(yesterday())]}"
         )
         |> Map.fetch!(:resp_body)
 
-      assert body =~ "referrer,#{today()},page,#{id},(deleted),,search,9"
+      assert body =~ "referrer,#{yesterday()},page,#{id},(deleted),,search,9"
     end
 
     test "CSV: a referrer count below the threshold is suppressed as \"< n\"", %{conn: conn} do
       enable_referrers(5)
       id = Ash.UUID.generate()
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 2})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :social, hits: 2})
       # Something for it to hide behind — a lone low count with four genuine
       # zeros loses the whole breakdown instead (#1073).
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 40})
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :other, hits: 50})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :search, hits: 40})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :other, hits: 50})
 
       body =
         conn
         |> log_in(authed_user(:admin))
         |> get(
-          ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+          ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(yesterday()), to: Date.to_iso8601(yesterday())]}"
         )
         |> Map.fetch!(:resp_body)
 
-      assert body =~ "referrer,#{today()},page,#{id},(deleted),,social,< 5"
+      assert body =~ "referrer,#{yesterday()},page,#{id},(deleted),,social,< 5"
       refute body =~ ",social,2"
     end
 
@@ -311,14 +355,14 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
       post = CMS.create_post!(%{title: "With Referrers", slug: slug()}, actor: admin)
       CMS.publish_post!(post, %{}, actor: admin)
 
-      seed_bucket(%{content_type: "post", content_id: post.id, day: today(), views: 4})
-      seed_referrer_bucket(%{content_id: post.id, day: today(), source: :internal, hits: 6})
+      seed_bucket(%{content_type: "post", content_id: post.id, day: yesterday(), views: 4})
+      seed_referrer_bucket(%{content_id: post.id, day: yesterday(), source: :internal, hits: 6})
 
       body =
         conn
         |> log_in(admin)
         |> get(
-          ~p"/editor/analytics/export.json?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+          ~p"/editor/analytics/export.json?#{[from: Date.to_iso8601(yesterday()), to: Date.to_iso8601(yesterday())]}"
         )
         |> Map.fetch!(:resp_body)
 
@@ -335,15 +379,15 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
          %{conn: conn} do
       enable_referrers(5)
       id = Ash.UUID.generate()
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :other, hits: 1})
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 40})
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 50})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :other, hits: 1})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :search, hits: 40})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :social, hits: 50})
 
       body =
         conn
         |> log_in(authed_user(:admin))
         |> get(
-          ~p"/editor/analytics/export.json?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+          ~p"/editor/analytics/export.json?#{[from: Date.to_iso8601(yesterday()), to: Date.to_iso8601(yesterday())]}"
         )
         |> Map.fetch!(:resp_body)
 
@@ -360,7 +404,7 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
     # hidden at all — it is `total` minus the other four.
 
     defp referrer_rows(conn, day \\ nil) do
-      day = day || today()
+      day = day || yesterday()
 
       conn
       |> log_in(authed_user(:admin))
@@ -375,7 +419,7 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
     test "a breakdown exports every category, not only the ones with hits", %{conn: conn} do
       enable_referrers(5)
       id = Ash.UUID.generate()
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 9})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :search, hits: 9})
 
       sources = conn |> referrer_rows() |> Enum.map(& &1["source"]) |> Enum.sort()
 
@@ -393,12 +437,12 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
       post = CMS.create_post!(%{title: "Quiet", slug: slug()}, actor: admin)
       CMS.publish_post!(post, %{}, actor: admin)
 
-      seed_bucket(%{content_type: "post", content_id: post.id, day: today(), views: 3})
+      seed_bucket(%{content_type: "post", content_id: post.id, day: yesterday(), views: 3})
 
       seed_referrer_bucket(%{
         content_type: "post",
         content_id: post.id,
-        day: today(),
+        day: yesterday(),
         source: :social,
         hits: 3
       })
@@ -417,8 +461,8 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
     test "two low counts still need somewhere to hide", %{conn: conn} do
       enable_referrers(5)
       id = Ash.UUID.generate()
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 2})
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 3})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :social, hits: 2})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :search, hits: 3})
 
       rows = referrer_rows(conn)
       shown = Map.new(rows, &{&1["source"], &1["hits"]})
@@ -433,8 +477,8 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
     test "a breakdown with nothing to hide exports exact counts", %{conn: conn} do
       enable_referrers(5)
       id = Ash.UUID.generate()
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 9})
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 7})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :search, hits: 9})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :social, hits: 7})
 
       shown = conn |> referrer_rows() |> Map.new(&{&1["source"], &1["hits"]})
 
@@ -451,9 +495,9 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
       quiet = Ash.UUID.generate()
       busy = Ash.UUID.generate()
 
-      seed_referrer_bucket(%{content_id: quiet, day: today(), source: :social, hits: 1})
-      seed_referrer_bucket(%{content_id: busy, day: today(), source: :search, hits: 40})
-      seed_referrer_bucket(%{content_id: busy, day: today(), source: :social, hits: 30})
+      seed_referrer_bucket(%{content_id: quiet, day: yesterday(), source: :social, hits: 1})
+      seed_referrer_bucket(%{content_id: busy, day: yesterday(), source: :search, hits: 40})
+      seed_referrer_bucket(%{content_id: busy, day: yesterday(), source: :social, hits: 30})
 
       rows = referrer_rows(conn)
       by_item = Enum.group_by(rows, & &1["content_id"])
@@ -470,15 +514,15 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
     test "CSV carries the same decision", %{conn: conn} do
       enable_referrers(5)
       id = Ash.UUID.generate()
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :social, hits: 2})
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :search, hits: 40})
-      seed_referrer_bucket(%{content_id: id, day: today(), source: :other, hits: 50})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :social, hits: 2})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :search, hits: 40})
+      seed_referrer_bucket(%{content_id: id, day: yesterday(), source: :other, hits: 50})
 
       body =
         conn
         |> log_in(authed_user(:admin))
         |> get(
-          ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(today()), to: Date.to_iso8601(today())]}"
+          ~p"/editor/analytics/export.csv?#{[from: Date.to_iso8601(yesterday()), to: Date.to_iso8601(yesterday())]}"
         )
         |> Map.fetch!(:resp_body)
 
@@ -504,16 +548,16 @@ defmodule KilnCMSWeb.AnalyticsExportControllerTest do
       post = CMS.create_post!(%{title: "Tagged", slug: slug()}, actor: admin)
       CMS.publish_post!(post, %{}, actor: admin)
 
-      seed_bucket(%{content_type: "post", content_id: post.id, day: today(), views: 4})
-      seed_referrer_bucket(%{content_id: post.id, day: today(), source: :search, hits: 9})
+      seed_bucket(%{content_type: "post", content_id: post.id, day: yesterday(), views: 4})
+      seed_referrer_bucket(%{content_id: post.id, day: yesterday(), source: :search, hits: 9})
 
       org = KilnCMS.Accounts.default_org_id()
 
       assert [{:view, _rows, _titles} | _] =
-               Enum.to_list(Export.stream_rows(today(), today(), org, admin))
+               Enum.to_list(Export.stream_rows(yesterday(), yesterday(), org, admin))
 
       assert [{:referrer, _rows, _titles} | _] =
-               Enum.to_list(Export.stream_referrer_rows(today(), today(), org, admin))
+               Enum.to_list(Export.stream_referrer_rows(yesterday(), yesterday(), org, admin))
     end
 
     # The row that used to be mis-dispatched. It is not part of any export —

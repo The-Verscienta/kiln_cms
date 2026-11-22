@@ -114,13 +114,23 @@ defmodule KilnCMS.Analytics.Export do
   pre-#1073 algorithm; it also carries the shapes #2752 found recoverable. A
   breakdown hidden whole is checked against the same reader, who keeps every
   candidate the algorithm would also have hidden whole: each category must
-  take at least two values across them (#2981). All of this is about one
-  breakdown on its own; a reader holding the per-day file *and* the
-  dashboard's span, or two overlapping files, can difference them — see the
-  warning on `Analytics.suppress_referrer_group/1` and #2989. That the
-  *function* is sound is a separate claim, tested separately; this one is
-  about the file, which is what #777 was filed about and what a recipient
-  actually holds.
+  take at least two values across them (#2981). That the *function* is sound
+  is a separate claim, tested separately; this one is about the file, which is
+  what #777 was filed about and what a recipient actually holds.
+
+  ## Completed days only, and no wider figures (#2989)
+
+  Every referrer row here is one item-day cell, which is the only grain
+  `Analytics.suppress_referrer_group/1` decides. The dashboard's spans and
+  site chart are derived from these same cells' displays
+  (`Analytics.derive_referrer_group/1`), so holding this file beside the
+  dashboard, or two overlapping files, recovers nothing that one cell did not
+  already say.
+
+  Referrer rows stop at `Analytics.last_published_referrer_day/0`, yesterday,
+  even when `to` is today or later: today's bucket is still growing, and two
+  exports of it taken an hour apart could be differenced. View rows still run
+  to `to`. A request whose whole span is today or later gets no referrer rows.
 
   ## Why this is still a stream
 
@@ -133,7 +143,9 @@ defmodule KilnCMS.Analytics.Export do
   """
   @spec stream_referrer_rows(Date.t(), Date.t(), term(), term()) :: Enumerable.t()
   def stream_referrer_rows(from, to, org, actor) do
-    if Analytics.referrers_enabled?() do
+    to = Enum.min([to, Analytics.last_published_referrer_day()], Date)
+
+    if Analytics.referrers_enabled?() and Date.compare(from, to) != :gt do
       query = Ash.Query.for_read(ReferrerDay, :in_range, %{from: from, to: to})
 
       query

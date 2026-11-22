@@ -30,7 +30,7 @@ defmodule KilnCMS.Analytics.ReferrerSuppressionTest do
   allowed — it says what a published `0` would.
 
   None of this covers a reader holding two publications of overlapping traffic
-  (#2989).
+  (#2989): `referrer_differencing_test.exs` does.
   """
   use ExUnit.Case, async: false
 
