@@ -7,6 +7,10 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="staging-scrub-safety-upgrade"></a>
+
+- **Re-scrub staging clones made before 1.12, and give `staging.sh` a prod environment (#2973, #2974, #2977).** A clone scrubbed by an earlier release still holds production's S3 storage credentials and its content-signing key: run `./scripts/staging.sh scrub` (or `bin/kiln_cms eval 'KilnCMS.Release.scrub_staging()'` against the clone) once more. Serve staging with its own `SECRET_KEY_BASE`, and never give it production's `S3_*`, `KILN_PROVENANCE_PRIVATE_KEY`/`KILN_PROVENANCE_KEY_FILE` or `KILN_GOVERNANCE_WITNESS*` ([docs/staging-environments.md](../staging-environments.md)). With the default `KILN_BIN=mix`, `staging.sh` now runs migrate and the scrub under `MIX_ENV=prod` (an unset `MIX_ENV` is set to `prod`; any other value is refused), so it needs `SECRET_KEY_BASE` and `TOKEN_SIGNING_SECRET`, and `DATABASE_SSL=false` for a local Postgres without TLS. It checks that the prod config loads before it copies anything.
+
 <a id="plugin-list-field-types-upgrade"></a>
 
 - **Plugin field types can hold lists from this release; rolling back past it needs preparation (#2680).** Upgrading needs nothing: no migration, no configuration. Rolling back is where the care goes. v1.11 and earlier treat a list field of a plugin type as a single value that happens to store an array. Their editor renders the list run together in one input, and saving such a record there can replace the list with one value or be refused. Restore, publishing a working copy and duplicate fail for a record holding one when the type's `cast/2` refuses a list. Saving or reordering the field in the fields admin clears its `multiple` flag (the arrays stay). Before rolling back, find those fields with the query in [docs/releasing.md → Rolling back past plugin list fields](../releasing.md#rolling-back-past-plugin-list-fields), then leave their records alone until you roll forward, or make each field single-valued (keeping the first item) or delete it on this release, after a backup.
@@ -323,6 +327,40 @@ carries the reasoning.
   The "no all-hidden breakdown leaves a category a single value" rule (#2981) was found by a search run outside the suite, so a change to `referrer_sources/0` or to `KilnCMS.Analytics.suppress_referrer_group/1` had nothing wide to re-check against. The search is now in `test/kiln_cms/analytics/referrer_suppression_test.exs` behind the `slow_sweep` tag, which the default suite excludes. Run it with `mix test --only slow_sweep test/kiln_cms/analytics/referrer_suppression_test.exs` after touching either. It covers thresholds 2 to 20 with four, five and six categories, bounded at view totals of 40, 30 and 20; the original hand search went to 50, and the committed one does not re-run totals above these bounds. A second test in the sweep checks that the criterion can fail (three categories at a threshold of 3 still do). To let the sweep vary the number of categories, `suppress_referrer_group/2` takes an explicit category list; `/1` is `/2` over `referrer_sources/0`, and a default-suite test pins that. Nothing published changes: the dashboard and the export still call `/1`, and no setting or output differs. Operators have nothing to do. The decision record for the rule (ADR 0075) is on a separate open pull request.
 
 ## Fixed
+
+<a id="staging-scrub-safety"></a>
+
+- **The staging scrub no longer leaves a clone able to reach production's buckets or sign as production, and the staging tools can't hit the wrong database (#2973, #2974, #2977).**
+  - **Storage (#2973).** Each storage profile keeps where its files are
+    (endpoint, buckets, public URL, so the site's CSP still allows them and
+    existing media keeps loading read-only from production's public URLs) and
+    loses what reaches them: `access_key_id` becomes `scrubbed` and the secret
+    an empty ciphertext that opens under no key. Every operation on a
+    production file (fetch, delete, store, variants, trash purge, gated
+    downloads) now fails before connecting. Site storage is switched off, so
+    new uploads go to staging's own storage until an admin saves a staging
+    bucket. `mix kiln.vault.reencrypt` counts a scrubbed secret as empty.
+  - **Signing key (#2974).** The scrub deletes the stored provenance key and
+    queues a job that generates a fresh one when staging's own app runs it,
+    sealed under staging's `SECRET_KEY_BASE`, so staging signs, but never as
+    production; production's signatures read as unverifiable there, not as
+    tampered. Until that job runs, staging's publishes are unsigned. The
+    scrub warns when a provenance key is mounted in its environment
+    (`KILN_PROVENANCE_PRIVATE_KEY`/`_KEY_FILE`), which no scrub can remove.
+  - **Order.** Storage credentials and the signing key are now scrubbed right
+    after the billing credentials, before anything that could stop the run.
+  - **The tools (#2977).** `staging.sh` with `KILN_BIN=mix` used to run
+    migrate and the scrub under whatever `MIX_ENV` was set, so under `dev`
+    `mix ecto.migrate` migrated the dev database. It now runs them under
+    `prod`, checks the prod config loads before copying anything, and if
+    migrate or the scrub fails after the copy, drops the clone (or says
+    loudly to drop it, since it holds unscrubbed production data).
+    `mix kiln.staging.scrub` refuses when `DATABASE_URL` names a different
+    host, port or database than the one it would scrub.
+  - New scrub summary keys: `storage_credentials_scrubbed`,
+    `site_storages_disabled`, `provenance_key_removed`. No migration. See the
+    [upgrade note](#staging-scrub-safety-upgrade).
+  ([#2973](https://github.com/The-Verscienta/kiln_cms/issues/2973), [#2974](https://github.com/The-Verscienta/kiln_cms/issues/2974), [#2977](https://github.com/The-Verscienta/kiln_cms/issues/2977))
 
 <a id="custom-filter-datetime-fractions"></a>
 

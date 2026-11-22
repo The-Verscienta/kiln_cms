@@ -17,6 +17,11 @@ defmodule KilnCMS.Provenance.Settings do
   operator who wants another key mounts it and registers this one's public
   half (`public_key_pem/0`) through `KILN_PROVENANCE_RETIRED_KEY_FILES`.
 
+  The one thing that removes the row is the staging scrub
+  (`KilnCMS.Staging.Scrub`, #2974): on a clone of production it deletes it,
+  and `KilnCMS.Provenance.GenerateKeyWorker` generates staging's own once
+  staging serves, so staging signs as itself and never as production.
+
   Instance-wide and tenant-less, so platform-admin only, like
   `KilnCMS.Mail.Settings`. Signing reads the row as the system
   (`KilnCMS.Provenance.stored_key/0`).

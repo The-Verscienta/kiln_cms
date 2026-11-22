@@ -80,8 +80,6 @@ defmodule KilnCMS.Staging.ScrubCoverageTest do
     "posts" => "content",
     "posts_versions" => "content history",
     "propagations" => "content propagation records",
-    "provenance_settings" =>
-      "content signing key; scrubbing it would break governance on the clone (follow-up)",
     "published_artifacts" => "published content",
     "redirects" => "site configuration",
     "reference_edges" => "reference graph between content",
@@ -112,11 +110,7 @@ defmodule KilnCMS.Staging.ScrubCoverageTest do
     "site_session_policy" => "site configuration",
     "site_sso_domains" =>
       "verified sign-in domains; inert once the site's SSO provider is purged",
-    "site_storages" =>
-      "which storage profile a site uses; storage credentials are a known follow-up",
     "social_posts" => "post history of content; the accounts are deactivated",
-    "storage_profiles" =>
-      "media storage (S3) settings; holds credentials, kept because media breaks without them (follow-up)",
     "sync_exposures" => "change-feed disclosure records for content",
     "tag_embeddings" => "search vectors derived from tags",
     "tag_groups" => "content taxonomy",
@@ -136,8 +130,7 @@ defmodule KilnCMS.Staging.ScrubCoverageTest do
       "operator-entered abuse blocks, not visitor logs; the clone should refuse the same sources",
     {"site_admin_allowlist", "cidrs"} =>
       "the operator's own admin networks; dropping them would widen admin access on the clone",
-    {"site_security_txt", "contacts"} => "published in the site's security.txt, public by design",
-    {"storage_profiles", "endpoint"} => "an S3 endpoint URL, not a person"
+    {"site_security_txt", "contacts"} => "published in the site's security.txt, public by design"
   }
 
   defp base_tables do

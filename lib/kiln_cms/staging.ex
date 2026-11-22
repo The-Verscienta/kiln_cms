@@ -43,7 +43,10 @@ defmodule KilnCMS.Staging do
       `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD`.
     * `:allow_live?` — scrub even though this node's Oban is executing jobs
       (`oban_live?/1`). Every queue is paused first, cluster-wide, and stays
-      paused: restart the application once the scrub is done. Only for
+      paused: restart the application, on every node, once the scrub is
+      done. A restart is also what drops production's content-signing key
+      from each other node's cache: the scrub can only clear this one's.
+      Only for
       re-scrubbing a node that is already a scrubbed clone, since jobs may
       have run before the pause.
     * `:shell` — 1-arity logger for human output (default `&IO.puts/1`).
@@ -107,8 +110,35 @@ defmodule KilnCMS.Staging do
       |> Scrub.run()
 
     report(shell, summary)
+
+    warn_mounted_provenance_key(
+      shell,
+      Keyword.get_lazy(opts, :provenance_key_mounted?, &KilnCMS.Keys.provenance_key_mounted?/0)
+    )
+
     warn_unlabelled(shell)
     summary
+  end
+
+  # The scrub removes the generated signing key (#2974), but a mounted one
+  # (`KILN_PROVENANCE_PRIVATE_KEY` / `KILN_PROVENANCE_KEY_FILE`) wins over it
+  # and lives in the environment, out of the scrub's reach. One resolving here
+  # usually means this is production's environment (a release `eval` on the
+  # production host): say so, because the staging application must not be
+  # given the same. `:provenance_key_mounted?` in `opts` stands in for the
+  # check in tests.
+  defp warn_mounted_provenance_key(_shell, false), do: :ok
+
+  defp warn_mounted_provenance_key(shell, true) do
+    shell.("""
+
+    Warning: a provenance signing key is mounted in this environment
+    (KILN_PROVENANCE_PRIVATE_KEY or KILN_PROVENANCE_KEY_FILE). A mounted key
+    wins over the database, so a staging application given production's signs
+    as production whatever the scrub removed. Do not give the application
+    serving this clone production's KILN_PROVENANCE_* variables: leave them
+    unset (it generates a key of its own) or mount a staging key.\
+    """)
   end
 
   @doc """
@@ -175,7 +205,8 @@ defmodule KilnCMS.Staging do
 
         shell.(
           "Oban is live on this node: every queue is now paused. " <>
-            "Restart the application after the scrub to resume them."
+            "Restart the application after the scrub, on every node, to resume them " <>
+            "and to drop production's signing key from each node's cache."
         )
     end
   end

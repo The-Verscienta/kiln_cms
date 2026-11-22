@@ -15,11 +15,24 @@
 #                           only, never their argv (see pg_conn_split). A
 #                           key=value string with a password is refused. Put
 #                           `sslmode=require` (or verify-full) in a URL to
-#                           require TLS: DATABASE_SSL does not reach this script
+#                           require TLS for pg_dump/psql: DATABASE_SSL does
+#                           not reach them
+#   DATABASE_SSL            reaches migrate and scrub, which boot the prod
+#                           config: it uses TLS unless DATABASE_SSL=false. Set
+#                           that for a local Postgres without TLS
 #   STAGING_ADMIN_EMAIL     seed one usable admin (recommended)
 #   STAGING_ADMIN_PASSWORD  password for that admin
 #   KILN_BIN                how to run migrate + scrub. Default: "mix".
 #                           For a release image, e.g. "/app/bin/kiln_cms".
+#   MIX_ENV                 with KILN_BIN=mix: unset (the script sets prod) or
+#                           prod. Any other value is refused before anything
+#                           runs: only the prod config reads DATABASE_URL.
+#   SECRET_KEY_BASE         with KILN_BIN=mix: required, as for any prod boot,
+#   TOKEN_SIGNING_SECRET    and checked (with the rest of the prod config)
+#                           before anything is created or copied
+#
+# If migrate or scrub fails after `up` copied production, the clone holds
+# unscrubbed production data: the script says so and drops it.
 #
 # Deliberately plain shell + pg_dump/psql so it behaves the same on a laptop and
 # on the production VPS. It never writes to PROD_DATABASE_URL.
@@ -259,6 +272,63 @@ pg_conn_split() {
 
 KILN_BIN="${KILN_BIN:-mix}"
 
+# Only config/runtime/prod reads DATABASE_URL (#2977). Under MIX_ENV=dev, Mix
+# migrates and scrubs the database config/dev.exs names (kiln_cms_dev), not
+# the clone: migrate changes the developer's database, and the scrub then
+# refuses, leaving the clone unscrubbed. So with mix, MIX_ENV is prod: set
+# here when unset, refused when it says anything else. Called before anything
+# is created or copied.
+require_mix_env() {
+  [ "$KILN_BIN" = "mix" ] || return 0
+  case "${MIX_ENV:-}" in
+    "")
+      echo "==> MIX_ENV is unset: running mix with MIX_ENV=prod"
+      export MIX_ENV=prod
+      ;;
+    prod) ;;
+    *)
+      die "KILN_BIN=mix needs MIX_ENV=prod (or unset), not MIX_ENV=${MIX_ENV}: only the prod config reads DATABASE_URL, so mix would migrate and scrub the ${MIX_ENV} database instead of the clone"
+      ;;
+  esac
+}
+
+# With mix, the prod config must load before production is copied anywhere: a
+# migrate that fails on a missing SECRET_KEY_BASE after the copy leaves an
+# unscrubbed clone behind. The two variables every prod boot needs are named
+# first; then the config itself is loaded, without starting the app or
+# connecting, which catches whatever else it requires. Nothing is checked for
+# a release, whose image carries its own configuration.
+preflight_mix() {
+  [ "$KILN_BIN" = "mix" ] || return 0
+  local missing="" var
+  for var in SECRET_KEY_BASE TOKEN_SIGNING_SECRET; do
+    [ -n "${!var:-}" ] || missing="${missing} ${var}"
+  done
+  [ -z "$missing" ] ||
+    die "KILN_BIN=mix boots the prod config, which needs:${missing}. Export them (fresh values, not production's) and re-run; nothing was created or copied"
+  echo "==> Checking that the prod config loads"
+  DATABASE_URL="$STAGING_DATABASE_URL" mix run --no-start -e ':ok' ||
+    die "the prod config does not load under MIX_ENV=prod (see above); nothing was created or copied"
+}
+
+# `up` copied production into the clone and could not finish: what is there is
+# production's personal data and secrets, unscrubbed. Dropped, so nobody
+# serves or shares it by mistake. $1 = database name, $2 = the step.
+unscrubbed_clone() {
+  cat >&2 <<EOF
+
+!!! staging: ${2} failed after production was copied into ${1}.
+!!! ${1} holds UNSCRUBBED production data (accounts, personal data, secrets).
+!!! Dropping it now. Do not serve or share it.
+EOF
+  if dropdb --if-exists "$1"; then
+    echo "!!! Dropped ${1}. Fix the error above and run \`up\` again." >&2
+  else
+    echo "!!! Could not drop ${1}: drop it yourself NOW (STAGING_DATABASE_URL=… ./scripts/staging.sh down, or dropdb ${1})." >&2
+  fi
+  exit 1
+}
+
 # Run migrate / scrub either via mix (checkout) or a release bin path.
 run_migrate() {
   if [ "$KILN_BIN" = "mix" ]; then
@@ -286,6 +356,7 @@ run_scrub() {
 cmd_up() {
   require PROD_DATABASE_URL
   require STAGING_DATABASE_URL
+  require_mix_env
 
   # Each side gets its own URL's password as PGPASSWORD, in its own subshell,
   # and neither password is ever an argv element (#2726). Split first, so a
@@ -298,6 +369,8 @@ cmd_up() {
   [ -z "$PG_CONN_ERROR" ] || die "STAGING_DATABASE_URL $PG_CONN_ERROR"
   staging_url="$PG_CONN_URL" staging_pw="$PG_CONN_PASSWORD" staging_has="$PG_CONN_HAS_PASSWORD"
   staging_shown="$PG_CONN_DISPLAY_URL"
+
+  preflight_mix
 
   local name
   name="$(db_name "$STAGING_DATABASE_URL")"
@@ -328,10 +401,10 @@ cmd_up() {
   fi
 
   echo "==> Migrating staging to the current schema"
-  run_migrate
+  run_migrate || unscrubbed_clone "$name" "migrate"
 
   echo "==> Scrubbing staging (PII + outbound secrets)"
-  run_scrub
+  run_scrub || unscrubbed_clone "$name" "the scrub"
 
   cat <<EOF
 
@@ -351,8 +424,21 @@ EOF
 
 cmd_scrub() {
   require STAGING_DATABASE_URL
+  require_mix_env
+  preflight_mix
   echo "==> Scrubbing staging (PII + outbound secrets)"
-  run_scrub
+  if ! run_scrub; then
+    # Not dropped: `scrub` runs against a clone someone else made, perhaps
+    # already scrubbed once. Whether it still holds production's data is
+    # unknown, so it is treated as if it did.
+    cat >&2 <<EOF
+
+!!! staging: the scrub failed. Treat the clone as holding UNSCRUBBED
+!!! production data: do not serve or share it. Fix the error above and run
+!!! \`scrub\` again, or drop it with \`./scripts/staging.sh down\`.
+EOF
+    exit 1
+  fi
 }
 
 cmd_down() {
