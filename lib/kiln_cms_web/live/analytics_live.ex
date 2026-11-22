@@ -410,7 +410,7 @@ defmodule KilnCMSWeb.AnalyticsLive do
           <p
             :if={@referrers_hidden?}
             id="referrers-hidden-note"
-            class="mt-1 text-xs text-base-content/60"
+            class="mt-1 text-xs text-base-content/70"
           >
             {gettext(
               "\"hidden\" means that on at least one day in this range, too few readers arrived that way to show the day's count safely (fewer than %{n}, or a count that could be deduced from one that small). A total that included that day could be compared with the daily figures in the export to recover it, so the total is hidden too.",
