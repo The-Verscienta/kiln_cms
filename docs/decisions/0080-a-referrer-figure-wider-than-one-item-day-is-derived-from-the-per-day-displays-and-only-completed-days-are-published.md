@@ -10,7 +10,7 @@
   per-breakdown guarantee). The guides are
   [data-flows.md](../data-flows.md) and
   [environment-variables.md](../environment-variables.md#referrer-attribution-619).
-- **Changelog** — 1.12.0, under Changed ([long form](../changelog/unreleased.md#referrer-exact-or-hidden)).
+- **Changelog** — 1.12.0, under Changed ([long form](../changelog/v1.12.0.md#referrer-exact-or-hidden)).
 
 ## The problem
 

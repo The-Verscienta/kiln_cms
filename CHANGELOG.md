@@ -54,183 +54,186 @@ else.
   entries to three lines and fails on an entry with nowhere to link.
 -->
 
-## [Unreleased]
+## [1.12.0] - 2026-11-21
+
+Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —
+the 1.12.0 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
 
 What's new, with examples and migration steps: [docs/whats-new/v1.12.md](docs/whats-new/v1.12.md).
-
-Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
-the Unreleased entries as they were written when each change merged.
-Every summary line below that was shortened links to its own entry there.
 
 ### Upgrade notes
 
 - **Re-scrub every staging clone made before 1.12 (`./scripts/staging.sh scrub`): older clones still hold production's S3 storage credentials and content-signing key. `staging.sh` with `KILN_BIN=mix` now runs under `MIX_ENV=prod` and needs `SECRET_KEY_BASE`, `TOKEN_SIGNING_SECRET` (and `DATABASE_SSL=false` for a local Postgres without TLS).**
-  ([long form](docs/changelog/unreleased.md#staging-scrub-safety-upgrade))
+  ([long form](docs/changelog/v1.12.0.md#staging-scrub-safety-upgrade))
 
 - **Plugin field types can now hold lists: no migration, nothing to do to upgrade. Before rolling back past this release, find plugin list fields (query in docs/releasing.md, "Rolling back past plugin list fields"): older releases treat them as single values, and saving such a record there can replace the list. Don't make a plugin field a list until every node is upgraded.**
-  ([#3203](https://github.com/The-Verscienta/kiln_cms/pull/3203) · [long form](docs/changelog/unreleased.md#plugin-list-field-types-upgrade))
+  ([#3203](https://github.com/The-Verscienta/kiln_cms/pull/3203) · [long form](docs/changelog/v1.12.0.md#plugin-list-field-types-upgrade))
 
 - **Two S3 destinations on one bucket name now stop pruning.** If two S3 destinations name the same bucket with one prefix inside the other on different hosts, retention on both is skipped after the upgrade, with a notice on every pass, and their storage grows until you act. Give them prefixes side by side, or untick "Delete its old backups (retention)" on one of them.
-  ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap-upgrade))
+  ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/v1.12.0.md#backup-s3-same-bucket-overlap-upgrade))
 
 - **The destination kind `sftp` is now Kiln's own, and SFTP has its own private-host list.** A plugin destination of kind `sftp` is now answered by Kiln's adapter; delete such rows and add them again under **SFTP server**. List LAN SFTP servers in `BACKUP_SFTP_PRIVATE_HOSTS` (`BACKUP_S3_PRIVATE_HOSTS` doesn't count). Apply the `add_backup_destination_host_key` migration.
-  ([#3198](https://github.com/The-Verscienta/kiln_cms/pull/3198) · [long form](docs/changelog/unreleased.md#backup-sftp-destination-upgrade))
+  ([#3198](https://github.com/The-Verscienta/kiln_cms/pull/3198) · [long form](docs/changelog/v1.12.0.md#backup-sftp-destination-upgrade))
 
 - **Destination retention now deletes only this server's backups: older backups and a container's earlier ones may stop being pruned.** Backups made before v1.10.0, and those sent from a `BACKUP_DIR` that didn't survive a redeploy, are kept from now on, so storage can grow. Adopt an old backup directory on the Destinations tab, or prune those backups by hand. Apply the `destination_prune_ownership` migration.
-  ([GHSA-rx2c-h7cx-wmfj](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-rx2c-h7cx-wmfj) · [#3204](https://github.com/The-Verscienta/kiln_cms/pull/3204) · [long form](docs/changelog/unreleased.md#backup-destination-prune-ownership-upgrade))
+  ([GHSA-rx2c-h7cx-wmfj](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-rx2c-h7cx-wmfj) · [#3204](https://github.com/The-Verscienta/kiln_cms/pull/3204) · [long form](docs/changelog/v1.12.0.md#backup-destination-prune-ownership-upgrade))
 
 - **Custom asset builds and overlay Dockerfiles that don't run `mix assets.deploy`: also run `mix esbuild kiln_public --minify` before `phx.digest`. Without it signed-out pages fall back to app.js and keep working. No migration; rolling back is safe.**
-  ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle-upgrade))
+  ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/v1.12.0.md#public-js-bundle-upgrade))
 
 ### Breaking
 
 - **GraphQL `customWhere` `dateTime` operands are now `NaiveDateTime` and compare wall clock, as values are stored: a filter's UTC offset is dropped instead of converted, and a variable for them must be declared `NaiveDateTime` (`$t: DateTime` now fails validation; inline literals keep working) (#2678).**
-  ([long form](docs/changelog/unreleased.md#customwhere-datetime-wall-clock))
+  ([long form](docs/changelog/v1.12.0.md#customwhere-datetime-wall-clock))
 
 - **`/ws/gql` reads an `authorization` connect param under `Bearer` in any case: a lowercase valid JWT connects as its user, and lowercase garbage or a bare `Bearer` is refused (`403`) instead of connecting anonymously (#2632).**
-  ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#ws-gql-bearer-scheme-any-case))
+  ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/v1.12.0.md#ws-gql-bearer-scheme-any-case))
 
 ### Known issues
 
 - **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check; check those on hex.pm by hand.**
-  ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/unreleased.md#plugin-health-tail-packages-unknown))
+  ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/v1.12.0.md#plugin-health-tail-packages-unknown))
+
 - **A site storage profile on a region ExAws doesn't know (Backblaze B2 `us-west-004`, Wasabi `us-central-1`) fails on every upload and read; keep such sites on the instance's storage until the fix.**
-  ([#3085](https://github.com/The-Verscienta/kiln_cms/issues/3085) · [long form](docs/changelog/unreleased.md#site-storage-unknown-region))
+  ([#3085](https://github.com/The-Verscienta/kiln_cms/issues/3085) · [long form](docs/changelog/v1.12.0.md#site-storage-unknown-region))
+
 - **Comping a member whose provider subscription is still active doesn't cancel it: the provider keeps charging, and its later events are ignored. Cancel the subscription at the provider before comping.**
-  ([#3156](https://github.com/The-Verscienta/kiln_cms/issues/3156) · [long form](docs/changelog/unreleased.md#comp-keeps-provider-subscription))
+  ([#3156](https://github.com/The-Verscienta/kiln_cms/issues/3156) · [long form](docs/changelog/v1.12.0.md#comp-keeps-provider-subscription))
+
 - **A page opened at its path alias shows no reference byline and leaves inherited (`:fallback`) fields blank, though the same page at its slug shows both; link to the slug where that matters.**
-  ([#3193](https://github.com/The-Verscienta/kiln_cms/issues/3193) · [long form](docs/changelog/unreleased.md#alias-page-bylines-fallback))
+  ([#3193](https://github.com/The-Verscienta/kiln_cms/issues/3193) · [long form](docs/changelog/v1.12.0.md#alias-page-bylines-fallback))
 
 ### Added
 
 - **An embedded form can be shown in a chosen language: `data-kiln-locale` on the `embed.js` snippet (`?locale=` on `/forms/:slug/embed`); an unsupported value gets the site default and existing snippets are unchanged (#2597).**
-  ([long form](docs/changelog/unreleased.md#embedded-form-locale))
+  ([long form](docs/changelog/v1.12.0.md#embedded-form-locale))
 
 - **A plugin field type can hold a list (`multiple?/0`, `unique_items?/0`, `kiln_plugin` 1.6), with the same editor input, write rules, API filters and schema export as core lists. A list whose type later stops taking lists is kept read-only (a "held list") instead of being dropped.**
-  ([#3203](https://github.com/The-Verscienta/kiln_cms/pull/3203) · [long form](docs/changelog/unreleased.md#plugin-list-field-types))
+  ([#3203](https://github.com/The-Verscienta/kiln_cms/pull/3203) · [long form](docs/changelog/v1.12.0.md#plugin-list-field-types))
 
 - **Backups: a native SFTP destination.** Back up to any SSH server with a password or a key (Ed25519, ECDSA, RSA). A platform admin confirms the server's host key before it is used, and a changed key fails the destination and alerts platform admins. Uploads resume; retention and rescan work as for S3.
-  ([#3198](https://github.com/The-Verscienta/kiln_cms/pull/3198) · [long form](docs/changelog/unreleased.md#backup-sftp-destination))
+  ([#3198](https://github.com/The-Verscienta/kiln_cms/pull/3198) · [long form](docs/changelog/v1.12.0.md#backup-sftp-destination))
 
 - **`/mcp` can read, create and update links between records: `read_content_links`, `create_content_link` and `update_content_link`, over the same payload-link actions as `/api/json/content-links`. Overlays that replace `:mcp_tools` must add them.**
-  ([#3191](https://github.com/The-Verscienta/kiln_cms/pull/3191) · [long form](docs/changelog/unreleased.md#mcp-content-link-tools))
+  ([#3191](https://github.com/The-Verscienta/kiln_cms/pull/3191) · [long form](docs/changelog/v1.12.0.md#mcp-content-link-tools))
 
 - **Backups → Schedule: the preview warns when a schedule would keep more than about 500 backups of each component, or more than the backup directory has room for (free space plus the backups already there); it never blocks the save.**
-  ([#3172](https://github.com/The-Verscienta/kiln_cms/pull/3172) · [long form](docs/changelog/unreleased.md#backup-schedule-disk-warning))
+  ([#3172](https://github.com/The-Verscienta/kiln_cms/pull/3172) · [long form](docs/changelog/v1.12.0.md#backup-schedule-disk-warning))
 
 - **`GET /api/site`: a site's name, X (Twitter) handle and default share image for a headless front end's link previews, public and shared-cacheable, with a CDN purge on a Branding save that changes them.**
-  ([#3167](https://github.com/The-Verscienta/kiln_cms/pull/3167) · [long form](docs/changelog/unreleased.md#site-defaults-api))
+  ([#3167](https://github.com/The-Verscienta/kiln_cms/pull/3167) · [long form](docs/changelog/v1.12.0.md#site-defaults-api))
 
 - **`GET /api/security/plugin-health`: each installed plugin's health as JSON for monitoring, read from the server's cache and never asking hex.pm; platform administrators only, behind the host site's admin allowlist.**
-  ([#3135](https://github.com/The-Verscienta/kiln_cms/pull/3135) · [long form](docs/changelog/unreleased.md#plugin-health-api))
+  ([#3135](https://github.com/The-Verscienta/kiln_cms/pull/3135) · [long form](docs/changelog/v1.12.0.md#plugin-health-api))
 
 ### Changed
 
 - **Analytics referrers: every figure wider than one item-day is derived from the per-day displays (a source reads `hidden` for the range if any day hid it), and only completed UTC days are shown or exported, so published figures can no longer be differenced to recover a suppressed count; low-traffic sites will see far more `hidden`, now explained on the dashboard (#2989, #2990).**
-  ([long form](docs/changelog/unreleased.md#referrer-exact-or-hidden))
+  ([long form](docs/changelog/v1.12.0.md#referrer-exact-or-hidden))
 
 - **Search: when `query_budget` cuts a search, running sections get `cut_grace` (new, default 100 ms) to stop on their own before they are killed, so a query that finishes keeps its database connection; a cut search may answer up to that much later. New metrics `kiln_cms_search_budget_cut_returned`/`_killed`.**
-  ([#3162](https://github.com/The-Verscienta/kiln_cms/pull/3162) · [long form](docs/changelog/unreleased.md#search-budget-cut-grace))
+  ([#3162](https://github.com/The-Verscienta/kiln_cms/pull/3162) · [long form](docs/changelog/v1.12.0.md#search-budget-cut-grace))
 
 - **Signed-out content pages load a 2.5 KB (gzipped) `public.js` instead of the 81 KB app.js and its chunks; `mix kiln.assets.budget` keeps it free of LiveView and console code.**
-  ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/unreleased.md#public-js-bundle))
+  ([#3142](https://github.com/The-Verscienta/kiln_cms/pull/3142) · [long form](docs/changelog/v1.12.0.md#public-js-bundle))
 
 - **The exhaustive referrer-suppression search (thresholds 2–20, four to six categories, totals up to 40/30/20) is now a `slow_sweep` test you can re-run; `suppress_referrer_group/2` takes an explicit category list, and published output is unchanged.**
-  ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/unreleased.md#referrer-suppression-sweep))
+  ([#3134](https://github.com/The-Verscienta/kiln_cms/pull/3134) · [long form](docs/changelog/v1.12.0.md#referrer-suppression-sweep))
 
 ### Fixed
 
 - **The staging scrub removes production's S3 storage credentials (existing media still loads from production's public URLs; new uploads go to staging's own storage) and its content-signing key (staging generates its own), and `staging.sh`/`mix kiln.staging.scrub` can no longer migrate or scrub the wrong database (#2973, #2974, #2977).**
-  ([long form](docs/changelog/unreleased.md#staging-scrub-safety))
+  ([long form](docs/changelog/v1.12.0.md#staging-scrub-safety))
 
 - **Datetime custom-field filters (JSON:API, GraphQL, MCP; single, link and list fields) match stored values with fractional seconds under any spelling and compare ranges below one second; `in` takes at most 1000 values per request (#2678).**
-  ([long form](docs/changelog/unreleased.md#custom-filter-datetime-fractions))
+  ([long form](docs/changelog/v1.12.0.md#custom-filter-datetime-fractions))
 
 - **A newsletter confirmation email, its link and the confirm page are in the language the reader signed up in, and a record whose locale is no longer configured gets the site default in its `lang` and `og:locale` (#2597).**
-  ([long form](docs/changelog/unreleased.md#locale-followups))
+  ([long form](docs/changelog/v1.12.0.md#locale-followups))
 
 - **An event's recurrence rule with a date-time UNTIL now ends at that instant (a `Z` time in UTC, a floating time in the event's zone), as RFC 5545 says, instead of on its UTC date; rules saved before this release keep their old date until re-saved (#2861).**
-  ([long form](docs/changelog/unreleased.md#recurrence-until-instant))
+  ([long form](docs/changelog/v1.12.0.md#recurrence-until-instant))
 
 - **The sign-in page no longer offers "Use a passkey" on a site's own host, where the browser refuses it, and a passkey-only account on `/sign-in/verify` in a browser that can't use a passkey is told to use another browser or device, or ask an administrator (#2827, #2887).**
-  ([long form](docs/changelog/unreleased.md#passkey-fallbacks))
+  ([long form](docs/changelog/v1.12.0.md#passkey-fallbacks))
 
 - **Automation jobs now store the event payload (the document snapshot, drafts included) sealed, so a pending job's row and Oban's log lines no longer show it; jobs a 1.11 node queued still run (#2992).**
-  ([long form](docs/changelog/unreleased.md#automation-job-payload-sealed))
+  ([long form](docs/changelog/v1.12.0.md#automation-job-payload-sealed))
 
 - **A gallery in the carousel layout can be scrolled with the keyboard: Tab reaches it, the arrow keys scroll it, and it has a focus ring and an "Image gallery" label (#2590).**
-  ([long form](docs/changelog/unreleased.md#gallery-carousel-keyboard))
+  ([long form](docs/changelog/v1.12.0.md#gallery-carousel-keyboard))
 
 - **A revalidating browser or CDN no longer gets a `304` for a public page whose fragments, media, translations, inherited fields, bylines, author name, category or menu links changed: the HTML `ETag` now hashes the cached payload and the menus, and type, field and locale-settings saves move every page's tag.**
-  ([#3202](https://github.com/The-Verscienta/kiln_cms/pull/3202) · [long form](docs/changelog/unreleased.md#public-html-etag-render-inputs))
+  ([#3202](https://github.com/The-Verscienta/kiln_cms/pull/3202) · [long form](docs/changelog/v1.12.0.md#public-html-etag-render-inputs))
 
 - **Federation: a publish sends one signed POST per remote inbox (a `sharedInbox` reaches all its followers) instead of one per follower, settled against every follower there; the fan-out is one transaction, so a retry no longer re-sends to inboxes already queued.**
-  ([#3195](https://github.com/The-Verscienta/kiln_cms/pull/3195) · [long form](docs/changelog/unreleased.md#federation-shared-inbox-dedup))
+  ([#3195](https://github.com/The-Verscienta/kiln_cms/pull/3195) · [long form](docs/changelog/v1.12.0.md#federation-shared-inbox-dedup))
 
 - **The release refusals ("release is no longer open for changes", "release is full", and two more) are translated in the content editor (es, fr; API answers use the request's locale, from a path prefix or the configured default), and an admin's "Release a stuck claim" that wins against a running go-live or rollback now logs at info instead of error. `Releases.publish/1` and `roll_back/1` can return `{:error, :abandoned}`.**
-  ([long form](docs/changelog/unreleased.md#release-refusal-text-abandon-log))
+  ([long form](docs/changelog/v1.12.0.md#release-refusal-text-abandon-log))
 
 - **A valid `bearer`/`BEARER <jwt>` now authenticates on `/api/*`, `/gql` and `/api/feed`, reversing [1.9.0's `401`](docs/changelog/v1.9.0.md#bearer-401-hardening); `/mcp` and `POST /api/keys/rotate` take a `kiln_` key under any case or in a later `Authorization` value, and `/metrics` its token under any case (#2632).**
-  ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/unreleased.md#bearer-scheme-any-case))
+  ([#3188](https://github.com/The-Verscienta/kiln_cms/pull/3188) · [long form](docs/changelog/v1.12.0.md#bearer-scheme-any-case))
 
 - **Plugin health: System, Security posture and "Check plugins now" share one check per server, so hex.pm is asked once; a check stops at 75 s and caches what it got for 15 minutes instead of being killed with nothing stored.**
-  ([#3183](https://github.com/The-Verscienta/kiln_cms/pull/3183) · [long form](docs/changelog/unreleased.md#plugin-check-single-flight))
+  ([#3183](https://github.com/The-Verscienta/kiln_cms/pull/3183) · [long form](docs/changelog/v1.12.0.md#plugin-check-single-flight))
 
 - **Accepting an invitation to the default site at a lower tier no longer demotes an account with no membership but a legacy editor or admin role: its tier is carried into a membership first and the accept reports it already a member. An admin's own Add is unchanged.**
-  ([long form](docs/changelog/unreleased.md#invitation-keeps-legacy-tier))
+  ([#2574](https://github.com/The-Verscienta/kiln_cms/issues/2574) · [long form](docs/changelog/v1.12.0.md#invitation-keeps-legacy-tier))
 
 - **Billing webhooks: an event older than the last one applied, about a different subscription than the membership holds, or for a `comped` membership is now ignored (with the reason stored on its `billing_webhook_events` row) instead of overwriting it; new nullable column `last_provider_event_at`, rollback-safe.**
-  ([long form](docs/changelog/unreleased.md#webhook-ordering-identity))
+  ([#2749](https://github.com/The-Verscienta/kiln_cms/issues/2749) · [long form](docs/changelog/v1.12.0.md#webhook-ordering-identity))
 
 - **Backups History: on a host where both cron and the app back up, an imported row no longer reads "probably expired" just because the app wrote the latest manifest; it reads "expired" only when a later cron prune, by its own keep days, would have removed it.**
-  ([#3161](https://github.com/The-Verscienta/kiln_cms/pull/3161) · [long form](docs/changelog/unreleased.md#backup-history-cron-keep-days))
+  ([#3161](https://github.com/The-Verscienta/kiln_cms/pull/3161) · [long form](docs/changelog/v1.12.0.md#backup-history-cron-keep-days))
 
 - **Members of a non-default site: the content list's New buttons and the translations dashboard's Missing chips and actions now follow that site's content-type scope, not the default site's (display only; the policies were already correct). `Scoping.permitted?/4` and `explicitly_permits?/4` accept a bare org id and raise `ArgumentError` on shapes that name no org.**
-  ([long form](docs/changelog/unreleased.md#scoping-bare-org-id))
+  ([#2599](https://github.com/The-Verscienta/kiln_cms/issues/2599) · [long form](docs/changelog/v1.12.0.md#scoping-bare-org-id))
 
 - **Billing webhooks: recording an event and enqueueing its job are now one transaction, so a failure leaves nothing recorded and the provider's retry starts clean; redelivering an unfinished event re-enqueues it, and a worker that crashes or stalls is retried or reclaimed after 10 minutes.**
-  ([long form](docs/changelog/unreleased.md#billing-webhook-lost-events))
+  ([#2748](https://github.com/The-Verscienta/kiln_cms/issues/2748) · [long form](docs/changelog/v1.12.0.md#billing-webhook-lost-events))
 
 - **Backups: two S3 destinations that name one bucket through different hosts (AWS global vs regional, R2 jurisdiction hosts, a MinIO by name and by IP) no longer both prune it; neither does, and the Destinations badge says why.**
-  ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/unreleased.md#backup-s3-same-bucket-overlap))
+  ([#3154](https://github.com/The-Verscienta/kiln_cms/pull/3154) · [long form](docs/changelog/v1.12.0.md#backup-s3-same-bucket-overlap))
 
 - **Billing webhooks: a database fault while resolving an event's membership now fails the event and Oban retries it (8 attempts) instead of dropping it as `ignored`; a metadata mismatch halts the lookup as `ignored` (`metadata_mismatch`) with nothing written.**
-  ([long form](docs/changelog/unreleased.md#webhook-resolve-ladder-errors))
+  ([#2754](https://github.com/The-Verscienta/kiln_cms/issues/2754) · [long form](docs/changelog/v1.12.0.md#webhook-resolve-ladder-errors))
 
 - **Choosing "join" again on a tier you already hold no longer demotes an `active`, `past_due` or `comped` membership to `incomplete`; the member is sent to `/account` with a notice instead, and no second checkout is opened.**
-  ([long form](docs/changelog/unreleased.md#billing-recheckout-keeps-live-membership))
+  ([#2747](https://github.com/The-Verscienta/kiln_cms/issues/2747) · [long form](docs/changelog/v1.12.0.md#billing-recheckout-keeps-live-membership))
 
 - **Experiments: a second Start, Conclude or Archive from a stale page or struct is refused instead of overwriting the first (the console reloads with a notice; `mix kiln.experiment conclude` reports the error instead of crashing), and a test now fails when any state machine transition lacks a from-state filter.**
-  ([#3133](https://github.com/The-Verscienta/kiln_cms/pull/3133) · [long form](docs/changelog/unreleased.md#experiment-transition-compare-and-swap))
+  ([#3133](https://github.com/The-Verscienta/kiln_cms/pull/3133) · [long form](docs/changelog/v1.12.0.md#experiment-transition-compare-and-swap))
 
 - **Backups: `BACKUP_RCLONE_REMOTE_PRUNE=true` lets in-app backups prune the env remote (only what this backup directory's in-app runs sent there); each retention list/delete call gets its own time limit; the Destinations "Prunes" badge shows only when pruning can run.**
-  ([#3119](https://github.com/The-Verscienta/kiln_cms/pull/3119) · [long form](docs/changelog/unreleased.md#backup-destination-retention-gaps))
+  ([#3119](https://github.com/The-Verscienta/kiln_cms/pull/3119) · [long form](docs/changelog/v1.12.0.md#backup-destination-retention-gaps))
 
 - **idna 8.0.0 fixes EEF-CVE-2026-117678: a long `xn--` label in an email address's domain no longer costs super-linear CPU when Swoosh encodes it to send mail.**
-  ([#3121](https://github.com/The-Verscienta/kiln_cms/pull/3121) · [long form](docs/changelog/unreleased.md#idna-punycode-length-advisory))
+  ([#3121](https://github.com/The-Verscienta/kiln_cms/pull/3121) · [long form](docs/changelog/v1.12.0.md#idna-punycode-length-advisory))
 
 - **A host `backup.sh prune` that skips or can't finish now shows on the Backups page and Home (it writes `.kiln-prune-status.json`), and the app no longer deletes a local backup whose stale hold marker it couldn't remove.**
-  ([#3117](https://github.com/The-Verscienta/kiln_cms/pull/3117) · [long form](docs/changelog/unreleased.md#backup-local-retention-gaps))
+  ([#3117](https://github.com/The-Verscienta/kiln_cms/pull/3117) · [long form](docs/changelog/v1.12.0.md#backup-local-retention-gaps))
 
 - **A hung backup directory no longer stops a node's heartbeat while it records another node's interrupted backup; a restarted node keeps its last directory id for 180 s; a resume waiting on a backup record that can't be read says so; and a heartbeat restart no longer leaves its own paused queue paused.**
-  ([#3116](https://github.com/The-Verscienta/kiln_cms/pull/3116) · [long form](docs/changelog/unreleased.md#backup-heartbeat-lock-gaps))
+  ([#3116](https://github.com/The-Verscienta/kiln_cms/pull/3116) · [long form](docs/changelog/v1.12.0.md#backup-heartbeat-lock-gaps))
 
 - **Backups History: the "couldn't check" chips explain themselves, a media set whose missing parts were copied off-site says which ones, and Home's red backup strip shows the schedule and cron lines only when a backup is actually overdue.**
-  ([#3114](https://github.com/The-Verscienta/kiln_cms/pull/3114) · [long form](docs/changelog/unreleased.md#backup-history-home-polish))
+  ([#3114](https://github.com/The-Verscienta/kiln_cms/pull/3114) · [long form](docs/changelog/v1.12.0.md#backup-history-home-polish))
 
 - **Backups → Schedule: a warning when `KILN_BACKUP_SCHEDULER_CRON` ticks less often than a schedule runs; the tab no longer freezes on a hung backup directory; and a keep-days change made while a backup runs reaches the `.hold` markers when it ends, even if it failed.**
-  ([#3112](https://github.com/The-Verscienta/kiln_cms/pull/3112) · [long form](docs/changelog/unreleased.md#backup-schedule-tab-followups))
+  ([#3112](https://github.com/The-Verscienta/kiln_cms/pull/3112) · [long form](docs/changelog/v1.12.0.md#backup-schedule-tab-followups))
 
 ### Security
 
 - **phoenix 1.8.17 fixes EEF-CVE-2026-128361 (a non-string Presence key crashes the tracker) and EEF-CVE-2026-129344 (a client on the V1 serializer crashes binary broadcasts); Kiln was not exposed: its Presence keys are server-made strings and it broadcasts no binary payloads.**
-  ([#3205](https://github.com/The-Verscienta/kiln_cms/pull/3205) · [long form](docs/changelog/unreleased.md#phoenix-presence-serializer-advisories))
+  ([#3205](https://github.com/The-Verscienta/kiln_cms/pull/3205) · [long form](docs/changelog/v1.12.0.md#phoenix-presence-serializer-advisories))
 
 - **A database restored on another server no longer prunes the original server's backups on its destinations: retention deletes only what this server's backup directory sent, plus directories a platform admin adopts (GHSA-rx2c-h7cx-wmfj).**
-  ([GHSA-rx2c-h7cx-wmfj](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-rx2c-h7cx-wmfj) · [#3204](https://github.com/The-Verscienta/kiln_cms/pull/3204) · [long form](docs/changelog/unreleased.md#backup-destination-prune-ownership))
+  ([GHSA-rx2c-h7cx-wmfj](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-rx2c-h7cx-wmfj) · [#3204](https://github.com/The-Verscienta/kiln_cms/pull/3204) · [long form](docs/changelog/v1.12.0.md#backup-destination-prune-ownership))
 
 - **phoenix_live_view 1.2.14 fixes EEF-CVE-2026-126334 (a LiveView joined without `"url"` skipped its `live_session` `on_mount` hooks); Kiln was not exposed, because `KilnCMSWeb.LiveRouteGuard` already refused those joins (#688).**
-  ([#3190](https://github.com/The-Verscienta/kiln_cms/issues/3190) · [long form](docs/changelog/unreleased.md#liveview-url-less-join))
+  ([#3190](https://github.com/The-Verscienta/kiln_cms/issues/3190) · [long form](docs/changelog/v1.12.0.md#liveview-url-less-join))
 
 ## [1.11.0] - 2026-11-18
 
@@ -606,7 +609,6 @@ What's new, with examples and migration steps: [docs/whats-new/v1.11.md](docs/wh
 
 - **`restore.sh` no longer fails a multi-part media restore at random with "… is not listed in … — nothing was extracted" (a broken pipe under `pipefail` made a listed part read as missing).**
   ([#3110](https://github.com/The-Verscienta/kiln_cms/pull/3110) · [long form](docs/changelog/v1.11.0.md#restore-sigpipe))
-
 
 ### Security
 
