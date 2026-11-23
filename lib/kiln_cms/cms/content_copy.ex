@@ -182,7 +182,7 @@ defmodule KilnCMS.CMS.ContentCopy do
   `values` (a `custom_fields` map) split by what an editor holding write
   `grant` and a read restriction hiding `hidden` may write: `{kept, withheld}`,
   `withheld` the `custom_fields.<name>` entries of the non-blank values left
-  out. A top-level key only — a group is carried whole or not at all.
+  out. A top-level key only — a group is carried whole or not at all; a flexible field may be carried in part, the items of the item types the grant names.
   """
   @spec filter_custom_fields(map(), [String.t()] | nil, [String.t()]) ::
           {map(), [String.t()]}

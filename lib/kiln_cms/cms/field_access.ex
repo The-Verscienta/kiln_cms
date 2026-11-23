@@ -35,7 +35,8 @@ defmodule KilnCMS.CMS.FieldAccess do
 
   A write grant is the list of entries for a type, or `nil` for "no
   restriction". `writable?/2` is plain membership: the bare entry, the field's
-  own entry, or (for a sub-field) its group's entry.
+  own entry, or (for a sub-field or an item type) its group's or flexible
+  field's entry.
 
   ## Read
 

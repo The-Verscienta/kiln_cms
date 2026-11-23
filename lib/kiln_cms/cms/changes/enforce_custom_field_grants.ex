@@ -244,7 +244,11 @@ defmodule KilnCMS.CMS.Changes.EnforceCustomFieldGrants do
       {:ok, type} ->
         subs = Map.new(FieldDefinition.group_fields(type), &{&1.name, &1})
 
-        Map.new(item, fn
+        # Only the keys the type still declares count: a stale key an admin
+        # removed from the type is not the editor's change when coercion drops it.
+        item
+        |> Map.take(["_id", "_type", "_settings" | Map.keys(subs)])
+        |> Map.new(fn
           {"_settings", %{} = settings} -> {"_settings", comparable_map(settings, subs)}
           {key, value} -> {key, comparable_value(Map.get(subs, key), value)}
         end)

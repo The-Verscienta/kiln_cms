@@ -403,7 +403,11 @@ check judges a flexible value by item.
   scope: the grammar has two segments, and a sub-field name in the second
   position grants nothing (it is not an item type, so no path matches it).
 - **A list that cannot be matched is judged whole.** If any item lacks a
-  string `_id` or `_type`, or an id repeats, the path is `[field]`.
+  string `_id` or `_type`, or an id repeats, the path is `[field]`, so an
+  editor with only item-type entries cannot save a field holding such legacy
+  items (data written outside coercion) until someone with the whole-field
+  grant re-saves it. Keys a type no longer declares are ignored in the
+  comparison, so a removed sub-field's stale values are not the editor's change.
 - **Read grants are untouched.** A flexible field cannot be private, so an item
   type is not a read entry; `valid_read_entry?/2` still refuses it.
 - **Copies carry the granted items.** `ContentCopy.filter_custom_fields/3`
