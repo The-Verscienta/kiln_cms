@@ -392,6 +392,8 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
               problems={@problems}
               depth={@depth}
               ctx={@ctx}
+              field_label={@definition.label}
+              position={@index + 1}
             />
           </div>
           <p
@@ -413,6 +415,8 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
             problems={@problems}
             depth={@depth}
             ctx={@ctx}
+            field_label={@definition.label}
+            position={@index + 1}
           />
         </div>
       <% else %>
@@ -482,6 +486,8 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
   attr :problems, :map, required: true
   attr :depth, :integer, required: true
   attr :ctx, :map, default: %{}
+  attr :field_label, :string, required: true
+  attr :position, :integer, required: true
 
   # Always rendered, hidden by CSS only (`.flex-settings`): the save replaces
   # an item's settings, so an input that was not in the DOM would wipe its
@@ -546,6 +552,8 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
             problems={@problems}
             depth={@depth}
             ctx={@ctx}
+            field_label={@field_label}
+            position={@position}
           />
         </div>
       </div>
@@ -564,6 +572,10 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
   attr :problems, :map, required: true
   attr :depth, :integer, required: true
   attr :ctx, :map, default: %{}
+  # The owning flexible field's label and the item's 1-based place, for the
+  # accessible names of the buttons in the item's media picker.
+  attr :field_label, :string, required: true
+  attr :position, :integer, required: true
 
   # One sub-field of one item, through the same inputs a top-level field gets
   # (`InspectorComponents.group_cell_input/1`), under an id of its own keyed by
@@ -621,6 +633,9 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
             errors={@errors}
             at={@address}
             media={Map.get(@ctx, :media, [])}
+            locked={Map.get(@ctx, :locked, false)}
+            field_label={@field_label}
+            position={@position}
           />
           <.live_component
             :if={@sub.field_type == :reference}
@@ -660,6 +675,9 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
   # server resolves both against the live form; it trusts nothing else.
   attr :at, :string, required: true
   attr :media, :list, default: []
+  attr :locked, :boolean, default: false
+  attr :field_label, :string, required: true
+  attr :position, :integer, required: true
 
   # A media sub-field of an item (#2282): the single media field's input
   # (`InspectorComponents.custom_field_input/1`) with events that carry the
@@ -698,6 +716,22 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
           phx-click="open_item_media_picker"
           phx-value-at={@at}
           phx-value-field={@sub.name}
+          disabled={@locked}
+          aria-label={
+            if @item_media,
+              do:
+                gettext("Replace %{label} of item %{position} in %{field}",
+                  label: @sub.label,
+                  position: @position,
+                  field: @field_label
+                ),
+              else:
+                gettext("Choose %{label} for item %{position} in %{field}",
+                  label: @sub.label,
+                  position: @position,
+                  field: @field_label
+                )
+          }
           class="btn btn-sm btn-default"
         >
           {if @item_media, do: gettext("Replace"), else: gettext("Choose from library")}
@@ -709,7 +743,15 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
           phx-click="clear_item_media"
           phx-value-at={@at}
           phx-value-field={@sub.name}
-          class="text-sm text-base-content/70 hover:text-error"
+          disabled={@locked}
+          aria-label={
+            gettext("Remove %{label} of item %{position} in %{field}",
+              label: @sub.label,
+              position: @position,
+              field: @field_label
+            )
+          }
+          class="text-sm text-base-content/70 hover:text-error disabled:opacity-50"
         >
           {gettext("Remove")}
         </button>

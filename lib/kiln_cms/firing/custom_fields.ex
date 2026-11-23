@@ -165,8 +165,10 @@ defmodule KilnCMS.Firing.CustomFields do
 
   # The top-level fields whose value can hold a snapshot of `type`: a field of
   # that type, and any `:flexible` or `:group` field, whose items and rows can
-  # carry one in a sub-field (#2282). The walkers find the snapshots inside by
-  # shape; a `:json` field is left alone however its value looks.
+  # carry one in a sub-field (#2282). This list only decides what is relabelled
+  # (and, for media, re-read). `ReferenceSnapshots.ids/1` and `mask/2` walk
+  # every value by shape, a `:json` field's included, so a snapshot-shaped
+  # object a writer typed into a `:json` value is masked like a real one.
   defp nested_names(definitions, type) do
     for %{field_type: field_type, name: name} <- definitions,
         field_type in [type, :flexible, :group],

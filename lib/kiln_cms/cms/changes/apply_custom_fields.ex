@@ -245,24 +245,133 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # re-resolves a `:reference`, and never re-checks a value nobody sent.
   #
   # A `:group` or `:flexible` field holding a `:media` sub-field anywhere in
-  # its tree (#2282) is re-resolved whole, with `refs: :keep`: the media
-  # snapshots inside it are re-taken, every `:reference` sub-value in it is
-  # returned as stored (this pass runs as the `:media` system actor, which has
-  # no content READ — resolving a reference would fail the record, and a
-  # reference is never this task's to refresh), and constraints are not
-  # re-judged (nothing but a snapshot can move).
+  # its tree (#2282) is walked by `keep_media/4` instead: only the media
+  # snapshots inside it are re-taken. Everything else in the value (every
+  # `:reference` sub-value, an item of a type the field no longer has, a key no
+  # sub-field declares, a required sub-field added since) is kept as stored.
+  # This pass runs as the `:media` system actor, which has no content READ, and
+  # a stale record must not block a snapshot refresh.
   defp resnapshot_media(changeset, context) do
     existing = merge_base(changeset)
 
-    supplied =
-      for %{name: name} = definition <- definitions_for(changeset),
-          media_bearing?(definition),
-          Map.has_key?(existing, name),
-          into: %{},
-          do: {name, existing[name]}
+    defs =
+      Enum.filter(definitions_for(changeset), &(media_bearing?(&1) and has_value?(existing, &1)))
 
-    apply_definitions(changeset, existing, :strict, context, supplied, :keep)
+    supplied =
+      for %{field_type: :media, name: name} <- defs, into: %{}, do: {name, existing[name]}
+
+    changeset = apply_definitions(changeset, existing, :strict, context, supplied, :keep)
+    read_opts = context |> Ash.Context.to_opts() |> Keyword.put(:tenant, changeset.to_tenant)
+
+    Enum.reduce(defs, changeset, fn
+      %{field_type: type} = def, changeset when type in [:group, :flexible] ->
+        {value, problems} = keep_media(def, existing[def.name], def.name, read_opts)
+        cleaned = Ash.Changeset.get_attribute(changeset, :custom_fields)
+
+        changeset
+        |> Ash.Changeset.force_change_attribute(:custom_fields, Map.put(cleaned, def.name, value))
+        |> then(fn cs -> Enum.reduce(problems, cs, &add_path_error(&2, def, &1)) end)
+
+      _media, changeset ->
+        changeset
+    end)
   end
+
+  defp has_value?(existing, %{name: name}), do: Map.has_key?(existing, name)
+
+  defp add_path_error(changeset, def, problem),
+    do: Ash.Changeset.add_error(changeset, path_error(def, problem))
+
+  # Returns `{value, problems}`: the stored value with each media snapshot
+  # re-resolved, and a problem (`{path, label, message}`) for one whose media is
+  # gone. The value keeps its shape wherever it is not what the definition
+  # says (a row that is not an object, an item with an unknown `_type`).
+  defp keep_media(%{field_type: :group} = def, value, path, read_opts) do
+    subs = FieldDefinition.group_fields(def)
+
+    case value do
+      rows when is_list(rows) ->
+        map_with_problems(rows, path, fn row, row_path ->
+          keep_row(subs, row, row_path, read_opts)
+        end)
+
+      row ->
+        keep_row(subs, row, path, read_opts)
+    end
+  end
+
+  defp keep_media(%{field_type: :flexible} = def, items, path, read_opts) when is_list(items) do
+    types = FieldDefinition.item_types(def)
+
+    map_with_problems(items, path, fn
+      %{"_type" => name} = item, item_path ->
+        case Enum.find(types, &(&1.name == name)) do
+          nil -> {item, []}
+          type -> keep_item(type, item, item_path, read_opts)
+        end
+
+      item, _item_path ->
+        {item, []}
+    end)
+  end
+
+  defp keep_media(_def, value, _path, _read_opts), do: {value, []}
+
+  defp map_with_problems(list, path, fun) do
+    {kept, problems} =
+      list
+      |> Enum.with_index()
+      |> Enum.map(fn {element, index} -> fun.(element, "#{path}[#{index}]") end)
+      |> Enum.unzip()
+
+    {kept, Enum.concat(problems)}
+  end
+
+  defp keep_item(type, item, path, read_opts) do
+    {content, settings} =
+      Enum.split_with(FieldDefinition.group_fields(type), &(not &1.item_setting))
+
+    {item, problems} = keep_row(content, item, path, read_opts)
+
+    case item do
+      %{"_settings" => %{} = held} = item ->
+        {held, more} = keep_row(settings, held, path <> "._settings", read_opts)
+        {%{item | "_settings" => held}, problems ++ more}
+
+      item ->
+        {item, problems}
+    end
+  end
+
+  defp keep_row(subs, %{} = row, path, read_opts) when not is_struct(row) do
+    Enum.reduce(subs, {row, []}, fn sub, {row, problems} ->
+      case Map.fetch(row, sub.name) do
+        {:ok, value} ->
+          {value, more} = keep_sub(sub, value, "#{path}.#{sub.name}", read_opts)
+          {Map.put(row, sub.name, value), problems ++ more}
+
+        :error ->
+          {row, problems}
+      end
+    end)
+  end
+
+  defp keep_row(_subs, row, _path, _read_opts), do: {row, []}
+
+  defp keep_sub(%{field_type: :media} = sub, %{} = value, path, read_opts)
+       when not is_struct(value) do
+    case resolve(Map.put(sub, :multiple, false), value, read_opts) do
+      {:ok, snapshot} -> {snapshot, []}
+      {:error, message} -> {value, [{path, sub.label, message}]}
+      _other -> {value, []}
+    end
+  end
+
+  defp keep_sub(%{field_type: type} = sub, value, path, read_opts)
+       when type in [:group, :flexible],
+       do: keep_media(sub, value, path, read_opts)
+
+  defp keep_sub(_sub, value, _path, _read_opts), do: {value, []}
 
   @doc """
   Whether a top-level definition holds `:media` values: a `:media` field, or a
@@ -432,7 +541,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp merge_base(changeset), do: stringify_keys(changeset.data.custom_fields || %{})
 
   # `refs` is `:resolve` for every write but the media re-snapshot (`:keep`,
-  # see `resnapshot_media/2`).
+  # see `resnapshot_media/2`), which re-judges no constraint.
   defp apply_definitions(changeset, existing, mode, context, supplied \\ nil, refs \\ :resolve) do
     {all_defs, held} = scope_for(changeset)
     # A held list (#2680) is held beside the unknown types, but stays declared.
@@ -1180,8 +1289,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
 
   # `env` carries what a nested `:media` / `:reference` sub-field resolves
   # with: the write's `read_opts` (the caller and the writing tenant, #1659 —
-  # never a system actor, never empty) and `refs` (`:keep` on the media
-  # re-snapshot). It is threaded to every sub-field, however deep.
+  # never a system actor, never empty) and `refs`. It is threaded to every sub-field, however deep.
   defp resolve_field(%{field_type: :group} = def, raw, env, {mode, held}),
     do: resolve_group(def, raw, mode, held, env)
 
@@ -1293,9 +1401,6 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # (`env.read_opts`, #1659), so a target the writer cannot read is refused
   # like a missing one. Never `[]`, never a system actor.
   #
-  # `refs: :keep` (the media re-snapshot) returns a `:reference` sub-value as
-  # stored: that pass runs as the media actor, which cannot read content.
-  #
   # Every other sub-field is scalar (`FieldDefinition.link_field_types/0`), so
   # a nested object or list is refused before it reaches a coercion that would
   # stringify it; a list is refused for a media or reference one too — a
@@ -1303,9 +1408,6 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   defp sub_value(%{field_type: type}, value, _env)
        when type in [:media, :reference] and is_list(value),
        do: {:error, FieldValue.not_single()}
-
-  defp sub_value(%{field_type: :reference} = sub, value, %{refs: :keep}),
-    do: if(blank_for?(sub, value), do: :skip, else: {:ok, value})
 
   defp sub_value(%{field_type: type} = sub, value, env) when type in [:media, :reference],
     do: resolve(Map.put(sub, :multiple, false), value, env.read_opts)

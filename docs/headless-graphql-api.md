@@ -291,6 +291,16 @@ combined with `field` or `sourceType`, and a name the record's type has no
 reverse field for lists nothing. The schema export lists each type's reverse
 fields as `x-kiln-reverse-fields`.
 
+A reference inside a flexible field's item or a group's row (#2282) is an
+edge too, and `ContentReferrer.field` (and `referencedBy(field:)`) names it by
+its **definition path**, dotted: `sections.hero.cta` (field, item type,
+sub-field), `visits.doctor` for a group row, `sections.section.rows.row.cta`
+for a nested flexible field. The path names definitions, never positions or item
+ids, and its `position` is 0. The same field's path is also the
+`content_links` `field` that JSON:API's `?include=content_links` carries.
+A path longer than 1,000 characters (the `field` cap) implies no edge. The
+reference stays in the record's `customFields`; it just has no reverse entry.
+
 `ContentReference` is `{ position, link, target }` and `ContentReferrer` is
 `{ field, position, link, source }`. `target` and `source` are a
 `ContentRecord`: an **interface** that every content object implements, with

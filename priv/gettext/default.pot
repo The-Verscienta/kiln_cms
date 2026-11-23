@@ -5764,6 +5764,11 @@ msgstr ""
 msgid "Checkpointing is switched off, so no checkpoints are being minted and nothing is published to a witness."
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/flexible_components.ex
+#, elixir-autogen, elixir-format
+msgid "Choose %{label} for item %{position} in %{field}"
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a caption track"
@@ -18884,6 +18889,11 @@ msgstr ""
 msgid "Remove %{email}"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/flexible_components.ex
+#, elixir-autogen, elixir-format
+msgid "Remove %{label} of item %{position} in %{field}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove %{path} from the 404 list"
@@ -19233,6 +19243,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Replace"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/flexible_components.ex
+#, elixir-autogen, elixir-format
+msgid "Replace %{label} of item %{position} in %{field}"
 msgstr ""
 
 #: lib/kiln_cms_web/live/social_live.ex

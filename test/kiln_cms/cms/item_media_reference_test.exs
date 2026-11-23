@@ -650,6 +650,53 @@ defmodule KilnCMS.CMS.ItemMediaReferenceTest do
       assert %{stale: 0, written: 0} = Resnapshot.run(org)
     end
 
+    # The pass is media-only: whatever else the stored value has drifted into
+    # (a required sub-field added since, an item type the field no longer has,
+    # a key no sub-field declares) is kept as stored and never refuses it.
+    test "a stale record still refreshes its media: nothing else is re-judged", ctx do
+      org = KilnCMS.Accounts.default_org_id()
+      stale_ref = %{"id" => ctx.target.id, "type" => "page", "slug" => "old", "title" => "Old"}
+      sub!(ctx.admin, ctx.section, "kicker", :string, %{required: true, position: 9})
+      sub!(ctx.admin, ctx.visits, "badge", :string, %{required: true, position: 9})
+
+      post = post!(ctx.editor, %{})
+
+      stored_value = %{
+        "sections" => [
+          %{
+            "_id" => Ash.UUID.generate(),
+            "_type" => "section",
+            "pic" => stale_pic(ctx.media),
+            "cta" => stale_ref,
+            "legacy" => "kept"
+          },
+          %{"_id" => Ash.UUID.generate(), "_type" => "retired", "note" => "orphan"}
+        ],
+        "visits" => [%{"photo" => stale_pic(ctx.media), "stray" => "kept"}]
+      }
+
+      post = Ash.Seed.update!(post, %{custom_fields: stored_value})
+
+      dry = Resnapshot.run(org, dry_run?: true)
+      assert dry.stale >= 1
+      assert dry.failed == []
+      assert stored(post) == stored_value
+
+      report = Resnapshot.run(org)
+      assert report.failed == []
+      assert report.written == dry.stale
+
+      fresh = Snapshot.of(ctx.media)
+      [section, orphan] = stored(post)["sections"]
+      assert section["pic"] == fresh
+      assert section["cta"] == stale_ref
+      assert section["legacy"] == "kept"
+      assert orphan == Enum.at(stored_value["sections"], 1)
+      assert [%{"photo" => ^fresh, "stray" => "kept"}] = stored(post)["visits"]
+
+      assert %{stale: 0, written: 0} = Resnapshot.run(org)
+    end
+
     test "a trashed record is re-snapshotted without a fire and counted as trashed", ctx do
       org = KilnCMS.Accounts.default_org_id()
       post = post!(ctx.editor, %{})

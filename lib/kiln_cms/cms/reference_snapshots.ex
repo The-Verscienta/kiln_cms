@@ -42,6 +42,14 @@ defmodule KilnCMS.CMS.ReferenceSnapshots do
   sub-field was deleted or renamed since it was stored. An item (a map with
   `_id` or `_type`) is never itself taken for a snapshot, whatever its
   sub-fields are called; its values are walked.
+
+  ## Limitation: shape, not definition
+
+  The walks never consult a definition, so they also see a snapshot-shaped
+  object (`id` uuid, `type`, `slug`, `title`, no `url`) inside a `:json` field,
+  or under a key no definition names. Such an object is masked and counted as
+  an edge like a real snapshot. That is deliberate: it fails closed, and a
+  stored map cannot tell a leftover of a retype from a typed one.
   """
 
   alias KilnCMS.CMS.FieldDefinition

@@ -186,6 +186,22 @@ defmodule KilnCMSWeb.FlexibleMediaReferenceEditorTest do
       assert render(ctx.lv) =~ "None selected"
     end
 
+    test "each item's buttons carry a name of their own: the field and the item's place", ctx do
+      html = render(ctx.lv)
+      label = fn id -> html |> LazyHTML.from_fragment() |> LazyHTML.query(id) end
+
+      one = label.("#cf-media-sections-#{@hero}-image-choose") |> LazyHTML.attribute("aria-label")
+
+      two =
+        label.("#cf-media-sections-#{@hero2}-image-choose") |> LazyHTML.attribute("aria-label")
+
+      assert [one_name] = one
+      assert [two_name] = two
+      assert one_name =~ "item 1 in Sections"
+      assert two_name =~ "item 2 in Sections"
+      refute one_name == two_name
+    end
+
     test "picks through the drawer, saves a snapshot, and shows it after a reload", ctx do
       ctx.lv |> element("#cf-media-sections-#{@hero}-image-choose") |> render_click()
 

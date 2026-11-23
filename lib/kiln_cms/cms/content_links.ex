@@ -74,7 +74,8 @@ defmodule KilnCMS.CMS.ContentLinks do
   removing another leaves an edge alone, and two items naming one target imply
   one edge. Such an edge has `position` 0 and no link values, is uncapped and
   has no inverse; it behaves as `on_target_delete: :keep`
-  (`Changes.ClearReferenceOptions`).
+  (`Changes.ClearReferenceOptions`). A path longer than `ContentLink.field`
+  allows (`KilnCMS.Limits.line/0`, 1,000 characters) implies no edge.
   """
   @spec desired(map() | nil, [struct()]) :: [edge()]
   def desired(custom_fields, definitions) when is_map(custom_fields) do
@@ -131,7 +132,7 @@ defmodule KilnCMS.CMS.ContentLinks do
   # `position` is the value's place in a top-level list; a reference inside a
   # row or item always has 0 (see `desired/2`).
   defp edge({%{"id" => id} = value, position}, definition, path) when is_binary(id) do
-    if uuid?(id) do
+    if uuid?(id) and path_fits?(path) do
       [
         %{
           field: path,
@@ -147,6 +148,12 @@ defmodule KilnCMS.CMS.ContentLinks do
   end
 
   defp edge(_value, _definition, _path), do: []
+
+  # `ContentLink.field` is capped (`KilnCMS.Limits.line/0`). A nested path can
+  # outgrow it (up to 3 item levels of long names): such a reference implies
+  # no edge, as one to a non-uuid id does, rather than raising inside a save.
+  # The value stays in `custom_fields`; only the reverse list misses it.
+  defp path_fits?(path), do: String.length(path) <= KilnCMS.Limits.line()
 
   defp link_values(%{"link" => %{} = link}), do: link
   defp link_values(_value), do: %{}

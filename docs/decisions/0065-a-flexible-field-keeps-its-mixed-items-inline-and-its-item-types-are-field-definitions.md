@@ -329,6 +329,23 @@ An item type's sub-field may now be a `:media` or a `:reference`
   inside items, and the re-fire graph (`Firing.References`) sees item media and
   references, so renaming a target or re-processing an image re-fires the
   documents that show it only through an item.
+- **The SQL reporting views cut nested snapshots (#3057).** A reference
+  snapshot inside an item or a group row is cut to `{id, type}` by the views
+  (`docs/reporting.md`); the strip depth is pinned to the snapshot walks'
+  depth by a test.
+- **Walks are by shape, so they also see a `:json` field.** `ids/1` and
+  `mask/2` never consult a definition: a snapshot-shaped object a writer
+  typed into a `:json` value is masked and counted like a real one. That fails
+  closed and is accepted (`Firing.CustomFields` relabels only the
+  reference, flexible and group fields' values).
+- **The media re-snapshot is media-only.** `mix kiln.media.resnapshot` walks
+  a group's rows and an item's sub-fields and re-takes only the media
+  snapshots; every other value, an item of a retired type, a stray key and a
+  sub-field required since the record was saved are kept as stored and never
+  refuse the record.
+- **An edge path is capped.** `ContentLink.field` holds 1,000 characters; a
+  reference whose definition path is longer implies no edge (the value stays
+  in `custom_fields`).
 - **No private sub-fields.** `private` is top-level only
   (`Validations.PrivateField`), so a hidden value never sits inside an item.
 - **The editor addresses an item, not a field.** The pickers inside an item

@@ -5764,6 +5764,11 @@ msgstr "Paiement annulé — vous n'avez pas été débité."
 msgid "Checkpointing is switched off, so no checkpoints are being minted and nothing is published to a witness."
 msgstr "Les points de contrôle sont désactivés : aucun n'est émis et rien n'est publié auprès d'un témoin."
 
+#: lib/kiln_cms_web/components/content_editor/flexible_components.ex
+#, elixir-autogen, elixir-format
+msgid "Choose %{label} for item %{position} in %{field}"
+msgstr "Choisir %{label} pour l'élément %{position} de %{field}"
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a caption track"
@@ -18884,6 +18889,11 @@ msgstr "Supprimer %{domain} ?"
 msgid "Remove %{email}"
 msgstr "Retirer %{email}"
 
+#: lib/kiln_cms_web/components/content_editor/flexible_components.ex
+#, elixir-autogen, elixir-format
+msgid "Remove %{label} of item %{position} in %{field}"
+msgstr "Retirer %{label} de l'élément %{position} de %{field}"
+
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove %{path} from the 404 list"
@@ -19234,6 +19244,11 @@ msgstr "Récurrent"
 #, elixir-autogen, elixir-format
 msgid "Replace"
 msgstr "Remplacer"
+
+#: lib/kiln_cms_web/components/content_editor/flexible_components.ex
+#, elixir-autogen, elixir-format
+msgid "Replace %{label} of item %{position} in %{field}"
+msgstr "Remplacer %{label} de l'élément %{position} de %{field}"
 
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
