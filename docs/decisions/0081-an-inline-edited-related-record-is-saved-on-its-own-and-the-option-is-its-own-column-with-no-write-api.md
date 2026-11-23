@@ -1,9 +1,9 @@
 # 0081. An inline-edited related record is saved on its own, and the option is its own column with no write API
 
-- **Status** — accepted (2026-11-23). Pull request 1 of #2283 ships only the
-  option and a read-only record card; saving from the card and the cascade
-  come in later pull requests of the same plan, and this record is the
-  reasoning they build on.
+- **Status** — accepted (2026-11-23). Pull request 1 of #2283 shipped the
+  option and a read-only record card; part 2a adds saving from the card
+  (the notes under "What part 2a adds"). The unsaved-changes guard and the
+  cascade come in later pull requests of the same plan.
 - **References** — [#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283),
   [the plan](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/plans/inline-reference-editing-plan.md) (I1, I2, I12 and the
   owner's decisions of 2026-11-16), building on
@@ -66,11 +66,41 @@ result from two authorized calls, writing the related record at its own
 endpoint and then connecting it. A "write the child through the parent's
 mutation" input is not offered.
 
-## What this pull request ships
+## What pull request 1 shipped
 
-Only the option (column, validation, sync, export annotation, the fields-admin
-checkbox) and a **read-only** card on each connected row the actor may write.
-Nothing is editable yet.
+The option (column, validation, sync, export annotation, the fields-admin
+checkbox) and a read-only card on each connected row the actor may write.
+
+## What part 2a adds
+
+The card edits the record and saves it on its own, as decided above. The
+choices that carry weight:
+
+- **No `AshPhoenix.Form` per card.** The card holds a params map of the
+  changed editable keys and calls `ContentTypes.update/4` (a draft) or
+  `ContentTypes.save_working_copy/4` (a published record, with the title as
+  `working_title`), then maps the Ash errors to inputs itself. A form per
+  open card would hold a changeset in the LiveView for up to ten cards and
+  validate on every keystroke for a result the save recomputes anyway.
+- **A server-side whitelist.** A save takes only the keys of the card's
+  editable set: the title (when the actor's grant allows it and the type has
+  no title template) and the plain custom fields the actor's grant allows,
+  not hidden by a read grant or a condition. Any other posted key is
+  dropped, so a forged event cannot widen the write.
+- **Staleness is checked by state as well as `lock_version`.** Workflow
+  writes keep `lock_version`, so a record published since the card read it
+  would pass a version check. The draft write passes
+  `kiln_if_match: [{lock_version, state}]`, the card re-reads the record
+  before writing, and both a stale-record error and a failed precondition
+  show as *Changed by someone else*.
+- **The card is inert when the parent field is disabled.** The picker sits
+  in a disabled group in that case, so the card's inputs and Save are
+  disabled. The decision above stands: the server would accept the write
+  under the related record's own policy, since the parent field's grant
+  governs only the connection. Only the interface does not offer it.
+
+Still not in the card: the unsaved-changes guard on leaving the page, the
+cascade on the parent's Save, and creating and expanding a record on create.
 
 ## Rejected
 

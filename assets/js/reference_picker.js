@@ -33,6 +33,10 @@ export const ReferencePicker = {
     this.el.addEventListener("input", this.onInput)
     this.el.addEventListener("click", this.onClick, true)
     this.setupSorter()
+    // A failed card save moves focus to its first invalid input.
+    this.handleEvent("inline_focus", ({id}) => {
+      if (this.el.querySelector(`[id="${id}"]`)) document.getElementById(id)?.focus()
+    })
   },
 
   updated() {
@@ -66,6 +70,7 @@ export const ReferencePicker = {
 
   key(e) {
     if (e.target.closest("[data-ref-new]")) return this.newFormKey(e)
+    if (e.target.closest("[data-inline-card]")) return this.inlineKey(e)
 
     const input = e.target.closest("[data-ref-search]")
     if (!input) return
@@ -111,6 +116,22 @@ export const ReferencePicker = {
       e.preventDefault()
       e.stopPropagation()
       form.querySelector("[data-ref-new-cancel]")?.click()
+    }
+  },
+
+  // A record card (#2283) sits inside the editor form too: Enter in one of its
+  // inputs saves the card, never the document; Escape closes it (the server
+  // refuses while there are unsaved changes).
+  inlineKey(e) {
+    const card = e.target.closest("[data-inline-card]")
+
+    if (e.key === "Enter" && e.target.matches("input:not([type=checkbox])")) {
+      e.preventDefault()
+      card.querySelector("[data-inline-save]:not([disabled])")?.click()
+    } else if (e.key === "Escape") {
+      e.preventDefault()
+      e.stopPropagation()
+      document.getElementById(card.id.replace(/-card$/, "-toggle"))?.click()
     }
   },
 

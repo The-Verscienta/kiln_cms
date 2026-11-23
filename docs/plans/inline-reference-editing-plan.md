@@ -1,6 +1,6 @@
 # Inline editing of related records: plan
 
-Status: PR 1 built (the `edit_inline` option, fields-admin checkbox, schema export and a read-only card); PRs 2a, 2b and 3 not built. Tracking issue: #2283. Written 2026-11-16 against
+Status: PR 1 built (the `edit_inline` option, fields-admin checkbox, schema export and a read-only card); PR 2a built (Card Save, mock in [inline-reference-card-mock.html](inline-reference-card-mock.html)); PRs 2b and 3 not built. Tracking issue: #2283. Written 2026-11-16 against
 `main` after #2285 (reference selection and create-on-type, all four PRs) and
 the #2282 plan ([flexible-content-plan.md](../flexible-content-plan.md)). Nothing
 here is a decision until the PR that carries it merges; the questions for the
@@ -337,8 +337,8 @@ children is N child versions plus the parent's, by design.
   snapshot reads the live row. Re-fire already serves fresh values (R0), so
   only the raw `custom_fields` read differs; documented. PR 3's cascade removes
   the lag for draft children only.
-* **LiveView memory.** One `AshPhoenix.Form` per open card; capped at 10 per
-  field and released on close-after-save.
+* **LiveView memory.** One card component per open card, holding a params map
+  (no `AshPhoenix.Form`, see Deviations); capped at 10 per field.
 * **Plugin and dynamic types.** The child's field list comes from the same
   `field_definitions` call as "Add new" (dynamic or compiled); a plugin field
   type is read-only (I4). A removed type makes its row read-only, as the picker
@@ -436,3 +436,39 @@ PR 1 differs from the plan in these places:
 - **The fields-admin checkbox is step 7**, "Editing the linked records", after
   step 6 "Which records can be picked".
 - **The decision record is [ADR 0081](../decisions/0081-an-inline-edited-related-record-is-saved-on-its-own-and-the-option-is-its-own-column-with-no-write-api.md).**
+
+PR 2a (Card Save) differs from the plan in these places. The mock it was built
+from is [inline-reference-card-mock.html](inline-reference-card-mock.html).
+
+1. **No `AshPhoenix.Form` per card.** The card (now the `ReferenceInline` live
+   component) keeps a params map of the editable fields and calls
+   `ContentTypes.update/4` or `ContentTypes.save_working_copy/4`; Ash errors
+   are mapped to inputs by the card. The Risks line "one `AshPhoenix.Form` per
+   open card" no longer applies.
+2. **The title grant check is `nil grant or "title" in grant`.**
+   `FieldAccess.writable?(grant, ["title"])`, as I4 writes it, looks for
+   `custom_fields.title`, not the title.
+3. **Q3: a card under a disabled parent field is disabled, not hidden.** When
+   the parent field is read-only (a read-only grant, a held list, a
+   localization lock) the picker sits in a disabled `<fieldset>`, so the card
+   renders with disabled inputs and Save. The server would still accept the
+   child write under the child's own policy.
+4. **A draft `:update` also passes `kiln_if_match`** `[{lock_version, state}]`,
+   because workflow writes keep `lock_version`. Both `StaleRecord` and
+   `PreconditionFailed` map to the stale state (**Changed by someone else**,
+   **Reload this record**).
+5. **A blank title is refused on the card** (*Give it a title.*): a blank
+   working title would otherwise poison that record's Publish.
+6. **The title is read-only for a type with a `title_template`.**
+7. **The record being edited never gets a card on its own field.**
+8. **Closing a card with unsaved edits is refused, not kept hidden.** The card
+   reports dirty state to the picker by `send_update`; the picker refuses the
+   toggle (*Save or discard the changes to this record before closing it.*).
+   The parent-level `inline_dirty` and the unsaved-changes guard on leaving
+   stay in PR 2b, so navigating away still loses unsaved card edits.
+   Inline create and expand-on-create (I11) are also 2b.
+9. **The optional refactor step 0 was done in this PR:** the plain-field input
+   renderer is `KilnCMSWeb.ContentEditor.PlainField`, shared by "Add new" and
+   the card.
+10. **The mock is `docs/plans/inline-reference-card-mock.html`.**
+11. **The disclosure label is now "Edit the record"** (was "Show the record").

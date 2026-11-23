@@ -120,6 +120,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldWidgets
   alias KilnCMS.CMS.ReferenceSelection
+  alias KilnCMSWeb.ContentEditor.PlainField
   alias KilnCMSWeb.ContentEditor.ReferenceInline
   alias KilnCMSWeb.ContentEditor.ReferenceValues
 
@@ -162,10 +163,15 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
      |> assign(:creating, nil)
      |> assign(:inline_ok, %{})
      |> assign(:inline_open, %{})
+     |> assign(:inline_dirty, %{})
      |> assign(:announcement, "")}
   end
 
   @impl true
+  # A record card reporting (#2283): its edits are unsaved or not, or it saved
+  # a draft and the row should show the new title.
+  def update(%{inline_event: event}, socket), do: {:ok, inline_event(socket, event)}
+
   def update(assigns, socket) do
     socket =
       socket
@@ -233,6 +239,14 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     %{items: items, inline_ok: decided, inline_open: open} = socket.assigns
     keys = Enum.map(items, & &1.id)
 
+    # The record being edited never gets a card on its own field: its write
+    # would move the very row the parent's Save is built on.
+    decided =
+      Map.merge(
+        decided,
+        Map.new(Enum.filter(items, &parent?(&1, socket.assigns)), &{&1.id, false})
+      )
+
     fresh = Enum.reject(items, &(Map.has_key?(decided, &1.id) or is_nil(&1.state)))
 
     decided =
@@ -254,9 +268,39 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     socket
     |> assign(:inline_ok, Map.take(decided, keys))
     |> assign(:inline_open, Map.take(open, keys))
+    |> update(:inline_dirty, &Map.take(&1, keys))
   end
 
   defp assign_inline(socket), do: socket
+
+  defp inline_event(socket, {:dirty, key, dirty?}) do
+    update(socket, :inline_dirty, fn dirty ->
+      if dirty?, do: Map.put(dirty, key, true), else: Map.delete(dirty, key)
+    end)
+  end
+
+  # A draft's row title is its live title; a published record's is not
+  # touched by a working-copy save.
+  defp inline_event(socket, {:saved, key, :draft, title}) do
+    known = socket.assigns.known
+
+    case known do
+      %{^key => item} ->
+        socket
+        |> assign(:known, Map.put(known, key, %{item | title: title}))
+        |> then(&assign(&1, :items, items(&1.assigns)))
+
+      _unknown ->
+        socket
+    end
+  end
+
+  defp inline_event(socket, {:saved, _key, _state, _title}), do: socket
+
+  defp parent?(item, %{source: %{id: id, type: type}}) when is_binary(id),
+    do: Map.get(item, :record_id) == id and to_string(item.type) == type
+
+  defp parent?(_item, _assigns), do: false
 
   # Whether the search shows: never on a locked field; on a list until it
   # holds `max_items`; on a single reference while it is empty. `pick` checks
@@ -451,6 +495,14 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       definition.edit_inline != true or not socket.assigns.rows ->
         {:noreply, socket}
 
+      Map.has_key?(socket.assigns.inline_dirty, key) ->
+        {:noreply,
+         assign(
+           socket,
+           :announcement,
+           gettext("Save or discard the changes to this record before closing it.")
+         )}
+
       Map.has_key?(open, key) ->
         {:noreply, assign(socket, :inline_open, Map.delete(open, key))}
 
@@ -469,20 +521,16 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   def handle_event(_event, _params, socket), do: {:noreply, socket}
 
   defp open_card(socket, key) do
-    %{items: items, definition: definition, tenant: tenant, actor: actor} = socket.assigns
+    %{items: items, definition: definition, tenant: tenant} = socket.assigns
     item = Enum.find(items, &(&1.id == key))
 
     ct =
       item &&
         Enum.find(target_types(definition, tenant), &(to_string(&1.type) == to_string(item.type)))
 
-    card =
-      case ct && ReferenceInline.open(ct, item.record_id, actor, tenant) do
-        {:ok, card} -> card
-        _refused -> :refused
-      end
-
-    update(socket, :inline_open, &Map.put(&1, key, card))
+    if ct,
+      do: update(socket, :inline_open, &Map.put(&1, key, %{ct: ct, record_id: item.record_id})),
+      else: socket
   end
 
   # The create-on-type row, or nil: what the field's `selection.create` offers
@@ -1196,13 +1244,21 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
               open?={Map.has_key?(@inline_open, item.id)}
               target={@myself}
             />
-            <%= case Map.get(@inline_open, item.id) do %>
-              <% nil -> %>
-              <% :refused -> %>
-                <ReferenceInline.refused id={row_id} />
-              <% card -> %>
-                <ReferenceInline.card id={row_id} card={card} />
-            <% end %>
+            <.live_component
+              :if={Map.has_key?(@inline_open, item.id)}
+              module={ReferenceInline}
+              id={"#{@id}-inline-#{item.id}"}
+              dom_id={row_id}
+              picker_id={@id}
+              field={@definition.name}
+              key={item.id}
+              ct={@inline_open[item.id].ct}
+              record_id={@inline_open[item.id].record_id}
+              actor={@actor}
+              tenant={@tenant}
+              connected?={item.id in @ids}
+              locked?={@locked}
+            />
           </:extra>
         </.row>
       </ol>
@@ -1543,12 +1599,13 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           class="field-input"
         />
       </div>
-      <.new_field
+      <PlainField.field
         :for={definition <- @entry.fields}
         id={"#{@form_id}-cf-#{definition.name}"}
         definition={definition}
         name={"#{@prefix}[custom_fields][#{definition.name}]"}
         value={get_in(@creating.params, ["custom_fields", definition.name])}
+        event="ref_new_change"
         target={@target}
       />
       <ul :if={@creating.errors != []} id={"#{@form_id}-errors"} role="alert" class="space-y-0.5">
@@ -1581,95 +1638,6 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     </div>
     """
   end
-
-  attr :id, :string, required: true
-  attr :definition, :map, required: true
-  attr :name, :string, required: true
-  attr :value, :any, default: nil
-  attr :target, :any, required: true
-
-  defp new_field(%{definition: %{field_type: :boolean}} = assigns) do
-    ~H"""
-    <div class="flex items-center gap-2">
-      <input type="hidden" name={@name} value="false" />
-      <input
-        type="checkbox"
-        id={@id}
-        name={@name}
-        value="true"
-        checked={@value == "true"}
-        phx-change="ref_new_change"
-        phx-target={@target}
-        class="size-4 rounded border-base-content/30"
-      />
-      <label for={@id} class="text-xs font-medium">{@definition.label}</label>
-    </div>
-    """
-  end
-
-  defp new_field(%{definition: %{field_type: :select}} = assigns) do
-    ~H"""
-    <div>
-      <label for={@id} class="mb-1 block text-xs font-medium">{@definition.label}</label>
-      <select
-        id={@id}
-        name={@name}
-        phx-change="ref_new_change"
-        phx-target={@target}
-        class="field-select"
-      >
-        <option value="">{gettext("— None —")}</option>
-        <option :for={option <- @definition.options} value={option} selected={@value == option}>
-          {FieldDefinition.option_label(@definition, option)}
-        </option>
-      </select>
-    </div>
-    """
-  end
-
-  defp new_field(%{definition: %{field_type: :text}} = assigns) do
-    ~H"""
-    <div>
-      <label for={@id} class="mb-1 block text-xs font-medium">{@definition.label}</label>
-      <textarea
-        id={@id}
-        name={@name}
-        rows="3"
-        phx-change="ref_new_change"
-        phx-target={@target}
-        class="field-input min-h-16"
-      >{@value}</textarea>
-    </div>
-    """
-  end
-
-  defp new_field(assigns) do
-    assigns = assign(assigns, :type, input_type(assigns.definition.field_type))
-
-    ~H"""
-    <div>
-      <label for={@id} class="mb-1 block text-xs font-medium">{@definition.label}</label>
-      <input
-        type={@type}
-        id={@id}
-        name={@name}
-        value={@value}
-        step={@definition.field_type == :float && "any"}
-        autocomplete="off"
-        phx-change="ref_new_change"
-        phx-target={@target}
-        class="field-input"
-      />
-    </div>
-    """
-  end
-
-  defp input_type(:integer), do: "number"
-  defp input_type(:float), do: "number"
-  defp input_type(:date), do: "date"
-  defp input_type(:datetime), do: "datetime-local"
-  defp input_type(:url), do: "url"
-  defp input_type(_string), do: "text"
 
   attr :id, :string, required: true
   attr :fields, :list, required: true
@@ -1748,7 +1716,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   end
 
   defp link_input(assigns) do
-    assigns = assign(assigns, :type, input_type(assigns.field.field_type))
+    assigns = assign(assigns, :type, PlainField.input_type(assigns.field.field_type))
 
     ~H"""
     <div>

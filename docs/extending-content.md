@@ -2225,8 +2225,8 @@ connected record (a venue's address, a person's title). With this option on,
 each connected record gets a card under its row instead of a trip to another
 screen. You need the admin role to turn it on.
 
-**This release ships the read-only preview.** The card shows the record; it
-does not save anything yet. Editing in the card is the next step of
+Editing happens in a card under the row. It has its own **Save**, and it
+writes only that related record. The plan, with what is still to come, is
 [the plan](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/plans/inline-reference-editing-plan.md).
 
 1. Open **Fields** (`/editor/fields`) and choose **Edit** on a field whose
@@ -2236,14 +2236,21 @@ does not save anything yet. Editing in the card is the next step of
 2. In step 7, **Editing the linked records**, tick **Let editors edit the
    related record here**, then **Save**.
 3. As an editor, open a record of the source type. Each connected record the
-   editor may change shows **Show the record** under its row.
+   editor may change shows **Edit the record** under its row.
 4. Choose it. The card shows the record's title and its plain fields (text,
-   numbers, yes/no, dates, URLs, selects), and **Open in the full editor**.
-   A draft says readers do not see it yet; a published record with unsaved
-   working-copy changes says the card shows the working copy. Other fields,
-   such as media and rich text, are only in the full editor, and the card
-   says so.
-5. Choose **Hide the record** to close it.
+   numbers, yes/no, dates, URLs, selects) as inputs, and **Open in the full
+   editor**. A draft says readers do not see it yet; a published record says
+   changes go to a working copy. Other fields, such as media and rich text,
+   are only in the full editor, and the card says so.
+5. Change a field. The chip at the bottom right of the card reads **Unsaved
+   changes**, and **Discard changes** appears next to the save button.
+6. Choose **Save** (labeled with the record's type, for example **Save
+   Venue**), or press Enter in an input. The chip reads **Saved**. On a
+   published record it reads **Saved to the working copy**: readers see the
+   new text only after that record's own **Publish changes**. The row's title
+   in the field follows a saved draft.
+7. Choose **Hide the record** (or press Escape) to close the card. A card with
+   unsaved changes does not close: save or discard first.
 
 From code, it is one attribute on the field definition:
 
@@ -2256,11 +2263,22 @@ the field sync file (`mix kiln.fields.export`) carries `"edit_inline": true`.
 
 What to know before relying on it:
 
-- **A related record is saved on its own.** When editing arrives, the card
-  will have its own Save and its own status: the related record is never
-  written through the parent form, and there is no one transaction for both.
-  The parent's Save and the card's Save stay separate writes (as with "Add
-  new"), so a failure on one leaves the other as it was.
+- **A related record is saved on its own.** The card has its own Save and its
+  own status: the related record is never written through the parent form,
+  and there is no one transaction for both. **The parent's Save does not save
+  the card**, and the card's Save does not save the parent. They are separate
+  writes (as with "Add new"), so a failure on one leaves the other as it was.
+- **Unsaved card edits are lost when you leave the page.** Closing a card
+  with unsaved edits is refused, but navigating away, reloading or switching
+  version does not warn yet; that guard is the next part of the plan. Save
+  each card before leaving.
+- **Draft or working copy.** A draft is updated in place. A published record
+  gets `save_working_copy` with the title as `working_title`; its live text
+  does not change until that record's own **Publish changes**.
+- **Not in the card yet.** Creating a new record and opening its card on
+  create, saving every card with the parent, and fields other than the plain
+  types above. The title is read-only for a type with a title template, and
+  the record you are editing never gets a card on its own field.
 - **The related record's own permissions decide.** A card is offered only for a
   connected record the editor may change, checked per record (a published
   record's working copy counts). A record the editor cannot read stays
@@ -2272,6 +2290,16 @@ What to know before relying on it:
 - **A cap.** At most 10 cards are open at once on one field (*Close a record
   before opening another.*). This is counted per field on the page; the page
   as a whole has no cap yet.
+- **A disabled parent field disables the card.** If the field is read-only
+  for the editor (a read-only grant, a held list or a localization lock), the
+  card opens with disabled inputs and Save, because the picker sits in a
+  disabled group. The server would still accept the write under the related
+  record's own policy; the interface just does not offer it.
+- **Fields and conditions.** A field the editor's grant does not allow is
+  read-only on the card; a private field their read grant hides is not shown;
+  a field hidden by a condition is not shown or sent, and a required field
+  is marked from the record's current values. The server takes only the
+  card's editable fields and ignores any other key posted to it.
 - **Editor only.** No API reads or writes related records through the parent.
   A headless client writes the record at its own endpoint, then connects it
   ([JSON:API](json-api.md#writing-relationships),
@@ -2284,6 +2312,17 @@ What the editor can see go wrong:
   editor when the card opened.
 - *Close a record before opening another.* Ten cards are already open on the
   field.
+- *Save or discard the changes to this record before closing it.* The card
+  has unsaved edits.
+- *N problems on this record. Nothing was saved.* with messages under the
+  inputs: the record's own validation refused the save. *Give it a title.*
+  means the title was blank, which a card refuses because a blank working
+  title would block that record's Publish. *You can't change this record.*
+  means its permissions changed.
+- **Changed by someone else**, with *Someone changed this record since you
+  opened it. Nothing was overwritten.* The record was saved, published,
+  unpublished or trashed since the card read it. Choose **Reload this
+  record**; your edits in the card are dropped.
 - *is only for a reference field of the record itself*, on saving the field:
   the option was set on a sub-field.
 

@@ -96,6 +96,9 @@ defmodule KilnCMSWeb.ContentEditor.ReferenceValues do
   @spec normalize(map(), [map()]) :: map()
   def normalize(%{"custom_fields" => %{} = custom} = params, definitions) do
     {posted_links, params} = Map.pop(params, "_kiln_ref_link", %{})
+    # The inline record cards' inputs (#2283) are their own writes, never the
+    # parent's.
+    params = Map.delete(params, "_kiln_inline")
     custom = fold_links(custom, posted_links, definitions)
 
     names = for definition <- definitions, polymorphic?(definition), do: definition.name
@@ -112,7 +115,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferenceValues do
   end
 
   def normalize(params, _definitions) when is_map(params),
-    do: Map.delete(params, "_kiln_ref_link")
+    do: Map.drop(params, ["_kiln_ref_link", "_kiln_inline"])
 
   def normalize(params, _definitions), do: params
 

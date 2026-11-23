@@ -63,8 +63,10 @@ else.
 
 ### Added
 
-- **A reference field can show a read-only preview of related records: tick "Let editors edit the related record here" in the fields admin and each connected record the editor may change gets a "Show the record" card; nothing is editable yet ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
+- **A reference field can show a record card for each connected record: tick "Let editors edit the related record here" in the fields admin and each connected record the editor may change gets an "Edit the record" card ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
   ([long form](docs/changelog/unreleased.md#edit-inline-option))
+- **The record card now edits the record: its title and plain fields are inputs with their own Save, Discard and status chip; a published record's edits go to its working copy, and the parent's Save does not save the card ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
+  ([long form](docs/changelog/unreleased.md#edit-inline-card-save))
 
 ## [1.12.0] - 2026-11-21
 

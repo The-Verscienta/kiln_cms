@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inline record card: mock (#2283 PR 2a)</title>
+<!--
+  Static mock of the editing card (docs/plans/inline-reference-editing-plan.md,
+  I2, I7, I8, I9 and the UX section). Open it in a browser; no build needed.
+  It only sets the copy, the grouping and the status chips; the real card uses
+  the app's own classes (docs/design-language.md). Six states of one card.
+-->
+<style>
+  :root {
+    --bg: #fff; --ink: #1c1d22; --muted: #5f6370; --line: #e1e3e8; --soft: #f5f6f8;
+    --primary: #ff7a2f; --primary-ink: #a84a00; --ok: #1f7a3d; --warn: #8a5a00; --err: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16171b; --ink: #ececf0; --muted: #a3a7b3; --line: #2c2e36; --soft: #1f2127;
+      --primary-ink: #ffb27d; --ok: #6fd48f; --warn: #f0c36a; --err: #ff8f87; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 24px 16px 64px; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 18px; } h2 { font-size: 13px; margin: 32px 0 8px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .04em; }
+  .field { border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .field > label.t { font-weight: 600; display: block; margin-bottom: 8px; }
+  .row { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+  .row-head { display: flex; gap: 8px; align-items: center; }
+  .row-head .name { font-weight: 600; flex: 1; }
+  .badge { font-size: 11px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; color: var(--muted); }
+  .link { background: none; border: 0; color: var(--primary-ink); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; padding: 4px 0; }
+  .link:hover { text-decoration: underline; }
+  .card { margin-top: 8px; border: 1px solid var(--line); background: var(--soft); border-radius: 8px; padding: 12px; }
+  .group { margin-bottom: 12px; }
+  .group > .gh { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 6px;
+    display: flex; justify-content: space-between; gap: 8px; }
+  .group.link-values { border-bottom: 1px dashed var(--line); padding-bottom: 12px; }
+  .grid { display: grid; gap: 8px 12px; grid-template-columns: 1fr 1fr; }
+  .grid .wide { grid-column: 1 / -1; }
+  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  label.f { font-size: 12px; font-weight: 600; display: block; margin-bottom: 2px; }
+  input, select, textarea { width: 100%; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+  input[readonly] { background: transparent; border-style: dashed; color: var(--muted); }
+  .invalid { border-color: var(--err); }
+  .err { color: var(--err); font-size: 12px; margin: 2px 0 0; }
+  .note { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+  .bar { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 10px; flex-wrap: wrap; }
+  .bar .left { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .btn { font: inherit; font-size: 13px; font-weight: 600; border-radius: 6px; padding: 6px 12px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #1c1d22; }
+  .chip { font-size: 12px; font-weight: 600; }
+  .chip.dirty { color: var(--warn); } .chip.ok { color: var(--ok); } .chip.bad { color: var(--err); }
+  .alert { border: 1px solid var(--err); border-radius: 6px; padding: 8px 10px; font-size: 13px; margin-bottom: 10px; }
+  .alert button { margin-left: 8px; }
+  .ref { margin: 0 0 8px; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Inline record card: mock</h1>
+  <p class="note">One card, six states. The card sits under a connected row of a reference
+  field with <b>Let editors edit the related record here</b> on. The parent form's own Save
+  stays at the bottom of the page and does not save the card.</p>
+
+  <h2>1. Closed (what a row looks like)</h2>
+  <div class="field">
+    <label class="t">Ingredients</label>
+    <div class="row">
+      <div class="row-head"><span class="name">Fresh ginger</span><span class="badge">Draft</span></div>
+      <button class="link" type="button" aria-expanded="false">▸ Edit Fresh ginger</button>
+    </div>
+  </div>
+
+  <h2>2. Open, unsaved changes (draft record)</h2>
+  <div class="field">
+    <label class="t">Ingredients</label>
+    <div class="row">
+      <div class="row-head"><span class="name">Fresh ginger</span><span class="badge">Draft</span></div>
+      <div class="group link-values" style="margin-top:8px">
+        <div class="gh"><span>On this connection</span><span style="text-transform:none;font-weight:400;letter-spacing:0">Saved with this recipe</span></div>
+        <div class="grid"><div><label class="f">Quantity</label><input value="2 tbsp"></div></div>
+      </div>
+      <button class="link" type="button" aria-expanded="true">▾ Edit Fresh ginger</button>
+      <div class="card" role="group" aria-label="Ingredient record">
+        <div class="group">
+          <div class="gh"><span>The Ingredient record</span><span style="text-transform:none;font-weight:400;letter-spacing:0">Saved on its own</span></div>
+          <p class="note">Draft: readers do not see this record, so the page leaves it out until it is published.</p>
+          <div class="grid">
+            <div class="wide"><label class="f">Title</label><input value="Fresh ginger root"></div>
+            <div><label class="f">Origin</label><select><option>Peru</option></select></div>
+            <div><label class="f">Grams per unit</label><input value="15"></div>
+            <div class="wide"><label class="f">Notes</label><textarea rows="2">Peel before use.</textarea></div>
+          </div>
+          <p class="note" style="margin-top:8px">Other fields, such as media and rich text, are edited in the full editor.</p>
+        </div>
+        <div class="bar">
+          <div class="left"><button class="btn primary" type="button">Save Ingredient</button>
+            <button class="btn" type="button">Discard changes</button>
+            <a class="link" href="#">Open in the full editor ↗</a></div>
+          <span class="chip dirty" role="status">● Unsaved changes</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h2>3. Saved (draft record)</h2>
+  <div class="field"><div class="row"><div class="card" style="margin:0">
+    <div class="bar" style="margin:0"><span class="chip ok" role="status">✓ Saved</span><a class="link" href="#">Open in the full editor ↗</a></div>
+    <p class="ref">Saved as its own version of Fresh ginger root. This recipe has not changed; its stored copy of the title updates when the recipe next saves.</p>
+  </div></div></div>
+
+  <h2>4. Saved to the working copy (published record)</h2>
+  <div class="field"><div class="row"><div class="card" style="margin:0">
+    <p class="note">Showing the working copy. Readers see this once the record's changes are published.</p>
+    <div class="bar" style="margin:0"><span class="chip ok" role="status">✓ Saved to the working copy</span><a class="link" href="#">Publish it in the full editor ↗</a></div>
+  </div></div></div>
+
+  <h2>5. Validation errors stay on the card</h2>
+  <div class="field"><div class="row"><div class="card" style="margin:0">
+    <div class="alert" role="alert">2 problems on this record. Nothing was saved.</div>
+    <div class="grid">
+      <div class="wide"><label class="f">Title</label><input class="invalid" value="" aria-invalid="true"><p class="err">Give it a title.</p></div>
+      <div><label class="f">SKU (unique)</label><input class="invalid" value="GN-1" aria-invalid="true"><p class="err">SKU (sku) is already used.</p></div>
+    </div>
+    <div class="bar"><div class="left"><button class="btn primary" type="button">Save Ingredient</button><button class="btn" type="button">Discard changes</button></div><span class="chip bad" role="status">Error</span></div>
+  </div></div></div>
+
+  <h2>6. Changed by someone else</h2>
+  <div class="field"><div class="row"><div class="card" style="margin:0">
+    <div class="alert" role="alert">Someone changed this record since you opened it. Nothing was overwritten.
+      <button class="btn" type="button">Reload this record</button></div>
+    <p class="note">Reloading discards what you typed in this card.</p>
+  </div></div></div>
+</main>
+</body>
+</html>
