@@ -272,7 +272,7 @@ test.describe("flexible field items", () => {
     await expect(again.nth(0).locator('input[type="hidden"][name$="[picture]"]')).toHaveValue("");
 
     // Remove the image: the card forgets it, the other card is untouched.
-    await again.nth(1).getByRole("button", { name: "Remove", exact: true }).first().click();
+    await again.nth(1).getByRole("button", { name: /^Remove .* of item \d+ in / }).click();
     await expect(again.nth(1).locator('input[type="hidden"][name$="[picture]"]')).toHaveValue("");
   });
 });
