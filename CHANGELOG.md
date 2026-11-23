@@ -54,6 +54,18 @@ else.
   entries to three lines and fails on an entry with nowhere to link.
 -->
 
+## [Unreleased]
+
+Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
+the Unreleased entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
+### Added
+
+- **An item of a Flexible content field can hold a single image or a link to one record: pick them inside the card, saved as snapshots rebuilt from the record, masked when the reader can't see the record.**
+  Re-saving such a record on the previous release fails validation; reads work.
+  ([long form](docs/changelog/unreleased.md#flexible-media-reference))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —
@@ -376,10 +388,6 @@ What's new, with examples and migration steps: [docs/whats-new/v1.11.md](docs/wh
 
 - **A new custom field type, Flexible content: an ordered list of items of different kinds (a hero, a quote), defined under Fields (Item types panel) and edited as cards in the content editor. Field-sync files now carry `item_types`, which 1.10 refuses.**
   ([long form](docs/changelog/v1.11.0.md#flexible-content))
-
-- **An item of a Flexible content field can hold a single image or a link to one record: pick them inside the card, saved as snapshots rebuilt from the record, masked when the reader can't see the record.**
-  Re-saving such a record on the previous release fails validation; reads work.
-  ([long form](docs/changelog/unreleased.md#flexible-media-reference))
 
 - **A built-in `:address` custom field type: a postal address stored as one object, with a country select, trimmed single-line parts and a postal-code format check for 14 countries.**
   Served as generic JSON, filterable only for "Empty or not", not sortable. Country-driven labels, region lists and schema.org output are not yet.
