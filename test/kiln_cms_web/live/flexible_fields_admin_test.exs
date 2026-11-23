@@ -376,6 +376,57 @@ defmodule KilnCMSWeb.FlexibleFieldsAdminTest do
              )
     end
 
+    test "a sub-field may be an image, or a link to one record of the types ticked", %{
+      conn: conn,
+      admin: admin,
+      sections: sections
+    } do
+      hero = item_type!(admin, sections, "hero")
+      {lv, _html} = open(conn, admin)
+      form_id = "#link-field-form-new-#{hero.id}"
+
+      lv |> element("#field-#{hero.id}-sub-fields-add") |> render_click()
+      # The target choice appears for a reference only, with no cap, delete
+      # rule or reverse-side control.
+      refute has_element?(lv, "#{form_id}-targets")
+
+      lv
+      |> form(form_id, link_field: %{label: "Picture", field_type: "media"})
+      |> render_submit()
+
+      lv |> element("#field-#{hero.id}-sub-fields-add") |> render_click()
+
+      lv
+      |> form(form_id, link_field: %{label: "Link", field_type: "reference"})
+      |> render_change()
+
+      assert has_element?(lv, "#{form_id}-targets")
+      refute has_element?(lv, "#{form_id} [name*=max_sources]")
+      refute has_element?(lv, "#{form_id} [name*=on_target_delete]")
+      refute has_element?(lv, "#{form_id} [name*=inverse]")
+      refute has_element?(lv, "#{form_id} [name*=multiple]")
+
+      # No type ticked: refused, with the same message a top-level field gets.
+      html =
+        lv
+        |> form(form_id, link_field: %{label: "Link", field_type: "reference"})
+        |> render_submit()
+
+      assert html =~ "pick the type of content this field links to"
+
+      lv
+      |> form(form_id,
+        link_field: %{label: "Link", field_type: "reference", target_types: ["", "page"]}
+      )
+      |> render_submit()
+
+      subs = CMS.get_field_definition!(hero.id, actor: admin, load: :group_fields).group_fields
+      assert %{field_type: :media, multiple: false} = Enum.find(subs, &(&1.name == "picture"))
+
+      assert %{field_type: :reference, target_type: "page", target_types: [], multiple: false} =
+               Enum.find(subs, &(&1.name == "link"))
+    end
+
     test "a sub-field condition sees the item's content and settings", %{
       conn: conn,
       admin: admin,

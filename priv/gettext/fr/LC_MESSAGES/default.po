@@ -5764,6 +5764,11 @@ msgstr "Paiement annulé — vous n'avez pas été débité."
 msgid "Checkpointing is switched off, so no checkpoints are being minted and nothing is published to a witness."
 msgstr "Les points de contrôle sont désactivés : aucun n'est émis et rien n'est publié auprès d'un témoin."
 
+#: lib/kiln_cms_web/components/content_editor/flexible_components.ex
+#, elixir-autogen, elixir-format
+msgid "Choose %{label} for item %{position} in %{field}"
+msgstr "Choisir %{label} pour l'élément %{position} de %{field}"
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #, elixir-autogen, elixir-format
 msgid "Choose a caption track"
@@ -5911,6 +5916,7 @@ msgid "Choose files"
 msgstr "Choisir des fichiers"
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
+#: lib/kiln_cms_web/components/content_editor/flexible_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -15639,6 +15645,7 @@ msgstr "Aucun"
 msgid "None of them"
 msgstr "Aucun"
 
+#: lib/kiln_cms_web/components/content_editor/flexible_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/image_backend_live.ex
 #, elixir-autogen, elixir-format
@@ -18896,6 +18903,7 @@ msgstr "Nom du remote"
 msgid "Removal pending"
 msgstr "Retrait en attente"
 
+#: lib/kiln_cms_web/components/content_editor/flexible_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/code_injection_live.ex
@@ -18926,6 +18934,11 @@ msgstr "Supprimer %{domain} ?"
 #, elixir-autogen, elixir-format
 msgid "Remove %{email}"
 msgstr "Retirer %{email}"
+
+#: lib/kiln_cms_web/components/content_editor/flexible_components.ex
+#, elixir-autogen, elixir-format
+msgid "Remove %{label} of item %{position} in %{field}"
+msgstr "Retirer %{label} de l'élément %{position} de %{field}"
 
 #: lib/kiln_cms_web/live/redirect_live.ex
 #, elixir-autogen, elixir-format
@@ -19272,10 +19285,16 @@ msgstr "Lignes répétées"
 msgid "Repeats"
 msgstr "Récurrent"
 
+#: lib/kiln_cms_web/components/content_editor/flexible_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Replace"
 msgstr "Remplacer"
+
+#: lib/kiln_cms_web/components/content_editor/flexible_components.ex
+#, elixir-autogen, elixir-format
+msgid "Replace %{label} of item %{position} in %{field}"
+msgstr "Remplacer %{label} de l'élément %{position} de %{field}"
 
 #: lib/kiln_cms_web/live/social_live.ex
 #, elixir-autogen, elixir-format
@@ -27597,8 +27616,8 @@ msgstr "Ce que reçoit un lecteur quand la traduction demandée n'est pas publi�
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
-msgid "What an editor fills in for each %{type} item. A plain value, or a list of items of its own. Tick Setting on a value that configures the item (a background, a width) rather than content: settings are stored apart from the content."
-msgstr "Ce qu'un éditeur renseigne pour chaque élément %{type}. Une valeur simple, ou une liste d'éléments propres. Cochez Réglage pour une valeur qui configure l'élément (un fond, une largeur) plutôt que du contenu : les réglages sont enregistrés à part du contenu."
+msgid "What an editor fills in for each %{type} item. A plain value, an image, a link to one record, or a list of items of its own. Tick Setting on a value that configures the item (a background, a width) rather than content: settings are stored apart from the content."
+msgstr "Ce qu'un éditeur renseigne pour chaque élément %{type}. Une valeur simple, une image, un lien vers un enregistrement ou une liste d'éléments propres. Cochez Réglage sur une valeur qui configure l'élément (un fond, une largeur) plutôt que du contenu : les réglages sont stockés à part du contenu."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format

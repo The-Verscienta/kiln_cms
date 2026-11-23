@@ -755,6 +755,142 @@ defmodule KilnCMS.Reporting.ViewsTest do
                2 * KilnCMS.CMS.FieldDefinition.max_flexible_depth() + 2
     end
 
+    # Media and reference sub-fields of an item type or a group (#2282, the
+    # type list is lifted for item types only: a group's sub-field type is set
+    # directly, as a later release writes it). Their stored snapshots sit inside the
+    # parent field's own value, never at the top of `custom_fields`, so a
+    # stray top-level key sharing their name (or their item type's) joins no
+    # view, and the snapshot is reachable only through the parent's raw JSON.
+    test "media and reference sub-fields of an item type or a group never join a view", ctx do
+      %{admin: admin, role: role} = ctx
+
+      flexible = field!(admin, %{name: "blocks", field_type: :flexible})
+
+      card =
+        field!(admin, %{
+          name: "card",
+          field_type: :group,
+          flex_of_id: flexible.id,
+          content_type: nil
+        })
+
+      group = field!(admin, %{name: "visits", field_type: :group})
+
+      for {parent, name, type} <- [
+            {card, "pic", :media},
+            {card, "cta", :reference},
+            {group, "photo", :media},
+            {group, "doctor", :reference}
+          ] do
+        sub = field!(admin, %{name: name, group_of_id: parent.id, content_type: nil})
+        Ash.Seed.update!(sub, %{field_type: type})
+      end
+
+      page = page!(admin, %{})
+
+      inject!("pages", page.id, %{
+        "blocks" => [
+          %{
+            "_id" => "1",
+            "_type" => "card",
+            "pic" => %{"id" => "SENT-PIC-7a", "url" => "SENT-PICURL-7a"},
+            "cta" => %{"id" => "SENT-CTA-7b", "title" => "SENT-CTATITLE-7b"}
+          }
+        ],
+        "visits" => [%{"doctor" => %{"id" => "SENT-DOC-7c"}}],
+        "card" => "SENT-CARD-7d",
+        "pic" => "SENT-STRAYPIC-7e",
+        "cta" => "SENT-STRAYCTA-7f",
+        "photo" => "SENT-STRAYPHOTO-7g",
+        "doctor" => "SENT-STRAYDOC-7h"
+      })
+
+      dump = ReportingRole.dump(role)
+
+      for stray <- ~w(SENT-CARD-7d SENT-STRAYPIC-7e SENT-STRAYCTA-7f SENT-STRAYPHOTO-7g
+                      SENT-STRAYDOC-7h) do
+        refute dump["pages"] =~ stray
+        refute dump["pages_field_values"] =~ stray
+      end
+
+      names =
+        ReportingRole.as(role, fn ->
+          KilnCMS.Repo.query!(
+            "SELECT DISTINCT field_name FROM kiln_reporting_v1.pages_field_values"
+          ).rows
+          |> List.flatten()
+        end)
+
+      for sub <- ~w(card pic cta photo doctor), do: refute(sub in names)
+      assert "blocks" in names
+      assert "visits" in names
+    end
+
+    # The end-to-end leak check for a reference inside an item (#2282): written
+    # through the real write path (the snapshot is taken from the target, as an
+    # editor's save does), the draft target's title and slug reach neither the
+    # SQL views nor an Ash read by an actor who cannot read the target. The
+    # HTTP surfaces (JSON:API, GraphQL, the fired artifact) are pinned in
+    # `KilnCMS.CMS.NestedReferenceMaskingTest`.
+    test "a reference to a draft inside an item leaks through no view and no read", ctx do
+      %{admin: admin, role: role} = ctx
+
+      flexible = field!(admin, %{name: "leakblocks", field_type: :flexible})
+
+      card =
+        field!(admin, %{
+          name: "leakcard",
+          field_type: :group,
+          flex_of_id: flexible.id,
+          content_type: nil
+        })
+
+      field!(admin, %{
+        name: "cta",
+        field_type: :reference,
+        target_type: "page",
+        group_of_id: card.id,
+        content_type: nil
+      })
+
+      draft =
+        CMS.create_page!(%{title: "SENT-LEAK-DRAFT-5c", slug: "sent-leak-slug-5c"}, actor: admin)
+
+      page =
+        page!(admin, %{
+          "leakblocks" => [
+            %{"_id" => "1", "_type" => "leakcard", "cta" => %{"id" => draft.id, "type" => "page"}}
+          ]
+        })
+
+      # The write path took the snapshot: the stored item names the draft.
+      stored = Ash.get!(KilnCMS.CMS.Page, page.id, authorize?: false)
+      assert [%{"cta" => %{"title" => "SENT-LEAK-DRAFT-5c"}}] = stored.custom_fields["leakblocks"]
+
+      # The views.
+      needles = ["SENT-LEAK-DRAFT-5c", "sent-leak-slug-5c"]
+      assert [] == ReportingRole.leaks(role, needles)
+
+      # An Ash read by an actor who cannot read the draft target.
+      viewer =
+        Ash.Seed.seed!(KilnCMS.Accounts.User, %{
+          email: "rpt-viewer-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :viewer
+        })
+
+      for actor <- [nil, viewer] do
+        read = CMS.get_page!(page.id, actor: actor)
+        refute inspect(read.custom_fields) =~ "SENT-LEAK-DRAFT-5c"
+        refute inspect(read.custom_fields) =~ "sent-leak-slug-5c"
+      end
+
+      # An editor still sees it, so the absence above is not a broken fixture.
+      editor_read = CMS.get_page!(page.id, actor: admin)
+      assert inspect(editor_read.custom_fields) =~ "SENT-LEAK-DRAFT-5c"
+    end
+
     test "an item type never joins a dynamic type's view either", ctx do
       %{admin: admin, role: role} = ctx
 

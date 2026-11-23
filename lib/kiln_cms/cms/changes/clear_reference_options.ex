@@ -11,6 +11,15 @@ defmodule KilnCMS.CMS.Changes.ClearReferenceOptions do
   submits neither, and a stored cap or delete rule would otherwise linger on a
   field that has no targets to apply it to. A link field (R3) is never a
   reference, so it is cleared too.
+
+  A reference that is not top-level (#2282: a sub-field of an item type or a
+  group) is cleared the same way, though it is a reference: its connections
+  live inside a row, not in a record-level field, so a cap (`max_sources`), a
+  delete rule (`on_target_delete`), a schema.org property and a `selection`
+  would each claim something nothing honors. Item references behave as
+  `on_target_delete: :keep` and are uncapped. `edit_inline` is the exception:
+  it is left set so `Validations.ReferenceEditInline` refuses it with its own
+  message (#2283).
   """
   use Ash.Resource.Change
 
@@ -18,16 +27,31 @@ defmodule KilnCMS.CMS.Changes.ClearReferenceOptions do
 
   @impl true
   def change(changeset, _opts, _context) do
-    if Ash.Changeset.get_attribute(changeset, :field_type) == :reference do
-      changeset |> normalize_selection() |> normalize_edit_inline()
-    else
-      changeset
-      |> Ash.Changeset.force_change_attribute(:max_sources, nil)
-      |> Ash.Changeset.force_change_attribute(:on_target_delete, :keep)
-      |> Ash.Changeset.force_change_attribute(:schema_org_property, nil)
-      |> Ash.Changeset.force_change_attribute(:selection, nil)
-      |> Ash.Changeset.force_change_attribute(:edit_inline, nil)
+    reference? = Ash.Changeset.get_attribute(changeset, :field_type) == :reference
+
+    cond do
+      reference? and KilnCMS.CMS.FieldDefinition.top_level?(changeset) ->
+        changeset |> normalize_selection() |> normalize_edit_inline()
+
+      # Not top-level: the target-side options are cleared, but `edit_inline`
+      # is left for `Validations.ReferenceEditInline` to refuse (#2283), as it
+      # does for any reference that is not a field of the record itself.
+      reference? ->
+        clear_target_options(changeset)
+
+      true ->
+        changeset
+        |> clear_target_options()
+        |> Ash.Changeset.force_change_attribute(:edit_inline, nil)
     end
+  end
+
+  defp clear_target_options(changeset) do
+    changeset
+    |> Ash.Changeset.force_change_attribute(:max_sources, nil)
+    |> Ash.Changeset.force_change_attribute(:on_target_delete, :keep)
+    |> Ash.Changeset.force_change_attribute(:schema_org_property, nil)
+    |> Ash.Changeset.force_change_attribute(:selection, nil)
   end
 
   # Off is nil, whichever way the form said it ("false" or absent).

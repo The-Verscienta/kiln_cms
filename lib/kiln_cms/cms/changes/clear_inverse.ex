@@ -5,7 +5,8 @@ defmodule KilnCMS.CMS.Changes.ClearInverse do
   something.
 
     * Only a top-level `:reference` field has another side, so on any other
-      type, and on a link field (R3), both are cleared — the same stance as
+      type, on a link field (R3) and on a reference inside a group or an item
+      (#2282), both are cleared — the same stance as
       `KilnCMS.CMS.Changes.ClearMultiple`: the fields admin shows the input
       only for a reference, and clearing beats an error on a control nobody
       can see.
@@ -21,7 +22,7 @@ defmodule KilnCMS.CMS.Changes.ClearInverse do
   def change(changeset, _opts, _context) do
     reference? =
       Ash.Changeset.get_attribute(changeset, :field_type) == :reference and
-        is_nil(Ash.Changeset.get_attribute(changeset, :link_of_id))
+        FieldDefinition.top_level?(changeset)
 
     label = Ash.Changeset.get_attribute(changeset, :inverse_label)
     name = Ash.Changeset.get_attribute(changeset, :inverse_name)

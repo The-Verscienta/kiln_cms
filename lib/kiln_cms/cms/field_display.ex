@@ -17,6 +17,10 @@ defmodule KilnCMS.CMS.FieldDisplay do
     * a rich `:text` field has its tags stripped;
     * a `:group` shows `Label: value` pairs, a bounded number of rows and
       sub-fields;
+    * a `:flexible` field shows its items the same way, each led by its item
+      type's label — `Hero: Headline: Welcome; Image: logo.png` — to the depth
+      flexible fields may nest, then only a count; a media or reference
+      inside an item resolves like a top-level one;
     * anything else, and any value whose definition is gone (a retired field),
       falls back to `format/1`, the generic compact rendering.
 
@@ -40,6 +44,8 @@ defmodule KilnCMS.CMS.FieldDisplay do
   @max_group_fields 8
   @max_items 10
   @max_depth 2
+  # Flexible fields nest this many levels (`FieldDefinition.max_flexible_depth/0`).
+  @flexible_depth FieldDefinition.max_flexible_depth()
 
   @doc "A context that resolves nothing: every media and reference value shows its raw id."
   @spec empty_context() :: context()
@@ -145,7 +151,56 @@ defmodule KilnCMS.CMS.FieldDisplay do
     end
   end
 
+  # A flexible field (#2282): its items, each led by its item type's label,
+  # then its fields as a group row's. Never the stored JSON, which carries the
+  # snapshots (titles) of whatever the items name. A nest past the cap shows
+  # a count only.
+  defp display(%{field_type: :flexible} = definition, value, context, depth) do
+    items = value |> List.wrap() |> Enum.filter(&is_map/1)
+    types = Map.new(item_type_definitions(definition), &{&1.name, &1})
+
+    cond do
+      items == [] ->
+        format(value)
+
+      depth >= @flexible_depth ->
+        "+#{length(items)}"
+
+      true ->
+        shown =
+          items
+          |> Enum.take(@max_rows)
+          |> Enum.map(&item_text(&1, types, context, depth))
+
+        more = length(items) - @max_rows
+        suffix = if more > 0, do: ["+#{more}"], else: []
+
+        shown |> Kernel.++(suffix) |> Enum.join(" | ") |> truncate()
+    end
+  end
+
   defp display(_definition, value, _context, _depth), do: format(value)
+
+  defp item_text(item, types, context, depth) do
+    case Map.get(types, item["_type"]) do
+      nil ->
+        "?"
+
+      type ->
+        row =
+          item
+          |> Map.drop(["_id", "_type", "_settings"])
+          |> Map.merge(setting_values(item))
+
+        body = row_text(row, sub_definitions(type), context, depth)
+        label = type.label || type.name
+        if body == "", do: label, else: "#{label}: #{body}"
+    end
+  end
+
+  # An item's settings read as fields of it.
+  defp setting_values(%{"_settings" => %{} = settings}), do: settings
+  defp setting_values(_item), do: %{}
 
   defp row_text(row, sub_fields, context, depth) do
     by_name = Map.new(sub_fields, &{&1.name, &1})
@@ -216,6 +271,22 @@ defmodule KilnCMS.CMS.FieldDisplay do
     end
   end
 
+  # The items of a flexible field (#2282): the ids their media and reference
+  # sub-fields name, down to the nesting cap. Meta keys name nothing.
+  defp collect(%{field_type: :flexible} = definition, value, acc, depth)
+       when depth < @flexible_depth do
+    types = Map.new(item_type_definitions(definition), &{&1.name, &1})
+
+    for %{} = item <- List.wrap(value),
+        %{} = type <- [Map.get(types, item["_type"])],
+        subs = Map.new(sub_definitions(type), &{&1.name, &1}),
+        {key, sub_value} <-
+          Map.merge(Map.drop(item, ["_id", "_type", "_settings"]), setting_values(item)),
+        reduce: acc do
+      acc -> collect(Map.get(subs, key), sub_value, acc, depth + 1)
+    end
+  end
+
   defp collect(_definition, _value, acc, _depth), do: acc
 
   # Both stored shapes: the snapshot map (`KilnCMS.Media.Snapshot`,
@@ -259,4 +330,8 @@ defmodule KilnCMS.CMS.FieldDisplay do
 
   defp sub_definitions(%{group_fields: fields}) when is_list(fields), do: fields
   defp sub_definitions(_definition), do: []
+
+  # The item types a flexible definition declares, when they were loaded.
+  defp item_type_definitions(%{item_types: types}) when is_list(types), do: types
+  defp item_type_definitions(_definition), do: []
 end

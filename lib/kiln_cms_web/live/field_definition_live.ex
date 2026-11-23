@@ -1357,6 +1357,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   defp link_params(params, %{id: nil, parent: parent_id, kind: kind}, assigns) do
     column = if kind in [:group, :item], do: "group_of_id", else: "link_of_id"
+
     params = params |> normalize() |> without_unique() |> Map.put(column, parent_id)
 
     case assigns do
@@ -5454,7 +5455,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       </div>
       <p :if={@item?} class="mt-0.5 text-xs text-base-content/70">
         {gettext(
-          "What an editor fills in for each %{type} item. A plain value, or a list of items of its own. Tick Setting on a value that configures the item (a background, a width) rather than content: settings are stored apart from the content.",
+          "What an editor fills in for each %{type} item. A plain value, an image, a link to one record, or a list of items of its own. Tick Setting on a value that configures the item (a background, a width) rather than content: settings are stored apart from the content.",
           type: @definition.label
         )}
       </p>
@@ -5584,6 +5585,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             id={"link-field-form-#{link.id}"}
             group?={@group?}
             open={@open}
+            target_types={@target_types}
           />
           <%!-- A flexible sub-field of an item type has item types of its own. --%>
           <div :if={link.field_type == :flexible and !(@open && @open.id == link.id)} class="mt-2">
@@ -5610,6 +5612,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         id={"link-field-form-new-#{@definition.id}"}
         group?={@group?}
         open={@open}
+        target_types={@target_types}
       />
     </div>
     """
@@ -5874,6 +5877,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   attr :id, :string, required: true
   attr :group?, :boolean, default: false
   attr :open, :map, required: true
+  # Every content type of the site, for the "Links to" choice of an item's
+  # reference sub-field.
+  attr :target_types, :list, default: []
 
   defp link_field_form(assigns) do
     ~H"""
@@ -5911,6 +5917,15 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
         value="flexible"
       />
       <.input field={@form[:help_text]} label={gettext("Help text")} />
+      <%!-- A reference sub-field of an item says which types it links to, and
+            nothing else: no cap, no reverse side, no delete rule, no details
+            (ADR 0065). --%>
+      <.target_types_field
+        :if={@open.kind == :item}
+        form={@form}
+        id={"#{@id}-targets"}
+        target_types={@target_types}
+      />
       <.options_field form={@form} id={"#{@id}-options"} />
       <.default_field form={@form} />
       <.validation_field form={@form} id={"#{@id}-validation"} nested? />

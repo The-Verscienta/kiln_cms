@@ -177,6 +177,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       |> assign_new(:rows, fn -> true end)
       |> assign_new(:placeholder, fn -> nil end)
       |> assign_new(:exclude, fn -> [] end)
+      |> assign_new(:key, fn -> assigns.definition.name end)
+      |> assign_new(:address, fn -> nil end)
       |> assign_new(:link_name, fn -> link_name(assigns.name) end)
       |> assign(:link_fields, FieldDefinition.link_fields(assigns.definition))
       |> assign(:links, ReferenceValues.links(assigns.value, assigns.definition))
@@ -293,7 +295,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     do: {:noreply, assign(socket, :open?, false)}
 
   def handle_event("ref_search", %{"_kiln_ref_q" => queries}, socket) when is_map(queries) do
-    query = queries |> Map.get(socket.assigns.definition.name, "") |> to_string()
+    query = queries |> Map.get(socket.assigns.key, "") |> to_string()
 
     {:noreply,
      socket
@@ -340,7 +342,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   # search's are; a full target, an id it never offered, or a locked field
   # changes nothing.
   def handle_event("ref_select", %{"_kiln_ref_pick" => picks}, socket) when is_map(picks) do
-    id = picks |> Map.get(socket.assigns.definition.name, "") |> to_string()
+    id = picks |> Map.get(socket.assigns.key, "") |> to_string()
     current = List.first(socket.assigns.ids || [])
 
     if socket.assigns.locked or not is_list(socket.assigns.candidates),
@@ -387,7 +389,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   end
 
   def handle_event("ref_new_change", %{"_kiln_ref_new" => forms}, socket) when is_map(forms) do
-    case {socket.assigns.creating, Map.get(forms, socket.assigns.definition.name)} do
+    case {socket.assigns.creating, Map.get(forms, socket.assigns.key)} do
       {%{} = creating, %{} = params} ->
         {:noreply, assign(socket, :creating, %{creating | params: params})}
 
@@ -642,6 +644,11 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   # field, R4b), as an update carrying `picked: {op, arg}`.
   defp notify(%{assigns: %{notify: {module, id}}}, op, arg),
     do: send_update(module, id: id, picked: {op, arg})
+
+  # A picker inside a flexible item (#2282, `address` is the item's `_id`
+  # address) names the item and the sub-field instead of a top-level field.
+  defp notify(%{assigns: %{address: address}} = socket, op, arg) when is_binary(address),
+    do: send(self(), {__MODULE__, {:item, address, socket.assigns.definition.name, op, arg}})
 
   defp notify(socket, op, arg),
     do: send(self(), {__MODULE__, {op, socket.assigns.definition.name, arg}})
@@ -1126,7 +1133,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     assigns =
       assigns
       |> assign(:multiple?, assigns.definition.multiple == true)
-      |> assign(:root, "custom-field-#{assigns.definition.name}")
+      |> assign(:root, "custom-field-#{assigns.key}")
       |> assign(:last, length(assigns.items) - 1)
       |> assign(:dropdown?, is_list(assigns.candidates))
       |> assign(:typed, assigns.open? and typed_create(assigns))
@@ -1139,7 +1146,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       role="group"
       aria-labelledby={"#{@root}-label"}
       aria-describedby={@errors != [] && "#{@root}-errors"}
-      data-reference-picker={@definition.name}
+      data-reference-picker={@key}
     >
       <div class={["mb-1 flex items-baseline justify-between gap-2", !@rows && "sr-only"]}>
         <span id={"#{@root}-label"} class="text-sm font-medium">{@definition.label}</span>
@@ -1168,7 +1175,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       >
         <.row
           :for={{item, index} <- Enum.with_index(@items)}
-          id={"cf-ref-#{@definition.name}-#{String.replace(item.id, ":", "-")}"}
+          id={"cf-ref-#{@key}-#{String.replace(item.id, ":", "-")}"}
           item={item}
           index={index}
           last={@last}
@@ -1179,7 +1186,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         >
           <:extra :if={@link_fields != []}>
             <.link_inputs
-              id={"cf-ref-#{@definition.name}-#{String.replace(item.id, ":", "-")}-link"}
+              id={"cf-ref-#{@key}-#{String.replace(item.id, ":", "-")}-link"}
               fields={@link_fields}
               name={"#{@link_name}[#{item.id}]"}
               values={Map.get(@links, item.id, %{})}
@@ -1214,6 +1221,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       <.candidate_select
         :if={@dropdown? and not @locked}
         root={@root}
+        key={@key}
         definition={@definition}
         candidates={@candidates}
         current={List.first(@items)}
@@ -1242,7 +1250,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           <input
             type="text"
             id={"#{@root}-search"}
-            name={"_kiln_ref_q[#{@definition.name}]"}
+            name={"_kiln_ref_q[#{@key}]"}
             value={@query}
             role="combobox"
             autocomplete="off"
@@ -1376,7 +1384,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       <.new_record_form
         :if={@creating}
         root={@root}
-        field={@definition.name}
+        field={@key}
         entry={creatable_type(assigns, @creating.type)}
         creating={@creating}
         target={@myself}
@@ -1399,6 +1407,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   end
 
   attr :root, :string, required: true
+  attr :key, :string, required: true
   attr :definition, :map, required: true
   attr :candidates, :list, required: true
   attr :current, :map, default: nil
@@ -1424,7 +1433,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     <div class="mb-1.5">
       <select
         id={"#{@root}-select"}
-        name={"_kiln_ref_pick[#{@definition.name}]"}
+        name={"_kiln_ref_pick[#{@key}]"}
         aria-labelledby={"#{@root}-label"}
         aria-invalid={@errors != [] && "true"}
         aria-describedby={@errors != [] && "#{@root}-errors"}

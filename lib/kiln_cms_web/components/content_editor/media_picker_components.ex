@@ -20,6 +20,7 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
   defp pick_index({:gallery, _id}), do: "gallery"
   defp pick_index({:field_gallery, _name}), do: "field_gallery"
   defp pick_index({:field_media, _name}), do: "field_media"
+  defp pick_index({:item_media, _at, _sub}), do: "item_media"
   defp pick_index(:featured), do: "featured"
   defp pick_index(:seo_image), do: "seo_image"
   defp pick_index({:block, _id}), do: "block"
@@ -33,7 +34,12 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
 
   # The gallery custom field a multi-select fills; nil for every other target.
   defp pick_field({kind, name}) when kind in [:field_gallery, :field_media], do: name
+  defp pick_field({:item_media, _at, sub}), do: sub
   defp pick_field(_), do: nil
+
+  # The flexible item a media sub-field pick lands in (its `_id` address).
+  defp pick_at({:item_media, at, _sub}), do: at
+  defp pick_at(_), do: nil
   attr :index, :any, required: true
   attr :media, :list, required: true
   attr :results, :list, default: nil
@@ -146,6 +152,7 @@ defmodule KilnCMSWeb.ContentEditor.MediaPickerComponents do
             phx-value-index={pick_index(@index)}
             phx-value-bid={pick_block_id(@index)}
             phx-value-field={pick_field(@index)}
+            phx-value-at={pick_at(@index)}
             phx-value-id={item.id}
             phx-value-url={item.url}
             title={item.filename}

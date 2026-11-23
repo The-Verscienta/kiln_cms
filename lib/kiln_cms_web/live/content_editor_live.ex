@@ -764,6 +764,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
       when is_binary(name),
       do: {:noreply, apply_reference_edit(socket, op, name, arg)}
 
+  # The same picker inside a flexible item (#2282) names the item's address and
+  # its sub-field; only a pick or a clear of a single reference is written.
+  def handle_info({KilnCMSWeb.ContentEditor.ReferencePicker, {:item, at, sub, op, arg}}, socket)
+      when is_binary(at) and is_binary(sub) and op in [:put, :remove] do
+    value = if op == :put and is_binary(arg), do: arg, else: ""
+    {:noreply, put_item_value(socket, at, sub, :reference, value)}
+  end
+
+  def handle_info(
+        {KilnCMSWeb.ContentEditor.ReferencePicker, {:item, _at, _sub, _op, _arg}},
+        socket
+      ),
+      do: {:noreply, socket}
+
   # Drafting results. Note the double wrap: `start_async` wraps the function's
   # own return, so a successful generation arrives as `{:ok, {_version, {:ok, _}}}`.
   # All three arms must clear `seo_drafting?` or the button stays stuck forever.
@@ -3113,6 +3127,25 @@ defmodule KilnCMSWeb.ContentEditorLive do
   def handle_event("clear_field_media", %{"field" => name}, socket) when is_binary(name),
     do: {:noreply, put_field_media(socket, name, "")}
 
+  # A media sub-field of a flexible item (#2282) picks through the same drawer.
+  # The event names the item's `_id` address and the sub-field, never a type or
+  # a value: both are resolved against the live form now, so a stale page or a
+  # forged address opens nothing and writes nothing.
+  def handle_event("open_item_media_picker", %{"at" => at, "field" => sub}, socket)
+      when is_binary(at) and is_binary(sub) do
+    if item_value_editable?(socket, at, sub, :media),
+      do: {:noreply, assign(socket, :picking, {:item_media, at, sub})},
+      else: {:noreply, socket}
+  end
+
+  def handle_event("open_item_media_picker", _params, socket), do: {:noreply, socket}
+
+  def handle_event("clear_item_media", %{"at" => at, "field" => sub}, socket)
+      when is_binary(at) and is_binary(sub),
+      do: {:noreply, put_item_value(socket, at, sub, :media, "")}
+
+  def handle_event("clear_item_media", _params, socket), do: {:noreply, socket}
+
   def handle_event("field_gallery_remove", %{"field" => name, "id" => id}, socket)
       when is_binary(name) and is_binary(id),
       do: {:noreply, update_field_gallery(socket, name, &List.delete(&1, id))}
@@ -3485,6 +3518,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
       when is_binary(name) and is_binary(id) do
     case socket.assigns.picking do
       {:field_media, ^name} = target ->
+        {:noreply, socket |> apply_pick(target, id, nil) |> reset_picker()}
+
+      _other ->
+        {:noreply, reset_picker(socket)}
+    end
+  end
+
+  # Set a media sub-field of a flexible item (#2282) — only the item and
+  # sub-field the drawer was opened for.
+  def handle_event(
+        "pick_image",
+        %{"index" => "item_media", "at" => at, "field" => sub, "id" => id},
+        socket
+      )
+      when is_binary(at) and is_binary(sub) and is_binary(id) do
+    case socket.assigns.picking do
+      {:item_media, ^at, ^sub} = target ->
         {:noreply, socket |> apply_pick(target, id, nil) |> reset_picker()}
 
       _other ->
@@ -4425,6 +4475,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp apply_pick(socket, {:field_media, name}, media_id, _url),
     do: put_field_media(socket, name, media_id)
 
+  defp apply_pick(socket, {:item_media, at, sub}, media_id, _url),
+    do: put_item_value(socket, at, sub, :media, media_id)
+
   # Not on a translation whose type shares the featured image (#1860).
   defp apply_pick(socket, :featured, media_id, _url) do
     if shared_locked?(socket, :featured_image_id) do
@@ -4772,6 +4825,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # for a group. An address that names no list, or a `fun` that refuses
   # (`:error`: full, unknown type, not a permutation), changes nothing.
   defp update_flexible(socket, address, fun) do
+    case rewrite_flexible(socket, address, fun) do
+      {:ok, name, updated} -> put_custom_field_param(socket, name, updated)
+      :error -> socket
+    end
+  end
+
+  # What `update_flexible/3` would write, without writing it: `{:ok, field,
+  # items}`, or `:error` for a field this view may not change, an address that
+  # names no list, or a `fun` that refuses.
+  defp rewrite_flexible(socket, address, fun) do
     {name, segments} = FlexibleItems.parse(address)
 
     editable? =
@@ -4781,24 +4844,64 @@ defmodule KilnCMSWeb.ContentEditorLive do
          %{} = definition <- Enum.find(socket.assigns.field_definitions, &(&1.name == name)),
          items = FlexibleItems.posted(socket.assigns.form, name),
          {:ok, updated} <- FlexibleItems.update_list(items, definition, segments, fun) do
-      put_custom_field_param(socket, name, updated)
+      {:ok, name, updated}
     else
-      _unchanged -> socket
+      _unchanged -> :error
     end
   end
 
   # The same for one item: `address` ends in the item's `_id`, and `fun`
   # also gets that id.
   defp update_flexible_item(socket, address, fun) do
+    case item_list_address(address) do
+      {:ok, list_address, id} ->
+        update_flexible(socket, list_address, fn items, def -> fun.(items, def, id) end)
+
+      :error ->
+        socket
+    end
+  end
+
+  defp item_list_address(address) do
     {name, segments} = FlexibleItems.parse(address)
 
     case Enum.split(segments, -1) do
       {list_segments, [id]} when rem(length(list_segments), 2) == 0 ->
-        list_address = Enum.join([name | list_segments], "/")
-        update_flexible(socket, list_address, fn items, def -> fun.(items, def, id) end)
+        {:ok, Enum.join([name | list_segments], "/"), id}
 
       _not_an_item ->
-        socket
+        :error
+    end
+  end
+
+  # Set (or, with `""`, clear) the media or reference sub-field `sub` of the
+  # item at `address`, through the same params-then-validate path. Resolved
+  # against the live form: an item that has moved keeps its value, one that is
+  # gone, a sub-field the item's type does not have or one of another type
+  # changes nothing.
+  defp put_item_value(socket, address, sub, type, value) do
+    with {:ok, list_address, id} <- item_list_address(address),
+         {:ok, name, updated} <-
+           rewrite_flexible(socket, list_address, fn items, def ->
+             FlexibleItems.put_value(items, def, id, sub, type, value)
+           end) do
+      put_custom_field_param(socket, name, updated)
+    else
+      _unchanged -> socket
+    end
+  end
+
+  # Whether `put_item_value/5` would find that sub-field now: what opening a
+  # drawer for it is gated on.
+  defp item_value_editable?(socket, address, sub, type) do
+    with {:ok, list_address, id} <- item_list_address(address),
+         {:ok, _name, _items} <-
+           rewrite_flexible(socket, list_address, fn items, def ->
+             FlexibleItems.put_value(items, def, id, sub, type, "")
+           end) do
+      true
+    else
+      _no -> false
     end
   end
 

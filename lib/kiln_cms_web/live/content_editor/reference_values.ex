@@ -154,14 +154,19 @@ defmodule KilnCMSWeb.ContentEditor.ReferenceValues do
     end
   end
 
-  defp untokenize(values) when is_list(values), do: Enum.map(values, &untokenize/1)
+  @doc """
+  A `"type:id"` token as the `%{"type", "id"}` a write needs; a bare id, a map
+  or a list of either passes through (a list is mapped).
+  """
+  @spec untokenize(term()) :: term()
+  def untokenize(values) when is_list(values), do: Enum.map(values, &untokenize/1)
 
-  defp untokenize(value) when is_binary(value) do
+  def untokenize(value) when is_binary(value) do
     case String.split(value, ":", parts: 2) do
       [type, id] when type != "" and id != "" -> %{"type" => type, "id" => id}
       _bare -> value
     end
   end
 
-  defp untokenize(value), do: value
+  def untokenize(value), do: value
 end

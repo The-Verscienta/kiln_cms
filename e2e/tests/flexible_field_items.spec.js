@@ -7,11 +7,18 @@
 // duplicated and removed, a card of a nested list dragged by its own handle
 // (the outer list untouched), then saved and reloaded.
 //
+// A second journey (PR 3): an image and a record picked inside an item card
+// (the media drawer and the record search each address the card by its `_id`
+// chain), saved and shown again after a reload.
+//
 // `FlexibleEditorTest` pushes the events itself. It proves what the server
 // does with an `_id` path, and nothing about whether a click or a drag
 // produces one, whether a collapsed card survives a patch, or whether a
 // setting nobody can see still posts.
-const { test, expect, signInAsAdmin, newDraftContent, saveDraft, holdsAcross } = require("./fixtures");
+const { test, expect, signInAsAdmin, newDraftContent, newDraftPage, saveDraft, holdsAcross } = require("./fixtures");
+
+// A minimal valid 1x1 PNG (the same bytes the Elixir tests upload).
+const PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP6zwAAAAcAAQL+pTXmAAAAAElFTkSuQmCC";
 
 test.describe("flexible field items", () => {
   /** @type {string} */
@@ -29,13 +36,15 @@ test.describe("flexible field items", () => {
   });
 
   test.afterEach(async ({ page }) => {
-    await page.goto("/editor");
-    const rows = page.locator(`li[id^="${name}-"]`).filter({ hasText: stamp });
-    if (await rows.count()) {
-      for (const row of await rows.all()) await row.getByRole("checkbox").check();
-      await page.locator('button[phx-click="bulk"][phx-value-action="delete"]').click();
-      await page.locator('button[phx-click="confirm_bulk"]').click();
-      await expect(rows).toHaveCount(0);
+    for (const kind of [name, "page"]) {
+      await page.goto("/editor");
+      const rows = page.locator(`li[id^="${kind}-"]`).filter({ hasText: stamp });
+      if (await rows.count()) {
+        for (const row of await rows.all()) await row.getByRole("checkbox").check();
+        await page.locator('button[phx-click="bulk"][phx-value-action="delete"]').click();
+        await page.locator('button[phx-click="confirm_bulk"]').click();
+        await expect(rows).toHaveCount(0);
+      }
     }
 
     await page.goto("/editor/fields");
@@ -61,7 +70,7 @@ test.describe("flexible field items", () => {
    * @param {import("@playwright/test").Locator} scope
    * @param {string} label
    * @param {string} type
-   * @param {{ setting?: boolean }} [opts]
+   * @param {{ setting?: boolean, targets?: string[] }} [opts]
    */
   async function addSubField(scope, label, type, opts = {}) {
     await scope.getByRole("button", { name: "Add a field" }).first().click();
@@ -69,6 +78,8 @@ test.describe("flexible field items", () => {
     await form.locator('input[name="link_field[label]"]').fill(label);
     await form.locator('select[name="link_field[field_type]"]').selectOption(type);
     if (opts.setting) await form.locator('input[type=checkbox][name="link_field[item_setting]"]').check();
+    for (const target of opts.targets || [])
+      await form.locator(`input[type=checkbox][name="link_field[target_types][]"][value="${target}"]`).check();
     await form.getByRole("button", { name: "Save field" }).click();
     await expect(scope.locator(`code:text-is("${label.toLowerCase()}")`).first()).toBeVisible();
   }
@@ -83,7 +94,7 @@ test.describe("flexible field items", () => {
   }
 
   /** A type with a flexible field: hero (headline + a setting), columns (a nested list of cells). @param {import("@playwright/test").Page} page */
-  async function createType(page) {
+  async function createType(page, { media = false } = {}) {
     await page.goto("/editor/types");
     await page.fill('#new-type-form input[name="type_definition[label]"]', `E2E Flex ${stamp}`);
     await page.fill('#new-type-form input[name="type_definition[plural_label]"]', `E2E Flex ${stamp}s`);
@@ -106,6 +117,10 @@ test.describe("flexible field items", () => {
     const hero = types.locator("li[id^='item-type-']").filter({ hasText: "Hero" }).first();
     await addSubField(hero, "Headline", "string");
     await addSubField(hero, "Accent", "string", { setting: true });
+    if (media) {
+      await addSubField(hero, "Picture", "media");
+      await addSubField(hero, "Link", "reference", { targets: ["page"] });
+    }
 
     const columns = types.locator("li[id^='item-type-']").filter({ hasText: "Columns" }).first();
     await addSubField(columns, "Cells", "flexible");
@@ -204,5 +219,60 @@ test.describe("flexible field items", () => {
     await expect.poll(headlines).toEqual(["second", "first!"]);
     await expect(cards.nth(1).locator("input[name$='[_settings][accent]']")).toHaveValue("teal");
     await expect.poll(labels).toEqual(["b", "a"]);
+  });
+  test("an image and a record picked inside an item are saved and shown again", async ({ page }) => {
+    await createType(page, { media: true });
+
+    // The record to link to: a page with a title the search can find.
+    await newDraftPage(page);
+    await saveDraft(page, { title: `Target ${stamp}`, slug: `target-${stamp}` });
+
+    await newDraftContent(page, name);
+    await addItem(page, "hero");
+    await addItem(page, "hero");
+    const cards = page.locator(`#custom-field-${field}-items > li`);
+    await expect(cards).toHaveCount(2);
+    const second = cards.nth(1);
+
+    // The image: the drawer opens from the card, the upload lands in that
+    // card only.
+    await second.getByRole("button", { name: /^Choose .* for item \d+ in / }).click();
+    const drawer = page.locator("#image-picker-dialog");
+    await expect(drawer).toBeVisible();
+    await drawer.locator('input[type="file"]').setInputFiles({
+      name: `item-${stamp}.png`,
+      mimeType: "image/png",
+      buffer: Buffer.from(PNG_BASE64, "base64"),
+    });
+    await expect(drawer).toBeHidden();
+    await expect(second.locator('input[type="hidden"][name$="[picture]"]')).toHaveValue(/.+/);
+    await expect(second.locator('img[src*="/uploads/"]')).toBeVisible();
+    await expect(cards.nth(0).locator('input[type="hidden"][name$="[picture]"]')).toHaveValue("");
+    await expect(cards.nth(0).getByRole("button", { name: /^Choose .* for item \d+ in / })).toBeVisible();
+
+    // The record: the search sits in the card, under an id of its own.
+    const search = second.locator("input[data-ref-search]");
+    await search.click();
+    await search.fill(`Target ${stamp}`);
+    await page.locator(`[role="option"]`).filter({ hasText: `Target ${stamp}` }).first().click();
+    await expect(second.locator('input[type="hidden"][name$="[link]"]')).toHaveValue(/.+/);
+    await expect(second).toContainText(`Target ${stamp}`);
+    await expect(cards.nth(0).locator('input[type="hidden"][name$="[link]"]')).toHaveValue("");
+
+    await cards.nth(0).locator('input[name$="[headline]"]').fill("plain");
+    await second.locator('input[name$="[headline]"]').fill("pictured");
+    await saveDraft(page, { title: `Flex pics ${stamp}`, slug: `flex-pics-${stamp}` });
+    await page.reload();
+
+    const again = page.locator(`#custom-field-${field}-items > li`);
+    await expect(again).toHaveCount(2);
+    await expect(again.nth(1).locator('img[src*="/uploads/"]')).toBeVisible();
+    await expect(again.nth(1)).toContainText(`Target ${stamp}`);
+    await expect(again.nth(1).locator('input[type="hidden"][name$="[picture]"]')).toHaveValue(/.+/);
+    await expect(again.nth(0).locator('input[type="hidden"][name$="[picture]"]')).toHaveValue("");
+
+    // Remove the image: the card forgets it, the other card is untouched.
+    await again.nth(1).getByRole("button", { name: /^Remove .* of item \d+ in / }).click();
+    await expect(again.nth(1).locator('input[type="hidden"][name$="[picture]"]')).toHaveValue("");
   });
 });

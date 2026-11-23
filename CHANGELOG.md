@@ -66,6 +66,10 @@ else.
 - **A reference field can show a read-only preview of related records: tick "Let editors edit the related record here" in the fields admin and each connected record the editor may change gets a "Show the record" card; nothing is editable yet ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
   ([long form](docs/changelog/unreleased.md#edit-inline-option))
 
+- **An item of a Flexible content field can hold a single image or a link to one record: pick them inside the card, saved as snapshots rebuilt from the record, masked when the reader can't see the record.**
+  Re-saving such a record on the previous release fails validation; reads work.
+  ([long form](docs/changelog/unreleased.md#flexible-media-reference))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —

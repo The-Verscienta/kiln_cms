@@ -48,6 +48,7 @@ defmodule KilnCMS.CMS.ContentLinks do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Bookkeeping
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.FieldDefinition
 
   @typedoc "One edge a record's custom fields imply."
   @type edge :: %{
@@ -59,31 +60,85 @@ defmodule KilnCMS.CMS.ContentLinks do
         }
 
   @doc """
-  The reference edges `custom_fields` implies, given the record's `:reference`
-  field definitions. Values that are not a resolved snapshot (no uuid `"id"`)
-  imply nothing; a list value implies one edge per element, in order.
+  The reference edges `custom_fields` implies, given the record's top-level
+  field definitions (`reference_definitions/1`). Values that are not a
+  resolved snapshot (no uuid `"id"`) imply nothing; a list value implies one
+  edge per element, in order.
+
+  A reference inside a group row or a flexible field's item (#2282) implies an
+  edge too, keyed by its **definition path**: `field` is the dotted path from
+  the top-level field through the item type to the sub-field
+  (`sections.hero.cta`; a group's is `visits.doctor`; a nested flexible field
+  adds its own steps, `sections.section.rows.row.cta`). The path names
+  definitions, never positions or item ids, so reordering items, adding one or
+  removing another leaves an edge alone, and two items naming one target imply
+  one edge. Such an edge has `position` 0 and no link values, is uncapped and
+  has no inverse; it behaves as `on_target_delete: :keep`
+  (`Changes.ClearReferenceOptions`). A path longer than `ContentLink.field`
+  allows (`KilnCMS.Limits.line/0`, 1,000 characters) implies no edge.
   """
   @spec desired(map() | nil, [struct()]) :: [edge()]
   def desired(custom_fields, definitions) when is_map(custom_fields) do
     Enum.flat_map(definitions, fn definition ->
-      custom_fields
-      |> Map.get(definition.name)
-      |> List.wrap()
-      |> Enum.with_index()
-      |> Enum.flat_map(&edge(&1, definition))
+      walk(definition, Map.get(custom_fields, definition.name), definition.name)
     end)
   end
 
   def desired(_custom_fields, _definitions), do: []
 
-  defp edge({%{"id" => id} = value, position}, definition) when is_binary(id) do
-    if uuid?(id) do
+  # `value` is what `definition` stores, `path` its dotted definition path.
+  defp walk(%{field_type: :reference} = definition, value, path) do
+    value
+    |> List.wrap()
+    |> Enum.with_index()
+    |> Enum.flat_map(&edge(&1, definition, path))
+  end
+
+  defp walk(%{field_type: :group} = definition, value, path) do
+    subs = FieldDefinition.group_fields(definition)
+
+    for row <- List.wrap(value), is_map(row), sub <- subs do
+      walk(sub, Map.get(row, sub.name), path <> "." <> sub.name)
+    end
+    |> Enum.concat()
+  end
+
+  defp walk(%{field_type: :flexible} = definition, value, path) do
+    types =
+      Map.new(
+        FieldDefinition.item_types(definition),
+        &{&1.name, {&1, FieldDefinition.group_fields(&1)}}
+      )
+
+    for %{} = item <- List.wrap(value),
+        {type, subs} <- List.wrap(Map.get(types, item["_type"])),
+        sub <- subs do
+      # A setting lives under the item's `_settings`.
+      stored =
+        if sub.item_setting,
+          do: item |> Map.get("_settings") |> item_setting(sub.name),
+          else: Map.get(item, sub.name)
+
+      walk(sub, stored, "#{path}.#{type.name}.#{sub.name}")
+    end
+    |> Enum.concat()
+  end
+
+  defp walk(_definition, _value, _path), do: []
+
+  defp item_setting(%{} = settings, name), do: Map.get(settings, name)
+  defp item_setting(_settings, _name), do: nil
+
+  # `position` is the value's place in a top-level list; a reference inside a
+  # row or item always has 0 (see `desired/2`).
+  defp edge({%{"id" => id} = value, position}, definition, path) when is_binary(id) do
+    if uuid?(id) and path_fits?(path) do
       [
         %{
-          field: definition.name,
+          field: path,
           target_id: id,
           target_type: string_or(value["type"], only_target(definition)),
-          position: position,
+          position: if(path == definition.name, do: position, else: 0),
           metadata: link_values(value)
         }
       ]
@@ -92,7 +147,13 @@ defmodule KilnCMS.CMS.ContentLinks do
     end
   end
 
-  defp edge(_value, _definition), do: []
+  defp edge(_value, _definition, _path), do: []
+
+  # `ContentLink.field` is capped (`KilnCMS.Limits.line/0`). A nested path can
+  # outgrow it (up to 3 item levels of long names): such a reference implies
+  # no edge, as one to a non-uuid id does, rather than raising inside a save.
+  # The value stays in `custom_fields`; only the reverse list misses it.
+  defp path_fits?(path), do: String.length(path) <= KilnCMS.Limits.line()
 
   defp link_values(%{"link" => %{} = link}), do: link
   defp link_values(_value), do: %{}
@@ -111,10 +172,12 @@ defmodule KilnCMS.CMS.ContentLinks do
   defp string_or(_value, fallback), do: fallback
 
   @doc """
-  The `:reference` field definitions governing `record`, read as the cms
-  bookkeeping (registry metadata, not user data) and failing closed: a refused
-  read raising beats reconciling against "no reference fields", which would
-  delete every edge the record has.
+  The top-level field definitions governing `record` that imply reference
+  edges — a `:reference` field, or a `:group` / `:flexible` field with a
+  `:reference` sub-field anywhere in its tree (#2282) — with their sub-field
+  and item-type trees loaded. Read as the cms bookkeeping (registry metadata,
+  not user data) and failing closed: a refused read raising beats reconciling
+  against "no reference fields", which would delete every edge the record has.
   """
   @spec reference_definitions(struct()) :: [struct()]
   def reference_definitions(%resource{} = record) do
@@ -133,8 +196,22 @@ defmodule KilnCMS.CMS.ContentLinks do
       true ->
         []
     end
-    |> Enum.filter(&(&1.field_type == :reference))
+    |> Enum.filter(&references?/1)
   end
+
+  defp references?(%{field_type: :reference}), do: true
+
+  defp references?(%{field_type: :group} = definition),
+    do: definition |> FieldDefinition.group_fields() |> Enum.any?(&references?/1)
+
+  defp references?(%{field_type: :flexible} = definition) do
+    definition
+    |> FieldDefinition.item_types()
+    |> Enum.flat_map(&FieldDefinition.group_fields/1)
+    |> Enum.any?(&references?/1)
+  end
+
+  defp references?(_definition), do: false
 
   @doc """
   Bring `record`'s outgoing reference edges in line with its live

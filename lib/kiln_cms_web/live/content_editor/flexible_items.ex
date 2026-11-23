@@ -32,6 +32,7 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleItems do
 
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMSWeb.ContentEditor.GroupRows
+  alias KilnCMSWeb.ContentEditor.ReferenceValues
 
   @meta ["_id", "_type", "_settings"]
 
@@ -115,12 +116,25 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleItems do
           item
       end
 
-    type
-    |> FieldDefinition.group_fields()
-    |> Enum.filter(&(&1.field_type == :flexible))
+    subs = FieldDefinition.group_fields(type)
+
+    item =
+      subs
+      |> Enum.filter(&(&1.field_type == :flexible))
+      |> Enum.reduce(item, fn sub, item ->
+        case fetch_sub(item, sub) do
+          {:ok, value} -> put_sub(item, sub, normalize_list(value, sub))
+          :error -> item
+        end
+      end)
+
+    # A reference sub-field that allows several types posts a `"type:id"` token
+    # in its one hidden input; the write needs the `%{"id", "type"}` map.
+    subs
+    |> Enum.filter(&(&1.field_type == :reference and ReferenceValues.polymorphic?(&1)))
     |> Enum.reduce(item, fn sub, item ->
       case fetch_sub(item, sub) do
-        {:ok, value} -> put_sub(item, sub, normalize_list(value, sub))
+        {:ok, value} -> put_sub(item, sub, ReferenceValues.untokenize(value))
         :error -> item
       end
     end)
@@ -203,7 +217,7 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleItems do
   def summary(item, type) do
     type
     |> FieldDefinition.group_fields()
-    |> Enum.reject(&(setting?(&1) or &1.field_type == :flexible))
+    |> Enum.reject(&(setting?(&1) or &1.field_type in [:flexible, :media, :reference]))
     |> Enum.find_value(fn sub -> sub_summary(Map.get(item, sub.name)) end)
   end
 
@@ -282,6 +296,35 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleItems do
   end
 
   def update_list(_items, _definition, _segments, _fun), do: :error
+
+  @doc """
+  `value` set on the single-valued sub-field `sub_name` of the item `id`, when
+  that sub-field is a `field_type` (`:media` or `:reference`) of the item's
+  type and holds one value (`multiple` off). `:error` for an item that is gone,
+  a sub-field the item's type does not have, or one that is another type, so an
+  event naming an address and a sub-field can write nothing the editor's own
+  input could not. A reference that allows several types takes the picker's
+  `"type:id"` token and stores the `%{"id", "type"}` map; `""` clears.
+  """
+  @spec put_value([map()], map(), String.t(), String.t(), :media | :reference, term()) ::
+          {:ok, [map()]} | :error
+  def put_value(items, definition, id, sub_name, field_type, value)
+      when field_type in [:media, :reference] do
+    with {item, index} <- find(items, id),
+         %{} = item_type <- type(definition, item),
+         %{field_type: ^field_type} = sub <-
+           Enum.find(FieldDefinition.group_fields(item_type), &(&1.name == sub_name)),
+         true <- Map.get(sub, :multiple) != true do
+      value =
+        if field_type == :reference and ReferenceValues.polymorphic?(sub),
+          do: ReferenceValues.untokenize(value),
+          else: value
+
+      {:ok, List.replace_at(items, index, put_sub(item, sub, value))}
+    else
+      _no_such_sub_field -> :error
+    end
+  end
 
   defp find(items, id) do
     items
