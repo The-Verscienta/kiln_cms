@@ -36,6 +36,7 @@ defmodule KilnCMSWeb.FieldSelection do
       |> put("sort", if(sel["sort"] == "title", do: "title"))
       |> put("by_type", by_type(sel["by_type"], targets, catalog))
       |> put("create", create(sel["create"], targets))
+      |> put_add_new(sel["add_new"])
 
     params
     |> Map.delete("sel")
@@ -56,6 +57,12 @@ defmodule KilnCMSWeb.FieldSelection do
     do: if(type in targets, do: %{"type" => type})
 
   defp create(_none, _targets), do: nil
+
+  # "Add new" is on unless the admin turned it off; only the off value is
+  # stored, so a field that never touches it saves the selection it always did.
+  # Off also clears create-on-type, which is a kind of adding new.
+  defp put_add_new(map, "false"), do: map |> Map.delete("create") |> Map.put("add_new", false)
+  defp put_add_new(map, _on), do: map
 
   defp put(map, _key, value) when value in [nil, [], %{}, ""], do: map
   defp put(map, key, value), do: Map.put(map, key, value)
@@ -145,6 +152,7 @@ defmodule KilnCMSWeb.FieldSelection do
       states: Map.get(map, "states", []),
       owner?: Map.get(map, "owner") == "self",
       create: get_in(map, ["create", "type"]),
+      add_new?: Map.get(map, "add_new") != false,
       sort: Map.get(map, "sort", "recent"),
       by_type:
         Map.new(Map.get(map, "by_type", %{}), fn {type, entry} ->
@@ -209,12 +217,21 @@ defmodule KilnCMSWeb.FieldSelection do
 
     base = Enum.join([noun | parts ++ owner] ++ [sort], ", ") <> "."
 
-    case get_in(map, ["create", "type"]) do
-      type when is_binary(type) ->
+    closing(base, map, lookup)
+  end
+
+  # What the picker may create, after the conditions: create-on-type, or that
+  # "Add new" is off.
+  defp closing(base, map, lookup) do
+    case {get_in(map, ["create", "type"]), Map.get(map, "add_new")} do
+      {type, _add_new} when is_binary(type) ->
         gettext("%{sentence} Typing a new name offers to create a draft %{type}.",
           sentence: base,
           type: label(lookup, type)
         )
+
+      {_none, false} ->
+        gettext("%{sentence} Editors can't add new records from here.", sentence: base)
 
       _none ->
         base

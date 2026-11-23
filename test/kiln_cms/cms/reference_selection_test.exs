@@ -340,6 +340,49 @@ defmodule KilnCMS.CMS.ReferenceSelectionTest do
       end
     end
 
+    test "add_new is true or false, and false can't stand beside create", %{admin: admin} do
+      off = field!(admin, %{selection: %{"add_new" => false}})
+      assert off.selection == %{"add_new" => false}
+      refute ReferenceSelection.add_new?(off.selection)
+
+      assert ReferenceSelection.add_new?(nil)
+      assert ReferenceSelection.add_new?(%{"add_new" => true})
+      assert ReferenceSelection.add_new?(%{"states" => ["published"]})
+
+      # Not a condition: it narrows no read.
+      assert {:ok, :unfiltered} =
+               ReferenceSelection.query_for(off.selection, "page", admin, nil)
+
+      for {selection, fragment} <- [
+            {%{"add_new" => "no"}, "add_new must be true or false"},
+            {%{"add_new" => false, "create" => %{"type" => "page"}}, "create needs add_new"}
+          ] do
+        message =
+          refusal(fn ->
+            CMS.create_field_definition(
+              %{
+                content_type: :post,
+                name: name(),
+                label: "L",
+                field_type: :reference,
+                target_type: "page",
+                selection: selection
+              },
+              actor: admin
+            )
+          end)
+
+        assert message =~ fragment, "#{inspect(selection)}: #{message}"
+      end
+    end
+
+    test "live/3 reports add_new only when it is off" do
+      assert ReferenceSelection.live(%{"add_new" => false}, ["page"], nil) ==
+               %{"add_new" => false}
+
+      assert ReferenceSelection.live(%{"add_new" => true}, ["page"], nil) == nil
+    end
+
     test "create is accepted only when a new draft would pass the filter", %{admin: admin} do
       category = category!(admin)
 

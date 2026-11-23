@@ -34,6 +34,14 @@ carries the reasoning.
   - See [Edit related records in place](../extending-content.md#edit-related-records-in-place) and [ADR 0081](../decisions/0081-an-inline-edited-related-record-is-saved-on-its-own-and-the-option-is-its-own-column-with-no-write-api.md).
 
 
+<a id="reference-add-new-off"></a>
+
+- **A reference field can turn off the picker's "Add new" (#3222).** In the fields admin, step 6 (**Which records can be picked**) has a new checkbox, **Offer “Add new” in the picker**, ticked by default. Untick it and the field's picker offers no **Add new *Type*** and no create-on-type row: editors connect only records that already exist. Use it where a record made from a picker would be a thin draft, such as a catalogue whose records need their own fields filled in before they mean anything.
+  - **Both sides.** The reverse field on each target turns its **Add new** off too, so the relationship makes no new records from either side.
+  - **Stored as** `"add_new": false` in the field's `selection` (#2285); only the off value is stored, so a field that never changes it keeps the selection it had. `"add_new"` must be `true` or `false`, and `false` beside `"create"` is refused (*create needs add_new*); unticking the box in the admin clears create-on-type for you.
+  - **Not a filter, not access control.** It narrows no read: the search lists what it did before. An editor who may create the type can still create the record from its own screen. The server checks it too, so a forged create event from the picker creates nothing.
+  - **Outside the editor.** `GET /api/schema` reports it in `x-kiln-selection` when off; field sync carries it with the rest of `selection`. No migration.
+
 <a id="flexible-media-reference"></a>
 
 - **An item of a Flexible content field can hold a single image (Media) or a link to one record (Reference), picked inside the item's card (#2282).**

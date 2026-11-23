@@ -2009,8 +2009,12 @@ field and every write path apply it (#2285). You need the admin role.
    empty to not filter on that field. Only plain, non-private fields are
    listed; a value on a number or yes/no field is saved as a number or a
    boolean.
-6. Optionally, under **Let editors create what they type**, choose **Yes,
-   create a new *Type***. See
+6. Under **Adding new records**, **Offer “Add new” in the picker** is ticked
+   by default. Untick it to have editors connect only records that already
+   exist: the picker, and the reverse field on each target, then offer no
+   **Add new**. It is stored as `"add_new": false` and filters nothing.
+   With it ticked, optionally choose **Yes, create a new *Type*** under
+   **Let editors create what they type**. See
    [Let editors create what they type](#let-editors-create-what-they-type).
 7. Read the sentence at the end of the step, which restates the setting, for
    example *Editors are offered: Published Page records, tagged vegan, newest
@@ -2058,7 +2062,9 @@ relationship back to a plain value clears the selection.
    name to a value, `{"in": [...]}` or `{"not_eq": value}` (only non-private
    fields with a plain value, see the errors table below; not `text`, media,
    reference, group, geolocation or link). `create` is `{"type": "<one of the
-   target types>"}`. Conditions AND together.
+   target types>"}`. `add_new` is `false` to turn off the picker's **Add
+   new** on both sides (it may not stand beside `create`), and is left out
+   otherwise; it is not a condition. Conditions AND together.
 2. Write a reference as usual (editor, reverse field, JSON:API, GraphQL, MCP,
    import). A target the filter rejects fails the save on that field, for
    example `“Only a draft” isn't one of the records this field accepts.`

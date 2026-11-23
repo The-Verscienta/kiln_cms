@@ -72,6 +72,10 @@ else.
   Re-saving such a record on the previous release fails validation; reads work.
   ([long form](docs/changelog/unreleased.md#flexible-media-reference))
 
+- **A reference field can turn off the picker's "Add new": untick "Offer “Add new” in the picker" in the fields admin (stored as `"add_new": false` in the field's `selection`) and editors connect only records that already exist, from both sides of the relationship ([#3222](https://github.com/The-Verscienta/kiln_cms/issues/3222)).**
+  No migration.
+  ([long form](docs/changelog/unreleased.md#reference-add-new-off))
+
 - **A role can be granted single item types of a Flexible content field (`custom_fields.<field>.<item type>`): its editors may edit, add and remove items of that type and no others ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282)).**
   Reordering needs the whole-field grant; the console shows a partly granted field read-only. No migration.
   ([long form](docs/changelog/unreleased.md#flexible-item-type-grants))
