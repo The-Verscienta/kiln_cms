@@ -72,6 +72,10 @@ else.
   Re-saving such a record on the previous release fails validation; reads work.
   ([long form](docs/changelog/unreleased.md#flexible-media-reference))
 
+- **A role can be granted single item types of a Flexible content field (`custom_fields.<field>.<item type>`): its editors may edit, add and remove items of that type and no others ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282)).**
+  Reordering needs the whole-field grant; the console shows a partly granted field read-only. No migration.
+  ([long form](docs/changelog/unreleased.md#flexible-item-type-grants))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —

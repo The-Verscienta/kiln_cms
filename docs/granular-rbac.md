@@ -186,6 +186,8 @@ An entry in a type's `field_grants` list can be:
 | `custom_fields.<name>` | that one top-level field |
 | `custom_fields.<group>` | a whole group field, including adding, removing and reordering its rows |
 | `custom_fields.<group>.<sub>` | that one sub-field, in every row of the group |
+| `custom_fields.<flexible>` | a whole Flexible content field: every item, and adding, removing and reordering them |
+| `custom_fields.<flexible>.<item type>` | the items of that one item type: edit, add and remove them. Not the items of other types, and not reordering |
 | `access_password` | set, change or remove the page's passphrase lock. Not an attribute (the editor sends it as an argument), so no other entry covers it: an editor with a `field_grants` list for the type needs this entry to touch the lock |
 
 Field names are lower-case letters, digits and underscores, starting with a
@@ -205,6 +207,15 @@ fields are never written by anyone.
   `custom_fields.*` entry.** A key outside the grant may carry only its
   default on a new document. A role with just the bare `custom_fields` key (or
   none) keeps the old rule: creating a document is ungoverned.
+- **A flexible field is judged item by item.** Items are matched by their
+  `_id`, so inserting one is not a reorder. A changed, added or removed item
+  needs the entry for its type; an item whose type changes needs both; putting
+  the surviving items in a different order needs the whole-field entry. A
+  change anywhere inside an item, including its nested items, is a change to
+  that item's type. Copies and imports carry only the items of the granted
+  types. The console shows a flexible field read-only unless the whole field is
+  granted (the same as a group with only sub-field entries); the grant is
+  enforced on every write path.
 - **A hidden field cannot be written** (below), on a create or an update.
 
 ### Read: `field_read_grants`
@@ -267,7 +278,9 @@ custom field must exist on the type for the read picker to appear.
    in **Fields of Post** (for example).
 2. Under **Individual custom fields**, tick the fields they may change. A
    group's own box lets them add, remove and reorder its rows; the indented
-   boxes beneath it change one sub-field in every row. Leave all of them
+   boxes beneath it change one sub-field in every row. A flexible field's own
+   box covers all its items, and the boxes beneath it are its item types (edit,
+   add and remove the items of that type). Leave all of them
    unticked and tick **Custom fields (all of them)** for the old all-or-nothing
    grant.
 3. Below, in **Custom fields they can read**, choose **Only these private

@@ -138,14 +138,14 @@ added in those two functions and nowhere else.
 | `ReferenceSelection`, `Validations.ReferenceSelection` | A selection may not filter on an item-type row. |
 | `Changes.ClearDefaultSource`, `ClearDeliverPlain`, `ClearDeliverPortable`, `ClearLinkFieldOptions` | An item type and its sub-fields are treated as nested: record-level options are cleared. |
 | `Changes.ClearMultiple` | `:flexible` and item types are forced `multiple: true`. |
-| `Changes.EnforceCustomFieldGrants` | Top-level only. A `:flexible` field falls under the whole-value clause: `custom_fields.sections` works, an item-type segment (`custom_fields.sections.hero`) is not valid until the grants PR. |
+| `Changes.EnforceCustomFieldGrants` | Judges a flexible field item by item, by `_id`; `custom_fields.sections.hero` grants the items of one type (PR 4, below). |
 | `Validations.FieldConstraints`, `Validations.PrivateField` | `nested?` is "not top level", so a unique or private option on an item type or its sub-field is refused. |
 | `Validations.FieldCondition` | A `:flexible` field carries no condition of its own (as a group); item sub-fields' conditions see the item's own fields, content and settings together. |
 | `Preparations.CustomFieldQuery`, `IndexedCustomFields`, `ListFields` | `:flexible` is not a filter leaf, an index, or a list column. |
 | `Media.Resnapshot` | The query for top-level media fields also requires `group_of_id` and `flex_of_id` to be null. |
 | `Graphql.CustomFields` | The top-level map uses `top_level?/1`; the field is served as generic JSON per item until the typed `FlexibleValue`. |
 | `SchemaExport` | The field is `["array", "null"]` of generic objects, with the item bounds; item types are not listed as fields. |
-| `ScopePickers` | Grant and hide pickers list top-level fields only. |
+| `ScopePickers` | Grant and hide pickers list top-level fields; a flexible field's item types are offered beneath it as write entries (PR 4). The read picker never offers them. |
 | `FieldSync` | `flex_of_id` is an owner key; item types travel as an `"item_types"` child list and `item_setting` as an attribute; see "Export and import" below. |
 | `FieldDefinitionLive` | The new-field picker offers `:flexible`; an existing flexible field's type select is disabled. Item types and their sub-fields are edited in the field's own panels, not listed as top-level rows. |
 | `BustTypeRegistry`, `SyncFieldValues`, `FlexiblePath` | Walk the owner chain up to the cap; see below. |
@@ -280,8 +280,8 @@ The admin form disables the type select on a flexible field.
 
 ### What is not done yet
 
-No per-item-type grants, no search of items, no per-item diff, no typed GraphQL
-or client export (PR 4 to PR 7 of the plan). The values are served as generic
+No search of items, no per-item diff, no typed GraphQL
+or client export (PR 5 to PR 7 of the plan; per-item-type grants are PR 4, below). The values are served as generic
 JSON objects until then.
 
 ## Media and reference inside items (PR 3, #2282)
@@ -374,6 +374,54 @@ validation** at that sub-field. Reads work: the stored snapshots are returned
 as stored, and the fired artifacts keep what was fired. The definitions of
 those sub-fields load (`field_type` is a known atom there). Roll forward, or
 delete the sub-field first (which purges its values).
+
+## Item-type grants (PR 4, #2282)
+
+The grammar did not change: `custom_fields.<field>.<x>` already parsed, and
+`FieldAccess.writable?/2` is plain membership of the entry or the field's own
+entry. What changed is that `<x>` may now be an item type, and that the write
+check judges a flexible value by item.
+
+- **Matched by `_id`, not by position.** `EnforceCustomFieldGrants` compares
+  the coerced list with the stored one: an `_id` only in the new list is an
+  *added* item, only in the old one a *removed* item, in both and different a
+  *changed* item. Each needs `[field, item type]` (an item whose `_type`
+  changes needs both). Matching by position, as groups do, would turn one
+  inserted hero into a change to every item after it.
+- **Reordering needs the whole field.** If the surviving ids come in a
+  different order the path is `[field]`. Letting a `hero` editor move `hero`
+  items among others would need the grant inside the path check and a judgment
+  of whether the other items kept their relative order; the plan's "may not
+  reorder others" is met in the strict form, and a later PR can relax it.
+  Rejected: treating every reorder as free (it lets an editor move a `quote`
+  item).
+- **Snapshots are not changes.** Before comparing, an item's media and
+  reference sub-values (and its settings', and those of nested items) are cut
+  to their ids, so a refreshed title in an item type the editor cannot write
+  does not refuse their save.
+- **No third segment.** A grant per sub-field of an item type stays out of
+  scope: the grammar has two segments, and a sub-field name in the second
+  position grants nothing (it is not an item type, so no path matches it).
+- **A list that cannot be matched is judged whole.** If any item lacks a
+  string `_id` or `_type`, or an id repeats, the path is `[field]`, so an
+  editor with only item-type entries cannot save a field holding such legacy
+  items (data written outside coercion) until someone with the whole-field
+  grant re-saves it. Keys a type no longer declares are ignored in the
+  comparison, so a removed sub-field's stale values are not the editor's change.
+- **Read grants are untouched.** A flexible field cannot be private, so an item
+  type is not a read entry; `valid_read_entry?/2` still refuses it.
+- **Copies carry the granted items.** `ContentCopy.filter_custom_fields/3`
+  keeps the items of the granted types of a flexible value
+  (`FieldAccess.writable_items/3`), and lists the field as withheld when it
+  left any out. The result is exactly what the editor could have written to a
+  new record.
+- **The console is unchanged.** `HiddenFields.console_access/4` marks a field
+  read-only unless `writable?(write, [name])`, so a partly granted flexible
+  field renders disabled, as a group with only sub-field entries does.
+  Editing the permitted items there is a follow-up.
+- **Rollback.** No migration and no new data. The previous release stores an
+  item-type entry and never matches it, so a role that holds one grants
+  nothing there. Rolling back only restores the refusal.
 
 ## What was rejected
 

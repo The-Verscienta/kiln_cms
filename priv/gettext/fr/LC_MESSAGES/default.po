@@ -26033,8 +26033,8 @@ msgstr "jeudi"
 
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
-msgid "Tick Custom fields (all of them) above for every custom field, or pick individual ones here. A group's own box lets them add, remove and reorder its rows; a field under it lets them change just that field in every row. With any of these ticked, creating a document is held to them too."
-msgstr "Cochez Champs personnalisés (tous) ci-dessus pour tous les champs personnalisés, ou choisissez des champs individuels ici. La case d'un groupe leur permet d'ajouter, de retirer et de réordonner ses lignes ; un champ placé dessous leur permet de ne modifier que ce champ dans chaque ligne. Dès que l'un d'eux est coché, la création d'un document y est aussi limitée."
+msgid "Tick Custom fields (all of them) above for every custom field, or pick individual ones here. A group's own box lets them add, remove and reorder its rows; a field under it lets them change just that field in every row. A flexible field's own box lets them change every item and reorder them; a type under it lets them edit, add and remove just the items of that type. With any of these ticked, creating a document is held to them too."
+msgstr "Cochez Champs personnalisés (tous) ci-dessus pour tous les champs personnalisés, ou choisissez des champs individuels ici. La case d'un groupe leur permet d'ajouter, de retirer et de réordonner ses lignes ; un champ placé dessous leur permet de ne modifier que ce champ dans chaque ligne. La case d'un champ flexible leur permet de modifier tous ses éléments et de les réordonner ; un type placé dessous leur permet de modifier, d'ajouter et de retirer uniquement les éléments de ce type. Dès que l'un d'eux est coché, la création d'un document y est aussi limitée."
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
