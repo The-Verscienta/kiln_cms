@@ -1663,12 +1663,17 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   attr :values, :map, required: true
   attr :title, :string, default: nil
   attr :readonly, :boolean, default: false
+  attr :change, :string, default: nil, doc: "a `phx-change` of the inputs' own"
+  attr :target, :any, default: nil, doc: "the `phx-target` for `change`"
 
-  # One connection's link-field inputs (R3): a compact grid under the row's
-  # title. Plain inputs of the editor form — no `phx-change` of their own, so
-  # an edit validates like any field. Each is labelled with the record, since
-  # every row repeats the same labels.
-  defp link_inputs(assigns) do
+  @doc """
+  One connection's link-field inputs (R3): a compact grid under the row's
+  title. In the picker they are plain inputs of the editor form, with no
+  `phx-change` of their own, so an edit validates like any field. The reverse
+  field (R4b) passes `change` and `target` so its inputs report to it instead.
+  Each is labelled with the record, since every row repeats the same labels.
+  """
+  def link_inputs(assigns) do
     ~H"""
     <div
       id={@id}
@@ -1684,6 +1689,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         name={"#{@name}[#{field.name}]"}
         value={Map.get(@values, field.name)}
         readonly={@readonly}
+        change={@change}
+        target={@target}
       />
     </div>
     """
@@ -1694,6 +1701,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   attr :name, :string, required: true
   attr :value, :any, default: nil
   attr :readonly, :boolean, default: false
+  attr :change, :string, default: nil
+  attr :target, :any, default: nil
 
   defp link_input(%{field: %{field_type: :boolean}} = assigns) do
     ~H"""
@@ -1706,6 +1715,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         value="true"
         checked={@value in [true, "true"]}
         disabled={@readonly}
+        phx-change={@change}
+        phx-target={@target}
         class="size-4 rounded border-base-content/30 accent-primary"
       />
       <label for={@id} class="text-xs text-base-content/70">{@field.label}</label>
@@ -1719,7 +1730,14 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       <label for={@id} class="mb-0.5 block text-[11px] font-medium text-base-content/60">
         {@field.label}<span :if={@field.required} class="text-error"> *</span>
       </label>
-      <select id={@id} name={@name} disabled={@readonly} class="field-select py-1 text-sm">
+      <select
+        id={@id}
+        name={@name}
+        disabled={@readonly}
+        phx-change={@change}
+        phx-target={@target}
+        class="field-select py-1 text-sm"
+      >
         <option value="">{gettext("— None —")}</option>
         <option
           :for={option <- @field.options}
@@ -1751,6 +1769,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         title={@field.help_text}
         autocomplete="off"
         disabled={@readonly}
+        phx-change={@change}
+        phx-target={@target}
         class="field-input py-1 text-sm"
       />
     </div>

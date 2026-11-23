@@ -26,6 +26,12 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
       it goes live when that source is published, and links to it.
     * Adding uses the reference picker (`ReferencePicker`, `rows: false`,
       `notify:` this component), searching the source type as the editor.
+    * A field with link fields (R3) offers **Edit details** on each row the
+      editor may write: the connection's link-field inputs open under the
+      row, start from the source's working copy, and **Save details** is
+      the same edit of the source (`ReverseFields.set_link/5`). One row
+      edits at a time; its inputs are named under `_kiln_reverse_link`,
+      outside the editor form's params, with their own `phx-change`.
 
   Reading is `KilnCMS.CMS.ReverseFields.rows/3`, as the editor's actor, so the
   both-ends read rule holds: an editor scoped away from the source type is
@@ -59,7 +65,9 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
      |> assign(:errors, %{})
      |> assign(:notice, nil)
      |> assign(:capacity, nil)
-     |> assign(:accepts?, true)}
+     |> assign(:accepts?, true)
+     |> assign(:editing, nil)
+     |> assign(:link_draft, %{})}
   end
 
   # A pick (or an "Add new" record) from the add control, sent here by the
@@ -132,11 +140,20 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
   defp notice(%{title: title}, :move),
     do: gettext("Moved this record in “%{title}”.", title: title || gettext("Untitled"))
 
+  defp notice(%{title: title}, :link),
+    do: gettext("Saved the details in “%{title}”.", title: title || gettext("Untitled"))
+
   defp error_message(:occupied, source, reverse) do
     gettext(
       "“%{title}” already connects another record through %{field}. Change it from its own page.",
       title: source.title || gettext("Untitled"),
       field: reverse.definition.label
+    )
+  end
+
+  defp error_message(:not_connected, source, _reverse) do
+    gettext("“%{title}” no longer connects to this record.",
+      title: source.title || gettext("Untitled")
     )
   end
 
@@ -178,7 +195,65 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
     end
   end
 
+  # Edit details (R3 link fields): one row at a time, a row the editor may
+  # write, on a field that has link fields. The draft starts from the source's
+  # working copy, so a pending change is what the edit builds on.
+  def handle_event("reverse_link_edit", %{"id" => id}, socket) do
+    case editable_row(socket, id) do
+      %{} = row when socket.assigns.link_fields != [] ->
+        %{reverse: reverse, record: target} = socket.assigns
+
+        {:noreply,
+         socket
+         |> assign(:editing, id)
+         |> assign(:link_draft, ReverseFields.link_values(target, reverse, row.source))}
+
+      _other ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("reverse_link_change", %{"_kiln_reverse_link" => links}, socket)
+      when is_map(links) do
+    case {socket.assigns.editing, Map.get(links, root(socket.assigns.reverse))} do
+      {id, %{} = values} when is_binary(id) ->
+        {:noreply, update(socket, :link_draft, &Map.merge(&1, values))}
+
+      _other ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("reverse_link_cancel", _params, socket),
+    do: {:noreply, assign(socket, editing: nil, link_draft: %{})}
+
+  def handle_event("reverse_link_save", _params, socket) do
+    with id when is_binary(id) <- socket.assigns.editing,
+         %{} = row <- editable_row(socket, id) do
+      %{reverse: reverse, actor: actor, tenant: tenant, record: target} = socket.assigns
+      opts = [actor: actor, tenant: tenant]
+
+      result =
+        ReverseFields.set_link(target, reverse, row.source, socket.assigns.link_draft, opts)
+
+      socket =
+        case result do
+          {:ok, _source} -> assign(socket, editing: nil, link_draft: %{})
+          {:error, _error} -> socket
+        end
+
+      {:noreply, settle(socket, row.source, result, :link)}
+    else
+      _other -> {:noreply, socket}
+    end
+  end
+
   def handle_event(_event, _params, socket), do: {:noreply, socket}
+
+  defp root(reverse), do: "reverse-field-#{reverse.source_type}-#{reverse.field}"
+
+  defp editable_row(socket, id),
+    do: Enum.find(socket.assigns.rows, &(&1.source.id == id and &1.editable?))
 
   defp write(socket, source, op, params) do
     %{reverse: reverse, actor: actor, tenant: tenant, record: target} = socket.assigns
@@ -285,12 +360,7 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
 
   @impl true
   def render(assigns) do
-    assigns =
-      assign(
-        assigns,
-        :root,
-        "reverse-field-#{assigns.reverse.source_type}-#{assigns.reverse.field}"
-      )
+    assigns = assign(assigns, :root, root(assigns.reverse))
 
     ~H"""
     <div
@@ -344,11 +414,63 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
         >
           <:extra>
             <.connection_details
+              :if={@editing != row.source.id}
               id={"#{@root}-#{row.source.id}-details"}
               fields={@link_fields}
               values={row.link && row.link.metadata}
               position={@reverse.definition.multiple && row.link && row.link.position}
             />
+            <button
+              :if={
+                @editing != row.source.id and @link_fields != [] and row.editable? and
+                  row.pending != :remove
+              }
+              type="button"
+              id={"#{@root}-#{row.source.id}-edit-link"}
+              phx-click="reverse_link_edit"
+              phx-value-id={row.source.id}
+              phx-target={@myself}
+              class="mt-1 inline-flex items-center gap-1 text-xs text-primary-ink hover:underline"
+            >
+              <.icon name="hero-pencil-square" class="size-3.5" />
+              {gettext("Edit details")}
+            </button>
+            <div :if={@editing == row.source.id} id={"#{@root}-#{row.source.id}-link-form"}>
+              <ReferencePicker.link_inputs
+                id={"#{@root}-#{row.source.id}-link"}
+                fields={@link_fields}
+                name={"_kiln_reverse_link[#{@root}]"}
+                values={@link_draft}
+                title={row.source.title}
+                change="reverse_link_change"
+                target={@myself}
+              />
+              <div class="mt-1.5 flex items-center gap-2">
+                <button
+                  type="button"
+                  id={"#{@root}-#{row.source.id}-link-save"}
+                  phx-click="reverse_link_save"
+                  phx-target={@myself}
+                  class="btn btn-primary btn-xs"
+                >
+                  {gettext("Save details")}
+                </button>
+                <button
+                  type="button"
+                  id={"#{@root}-#{row.source.id}-link-cancel"}
+                  phx-click="reverse_link_cancel"
+                  phx-target={@myself}
+                  class="btn btn-ghost btn-xs"
+                >
+                  {gettext("Cancel")}
+                </button>
+                <span :if={row.source.state == :published} class="text-xs text-base-content/60">
+                  {gettext("Saved to the working copy of “%{title}”.",
+                    title: row.source.title || gettext("Untitled")
+                  )}
+                </span>
+              </div>
+            </div>
             <.pending_note
               :if={row.pending}
               id={"#{@root}-#{row.source.id}-pending"}

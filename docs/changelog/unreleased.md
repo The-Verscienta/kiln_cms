@@ -42,6 +42,14 @@ carries the reasoning.
   - **Not a filter, not access control.** It narrows no read: the search lists what it did before. An editor who may create the type can still create the record from its own screen. The server checks it too, so a forged create event from the picker creates nothing.
   - **Outside the editor.** `GET /api/schema` reports it in `x-kiln-selection` when off; field sync carries it with the rest of `selection`. No migration.
 
+<a id="reverse-link-edit"></a>
+
+- **A connection's link fields can be edited from the reverse field (#3243).** On a record's reverse field (R4, "Recipes using this ingredient") whose reference has link fields (R3), each row the editor may change offers **Edit details**. It opens the connection's link-field inputs under the row, filled from the source's working copy, so a pending change is what the edit starts from, with **Save details** and **Cancel**. One row edits at a time.
+  - **An edit of the source.** Save is the same write as connecting or disconnecting from this side (R4b, D23): the source's own update as the editor, or a save of its working copy when it is published (the row then says *Saved to the working copy of “Source”*). Its policies, validations, history and optimistic lock apply, and a failure stays on that row.
+  - **What is written.** Only the reference's own link fields. A value left out keeps what the connection stored; an emptied input clears it. Nothing is written when nothing changed. If the source no longer connects to this record, the save is refused (*“Source” no longer connects to this record.*).
+  - **Who.** A row whose source the editor may not change shows its lock and no **Edit details**; the server checks again, so a forged event writes nothing.
+  - **In code.** `KilnCMS.CMS.ReverseFields.set_link/5` and `link_values/3`. The inputs are named under `_kiln_reverse_link`, outside the editor form's params, so typing in them never changes the record being edited. No migration.
+
 <a id="flexible-media-reference"></a>
 
 - **An item of a Flexible content field can hold a single image (Media) or a link to one record (Reference), picked inside the item's card (#2282).**

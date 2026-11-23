@@ -5360,6 +5360,7 @@ msgstr "No se puede verificar"
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
@@ -9203,6 +9204,11 @@ msgstr "Editar el bloque %{n} en la página"
 #, elixir-autogen, elixir-format
 msgid "Edit destination: %{kind}"
 msgstr "Editar destino: %{kind}"
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Edit details"
+msgstr "Editar detalles"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -20260,6 +20266,7 @@ msgstr "Guardar destino"
 msgid "Save detail"
 msgstr "Guardar detalle"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save details"
@@ -20374,6 +20381,11 @@ msgstr "Detalles guardados."
 msgid "Saved on its own"
 msgstr "Se guarda por separado"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Saved the details in “%{title}”."
+msgstr "Detalles guardados en «%{title}»."
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saved the view “%{name}”."
@@ -20384,6 +20396,11 @@ msgstr "Se guardó la vista «%{name}»."
 #, elixir-autogen, elixir-format
 msgid "Saved to the working copy"
 msgstr "Guardado en la copia de trabajo"
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Saved to the working copy of “%{title}”."
+msgstr "Guardado en la copia de trabajo de «%{title}»."
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
@@ -31513,6 +31530,11 @@ msgid "“%{title}” can't be deleted for good: 1 record still links to it thro
 msgid_plural "“%{title}” can't be deleted for good: %{count} records still link to it through “%{field}”, which doesn't allow that. Remove the links first, or change the field's setting under Fields."
 msgstr[0] "“%{title}” no se puede eliminar definitivamente: 1 registro aún lo enlaza mediante “%{field}”, que no lo permite. Quita primero el enlace o cambia el ajuste del campo en Campos."
 msgstr[1] "“%{title}” no se puede eliminar definitivamente: %{count} registros aún lo enlazan mediante “%{field}”, que no lo permite. Quita primero los enlaces o cambia el ajuste del campo en Campos."
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "“%{title}” no longer connects to this record."
+msgstr "«%{title}» ya no está conectado a este registro."
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
