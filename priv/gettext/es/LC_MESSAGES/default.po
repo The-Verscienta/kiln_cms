@@ -2252,6 +2252,11 @@ msgstr "Un punto de recuperación (kiln-<stamp>.keep) protege de la retención t
 msgid "A regular expression the whole value must match."
 msgstr "Una expresión regular con la que debe coincidir todo el valor."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "A related record did not answer, so this record was not saved. Try again."
+msgstr "Un registro relacionado no respondió, así que este registro no se guardó. Inténtalo de nuevo."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A relationship"
@@ -3745,6 +3750,13 @@ msgstr "También incluye"
 #, elixir-autogen, elixir-format
 msgid "Also restrict sign-in"
 msgstr "Restringir también el inicio de sesión"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Also saved %{count} related record."
+msgid_plural "Also saved %{count} related records."
+msgstr[0] "También se guardó %{count} registro relacionado."
+msgstr[1] "También se guardaron %{count} registros relacionados."
 
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
@@ -7365,6 +7377,11 @@ msgstr "No se pudo revocar esa clave."
 #, elixir-autogen, elixir-format
 msgid "Couldn't rotate that signing secret."
 msgstr "No se pudo rotar ese secreto de firma."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save %{name}, so this record was not saved. Fix it below and try again."
+msgstr "No se pudo guardar %{name}, así que este registro no se guardó. Corrígelo abajo e inténtalo de nuevo."
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -20344,6 +20361,20 @@ msgstr "Guarde sus cambios antes de cambiar el estado de este contenido."
 msgid "Saved"
 msgstr "Guardado"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved %{count} related record, but another did not answer, so this record was not saved. Try again."
+msgid_plural "Saved %{count} related records, but another did not answer, so this record was not saved. Try again."
+msgstr[0] "Se guardó %{count} registro relacionado, pero otro no respondió, así que este registro no se guardó. Inténtalo de nuevo."
+msgstr[1] "Se guardaron %{count} registros relacionados, pero otro no respondió, así que este registro no se guardó. Inténtalo de nuevo."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved %{count} related record, but couldn't save %{name}, so this record was not saved. Fix it below and try again."
+msgid_plural "Saved %{count} related records, but couldn't save %{name}, so this record was not saved. Fix it below and try again."
+msgstr[0] "Se guardó %{count} registro relacionado, pero no se pudo guardar %{name}, así que este registro no se guardó. Corrígelo abajo e inténtalo de nuevo."
+msgstr[1] "Se guardaron %{count} registros relacionados, pero no se pudo guardar %{name}, así que este registro no se guardó. Corrígelo abajo e inténtalo de nuevo."
+
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Saved as a draft and connected here."
@@ -22545,6 +22576,11 @@ msgstr "Los pasos se cuentan de forma independiente — esto no es una tasa de c
 #, elixir-autogen, elixir-format
 msgid "Still in grace"
 msgstr "Aún en periodo de gracia"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Still saving the related records. One moment."
+msgstr "Aún se están guardando los registros relacionados. Un momento."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -29070,6 +29106,11 @@ msgstr "un campo de botones de opción debe tener al menos una opción"
 #, elixir-autogen, elixir-format
 msgid "a rating only has a star count"
 msgstr "una valoración solo tiene un número de estrellas"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "a related record"
+msgstr "un registro relacionado"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format

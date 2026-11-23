@@ -2252,6 +2252,11 @@ msgstr ""
 msgid "A regular expression the whole value must match."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "A related record did not answer, so this record was not saved. Try again."
+msgstr "A related record did not answer, so this record was not saved. Try again."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A relationship"
@@ -3745,6 +3750,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Also restrict sign-in"
 msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Also saved %{count} related record."
+msgid_plural "Also saved %{count} related records."
+msgstr[0] "Also saved %{count} related record."
+msgstr[1] "Also saved %{count} related records."
 
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
@@ -7365,6 +7377,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Couldn't rotate that signing secret."
 msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save %{name}, so this record was not saved. Fix it below and try again."
+msgstr "Couldn't save %{name}, so this record was not saved. Fix it below and try again."
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -20344,6 +20361,20 @@ msgstr ""
 msgid "Saved"
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved %{count} related record, but another did not answer, so this record was not saved. Try again."
+msgid_plural "Saved %{count} related records, but another did not answer, so this record was not saved. Try again."
+msgstr[0] "Saved %{count} related record, but another did not answer, so this record was not saved. Try again."
+msgstr[1] "Saved %{count} related records, but another did not answer, so this record was not saved. Try again."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved %{count} related record, but couldn't save %{name}, so this record was not saved. Fix it below and try again."
+msgid_plural "Saved %{count} related records, but couldn't save %{name}, so this record was not saved. Fix it below and try again."
+msgstr[0] "Saved %{count} related record, but couldn't save %{name}, so this record was not saved. Fix it below and try again."
+msgstr[1] "Saved %{count} related records, but couldn't save %{name}, so this record was not saved. Fix it below and try again."
+
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Saved as a draft and connected here."
@@ -22545,6 +22576,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Still in grace"
 msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Still saving the related records. One moment."
+msgstr "Still saving the related records. One moment."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -29070,6 +29106,11 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "a rating only has a star count"
 msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "a related record"
+msgstr "a related record"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format

@@ -137,11 +137,50 @@ defmodule KilnCMSWeb.ContentEditor.ReferenceInline do
 
   @impl true
   def update(assigns, socket) do
+    {cascade, assigns} = Map.pop(assigns, :cascade)
     socket = assign(socket, assigns)
 
     # Opened once; the picker's later renders only refresh the row's facts.
     socket = if socket.assigns.loaded?, do: socket, else: open(socket)
-    {:ok, socket}
+    {:ok, if(cascade, do: cascade_save(socket, cascade), else: socket)}
+  end
+
+  @doc """
+  The id of the card component for row `key` of reference field `field`: what
+  the editor addresses (`send_update/2`) when its Save cascades (I3).
+  """
+  def card_id(field, key), do: "reference-picker-#{field}-inline-#{key}"
+
+  # The parent's Save asks this card to save first (I3). The card runs the
+  # same save its own button does and reports back to the editor, which
+  # owns the order and decides whether the parent is written. A card with
+  # nothing to save, or already saved, is a success; anything else (an error
+  # on the card, someone else's change, a refusal) stops the cascade.
+  defp cascade_save(socket, ref) do
+    dirty? = socket.assigns.status == :dirty and editing?(socket)
+    socket = if dirty?, do: save(socket), else: socket
+
+    outcome =
+      case socket.assigns.status do
+        status when status in [:saved, :saved_copy] and dirty? -> :saved
+        status when status in [:clean, :saved, :saved_copy] -> :unchanged
+        _failed -> :failed
+      end
+
+    send(
+      self(),
+      {__MODULE__,
+       {:cascaded, ref, socket.assigns.field, socket.assigns.key, outcome, card_title(socket)}}
+    )
+
+    socket
+  end
+
+  defp card_title(socket) do
+    case get_in(socket.assigns, [:values, "title"]) do
+      title when is_binary(title) and title != "" -> title
+      _blank -> nil
+    end
   end
 
   defp open(socket) do

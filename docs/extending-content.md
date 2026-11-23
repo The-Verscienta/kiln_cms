@@ -2251,6 +2251,10 @@ writes only that related record. The plan, with what is still to come, is
    in the field follows a saved draft.
 7. Choose **Hide the record** (or press Escape) to close the card. A card with
    unsaved changes does not close: save or discard first.
+8. Or leave the card as it is and save the record you are editing. **Save**
+   first saves every card with unsaved changes, then the record. The message
+   says how many related records it saved (*Saved. Also saved 2 related
+   records.*).
 
 A record you make from the field with **Add new** opens its card straight
 away, so you can fill in its other fields without leaving the page.
@@ -2268,9 +2272,26 @@ What to know before relying on it:
 
 - **A related record is saved on its own.** The card has its own Save and its
   own status: the related record is never written through the parent form,
-  and there is no one transaction for both. **The parent's Save does not save
-  the card**, and the card's Save does not save the parent. They are separate
-  writes (as with "Add new"), so a failure on one leaves the other as it was.
+  and there is no one transaction for both. The card's own Save does not save
+  the parent. The parent's Save saves the cards first (below), one write each,
+  so a failure leaves records that are each valid on their own, never half of
+  one.
+- **The parent's Save saves the cards first, and stops at the first failure.**
+  Cards with unsaved edits are saved one at a time in the order they appear
+  (fields by name, rows top to bottom). If one fails (a blank title, a rule of
+  the record's own, someone else's change, a permission change), the parent is
+  not saved, the cards after it are not tried, that card shows its errors and
+  the page says so (*Saved 1 related record, but couldn't save "Venue", so
+  this record was not saved. Fix it below and try again.*). What you typed in
+  the parent stays in the form; cards that saved stay **Saved**, and the next
+  Save runs only the cards still unsaved. Publishing, submitting for review,
+  archiving and **Move to trash** settle the cards the same way. Each related
+  record keeps its own version history and its own *updated* webhook, so
+  saving three cards is three versions of three records plus the parent's. A
+  draft related record's new title reaches the parent's stored link in the
+  same Save; a published one keeps its live title there until its own
+  **Publish changes**. A card that does not answer within 15 seconds ends the
+  Save with *A related record did not answer, so this record was not saved.* Publish changes on a live record settles the cards first too.
 - **Unsaved card edits are guarded like the parent's own.** A card with
   unsaved changes turns on the editor's leave-page warning (closing the tab,
   reloading, following a link), and it stays on until every such card is saved
@@ -2281,9 +2302,7 @@ What to know before relying on it:
 - **Draft or working copy.** A draft is updated in place. A published record
   gets `save_working_copy` with the title as `working_title`; its live text
   does not change until that record's own **Publish changes**.
-- **Not in the card yet.** Creating a new record and opening its card on
-  create, saving every card with the parent, and fields other than the plain
-  types above. The title is read-only for a type with a title template, and
+- **Not in the card yet.** Fields other than the plain types above. The title is read-only for a type with a title template, and
   the record you are editing never gets a card on its own field.
 - **The related record's own permissions decide.** A card is offered only for a
   connected record the editor may change, checked per record (a published

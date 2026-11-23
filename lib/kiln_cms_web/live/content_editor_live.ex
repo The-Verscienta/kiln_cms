@@ -120,6 +120,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # update. Short relative to `@autosave_debounce_ms`: this coalesces a burst
   # arriving over milliseconds, not idle-typing.
   @comments_reload_debounce_ms 300
+  # How long the Save waits for a record card to answer before it gives up.
+  @cascade_timeout 15_000
 
   # Paste/drop image uploads into the body (the texttile pattern, adapted to a
   # block editor): the rich-text hook hands the files to a hidden
@@ -367,6 +369,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # (docs/working-copy.md) — its text autosaves, its settings do not.
     |> assign(:settings_dirty?, false)
     |> assign(:inline_dirty, %{})
+    # The cascade of the parent's Save into its dirty record cards (#2283,
+    # I3), while one is running; `nil` otherwise.
+    |> assign(:cascade, nil)
     # The lost-update guard's question (#1815): the keys the live page changed
     # after the draft was saved, and what the editor chose for each, while the
     # "Publish changes" panel is open. `nil` when it is closed.
@@ -771,6 +776,39 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     {:noreply, assign(socket, :inline_dirty, dirty)}
   end
+
+  # A card answered the cascade (I3): the next dirty card, or, with every one
+  # saved, what the parent was going to do. The first failure stops it.
+  def handle_info(
+        {KilnCMSWeb.ContentEditor.ReferenceInline, {:cascaded, ref, field, key, outcome, title}},
+        %{assigns: %{cascade: %{ref: ref}}} = socket
+      ) do
+    {:noreply, cascade_step(socket, field, key, outcome, title)}
+  end
+
+  # A card that answers an old (or no) cascade is ignored: its work is done.
+  def handle_info(
+        {KilnCMSWeb.ContentEditor.ReferenceInline, {:cascaded, _ref, _, _, _, _}},
+        socket
+      ),
+      do: {:noreply, socket}
+
+  # A card that never answered (it unmounted) must not leave Save dead.
+  def handle_info({:cascade_timeout, ref}, %{assigns: %{cascade: %{ref: ref} = cascade}} = socket) do
+    message =
+      if cascade.saved == 0,
+        do: gettext("A related record did not answer, so this record was not saved. Try again."),
+        else:
+          ngettext(
+            "Saved %{count} related record, but another did not answer, so this record was not saved. Try again.",
+            "Saved %{count} related records, but another did not answer, so this record was not saved. Try again.",
+            cascade.saved
+          )
+
+    {:noreply, socket |> assign(:cascade, nil) |> put_flash(:error, message)}
+  end
+
+  def handle_info({:cascade_timeout, _ref}, socket), do: {:noreply, socket}
 
   # A reference field's picker (R9) asks for a pick, a removal or a reorder;
   # the value lives in the form, so the edit is made here, through the same
@@ -2113,14 +2151,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> broadcast_saved()
     |> mark_saved()
     |> assign(:settings_dirty?, false)
-    |> put_flash(:info, saved_message(reloaded))
+    |> put_flash(:info, saved_message(reloaded, socket.assigns[:cascade_saved] || 0))
   end
 
   # A live document's Save holds its changes back (#1815) — say where they went.
-  defp saved_message(record) do
-    if WorkingCopy.pending?(record),
-      do: gettext("Saved. Readers see these changes once you publish them."),
-      else: gettext("Saved.")
+  defp saved_message(record, related) do
+    base =
+      if WorkingCopy.pending?(record),
+        do: gettext("Saved. Readers see these changes once you publish them."),
+        else: gettext("Saved.")
+
+    if related == 0 do
+      base
+    else
+      base <>
+        " " <>
+        ngettext(
+          "Also saved %{count} related record.",
+          "Also saved %{count} related records.",
+          related
+        )
+    end
   end
 
   # Write whatever text is waiting for the debounce into the working copy now,
@@ -3722,23 +3773,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   def handle_event("save", %{"form" => params}, socket) when is_map(params) do
-    socket = cancel_autosave_timer(socket)
-
-    params =
-      params
-      |> reconcile_blocks(socket.assigns.form)
-      |> inject_children(socket.assigns.block_children)
-      |> inject_rich_bodies(socket.assigns.rich_bodies)
-      |> normalize_item_rows()
-      |> merge_tag_params(socket)
-      |> drop_blank_related(socket)
-      |> ReferenceValues.normalize(socket.assigns.field_definitions)
-      |> GroupRows.normalize(socket.assigns.field_definitions)
-      |> FlexibleItems.normalize(socket.assigns.field_definitions)
-
-    if socket.assigns.record.state == :published,
-      do: save_live(socket, params),
-      else: save_draft(socket, params)
+    {:noreply,
+     with_settled_cards(socket, fn socket ->
+       {:noreply, socket} = save_form(socket, params)
+       socket
+     end)}
   end
 
   # Discard local changes and reload the latest saved version, clearing the
@@ -3998,10 +4037,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
     if socket.assigns.may_trash? and
          ContentTypes.can_destroy?(kind, record, actor, tenant: record.org_id) do
-      case settle_before_workflow(socket) do
-        {:ok, socket} -> {:noreply, move_to_trash(socket)}
-        {:error, socket} -> {:noreply, socket}
-      end
+      {:noreply,
+       with_settled_cards(socket, fn socket ->
+         case settle_before_workflow(socket) do
+           {:ok, socket} -> move_to_trash(socket)
+           {:error, socket} -> socket
+         end
+       end)}
     else
       {:noreply,
        put_flash(
@@ -5438,10 +5480,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # flushed on the button's mousedown — are saved first, so Publish publishes
     # what is on the screen; a non-draft cannot autosave, so its unsaved edits
     # stop the transition instead of being marked saved and thrown away.
-    case settle_before_workflow(socket) do
-      {:ok, socket} -> transition(socket, action)
-      {:error, socket} -> socket
-    end
+    with_settled_cards(socket, fn socket ->
+      case settle_before_workflow(socket) do
+        {:ok, socket} -> transition(socket, action)
+        {:error, socket} -> socket
+      end
+    end)
   end
 
   # "Publish changes" (docs/working-copy.md): flush the text still waiting for
@@ -5456,16 +5500,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp run_workflow(socket, "publish_changes") do
-    params =
-      socket.assigns.form
-      |> AshPhoenix.Form.params()
-      |> inject_children(socket.assigns.block_children)
-      |> inject_rich_bodies(socket.assigns.rich_bodies)
+    with_settled_cards(socket, fn socket ->
+      params =
+        socket.assigns.form
+        |> AshPhoenix.Form.params()
+        |> inject_children(socket.assigns.block_children)
+        |> inject_rich_bodies(socket.assigns.rich_bodies)
 
-    case flush_working_copy(socket, params) do
-      {:ok, socket} -> publish_or_ask(socket)
-      {:error, socket} -> socket
-    end
+      case flush_working_copy(socket, params) do
+        {:ok, socket} -> publish_or_ask(socket)
+        {:error, socket} -> socket
+      end
+    end)
   end
 
   # "Discard the changes": the published text is back, and every rich-text
@@ -5584,10 +5630,12 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   defp publish_asked(socket, %{action: "publish"}) do
-    case settle_before_workflow(socket) do
-      {:ok, socket} -> transition(socket, "publish")
-      {:error, socket} -> socket
-    end
+    with_settled_cards(socket, fn socket ->
+      case settle_before_workflow(socket) do
+        {:ok, socket} -> transition(socket, "publish")
+        {:error, socket} -> socket
+      end
+    end)
   end
 
   defp close_severity(socket) do
@@ -5712,6 +5760,114 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp refusal_context(socket) do
     %{actor: actor, record: record} = socket.assigns
     [actor: actor, org: record.org_id, resource: record]
+  end
+
+  defp save_form(socket, params) do
+    socket = cancel_autosave_timer(socket)
+
+    params =
+      params
+      |> reconcile_blocks(socket.assigns.form)
+      |> inject_children(socket.assigns.block_children)
+      |> inject_rich_bodies(socket.assigns.rich_bodies)
+      |> normalize_item_rows()
+      |> merge_tag_params(socket)
+      |> drop_blank_related(socket)
+      |> ReferenceValues.normalize(socket.assigns.field_definitions)
+      |> GroupRows.normalize(socket.assigns.field_definitions)
+      |> FlexibleItems.normalize(socket.assigns.field_definitions)
+
+    if socket.assigns.record.state == :published,
+      do: save_live(socket, params),
+      else: save_draft(socket, params)
+  end
+
+  # ── The cascade into record cards (#2283, I3) ──────────────────────────────
+
+  # Saving this record, or moving it through its workflow, first saves the
+  # record cards that hold unsaved edits, in field and row order, each its own
+  # write by its own action. The first failure stops everything: that card
+  # shows its errors, this record is not written and its form keeps its edits.
+  # Children first, because this record's custom-field write reads each target
+  # (the live row) and stores a snapshot of its title. `fun` is what was going
+  # to run, and takes the socket as it is once every card saved. No card dirty
+  # is the plain path.
+  defp with_settled_cards(socket, fun) do
+    queue = dirty_cards(socket)
+
+    cond do
+      # One cascade at a time: a second click waits for the first.
+      socket.assigns.cascade != nil ->
+        put_flash(socket, :info, gettext("Still saving the related records. One moment."))
+
+      queue == [] ->
+        fun.(socket)
+
+      true ->
+        ref = make_ref()
+        Process.send_after(self(), {:cascade_timeout, ref}, @cascade_timeout)
+
+        socket
+        |> assign(:cascade, %{ref: ref, queue: queue, then: fun, saved: 0})
+        |> ask_next_card()
+    end
+  end
+
+  # `{field, key}` for every dirty card, fields by name, rows in field order.
+  defp dirty_cards(socket) do
+    socket.assigns.inline_dirty
+    |> Enum.sort_by(fn {name, _keys} -> name end)
+    |> Enum.flat_map(fn {name, keys} -> Enum.map(keys, &{name, &1}) end)
+  end
+
+  defp ask_next_card(%{assigns: %{cascade: %{queue: [{field, key} | _rest], ref: ref}}} = socket) do
+    send_update(KilnCMSWeb.ContentEditor.ReferenceInline,
+      id: KilnCMSWeb.ContentEditor.ReferenceInline.card_id(field, key),
+      cascade: ref
+    )
+
+    socket
+  end
+
+  defp cascade_step(socket, _field, _key, outcome, _title) when outcome in [:saved, :unchanged] do
+    cascade = socket.assigns.cascade
+    saved = if outcome == :saved, do: cascade.saved + 1, else: cascade.saved
+    rest = tl(cascade.queue)
+
+    if rest == [] do
+      socket = assign(socket, :cascade, nil)
+      # The count is read once, by the Save's own flash.
+      socket |> assign(:cascade_saved, saved) |> cascade.then.() |> assign(:cascade_saved, 0)
+    else
+      socket
+      |> assign(:cascade, %{cascade | queue: rest, saved: saved})
+      |> ask_next_card()
+    end
+  end
+
+  defp cascade_step(socket, _field, _key, :failed, title) do
+    saved = socket.assigns.cascade.saved
+
+    socket
+    |> assign(:cascade, nil)
+    |> put_flash(:error, cascade_failure(title, saved))
+  end
+
+  defp cascade_failure(title, saved) do
+    name = title || gettext("a related record")
+
+    if saved == 0 do
+      gettext("Couldn't save %{name}, so this record was not saved. Fix it below and try again.",
+        name: name
+      )
+    else
+      ngettext(
+        "Saved %{count} related record, but couldn't save %{name}, so this record was not saved. Fix it below and try again.",
+        "Saved %{count} related records, but couldn't save %{name}, so this record was not saved. Fix it below and try again.",
+        saved,
+        name: name
+      )
+    end
   end
 
   defp settle_before_workflow(%{assigns: %{save_state: state}} = socket)

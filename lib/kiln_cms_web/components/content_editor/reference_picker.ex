@@ -333,7 +333,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   # it must not schedule the parent's autosave or flip its save state.
   defp report_dirty(%{assigns: %{rows: true, definition: %{edit_inline: true}}} = socket) do
     %{inline_dirty: dirty, inline_reported: reported, definition: definition} = socket.assigns
-    keys = dirty |> Map.keys() |> Enum.sort()
+    # In row order: the cascade on the parent's Save (I3) saves them in it.
+    keys = Enum.filter(socket.assigns.ids || [], &Map.has_key?(dirty, &1))
 
     cond do
       keys == reported ->

@@ -69,6 +69,8 @@ else.
   ([long form](docs/changelog/unreleased.md#edit-inline-card-save))
 - **The editor now warns before leaving with unsaved record-card edits, an "Add new" record opens its card, and a row with unsaved card edits cannot be removed or replaced ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
   ([long form](docs/changelog/unreleased.md#edit-inline-dirty-guard))
+- **Saving a record now saves its edited related records first, and stops at the first one that fails ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
+  ([long form](docs/changelog/unreleased.md#edit-inline-cascade))
 
 - **An item of a Flexible content field can hold a single image or a link to one record: pick them inside the card, saved as snapshots rebuilt from the record, masked when the reader can't see the record.**
   Re-saving such a record on the previous release fails validation; reads work.
