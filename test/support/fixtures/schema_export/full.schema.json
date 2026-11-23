@@ -1613,6 +1613,7 @@
                 "array",
                 "null"
               ],
+              "x-kiln-edit-inline": true,
               "x-kiln-target-types": [
                 "post"
               ]

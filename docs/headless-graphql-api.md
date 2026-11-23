@@ -853,6 +853,14 @@ mutation ($id: ID!) {
 }
 ```
 
+**Related records are written with their own mutation.** The fields admin's
+"Let editors edit the related record here" option (`edit_inline`, #2283) is
+editor-only: no mutation reads it, and there is no input that writes a related
+record through the parent's mutation. To change a connected record, call its
+own `update<Type>` mutation, then connect it with the mutations above; each is
+judged by that record's own policies. See
+[Edit related records in place](extending-content.md#edit-related-records-in-place).
+
 ### Writing body content — the `blockTree` argument
 
 The typed `blocks` union is not on the GraphQL surface (it can't render cleanly

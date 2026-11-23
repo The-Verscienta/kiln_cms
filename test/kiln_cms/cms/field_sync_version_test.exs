@@ -29,7 +29,9 @@ defmodule KilnCMS.CMS.FieldSyncVersionTest do
   #     export writes it only when `true`, so a site without flexible fields
   #     exports the same file as before; a file carrying it needs 1.10+.
   #     (`item_types` is a nested list, not a field key.)
-  @added_field_keys ~w(item_setting prefix step suffix)
+  #   * `edit_inline` (#2283): a reference's record card. Written only when
+  #     `true`, so a file of a site that never ticks it is unchanged.
+  @added_field_keys ~w(edit_inline item_setting prefix step suffix)
 
   @v1_section_keys ~w(display initially name)
 

@@ -120,6 +120,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldWidgets
   alias KilnCMS.CMS.ReferenceSelection
+  alias KilnCMSWeb.ContentEditor.ReferenceInline
   alias KilnCMSWeb.ContentEditor.ReferenceValues
 
   @page_size 20
@@ -159,6 +160,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
      |> assign(:plans, nil)
      |> assign(:candidates, nil)
      |> assign(:creating, nil)
+     |> assign(:inline_ok, %{})
+     |> assign(:inline_open, %{})
      |> assign(:announcement, "")}
   end
 
@@ -215,8 +218,45 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         do: assign(socket, :candidates, candidates(socket)),
         else: socket
 
-    {:ok, socket |> assign(:items, items(socket.assigns)) |> assign_capacity()}
+    {:ok,
+     socket
+     |> assign(:items, items(socket.assigns))
+     |> assign_capacity()
+     |> assign_inline()}
   end
+
+  # The rows that get a record card (`edit_inline`, #2283): the connected
+  # records the actor may write, decided once per row (one read per target
+  # type, for the rows not yet decided). An open card of a row that left the
+  # field is dropped. The server re-decides when a card opens.
+  defp assign_inline(%{assigns: %{rows: true, definition: %{edit_inline: true}}} = socket) do
+    %{items: items, inline_ok: decided, inline_open: open} = socket.assigns
+    keys = Enum.map(items, & &1.id)
+
+    fresh = Enum.reject(items, &(Map.has_key?(decided, &1.id) or is_nil(&1.state)))
+
+    decided =
+      if fresh == [] do
+        decided
+      else
+        cts =
+          Map.new(
+            target_types(socket.assigns.definition, socket.assigns.tenant),
+            &{to_string(&1.type), &1}
+          )
+
+        Map.merge(
+          decided,
+          ReferenceInline.writable(cts, fresh, socket.assigns.actor, socket.assigns.tenant)
+        )
+      end
+
+    socket
+    |> assign(:inline_ok, Map.take(decided, keys))
+    |> assign(:inline_open, Map.take(open, keys))
+  end
+
+  defp assign_inline(socket), do: socket
 
   # Whether the search shows: never on a locked field; on a list until it
   # holds `max_items`; on a single reference while it is empty. `pick` checks
@@ -401,7 +441,49 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     end
   end
 
+  # A record card (#2283) opens or closes. The row key must be one of the
+  # field's current values, and the server re-reads the record and re-checks
+  # that the actor may write it: a forged key opens nothing.
+  def handle_event("inline_toggle", %{"id" => key}, socket) when is_binary(key) do
+    %{definition: definition, ids: ids, inline_ok: decided, inline_open: open} = socket.assigns
+
+    cond do
+      definition.edit_inline != true or not socket.assigns.rows ->
+        {:noreply, socket}
+
+      Map.has_key?(open, key) ->
+        {:noreply, assign(socket, :inline_open, Map.delete(open, key))}
+
+      key not in ids or Map.get(decided, key) != true ->
+        {:noreply, socket}
+
+      map_size(open) >= ReferenceInline.max_open() ->
+        {:noreply,
+         assign(socket, :announcement, gettext("Close a record before opening another."))}
+
+      true ->
+        {:noreply, open_card(socket, key)}
+    end
+  end
+
   def handle_event(_event, _params, socket), do: {:noreply, socket}
+
+  defp open_card(socket, key) do
+    %{items: items, definition: definition, tenant: tenant, actor: actor} = socket.assigns
+    item = Enum.find(items, &(&1.id == key))
+
+    ct =
+      item &&
+        Enum.find(target_types(definition, tenant), &(to_string(&1.type) == to_string(item.type)))
+
+    card =
+      case ct && ReferenceInline.open(ct, item.record_id, actor, tenant) do
+        {:ok, card} -> card
+        _refused -> :refused
+      end
+
+    update(socket, :inline_open, &Map.put(&1, key, card))
+  end
 
   # The create-on-type row, or nil: what the field's `selection.create` offers
   # for what is typed. Needs a non-blank query, a search that shows, the
@@ -1106,6 +1188,22 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
             />
           </:extra>
           <:extra :for={extra <- @row_extra}>{render_slot(extra, item)}</:extra>
+          <:extra :if={@definition.edit_inline == true and Map.get(@inline_ok, item.id) == true}>
+            <% row_id = "cf-ref-#{@definition.name}-#{String.replace(item.id, ":", "-")}-inline" %>
+            <ReferenceInline.toggle
+              id={row_id}
+              item={item}
+              open?={Map.has_key?(@inline_open, item.id)}
+              target={@myself}
+            />
+            <%= case Map.get(@inline_open, item.id) do %>
+              <% nil -> %>
+              <% :refused -> %>
+                <ReferenceInline.refused id={row_id} />
+              <% card -> %>
+                <ReferenceInline.card id={row_id} card={card} />
+            <% end %>
+          </:extra>
         </.row>
       </ol>
 
