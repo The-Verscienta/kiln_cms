@@ -342,7 +342,6 @@ defmodule KilnCMSWeb.ContentEditor.ReferenceInline do
   end
 
   defp save(socket) do
-    %{ct: ct, record: held, actor: actor, tenant: tenant} = socket.assigns
     {title, cf} = changes(socket)
 
     cond do
@@ -355,24 +354,33 @@ defmodule KilnCMSWeb.ContentEditor.ReferenceInline do
         |> failed()
 
       true ->
-        # The record as it is now, as the actor: gone, trashed, unreadable,
-        # not writable, or moved on since the card read it.
-        case read(ct, held.id, actor, tenant) do
-          {:ok, current} ->
-            cond do
-              not can_write?(ct, current, actor, tenant) ->
-                refuse(socket)
+        guarded_write(socket, title, cf)
+    end
+  end
 
-              current.lock_version != held.lock_version or current.state != held.state ->
-                assign(socket, :status, :stale)
+  # The record as it is now, as the actor: gone, trashed, unreadable, not
+  # writable, or moved on since the card read it.
+  defp guarded_write(socket, title, cf) do
+    %{ct: ct, record: held, actor: actor, tenant: tenant} = socket.assigns
 
-              true ->
-                write(socket, held, title, cf)
-            end
+    case read(ct, held.id, actor, tenant) do
+      {:ok, current} -> judge(socket, current, title, cf)
+      :error -> refuse(socket)
+    end
+  end
 
-          :error ->
-            refuse(socket)
-        end
+  defp judge(socket, current, title, cf) do
+    %{ct: ct, record: held, actor: actor, tenant: tenant} = socket.assigns
+
+    cond do
+      not can_write?(ct, current, actor, tenant) ->
+        refuse(socket)
+
+      current.lock_version != held.lock_version or current.state != held.state ->
+        assign(socket, :status, :stale)
+
+      true ->
+        write(socket, held, title, cf)
     end
   end
 
@@ -466,27 +474,29 @@ defmodule KilnCMSWeb.ContentEditor.ReferenceInline do
     names = Enum.map(shown, & &1.definition.name)
 
     Enum.reduce(errors, %{}, fn error, acc ->
-      # An error about a field the actor may not read says nothing about it.
-      hidden? =
-        match?(%{field: :custom_fields, value: name} when is_binary(name), error) and
-          error.value in hidden
-
-      message =
-        if hidden?,
-          do: gettext("The record could not be saved."),
-          else: error |> Exception.message() |> String.replace_prefix("(working copy) ", "")
-
-      key =
-        case error do
-          %{field: :title} -> "title"
-          %{field: :working_title} -> "title"
-          %{field: :custom_fields, value: name} when is_binary(name) -> if name in names, do: name
-          _other -> nil
-        end
-
-      Map.update(acc, key || :base, [message], &(&1 ++ [message]))
+      {key, message} = describe(error, names, hidden)
+      Map.update(acc, key, [message], &(&1 ++ [message]))
     end)
   end
+
+  # Under the input the error concerns, else at the card level. An error
+  # about a field the actor may not read says nothing about it.
+  defp describe(%{field: :custom_fields, value: name} = error, names, hidden)
+       when is_binary(name) do
+    cond do
+      name in hidden -> {:base, gettext("The record could not be saved.")}
+      name in names -> {name, text(error)}
+      true -> {:base, text(error)}
+    end
+  end
+
+  defp describe(%{field: field} = error, _names, _hidden) when field in [:title, :working_title],
+    do: {"title", text(error)}
+
+  defp describe(error, _names, _hidden), do: {:base, text(error)}
+
+  defp text(error),
+    do: error |> Exception.message() |> String.replace_prefix("(working copy) ", "")
 
   defp failed(socket) do
     socket

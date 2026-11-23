@@ -1734,8 +1734,8 @@ msgstr[1] "%{count} paragraphes dépassent %{max} mots — envisagez de les déc
 #, elixir-autogen, elixir-format
 msgid "1 problem on this record. Nothing was saved."
 msgid_plural "%{count} problems on this record. Nothing was saved."
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "1 problème sur cet enregistrement. Rien n'a été enregistré."
+msgstr[1] "%{count} problèmes sur cet enregistrement. Rien n'a été enregistré."
 
 #: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
@@ -5550,7 +5550,7 @@ msgstr "Modifié"
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "Changed by someone else"
-msgstr ""
+msgstr "Modifié par quelqu'un d'autre"
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -8651,7 +8651,7 @@ msgstr "Désactivé"
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "Discard changes"
-msgstr ""
+msgstr "Annuler les modifications"
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
@@ -9237,12 +9237,12 @@ msgstr "Modifier la planification"
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "Edit the record"
-msgstr ""
+msgstr "Modifier l'enregistrement"
 
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "Edit the record: %{title}"
-msgstr ""
+msgstr "Modifier l'enregistrement : %{title}"
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
@@ -18193,7 +18193,7 @@ msgstr "Publié, mais aucun menu n'y renvoie."
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "Published: your changes are saved to a working copy, and readers see them once you publish them."
-msgstr ""
+msgstr "Publié : vos modifications sont enregistrées dans une copie de travail, et les lecteurs les voient une fois que vous les publiez."
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -18914,7 +18914,7 @@ msgstr "Rechargez la page avant de changer la catégorie."
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "Reload this record"
-msgstr ""
+msgstr "Recharger cet enregistrement"
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
@@ -20203,7 +20203,7 @@ msgstr "Enregistrer"
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "Save %{type}"
-msgstr ""
+msgstr "Enregistrer : %{type}"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -20280,7 +20280,7 @@ msgstr "Enregistrer la source de la clé"
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Save or discard the changes to this record before closing it."
-msgstr ""
+msgstr "Enregistrez ou annulez les modifications de cet enregistrement avant de le fermer."
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
@@ -20352,7 +20352,7 @@ msgstr "Détails enregistrés."
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "Saved on its own"
-msgstr ""
+msgstr "Enregistré séparément"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -22232,7 +22232,7 @@ msgstr "Quelqu’un a modifié la page en ligne après l’enregistrement de vot
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "Someone changed this record since you opened it. Nothing was overwritten."
-msgstr ""
+msgstr "Quelqu'un a modifié cet enregistrement depuis que vous l'avez ouvert. Rien n'a été écrasé."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -23736,7 +23736,7 @@ msgstr "C'est le maximum que ce champ accepte."
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "The %{type} record"
-msgstr ""
+msgstr "L'enregistrement %{type}"
 
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
@@ -24473,7 +24473,7 @@ msgstr "Le serveur de messagerie destinataire a refusé %{to}. Vérifiez l'adres
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "The record could not be saved."
-msgstr ""
+msgstr "L'enregistrement n'a pas pu être enregistré."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -28329,7 +28329,7 @@ msgstr "Vous ne pouvez pas modifier cet enregistrement : sa liaison est en lectu
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "You can't change this record."
-msgstr ""
+msgstr "Vous ne pouvez pas modifier cet enregistrement."
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
