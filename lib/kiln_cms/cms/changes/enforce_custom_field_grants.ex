@@ -42,6 +42,15 @@ defmodule KilnCMS.CMS.Changes.EnforceCustomFieldGrants do
   reordering rows; with only sub-field entries the row count must stay and each
   differing sub-field must be granted.
 
+  A flexible field (#2282) is judged item by item, matched by `_id` and not by
+  position: `custom_fields.<field>.<item type>` covers adding, removing and
+  editing (sub-fields, settings, anything nested) the items of that type. A
+  changed item needs the grant of its type, an added or removed item needs the
+  grant of its type, and an item whose `_type` changes needs both. Putting the
+  surviving items in a different order needs the whole-field entry, because it
+  moves items of every type. A list whose items do not all carry one distinct
+  `_id` (it cannot be matched) is judged as a whole.
+
   Runs in the change phase (not a hook) so that the probe changeset
   `Changes.StageWorkingFields` builds for `:save_working_copy` meets it too.
   """
@@ -51,6 +60,7 @@ defmodule KilnCMS.CMS.Changes.EnforceCustomFieldGrants do
   alias KilnCMS.CMS.Changes.ApplyCustomFields
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldAccess
+  alias KilnCMS.CMS.FieldDefinition
 
   @impl true
   def change(changeset, _opts, %{actor: %{} = actor} = context) do
@@ -169,7 +179,7 @@ defmodule KilnCMS.CMS.Changes.EnforceCustomFieldGrants do
   # Top-level, editor-filled definitions: not a link or group sub-field (they
   # ride on their parent), not computed (the engine's, never supplied).
   defp editable?(definition) do
-    definition.field_type != :computed and KilnCMS.CMS.FieldDefinition.top_level?(definition)
+    definition.field_type != :computed and FieldDefinition.top_level?(definition)
   end
 
   defp paths(%{field_type: :group} = definition, new, old) do
@@ -182,8 +192,73 @@ defmodule KilnCMS.CMS.Changes.EnforceCustomFieldGrants do
     end
   end
 
-  defp paths(%{name: name, field_type: type}, new, old),
-    do: if(comparable(type, new) == comparable(type, old), do: [], else: [[name]])
+  defp paths(%{field_type: :flexible, name: name} = definition, new, old) do
+    {new_items, old_items} = {List.wrap(new), List.wrap(old)}
+
+    cond do
+      new_items == old_items -> []
+      not identified?(new_items) or not identified?(old_items) -> [[name]]
+      true -> item_paths(definition, new_items, old_items)
+    end
+  end
+
+  defp paths(%{name: name} = definition, new, old),
+    do: if(comparable(definition, new) == comparable(definition, old), do: [], else: [[name]])
+
+  # Every item a map with a binary `_type` and a distinct binary `_id`.
+  defp identified?(items) do
+    ids = for %{"_id" => id} when is_binary(id) <- items, do: id
+
+    length(ids) == length(items) and length(Enum.uniq(ids)) == length(ids) and
+      Enum.all?(items, &(is_map(&1) and is_binary(Map.get(&1, "_type"))))
+  end
+
+  defp item_paths(%{name: name} = definition, new_items, old_items) do
+    types = Map.new(FieldDefinition.item_types(definition), &{&1.name, &1})
+    {new_by, old_by} = {by_id(new_items), by_id(old_items)}
+
+    added = for {id, item} <- new_by, not is_map_key(old_by, id), do: [name, item["_type"]]
+    removed = for {id, item} <- old_by, not is_map_key(new_by, id), do: [name, item["_type"]]
+
+    changed =
+      for {id, new_item} <- new_by,
+          old_item = Map.get(old_by, id),
+          item_comparable(new_item, types) != item_comparable(old_item, types),
+          type <- Enum.uniq([new_item["_type"], old_item["_type"]]),
+          do: [name, type]
+
+    common = MapSet.intersection(MapSet.new(Map.keys(new_by)), MapSet.new(Map.keys(old_by)))
+    order = fn items -> for %{"_id" => id} <- items, id in common, do: id end
+    reordered = if order.(new_items) == order.(old_items), do: [], else: [[name]]
+
+    Enum.uniq(added ++ removed ++ changed ++ reordered)
+  end
+
+  defp by_id(items), do: Map.new(items, &{&1["_id"], &1})
+
+  # An item with the snapshots of its media and references cut to their ids,
+  # at any depth, so a refreshed title in a type the editor cannot write is
+  # not their change.
+  defp item_comparable(item, types) do
+    case Map.fetch(types, item["_type"]) do
+      {:ok, type} ->
+        subs = Map.new(FieldDefinition.group_fields(type), &{&1.name, &1})
+
+        Map.new(item, fn
+          {"_settings", %{} = settings} -> {"_settings", comparable_map(settings, subs)}
+          {key, value} -> {key, comparable_value(Map.get(subs, key), value)}
+        end)
+
+      :error ->
+        item
+    end
+  end
+
+  defp comparable_map(map, subs),
+    do: Map.new(map, fn {key, value} -> {key, comparable_value(Map.get(subs, key), value)} end)
+
+  defp comparable_value(nil, value), do: value
+  defp comparable_value(definition, value), do: comparable(definition, value)
 
   # A row's own spelling of "no value" differs from key to key; compare the
   # rows as stored. A single (non-repeating) group is one row, missing = empty.
@@ -206,10 +281,16 @@ defmodule KilnCMS.CMS.Changes.EnforceCustomFieldGrants do
   end
 
   # A media or reference snapshot is the same value while its ids are.
-  defp comparable(type, value) when type in [:media, :reference],
+  defp comparable(%{field_type: type}, value) when type in [:media, :reference],
     do: ApplyCustomFields.snapshot_ids(value)
 
-  defp comparable(_type, value), do: value
+  # A flexible field nested in an item: its own items, snapshots cut to ids.
+  defp comparable(%{field_type: :flexible} = definition, value) when is_list(value) do
+    types = Map.new(FieldDefinition.item_types(definition), &{&1.name, &1})
+    for item <- value, do: if(is_map(item), do: item_comparable(item, types), else: item)
+  end
+
+  defp comparable(_definition, value), do: value
 
   defp stringify(map), do: Map.new(map, fn {key, value} -> {to_string(key), value} end)
 
