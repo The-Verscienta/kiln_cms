@@ -2268,9 +2268,11 @@ What to know before relying on it:
 
 - **A related record is saved on its own.** The card has its own Save and its
   own status: the related record is never written through the parent form,
-  and there is no one transaction for both. **The parent's Save does not save
-  the card**, and the card's Save does not save the parent. They are separate
-  writes (as with "Add new"), so a failure on one leaves the other as it was.
+  and there is no one transaction for both. **Saving the parent saves the cards
+  with unsaved edits first**, one at a time, each as its own write; the first
+  one that fails stops the run and the parent is not saved (it keeps what you
+  typed, and the cards already saved stay saved). Fix the card, then save
+  again. A card's own Save never saves the parent.
 - **Unsaved card edits are guarded like the parent's own.** A card with
   unsaved changes turns on the editor's leave-page warning (closing the tab,
   reloading, following a link), and it stays on until every such card is saved

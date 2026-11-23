@@ -50,9 +50,8 @@ co-editor saving in the other order; and a long transaction holds a connection
 while those hooks run. Each commit is a valid record by itself, so a failure
 partway leaves consistent data, never a corrupt pair. The cost, accepted, is
 that "all or nothing" is not offered; the card says which records were saved.
-Saving every changed card when the parent is saved (a cascade, one commit at a
-time) is planned for a later pull request on top of this, and is decided
-there.
+Saving every changed card when the parent is saved is the cascade (one commit at
+a time, stop at the first failure, parent not written), built in part 2b.
 
 **The parent field's grant governs only the connection.** Whether an editor may
 change a related record is decided by that record's own policies, per record,
@@ -99,8 +98,8 @@ choices that carry weight:
   under the related record's own policy, since the parent field's grant
   governs only the connection. Only the interface does not offer it.
 
-Still not in the card: the unsaved-changes guard on leaving the page, the
-cascade on the parent's Save, and creating and expanding a record on create.
+Added in part 2b: the unsaved-changes guard, the cascade on the parent's Save and
+workflow steps, and expanding a record on create.
 
 ## Rejected
 

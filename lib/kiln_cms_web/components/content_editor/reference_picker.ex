@@ -164,7 +164,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
      |> assign(:inline_ok, %{})
      |> assign(:inline_open, %{})
      |> assign(:inline_dirty, %{})
-     |> assign(:inline_reported, [])
+     |> assign(:inline_reported, nil)
      |> assign(:expand_new, nil)
      |> assign(:announcement, "")}
   end
@@ -333,7 +333,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   # it must not schedule the parent's autosave or flip its save state.
   defp report_dirty(%{assigns: %{rows: true, definition: %{edit_inline: true}}} = socket) do
     %{inline_dirty: dirty, inline_reported: reported, definition: definition} = socket.assigns
-    keys = dirty |> Map.keys() |> Enum.sort()
+    # In row order: the cascade saves cards in the order they are on screen.
+    keys = for item <- socket.assigns.items, Map.has_key?(dirty, item.id), do: item.id
 
     cond do
       keys == reported ->
@@ -343,7 +344,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         socket
 
       true ->
-        send(self(), {__MODULE__, {:inline_dirty, definition.name, keys}})
+        send(self(), {__MODULE__, {:inline_dirty, definition.name, socket.assigns.id, keys}})
         assign(socket, :inline_reported, keys)
     end
   end

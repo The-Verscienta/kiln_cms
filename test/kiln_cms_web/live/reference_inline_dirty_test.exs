@@ -271,6 +271,105 @@ defmodule KilnCMSWeb.ReferenceInlineDirtyTest do
     end
   end
 
+  describe "the parent's Save saves dirty cards first (I3)" do
+    defp settle(lv), do: Enum.each(1..6, fn _ -> render(lv) end)
+
+    defp submit(lv, kind, params),
+      do: lv |> form("##{kind}-editor") |> render_submit(%{"form" => params})
+
+    test "saves each dirty card, then the parent", ctx do
+      field!(ctx.admin, "rid_cas")
+      a = page!(ctx.admin)
+      b = page!(ctx.admin)
+      post = post_with!(ctx.admin, "rid_cas", [a, b])
+      lv = open_editor(build_conn(), ctx.admin, post)
+
+      open_card(lv, "rid_cas", a)
+      open_card(lv, "rid_cas", b)
+      edit(lv, "rid_cas", a, %{"title" => "Card A"})
+      edit(lv, "rid_cas", b, %{"title" => "Card B"})
+
+      submit(lv, "post", %{"title" => "Parent now"})
+      settle(lv)
+
+      assert CMS.get_page!(a.id, actor: ctx.admin).title == "Card A"
+      assert CMS.get_page!(b.id, actor: ctx.admin).title == "Card B"
+      assert CMS.get_post!(post.id, actor: ctx.admin).title == "Parent now"
+      assert :sys.get_state(lv.pid).socket.assigns.cascade == nil
+      assert dirty?(lv) == ["false"]
+    end
+
+    test "stops at the first failure: later cards and the parent are not written", ctx do
+      field!(ctx.admin, "rid_stop")
+      a = page!(ctx.admin)
+      b = page!(ctx.admin)
+      post = post_with!(ctx.admin, "rid_stop", [a, b])
+      lv = open_editor(build_conn(), ctx.admin, post)
+
+      open_card(lv, "rid_stop", a)
+      open_card(lv, "rid_stop", b)
+      edit(lv, "rid_stop", a, %{"title" => ""})
+      edit(lv, "rid_stop", b, %{"title" => "Card B"})
+
+      submit(lv, "post", %{"title" => "Parent now"})
+      settle(lv)
+
+      html = render(lv)
+      assert html =~ "this record was not saved"
+      assert html =~ "Give it a title."
+      assert CMS.get_page!(b.id, actor: ctx.admin).title == b.title
+      assert CMS.get_post!(post.id, actor: ctx.admin).title == post.title
+      assert :sys.get_state(lv.pid).socket.assigns.cascade == nil
+      assert dirty?(lv) == ["true"]
+    end
+
+    test "a second Save after fixing the card goes through", ctx do
+      field!(ctx.admin, "rid_retry")
+      a = page!(ctx.admin)
+      post = post_with!(ctx.admin, "rid_retry", [a])
+      lv = open_editor(build_conn(), ctx.admin, post)
+
+      open_card(lv, "rid_retry", a)
+      edit(lv, "rid_retry", a, %{"title" => ""})
+      submit(lv, "post", %{"title" => "Parent now"})
+      settle(lv)
+      assert CMS.get_post!(post.id, actor: ctx.admin).title == post.title
+
+      edit(lv, "rid_retry", a, %{"title" => "Fixed"})
+      submit(lv, "post", %{"title" => "Parent now"})
+      settle(lv)
+
+      assert CMS.get_page!(a.id, actor: ctx.admin).title == "Fixed"
+      assert CMS.get_post!(post.id, actor: ctx.admin).title == "Parent now"
+    end
+
+    test "a parent with no dirty card saves as before", ctx do
+      field!(ctx.admin, "rid_none")
+      a = page!(ctx.admin)
+      post = post_with!(ctx.admin, "rid_none", [a])
+      lv = open_editor(build_conn(), ctx.admin, post)
+
+      submit(lv, "post", %{"title" => "Plain save"})
+      settle(lv)
+
+      assert CMS.get_post!(post.id, actor: ctx.admin).title == "Plain save"
+    end
+
+    test "a workflow step saves dirty cards first", ctx do
+      field!(ctx.admin, "rid_wf")
+      a = page!(ctx.admin)
+      post = post_with!(ctx.admin, "rid_wf", [a])
+      lv = open_editor(build_conn(), ctx.admin, post)
+
+      open_card(lv, "rid_wf", a)
+      edit(lv, "rid_wf", a, %{"title" => "Before publish"})
+      lv |> render_hook("workflow", %{"action" => "publish"})
+      settle(lv)
+
+      assert CMS.get_page!(a.id, actor: ctx.admin).title == "Before publish"
+    end
+  end
+
   describe "create from the field opens the card (I11)" do
     defp create_new(lv, field, title) do
       lv |> element("#custom-field-#{field}") |> render_hook("ref_new", %{"type" => "page"})
