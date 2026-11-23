@@ -205,7 +205,7 @@ test.describe("reference picker", () => {
     await page.reload();
     await expect.poll(titles).toEqual([`Typed ${stamp}`]);
   });
-  test("open a connected record's read-only card from the keyboard (#2283)", async ({ page }) => {
+  test("edit a connected record in its card from the keyboard (#2283)", async ({ page }) => {
     pageIds.push(await newDraftContent(page, "page"));
     await saveDraft(page, { title: `Linden ${stamp}`, slug: `linden-${stamp}` });
 
@@ -224,21 +224,39 @@ test.describe("reference picker", () => {
     await search.press("Enter");
     await expect(rows).toHaveCount(1);
 
-    // The disclosure is a button: Enter opens it, the card shows the record
-    // and holds no input, and a second Enter closes it.
+    // The disclosure is a button: Enter opens it.
     const toggle = rows.nth(0).locator("[data-inline-toggle]");
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await toggle.focus();
     await toggle.press("Enter");
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     const card = rows.nth(0).locator("[data-inline-card]");
-    await expect(card).toContainText(`Linden ${stamp}`);
     await expect(card).toContainText("Draft: readers do not see this record");
-    await expect(card.locator("input, textarea, select")).toHaveCount(0);
     await expect(toggle).toBeFocused();
 
-    await toggle.press("Enter");
+    // The card edits the record itself. Enter in its input saves the card, not
+    // the document: the page stays on the editor, the chip says Saved, and the
+    // record keeps the new title after a reload.
+    const title = card.locator('input[id$="-inline-title"]');
+    await expect(title).toHaveValue(`Linden ${stamp}`);
+    await title.fill(`Linden renamed ${stamp}`);
+    await expect(card.locator("[data-inline-chip]")).toHaveText("Unsaved changes");
+    const url = page.url();
+    await title.press("Enter");
+    await expect(card.locator("[data-inline-chip]")).toHaveText("Saved");
+    expect(page.url()).toBe(url);
+
+    // Escape closes a card with nothing unsaved.
+    await title.press("Escape");
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
     await expect(card).toHaveCount(0);
+
+    // The document's own Save saves the connection, not the card's record.
+    await saveDraft(page, { title: `Refs ${stamp}`, slug: `refs-${stamp}` });
+    await page.reload();
+    await rows.nth(0).locator("[data-inline-toggle]").click();
+    await expect(rows.nth(0).locator('input[id$="-inline-title"]')).toHaveValue(
+      `Linden renamed ${stamp}`,
+    );
   });
 });

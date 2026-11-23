@@ -1,8 +1,8 @@
 defmodule KilnCMSWeb.ReferenceInlineCardTest do
   @moduledoc """
-  The read-only record card of a reference field with `edit_inline` (#2283,
-  PR 1): a disclosure on each connected row the actor may write opens a card
-  with the record's title and plain fields; a record the actor cannot write or
+  The record card of a reference field with `edit_inline` (#2283, PRs 1 and
+  2a): a disclosure on each connected row the actor may write opens a card
+  with the record's title and plain fields as inputs; a record the actor cannot write or
   read has no card, a forged `inline_toggle` opens nothing, and a field the
   actor's read grant hides is not rendered.
   """
@@ -123,7 +123,7 @@ defmodule KilnCMSWeb.ReferenceInlineCardTest do
   end
 
   describe "the card" do
-    test "an editor opens a read-only card with the title and plain fields", ctx do
+    test "an editor opens a card with the title and plain fields as inputs", ctx do
       field!(ctx.admin, "rin_a")
       post = post_with!(ctx.admin, "rin_a", [ctx.page])
       editor = authed_user(:editor)
@@ -141,9 +141,11 @@ defmodule KilnCMSWeb.ReferenceInlineCardTest do
       assert html =~ "Hello kicker"
       assert html =~ "Draft: readers do not see this record"
       assert html =~ "Open in the full editor"
-      # Read-only in this release: the card holds no input of its own.
-      refute html =~ "<input"
-      refute html =~ "<textarea"
+      assert html =~ ~s(name="_kiln_inline[rin_a][#{ctx.page.id}][title]")
+      assert html =~ ~s(name="_kiln_inline[rin_a][#{ctx.page.id}][custom_fields][rin_kicker]")
+      # A media field is never an input here: it is the full editor's.
+      refute html =~ "rin_body"
+      assert html =~ "Other fields, such as media and rich text"
 
       render_click(toggle(lv, "rin_a", ctx.page.id))
       refute has_element?(lv, "#cf-ref-rin_a-#{ctx.page.id}-inline-card")

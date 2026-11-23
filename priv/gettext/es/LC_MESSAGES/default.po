@@ -1730,6 +1730,13 @@ msgid_plural "%{count} paragraphs run over %{max} words — consider splitting t
 msgstr[0] "1 párrafo supera las %{max} palabras — considere dividirlo."
 msgstr[1] "%{count} párrafos superan las %{max} palabras — considere dividirlos."
 
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "1 problem on this record. Nothing was saved."
+msgid_plural "%{count} problems on this record. Nothing was saved."
+msgstr[0] "1 problema en este registro. No se guardó nada."
+msgstr[1] "%{count} problemas en este registro. No se guardó nada."
+
 #: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
 msgid "1 published document is in no menu."
@@ -5540,6 +5547,11 @@ msgstr "Cambio actualizado."
 msgid "Changed"
 msgstr "Modificado"
 
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Changed by someone else"
+msgstr "Modificado por otra persona"
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Changed on Hex since this build"
@@ -8636,6 +8648,11 @@ msgstr "¿Desactivar la federación? Los seguidores dejan de recibir publicacion
 msgid "Disabled"
 msgstr "Desactivado"
 
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Discard changes"
+msgstr "Descartar cambios"
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
 msgid "Discard the changes"
@@ -9216,6 +9233,16 @@ msgstr "Editar regla"
 #, elixir-autogen, elixir-format
 msgid "Edit schedule"
 msgstr "Editar programación"
+
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Edit the record"
+msgstr "Editar el registro"
+
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Edit the record: %{title}"
+msgstr "Editar el registro: %{title}"
 
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
@@ -9850,6 +9877,7 @@ msgstr "Borrado"
 msgid "Erasing can't be undone. Only accounts whose address was never confirmed and that are used for nothing besides this registration are erased; a rejected applicant who confirmed their address is always kept. An erased address can register again, while a kept one can't register here again."
 msgstr "El borrado no se puede deshacer. Solo se borran las cuentas cuya dirección nunca se confirmó y que no se usan para nada más que esta solicitud de registro; un solicitante rechazado que confirmó su dirección siempre se conserva. Una dirección borrada puede volver a registrarse; una conservada no puede volver a registrarse aquí."
 
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Error"
@@ -11260,6 +11288,7 @@ msgstr "Asigna cada host que deba llegar a un sitio a una organización, como su
 msgid "Give it a name and every %{type} shows a list of the records that connect to it through this field. Leave it empty for no list."
 msgstr "Dale un nombre y cada %{type} mostrará una lista de los registros que se conectan con él a través de este campo. Déjalo vacío para no mostrar ninguna lista."
 
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "Give it a title."
@@ -14753,7 +14782,7 @@ msgid "Next week"
 msgstr "Semana siguiente"
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
-#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#: lib/kiln_cms_web/components/content_editor/plain_field.ex
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -18161,6 +18190,11 @@ msgstr "Publicado — contenido de mi autoría se puso en línea"
 msgid "Published, but no menu links to it."
 msgstr "Publicado, pero ningún menú enlaza con él."
 
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Published: your changes are saved to a working copy, and readers see them once you publish them."
+msgstr "Publicado: sus cambios se guardan en una copia de trabajo y los lectores los ven cuando los publica."
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -18876,6 +18910,11 @@ msgstr "Vuelve a cargar la página antes de cambiar las etiquetas."
 #, elixir-autogen, elixir-format
 msgid "Reload the page before changing the category."
 msgstr "Recarga la página antes de cambiar la categoría."
+
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Reload this record"
+msgstr "Recargar este registro"
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #, elixir-autogen, elixir-format
@@ -20161,6 +20200,11 @@ msgstr "sábado"
 msgid "Save"
 msgstr "Guardar"
 
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Save %{type}"
+msgstr "Guardar %{type}"
+
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save & check source"
@@ -20233,6 +20277,11 @@ msgstr "Guardar tipo de elemento"
 msgid "Save key source"
 msgstr "Guardar el origen de la clave"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Save or discard the changes to this record before closing it."
+msgstr "Guarde o descarte los cambios de este registro antes de cerrarlo."
+
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save platform alerts"
@@ -20285,6 +20334,7 @@ msgid "Save your changes before changing this content's state."
 msgstr "Guarde sus cambios antes de cambiar el estado de este contenido."
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "Saved"
 msgstr "Guardado"
@@ -20299,12 +20349,18 @@ msgstr "Se guarda como borrador y se conecta aquí."
 msgid "Saved details."
 msgstr "Detalles guardados."
 
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Saved on its own"
+msgstr "Se guarda por separado"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saved the view “%{name}”."
 msgstr "Se guardó la vista «%{name}»."
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "Saved to the working copy"
 msgstr "Guardado en la copia de trabajo"
@@ -20382,6 +20438,7 @@ msgid "Saving this sends this site's content to the URL below."
 msgstr "Al guardar esto, el contenido de este sitio se envía a la URL de abajo."
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
@@ -21486,16 +21543,6 @@ msgstr "Mostrar el panel Cumplimiento en el editor"
 msgid "Show the full IP address in alerts"
 msgstr "Mostrar la dirección IP completa en las alertas"
 
-#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
-#, elixir-autogen, elixir-format
-msgid "Show the record"
-msgstr "Mostrar el registro"
-
-#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
-#, elixir-autogen, elixir-format
-msgid "Show the record: %{title}"
-msgstr "Mostrar el registro: %{title}"
-
 #: lib/kiln_cms_web/components/advisory_components.ex
 #, elixir-autogen, elixir-format
 msgid "Show this in the editor"
@@ -22181,6 +22228,11 @@ msgstr "Alguien"
 #, elixir-autogen, elixir-format
 msgid "Someone changed the live page after you saved your draft"
 msgstr "Alguien cambió la página publicada después de que guardaras tu borrador"
+
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Someone changed this record since you opened it. Nothing was overwritten."
+msgstr "Alguien modificó este registro desde que lo abrió. No se sobrescribió nada."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -23681,6 +23733,11 @@ msgstr[1] "Es lo máximo que admite este campo: %{count} filas."
 msgid "That's the most this field holds."
 msgstr "Es el máximo que admite este campo."
 
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "The %{type} record"
+msgstr "El registro %{type}"
+
 #: lib/kiln_cms_web/console_nav.ex
 #, elixir-autogen, elixir-format
 msgid "The AI account and models this site's AI features use."
@@ -24412,6 +24469,11 @@ msgstr "El reenvío cambió mientras tanto. Inténtalo de nuevo."
 #, elixir-autogen, elixir-format
 msgid "The receiving mail server refused %{to}. Check the address."
 msgstr "El servidor de correo de destino rechazó %{to}. Revisa la dirección."
+
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "The record could not be saved."
+msgstr "No se pudo guardar el registro."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -26737,6 +26799,7 @@ msgid "Unrecognized event (%{type})"
 msgstr "Evento no reconocido (%{type})"
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/presentation_live.ex
 #, elixir-autogen, elixir-format
@@ -28168,7 +28231,7 @@ msgid "XLIFF file to import"
 msgstr "Archivo XLIFF para importar"
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
-#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#: lib/kiln_cms_web/components/content_editor/plain_field.ex
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/field_cells.ex
@@ -28262,6 +28325,11 @@ msgstr "No puedes cambiar esa vista. Solo un administrador puede compartir o edi
 #, elixir-autogen, elixir-format
 msgid "You can't change this record, so its connection is read-only here."
 msgstr "No puedes cambiar este registro, así que aquí su conexión es de solo lectura."
+
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "You can't change this record."
+msgstr "No puede modificar este registro."
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
@@ -31371,6 +31439,7 @@ msgstr "— Sin elemento superior (nivel principal) —"
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/components/content_editor/plain_field.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
 msgid "— None —"
