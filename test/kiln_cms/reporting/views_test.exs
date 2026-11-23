@@ -756,8 +756,8 @@ defmodule KilnCMS.Reporting.ViewsTest do
     end
 
     # Media and reference sub-fields of an item type or a group (#2282, the
-    # type list lifts in a later step: the sub-field's type is set directly,
-    # as a later release writes it). Their stored snapshots sit inside the
+    # type list is lifted for item types only: a group's sub-field type is set
+    # directly, as a later release writes it). Their stored snapshots sit inside the
     # parent field's own value, never at the top of `custom_fields`, so a
     # stray top-level key sharing their name (or their item type's) joins no
     # view, and the snapshot is reachable only through the parent's raw JSON.
