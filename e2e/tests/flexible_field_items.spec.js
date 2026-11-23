@@ -236,7 +236,7 @@ test.describe("flexible field items", () => {
 
     // The image: the drawer opens from the card, the upload lands in that
     // card only.
-    await second.getByRole("button", { name: "Choose from library" }).click();
+    await second.getByRole("button", { name: /^Choose .* for item \d+ in / }).click();
     const drawer = page.locator("#image-picker-dialog");
     await expect(drawer).toBeVisible();
     await drawer.locator('input[type="file"]').setInputFiles({
@@ -248,7 +248,7 @@ test.describe("flexible field items", () => {
     await expect(second.locator('input[type="hidden"][name$="[picture]"]')).toHaveValue(/.+/);
     await expect(second.locator('img[src*="/uploads/"]')).toBeVisible();
     await expect(cards.nth(0).locator('input[type="hidden"][name$="[picture]"]')).toHaveValue("");
-    await expect(cards.nth(0).getByRole("button", { name: "Choose from library" })).toBeVisible();
+    await expect(cards.nth(0).getByRole("button", { name: /^Choose .* for item \d+ in / })).toBeVisible();
 
     // The record: the search sits in the card, under an id of its own.
     const search = second.locator("input[data-ref-search]");
