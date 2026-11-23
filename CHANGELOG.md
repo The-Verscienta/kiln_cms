@@ -68,6 +68,10 @@ else.
 - **The record card now edits the record: its title and plain fields are inputs with their own Save, Discard and status chip; a published record's edits go to its working copy, and the parent's Save does not save the card ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
   ([long form](docs/changelog/unreleased.md#edit-inline-card-save))
 
+- **An item of a Flexible content field can hold a single image or a link to one record: pick them inside the card, saved as snapshots rebuilt from the record, masked when the reader can't see the record.**
+  Re-saving such a record on the previous release fails validation; reads work.
+  ([long form](docs/changelog/unreleased.md#flexible-media-reference))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —

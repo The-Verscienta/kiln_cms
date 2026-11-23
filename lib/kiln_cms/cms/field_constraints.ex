@@ -129,6 +129,11 @@ defmodule KilnCMS.CMS.FieldConstraints do
     end
   end
 
+  # A media or reference value is a snapshot (or a list of them): nothing in
+  # `validation` speaks about one, whether it is a top-level field or a
+  # sub-field of an item or group row (#2282).
+  def check(%{field_type: type}, _value, _path) when type in [:media, :reference], do: []
+
   # A JSON value is a list or map whole, never a list of items (#2434).
   def check(%{field_type: :json} = def, value, path) do
     path = path || def.name

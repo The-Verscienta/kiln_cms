@@ -148,11 +148,16 @@ defmodule KilnCMS.CMS.FieldDefinition do
   `[]` for a definition that is not a `:reference`. `for_type` and
   `for_definition` load them; reading them off a definition that was read
   another way raises rather than answering "none", because "none" would
-  silently drop every link value a write carries.
+  silently drop every link value a write carries. A reference that is a
+  sub-field of an item type or a group has none by construction (it cannot own
+  link fields, ADR 0065), so it answers `[]` without being loaded.
   """
   @spec link_fields(t() | map()) :: [t()]
-  def link_fields(%{field_type: :reference, link_fields: %Ash.NotLoaded{}} = definition),
-    do: raise(ArgumentError, "link_fields not loaded on field #{inspect(definition.name)}")
+  def link_fields(%{field_type: :reference, link_fields: %Ash.NotLoaded{}} = definition) do
+    if top_level?(definition),
+      do: raise(ArgumentError, "link_fields not loaded on field #{inspect(definition.name)}"),
+      else: []
+  end
 
   def link_fields(%{field_type: :reference, link_fields: fields}) when is_list(fields), do: fields
   def link_fields(_definition), do: []
@@ -183,15 +188,17 @@ defmodule KilnCMS.CMS.FieldDefinition do
   def item_types(_definition), do: []
 
   # What a sub-field of an item type (`flex_of_id` parent) may be: the plain
-  # types, and a `:flexible` field, so an item can hold a list of its own.
-  # Media and reference sub-fields join in a later step (group parity).
-  @item_field_types @link_field_types ++ [:flexible]
+  # types, a `:flexible` field, so an item can hold a list of its own, and a
+  # single `:media` or `:reference` (ADR 0065). A group's rows keep the plain
+  # types until the editor has row pickers (group parity is a follow-up; the
+  # write path already handles both).
+  @item_field_types @link_field_types ++ [:flexible, :media, :reference]
 
   @doc """
   The field types a sub-field of an **item type** may have: the plain ones
-  (`link_field_types/0`) and `:flexible`, for nesting. A plain `:group` keeps
-  `link_field_types/0`; a `:flexible` sub-field is allowed only under an item
-  type, never in a plain group.
+  (`link_field_types/0`), `:flexible` for nesting, and a single `:media` or
+  `:reference`. A plain `:group` keeps `link_field_types/0`; a `:flexible`
+  sub-field is allowed only under an item type, never in a plain group.
   """
   @spec item_field_types() :: [atom()]
   def item_field_types, do: @item_field_types

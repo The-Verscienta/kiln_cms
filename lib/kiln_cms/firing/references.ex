@@ -16,6 +16,7 @@ defmodule KilnCMS.Firing.References do
   """
   alias KilnCMS.Blocks.{Columns, Custom, Gallery}
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.ReferenceSnapshots
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMS.Firing
   alias KilnCMS.Firing.{Engine, RefireWorker}
@@ -77,8 +78,11 @@ defmodule KilnCMS.Firing.References do
       document
       |> Map.get(:custom_fields)
       |> case do
-        map when is_map(map) -> map |> Map.values() |> Enum.flat_map(&custom_field_media_id/1)
-        _other -> []
+        map when is_map(map) ->
+          map |> Map.values() |> Enum.flat_map(&custom_field_media_id(&1, 0))
+
+        _other ->
+          []
       end
 
     (featured ++ custom)
@@ -91,14 +95,26 @@ defmodule KilnCMS.Firing.References do
   # an `"id"`, so matching on that alone recorded every content reference as a
   # media edge — asserting a media dependency on a row that is not a media item.
   # `"url"` is what distinguishes an asset from a document.
-  defp custom_field_media_id(%{"id" => id, "url" => url}) when is_binary(id) and is_binary(url),
-    do: [id]
+  defp custom_field_media_id(%{"id" => id, "url" => url}, _depth)
+       when is_binary(id) and is_binary(url),
+       do: [id]
 
   # A gallery media field stores a list of those snapshots.
-  defp custom_field_media_id(list) when is_list(list),
-    do: Enum.flat_map(list, &custom_field_media_id/1)
+  defp custom_field_media_id(list, depth) when is_list(list),
+    do: Enum.flat_map(list, &custom_field_media_id(&1, depth))
 
-  defp custom_field_media_id(_value), do: []
+  # An item of a `:flexible` field or a row of a `:group` keeps its media
+  # sub-fields' snapshots in the map (#2282), found by shape down to
+  # `ReferenceSnapshots.max_depth/0` levels, as the read-side walkers do. The
+  # graph carries no path, only `{from, to}`: a media used only inside an item
+  # is an edge of the document like any other, and counts as used.
+  defp custom_field_media_id(value, depth) when is_map(value) and not is_struct(value) do
+    if depth < ReferenceSnapshots.max_depth(),
+      do: value |> Map.values() |> Enum.flat_map(&custom_field_media_id(&1, depth + 1)),
+      else: []
+  end
+
+  defp custom_field_media_id(_value, _depth), do: []
 
   # Documents a document points at outside its blocks: its `:reference` custom
   # fields. A reference renders the target's slug and title into the referrer's
@@ -109,33 +125,43 @@ defmodule KilnCMS.Firing.References do
   # block references use, so `type_atom/1` maps it to the storage-tier edge type.
   defp document_content_refs(document) do
     case Map.get(document, :custom_fields) do
-      map when is_map(map) -> map |> Map.values() |> Enum.flat_map(&custom_field_content_ref/1)
-      _other -> []
+      map when is_map(map) ->
+        map |> Map.values() |> Enum.flat_map(&custom_field_content_ref(&1, 0))
+
+      _other ->
+        []
     end
   end
 
   # The full four-key snapshot `ApplyCustomFields` writes, and only that: a
   # `:json` custom field can hold any map, and `"type"` + `"id"` alone would
   # read an arbitrary JSON value as a content reference. A media snapshot never
-  # matches (it has no `"type"`/`"slug"`/`"title"`, and carries a `"url"`).
-  defp custom_field_content_ref(
-         %{"id" => id, "type" => type, "slug" => _, "title" => _} = snapshot
-       )
-       when is_binary(id) and is_binary(type) do
-    with false <- Map.has_key?(snapshot, "url"),
-         true <- valid_uuid?(id),
-         atom when not is_nil(atom) <- type_atom(type) do
-      [{atom, id}]
-    else
-      _not_a_reference -> []
+  # matches (it has no `"type"`/`"slug"`/`"title"`, and carries a `"url"`), and
+  # neither does an item of a flexible field, whatever its sub-fields are
+  # called (`ReferenceSnapshots.snapshot?/1`).
+  defp custom_field_content_ref(value, depth) when is_map(value) and not is_struct(value) do
+    cond do
+      ReferenceSnapshots.snapshot?(value) ->
+        with true <- valid_uuid?(value["id"]),
+             atom when not is_nil(atom) <- type_atom(value["type"]) do
+          [{atom, value["id"]}]
+        else
+          _not_a_reference -> []
+        end
+
+      depth < ReferenceSnapshots.max_depth() ->
+        value |> Map.values() |> Enum.flat_map(&custom_field_content_ref(&1, depth + 1))
+
+      true ->
+        []
     end
   end
 
   # A multi-valued reference stores a list of those snapshots.
-  defp custom_field_content_ref(list) when is_list(list),
-    do: Enum.flat_map(list, &custom_field_content_ref/1)
+  defp custom_field_content_ref(list, depth) when is_list(list),
+    do: Enum.flat_map(list, &custom_field_content_ref(&1, depth))
 
-  defp custom_field_content_ref(_value), do: []
+  defp custom_field_content_ref(_value, _depth), do: []
 
   @doc """
   Media referenced from a typed block tree.

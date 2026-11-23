@@ -36,6 +36,11 @@ defmodule KilnCMS.Firing.CustomFields do
       target's publish re-fires this document (D13), which brings it back.
       A point-in-time read masks too: today's policy decides what may be
       shown, even of what was stored then.
+    * **all of the above reach into items and rows** (#2282). A snapshot a
+      `:flexible` field's item (nested items included) or a `:group` row holds
+      is relabelled, re-taken and masked exactly as a top-level one, found by
+      shape (`KilnCMS.CMS.ReferenceSnapshots`), in the same one read per
+      target type.
     * **private fields are left out** (#2044, `KilnCMS.CMS.PrivateFields`),
       for every surface and every caller — visual editing fires a preview
       for anyone holding the page — and before computed fields read their
@@ -158,11 +163,23 @@ defmodule KilnCMS.Firing.CustomFields do
     Computed.derive(computed, context, editable)
   end
 
+  # The top-level fields whose value can hold a snapshot of `type`: a field of
+  # that type, and any `:flexible` or `:group` field, whose items and rows can
+  # carry one in a sub-field (#2282). This list only decides what is relabelled
+  # (and, for media, re-read). `ReferenceSnapshots.ids/1` and `mask/2` walk
+  # every value by shape, a `:json` field's included, so a snapshot-shaped
+  # object a writer typed into a `:json` value is masked like a real one.
+  defp nested_names(definitions, type) do
+    for %{field_type: field_type, name: name} <- definitions,
+        field_type in [type, :flexible, :group],
+        do: name
+  end
+
   # One read per distinct target type, ids only — not one per value. The
   # labels read are the anonymously readable targets', so the same read
   # decides both what is relabelled and what is left out.
   defp refresh_references(values, definitions, org_id) do
-    names = for %{field_type: :reference, name: name} <- definitions, do: name
+    names = nested_names(definitions, :reference)
 
     case ReferenceSnapshots.snapshots(values) do
       [] ->
@@ -191,7 +208,7 @@ defmodule KilnCMS.Firing.CustomFields do
 
   # One read for every media item the document's fields name.
   defp refresh_media(values, definitions, org_id) do
-    names = for %{field_type: :media, name: name} <- definitions, do: name
+    names = nested_names(definitions, :media)
     media = Map.take(values, names)
 
     case media |> Map.values() |> Enum.flat_map(&Snapshot.ids/1) do

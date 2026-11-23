@@ -24,8 +24,10 @@ defmodule KilnCMS.Media.Resnapshot do
   change, so a second run writes nothing — and a dry run (the default) reports
   exactly what a real run would write.
 
-  Every record of every type with a `:media` field is visited, drafts
-  included: their stored value is served to editors on the same APIs. A
+  Every record of every type with a `:media` field is visited — a top-level
+  one, or one inside a group or a flexible field's items (#2282), which are
+  re-resolved whole with the `:reference` values among them left as stored —
+  drafts included: their stored value is served to editors on the same APIs. A
   snapshot whose item no longer resolves (deleted, or not readable) fails that
   record, as a save of it would, and is reported rather than rewritten.
 
@@ -110,41 +112,47 @@ defmodule KilnCMS.Media.Resnapshot do
       if(dry_run? and report.stale > 0, do: "\nRun again with --apply to write.", else: "")
   end
 
-  # The types with a top-level `:media` field, each with those fields' names.
-  # A link field (`link_of_id`) lives inside a reference's snapshot, not at
-  # the top of `custom_fields`, so it is not one of them.
+  # The types with a field holding `:media` values, each with those fields'
+  # names: a top-level `:media` field, or a `:group` / `:flexible` field with
+  # a `:media` sub-field anywhere in its tree (#2282) — the tree is discovered
+  # from the loaded definitions, each type's own read. A link field
+  # (`link_of_id`) lives inside a reference's snapshot, not at the top of
+  # `custom_fields`, so it is not one of them.
   defp media_types(org_id) do
-    definitions =
-      KilnCMS.CMS.list_field_definitions!(
-        actor: KilnCMS.CMS.Bookkeeping.system(),
-        # A refused read must not look like "no media fields": the run would
-        # report a clean site having looked at nothing.
-        authorize_with: :error,
-        tenant: org_id,
-        query: [
-          filter: [
-            field_type: :media,
-            link_of_id: [is_nil: true],
-            group_of_id: [is_nil: true],
-            flex_of_id: [is_nil: true]
-          ]
-        ]
-      )
-
     org_id
     |> ContentTypes.all_for_org()
     |> Enum.flat_map(fn descriptor ->
-      case Enum.filter(definitions, &belongs?(&1, descriptor)) do
-        [] -> []
-        defs -> [{descriptor, Enum.map(defs, & &1.name)}]
-      end
+      names =
+        descriptor
+        |> top_level_definitions(org_id)
+        |> Enum.filter(&(KilnCMS.CMS.FieldDefinition.top_level?(&1) and media_bearing?(&1)))
+        |> Enum.map(& &1.name)
+
+      if names == [], do: [], else: [{descriptor, names}]
     end)
   end
 
-  defp belongs?(definition, %{source: :dynamic, definition: %{id: id}}),
-    do: definition.type_definition_id == id
+  # Read as the cms bookkeeping (registry metadata), with the sub-field and
+  # item-type trees loaded. A refused read must not look like "no media
+  # fields": the run would report a clean site having looked at nothing.
+  defp top_level_definitions(descriptor, org_id) do
+    opts = [
+      actor: KilnCMS.CMS.Bookkeeping.system(),
+      authorize_with: :error,
+      tenant: org_id
+    ]
 
-  defp belongs?(definition, %{type: type}), do: definition.content_type == type
+    case descriptor do
+      %{source: :dynamic, definition: %{id: id}} ->
+        KilnCMS.CMS.field_definitions_for_definition!(id, opts)
+
+      %{type: type} ->
+        KilnCMS.CMS.field_definitions_for!(type, opts)
+    end
+  end
+
+  defp media_bearing?(definition),
+    do: KilnCMS.CMS.Changes.ApplyCustomFields.media_bearing?(definition)
 
   # Keyset pages, read without a policy check as `Computed.DailyRefresh` reads
   # its records: one tenant, one type, and it must see drafts, gated and

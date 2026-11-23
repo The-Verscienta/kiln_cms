@@ -63,6 +63,7 @@ defmodule KilnCMS.Media.Snapshot do
   version and an `updated` webhook, and a variant run is not an edit.
   """
 
+  alias KilnCMS.CMS.ReferenceSnapshots
   alias KilnCMS.HTMLSanitizer
   alias KilnCMS.Media.Presentation
   alias KilnCMS.MediaKind
@@ -120,12 +121,23 @@ defmodule KilnCMS.Media.Snapshot do
 
   @doc """
   Every media id a stored custom-field value names: a single snapshot, a
-  gallery list of them, or nothing.
+  gallery list of them, a snapshot nested in the items of a `:flexible` field
+  or the rows of a `:group` (found by shape, down to
+  `KilnCMS.CMS.ReferenceSnapshots.max_depth/0` levels), or nothing.
   """
   @spec ids(term()) :: [String.t()]
-  def ids(%{"id" => id, "url" => _}) when is_binary(id), do: [id]
-  def ids(list) when is_list(list), do: Enum.flat_map(list, &ids/1)
-  def ids(_value), do: []
+  def ids(value), do: ids(value, 0)
+
+  defp ids(%{"id" => id, "url" => _}, _depth) when is_binary(id), do: [id]
+  defp ids(list, depth) when is_list(list), do: Enum.flat_map(list, &ids(&1, depth))
+
+  defp ids(value, depth) when is_map(value) and not is_struct(value) do
+    if depth < ReferenceSnapshots.max_depth(),
+      do: value |> Map.values() |> Enum.flat_map(&ids(&1, depth + 1)),
+      else: []
+  end
+
+  defp ids(_value, _depth), do: []
 
   @doc """
   A stored custom-field value with each snapshot rebuilt from `items` (id →
@@ -133,15 +145,25 @@ defmodule KilnCMS.Media.Snapshot do
   in another site — keeps its stored shape, as delivery always has.
   """
   @spec refresh(term(), %{String.t() => map()}) :: term()
-  def refresh(%{"id" => id, "url" => _} = snapshot, items) do
+  def refresh(value, items), do: refresh(value, items, 0)
+
+  defp refresh(%{"id" => id, "url" => _} = snapshot, items, _depth) do
     case Map.fetch(items, id) do
       {:ok, item} -> of(item)
       :error -> snapshot
     end
   end
 
-  def refresh(list, items) when is_list(list), do: Enum.map(list, &refresh(&1, items))
-  def refresh(value, _items), do: value
+  defp refresh(list, items, depth) when is_list(list),
+    do: Enum.map(list, &refresh(&1, items, depth))
+
+  defp refresh(value, items, depth) when is_map(value) and not is_struct(value) do
+    if depth < ReferenceSnapshots.max_depth(),
+      do: Map.new(value, fn {key, child} -> {key, refresh(child, items, depth + 1)} end),
+      else: value
+  end
+
+  defp refresh(value, _items, _depth), do: value
 
   @doc """
   Read `ids` for delivery, as `{id => MediaItem}`.

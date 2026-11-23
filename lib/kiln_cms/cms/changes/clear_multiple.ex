@@ -12,7 +12,8 @@ defmodule KilnCMS.CMS.Changes.ClearMultiple do
   A multiple scalar list is a record-level field only: a link
   field (R3) and a group sub-field hold one scalar each (`JoinGraduation` maps a link field to
   one column, a group row to one value per key), so `multiple` is cleared on
-  one. `allow_custom` (the open vocabulary) is cleared on anything that is not
+  one, and so does a media or reference sub-field of an item type (no gallery,
+  no list of references inside an item). `allow_custom` (the open vocabulary) is cleared on anything that is not
   a multiple select.
 
   A **held list** (`KilnCMS.CMS.FieldDefinition.held_list?/1`, #2680) is the
@@ -37,6 +38,10 @@ defmodule KilnCMS.CMS.Changes.ClearMultiple do
 
   # The list types a link field or group sub-field may also be, as scalars.
   @scalar_list_types ScalarLists.types()
+
+  # Types whose list form is a record-level field only: a sub-field of an item
+  # (#2282) holds one value, so no gallery or list of references (ADR 0065).
+  @top_level_list_types @scalar_list_types ++ [:media, :reference]
 
   @doc "The field types that may set `multiple`."
   @spec list_types() :: [atom()]
@@ -81,7 +86,7 @@ defmodule KilnCMS.CMS.Changes.ClearMultiple do
   end
 
   defp list_capable?(changeset, type),
-    do: type in @list_types and not (type in @scalar_list_types and sub_field?(changeset))
+    do: type in @list_types and not (type in @top_level_list_types and sub_field?(changeset))
 
   # A held list stays one until an admin narrows it on purpose.
   defp keep_held?(%{action_type: :update, data: data} = changeset),

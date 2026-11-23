@@ -37,6 +37,11 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
   # The items as the form holds them (`FlexibleItems.posted/2`).
   attr :value, :any, required: true
   attr :errors, :list, default: []
+  # What a media or reference sub-field's input needs: the editor's `media`
+  # window, `actor`, `tenant`, `locked` (a shared field on a translation) and
+  # the record being edited (`source`). Absent, those sub-fields render
+  # read-only-empty, as in a preview.
+  attr :ctx, :map, default: %{}
 
   def flexible_field(assigns) do
     items = FlexibleItems.items(assigns.value)
@@ -54,6 +59,7 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
       items={@items}
       problems={@problems}
       depth={1}
+      ctx={@ctx}
     />
     """
   end
@@ -64,6 +70,7 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
   attr :items, :list, required: true
   attr :problems, :map, required: true
   attr :depth, :integer, required: true
+  attr :ctx, :map, default: %{}
 
   defp flexible_list(assigns) do
     definition = assigns.definition
@@ -120,6 +127,7 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
           depth={@depth}
           last={@last}
           at_minimum?={@at_minimum?}
+          ctx={@ctx}
         />
       </ol>
       <p :if={@items == []} class="text-sm text-base-content/70">{gettext("No items yet.")}</p>
@@ -230,6 +238,7 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
   attr :depth, :integer, required: true
   attr :last, :integer, required: true
   attr :at_minimum?, :boolean, required: true
+  attr :ctx, :map, default: %{}
 
   defp flexible_card(assigns) do
     %{definition: definition, item: item, index: index} = assigns
@@ -382,6 +391,9 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
               address={@address}
               problems={@problems}
               depth={@depth}
+              ctx={@ctx}
+              field_label={@definition.label}
+              position={@index + 1}
             />
           </div>
           <p
@@ -402,6 +414,9 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
             entry={@entry}
             problems={@problems}
             depth={@depth}
+            ctx={@ctx}
+            field_label={@definition.label}
+            position={@index + 1}
           />
         </div>
       <% else %>
@@ -470,6 +485,9 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
   attr :entry, :map, required: true
   attr :problems, :map, required: true
   attr :depth, :integer, required: true
+  attr :ctx, :map, default: %{}
+  attr :field_label, :string, required: true
+  attr :position, :integer, required: true
 
   # Always rendered, hidden by CSS only (`.flex-settings`): the save replaces
   # an item's settings, so an input that was not in the DOM would wipe its
@@ -533,6 +551,9 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
             address={@address}
             problems={@problems}
             depth={@depth}
+            ctx={@ctx}
+            field_label={@field_label}
+            position={@position}
           />
         </div>
       </div>
@@ -550,6 +571,11 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
   attr :address, :string, required: true
   attr :problems, :map, required: true
   attr :depth, :integer, required: true
+  attr :ctx, :map, default: %{}
+  # The owning flexible field's label and the item's 1-based place, for the
+  # accessible names of the buttons in the item's media picker.
+  attr :field_label, :string, required: true
+  attr :position, :integer, required: true
 
   # One sub-field of one item, through the same inputs a top-level field gets
   # (`InspectorComponents.group_cell_input/1`), under an id of its own keyed by
@@ -595,9 +621,39 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
             items={FlexibleItems.sub_items(@item, @sub)}
             problems={@problems}
             depth={@depth + 1}
+            ctx={@ctx}
           />
         <% else %>
+          <.item_media
+            :if={@sub.field_type == :media}
+            sub={@sub}
+            id={"cf-media-" <> @key}
+            name={@cell_name}
+            value={cell_value(@item, @sub)}
+            errors={@errors}
+            at={@address}
+            media={Map.get(@ctx, :media, [])}
+            locked={Map.get(@ctx, :locked, false)}
+            field_label={@field_label}
+            position={@position}
+          />
+          <.live_component
+            :if={@sub.field_type == :reference}
+            module={KilnCMSWeb.ContentEditor.ReferencePicker}
+            id={"reference-picker-" <> @key}
+            key={@key}
+            address={@address}
+            definition={@sub}
+            name={@cell_name}
+            value={cell_value(@item, @sub)}
+            errors={@errors}
+            locked={Map.get(@ctx, :locked, false)}
+            actor={Map.get(@ctx, :actor)}
+            tenant={Map.get(@ctx, :tenant)}
+            source={Map.get(@ctx, :source)}
+          />
           <InspectorComponents.group_cell_input
+            :if={@sub.field_type not in [:media, :reference]}
             sub={@sub}
             key={@key}
             name={@cell_name}
@@ -609,6 +665,113 @@ defmodule KilnCMSWeb.ContentEditor.FlexibleComponents do
     </div>
     """
   end
+
+  attr :sub, :map, required: true
+  attr :id, :string, required: true
+  attr :name, :string, required: true
+  attr :value, :any, required: true
+  attr :errors, :list, required: true
+  # The item's `_id` address: what the events name, with the sub-field. The
+  # server resolves both against the live form; it trusts nothing else.
+  attr :at, :string, required: true
+  attr :media, :list, default: []
+  attr :locked, :boolean, default: false
+  attr :field_label, :string, required: true
+  attr :position, :integer, required: true
+
+  # A media sub-field of an item (#2282): the single media field's input
+  # (`InspectorComponents.custom_field_input/1`) with events that carry the
+  # item's address and the sub-field name instead of a top-level field. Shown
+  # from the stored snapshot; a raw id (what a failed validate leaves in the
+  # params) borrows its url from the editor's media window.
+  defp item_media(assigns) do
+    assigns = assign(assigns, :item_media, media_choice(assigns.value, assigns.media))
+
+    ~H"""
+    <div
+      id={@id}
+      role="group"
+      aria-labelledby={"#{@id}-label"}
+      aria-describedby={@errors != [] && "#{@id}-errors"}
+    >
+      <span id={"#{@id}-label"} class="mb-1 block text-sm font-medium">{@sub.label}</span>
+      <input type="hidden" name={@name} value={(@item_media && @item_media.id) || ""} />
+      <div class="flex flex-wrap items-center gap-3">
+        <span class="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-md border border-base-content/10 bg-base-200 text-base-content/70">
+          <img
+            :if={@item_media && @item_media.url}
+            src={@item_media.url}
+            alt={@item_media.alt || ""}
+            loading="lazy"
+            class="size-full object-cover"
+          />
+          <.icon :if={!(@item_media && @item_media.url)} name="hero-photo" class="size-6" />
+        </span>
+        <span :if={!@item_media} class="text-sm text-base-content/70">
+          {gettext("None selected")}
+        </span>
+        <button
+          type="button"
+          id={"#{@id}-choose"}
+          phx-click="open_item_media_picker"
+          phx-value-at={@at}
+          phx-value-field={@sub.name}
+          disabled={@locked}
+          aria-label={
+            if @item_media,
+              do:
+                gettext("Replace %{label} of item %{position} in %{field}",
+                  label: @sub.label,
+                  position: @position,
+                  field: @field_label
+                ),
+              else:
+                gettext("Choose %{label} for item %{position} in %{field}",
+                  label: @sub.label,
+                  position: @position,
+                  field: @field_label
+                )
+          }
+          class="btn btn-sm btn-default"
+        >
+          {if @item_media, do: gettext("Replace"), else: gettext("Choose from library")}
+        </button>
+        <button
+          :if={@item_media}
+          type="button"
+          id={"#{@id}-remove"}
+          phx-click="clear_item_media"
+          phx-value-at={@at}
+          phx-value-field={@sub.name}
+          disabled={@locked}
+          aria-label={
+            gettext("Remove %{label} of item %{position} in %{field}",
+              label: @sub.label,
+              position: @position,
+              field: @field_label
+            )
+          }
+          class="text-sm text-base-content/70 hover:text-error disabled:opacity-50"
+        >
+          {gettext("Remove")}
+        </button>
+      </div>
+      <p :if={@sub.help_text} class="mt-1 text-xs text-base-content/70">{@sub.help_text}</p>
+      <.custom_field_errors_list id={"#{@id}-errors"} errors={@errors} />
+    </div>
+    """
+  end
+
+  # A stored snapshot, or a raw id; nil for none.
+  defp media_choice(%{"id" => id} = snapshot, _media) when is_binary(id) and id != "",
+    do: %{id: id, url: snapshot["url"], alt: snapshot["alt"]}
+
+  defp media_choice(id, media) when is_binary(id) and id != "" do
+    row = Enum.find(media, %{}, &(to_string(&1.id) == id))
+    %{id: id, url: Map.get(row, :url), alt: Map.get(row, :alt)}
+  end
+
+  defp media_choice(_blank, _media), do: nil
 
   defp cell_value(item, sub) do
     if FlexibleItems.setting?(sub),
