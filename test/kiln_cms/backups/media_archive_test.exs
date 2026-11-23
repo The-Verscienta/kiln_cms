@@ -23,11 +23,21 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
 
   # -- helpers ---------------------------------------------------------------
 
+  # The directory is made only when the write finds it missing: a `mkdir_p`
+  # per file stats every ancestor, and for the 1500-file trees below that was
+  # most of the test's time under load (#2625).
   defp put(media, rel, data) do
     path = Path.join(media, rel)
-    File.mkdir_p!(Path.dirname(path))
-    File.write!(path, data)
-    path
+
+    case File.write(path, data) do
+      :ok ->
+        path
+
+      {:error, :enoent} ->
+        File.mkdir_p!(Path.dirname(path))
+        File.write!(path, data)
+        path
+    end
   end
 
   defp plan!(ctx, opts \\ []) do
@@ -964,13 +974,19 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
   # -- bounded memory --------------------------------------------------------
 
   describe "bounded memory" do
+    # Sized to finish well inside ExUnit's 60 s with every core and the disk
+    # busy (#2625): with 1500 small files and a 256 MiB file it took longer,
+    # most of it writing the small files. 96 MiB against the 32 MiB bound still
+    # fails a whole-file buffer threefold, 16 MiB parts keep it an oversize
+    # part of its own, and the small files (about 200 KB) only mix many
+    # entries into the plan; the 3 GiB case below is the scale proof.
     test "archiving a tree with a large sparse file stays far below its size", ctx do
-      for n <- 1..1500, do: put(ctx.media, "d#{rem(n, 30)}/f#{n}.bin", :binary.copy("m", 700))
-      sparse!(Path.join(ctx.media, "huge.bin"), 256 * 1_048_576)
+      for n <- 1..300, do: put(ctx.media, "d#{rem(n, 10)}/f#{n}.bin", :binary.copy("m", 700))
+      sparse!(Path.join(ctx.media, "huge.bin"), 96 * 1_048_576)
 
       {_, growth} =
         ProcessMemory.peak_growth(fn ->
-          plan = plan!(ctx, part_bytes: 64 * 1_048_576)
+          plan = plan!(ctx, part_bytes: 16 * 1_048_576)
           parts = archive!(plan, ctx)
           assert {:ok, _} = MediaArchive.checksum(plan, parts, ctx.out)
           assert Enum.any?(parts, & &1.oversize) or length(parts) >= 2
