@@ -56,11 +56,15 @@ else.
 
 ## [Unreleased]
 
-Long form: [docs/changelog/unreleased.md](docs/changelog/unreleased.md) —
-the Unreleased entries as they were written when each change merged.
-Every summary line below that was shortened links to its own entry there.
+### Upgrade notes
+
+- **Run `mix ash.migrate`: one additive migration (`edit_inline`, a nullable boolean on `field_definitions`). Older releases never read the column, so rolling the pin back is safe.**
+  ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283) · [long form](docs/changelog/unreleased.md#edit-inline-option-upgrade))
 
 ### Added
+
+- **A reference field can show a read-only preview of related records: tick "Let editors edit the related record here" in the fields admin and each connected record the editor may change gets a "Show the record" card; nothing is editable yet ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
+  ([long form](docs/changelog/unreleased.md#edit-inline-option))
 
 - **An item of a Flexible content field can hold a single image or a link to one record: pick them inside the card, saved as snapshots rebuilt from the record, masked when the reader can't see the record.**
   Re-saving such a record on the previous release fails validation; reads work.

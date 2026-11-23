@@ -2218,6 +2218,77 @@ What the editor can see go wrong:
   value already taken, shows in the **New *Type*** form, and nothing is
   created.
 
+### Edit related records in place
+
+Starting point: a relationship field whose editors often fix a detail in a
+connected record (a venue's address, a person's title). With this option on,
+each connected record gets a card under its row instead of a trip to another
+screen. You need the admin role to turn it on.
+
+**This release ships the read-only preview.** The card shows the record; it
+does not save anything yet. Editing in the card is the next step of
+[the plan](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/plans/inline-reference-editing-plan.md).
+
+1. Open **Fields** (`/editor/fields`) and choose **Edit** on a field whose
+   type is a relationship to other records. The option is only for a field of
+   the record itself, not for one inside a group, a link field or a flexible
+   item.
+2. In step 7, **Editing the linked records**, tick **Let editors edit the
+   related record here**, then **Save**.
+3. As an editor, open a record of the source type. Each connected record the
+   editor may change shows **Show the record** under its row.
+4. Choose it. The card shows the record's title and its plain fields (text,
+   numbers, yes/no, dates, URLs, selects), and **Open in the full editor**.
+   A draft says readers do not see it yet; a published record with unsaved
+   working-copy changes says the card shows the working copy. Other fields,
+   such as media and rich text, are only in the full editor, and the card
+   says so.
+5. Choose **Hide the record** to close it.
+
+From code, it is one attribute on the field definition:
+
+```elixir
+CMS.update_field_definition!(field, %{edit_inline: true}, actor: admin)
+```
+
+`GET /api/schema` then reports `"x-kiln-edit-inline": true` on the field, and
+the field sync file (`mix kiln.fields.export`) carries `"edit_inline": true`.
+
+What to know before relying on it:
+
+- **A related record is saved on its own.** When editing arrives, the card
+  will have its own Save and its own status: the related record is never
+  written through the parent form, and there is no one transaction for both.
+  The parent's Save and the card's Save stay separate writes (as with "Add
+  new"), so a failure on one leaves the other as it was.
+- **The related record's own permissions decide.** A card is offered only for a
+  connected record the editor may change, checked per record (a published
+  record's working copy counts). A record the editor cannot read stays
+  *Unavailable* and has no card; one they can read but not change keeps its
+  row and has no card. The parent field's grant (who may change *this* field)
+  governs only the connection, not the related record. The server checks again
+  when a card opens, and a private field the editor's read grant hides is not
+  shown.
+- **A cap.** At most 10 cards are open at once on one field (*Close a record
+  before opening another.*). This is counted per field on the page; the page
+  as a whole has no cap yet.
+- **Editor only.** No API reads or writes related records through the parent.
+  A headless client writes the record at its own endpoint, then connects it
+  ([JSON:API](json-api.md#writing-relationships),
+  [GraphQL](headless-graphql-api.md#writing-relationships)).
+
+What the editor can see go wrong:
+
+- *This record can no longer be opened here. It may have been deleted or its
+  permissions changed.* The record was gone or no longer writable by the
+  editor when the card opened.
+- *Close a record before opening another.* Ten cards are already open on the
+  field.
+- *is only for a reference field of the record itself*, on saving the field:
+  the option was set on a sub-field.
+
+Why a separate column and no write API: [ADR 0081](decisions/0081-an-inline-edited-related-record-is-saved-on-its-own-and-the-option-is-its-own-column-with-no-write-api.md).
+
 ### Build flexible content in the admin
 
 A `:flexible` field holds an ordered list of items of **different kinds** (a

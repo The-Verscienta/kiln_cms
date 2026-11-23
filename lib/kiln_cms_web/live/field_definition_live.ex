@@ -3155,6 +3155,31 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       targets={picked_targets(@form)}
       catalog={@catalog}
     />
+    <section aria-labelledby={"#{@id}-inline-heading"} class="space-y-3 sm:col-span-2">
+      <.step_heading number={7} id={"#{@id}-inline-heading"}>
+        {gettext("Editing the linked records")}
+      </.step_heading>
+      <label for={"#{@id}-edit-inline"} class="flex cursor-pointer items-start gap-3 text-sm">
+        <input type="hidden" name={@form[:edit_inline].name} value="false" />
+        <input
+          type="checkbox"
+          id={"#{@id}-edit-inline"}
+          name={@form[:edit_inline].name}
+          value="true"
+          checked={@form[:edit_inline].value in [true, "true"]}
+          aria-describedby={"#{@id}-edit-inline-hint"}
+          class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary"
+        />
+        <span>
+          <span class="font-medium">{gettext("Let editors edit the related record here")}</span>
+          <span id={"#{@id}-edit-inline-hint"} class="mt-0.5 block text-xs text-base-content/60">
+            {gettext(
+              "Each linked record gets an expandable card in the editor. A related record is saved on its own, under its own permissions, not with this page, and only editors who may change it see a card."
+            )}
+          </span>
+        </span>
+      </label>
+    </section>
     """
   end
 

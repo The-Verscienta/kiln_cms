@@ -63,6 +63,8 @@ defmodule KilnCMS.CMS.JoinGraduation do
       It is a filter over what an editor may pick, enforced when the field is
       written; the graduated join resource is written through its own create
       action, so the filter is dropped with the field.
+    * `edit_inline` (the editor's expandable record card, #2283) is **not**
+      carried: it is how the editor presents a reference, not a column.
 
   A generated resource says what it graduated from in `__kiln_join__/0`,
   which is how `join_resources/0` finds it.

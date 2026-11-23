@@ -1,6 +1,6 @@
 # Inline editing of related records: plan
 
-Status: plan, not built. Tracking issue: #2283. Written 2026-11-16 against
+Status: PR 1 built (the `edit_inline` option, fields-admin checkbox, schema export and a read-only card); PRs 2a, 2b and 3 not built. Tracking issue: #2283. Written 2026-11-16 against
 `main` after #2285 (reference selection and create-on-type, all four PRs) and
 the #2282 plan ([flexible-content-plan.md](../flexible-content-plan.md)). Nothing
 here is a decision until the PR that carries it merges; the questions for the
@@ -421,3 +421,18 @@ one-line additive overlaps are expected; none are open today).
 4. v1 scope as planned: `lock_version` only with no advisory field locks (I6),
    no inline publish button (I7), plain field types only (I4), and no nested
    write API (I12). Richer field types and a nested API are separate issues.
+
+## Deviations
+
+PR 1 differs from the plan in these places:
+
+- **The cap of 10 open cards per field is enforced per picker, not per parent
+  form.** `ReferencePicker` counts the cards open in its own field
+  (`ReferenceInline.max_open/0`); the parent form has no state to count across
+  fields until PR 2b adds `inline_dirty` and parent-level state.
+- **The card is a function component inside the picker** (`ReferenceInline.toggle/1`,
+  `card/1`, `refused/1`, with the open/closed state kept in the picker's
+  `inline_open` assign), not yet a `ReferenceInline` live component.
+- **The fields-admin checkbox is step 7**, "Editing the linked records", after
+  step 6 "Which records can be picked".
+- **The decision record is [ADR 0081](../decisions/0081-an-inline-edited-related-record-is-saved-on-its-own-and-the-option-is-its-own-column-with-no-write-api.md).**

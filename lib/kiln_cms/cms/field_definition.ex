@@ -537,7 +537,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :validation,
       :visible_when,
       :required_when,
-      :selection
+      :selection,
+      :edit_inline
     ]
 
     create :create, primary?: true
@@ -689,8 +690,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # per-locale behaviour — drop rather than claim something nothing honours.
     change KilnCMS.CMS.Changes.ClearLinkFieldOptions
 
-    # `max_sources`, `on_target_delete` and `selection` speak about a
-    # reference's targets, so they drop on any other type — a link field
+    # `max_sources`, `on_target_delete`, `selection` and `edit_inline` speak
+    # about a reference's targets, so they drop on any other type — a link field
     # included.
     change KilnCMS.CMS.Changes.ClearReferenceOptions
 
@@ -825,6 +826,10 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # `selection` (#2285) is a well-formed filter over the targets' own
     # shape, and a field it names cannot turn private or lose its equality.
     validate KilnCMS.CMS.Validations.ReferenceSelection, on: [:create, :update]
+
+    # `edit_inline` (#2283) is only for a top-level reference: a sub-field of a
+    # group or a flexible item is refused.
+    validate KilnCMS.CMS.Validations.ReferenceEditInline, on: [:create, :update]
   end
 
   # Multi-tenancy (epic #336): a field belongs to the same site as the content
@@ -1063,6 +1068,16 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # `Changes.ApplyCustomFields`. Not an access control: it narrows a read the
     # actor's policy already gates. Not carried by `JoinGraduation`.
     attribute :selection, :map, public?: true
+
+    # Whether each connected record of a `:reference` field gets an expandable
+    # card in the editor that shows (and, in a later release, edits) that
+    # record in place (#2283). Nullable boolean: nil and false are both "off",
+    # and a false is stored as nil (`Changes.ClearReferenceOptions`). Editor-only
+    # like `widget`: no write path, API or sync reads it to decide anything, and
+    # the card never writes through the parent. Valid only on a top-level
+    # `:reference` (`Validations.ReferenceEditInline`), cleared on any other
+    # type. Not carried by `JoinGraduation`.
+    attribute :edit_inline, :boolean, public?: true
 
     # Optional helper text rendered under the input.
     attribute :help_text, :string,

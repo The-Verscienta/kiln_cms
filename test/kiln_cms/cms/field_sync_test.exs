@@ -167,7 +167,9 @@ defmodule KilnCMS.CMS.FieldSyncTest do
       note = Enum.find(post["fields"], &(&1["name"] == "note"))
 
       # `item_setting` (#2282) is left out of the file while it is false.
-      assert Enum.sort(Map.keys(note)) == FieldSync.field_keys() -- ["item_setting"]
+      assert Enum.sort(Map.keys(note)) ==
+               FieldSync.field_keys() -- ["edit_inline", "item_setting"]
+
       assert note["visible_when"] == %{"field" => "kind", "op" => "eq", "value" => "a"}
       assert note["deliver_plain"] and note["plain_breaks"]
 
