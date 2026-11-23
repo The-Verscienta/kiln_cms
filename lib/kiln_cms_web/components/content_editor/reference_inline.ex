@@ -654,7 +654,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferenceInline do
         <p id={"#{@dom_id}-heading"} class="text-sm font-medium">
           {gettext("The %{type} record", type: @ct.label)}
         </p>
-        <span class="text-xs text-base-content/60">{gettext("Saved on its own")}</span>
+        <span class="text-xs text-base-content/70">{gettext("Saved on its own")}</span>
       </div>
 
       <p :if={@draft?} class="text-xs text-base-content/70">
