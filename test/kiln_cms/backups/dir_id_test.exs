@@ -106,20 +106,29 @@ defmodule KilnCMS.Backups.DirIdTest do
     end
   end
 
+  # 4 readers and 4 creators for 60 rounds (#3196). With `publish/2` cut back
+  # to an exclusive create of the name (the empty-file window the hard link
+  # closes), 10 trials at this size failed by round 6 on average and by round
+  # 20 at worst, so 60 rounds miss it about once in 100,000 runs. More
+  # processes catch it no sooner: 8 and 8 needed up to 144 rounds. Every one
+  # of them does file io on the dirty io schedulers (10 by default) and the
+  # readers spin, so a larger test starves the creators' writes and fsyncs,
+  # and the rest of the suite's file io: 8 and 8 for 500 rounds ran for
+  # minutes under load.
   test "racing creators all settle on one id, and no reader sees a malformed one",
        %{dir: dir} do
     File.mkdir_p!(Path.join(dir, "db"))
 
-    for _round <- 1..500 do
+    for _round <- 1..60 do
       File.rm(DirId.path(dir))
 
       # Readers spin from before the first creator starts until an id is
       # there, so one that lands between an exclusive create and its write
       # would see an empty file.
-      readers = for _ <- 1..8, do: Task.async(fn -> spin_read(dir) end)
+      readers = for _ <- 1..4, do: Task.async(fn -> spin_read(dir) end)
 
       creators =
-        for n <- 1..8 do
+        for n <- 1..4 do
           Task.async(fn ->
             receive do
               :go -> :ok
@@ -130,8 +139,16 @@ defmodule KilnCMS.Backups.DirIdTest do
         end
 
       Enum.each(creators, &send(&1.pid, :go))
-      created = Task.await_many(creators, 5_000)
-      read = Task.await_many(readers, 5_000)
+      # No per-round deadline: the test's own timeout is the one bound. The
+      # creators are checked first, since readers spin until one succeeds.
+      created = Task.await_many(creators, :infinity)
+
+      unless Enum.all?(created, &match?({:ok, _}, &1)) do
+        Enum.each(readers, &Task.shutdown(&1, :brutal_kill))
+        flunk("a creator failed: #{inspect(created)}")
+      end
+
+      read = Task.await_many(readers, :infinity)
 
       assert {:ok, id} = DirId.current(dir)
       assert Enum.uniq(created) == [{:ok, id}]
