@@ -1637,6 +1637,7 @@
                 "array",
                 "null"
               ],
+              "x-kiln-edit-inline": true,
               "x-kiln-graphql-kind": "list",
               "x-kiln-target-types": [
                 "post"

@@ -597,6 +597,13 @@ planned and built in stages in [reference-selection-plan.md](https://github.com/
 ([#2285](https://github.com/The-Verscienta/kiln_cms/issues/2285)); the first
 stage is the stored setting and its enforcement on write, with no picker yet.
 
+Editing a connected record from the field itself (`edit_inline`) is planned in
+[inline-reference-editing-plan.md](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/plans/inline-reference-editing-plan.md)
+([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)): a card per
+connected row, saved on its own. The first stage is the option and a read-only
+card; see [Edit related records in place](extending-content.md#edit-related-records-in-place)
+and [ADR 0081](decisions/0081-an-inline-edited-related-record-is-saved-on-its-own-and-the-option-is-its-own-column-with-no-write-api.md).
+
 - Replace the reference `<select>` with a picker component: search-as-you-type
   across the allowed target types (server-side, no 500 cap), type badges,
   drag-to-reorder (the gallery's sortable), inline link-field inputs per row,

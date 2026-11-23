@@ -58,7 +58,7 @@ test.describe("reference picker", () => {
   });
 
   /** A type with a list-of-pages reference field. @param {import("@playwright/test").Page} page */
-  async function createTypeWithReferences(page) {
+  async function createTypeWithReferences(page, { inline = false } = {}) {
     await page.goto("/editor/types");
     await page.fill('#new-type-form input[name="type_definition[label]"]', `E2E Refs ${stamp}`);
     await page.fill('#new-type-form input[name="type_definition[plural_label]"]', `E2E Refs ${stamp}s`);
@@ -74,6 +74,8 @@ test.describe("reference picker", () => {
     // saved as `target_type`.
     await page.locator("#new-field-targets-page").check();
     await page.locator("#new-field-multiple-true").check();
+    // "Let editors edit the related record here" (#2283).
+    if (inline) await page.locator("#new-field-rules-edit-inline").check();
     await page.locator("#new-field-form button[type=submit]").click();
     await expect(page.locator(`code:text-is("${name}_see")`)).toBeVisible();
   }
@@ -202,5 +204,41 @@ test.describe("reference picker", () => {
     await save(page);
     await page.reload();
     await expect.poll(titles).toEqual([`Typed ${stamp}`]);
+  });
+  test("open a connected record's read-only card from the keyboard (#2283)", async ({ page }) => {
+    pageIds.push(await newDraftContent(page, "page"));
+    await saveDraft(page, { title: `Linden ${stamp}`, slug: `linden-${stamp}` });
+
+    await createTypeWithReferences(page, { inline: true });
+    await newDraftContent(page, name);
+    await saveDraft(page, { title: `Refs ${stamp}`, slug: `refs-${stamp}` });
+
+    const field = `${name}_see`;
+    const search = page.locator(`#custom-field-${field}-search`);
+    const rows = page.locator(`#custom-field-${field}-items > li`);
+
+    await search.click();
+    await search.pressSequentially(stamp);
+    await expect(page.locator(`#custom-field-${field}-listbox`).getByRole("option")).toHaveCount(1);
+    await search.press("ArrowDown");
+    await search.press("Enter");
+    await expect(rows).toHaveCount(1);
+
+    // The disclosure is a button: Enter opens it, the card shows the record
+    // and holds no input, and a second Enter closes it.
+    const toggle = rows.nth(0).locator("[data-inline-toggle]");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await toggle.focus();
+    await toggle.press("Enter");
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const card = rows.nth(0).locator("[data-inline-card]");
+    await expect(card).toContainText(`Linden ${stamp}`);
+    await expect(card).toContainText("Draft: readers do not see this record");
+    await expect(card.locator("input, textarea, select")).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+
+    await toggle.press("Enter");
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(card).toHaveCount(0);
   });
 });

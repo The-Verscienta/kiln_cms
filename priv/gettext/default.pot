@@ -6111,6 +6111,11 @@ msgstr ""
 msgid "Close"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Close a record before opening another."
+msgstr ""
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Close an open menu, panel or the mobile menu"
@@ -8872,6 +8877,11 @@ msgstr ""
 msgid "Draft, review and publish, with scheduled publishing and content releases that ship several changes at once."
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Draft: readers do not see this record, so the page leaves it out until it is published."
+msgstr ""
+
 #: lib/kiln_cms_web/controllers/manifest_controller.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -9076,6 +9086,11 @@ msgstr ""
 msgid "Each lane is one kind of date: scheduled publishing, content going live, reviews coming due, task deadlines and releases. Pick a lane to see only those dates. The colours in the key match the calendar."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Each linked record gets an expandable card in the editor. A related record is saved on its own, under its own permissions, not with this page, and only editors who may change it see a card."
+msgstr ""
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Each page and post gets an audit trail here once it exists."
@@ -9224,6 +9239,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
 msgid "Editing in place"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Editing the linked records"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
@@ -11685,6 +11705,16 @@ msgstr ""
 msgid "Hide signing secret for %{url}"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Hide the record"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Hide the record: %{title}"
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Highlighted quotation"
@@ -13284,6 +13314,11 @@ msgstr ""
 msgid "Let editors create what they type"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Let editors edit the related record here"
+msgstr ""
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Let editors publish"
@@ -14712,6 +14747,7 @@ msgid "Next week"
 msgstr ""
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -16681,6 +16717,11 @@ msgstr ""
 msgid "Open in a new tab"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Open in the full editor"
+msgstr ""
+
 #: lib/kiln_cms_web/live/notification_bell.ex
 #, elixir-autogen, elixir-format
 msgid "Open inbox"
@@ -16893,6 +16934,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
 msgid "Other bots and scripts"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Other fields, such as media and rich text, are edited in the full editor."
 msgstr ""
 
 #: lib/kiln_cms_web/components/scope_pickers.ex
@@ -21421,6 +21467,16 @@ msgstr ""
 msgid "Show the full IP address in alerts"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Show the record"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Show the record: %{title}"
+msgstr ""
+
 #: lib/kiln_cms_web/components/advisory_components.ex
 #, elixir-autogen, elixir-format
 msgid "Show this in the editor"
@@ -21479,6 +21535,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format
 msgid "Showing the first %{limit} tags. Filter to find others."
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "Showing the working copy. Readers see this once the record's changes are published."
 msgstr ""
 
 #: lib/kiln_cms_web/live/menu_live.ex
@@ -25436,6 +25497,11 @@ msgstr ""
 msgid "This preview link has expired"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#, elixir-autogen, elixir-format
+msgid "This record can no longer be opened here. It may have been deleted or its permissions changed."
+msgstr ""
+
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
 msgid "This record isn't one %{field} accepts, so %{type} records can't connect to it."
@@ -25961,6 +26027,7 @@ msgid "TipTap rich text, drag-and-drop blocks, live preview, and version restore
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/automation_live/config_fields.ex
@@ -26707,6 +26774,7 @@ msgid "Until then, the stock spec describes every core route:"
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/content_trash.ex
@@ -28081,6 +28149,7 @@ msgid "XLIFF file to import"
 msgstr ""
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/field_cells.ex
@@ -29948,6 +30017,11 @@ msgstr ""
 #: lib/kiln_cms/cms/validations/reference_selection.ex
 #, elixir-autogen, elixir-format
 msgid "is only for a reference field"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/reference_edit_inline.ex
+#, elixir-autogen, elixir-format
+msgid "is only for a reference field of the record itself"
 msgstr ""
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex

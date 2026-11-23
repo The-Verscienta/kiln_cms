@@ -754,9 +754,18 @@ defmodule KilnCMS.SchemaExport do
     |> put_bound("x-kiln-max-sources", Map.get(definition, :max_sources))
     |> put_bound("x-kiln-on-target-delete", delete_rule(Map.get(definition, :on_target_delete)))
     |> put_bound("x-kiln-selection", Map.get(definition, :selection))
+    |> put_edit_inline(definition)
   end
 
   defp put_target_rules(schema, _definition), do: schema
+
+  # `x-kiln-edit-inline` (#2283): the editor shows each connected record as an
+  # expandable card. An annotation for a client building its own editor, like
+  # `x-kiln-widget`; present only when on, and never a type change.
+  defp put_edit_inline(schema, %{edit_inline: true}),
+    do: Map.put(schema, "x-kiln-edit-inline", true)
+
+  defp put_edit_inline(schema, _definition), do: schema
 
   defp delete_rule(rule) when rule in [:clear, :restrict], do: to_string(rule)
   defp delete_rule(_keep), do: nil

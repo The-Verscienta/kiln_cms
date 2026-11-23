@@ -60,7 +60,7 @@ defmodule KilnCMS.SchemaExport.GoldenFixture do
      %{options: ["tonic", "bitter"], multiple: true, allow_custom: true, max_items: 5}},
     {"hero", :media, %{}},
     {"gallery", :media, %{multiple: true}},
-    {"related", :reference, %{target_type: "post", multiple: true}},
+    {"related", :reference, %{target_type: "post", multiple: true, edit_inline: true}},
     {"parent", :reference,
      %{
        target_type: "post",

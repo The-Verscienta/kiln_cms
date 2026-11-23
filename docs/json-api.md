@@ -1476,6 +1476,14 @@ source's `related_<type>s`, beside the related content the editor curates.
 
 `Idempotency-Key` works on `POST` and `PATCH` here as on every other write.
 
+**Related records are written at their own endpoint.** The fields admin's
+"Let editors edit the related record here" option (`edit_inline`, #2283) is
+editor-only: no write reads it, and there is no nested write of a related
+record through the parent. To change a connected record, write it at its own
+route, then connect it as above; each write is judged by that record's own
+policies. `GET /api/schema` reports the option as `x-kiln-edit-inline` on the
+field. See [Edit related records in place](extending-content.md#edit-related-records-in-place).
+
 ### Writing body content — the `block_tree` attribute
 
 The typed `blocks` union isn't exposed on the auto API (it isn't `public?`), so
