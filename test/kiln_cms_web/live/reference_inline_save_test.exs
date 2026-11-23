@@ -495,7 +495,11 @@ defmodule KilnCMSWeb.ReferenceInlineSaveTest do
       |> Floki.parse_document!()
       |> Floki.attribute("form[phx-change=validate]", "data-dirty")
 
-    assert before == after_edit
+    # The guard lights (the card has unsaved edits), but the parent's own
+    # save state does not move: no autosave, no "unsaved" chip on the parent.
+    assert before == ["false"]
+    assert after_edit == ["true"]
+    assert %{save_state: :saved} = :sys.get_state(lv.pid).socket.assigns
     assert CMS.get_post!(post.id, actor: ctx.admin).title == post.title
   end
 

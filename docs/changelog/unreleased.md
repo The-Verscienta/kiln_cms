@@ -29,9 +29,18 @@ carries the reasoning.
   - **Errors stay on the card.** A failed save shows *N problems on this record. Nothing was saved.*, the messages under the inputs they belong to, and moves focus to the first invalid input. A blank title is refused (*Give it a title.*). A record the editor may no longer change says *You can't change this record.* A field a condition hides on the card is not sent.
   - **Someone else changed it.** If the record was changed, published, unpublished or trashed after the card read it, the save writes nothing, the chip says **Changed by someone else**, and **Reload this record** discards the card's edits and reads the record again.
   - **Keyboard.** Enter in a card input saves the card (it does not submit the parent's form); Escape closes the card.
-  - **Closing and leaving.** A card with unsaved edits cannot be closed (*Save or discard the changes to this record before closing it.*). **The parent's Save does not save the card**, and navigating away from the parent loses unsaved card edits: the unsaved-changes guard is the next part (2b), and saving every card with the parent is a later part. Save the card first.
+  - **Closing and leaving.** A card with unsaved edits cannot be closed (*Save or discard the changes to this record before closing it.*). **The parent's Save does not save the card**, and navigating away is guarded (see the next entry), and saving every card with the parent is a later part. Save the card first.
   - **What the card shows.** The title is read-only for a type with a title template. A field the editor's grant does not allow is read-only, a private field their read grant hides is not shown, and a field a condition hides is not shown. If the parent field itself is read-only (a read-only grant, a held list or a localization lock), the card still opens but its inputs and Save are disabled. The record being edited never gets a card on its own field. Creating a record and opening its card on create is not part of this release.
   - See [Edit related records in place](../extending-content.md#edit-related-records-in-place) and [ADR 0081](../decisions/0081-an-inline-edited-related-record-is-saved-on-its-own-and-the-option-is-its-own-column-with-no-write-api.md).
+
+
+<a id="edit-inline-dirty-guard"></a>
+
+- **Unsaved record-card edits now count as unsaved changes (#2283, part 2b).** A card with unsaved edits turns on the editor's unsaved-changes guard, so closing the tab, reloading, or following a link such as **← All content** asks first (*You have unsaved changes. Leave without saving?*). Saving or discarding the last dirty card turns the guard off again. The parent's own save indicator and autosave are not touched: editing another record is not an edit of this one.
+  - **A dirty row stays put.** **Remove**, replacing a single reference by picking another record, and choosing another option in the dropdown are refused while the row's card has unsaved edits (*Save or discard the changes to this record before removing it.*), because the card, and what was typed in it, would go with the row. Save or discard first.
+  - **Add new opens the card.** On a field with **Let editors edit the related record here** ticked, a record made with **Add new** (or by typing a title and choosing **Create**) opens its card at once, so the rest of its fields can be filled without leaving. The draft is created at the same moment as before, by the same click; only the card is new. If the editor may not change the new record, or ten cards are already open on the field, it stays a plain row.
+  - **Not yet.** The parent's Save still does not save the cards, and the limit of 10 open cards is still counted per field, not across the whole form.
+  - See [Edit related records in place](../extending-content.md#edit-related-records-in-place).
 
 
 <a id="flexible-media-reference"></a>

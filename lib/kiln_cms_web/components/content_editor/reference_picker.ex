@@ -164,6 +164,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
      |> assign(:inline_ok, %{})
      |> assign(:inline_open, %{})
      |> assign(:inline_dirty, %{})
+     |> assign(:inline_reported, [])
+     |> assign(:expand_new, nil)
      |> assign(:announcement, "")}
   end
 
@@ -271,14 +273,39 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     |> assign(:inline_ok, Map.take(decided, keys))
     |> assign(:inline_open, Map.take(open, keys))
     |> update(:inline_dirty, &Map.take(&1, keys))
+    |> expand_created(keys)
+    |> report_dirty()
   end
 
   defp assign_inline(socket), do: socket
 
+  # A record just created from this field (I11) opens its card, so the
+  # editor can fill the rest without leaving. Decided once, on the first
+  # update that carries it. A cap or a refusal leaves it a plain row.
+  defp expand_created(%{assigns: %{expand_new: nil}} = socket, _keys), do: socket
+
+  # An update that does not carry the new row yet (another re-render got in
+  # first) leaves it pending; the next create or toggle replaces it.
+  defp expand_created(%{assigns: %{expand_new: key}} = socket, keys) do
+    if key in keys, do: open_created(socket, key), else: socket
+  end
+
+  defp open_created(%{assigns: %{expand_new: key}} = socket, _key) do
+    socket = assign(socket, :expand_new, nil)
+
+    if Map.get(socket.assigns.inline_ok, key) == true and
+         not Map.has_key?(socket.assigns.inline_open, key) and
+         map_size(socket.assigns.inline_open) < ReferenceInline.max_open(),
+       do: open_card(socket, key),
+       else: socket
+  end
+
   defp inline_event(socket, {:dirty, key, dirty?}) do
-    update(socket, :inline_dirty, fn dirty ->
+    socket
+    |> update(:inline_dirty, fn dirty ->
       if dirty?, do: Map.put(dirty, key, true), else: Map.delete(dirty, key)
     end)
+    |> report_dirty()
   end
 
   # A draft's row title is its live title; a published record's is not
@@ -298,6 +325,45 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   end
 
   defp inline_event(socket, {:saved, _key, _state, _title}), do: socket
+
+  # The editor owns the unsaved-changes guard (#2283), so it learns which
+  # rows of this field have a card with unsaved edits: the whole set, sent
+  # only when it changed. It goes into the editor's own assign, never through
+  # `mark_dirty/1`: editing a related record is not an edit of this one, so
+  # it must not schedule the parent's autosave or flip its save state.
+  defp report_dirty(%{assigns: %{rows: true, definition: %{edit_inline: true}}} = socket) do
+    %{inline_dirty: dirty, inline_reported: reported, definition: definition} = socket.assigns
+    keys = dirty |> Map.keys() |> Enum.sort()
+
+    cond do
+      keys == reported ->
+        socket
+
+      socket.assigns.notify != nil or is_binary(socket.assigns.address) ->
+        socket
+
+      true ->
+        send(self(), {__MODULE__, {:inline_dirty, definition.name, keys}})
+        assign(socket, :inline_reported, keys)
+    end
+  end
+
+  defp report_dirty(socket), do: socket
+
+  # A row whose card has unsaved edits cannot leave the field: removing or
+  # replacing it would unmount the card and drop what was typed.
+  defp card_dirty?(socket, id), do: Map.has_key?(socket.assigns.inline_dirty, id)
+
+  defp replaces_dirty?(socket),
+    do: not multiple?(socket) and Enum.any?(socket.assigns.ids || [], &card_dirty?(socket, &1))
+
+  defp refuse_dirty(socket) do
+    assign(
+      socket,
+      :announcement,
+      gettext("Save or discard the changes to this record before removing it.")
+    )
+  end
 
   defp parent?(item, %{source: %{id: id, type: type}}) when is_binary(id),
     do: Map.get(item, :record_id) == id and to_string(item.type) == type
@@ -356,6 +422,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   # Only an id this search offered: the editor re-validates whatever it is
   # handed, but a pick is a choice from the list, not an open door for ids.
   def handle_event("ref_pick", %{"id" => id}, socket) when is_binary(id) do
+    replaces_dirty? = replaces_dirty?(socket)
+
     case Enum.find(socket.assigns.results, &(&1.id == id)) do
       nil ->
         {:noreply, socket}
@@ -367,6 +435,11 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       # pickable: the save would be refused.
       %{full?: true} ->
         {:noreply, socket}
+
+      # A single reference put over a row with unsaved card edits would drop
+      # them with the card.
+      _result when replaces_dirty? ->
+        {:noreply, refuse_dirty(socket)}
 
       result ->
         notify(socket, if(multiple?(socket), do: :add, else: :put), id)
@@ -397,8 +470,12 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   def handle_event("ref_select", _params, socket), do: {:noreply, socket}
 
   def handle_event("ref_remove", %{"id" => id}, socket) when is_binary(id) do
-    notify(socket, :remove, id)
-    {:noreply, socket}
+    if card_dirty?(socket, id) do
+      {:noreply, refuse_dirty(socket)}
+    else
+      notify(socket, :remove, id)
+      {:noreply, socket}
+    end
   end
 
   def handle_event("ref_move", %{"id" => id, "dir" => dir}, socket)
@@ -609,14 +686,22 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
 
   defp select_pick(socket, "", nil), do: socket
 
-  defp select_pick(socket, "", current) do
+  defp select_pick(socket, id, current) when id != current and not is_nil(current) do
+    if card_dirty?(socket, current),
+      do: refuse_dirty(socket),
+      else: do_select(socket, id, current)
+  end
+
+  defp select_pick(socket, id, current), do: do_select(socket, id, current)
+
+  defp do_select(socket, "", current) do
     notify(socket, :remove, current)
     socket
   end
 
-  defp select_pick(socket, current, current), do: socket
+  defp do_select(socket, current, current), do: socket
 
-  defp select_pick(socket, id, _current) do
+  defp do_select(socket, id, _current) do
     case Enum.find(socket.assigns.candidates, &(&1.id == id)) do
       %{full?: true} ->
         socket
@@ -639,33 +724,36 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     %{actor: actor, tenant: tenant} = socket.assigns
     title = params |> Map.get("title", "") |> to_string() |> String.trim()
 
-    if title == "" do
-      set_create_errors(socket, [gettext("Give it a title.")])
-    else
-      attrs = %{title: title, custom_fields: new_custom_fields(entry, params)}
+    if title == "",
+      do: set_create_errors(socket, [gettext("Give it a title.")]),
+      else: do_create_and_connect(socket, entry, params, actor, tenant, title)
+  end
 
-      try do
-        record = ContentTypes.create!(entry.ct, attrs, actor: actor, tenant: tenant)
-        # Keyed as a pick is: the id, or its `"type:id"` token on a field
-        # that allows several types.
-        item = to_item(record, entry.ct, socket.assigns.definition)
+  defp do_create_and_connect(socket, entry, params, actor, tenant, title) do
+    attrs = %{title: title, custom_fields: new_custom_fields(entry, params)}
 
-        notify(socket, if(multiple?(socket), do: :add, else: :put), item.id)
+    try do
+      record = ContentTypes.create!(entry.ct, attrs, actor: actor, tenant: tenant)
+      # Keyed as a pick is: the id, or its `"type:id"` token on a field
+      # that allows several types.
+      item = to_item(record, entry.ct, socket.assigns.definition)
 
-        socket
-        |> update(:known, &Map.put(&1, item.id, item))
-        |> assign(:creating, nil)
-        |> assign(
-          :announcement,
-          gettext("Created “%{title}” as a draft and connected it.", title: title)
-        )
-      rescue
-        Ash.Error.Forbidden ->
-          set_create_errors(socket, [gettext("You can't create this here.")])
+      notify(socket, if(multiple?(socket), do: :add, else: :put), item.id)
 
-        error in Ash.Error.Invalid ->
-          set_create_errors(socket, Enum.map(error.errors, &Exception.message/1))
-      end
+      socket
+      |> update(:known, &Map.put(&1, item.id, item))
+      |> assign(:expand_new, if(socket.assigns.definition.edit_inline == true, do: item.id))
+      |> assign(:creating, nil)
+      |> assign(
+        :announcement,
+        gettext("Created “%{title}” as a draft and connected it.", title: title)
+      )
+    rescue
+      Ash.Error.Forbidden ->
+        set_create_errors(socket, [gettext("You can't create this here.")])
+
+      error in Ash.Error.Invalid ->
+        set_create_errors(socket, Enum.map(error.errors, &Exception.message/1))
     end
   end
 

@@ -366,6 +366,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # A live document's settings edited since the last Save
     # (docs/working-copy.md) — its text autosaves, its settings do not.
     |> assign(:settings_dirty?, false)
+    |> assign(:inline_dirty, %{})
     # The lost-update guard's question (#1815): the keys the live page changed
     # after the draft was saved, and what the editor chose for each, while the
     # "Publish changes" panel is open. `nil` when it is closed.
@@ -756,6 +757,20 @@ defmodule KilnCMSWeb.ContentEditorLive do
 
   def handle_info({:block_task_changed, _block_id}, socket),
     do: {:noreply, reload_tasks(socket)}
+
+  # A reference field's record cards (#2283) now have, or no longer have,
+  # unsaved edits. Kept in its own assign and read only by the unsaved-changes
+  # guard: a card edit is a change to *another* record, so it must not touch
+  # `save_state` (and so never schedules this record's autosave).
+  def handle_info({KilnCMSWeb.ContentEditor.ReferencePicker, {:inline_dirty, name, keys}}, socket)
+      when is_binary(name) and is_list(keys) do
+    dirty =
+      if keys == [],
+        do: Map.delete(socket.assigns.inline_dirty, name),
+        else: Map.put(socket.assigns.inline_dirty, name, keys)
+
+    {:noreply, assign(socket, :inline_dirty, dirty)}
+  end
 
   # A reference field's picker (R9) asks for a pick, a removal or a reorder;
   # the value lives in the form, so the edit is made here, through the same
@@ -7609,7 +7624,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         phx-submit="save"
         id={"#{@kind}-editor"}
         phx-hook="UnsavedGuard"
-        data-dirty={to_string(@save_state != :saved or @settings_dirty?)}
+        data-dirty={to_string(@save_state != :saved or @settings_dirty? or @inline_dirty != %{})}
         data-unsaved-message={gettext("You have unsaved changes. Leave without saving?")}
         class="space-y-6"
       >

@@ -20282,6 +20282,11 @@ msgstr ""
 msgid "Save or discard the changes to this record before closing it."
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Save or discard the changes to this record before removing it."
+msgstr ""
+
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save platform alerts"
