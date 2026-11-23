@@ -32,7 +32,6 @@ carries the reasoning.
   - **Closing and leaving.** A card with unsaved edits cannot be closed (*Save or discard the changes to this record before closing it.*). **The parent's Save does not save the card**, and navigating away from the parent loses unsaved card edits: the unsaved-changes guard is the next part (2b), and saving every card with the parent is a later part. Save the card first.
   - **What the card shows.** The title is read-only for a type with a title template. A field the editor's grant does not allow is read-only, a private field their read grant hides is not shown, and a field a condition hides is not shown. If the parent field itself is read-only (a read-only grant, a held list or a localization lock), the card still opens but its inputs and Save are disabled. The record being edited never gets a card on its own field. Creating a record and opening its card on create is not part of this release.
   - See [Edit related records in place](../extending-content.md#edit-related-records-in-place) and [ADR 0081](../decisions/0081-an-inline-edited-related-record-is-saved-on-its-own-and-the-option-is-its-own-column-with-no-write-api.md).
-||||||| 499117e9d
 
 
 <a id="flexible-media-reference"></a>
