@@ -70,7 +70,7 @@ What's new in the 1.12 line, with examples and migration steps: [docs/whats-new/
 - **Run `mix ash.migrate`: one additive migration (`edit_inline`, a nullable boolean on `field_definitions`). Older releases never read the column, so rolling the pin back is safe.**
   ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283) · [long form](docs/changelog/v1.12.1.md#edit-inline-option-upgrade))
 
-- **Keyset cursors are now signed with a key derived from `SECRET_KEY_BASE`: a cursor issued before the upgrade, or by a node with a different `SECRET_KEY_BASE`, is refused as an invalid keyset, and the client starts its pagination over. Nothing to configure.**
+- **Keyset cursors are now signed with a key derived from `SECRET_KEY_BASE`: a cursor issued before the upgrade, or by a node with a different `SECRET_KEY_BASE`, is refused with an invalid-keyset error, and the client has to start again from the first page. Nothing to configure.**
   ([#3272](https://github.com/The-Verscienta/kiln_cms/pull/3272) · [long form](docs/changelog/v1.12.1.md#keyset-signing-upgrade))
 
 ### Known issues

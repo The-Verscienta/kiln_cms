@@ -9,12 +9,12 @@ defmodule KilnCMS.CMS.Types.JsonbSortKey do
   page compares that key with the cursor's value, and the comparison has to
   stay in jsonb.
 
-  Left untyped, the key gets its type from the cursor value: from Ash 3.38 a
+  Left untyped, the key gets its type from the cursor value: from Ash 3.37.5 a
   float cursor value casts both sides to `float`, and a row holding a string
   under the same key fails the read (`cannot cast jsonb string to type double
   precision`). Typed with this, Ash casts the cursor value as a JSON scalar and
   `cast_in_query?/1` keeps any cast out of the SQL, so Postgres binds the value
-  as jsonb against the jsonb key, as it did before 3.38.
+  as jsonb against the jsonb key, as it did before 3.37.5.
   """
   use Ash.Type
 

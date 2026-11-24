@@ -158,6 +158,6 @@ config :kiln_cms, :embed_origins, :all
 config :kiln_cms, KilnCMS.CrawlerVerification.Ranges, enabled: false
 
 # Signs keyset pagination cursors (#3272). Without a secret Ash 3.38 encodes
-# cursors as JSON, which a custom-field sort (an untyped calculation) cannot
-# be. Production derives its own from SECRET_KEY_BASE (runtime/prod/web.exs).
+# cursors as JSON, which the untyped key of a reference or media field sort
+# (`CustomFieldQuery.Relations.sort_key/2`) cannot be. Production derives its own from SECRET_KEY_BASE (runtime/prod/web.exs).
 config :ash, keyset_signing_secret: "CYLlq6SFnnSlwx0b1/bgkUf+VFp/lhVFjx1QJsghCXU"
