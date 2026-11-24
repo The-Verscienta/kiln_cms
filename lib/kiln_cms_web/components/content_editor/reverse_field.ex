@@ -451,7 +451,7 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
                   id={"#{@root}-#{row.source.id}-link-save"}
                   phx-click="reverse_link_save"
                   phx-target={@myself}
-                  class="btn btn-primary btn-xs"
+                  class="btn btn-primary btn-sm"
                 >
                   {gettext("Save details")}
                 </button>
@@ -460,11 +460,11 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
                   id={"#{@root}-#{row.source.id}-link-cancel"}
                   phx-click="reverse_link_cancel"
                   phx-target={@myself}
-                  class="btn btn-ghost btn-xs"
+                  class="btn btn-ghost btn-sm"
                 >
                   {gettext("Cancel")}
                 </button>
-                <span :if={row.source.state == :published} class="text-xs text-base-content/60">
+                <span :if={row.source.state == :published} class="text-xs text-base-content/70">
                   {gettext("Saved to the working copy of “%{title}”.",
                     title: row.source.title || gettext("Untitled")
                   )}
