@@ -89,4 +89,49 @@ defmodule KilnCMSWeb.MediaComponentsTest do
     refute Map.has_key?(attrs, "srcset")
     refute Map.has_key?(attrs, "sizes")
   end
+
+  describe "thumb_src/2 (#3223)" do
+    @thumb %{"thumb" => %{"url" => "/uploads/thumb.jpg"}}
+
+    test "an image with a thumb variant previews as that variant, with or without fallback" do
+      image = item(%{variants: @thumb})
+
+      assert MediaComponents.thumb_src(image) == "/uploads/thumb.jpg"
+      assert MediaComponents.thumb_src(image, fallback: false) == "/uploads/thumb.jpg"
+    end
+
+    test "an image without a thumb variant falls back to its original, unless told not to" do
+      image = item(%{variants: %{}})
+
+      assert MediaComponents.thumb_src(image) == "/uploads/orig.jpg"
+      assert MediaComponents.thumb_src(image, fallback: false) == nil
+    end
+
+    test "an image no wider than the thumb variant is its own preview, even without fallback" do
+      small = item(%{width: KilnCMS.ImageProcessor.thumb_width(), variants: %{}})
+      wider = item(%{width: KilnCMS.ImageProcessor.thumb_width() + 1, variants: %{}})
+
+      assert MediaComponents.thumb_src(small, fallback: false) == "/uploads/orig.jpg"
+      assert MediaComponents.thumb_src(wider, fallback: false) == nil
+    end
+
+    test "a document has no preview" do
+      document = item(%{content_type: "application/pdf", width: nil, height: nil, variants: %{}})
+
+      assert MediaComponents.thumb_src(document) == nil
+      assert MediaComponents.thumb_src(document, fallback: false) == nil
+    end
+
+    test "a gated image (no public url) has no preview" do
+      assert MediaComponents.thumb_src(item(%{url: nil, variants: %{}})) == nil
+    end
+
+    test "a video previews as its poster frame, never the video itself" do
+      poster = %{"poster" => %{"url" => "/uploads/poster.jpg"}}
+      video = item(%{content_type: "video/mp4", url: "/uploads/clip.mp4"})
+
+      assert MediaComponents.thumb_src(Map.put(video, :variants, poster)) == "/uploads/poster.jpg"
+      assert MediaComponents.thumb_src(Map.put(video, :variants, %{})) == nil
+    end
+  end
 end

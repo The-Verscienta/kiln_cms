@@ -15,6 +15,13 @@ defmodule KilnCMS.ImageProcessor do
   # wider than the target (we never upscale).
   @targets [thumb: 400, medium: 1024]
 
+  @doc """
+  The width of the `"thumb"` variant. A source this wide or narrower gets no
+  `"thumb"` (variants never upscale), so it is its own thumbnail.
+  """
+  @spec thumb_width() :: pos_integer()
+  def thumb_width, do: Keyword.fetch!(@targets, :thumb)
+
   # Focal-aware cropped variants: `{label, {width, height}}`. The crop window
   # takes the target's aspect ratio, centers on the focal point (clamped to
   # the source bounds), then downscales — never upscales. Skipped when the

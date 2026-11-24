@@ -82,6 +82,15 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   A list of references, the reverse field's add control and the related
   content picker (none of which offer a widget) always search.
 
+  ## Thumbnails (#3223)
+
+  Each result and row shows its record's featured image, small and
+  decorative (`alt=""`): the generated `"thumb"` variant or a video's
+  poster, never the original (`thumb/1`). The image loads with the read that
+  lists the records (`thumb_load/0`), as the editor, so a page of results
+  costs one more query per type read, not one per record. A row without one
+  keeps an empty slot only when another row of its list has one.
+
   ## Seams for later workstreams
 
     * `row/1` is public and takes `readonly`, so the reverse list (R4) can
@@ -120,10 +129,12 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   alias KilnCMS.CMS.FieldAccess
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldWidgets
+  alias KilnCMS.CMS.MediaItem
   alias KilnCMS.CMS.ReferenceSelection
   alias KilnCMSWeb.ContentEditor.PlainField
   alias KilnCMSWeb.ContentEditor.ReferenceInline
   alias KilnCMSWeb.ContentEditor.ReferenceValues
+  alias KilnCMSWeb.MediaComponents
 
   @page_size 20
 
@@ -894,7 +905,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           query:
             search_filters("", excluded_ids(exclude, ct, definition)) ++
               [
-                select: [:id, :title, :state, :slug, :updated_at],
+                select: [:id, :title, :state, :slug, :updated_at, :featured_image_id],
+                load: thumb_load(),
                 sort: [title: :asc, id: :asc],
                 limit: limit
               ]
@@ -985,7 +997,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           query:
             search_filters(query, excluded_ids(exclude, ct, definition)) ++
               [
-                select: [:id, :title, :state, :slug, :updated_at],
+                select: [:id, :title, :state, :slug, :updated_at, :featured_image_id],
+                load: thumb_load(),
                 sort: search_sort(query, definition),
                 limit: limit,
                 offset: offset
@@ -1166,7 +1179,11 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         |> ContentTypes.list!(
           actor: actor,
           tenant: tenant,
-          query: [filter: [id: [in: missing]], select: [:id, :title, :state, :slug]]
+          query: [
+            filter: [id: [in: missing]],
+            select: [:id, :title, :state, :slug, :featured_image_id],
+            load: thumb_load()
+          ]
         )
         |> Enum.map(&to_item(&1, ct, definition))
       end)
@@ -1193,9 +1210,33 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       state: record.state,
       type: ct.type,
       type_label: ct.label,
-      href: ~p"/editor/content/#{type}/#{record.id}"
+      href: ~p"/editor/content/#{type}/#{record.id}",
+      thumb: thumb(record)
     }
   end
+
+  @doc """
+  The `load:` that gives a read of content records what `thumb/1` needs: each
+  record's featured image, with only the fields the thumbnail rule reads. A
+  relationship load, so it runs as the read's own actor and tenant — one
+  query per read, never one per record — and a featured image the actor
+  cannot read, or one in the trash, loads as `nil`.
+  """
+  def thumb_load do
+    [
+      featured_image: Ash.Query.select(MediaItem, [:id, :url, :variants, :content_type, :width])
+    ]
+  end
+
+  @doc """
+  A record's small preview for a row (#3223): its featured image's generated
+  `"thumb"` variant, or a video's poster — never the full-size original —
+  or `nil` when it has none, or when the image was not loaded (`thumb_load/0`).
+  """
+  def thumb(%{featured_image: %MediaItem{} = image}),
+    do: MediaComponents.thumb_src(image, fallback: false)
+
+  def thumb(_record), do: nil
 
   # Each result's connection count through this field when it has a
   # `max_sources` (R1b), so a full target is listed but disabled — "Full —
@@ -1259,7 +1300,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           state: nil,
           type: snapshot["type"] || elem(split_key(id, definition), 0),
           type_label: nil,
-          href: nil
+          href: nil,
+          thumb: nil
         }
       end)
     end)
@@ -1283,6 +1325,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       |> assign(:last, length(assigns.items) - 1)
       |> assign(:dropdown?, is_list(assigns.candidates))
       |> assign(:typed, assigns.open? and typed_create(assigns))
+      |> assign(:items_thumbs?, Enum.any?(assigns.items, &Map.get(&1, :thumb)))
+      |> assign(:results_thumbs?, Enum.any?(assigns.results, &Map.get(&1, :thumb)))
 
     ~H"""
     <div
@@ -1329,6 +1373,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           sortable={@multiple? and not @locked and @last > 0}
           readonly={@locked}
           target={@myself}
+          thumb_slot={@items_thumbs?}
         >
           <:extra :if={@link_fields != []}>
             <.link_inputs
@@ -1449,6 +1494,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
               )
             ]}
           >
+            <.thumb_image src={result.thumb} slot={@results_thumbs?} />
             <span class="min-w-0 flex-1 truncate">{result.title || gettext("Untitled")}</span>
             <span
               :if={Map.get(result, :full?)}
@@ -1847,13 +1893,18 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   end
 
   attr :id, :string, required: true
-  attr :item, :map, required: true, doc: "`id`, `title`, `state`, `type_label`, `href`"
+  attr :item, :map, required: true, doc: "`id`, `title`, `state`, `type_label`, `href`, `thumb`"
   attr :index, :integer, default: 0
   attr :last, :integer, default: 0
   attr :input_name, :any, default: nil, doc: "the `name[]` a list row submits its id under"
   attr :sortable, :boolean, default: false
   attr :readonly, :boolean, default: false
   attr :target, :any, default: nil
+
+  attr :thumb_slot, :boolean,
+    default: false,
+    doc: "whether any row of the list has a thumbnail, so a row without one keeps the space"
+
   slot :extra, doc: "rendered after the title — per-link inputs (R3)"
   slot :actions, doc: "controls of the caller's own, before the row's own (R4b)"
 
@@ -1884,6 +1935,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       >
         {@index + 1}
       </span>
+      <.thumb_image src={Map.get(@item, :thumb)} slot={@thumb_slot} />
       <div class="min-w-0 flex-1">
         <p class="truncate text-sm">{@item.title || gettext("Untitled")}</p>
         <p class="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-base-content/60">
@@ -1955,6 +2007,33 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         </button>
       </div>
     </li>
+    """
+  end
+
+  attr :src, :string, default: nil
+  attr :slot, :boolean, required: true
+
+  # A row's featured image (#3223), decorative: the title beside it names the
+  # record, so the image adds nothing to the accessible name. A row without
+  # one keeps an empty slot of the same size when another row of its list has
+  # one, so the titles line up; a list where no row has one renders neither.
+  defp thumb_image(assigns) do
+    ~H"""
+    <img
+      :if={@src}
+      src={@src}
+      alt=""
+      aria-hidden="true"
+      loading="lazy"
+      data-ref-thumb
+      class="size-8 shrink-0 rounded bg-base-200 object-cover"
+    />
+    <span
+      :if={!@src and @slot}
+      aria-hidden="true"
+      data-ref-thumb-placeholder
+      class="size-8 shrink-0 rounded bg-base-200"
+    />
     """
   end
 

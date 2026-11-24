@@ -13,6 +13,16 @@ carries the reasoning.
 
 ## Added
 
+<a id="reference-picker-thumbnails"></a>
+
+- **The reference picker shows each record's featured image as a thumbnail (#3223).** Every search result, every picked row and every row of a reverse field now shows a small (32 px) thumbnail of the record's **Featured image**, so records with similar titles are easy to tell apart. It is always on; there is no setting per field.
+  - **Which image.** The image's generated `thumb` variant, or a video's poster frame. An image 400 px wide or narrower has no `thumb` (variants never upscale), so the picker shows the original, which is already that small. It never loads a larger original, so a record shows no thumbnail when a wider featured image has no `thumb` variant (uploaded or processed without variants). An admin's **Regenerate variants** on `/media` writes the missing ones. A featured image in the trash shows none.
+  - **Layout.** When some rows of a list have a thumbnail, the rows without one keep an empty square of the same size so the titles line up. A list where no row has one, as on a site that uses no featured images, looks as it did before.
+  - **Accessibility.** The thumbnail is decorative (`alt=""`, `aria-hidden`): the options' and rows' accessible names, roles and keyboard behavior are unchanged.
+  - **Cost.** The featured image is loaded with the read that lists the records, as the editor: one more query per type the picker reads, not one per record.
+  - **For developers.** The media library's thumbnail rule is now public as `KilnCMSWeb.MediaComponents.thumb_src/2` (pass `fallback: false` to skip the fallback to an original wider than the `thumb` variant; `KilnCMS.ImageProcessor.thumb_width/0` is that width), and `KilnCMS.CMS.ReverseFields.rows/3` takes a `:load` option, loaded on each source record as the caller. No migration, no configuration, nothing to do to upgrade.
+  - Guide: **Thumbnails in the picker** under the reference field in [Extending content](../extending-content.md).
+
 <a id="edit-inline-option"></a>
 
 - **A reference field can show a record card for each connected record (#2283).** In the fields admin, a top-level reference field has a new step 7, **Editing the linked records**, with a checkbox: **Let editors edit the related record here**. With it ticked, each connected record in the editor gets an **Edit the record** button under its row (**Hide the record** once open). It opens a card with the record's title and its plain fields (text, number, yes/no, date, URL and select fields), a note when it is a draft or has unpublished changes, and an **Open in the full editor** link. Other fields, such as media and rich text, are edited in the full editor, and the card says so. The card edits the record (see the next entry); the plan is in [docs/plans/inline-reference-editing-plan.md](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/plans/inline-reference-editing-plan.md).

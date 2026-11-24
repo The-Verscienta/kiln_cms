@@ -20,11 +20,16 @@ defmodule KilnCMSWeb.MediaComponents do
   The block renderer (`KilnCMSWeb.BlockComponents`) still uses the fixed
   variants generated at upload; this is for templates that want a size or a
   crop those don't have.
+
+  `thumb_src/2` is the one rule for which small preview an item has, shared
+  by the media library's grid and the reference picker's rows.
   """
   use Phoenix.Component
 
   alias KilnCMS.HTMLSanitizer
+  alias KilnCMS.ImageProcessor
   alias KilnCMS.Media.{ImageTransform, Presentation}
+  alias KilnCMS.MediaKind
 
   attr :item, :map, required: true, doc: "a `MediaItem` (id, url, width, height, focal point)"
   attr :sizes, :string, default: "100vw"
@@ -110,4 +115,47 @@ defmodule KilnCMSWeb.MediaComponents do
   end
 
   defp dimensions(_item, _ratio), do: {nil, nil}
+
+  @doc """
+  The small preview image of a media item — the generated `"thumb"` variant
+  when it has one — or `nil` when there is nothing to preview: a document
+  (no `width`, so nothing was ever generated), a gated item (no public `url`,
+  #481), or a video without a poster frame. A caller shows a badge or nothing
+  in its place, never a broken `<img>`.
+
+  An image without a `"thumb"` variant falls back to the original when it
+  has a `width`, for the media library's grid. Pass `fallback: false` where a
+  full-size download for a small slot is not worth it (the reference picker,
+  #3223): such an image then falls back only when it is no wider than the
+  `"thumb"` variant would be (`KilnCMS.ImageProcessor.thumb_width/0`), the
+  case where the pipeline writes no variant because the original is already
+  that small; a wider one has no preview.
+
+  Dispatching on kind first matters for A/V (#494): a video ffprobe measured
+  has a `width` exactly like an image does, so the image rules would otherwise
+  put an `.mp4` in an `<img src>`. Its generated poster frame, when it has
+  one, is the only image a video has.
+  """
+  @spec thumb_src(map(), keyword()) :: String.t() | nil
+  def thumb_src(item, opts \\ []) do
+    case MediaKind.of(item.content_type) do
+      :image -> image_thumb_url(item, Keyword.get(opts, :fallback, true))
+      :video -> poster_url(item)
+      _kind -> nil
+    end
+  end
+
+  @doc "A video's generated poster frame, or `nil` when it has none."
+  @spec poster_url(map()) :: String.t() | nil
+  def poster_url(%{variants: %{"poster" => %{"url" => url}}}), do: url
+  def poster_url(_item), do: nil
+
+  defp image_thumb_url(%{variants: %{"thumb" => %{"url" => url}}}, _fallback?), do: url
+
+  defp image_thumb_url(%{width: width, url: url}, false) when is_integer(width),
+    do: if(width <= ImageProcessor.thumb_width(), do: url)
+
+  defp image_thumb_url(_item, false), do: nil
+  defp image_thumb_url(%{width: nil}, true), do: nil
+  defp image_thumb_url(item, true), do: item.url
 end
