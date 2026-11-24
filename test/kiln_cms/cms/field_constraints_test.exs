@@ -126,8 +126,64 @@ defmodule KilnCMS.CMS.FieldConstraintsTest do
     test "a multiple string is checked per item with indexed paths" do
       d = def_(:string, %{"max_length" => 3}, %{multiple: true})
 
-      assert d |> FieldConstraints.check(["ok", "toolong", "yes", "alsolong"]) |> paths() ==
-               ["f[1]", "f[3]"]
+      problems = FieldConstraints.check(d, ["ok", "toolong", "yes", "alsolong"])
+
+      # The path counts from 0; the text names the item from 1, as a
+      # coercion error does (#2683).
+      assert paths(problems) == ["f[1]", "f[3]"]
+
+      assert texts(problems) == [
+               "F (f) item 2 must be at most 3 characters long",
+               "F (f) item 4 must be at most 3 characters long"
+             ]
+    end
+  end
+
+  describe "check_item/4" do
+    test "names the item from 1 under its 0-based path" do
+      d = def_(:integer, %{"max" => 10}, %{multiple: true, label: "Scores", name: "scores"})
+
+      assert [{"scores[1]", "Scores", {:full, "Scores (scores) item 2 must be at most 10"}}] =
+               FieldConstraints.check_item(d, 11, 1)
+
+      assert FieldConstraints.check_item(d, 10, 1) == []
+    end
+
+    test "a base replaces the field's name in both the path and the text" do
+      d = def_(:string, %{"pattern" => "[a-z]+"}, %{multiple: true})
+
+      assert [
+               {"rows[0].f[2]", "F",
+                {:full, "F (rows[0].f) item 3 doesn't match the required format"}}
+             ] =
+               FieldConstraints.check_item(d, "ABC", 2, "rows[0].f")
+    end
+
+    test "a blank item and a definition with no constraints give nothing, as check/3 does" do
+      d = def_(:integer, %{"min" => 1}, %{multiple: true})
+
+      assert FieldConstraints.check_item(d, nil, 0) == []
+      assert FieldConstraints.check_item(d, "  ", 0) == []
+      assert FieldConstraints.check_item(def_(:integer, %{}, %{multiple: true}), 0, 0) == []
+      assert FieldConstraints.check_item(def_(:integer, nil, %{multiple: true}), 0, 0) == []
+    end
+
+    test "a colour item outside the palette" do
+      d = def_(:color, %{"palette" => ["#000000"]}, %{multiple: true})
+
+      assert ["F (f) item 1 must be one of the palette colors"] =
+               d |> FieldConstraints.check_item("#ffffff", 0) |> texts()
+    end
+
+    test "the item text nests inside each rule's translated sentence" do
+      d = def_(:integer, %{"max" => 10}, %{multiple: true, label: "Notes"})
+
+      texts =
+        Gettext.with_locale(KilnCMSWeb.Gettext, "fr", fn ->
+          d |> FieldConstraints.check([3, 11]) |> texts()
+        end)
+
+      assert texts == ["Notes (f) élément 2 doit être au plus 10"]
     end
   end
 
