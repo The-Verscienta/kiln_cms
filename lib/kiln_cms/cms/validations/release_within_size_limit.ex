@@ -9,10 +9,21 @@ defmodule KilnCMS.CMS.Validations.ReleaseWithinSizeLimit do
   so a release built by a bulk "select all" could hold locks until
   `KilnCMS.CMS.Releases.transaction_timeout_ms/0` aborted it, *after* the wait.
 
-  The cap is a guardrail, not an invariant. It is checked with a count, so two
-  concurrent adds at `cap - 1` can both pass and overshoot by one; that is fine,
-  because nothing downstream depends on the exact number. What matters is that a
-  release cannot grow unboundedly by accident.
+  ## The cap is exact (#3073)
+
+  `:add` runs this with `before_action?: true`, declared after
+  `KilnCMS.CMS.Validations.ReleaseOpenForEdit`, so the count runs inside the
+  add's own transaction, after that validation has locked the release row
+  `FOR UPDATE`. Adds to one release therefore take turns, and each counts
+  with every earlier add committed: two adds at `cap - 1` no longer both pass.
+  (Counted at changeset build, as it used to be, both could, and the release
+  overshot by one.)
+
+  It must not lock the release itself. A second lock on the row after the
+  first would be an upgrade if the first were ever `FOR SHARE`, and two adds
+  holding the share lock would deadlock on each other's upgrade. The lock
+  order and the cost of serializing adds are in `ReleaseOpenForEdit`'s
+  moduledoc. The count loads at most `cap` rows, under the lock.
 
   Configure it per install (see `KilnCMS.CMS.Releases.max_items/0`):
 

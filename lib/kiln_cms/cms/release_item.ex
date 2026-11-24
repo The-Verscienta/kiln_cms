@@ -115,14 +115,22 @@ defmodule KilnCMS.CMS.ReleaseItem do
       validate KilnCMS.CMS.Validations.EditableReleaseContent
       # Inside the write's transaction, with the release row locked, so a
       # go-live claim can't commit between the check and the insert (#2740).
-      validate KilnCMS.CMS.Validations.ReleaseOpenForEdit, before_action?: true
+      # `FOR UPDATE`, not the item writes' `FOR SHARE`, so adds to one release
+      # take turns and the size cap below counts exactly (#3073).
+      validate {KilnCMS.CMS.Validations.ReleaseOpenForEdit, lock: :update},
+        before_action?: true
+
       # A stale/bogus content_id would otherwise sit :pending until go-live,
       # where a single unresolvable item aborts the whole atomic release
       # (`Releases.apply_all/4` rolls back on the first `fetch_record` miss).
       validate KilnCMS.CMS.Validations.ReleaseContentExists
       # Last, because it is the only one that costs a count query — no point
       # paying for it on an add the cheaper checks already refused (#837).
-      validate KilnCMS.CMS.Validations.ReleaseWithinSizeLimit
+      # In the transaction, and declared AFTER `ReleaseOpenForEdit`: before_action
+      # hooks run in declaration order, so the count runs under the add's
+      # `FOR UPDATE` and sees every earlier add committed (#3073). It must not
+      # lock the release itself; see `ReleaseWithinSizeLimit`.
+      validate KilnCMS.CMS.Validations.ReleaseWithinSizeLimit, before_action?: true
       change KilnCMS.CMS.Changes.StampReleaseItemAdder
     end
 
