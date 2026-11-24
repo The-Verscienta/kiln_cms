@@ -545,6 +545,20 @@ curl -s 'http://localhost:4000/api/json/posts' \
   `POST /api/keys/rotate` answer it exactly as they answer a revoked or
   unknown key. `/editor/api-keys` shows such a key as *Expired*, not
   *Active*, until it is revoked.
+- A key whose **scope this release doesn't know** returns **401** too (#2604).
+  A newer Kiln release may add a scope; on an older node during a rolling
+  deploy, or after a rollback, a key minted with it is refused exactly as a
+  revoked key is: on JSON:API, GraphQL, `/mcp`, the change feed
+  (`GET /api/feed`), `GET /api/graphql/schema.graphql` and
+  `POST /api/keys/rotate`. It never falls back to read
+  access, because the new scope may grant less than read. On the bridge
+  socket it connects as anonymous, as any invalid key does. `/editor/api-keys`
+  lists it as *Unrecognized scope (name)*, with the stored name, and status
+  *Not accepted*; hovering the status explains that a release that knows the
+  scope accepts the key again, so revoke it if that isn't wanted. An erased
+  owner's key with such a scope reads *Expired*, like any other erased
+  owner's key. To keep a service working after a rollback, mint it a new key
+  with a scope this release offers.
 - A **drafts-only** (`draft_write`) key minted with a self-rotation window can
   renew itself: `POST /api/keys/rotate` with the key as the bearer returns a
   fresh key of the same account, scope and name and revokes the old one. See

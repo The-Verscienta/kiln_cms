@@ -909,7 +909,9 @@ curl -X POST https://kiln.example.com/api/keys/rotate \
   whole chain, including your current key, and alerts the platform admins. If you lose
   the `201` (a network failure mid-request), do not retry with the old key;
   ask an admin to mint a new one.
-* `401` (`invalid_api_key`): no key, or it is revoked/expired. `403`
+* `401` (`invalid_api_key`): no key, or it is revoked/expired, or its scope
+  is one this Kiln release doesn't know (a key minted by a newer release,
+  met after a rollback; ask an admin to mint a new one). `403`
   (`forbidden`): not a drafts-only key, or it has no rotation window or the
   window has closed. `409` (`not_rotatable`): it was rotated by a concurrent
   request, or its account was given an editor or admin role. `500`: a server
