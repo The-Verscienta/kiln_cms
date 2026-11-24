@@ -834,7 +834,7 @@ defmodule KilnCMS.MixProject do
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:ash_phoenix, "~> 2.0"},
       {:ash_postgres, "~> 2.0"},
-      {:ash, "~> 3.0"},
+      {:ash, "~> 3.38"},
       # The compile-time plugin contract (`Kiln.Plugin`, `Kiln.Block`,
       # `Kiln.FieldType`, …) lives in its own package so a plugin can depend on
       # it without depending on the core, and so ship as a Hex, git or path
@@ -885,8 +885,8 @@ defmodule KilnCMS.MixProject do
       {:makeup_css, "~> 0.2"},
       {:cachex, "~> 4.0"},
       {:image, "~> 0.69"},
-      {:ex_aws, "~> 2.5"},
-      {:ex_aws_s3, "~> 2.5"},
+      {:ex_aws, "~> 2.8"},
+      {:ex_aws_s3, "~> 2.6"},
       {:sweet_xml, "~> 0.7"},
       # Semantic search's STORAGE half: the pgvector column type and its
       # Postgrex extension. Cheap, pure Elixir, and unconditional —
