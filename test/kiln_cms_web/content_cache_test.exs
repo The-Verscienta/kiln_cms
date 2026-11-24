@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.ContentCacheTest do
 
   import KilnCMS.TypedFixtures
 
+  alias KilnCMS.Accounts
   alias KilnCMS.Cache
   alias KilnCMS.CMS
   alias KilnCMS.CMS.MediaItem
@@ -260,5 +261,46 @@ defmodule KilnCMSWeb.ContentCacheTest do
     # The fr alternate is still present — proving translations are cached, not
     # re-queried on every delivery hit.
     assert conn |> get(~p"/#{en.slug}") |> html_response(200) =~ ~s(hreflang="fr")
+  end
+
+  describe "an organization's URL fields (#3194)" do
+    # The canonical, hreflang and Open Graph URLs come from the org's host, and
+    # neither field is an ETag input of its own, so a new one must move the
+    # head generation or a revalidation keeps the old absolute URLs.
+    test "a new custom domain answers a revalidation with the new canonical", %{conn: conn} do
+      page = published_page("Moved")
+      assert [etag] = conn |> get(~p"/#{page.slug}") |> get_resp_header("etag")
+
+      stale = conn |> put_req_header("if-none-match", etag) |> get(~p"/#{page.slug}")
+      assert response(stale, 304) == ""
+
+      domain = "moved-#{System.unique_integer([:positive])}.example.org"
+      # authorize?: false — an operator's org edit (`mix kiln.org_slugs` calls
+      # the same action without an actor); the policy is not what is under test.
+      org =
+        Accounts.update_organization!(Accounts.default_org(), %{custom_domain: domain},
+          authorize?: false
+        )
+
+      canonical = "#{KilnCMSWeb.Tenant.base_url(org)}/#{page.slug}"
+      assert canonical =~ domain
+
+      moved = conn |> put_req_header("if-none-match", etag) |> get(~p"/#{page.slug}")
+      assert html_response(moved, 200) =~ ~s(rel="canonical" href="#{canonical}")
+      assert [etag2] = get_resp_header(moved, "etag")
+      refute etag2 == etag
+    end
+
+    test "an update that leaves the slug and domain alone keeps the ETag", %{conn: conn} do
+      page = published_page("Renamed")
+      org = Accounts.default_org()
+      assert [etag] = conn |> get(~p"/#{page.slug}") |> get_resp_header("etag")
+
+      # authorize?: false — as above.
+      Accounts.update_organization!(org, %{name: org.name <> " renamed"}, authorize?: false)
+
+      same = conn |> put_req_header("if-none-match", etag) |> get(~p"/#{page.slug}")
+      assert response(same, 304) == ""
+    end
   end
 end

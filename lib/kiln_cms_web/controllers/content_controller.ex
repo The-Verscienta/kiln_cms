@@ -1711,6 +1711,11 @@ defmodule KilnCMSWeb.ContentController do
   # autodiscovery, branding, code injection and calendar links live in `<head>`
   # but are not columns on the content row, so a settings save must move the
   # ETag or a revalidating client keeps a 304 body whose links are already wrong.
+  # A new slug or custom domain bumps it too (#3194, `BustSiteUrls`); the global
+  # base URL is runtime config, and the restart that changes it mints a new
+  # token on every node. With the cache disabled the token is always `"0"`, so
+  # no bump moves it.
+  #
   # `validators.forms` (#2249, `forms_digest/2`) is appended only when the page
   # renders a form. It stays apart from the payload digest because it also
   # names the human-verification config, which is runtime, not payload.
