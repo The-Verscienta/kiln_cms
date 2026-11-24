@@ -397,8 +397,12 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     |> element(~s(button[phx-click="duplicate_field"][phx-value-id="#{a.id}"]))
     |> render_click()
 
-    names = form.id |> CMS.form_fields_for!(authorize?: false) |> Enum.map(& &1.name)
-    assert names == ["email", "email_2", "message"]
+    fields = CMS.form_fields_for!(form.id, authorize?: false)
+    assert Enum.map(fields, & &1.name) == ["email", "email_2", "message"]
+    # Each its own slot: the copy was created at its original's position, and
+    # the order used to leave it there, tied with the original.
+    assert Enum.map(fields, &{&1.name, &1.position}) ==
+             [{"email", 0}, {"email_2", 1}, {"message", 2}]
   end
 
   test "deleting a field removes it from the canvas", %{conn: conn} do

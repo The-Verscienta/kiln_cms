@@ -487,11 +487,19 @@ defmodule KilnCMSWeb.FormBuilderLive do
     case CMS.create_form_field(attrs, actor_opts(socket)) do
       {:ok, copy} ->
         # Slot the copy right after its original, then renumber everything.
+        # The copy goes in the list the reorder works from too: it was created
+        # at its original's position, and a reorder skips ids it wasn't given,
+        # so without it the copy would keep sharing that position.
         order = fields |> Enum.map(& &1.id) |> insert_after(field.id, copy.id)
 
         # The copy is its own, already-saved write: a refused reorder keeps
         # it (sharing its original's position) and says which field to fix.
-        {:noreply, socket |> apply_order(order) |> reload_fields() |> select_field(copy.id)}
+        {:noreply,
+         socket
+         |> assign(:fields, fields ++ [copy])
+         |> apply_order(order)
+         |> reload_fields()
+         |> select_field(copy.id)}
 
       {:error, error} ->
         {:noreply, put_flash(socket, :error, error_message(error))}
