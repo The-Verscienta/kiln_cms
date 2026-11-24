@@ -21166,6 +21166,16 @@
                               }
                             ]
                           },
+                          "change_note": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "change_severity": {
                             "anyOf": [
                               {
@@ -21594,6 +21604,16 @@
                       "attributes": {
                         "additionalProperties": false,
                         "properties": {
+                          "change_note": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "change_severity": {
                             "anyOf": [
                               {
@@ -25506,6 +25526,16 @@
                               }
                             ]
                           },
+                          "change_note": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "change_severity": {
                             "anyOf": [
                               {
@@ -25913,6 +25943,16 @@
                       "attributes": {
                         "additionalProperties": false,
                         "properties": {
+                          "change_note": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "change_severity": {
                             "anyOf": [
                               {
@@ -29020,6 +29060,16 @@
                               }
                             ]
                           },
+                          "change_note": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "change_severity": {
                             "anyOf": [
                               {
@@ -29437,6 +29487,16 @@
                       "attributes": {
                         "additionalProperties": false,
                         "properties": {
+                          "change_note": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
                           "change_severity": {
                             "anyOf": [
                               {

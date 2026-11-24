@@ -4411,6 +4411,11 @@ msgstr "Demandez à un administrateur du site de vous en envoyer une nouvelle."
 msgid "Ask visitors to complete a human-verification check"
 msgstr "Demander aux visiteurs de passer une vérification humaine"
 
+#: lib/kiln_cms_web/live/safety_fields_live.ex
+#, elixir-autogen, elixir-format
+msgid "Ask why on every change"
+msgstr "Demander la raison de chaque modification"
+
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
@@ -10974,6 +10979,11 @@ msgstr "Pour chaque type de contenu, les champs que les membres ayant ce rôle p
 #, elixir-autogen, elixir-format
 msgid "For each content type, which fields this member may change on existing documents. Only these fields replaces their custom role's grant for that type, and No fields overrides it. Creating documents and workflow steps are not affected, and any grant on a type also refuses restoring an old version of it."
 msgstr "Pour chaque type de contenu, les champs que ce membre peut modifier sur les documents existants. Seulement ces champs remplace l'autorisation de son rôle personnalisé pour ce type, et Aucun champ la supplante. La création de documents et les étapes du flux de travail ne sont pas concernées, et toute autorisation sur un type refuse aussi la restauration d'une ancienne version de celui-ci."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "For example: dose corrected to match the cited source"
+msgstr "Par exemple : dose corrigée selon la source citée"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -20543,6 +20553,16 @@ msgstr "En enregistrant ceci, le contenu de ce site est envoyé à l'URL ci-dess
 msgid "Saving…"
 msgstr "Enregistrement…"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Say why you made this change, then save again."
+msgstr "Indiquez pourquoi vous avez fait cette modification, puis enregistrez à nouveau."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Say why you made this change."
+msgstr "Indiquez pourquoi vous avez fait cette modification."
+
 #: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
 msgid "Scan the QR code (or add the key) in your authenticator app, then enter the 6-digit code to confirm."
@@ -28167,10 +28187,25 @@ msgstr "Années complètes depuis une date, comme l’âge d’une personne. Act
 msgid "Why retention skips"
 msgstr "Pourquoi la rétention est ignorée"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Why this change? Asked when you publish your changes."
+msgstr "Pourquoi cette modification ? Demandé à la publication des modifications."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Why this change? Asked when you save."
+msgstr "Pourquoi cette modification ? Demandé à l’enregistrement."
+
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "Why this was blocked"
 msgstr "Pourquoi ce blocage"
+
+#: lib/kiln_cms_web/live/content_editor/inspector_history_component.ex
+#, elixir-autogen, elixir-format
+msgid "Why: %{note}"
+msgstr "Raison : %{note}"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -30673,6 +30708,11 @@ msgstr "ok"
 #, elixir-autogen, elixir-format
 msgid "on"
 msgstr "activée"
+
+#: lib/kiln_cms_web/live/safety_fields_live.ex
+#, elixir-autogen, elixir-format
+msgid "on a draft's Save and on Publish changes, kept in History"
+msgstr "à l’enregistrement d’un brouillon et à la publication des modifications, conservé dans l’historique"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
