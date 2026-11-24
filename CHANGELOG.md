@@ -78,6 +78,10 @@ else.
   No migration.
   ([long form](docs/changelog/unreleased.md#reference-add-new-off))
 
+- **Editors can narrow a reference field's search while picking: a Type select on any field with several linked types, and Category and Tag selects where the admin ticks "Let editors narrow the search by" (stored as `"filters"` in the field's `selection`); a filter only narrows ([#3224](https://github.com/The-Verscienta/kiln_cms/issues/3224)).**
+  No migration.
+  ([long form](docs/changelog/unreleased.md#reference-picker-filters))
+
 - **A role can be granted single item types of a Flexible content field (`custom_fields.<field>.<item type>`): its editors may edit, add and remove items of that type and no others ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282)).**
   Reordering needs the whole-field grant; the console shows a partly granted field read-only. No migration.
   ([long form](docs/changelog/unreleased.md#flexible-item-type-grants))

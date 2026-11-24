@@ -76,6 +76,13 @@ creates; under S4 that never disturbs existing connections.
   `fields`, a map of custom-field name → value or `{"in": [...]}`/`{"not_eq": v}`
   — the `custom_filter` grammar's equality-shaped operators only.
 * `create`: see S5.
+* `filters` (added later, #3224): a non-empty list of `"category"` and
+  `"tag"`, the selects the picker shows the editor to narrow its search. Like
+  `sort` it is a picker setting, not a condition: the editor's choice is
+  AND-ed onto the plan (`ReferenceSelection.narrow/2`), so it never widens
+  it. The type select needs no key: it shows on any field with several
+  target types. See
+  [Narrow a reference search by type, category or tag](../extending-content.md#narrow-a-reference-search-by-type-category-or-tag).
 
 Conditions AND together. Refused at definition save (`Validations.ReferenceSelection`):
 unknown keys; a `by_type` key that is not one of the field's target types; a

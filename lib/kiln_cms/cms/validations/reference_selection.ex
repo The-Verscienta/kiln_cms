@@ -4,7 +4,8 @@ defmodule KilnCMS.CMS.Validations.ReferenceSelection do
   writable and enforceable:
 
     * the map has a valid shape (no unknown keys, `states` among the content
-      states, `owner` only `"self"`, `sort` `recent` or `title`);
+      states, `owner` only `"self"`, `sort` `recent` or `title`, `filters` a
+      non-empty list of `category` and `tag` with no repeats);
     * `create` names one of the field's target types and is only allowed when a
       new draft of it would pass the field's own filter
       (`ReferenceSelection.create_problem/2`);

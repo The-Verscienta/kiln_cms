@@ -2002,23 +2002,31 @@ field and every write path apply it (#2285). You need the admin role.
 3. Optionally tick **Only records the editor created**.
 4. Under **Order a blank search**, choose **Newest first** (the default) or
    **By title**. This orders the list an editor sees before typing.
-5. For each linked type, under **Only *Type* records that match**, optionally
+5. Optionally, under **Let editors narrow the search by**, tick **Category**,
+   **Tag**, or both. This adds a select beside the picker's search box so an
+   editor can look through one category or tag while picking (see
+   [Narrow a reference search by type, category or tag](#narrow-a-reference-search-by-type-category-or-tag)).
+   It filters nothing: what the field accepts stays as the conditions below
+   say. If the site has more than 500 categories (or tags), a warning under
+   the box says the picker will not show that select.
+6. For each linked type, under **Only *Type* records that match**, optionally
    choose tags in **Tagged with any of**, a category in **In category**, and a
    condition per custom field: **equals**, **is one of** or **is not**, then a
    value. For **is one of**, separate the values with commas. Leave a value
    empty to not filter on that field. Only plain, non-private fields are
    listed; a value on a number or yes/no field is saved as a number or a
    boolean.
-6. Under **Adding new records**, **Offer “Add new” in the picker** is ticked
+7. Under **Adding new records**, **Offer “Add new” in the picker** is ticked
    by default. Untick it to have editors connect only records that already
    exist: the picker, and the reverse field on each target, then offer no
    **Add new**. It is stored as `"add_new": false` and filters nothing.
    With it ticked, optionally choose **Yes, create a new *Type*** under
    **Let editors create what they type**. See
    [Let editors create what they type](#let-editors-create-what-they-type).
-7. Read the sentence at the end of the step, which restates the setting, for
+8. Read the sentence at the end of the step, which restates the setting, for
    example *Editors are offered: Published Page records, tagged vegan, newest
-   first.* Then save the field (**Save**, or **Add field** for a new one).
+   first.* With editor filters ticked it ends *Editors can narrow the search
+   by category and tag.* (or *by category.*, *by tag.*). Then save the field (**Save**, or **Add field** for a new one).
 
 If the server refuses a condition, the reason shows under the step and
 nothing is saved. A condition naming a tag or category deleted since it was
@@ -2042,6 +2050,7 @@ relationship back to a plain value clears the selection.
          "states" => ["published"],
          "owner" => "self",
          "sort" => "title",
+         "filters" => ["category", "tag"],
          "by_type" => %{
            "page" => %{
              "tags_any" => [tag_id],
@@ -2056,7 +2065,10 @@ relationship back to a plain value clears the selection.
    ```
 
    `states` is a subset of `draft`, `in_review`, `published`, `archived`;
-   `owner` can only be `"self"`; `sort` is `recent` or `title`. Under
+   `owner` can only be `"self"`; `sort` is `recent` or `title`; `filters`
+   is a non-empty list of `"category"` and `"tag"` with no repeats. `sort`
+   and `filters` are picker settings, not conditions: they change what the
+   editor sees, never what a write accepts. Under
    `by_type`, each key must be one of the field's target types. `tags_any`
    takes tag ids, `category` one category id, and `fields` maps a custom field
    name to a value, `{"in": [...]}` or `{"not_eq": value}` (only non-private
@@ -2089,6 +2101,7 @@ relationship back to a plain value clears the selection.
      "states": ["published"],
      "owner": "self",
      "sort": "title",
+     "filters": ["category", "tag"],
      "by_type": {"page": {"tags_any": ["<tag id>"], "category": "<category id>"}}
    }
    ```
@@ -2097,7 +2110,10 @@ relationship back to a plain value clears the selection.
    category or field is left out, and so is one on a private field, since
    the endpoint is anonymous. A field with no live condition left has no
    `x-kiln-selection`. Create-on-type is reported too, as
-   `"create": {"type": "page"}`.
+   `"create": {"type": "page"}`. The picker-only keys `sort` and `filters`
+   are reported as stored (a field whose selection is only `filters` still
+   has an `x-kiln-selection`); they describe the editor's picker and narrow
+   nothing a client writes.
 
 What to know before relying on it:
 
@@ -2131,7 +2147,10 @@ under the step; from code they are errors on `selection`:
 | Message | Meaning |
 |---|---|
 | `is only for a reference field` | The field is not a top-level reference: another type, or a link or group sub-field. |
-| `is not valid: it …` | The shape is wrong: an unknown key, a state outside the four, an `owner` other than `"self"`, a `sort` other than `recent` or `title`, more than 50 tag ids, more than 10 field conditions, or more than 50 values in an `in`. The rest of the message names which. |
+| `is not valid: it …` | The shape is wrong: an unknown key, a state outside the four, an `owner` other than `"self"`, a `sort` other than `recent` or `title`, a bad `filters`, more than 50 tag ids, more than 10 field conditions, or more than 50 values in an `in`. The rest of the message names which. For `filters` it is one of the three below. |
+| `… filters is empty` | `filters` is `[]`. Leave the key out (in the admin, untick both boxes) to show no editor filters. |
+| `… lists a filter twice` | `filters` names `category` or `tag` more than once. |
+| `… filters must be a list among category, tag` | `filters` is not a list, or names something else (`"tags"`, `"type"`). The type select needs no setting. |
 | `names <type>, which is not one of this field's target types` | A `by_type` key is a type the field does not link to. Narrowing the field's targets while a condition names a type that leaves them is refused the same way. |
 | `names <type> to create, which is not one of this field's target types` | `create.type` is a type the field does not link to. |
 | `names a tag for <type> that does not exist on this site` | A `tags_any` id is not one of this site's tags (`category` says "a category"). |
@@ -2147,6 +2166,62 @@ that field with `is used by the selection of <fields>; remove it from there
 first`. A selection that can no longer be evaluated (a stored value its field
 can't cast) fails a save of the record with `could not be checked against
 which records it accepts — an admin should review the field's selection`.
+
+### Narrow a reference search by type, category or tag
+
+Starting point: you are editing a record with a relationship field, and the
+search finds too many records to scan. A row of selects above the field's
+search box narrows the results while you pick. Any editor who can use the
+field's search gets them; there is no permission of its own.
+
+- **Type** appears on its own whenever the field links to more than one
+  content type. There is nothing to turn on.
+- **Category** and **Tag** appear only on a field whose admin ticked them
+  under **Let editors narrow the search by** (step 5 of
+  [Limit what can be picked](#limit-what-can-be-picked)).
+
+1. On a field with several linked types, the **All types** select is
+   already above the search box. Click into the search box: the list opens,
+   and the **Any category** and **Any tag** selects join it, as the field
+   allows. Their options are loaded the first time you open the list.
+2. Choose a type, a category or a tag. The results start over from the
+   first page, limited to that choice; a screen reader announces the count
+   as, for example, *3 results (filtered)*. Tags are grouped under their tag group,
+   with the ungrouped ones last.
+3. Type in the search box as usual. The search applies on top of the
+   selects.
+4. Pick a record. To go back to everything, set each select to **All
+   types**, **Any category** or **Any tag**.
+
+Changing a select does not change the record: the document is not marked as
+having unsaved changes, and nothing is saved.
+
+What to know:
+
+- **A filter only narrows.** Your choice is added to the field's own
+  selection, and the search still runs with your permissions, so it never
+  finds a record the field would refuse or that you can't read.
+- **Some options are left out.** When every linked type's selection pins a
+  category, there is no category select (there is nothing to narrow). When
+  every linked type's selection lists tags, the tag select offers only
+  those tags.
+- **Create-on-type pauses while a filter is set.** The *Create “name” as a
+  new Type* row is not offered while any select is set, because it could
+  only check the filtered results for an existing record with that title.
+  **Add new *Type*** is unaffected.
+- **The dropdown widget has no filters.** A field shown as a dropdown gets
+  them only when it falls back to the search.
+- **No filters on a field you can't add to.** A locked or full field, or a
+  single reference that already holds a record, shows no search and so no
+  selects.
+
+What you might see:
+
+| Message | Meaning |
+|---|---|
+| *No matches with these filters.* with a **Clear filters** button | Nothing matches the selects and your search. **Clear filters** resets every select and searches again. |
+| *Too many categories to list — search by title instead.* | The site has more than 500 categories, so the category select is not shown. Tags say the same. The fields admin warns about this when the filter is ticked. |
+| No **Category** or **Tag** select at all | The field does not turn it on, the site has no categories or tags, or every linked type already pins the category. |
 
 ### Let editors create what they type
 
