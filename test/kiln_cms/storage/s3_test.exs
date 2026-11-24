@@ -207,6 +207,96 @@ defmodule KilnCMS.Storage.S3Test do
       stub_range(416, [], "")
 
       assert {:error, :range_not_satisfiable} = S3.fetch_range("clip.mp4", 99, :eof)
+      # Past 0 there is nothing to confirm: no HEAD is sent.
+      assert_received {:range, _path, ["bytes=99-"]}
+      refute_received {:head, _path}
+    end
+
+    # #3069: a range at 0 is refused only by an empty object, which a HEAD
+    # confirms before the total is reported as 0.
+    defp stub_empty_probe(head_size) do
+      test_pid = self()
+
+      Req.Test.stub(KilnCMS.Storage.S3, fn
+        %{method: "HEAD"} = conn ->
+          send(test_pid, {:head, conn.request_path})
+
+          conn
+          |> Plug.Conn.put_resp_header("content-length", Integer.to_string(head_size))
+          |> Plug.Conn.send_resp(200, "")
+
+        conn ->
+          send(test_pid, {:range, conn.request_path, Plug.Conn.get_req_header(conn, "range")})
+          Plug.Conn.send_resp(conn, 416, "")
+      end)
+    end
+
+    test "a 416 at 0 on an object a HEAD says is empty carries the total 0 (#3069)" do
+      stub_empty_probe(0)
+
+      assert {:error, {:range_not_satisfiable, 0}} = S3.fetch_range("empty.mp4", 0, :eof)
+      assert_received {:head, path}
+      assert path =~ "kiln-test"
+
+      with_private_bucket()
+      stub_empty_probe(0)
+
+      assert {:error, {:range_not_satisfiable, 0}} = S3.fetch_private_range("empty.mp4", 0, 9)
+      assert_received {:head, path}
+      assert path =~ "kiln-private"
+    end
+
+    test "a 416 at 0 on an object that has bytes stays an error, never an empty blob (#3069)" do
+      stub_empty_probe(10)
+
+      assert {:error, {:http_error, 416, _resp}} = S3.fetch_range("full.mp4", 0, :eof)
+      assert_received {:head, _path}
+    end
+
+    test "a 416 at 0 whose HEAD fails answers the HEAD's error (#3069)" do
+      Req.Test.stub(KilnCMS.Storage.S3, fn
+        %{method: "HEAD"} = conn -> Plug.Conn.send_resp(conn, 404, "")
+        conn -> Plug.Conn.send_resp(conn, 416, "")
+      end)
+
+      assert {:error, {:http_error, 404, _resp}} = S3.fetch_range("gone.mp4", 0, :eof)
+    end
+
+    test "a 200 with an empty body at 0 is an empty object (#3069)" do
+      # A provider that ignored the Range header sent the whole object, and
+      # the whole object is nothing.
+      stub_range(200, [], "")
+
+      assert {:error, {:range_not_satisfiable, 0}} = S3.fetch_range("empty.mp4", 0, :eof)
+    end
+
+    test "copy_to_file copies a zero-length object to an empty file (#3069)" do
+      original = Application.get_env(:kiln_cms, KilnCMS.Storage)
+      Application.put_env(:kiln_cms, KilnCMS.Storage, adapter: S3)
+
+      on_exit(fn ->
+        if original,
+          do: Application.put_env(:kiln_cms, KilnCMS.Storage, original),
+          else: Application.delete_env(:kiln_cms, KilnCMS.Storage)
+      end)
+
+      dest = Path.join(System.tmp_dir!(), "s3copy_#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm(dest) end)
+
+      stub_empty_probe(0)
+      assert :ok = KilnCMS.Storage.copy_to_file("empty.mp4", dest)
+      assert File.read!(dest) == ""
+
+      with_private_bucket()
+      File.rm!(dest)
+      stub_empty_probe(0)
+      assert :ok = KilnCMS.Storage.copy_to_file("empty.mp4", dest, private?: true)
+      assert File.read!(dest) == ""
+
+      # And one that has bytes, refused at 0 for some other reason, fails the
+      # copy rather than writing an empty file.
+      stub_empty_probe(10)
+      assert {:error, {:http_error, 416, _resp}} = KilnCMS.Storage.copy_to_file("full.mp4", dest)
     end
 
     test "a 200 with no Content-Range is refused rather than guessed at" do

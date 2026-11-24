@@ -11,8 +11,11 @@ defmodule KilnCMS.Media.VariantWorker do
   temp hand-off) means the job runs correctly on any node.
 
   When processing finishes it broadcasts on `"media:updated"` so an open media
-  library refreshes live. A non-raster upload (or a since-deleted item / missing
-  original) is a graceful no-op — the original is still served.
+  library refreshes live. A non-raster upload, a since-deleted item or an
+  original that is definitely missing (`KilnCMS.Storage.not_found?/1`) is a
+  graceful no-op — the original is still served. Any other failed read is
+  retried, up to `max_attempts`, and the job is then discarded (#3066);
+  `mix kiln.media.regenerate_variants` re-runs it later.
 
   Re-running the worker for an item that already has variants is safe and is how
   bulk regeneration works (#473): each run writes a fresh set under fresh
@@ -96,15 +99,26 @@ defmodule KilnCMS.Media.VariantWorker do
     end
   end
 
-  # An image backend is a remote service: unless it says the image is gone, a
-  # failed read (a timeout, a 5xx) is retried — "nothing to do" would leave an
-  # adopted row with no dimensions or variants, and nothing re-enqueues it.
-  defp unreadable(%{image_backend: backend}, reason)
-       when is_binary(backend) and reason not in [:not_found, :enoent],
-       do: {:error, reason}
+  # Only an original that is definitely gone completes the job: nothing to
+  # derive from. Any other failed read (a timeout, a `5xx`) is retried,
+  # whatever holds the file (#3066): "nothing to do" would leave the row with
+  # no dimensions or variants, and nothing re-enqueues it.
+  defp unreadable(item, reason) do
+    if Storage.not_found?(reason) do
+      Logger.warning(
+        "Variant processing for media #{item.id}: original unreadable (#{inspect(reason)}); nothing to derive."
+      )
 
-  # Original isn't readable (e.g. removed) — nothing to do; keep the original.
-  defp unreadable(_item, _reason), do: :ok
+      :ok
+    else
+      Logger.warning(
+        "Variant processing for media #{item.id}: could not read its original " <>
+          "(#{inspect(reason)}); will retry."
+      )
+
+      {:error, reason}
+    end
+  end
 
   defp generate(item, path, ext, tenant, site) do
     focal = %{x: item.focal_x || 0.5, y: item.focal_y || 0.5}

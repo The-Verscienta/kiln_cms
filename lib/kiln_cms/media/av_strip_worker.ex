@@ -53,6 +53,12 @@ defmodule KilnCMS.Media.AVStripWorker do
       will never remux.
     * The item is gone, or no longer quarantined — someone deleted it, or a
       duplicate job ran — nothing to do.
+    * The row is purged **while** the strip runs, after the copy reached the
+      public key (#3068): the release comes back stale, and once a re-read
+      finds no row at all, live or trashed, the job deletes that public copy
+      and the private upload, logs that it withdrew them, and completes. The
+      key is never put in the job's args for a retry to clean up: a job that
+      names a key to delete is a delete primitive.
 
   Everything an Oban retry could double is idempotent: promotion is a `store`
   to a key that either has the stripped copy or nothing; release is a flag;
@@ -62,6 +68,8 @@ defmodule KilnCMS.Media.AVStripWorker do
 
   alias KilnCMS.{AVProcessor, CMS, Media, Storage}
   alias KilnCMS.Media.Ingest
+
+  import Ecto.Query, only: [from: 2]
 
   require Logger
 
@@ -122,7 +130,7 @@ defmodule KilnCMS.Media.AVStripWorker do
       # The private blob is definitely not there to strip. Nothing this job
       # can do; the reaper takes the row.
       {:error, reason} = error ->
-        if missing_blob?(reason) do
+        if Storage.not_found?(reason) do
           Logger.error(
             "Deferred metadata strip for media #{item.id}: private blob unreadable (#{inspect(reason)})"
           )
@@ -133,6 +141,9 @@ defmodule KilnCMS.Media.AVStripWorker do
           # store, a full temp disk. Completing here would leave a good upload
           # to the reaper; retrying costs a few attempts at most, and if they
           # all fail the row ends with the reaper exactly as before, just later.
+          # Shapes no retry can fix (`:invalid_key`,
+          # `:private_storage_not_configured`) end the same way. What counts
+          # as missing is `Storage.not_found?/1`'s call.
           Logger.warning(
             "Deferred metadata strip for media #{item.id}: could not read its private blob " <>
               "(#{inspect(reason)}); will retry."
@@ -142,23 +153,6 @@ defmodule KilnCMS.Media.AVStripWorker do
         end
     end
   end
-
-  # The shapes that mean the blob is not there: the Local adapter's `:enoent`
-  # from `File.stat/1`, S3's `404`, and a `:not_found` from a backend that
-  # normalizes it. Everything else retries.
-  #
-  # Two near misses, both accepted. S3 answers `403`, not `404`, for a missing
-  # key when the credentials lack `s3:ListBucket`; that retries, which is the
-  # safe direction. And `File.open/2` on the temp file answers `:enoent` if the
-  # temp directory itself is gone; that is read as a missing blob, but a host
-  # whose tmp dir vanished has bigger problems than one quarantined upload.
-  # Shapes that cannot succeed on a retry either (`:invalid_key`,
-  # `:private_storage_not_configured`, a malformed range reply) also retry,
-  # then end with the reaper, as they did before.
-  defp missing_blob?(:enoent), do: true
-  defp missing_blob?(:not_found), do: true
-  defp missing_blob?({:http_error, 404, _response}), do: true
-  defp missing_blob?(_reason), do: false
 
   defp strip_downloaded(item, key, original, ext, max_bytes, tenant) do
     case AVProcessor.strip_metadata(original, ext) do
@@ -184,12 +178,17 @@ defmodule KilnCMS.Media.AVStripWorker do
   defp promote_stripped(item, key, stripped, max_bytes, tenant) do
     with :ok <- check_size(stripped, max_bytes),
          {:ok, ^key} <- Storage.store(key, stripped, item),
-         {:ok, released} <- release(item, stripped_size(stripped), tenant) do
+         {:ok, released} <- release_or_withdraw(item, key, stripped_size(stripped), tenant) do
       Storage.delete_private(key, item)
       Ingest.enqueue_processing(released)
       broadcast(item.id)
       :ok
     else
+      # Purged while the strip ran, or held by someone else: see
+      # `release_or_withdraw/4`.
+      :ok ->
+        :ok
+
       {:error, :too_large} ->
         # Same refusal as the sync path, one step later: the remux grew past
         # the ceiling `max_upload_size/0` advertises.
@@ -227,12 +226,15 @@ defmodule KilnCMS.Media.AVStripWorker do
       )
 
       with {:ok, ^key} <- Storage.store(key, original, item),
-           {:ok, released} <- release(item, nil, tenant) do
+           {:ok, released} <- release_or_withdraw(item, key, nil, tenant) do
         Storage.delete_private(key, item)
         Ingest.enqueue_processing(released)
         broadcast(item.id)
         :ok
       else
+        :ok ->
+          :ok
+
         other ->
           Logger.error("Deferred A/V promotion for media #{item.id} failed: #{inspect(other)}")
           {:error, other}
@@ -282,6 +284,105 @@ defmodule KilnCMS.Media.AVStripWorker do
         )
     end
   end
+
+  # The release, unless the row went while the strip ran (#3068). The public
+  # copy is already stored by then, so a row the reaper or an admin purged
+  # meanwhile would leave that copy served at a URL nothing records. A purge
+  # shows up as a `StaleRecord` on the release; the row is then re-read, and
+  # the copy withdrawn only if no row of any kind is left. Anything else
+  # fails the job as before.
+  #
+  # `{:ok, released}` continues the promotion; `:ok` means there is nothing
+  # left for this job to do.
+  defp release_or_withdraw(item, key, byte_size, tenant) do
+    case release(item, byte_size, tenant) do
+      {:ok, released} ->
+        {:ok, released}
+
+      {:error, error} ->
+        if stale?(error), do: withdraw_if_gone(item, key, tenant), else: {:error, error}
+    end
+  end
+
+  @doc false
+  # After a stale release: withdraw the copy this job promoted to `key`, but
+  # only when the row is gone. A row that `:read` still finds is someone
+  # else's to finish (a duplicate job released it). A row only the trash
+  # holds keeps its blobs too: a trashed item can be restored, and today a
+  # trashed row is simply released, so a stale release on one would mean a
+  # filter added to `:release_quarantine` later. Public only so a test can
+  # drive that branch, which no release reaches today.
+  @spec withdraw_if_gone(struct(), String.t(), String.t()) :: :ok | {:error, term()}
+  def withdraw_if_gone(item, key, tenant) do
+    case CMS.get_media_item(item.id,
+           actor: Media.system(),
+           authorize_with: :error,
+           tenant: tenant
+         ) do
+      {:ok, _live} ->
+        :ok
+
+      {:error, error} ->
+        cond do
+          not not_found?(error) ->
+            Logger.error(
+              "Deferred metadata strip for media #{item.id}: its release was stale and its " <>
+                "row could not be re-read (#{inspect(error)}); the copy at its public key " <>
+                "#{key} is kept."
+            )
+
+            {:error, error}
+
+          row_exists?(item) ->
+            :ok
+
+          true ->
+            withdraw(item, key)
+        end
+    end
+  end
+
+  # Any row with this id, trashed included. `:read` hides a trashed row, and
+  # `:trashed` is admin-only (the pipeline's actor may not read it), so this
+  # asks the table directly. It answers only "is there a row", for an id this
+  # job already read under its own org.
+  defp row_exists?(item) do
+    KilnCMS.Repo.exists?(
+      from(m in "media_items",
+        where: m.id == type(^item.id, :binary_id) and m.org_id == type(^item.org_id, :binary_id)
+      )
+    )
+  end
+
+  # Both copies go: the public one this job stored, and the private upload,
+  # in case the purger's own delete of it failed. The key is a write-once
+  # UUID whose row is gone, so nothing else can be using it. A failed delete
+  # is logged with the key for an operator, as the purge paths do.
+  defp withdraw(item, key) do
+    for {what, result} <- [
+          {"public copy", Storage.delete(key, item)},
+          {"private blob", Storage.delete_private(key, item)}
+        ],
+        result != :ok do
+      Logger.error("Purged media #{item.id} left its #{what} #{key} behind: #{inspect(result)}")
+    end
+
+    Logger.warning(
+      "Media #{item.id} was purged while its strip ran; withdrew the copy at its public key #{key}."
+    )
+
+    :ok
+  end
+
+  defp stale?(%Ash.Error.Invalid{errors: errors}),
+    do: Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1))
+
+  defp stale?(_error), do: false
+
+  defp not_found?(%Ash.Error.Invalid{errors: errors}),
+    do: Enum.any?(errors, &match?(%Ash.Error.Query.NotFound{}, &1))
+
+  defp not_found?(_error), do: false
 
   defp release(item, byte_size, tenant) do
     attrs = if byte_size, do: %{byte_size: byte_size}, else: %{}
