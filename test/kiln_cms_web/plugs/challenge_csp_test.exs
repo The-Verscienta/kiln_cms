@@ -189,7 +189,7 @@ defmodule KilnCMSWeb.Plugs.ChallengeCspTest do
 
       assert_inline_scripts_run(conn, 422)
       script_src = conn |> policy() |> directive("script-src")
-      assert script_src =~ ~r/^script-src 'self' 'nonce-[^']+' #{@origin}$/
+      assert script_src =~ ~r/^script-src 'self' 'nonce-[^']+' #{Regex.escape(@origin)}$/
       assert directive(policy(conn), "frame-src") =~ @origin
     end
   end
