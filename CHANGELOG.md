@@ -54,49 +54,72 @@ else.
   entries to three lines and fails on an entry with nowhere to link.
 -->
 
-## [Unreleased]
+## [1.12.1] - 2026-11-23
+
+Long form: [docs/changelog/v1.12.1.md](docs/changelog/v1.12.1.md) —
+the 1.12.1 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
+What's new in the 1.12 line, with examples and migration steps: [docs/whats-new/v1.12.md](docs/whats-new/v1.12.md).
 
 ### Upgrade notes
 
 - **Run `mix ash.migrate` for change notes: a nullable `change_note` column on each `*_versions` table and `site_editorial_settings.change_note_types`. An overlay with its own content types runs `mix ash.codegen` for its `*_versions` tables, as for `change_severity`.**
-  ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255) · [long form](docs/changelog/unreleased.md#change-note-upgrade))
+  ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255) · [long form](docs/changelog/v1.12.1.md#change-note-upgrade))
+
 - **Run `mix ash.migrate`: one additive migration (`edit_inline`, a nullable boolean on `field_definitions`). Older releases never read the column, so rolling the pin back is safe.**
-  ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283) · [long form](docs/changelog/unreleased.md#edit-inline-option-upgrade))
+  ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283) · [long form](docs/changelog/v1.12.1.md#edit-inline-option-upgrade))
+
+### Known issues
+
+- **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check; check those on hex.pm by hand.**
+  ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/v1.12.0.md#plugin-health-tail-packages-unknown))
+
+- **A site storage profile on a region ExAws doesn't know (Backblaze B2 `us-west-004`, Wasabi `us-central-1`) fails on every upload and read; keep such sites on the instance's storage until the fix.**
+  ([#3085](https://github.com/The-Verscienta/kiln_cms/issues/3085) · [long form](docs/changelog/v1.12.0.md#site-storage-unknown-region))
+
+- **Comping a member whose provider subscription is still active doesn't cancel it: the provider keeps charging, and its later events are ignored. Cancel the subscription at the provider before comping.**
+  ([#3156](https://github.com/The-Verscienta/kiln_cms/issues/3156) · [long form](docs/changelog/v1.12.0.md#comp-keeps-provider-subscription))
+
+- **A page opened at its path alias shows no reference byline and leaves inherited (`:fallback`) fields blank, though the same page at its slug shows both; link to the slug where that matters.**
+  ([#3193](https://github.com/The-Verscienta/kiln_cms/issues/3193) · [long form](docs/changelog/v1.12.0.md#alias-page-bylines-fallback))
 
 ### Added
 
 - **A reference field can show a record card for each connected record: tick "Let editors edit the related record here" in the fields admin and each connected record the editor may change gets an "Edit the record" card ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
-  ([long form](docs/changelog/unreleased.md#edit-inline-option))
+  ([long form](docs/changelog/v1.12.1.md#edit-inline-option))
+
 - **The record card now edits the record: its title and plain fields are inputs with their own Save, Discard and status chip; a published record's edits go to its working copy, and the parent's Save does not save the card ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
-  ([long form](docs/changelog/unreleased.md#edit-inline-card-save))
+  ([long form](docs/changelog/v1.12.1.md#edit-inline-card-save))
+
 - **The editor now warns before leaving with unsaved record-card edits, the parent's Save and workflow steps save those cards first and stop at the first failure, an "Add new" record opens its card, and a row with unsaved card edits cannot be removed or replaced ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
-  ([long form](docs/changelog/unreleased.md#edit-inline-dirty-guard))
+  ([long form](docs/changelog/v1.12.1.md#edit-inline-dirty-guard))
 
 - **An item of a Flexible content field can hold a single image or a link to one record: pick them inside the card, saved as snapshots rebuilt from the record, masked when the reader can't see the record.**
   Re-saving such a record on the previous release fails validation; reads work.
-  ([long form](docs/changelog/unreleased.md#flexible-media-reference))
+  ([long form](docs/changelog/v1.12.1.md#flexible-media-reference))
 
 - **A reference field can turn off the picker's "Add new": untick "Offer “Add new” in the picker" in the fields admin (stored as `"add_new": false` in the field's `selection`) and editors connect only records that already exist, from both sides of the relationship ([#3222](https://github.com/The-Verscienta/kiln_cms/issues/3222)).**
   No migration.
-  ([long form](docs/changelog/unreleased.md#reference-add-new-off))
+  ([long form](docs/changelog/v1.12.1.md#reference-add-new-off))
 
 - **Edits can say why: a `change_note` on update, publish and Publish changes is kept on the version and shown in History; a site can make the editor ask for one per content type ("Ask why on every change" on the Safety fields page) ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255)).**
-  ([long form](docs/changelog/unreleased.md#change-note))
+  ([long form](docs/changelog/v1.12.1.md#change-note))
 
 - **A reverse field can edit a connection's link fields: "Edit details" on a row opens its link values, and "Save details" saves them as an edit of the source record, as connect and disconnect already do ([#3243](https://github.com/The-Verscienta/kiln_cms/issues/3243)).**
-  ([long form](docs/changelog/unreleased.md#reverse-link-edit))
+  ([long form](docs/changelog/v1.12.1.md#reverse-link-edit))
 
 - **A role can be granted single item types of a Flexible content field (`custom_fields.<field>.<item type>`): its editors may edit, add and remove items of that type and no others ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282)).**
   Reordering needs the whole-field grant; the console shows a partly granted field read-only. No migration.
-  ([long form](docs/changelog/unreleased.md#flexible-item-type-grants))
+  ([long form](docs/changelog/v1.12.1.md#flexible-item-type-grants))
 
 - **The reference picker shows each record's featured image as a small thumbnail in search results, picked rows and reverse-field rows ([#3265](https://github.com/The-Verscienta/kiln_cms/pull/3265)).**
   Always on; the generated `thumb` variant, a video's poster, or an original already that small, never a large original. No migration.
-  ([long form](docs/changelog/unreleased.md#reference-picker-thumbnails))
+  ([long form](docs/changelog/v1.12.1.md#reference-picker-thumbnails))
 
 - **A Flexible content field is now typed in the GraphQL API and in the generated clients: a `FlexibleItemValue` per item, and a `oneOf` union per field in JSON Schema, OpenAPI, TypeScript, Swift, Kotlin and `kiln-types`. `?include=field_definitions.item_types` works on type definitions.**
   Validating consumers: a flexible field's `items` was `{"type": "object"}` and is now a `$ref` to a union of closed item definitions.
-  ([long form](docs/changelog/unreleased.md#flexible-typed-export))
+  ([long form](docs/changelog/v1.12.1.md#flexible-typed-export))
 
 ## [1.12.0] - 2026-11-21
 
