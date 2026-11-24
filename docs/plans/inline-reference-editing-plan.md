@@ -1,6 +1,6 @@
 # Inline editing of related records: plan
 
-Status: PR 1 built (the `edit_inline` option, fields-admin checkbox, schema export and a read-only card); PR 2a built (Card Save, mock in [inline-reference-card-mock.html](inline-reference-card-mock.html)); PRs 2b and 3 not built. Tracking issue: #2283. Written 2026-11-16 against
+Status: PR 1 built (the `edit_inline` option, fields-admin checkbox, schema export and a read-only card); PR 2a built (Card Save, mock in [inline-reference-card-mock.html](inline-reference-card-mock.html)); PR 2b built (dirty tracking, expand-on-create, and the cascade on Save and workflow steps, pulled forward from PR 3); the rest of PR 3 is not built. Tracking issue: #2283. Written 2026-11-16 against
 `main` after #2285 (reference selection and create-on-type, all four PRs) and
 the #2282 plan ([flexible-content-plan.md](../flexible-content-plan.md)). Nothing
 here is a decision until the PR that carries it merges; the questions for the
@@ -472,3 +472,39 @@ from is [inline-reference-card-mock.html](inline-reference-card-mock.html).
    the card.
 10. **The mock is `docs/plans/inline-reference-card-mock.html`.**
 11. **The disclosure label is now "Edit the record"** (was "Show the record").
+
+PR 2b (dirty tracking and expand-on-create) differs from the plan in these places:
+
+1. **The cascade (I3) is in 2b**, pulled forward from PR 3 at the
+   maintainer's request. The parent's Save and the `workflow` event ask each
+   dirty card, in field then row order, to run its own save, one at a time
+   (`{ReferenceInline, {:cascade, ref, ...}}` answers); the first failure stops
+   it, the parent is not written, and its edits stay in the form. A card that
+   does not answer within 20 s counts as a failure. The parent write
+   uses the params of the click: typing during the cascade (usually well
+   under a second) is not in that write. Not covered: autosave (it writes the parent
+   only), *Move to trash*, and the publish paths that do not go through the
+   `workflow` event; the lost-update panel and `flag_conflict` handling are
+   unchanged and not re-pinned with cards. The flash names how many cards
+   saved; there is no per-card result list beyond each card's own chip.
+2. **The parent assign is `inline_dirty`, a map of field name to the sorted
+   row keys with a dirty card.** The picker sends the whole set, only when it
+   changed (`{ReferencePicker, {:inline_dirty, field, keys}}`); the editor
+   stores it and ORs `inline_dirty != %{}` into `data-dirty`. It never calls
+   `mark_dirty/1`. Only top-level pickers report (a picker inside a flexible
+   item or a reverse field cannot be `edit_inline`).
+3. **"Every exit path" is the existing `UnsavedGuard`.** `beforeunload`, live
+   links and `data-guard-nav` controls all read `data-dirty`, so one attribute
+   covers them. Version restore and the conflict reload are in-page actions, not
+   exits, and are not separately guarded; whether a card's edits survive them
+   is not pinned by a test yet.
+4. **A dirty row cannot be removed or replaced.** Not in the plan: *Remove*,
+   a single-reference pick over it and a dropdown change are refused with
+   *Save or discard the changes to this record before removing it.*, because
+   they would unmount the card and drop its edits without a prompt.
+5. **Expand-on-create (I11)** is decided on the first picker update after the
+   create (`expand_new`), so it opens only if the row is actually connected,
+   the actor may write it, and the field has fewer than 10 cards open.
+6. **The cap of 10 is still per picker.** Counting across fields needs the
+   parent to know each picker's open cards; only dirty state was lifted, so
+   this stays a deviation.
