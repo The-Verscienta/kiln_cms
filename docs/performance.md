@@ -31,8 +31,15 @@ metric "headless API p95 under 50 ms" (#1546).
   (the fetch failed and the caller recomputed outside the per-key deduplication; a sustained
   rate here means every concurrent request is hitting the database at once).
 - **CDN offload.** Published HTML sends `Cache-Control: public, max-age=60,
-  stale-while-revalidate=300`, a content `ETag` (→ `304` on `If-None-Match`), and
-  `Vary: Accept-Language`. The URL is the whole cache key: a public page,
+  stale-while-revalidate=300`, a weak content `ETag` (`W/"…"`), and
+  `Vary: Accept-Language`. The tag is weak because it names what the page is
+  built from, not its bytes, and because Bandit does not compress a response
+  that carries a strong `ETag`: with a weak one, a page goes out gzipped (or
+  `deflate`d) to a client that sends `Accept-Encoding` (#2766).
+  `If-None-Match` is compared the weak way (RFC 9110): the tag with or without
+  its `W/` (a compressing CDN may add or keep it), the tag anywhere in a
+  comma-separated list, or `*` gets a bodyless `304`; anything else gets the
+  page. The URL is the whole cache key: a public page,
   the blog and event indexes (`/<plural>/index.json` too), the stock home and
   a form's page and embed take their language from the path prefix, or the
   site's default without one, never from the visitor's session (#2595). Kiln
@@ -74,11 +81,20 @@ metric "headless API p95 under 50 ms" (#1546).
     on. Menu trees are cached for 5 minutes, so after a linked page is
     renamed or unpublished, revalidations get a `200` once that entry
     expires.
+  - **The site's base URL**, as the request renders it
+    (`KilnCMSWeb.Tenant.base_url/1`: its custom domain if it has one, else
+    `PUBLIC_BASE_URL` for the default site, else its subdomain of
+    `TENANT_BASE_HOST`). Canonical, hreflang and Open Graph URLs are built
+    from it, so a change to the site's slug or custom domain moves every
+    page's tag (it also moves the head generation below), and a node that still renders the
+    old URLs (a host lookup it cached before the change) does so under the
+    old tag, never under the new one (#3194).
   - **The site's head generation**, a token moved on every node by a save of
     branding, code injection, feed settings or a menu; any write to a content
     type or one of its fields (feed and calendar links and the type's label
-    come from the type registry, not the page); and a save of the site's
-    locale fallback settings (they decide the language switcher). Each such
+    come from the type registry, not the page); a save of the site's
+    locale fallback settings (they decide the language switcher); and a
+    change to the site's slug or custom domain. Each such
     save costs every page on the site one `200`; they are rare. A site with
     no such save since a node started carries a token that node drew at
     random, so without sticky sessions two nodes can tag one page

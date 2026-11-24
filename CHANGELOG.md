@@ -120,6 +120,10 @@ else.
 - **A saved view that lost a field, locale, type or sort since it was saved is marked current, with its "no longer applies" message and its Rename / Delete bar, only when you open it, not on the plain list or a list filtered to what it has left; the field-filter builder no longer drops a second condition on one field and operator (#2785, #2741).**
   ([long form](docs/changelog/unreleased.md#content-list-saved-view-matching))
 
+- **Public pages carry a weak `ETag`, so they leave Kiln compressed and a `W/`, listed or `*` `If-None-Match` gets a `304`; a site's slug or custom-domain change moves its pages' `ETag`s and drops its cached sitemaps, feeds and `llms.txt` (#2766, #3194).**
+  Every page's `ETag` changes once on upgrade: one `200` per revalidating client.
+  ([long form](docs/changelog/unreleased.md#public-page-weak-etag))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —
