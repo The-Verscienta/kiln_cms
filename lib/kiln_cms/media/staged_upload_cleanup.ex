@@ -10,6 +10,15 @@ defmodule KilnCMS.Media.StagedUploadCleanup do
   otherwise an unsniffed file that nothing references would sit in the
   private bucket indefinitely, billed and invisible.
 
+  The job row is also the completion's lease (#2724,
+  `KilnCMS.Media.StagedUploadClaim`): a completion claims it in `meta` and
+  holds its `scheduled_at` in the future while it copies the object, so this
+  job is not due, and does not run, until the completion has finished or its
+  lease has lapsed. A finished completion that consumed the object makes the
+  job due at once, and it deletes again — a no-op, or the retry of a delete
+  that failed. The job needs no check of its own: the claim decides when it
+  runs, and it runs only when no completion can still be reading.
+
   A lifecycle rule on the bucket's `direct-uploads/` prefix is a sensible
   backstop for a job lost with its node (docs/media-pipeline.md), but this
   is the mechanism, not the rule.
@@ -22,8 +31,13 @@ defmodule KilnCMS.Media.StagedUploadCleanup do
   Queue the delete of `key` to run `in_seconds` from now, in the store it was
   staged into: the operator's (`profile_id` nil) or the site `org_id`'s own
   (#1559).
+
+  `{:error, reason}` when the job could not be inserted. The caller must not
+  issue the upload then: a completion claims this job, so a token without one
+  could never be completed, and nothing would delete what it staged.
   """
-  @spec schedule(String.t(), pos_integer(), Ash.UUID.t() | nil, Ash.UUID.t() | nil) :: :ok
+  @spec schedule(String.t(), pos_integer(), Ash.UUID.t() | nil, Ash.UUID.t() | nil) ::
+          :ok | {:error, term()}
   def schedule(key, in_seconds, org_id \\ nil, profile_id \\ nil) do
     args = %{key: key, org_id: org_id, profile_id: profile_id}
 
@@ -34,10 +48,10 @@ defmodule KilnCMS.Media.StagedUploadCleanup do
       {:error, reason} ->
         Logger.warning(
           "Direct upload #{key}: staging cleanup was not queued (#{inspect(reason)}); " <>
-            "an uncompleted upload will stay in the private bucket."
+            "the upload was not issued."
         )
 
-        :ok
+        {:error, reason}
     end
   end
 

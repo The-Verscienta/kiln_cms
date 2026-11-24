@@ -41,10 +41,26 @@ defmodule KilnCMS.Media.DirectUpload do
     * **Time** — the upload URL lives `url_ttl/0` seconds, the token
       `token_ttl/0`. `KilnCMS.Media.StagedUploadCleanup` is queued at step 1 to
       delete the staging key once the token has expired, so an upload that is
-      never completed does not sit in the private bucket forever.
+      never completed does not sit in the private bucket forever. If that job
+      can't be queued, step 1 fails: a token without one could be neither
+      completed nor cleaned up.
+    * **Use** — completion first claims that cleanup job
+      (`KilnCMS.Media.StagedUploadClaim`, #2724), and holds the claim, renewed
+      by a heartbeat, until it has finished. While it is held the job is not
+      due, so the delete can't run mid-copy, however long the copy, the
+      metadata strip and the variants take. A claim that is lost all the same
+      (the heartbeat stalled past the lease) aborts the completion with
+      `:claim_lost` rather than ingesting a truncated copy.
 
-  A token is not single-use by any record of its own: completion deletes the
-  staged object, and a second completion finds nothing to ingest.
+  ## Single use
+
+  The claimed job row is the token's record. Only one completion can claim
+  it, so a concurrent second completion is refused with `:not_uploaded`. A
+  completion that found the staged object deletes it and leaves the claim in
+  place, so the token is spent even if that delete failed (the job, now due,
+  retries it). A completion that found nothing (it came before the client's
+  `PUT`) gives the claim back, so the token can still be completed. Once the
+  job has run, nothing is left to claim, and the token is spent.
 
   ## A site's own store (#1559)
 
@@ -56,7 +72,7 @@ defmodule KilnCMS.Media.DirectUpload do
   site's setting afresh, like any upload.
   """
 
-  alias KilnCMS.Media.{Ingest, StagedUploadCleanup, Upload}
+  alias KilnCMS.Media.{Ingest, StagedUploadClaim, StagedUploadCleanup, Upload}
   alias KilnCMS.Storage
 
   @salt "media direct upload"
@@ -89,8 +105,9 @@ defmodule KilnCMS.Media.DirectUpload do
   `"byte_size"`. The caller has already been through `Upload.authorize/2`.
 
   Returns `{:ok, %{token, upload_url, method, headers, expires_at, max_bytes}}`,
-  `{:error, :direct_uploads_unavailable}`, `{:error, :too_large}`, or
-  `{:error, {:invalid, field, message}}`.
+  `{:error, :direct_uploads_unavailable}`, `{:error, :too_large}`,
+  `{:error, {:invalid, field, message}}`, or `{:error, :storage_failed}` when
+  the staging cleanup could not be queued.
   """
   @spec begin(map(), term(), String.t() | nil) :: {:ok, map()} | {:error, term()}
   def begin(params, actor, org_id) do
@@ -100,9 +117,8 @@ defmodule KilnCMS.Media.DirectUpload do
          {:ok, byte_size} <- declared_size(params),
          key = @staging_prefix <> Ecto.UUID.generate(),
          {:ok, %{url: url, headers: headers}} <-
-           Storage.presign_private_put(key, byte_size, @url_ttl, site) do
-      StagedUploadCleanup.schedule(key, @token_ttl + 60, org_id, Storage.profile_id(site))
-
+           Storage.presign_private_put(key, byte_size, @url_ttl, site),
+         :ok <- schedule_cleanup(key, org_id, site) do
       token =
         Phoenix.Token.sign(KilnCMSWeb.Endpoint, @salt, %{
           key: key,
@@ -127,24 +143,34 @@ defmodule KilnCMS.Media.DirectUpload do
 
   @doc """
   Ingest the object a `begin/3` token staged, as `actor` on `org_id`, with
-  `metadata` from `Upload.metadata/1`. The staged object is deleted however
-  this ends.
+  `metadata` from `Upload.metadata/1`. A staged object that was found is
+  deleted however this ends.
 
   Errors: `{:error, :invalid_token}` (bad, expired, or someone else's),
-  `{:error, :not_uploaded}` (nothing at the staging key — never PUT, or
-  already completed), `{:error, :size_mismatch}`, or anything
+  `{:error, :not_uploaded}` (nothing at the staging key — never PUT, already
+  completed, being completed right now, or cleaned up),
+  `{:error, :size_mismatch}`, `{:error, :claim_lost}` (the cleanup job's
+  claim lapsed mid-completion; see "Single use"), or anything
   `Ingest.store_file/3` returns.
   """
   @spec complete(String.t(), Upload.metadata(), term(), String.t() | nil) ::
           {:ok, struct()} | {:error, term()}
   def complete(token, metadata, actor, org_id) when is_binary(token) do
     with {:ok, claims} <- verify(token, actor, org_id),
-         {:ok, staged} <- staged_store(claims, org_id) do
-      try do
-        ingest_staged(claims, staged, metadata, actor, org_id)
-      after
-        Storage.delete_private(claims.key, staged)
-      end
+         {:ok, claim} <- StagedUploadClaim.claim(claims.key) do
+      heartbeat = StagedUploadClaim.start_heartbeat(claim)
+
+      # On a raise the heartbeat still stops, the claim is left to lapse, and
+      # the cleanup job deletes the object when it does.
+      {consumed?, result} =
+        try do
+          consume(claims, heartbeat, metadata, actor, org_id)
+        after
+          StagedUploadClaim.stop_heartbeat(heartbeat)
+        end
+
+      :ok = StagedUploadClaim.settle(claim, consumed?)
+      or_claim_lost(result, heartbeat)
     end
   end
 
@@ -184,20 +210,55 @@ defmodule KilnCMS.Media.DirectUpload do
     end
   end
 
+  # `{consumed?, result}`: consumed once a staged object was found, which is
+  # also when it is deleted, whatever the ingest's outcome.
+  defp consume(claims, heartbeat, metadata, actor, org_id) do
+    with {:ok, staged} <- staged_store(claims, org_id),
+         {:ok, size} <- staged_size(claims.key, staged) do
+      try do
+        {true, ingest_staged(claims, staged, size, heartbeat, metadata, actor, org_id)}
+      after
+        Storage.delete_private(claims.key, staged)
+      end
+    else
+      error -> {false, error}
+    end
+  end
+
   # The staged size is re-read rather than trusted from the token: the signed
   # `content-length` should make them equal, but "should" is the object
-  # store's promise, and the check is one ranged read.
-  defp ingest_staged(claims, staged, metadata, actor, org_id) do
+  # store's promise, and the check is one ranged read. A claim lost during the
+  # copy means the cleanup job may have deleted the object under it, so the
+  # copy is not ingested.
+  defp ingest_staged(claims, staged, size, heartbeat, metadata, actor, org_id) do
     tmp = Path.join(System.tmp_dir!(), "kiln-direct-#{Ecto.UUID.generate()}")
 
     try do
-      with {:ok, size} <- staged_size(claims.key, staged),
-           :ok <- same_size(size, claims.byte_size),
-           :ok <- Storage.copy_to_file(claims.key, tmp, private?: true, at: staged) do
+      with :ok <- same_size(size, claims.byte_size),
+           :ok <- Storage.copy_to_file(claims.key, tmp, private?: true, at: staged),
+           :ok <- still_claimed(heartbeat) do
         Upload.from_file(tmp, claims.filename, metadata, actor, org_id)
       end
     after
       rm(tmp)
+    end
+  end
+
+  # Whatever failed, a lost claim is the reason: the object may have been
+  # deleted under the copy, and the token is spent.
+  defp or_claim_lost({:error, _reason} = error, heartbeat),
+    do: if(StagedUploadClaim.lost?(heartbeat), do: {:error, :claim_lost}, else: error)
+
+  defp or_claim_lost(ok, _heartbeat), do: ok
+
+  defp still_claimed(heartbeat) do
+    if StagedUploadClaim.lost?(heartbeat), do: {:error, :claim_lost}, else: :ok
+  end
+
+  defp schedule_cleanup(key, org_id, site) do
+    case StagedUploadCleanup.schedule(key, @token_ttl + 60, org_id, Storage.profile_id(site)) do
+      :ok -> :ok
+      {:error, _reason} -> {:error, :storage_failed}
     end
   end
 
