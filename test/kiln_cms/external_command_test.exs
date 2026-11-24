@@ -61,6 +61,21 @@ defmodule KilnCMS.ExternalCommandTest do
       assert {_output, 127} = ExternalCommand.run("/nonexistent/kiln-no-such-binary", [], 5_000)
     end
 
+    test "a bare program name raises rather than running a builtin or a PATH lookup" do
+      # `"$@"` would run the shell's own `kill` builtin here.
+      assert_raise ArgumentError, ~r/absolute path/, fn ->
+        ExternalCommand.run("kill", ["-0", "1"], 5_000)
+      end
+    end
+
+    test "a relative path raises" do
+      relative = Path.join(".", Path.basename(@sh))
+
+      assert_raise ArgumentError, ~r/absolute path/, fn ->
+        ExternalCommand.run(relative, ["-c", "exit 0"], 5_000)
+      end
+    end
+
     @tag :tmp_dir
     test "a non-executable file is an exit status, not a raise", %{tmp_dir: dir} do
       script = Path.join(dir, "not-executable")
@@ -118,9 +133,10 @@ defmodule KilnCMS.ExternalCommandTest do
     end
 
     @tag :tmp_dir
-    test "kills the child with no `kill` binary on the PATH", %{tmp_dir: dir} do
-      # The kill is a shell builtin run by the wrapper, so nothing on PATH is
-      # needed. The child uses absolute paths for the same reason.
+    test "the kill needs nothing on the PATH given to the child", %{tmp_dir: dir} do
+      # The kill is a shell builtin run by the wrapper, whose PATH is the
+      # child's. The VM's own PATH is untouched here; ExternalCommandNoPathTest
+      # empties that too. The child uses absolute paths for the same reason.
       pid_file = Path.join(dir, "pid")
 
       assert {_output, :timeout} =
@@ -192,7 +208,7 @@ defmodule KilnCMS.ExternalCommandTest do
     end
 
     @tag :tmp_dir
-    test "kills the child with no `kill` binary on the PATH", %{tmp_dir: dir} do
+    test "the kill needs nothing on the PATH given to the child", %{tmp_dir: dir} do
       pid_file = Path.join(dir, "pid")
 
       caller =

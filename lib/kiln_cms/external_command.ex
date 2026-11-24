@@ -64,6 +64,12 @@ defmodule KilnCMS.ExternalCommand do
       race one last write.
     * A program that leaves the group (`setsid`, daemonizing) is not killed.
       None of the callers' programs do.
+    * The killed processes other than the wrapper are reparented to PID 1,
+      which must reap orphans or they stay zombies. The release image's
+      command runs under `/bin/sh` as PID 1, which reaps them, and so does
+      the VM when it is PID 1 itself. A custom entrypoint that leaves some
+      other program as PID 1 should run an init such as `tini`
+      (`docker run --init`).
 
   ## Behavior a caller can see
 
@@ -74,6 +80,9 @@ defmodule KilnCMS.ExternalCommand do
       the shell's message as the output, rather than raising from
       `Port.open/2`. Every caller resolves `exe` with
       `System.find_executable/1` first.
+    * A relative `exe` raises `ArgumentError`: `"$@"` would look a bare name
+      up as a shell function, a builtin or on `PATH`, so `"kill"` would run
+      the builtin rather than a binary.
     * Like any background job of a non-interactive shell, the program starts
       with SIGINT and SIGQUIT ignored.
     * Each run costs two small extra `sh` processes (the wrapper and the
@@ -130,8 +139,9 @@ defmodule KilnCMS.ExternalCommand do
   @doc """
   Exec `exe` with `args`, giving it at most `timeout_ms` of wall clock.
 
-  `exe` must be an absolute path — a `System.find_executable/1` result. It is
-  run by path, never looked up on `PATH`.
+  `exe` must be an absolute path, such as a `System.find_executable/1` result;
+  anything else raises `ArgumentError`. It is run by path, never looked up as
+  a builtin or on `PATH`.
 
   `timeout_ms` may be `:infinity` for a caller that is bounded some other way
   (an Oban job timeout). That bound kills the *caller*, which closes the port,
@@ -150,6 +160,10 @@ defmodule KilnCMS.ExternalCommand do
   def run(exe, args, timeout_ms, opts \\ [])
       when is_binary(exe) and is_list(args) and is_list(opts) and
              (timeout_ms == :infinity or (is_integer(timeout_ms) and timeout_ms > 0)) do
+    if Path.type(exe) != :absolute do
+      raise ArgumentError, "exe must be an absolute path, got: #{inspect(exe)}"
+    end
+
     port =
       Port.open({:spawn_executable, @shell}, [
         :binary,

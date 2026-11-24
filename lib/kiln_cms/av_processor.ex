@@ -425,6 +425,12 @@ defmodule KilnCMS.AVProcessor do
   # neither can be injected into. `args` carries a server-generated temp path
   # plus fixed flags; even a hostile *filename* would arrive as one argv
   # entry, not as shell syntax.
+  #
+  # Its deadline kill is asynchronous: `:timeout` comes back once the port is
+  # closed, and ffmpeg/ffprobe is SIGKILLed a moment later. So a caller's
+  # `File.rm(out)` right after a timeout can, in that window, run before
+  # ffmpeg's last write to `out`. Every `out` is a fresh UUID name in the temp
+  # dir that nothing else reads.
   defp cmd(exe, args) do
     case ExternalCommand.run(exe, args, @wall_clock_ms) do
       {output, 0} ->
@@ -600,6 +606,7 @@ defmodule KilnCMS.AVProcessor do
         strip_result(out)
 
       {:error, reason} ->
+        # After a timeout ffmpeg may still be dying; see `cmd/2`.
         File.rm(out)
         {:error, reason}
     end

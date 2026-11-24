@@ -10,7 +10,9 @@
   [ADR 0067](0067-a-backup-steps-temporary-files-are-its-own-and-only-their-rename-is-fenced.md)),
   and by [#2848](https://github.com/The-Verscienta/kiln_cms/issues/2848) (the
   self-fence runs in a watchdog apart from the heartbeat's tick; see
-  "Amendment (2026-11-17, #2848)").
+  "Amendment (2026-11-17, #2848)"), and by
+  [#2624](https://github.com/The-Verscienta/kiln_cms/issues/2624) (how the
+  external command is killed; see "Amendment (2026-11-24, #2624)").
 - **References** — [#2218](https://github.com/The-Verscienta/kiln_cms/issues/2218)
   (owner decision 9 of 2026-11-09, in its comments; PR #2537),
   [#2538](https://github.com/The-Verscienta/kiln_cms/issues/2538),
@@ -241,3 +243,10 @@ nodes could then write the same backup.
 
 The thresholds (90 and 180 seconds) and the reclaim are unchanged. Every
 other rule above is unchanged.
+
+## Amendment (2026-11-24, #2624): the external command is killed as a process group
+
+A killed step's `pg_dump`, `tar` or `rclone` is now stopped by a SIGKILL to
+its own process group, sent from a `/bin/sh` wrapper inside that group when
+the port closes, rather than by a pid kill from the VM; see
+`KilnCMS.ExternalCommand`. Every rule above is unchanged.
