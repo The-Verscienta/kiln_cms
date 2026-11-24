@@ -205,6 +205,9 @@ What's new in the 1.12 line, with examples and migration steps: [docs/whats-new/
 - **Ash 3.38.0: a forged keyset pagination cursor (`page[after]`/`page[before]`) could run code or inject SQL through a keyset-paginated read, without signing in (EEF-CVE-2026-124283, GHSA-m5v6-3qwf-6w9r).**
   ([#3272](https://github.com/The-Verscienta/kiln_cms/pull/3272) · [long form](docs/changelog/v1.12.1.md#ash-keyset-cursor-cve))
 
+- **Dependency updates for advisories published during the release: `ex_aws` 2.8.1 and `ex_aws_s3` 2.6.0 (S3 key and bucket-name encoding, redirects on the instance metadata token request, XML and header injection), `db_connection` 2.10.3 (EEF-CVE-2026-133555) and `ash` 3.38.1 (EEF-CVE-2026-120299).**
+  ([#3272](https://github.com/The-Verscienta/kiln_cms/pull/3272) · [long form](docs/changelog/v1.12.1.md#dependency-advisories-1-12-1))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —
