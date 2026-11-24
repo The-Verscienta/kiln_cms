@@ -2,10 +2,10 @@
 
 **Status:** PR 1 of 7 (section 9: model and write path) merged (#2969);
 PR 2 (admin Item types panel, editor cards, field-sync `item_types`) merged
-(#2980); PR 3 (media and reference inside items) merged (#3217); PR 4 (grants)
-merged (#3220); PR 5 (API and typed export) is on branch
-`feat/2282-flexible-content-pr5-api-export`, not yet merged; PRs 6 and 7 are
-plan only. Design record for
+(#2980); PR 3 (media and reference in items) merged (#3217); PR 4 (grants) merged (#3220)
+([ADR 0065](decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md#item-type-grants-pr-4-2282));
+PR 5 (API and typed export) is on branch `feat/2282-flexible-content-pr5-api-export`, not yet merged;
+PRs 6 and 7 are plan only. Design record for
 [#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282), written from a
 read of the model as it stood on 2026-11-10 (after custom-field waves 1–5). Read
 the resources for current behavior and this for *why*. Nothing here is a

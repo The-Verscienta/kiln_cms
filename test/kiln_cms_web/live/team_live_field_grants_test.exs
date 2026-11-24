@@ -136,6 +136,37 @@ defmodule KilnCMSWeb.TeamLiveFieldGrantsTest do
     assert html =~ "Custom fields (all of them)"
   end
 
+  test "a flexible field lists its item types beneath it", %{conn: conn, admin: admin} do
+    flexible = field!(admin, %{name: "sections", label: "Sections", field_type: :flexible})
+
+    for {name, label} <- [{"hero", "Hero"}, {"quote", "Quote"}] do
+      field!(admin, %{
+        name: name,
+        label: label,
+        field_type: :group,
+        flex_of_id: flexible.id,
+        content_type: nil
+      })
+    end
+
+    {:ok, view, html} = live(conn, ~p"/editor/team")
+    post = grant_index(html, "#new-role-form", "post")
+
+    html =
+      view
+      |> form("#new-role-form", %{"role" => %{"grant_mode" => %{post => "only"}}})
+      |> render_change()
+
+    write = ~s(#new-role-form input[name="role[grant_fields][#{post}][]"])
+    keys = values(html, write)
+
+    assert "custom_fields.sections" in keys
+    assert "custom_fields.sections.hero" in keys
+    assert "custom_fields.sections.quote" in keys
+    assert has_element?(view, "li.ml-6 input[value='custom_fields.sections.hero']")
+    refute html =~ "custom_fields.sections.hero (not found)"
+  end
+
   test "ticked custom-field keys round-trip into field_grants", %{conn: conn} do
     {:ok, view, html} = live(conn, ~p"/editor/team")
     post = grant_index(html, "#new-role-form", "post")

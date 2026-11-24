@@ -182,23 +182,49 @@ defmodule KilnCMS.CMS.ContentCopy do
   `values` (a `custom_fields` map) split by what an editor holding write
   `grant` and a read restriction hiding `hidden` may write: `{kept, withheld}`,
   `withheld` the `custom_fields.<name>` entries of the non-blank values left
-  out. A top-level key only — a group is carried whole or not at all.
+  out. A top-level key only — a group is carried whole or not at all; a flexible field may be carried in part, the items of the item types the grant names.
   """
   @spec filter_custom_fields(map(), [String.t()] | nil, [String.t()]) ::
           {map(), [String.t()]}
   def filter_custom_fields(values, grant, hidden) do
     per_key? = FieldAccess.per_key?(grant)
 
-    {kept, dropped} =
-      Enum.split_with(values, fn {key, _value} ->
+    {kept, withheld} =
+      Enum.reduce(values, {[], []}, fn {key, value}, {kept, withheld} ->
         key = to_string(key)
-        key not in hidden and (not per_key? or FieldAccess.writable?(grant, [key]))
+
+        case carry(key, value, grant, hidden, per_key?) do
+          {:keep, value} ->
+            {[{key, value} | kept], withheld}
+
+          :drop ->
+            {kept, if(blank?(value), do: withheld, else: [FieldAccess.key([key]) | withheld])}
+
+          {:partial, items} ->
+            {[{key, items} | kept], [FieldAccess.key([key]) | withheld]}
+        end
       end)
 
-    withheld =
-      for {key, value} <- dropped, not blank?(value), do: FieldAccess.key([to_string(key)])
-
     {Map.new(kept), Enum.sort(withheld)}
+  end
+
+  # What of one top-level key travels: all of it, none of it, or (a flexible
+  # field the editor holds only item types of, #2282) the items of the types
+  # they may write. `{:partial, items}` is a strict, non-empty subset.
+  defp carry(key, value, grant, hidden, per_key?) do
+    cond do
+      key in hidden -> :drop
+      not per_key? or FieldAccess.writable?(grant, [key]) -> {:keep, value}
+      true -> carry_items(key, value, grant)
+    end
+  end
+
+  defp carry_items(key, value, grant) do
+    case FieldAccess.writable_items(grant, key, value) do
+      {:ok, [_ | _] = items} when length(items) == length(value) -> {:keep, items}
+      {:ok, [_ | _] = items} -> {:partial, items}
+      _none -> :drop
+    end
   end
 
   @doc """

@@ -72,6 +72,10 @@ else.
   Re-saving such a record on the previous release fails validation; reads work.
   ([long form](docs/changelog/unreleased.md#flexible-media-reference))
 
+- **A role can be granted single item types of a Flexible content field (`custom_fields.<field>.<item type>`): its editors may edit, add and remove items of that type and no others ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282)).**
+  Reordering needs the whole-field grant; the console shows a partly granted field read-only. No migration.
+  ([long form](docs/changelog/unreleased.md#flexible-item-type-grants))
+
 - **A Flexible content field is now typed in the GraphQL API and in the generated clients: a `FlexibleItemValue` per item, and a `oneOf` union per field in JSON Schema, OpenAPI, TypeScript, Swift, Kotlin and `kiln-types`. `?include=field_definitions.item_types` works on type definitions.**
   Validating consumers: a flexible field's `items` was `{"type": "object"}` and is now a `$ref` to a union of closed item definitions.
   ([long form](docs/changelog/unreleased.md#flexible-typed-export))
