@@ -275,12 +275,20 @@ defmodule KilnCMSWeb.ContentCacheTest do
       assert response(stale, 304) == ""
 
       domain = "moved-#{System.unique_integer([:positive])}.example.org"
+      original = Accounts.default_org()
+
+      # The row rolls back with the sandbox, but the host cache is node-global:
+      # drop what this test resolved, or later tests would get the moved domain
+      # for the default org until the entry's TTL ran out.
+      on_exit(fn ->
+        keys = KilnCMSWeb.Tenant.host_cache_keys(original)
+        keys = keys ++ KilnCMSWeb.Tenant.host_cache_keys(%{original | custom_domain: domain})
+        Enum.each(Enum.uniq(keys), &Cachex.del(KilnCMS.Cache.Hosts.cache_name(), &1))
+      end)
+
       # authorize?: false — an operator's org edit (`mix kiln.org_slugs` calls
       # the same action without an actor); the policy is not what is under test.
-      org =
-        Accounts.update_organization!(Accounts.default_org(), %{custom_domain: domain},
-          authorize?: false
-        )
+      org = Accounts.update_organization!(original, %{custom_domain: domain}, authorize?: false)
 
       canonical = "#{KilnCMSWeb.Tenant.base_url(org)}/#{page.slug}"
       assert canonical =~ domain
@@ -289,6 +297,40 @@ defmodule KilnCMSWeb.ContentCacheTest do
       assert html_response(moved, 200) =~ ~s(rel="canonical" href="#{canonical}")
       assert [etag2] = get_resp_header(moved, "etag")
       refute etag2 == etag
+    end
+
+    # A request that refilled the host cache with the old org just before the
+    # bust (or a node that missed it) renders the old URLs. Its tag must name
+    # them, or once the entry expires the new URLs would carry the same tag and
+    # a client holding the stale body would keep getting 304s.
+    test "a stale host entry serves old URLs under a tag the new ones don't share", %{
+      conn: conn
+    } do
+      page = published_page("Raced")
+      domain = "raced-#{System.unique_integer([:positive])}.example.org"
+      original = Accounts.default_org()
+      keys = KilnCMSWeb.Tenant.host_cache_keys(original)
+      hosts = KilnCMS.Cache.Hosts.cache_name()
+
+      on_exit(fn ->
+        moved = KilnCMSWeb.Tenant.host_cache_keys(%{original | custom_domain: domain})
+        Enum.each(Enum.uniq(keys ++ moved), &Cachex.del(hosts, &1))
+      end)
+
+      # authorize?: false — as above.
+      Accounts.update_organization!(original, %{custom_domain: domain}, authorize?: false)
+
+      # The refill that raced the bust: the old org back under its hosts.
+      Enum.each(keys, &Cachex.put(hosts, &1, original))
+      stale = get(conn, ~p"/#{page.slug}")
+      refute html_response(stale, 200) =~ domain
+      assert [stale_etag] = get_resp_header(stale, "etag")
+
+      # The entry expires; the next render has the new URLs.
+      Enum.each(keys, &Cachex.del(hosts, &1))
+
+      fresh = conn |> put_req_header("if-none-match", stale_etag) |> get(~p"/#{page.slug}")
+      assert html_response(fresh, 200) =~ domain
     end
 
     test "an update that leaves the slug and domain alone keeps the ETag", %{conn: conn} do

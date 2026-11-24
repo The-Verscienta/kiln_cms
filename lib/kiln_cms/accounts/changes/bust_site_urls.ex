@@ -49,14 +49,21 @@ defmodule KilnCMS.Accounts.Changes.BustSiteUrls do
         KilnCMSWeb.Tenant.host_cache_keys(previous) ++ KilnCMSWeb.Tenant.host_cache_keys(org)
       )
 
-    # Hosts first, then the bump. Both go out from this process on the same
-    # ClusterBust topic, and PubSub keeps one sender's messages in order, so no
-    # node sees the new token while it can still resolve the old org struct.
+    # Every node re-resolves the org from the next request. The page ETag names
+    # the rendered base URL itself (ContentController), so a refill that races
+    # this, or a node that misses it, can serve old URLs only under their own
+    # old tag, for at most the host cache's TTL.
     Cache.ClusterBust.broadcast_in(Cache.Hosts.cache_name(), hosts)
     Cache.bump_head_generation(org_id)
-    Cache.bust_sitemap(org_id)
+
+    # The aggregates that bake absolute URLs into a cached body, on every node.
+    Cache.ClusterBust.broadcast([
+      Cache.sitemap_key(org_id),
+      Cache.news_sitemap_key(org_id),
+      Cache.llms_key(org_id)
+    ])
+
     Cache.bust_all_feeds(org_id)
-    Cache.bust_llms(org_id)
     KilnCMS.CDN.purge_site(org_id)
   end
 end
