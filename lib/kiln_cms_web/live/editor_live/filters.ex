@@ -383,7 +383,7 @@ defmodule KilnCMSWeb.EditorLive.Filters do
   longer offered) parses back to nothing or to the default.
 
   `stale?/2` decides the warning and the message; this decides how a view is
-  recognised. A lossy view's re-read params can equal a list it never was
+  recognized. A lossy view's re-read params can equal a list it never was
   (the plain list, or one that filters on what is left), so it is the view
   on screen only when the URL is its own stored params (#2785).
   """

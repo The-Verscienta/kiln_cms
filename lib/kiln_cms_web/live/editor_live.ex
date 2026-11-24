@@ -96,7 +96,7 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:saved_view_params, %{})
      |> assign(:stale_views, MapSet.new())
      # Views that lost something on that re-read, and the URL's own params:
-     # such a view is recognised only by its stored params (#2785).
+     # such a view is recognized only by its stored params (#2785).
      |> assign(:lossy_views, MapSet.new())
      |> assign(:url_params, %{})
      # The add-a-condition form's draft: the field and op picked and the value
@@ -174,7 +174,7 @@ defmodule KilnCMSWeb.EditorLive do
   defp assign_saved_view_params(socket), do: socket
 
   # Whether `view` is the one on screen. A view that lost nothing on a re-read
-  # is recognised by what it applies, as the built-in views are; a lossy one
+  # is recognized by what it applies, as the built-in views are; a lossy one
   # only by its own stored params in the URL, since what it applies may be
   # the plain list or anyone's list that filters on what is left (#2785).
   defp view_on_screen?(view, assigns, current) do
@@ -2993,7 +2993,14 @@ defmodule KilnCMSWeb.EditorLive do
         Map.put(view, :path, params_path(view_params(view, ctx)))
       end)
 
-    active_saved = Enum.find(assigns.saved_views, &view_on_screen?(&1, assigns, current))
+    # A lossy view opened by its own URL wins over any other view whose
+    # re-read params happen to equal what is left of it, wherever the list
+    # sorts them: it is the one the user just opened.
+    active_saved =
+      Enum.find(
+        assigns.saved_views,
+        &(&1.id in assigns.lossy_views and view_on_screen?(&1, assigns, current))
+      ) || Enum.find(assigns.saved_views, &view_on_screen?(&1, assigns, current))
 
     active_default =
       if active_saved && active_saved.id in assigns.lossy_views,

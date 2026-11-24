@@ -444,7 +444,7 @@ defmodule KilnCMSWeb.EditorLiveViewsTest do
     end
   end
 
-  # #2785: a view that loses nothing on a re-read is still recognised by what
+  # #2785: a view that loses nothing on a re-read is still recognized by what
   # it applies, wherever the URL came from; one that lost something only by
   # its own URL.
   describe "which saved view is on screen" do
@@ -501,6 +501,32 @@ defmodule KilnCMSWeb.EditorLiveViewsTest do
       # Not a field: no stale mark and no message.
       refute has_element?(lv, "#view-stale-#{view.id}")
       refute render(lv) =~ "named a field"
+    end
+
+    test "a lossy view opened by its URL is current even when another view sorts first", %{
+      conn: conn
+    } do
+      editor = authed_user(:editor)
+      opts = [actor: editor, tenant: Accounts.default_org_id()]
+
+      # "Drafts" sorts before "Zed" and its params equal what is left of Zed
+      # once its gone locale drops out.
+      drafts = CMS.create_saved_view!(%{name: "Drafts", params: %{"status" => "draft"}}, opts)
+
+      zed =
+        CMS.create_saved_view!(
+          %{name: "Zed", params: %{"status" => "draft", "locale" => "zz"}},
+          opts
+        )
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor")
+      lv |> element("#view-#{zed.id}") |> render_click()
+      assert_patch(lv)
+
+      assert has_element?(lv, "#view-#{zed.id}[aria-current=page]")
+      refute has_element?(lv, "#view-#{drafts.id}[aria-current=page]")
+      assert has_element?(lv, view_bar(zed))
+      refute has_element?(lv, view_bar(drafts))
     end
   end
 end
