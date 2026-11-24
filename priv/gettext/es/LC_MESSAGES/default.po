@@ -1386,6 +1386,21 @@ msgstr "%{sentence} Cada %{type} los muestra como «%{label}»."
 
 #: lib/kiln_cms_web/field_selection.ex
 #, elixir-autogen, elixir-format
+msgid "%{sentence} Editors can narrow the search by category and tag."
+msgstr "%{sentence} Los editores pueden acotar la búsqueda por categoría y etiqueta."
+
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "%{sentence} Editors can narrow the search by category."
+msgstr "%{sentence} Los editores pueden acotar la búsqueda por categoría."
+
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "%{sentence} Editors can narrow the search by tag."
+msgstr "%{sentence} Los editores pueden acotar la búsqueda por etiqueta."
+
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
 msgid "%{sentence} Editors can't add new records from here."
 msgstr "%{sentence} Los editores no pueden añadir registros nuevos desde aquí."
 
@@ -1452,6 +1467,11 @@ msgstr "Registros de %{type} %{states}"
 #, elixir-autogen, elixir-format
 msgid "%{states} records"
 msgstr "Registros %{states}"
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "%{status} (filtered)"
+msgstr "%{status} (filtrado)"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
@@ -3420,6 +3440,11 @@ msgstr "Dirección eliminada: puede volver a recibir correo."
 msgid "Address removed. This site can mail it again."
 msgstr "Dirección eliminada. Este sitio puede volver a escribirle."
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Adds a select beside the picker's search box, so an editor can look through one category or tag while picking. It does not change what the field accepts. A field shown as a dropdown uses it only when it falls back to search."
+msgstr "Añade una lista junto al cuadro de búsqueda del selector, para que un editor pueda recorrer una sola categoría o etiqueta mientras elige. No cambia lo que el campo acepta. Un campo mostrado como lista desplegable solo lo usa cuando vuelve a la búsqueda."
+
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #, elixir-autogen, elixir-format
 msgid "Adds detail drawn from this block and the rest of the page."
@@ -3669,6 +3694,7 @@ msgstr "Todos los atajos para escribir texto"
 msgid "All time"
 msgstr "Desde siempre"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/calendar_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/organize_live.ex
@@ -4059,6 +4085,7 @@ msgstr "Respuestas en /api/ask"
 msgid "Any"
 msgstr "Cualquiera"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/field_selection_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -4115,6 +4142,7 @@ msgstr "Cualquier estado"
 msgid "Any status"
 msgstr "Cualquier estado"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -4410,6 +4438,11 @@ msgstr "Pide a un administrador del sitio que te envíe una nueva."
 #, elixir-autogen, elixir-format
 msgid "Ask visitors to complete a human-verification check"
 msgstr "Pedir a los visitantes que completen una comprobación de verificación humana"
+
+#: lib/kiln_cms_web/live/safety_fields_live.ex
+#, elixir-autogen, elixir-format
+msgid "Ask why on every change"
+msgstr "Preguntar el motivo de cada cambio"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
@@ -5367,6 +5400,7 @@ msgstr "No se puede verificar"
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
@@ -5501,6 +5535,8 @@ msgid "Categories"
 msgstr "Categorías"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#: lib/kiln_cms_web/components/field_selection_components.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/search_palette_live.ex
@@ -6090,6 +6126,7 @@ msgstr "Borrar %{field}"
 msgid "Clear %{group} events"
 msgstr "Borrar los eventos de %{group}"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -9221,6 +9258,11 @@ msgstr "Editar el bloque %{n} en la página"
 msgid "Edit destination: %{kind}"
 msgstr "Editar destino: %{kind}"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Edit details"
+msgstr "Editar detalles"
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Edit field %{label}"
@@ -10968,6 +11010,11 @@ msgstr "Para cada tipo de contenido, qué campos pueden cambiar en los documento
 #, elixir-autogen, elixir-format
 msgid "For each content type, which fields this member may change on existing documents. Only these fields replaces their custom role's grant for that type, and No fields overrides it. Creating documents and workflow steps are not affected, and any grant on a type also refuses restoring an old version of it."
 msgstr "Para cada tipo de contenido, qué campos puede cambiar este miembro en los documentos existentes. Solo estos campos sustituye el permiso de su rol personalizado para ese tipo, y Ningún campo lo anula. Crear documentos y los pasos del flujo de trabajo no se ven afectados, y cualquier permiso sobre un tipo también rechaza restaurar una versión anterior de él."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "For example: dose corrected to match the cited source"
+msgstr "Por ejemplo: dosis corregida según la fuente citada"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -13381,6 +13428,11 @@ msgstr "Dejar que los editores creen lo que escriben"
 msgid "Let editors edit the related record here"
 msgstr "Permitir que los editores editen aquí el registro relacionado"
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Let editors narrow the search by"
+msgstr "Permitir a los editores acotar la búsqueda por"
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Let editors publish"
@@ -14495,6 +14547,11 @@ msgstr "Da nombre al registro (la búsqueda lo encuentra por este valor)"
 msgid "Narrow fields of the same section sit side by side in the editor; on a small screen each takes the full row."
 msgstr "Los campos estrechos de una misma sección se colocan uno al lado del otro en el editor; en una pantalla pequeña cada uno ocupa la fila completa."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Narrow the results"
+msgstr "Acotar los resultados"
+
 #: lib/kiln_cms_web/components/field_selection_components.ex
 #, elixir-autogen, elixir-format
 msgid "Narrow what editors are offered and what a save may add. It never shows a record someone cannot already read, and it binds admins too. Leave everything empty to allow any record."
@@ -15237,6 +15294,11 @@ msgstr "Ya no está disponible — puede que se haya eliminado."
 #, elixir-autogen, elixir-format
 msgid "No matches for “%{query}”."
 msgstr "No hay coincidencias para «%{query}»."
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "No matches with these filters."
+msgstr "No hay resultados con estos filtros."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -20277,6 +20339,7 @@ msgstr "Guardar destino"
 msgid "Save detail"
 msgstr "Guardar detalle"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save details"
@@ -20410,6 +20473,11 @@ msgstr "Detalles guardados."
 msgid "Saved on its own"
 msgstr "Se guarda por separado"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Saved the details in “%{title}”."
+msgstr "Detalles guardados en «%{title}»."
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saved the view “%{name}”."
@@ -20420,6 +20488,11 @@ msgstr "Se guardó la vista «%{name}»."
 #, elixir-autogen, elixir-format
 msgid "Saved to the working copy"
 msgstr "Guardado en la copia de trabajo"
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Saved to the working copy of “%{title}”."
+msgstr "Guardado en la copia de trabajo de «%{title}»."
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
@@ -20525,6 +20598,16 @@ msgstr "Al guardar esto, el contenido de este sitio se envía a la URL de abajo.
 #, elixir-autogen, elixir-format
 msgid "Saving…"
 msgstr "Guardando…"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Say why you made this change, then save again."
+msgstr "Indica por qué hiciste este cambio y vuelve a guardar."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Say why you made this change."
+msgstr "Indica por qué hiciste este cambio."
 
 #: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
@@ -22957,6 +23040,8 @@ msgstr "Valor TXT"
 msgid "Tab: one tab of the type's tab set"
 msgstr "Pestaña: una pestaña del conjunto de pestañas del tipo"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#: lib/kiln_cms_web/components/field_selection_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
@@ -25857,6 +25942,16 @@ msgstr "Este sitio no usa Meilisearch. La búsqueda usa la búsqueda integrada, 
 msgid "This site follows the operator defaults again."
 msgstr "Este sitio vuelve a seguir los valores del operador."
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "This site has more than %{count} categories, so the picker will not show the category select."
+msgstr "Este sitio tiene más de %{count} categorías, así que el selector no mostrará la lista de categorías."
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "This site has more than %{count} tags, so the picker will not show the tag select."
+msgstr "Este sitio tiene más de %{count} etiquetas, así que el selector no mostrará la lista de etiquetas."
+
 #: lib/kiln_cms/security/posture/checks/second_factor.ex
 #, elixir-autogen, elixir-format
 msgid "This site has no administrators or editors of its own."
@@ -26309,6 +26404,11 @@ msgstr "Demasiados intentos: inténtalo de nuevo en %{seconds} segundos."
 msgid "Too many attempts. Wait a few minutes and try again."
 msgstr "Demasiados intentos. Espere unos minutos e inténtelo de nuevo."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Too many categories to list — search by title instead."
+msgstr "Demasiadas categorías para listar: busca por título."
+
 #: lib/kiln_cms_web/plugs/rate_limit.ex
 #, elixir-autogen, elixir-format
 msgid "Too many requests"
@@ -26323,6 +26423,11 @@ msgstr "Demasiadas solicitudes. Inténtalo de nuevo en %{seconds} s."
 #, elixir-autogen, elixir-format
 msgid "Too many suggestions requested. Try again in %{seconds}s."
 msgstr "Demasiadas sugerencias solicitadas. Inténtelo de nuevo en %{seconds} s."
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Too many tags to list — search by title instead."
+msgstr "Demasiadas etiquetas para listar: busca por título."
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
@@ -26625,6 +26730,7 @@ msgstr "Cambió el requisito de inicio de sesión en dos pasos"
 msgid "Two-step sign-in settings saved."
 msgstr "Ajustes del inicio de sesión en dos pasos guardados."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/calendar_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -26767,6 +26873,7 @@ msgstr "Poco organizado"
 msgid "Undo"
 msgstr "Deshacer"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -28150,10 +28257,25 @@ msgstr "Años completos desde una fecha, como la edad de una persona. Se actuali
 msgid "Why retention skips"
 msgstr "Por qué se omite la retención"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Why this change? Asked when you publish your changes."
+msgstr "¿Por qué este cambio? Se pide al publicar los cambios."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Why this change? Asked when you save."
+msgstr "¿Por qué este cambio? Se pide al guardar."
+
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "Why this was blocked"
 msgstr "Por qué se bloqueó"
+
+#: lib/kiln_cms_web/live/content_editor/inspector_history_component.ex
+#, elixir-autogen, elixir-format
+msgid "Why: %{note}"
+msgstr "Motivo: %{note}"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -30673,6 +30795,11 @@ msgstr "correcto"
 msgid "on"
 msgstr "activada"
 
+#: lib/kiln_cms_web/live/safety_fields_live.ex
+#, elixir-autogen, elixir-format
+msgid "on a draft's Save and on Publish changes, kept in History"
+msgstr "al guardar un borrador y al publicar cambios; se conserva en el historial"
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "on behalf of %{who}"
@@ -31570,6 +31697,11 @@ msgid "“%{title}” can't be deleted for good: 1 record still links to it thro
 msgid_plural "“%{title}” can't be deleted for good: %{count} records still link to it through “%{field}”, which doesn't allow that. Remove the links first, or change the field's setting under Fields."
 msgstr[0] "“%{title}” no se puede eliminar definitivamente: 1 registro aún lo enlaza mediante “%{field}”, que no lo permite. Quita primero el enlace o cambia el ajuste del campo en Campos."
 msgstr[1] "“%{title}” no se puede eliminar definitivamente: %{count} registros aún lo enlazan mediante “%{field}”, que no lo permite. Quita primero los enlaces o cambia el ajuste del campo en Campos."
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "“%{title}” no longer connects to this record."
+msgstr "«%{title}» ya no está conectado a este registro."
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format

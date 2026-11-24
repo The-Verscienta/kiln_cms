@@ -116,7 +116,9 @@ defmodule KilnCMS.CMS.ReverseFields do
   @doc """
   One page of the records connecting to `target` through `reverse`, as the
   caller (`:actor`, `:tenant`) may see them, ordered by title — and how many
-  there are in all. `:offset` and `:limit` (default 10) pick the page.
+  there are in all. `:offset` and `:limit` (default 10) pick the page, and
+  `:load` (default none) is loaded on each source in the same read, as the
+  caller — the editor's row thumbnails (#3223).
 
   A connection is listed once it is **live** (an edge) or **pending**: a
   published source whose working copy connects the target, not yet published
@@ -220,7 +222,8 @@ defmodule KilnCMS.CMS.ReverseFields do
               filter: filter,
               sort: [title: :asc, id: :asc],
               offset: Keyword.get(opts, :offset, 0),
-              limit: Keyword.get(opts, :limit, 10)
+              limit: Keyword.get(opts, :limit, 10),
+              load: Keyword.get(opts, :load, [])
             ]
           ]
       )
@@ -357,6 +360,60 @@ defmodule KilnCMS.CMS.ReverseFields do
     edit(source, reverse, opts, fn items ->
       {:ok, Enum.reject(items, &(&1["id"] == target.id))}
     end)
+  end
+
+  @doc """
+  Change the link-field values (R3) of `target`'s connection in `source`'s
+  field, from the target's side: the same write as `connect/4`, an edit of
+  the **source** (its update, or its working copy's save when published).
+  Only the field's own link fields are taken from `values` (string keys); a
+  link field left out keeps what the connection stored, and `""` clears it,
+  as on the source's own editor. Nothing is written when nothing changed.
+
+  `{:error, :not_connected}` when `source` no longer connects `target` (it
+  was removed since the list was read).
+  """
+  @spec set_link(struct(), t(), struct(), map(), keyword()) ::
+          {:ok, struct()} | {:error, term()}
+  def set_link(target, reverse, source, values, opts) when is_map(values) do
+    names = reverse.definition |> FieldDefinition.link_fields() |> Enum.map(& &1.name)
+    link = Map.take(values, names)
+
+    edit(source, reverse, opts, &put_link(&1, target.id, link))
+  end
+
+  # `items` with `link` merged into `id`'s connection — unchanged (so nothing
+  # is written) when it holds those values already.
+  defp put_link(items, id, link) do
+    case find_item(items, id) do
+      nil ->
+        {:error, :not_connected}
+
+      %{item: item, position: index} ->
+        stored = Map.get(item, "link") || %{}
+        merged = Map.merge(stored, link)
+        {:ok, List.replace_at(items, index, Map.put(item, "link", merged))}
+    end
+  end
+
+  @doc """
+  The link-field values of `target`'s connection in `source`'s field, as the
+  source's editor shows them: its working copy over the live row, so a
+  pending change is what an edit starts from. `%{}` when not connected.
+  """
+  @spec link_values(struct(), t(), struct()) :: map()
+  def link_values(target, reverse, source) do
+    source
+    |> WorkingCopy.view()
+    |> Map.get(:custom_fields, %{})
+    |> Kernel.||(%{})
+    |> Map.get(reverse.field)
+    |> items()
+    |> find_item(target.id)
+    |> case do
+      %{item: item} -> Map.get(item, "link") || %{}
+      nil -> %{}
+    end
   end
 
   @doc """

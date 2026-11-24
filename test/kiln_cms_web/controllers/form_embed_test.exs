@@ -114,6 +114,9 @@ defmodule KilnCMSWeb.FormEmbedTest do
       html = html_response(conn, 200)
       assert html =~ "Merci!"
       assert String.ends_with?(csp(conn), "frame-ancestors 'self' https://embedder.test")
+      # The embed policy replaces the pipeline's nonce policy outright (#2715):
+      # the iframe document has no inline script to run.
+      refute csp(conn) =~ "nonce-"
       # Loads the height reporter so the iframe shrinks to the short message
       # rather than keeping the (much taller) form's height.
       assert html =~ "/embed-frame.js"
@@ -160,11 +163,14 @@ defmodule KilnCMSWeb.FormEmbedTest do
     test "a refused embedded submission re-renders the form inside the iframe", %{conn: conn} do
       form = form!()
 
-      html =
+      conn =
         conn
         |> unique_ip()
         |> post("/forms/#{form.slug}", %{"email" => "not-an-email", "_kiln_embed" => "1"})
-        |> html_response(422)
+
+      html = html_response(conn, 422)
+      assert String.ends_with?(csp(conn), "frame-ancestors 'self' https://embedder.test")
+      refute csp(conn) =~ "nonce-"
 
       assert html =~ ~s(action="/forms/#{form.slug}")
       assert html =~ ~s(value="not-an-email")

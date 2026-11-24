@@ -11,7 +11,21 @@
 // "Add new Page" (create and connect) renders its small form inside the
 // editor form, so Enter in it must create rather than save the document, and
 // Escape must close it — the hook again.
-const { test, expect, signInAsAdmin, newDraftContent, saveDraft, save } = require("./fixtures");
+//
+// The filters while picking (#3224) are selects inside the editor form with a
+// `phx-change` of their own: changing one must narrow the results without
+// the form's own change event marking the document dirty.
+const {
+  test,
+  expect,
+  signInAsAdmin,
+  newDraftContent,
+  saveDraft,
+  save,
+  createTag,
+  deleteTagByName,
+  holdsAcross,
+} = require("./fixtures");
 
 test.describe("reference picker", () => {
   /** @type {string} */
@@ -205,6 +219,57 @@ test.describe("reference picker", () => {
     await page.reload();
     await expect.poll(titles).toEqual([`Typed ${stamp}`]);
   });
+  test("narrow the search by a tag without dirtying the document (#3224)", async ({ page }) => {
+    // Ungrouped, so deleted again in `finally`: a leftover ungrouped tag would
+    // apply to every content type (see tag_picker_midsession.spec.js).
+    const tag = `e2e-3224-${stamp}`;
+    try {
+      await page.goto("/editor/taxonomy");
+      await createTag(page, tag);
+
+      pageIds.push(await newDraftContent(page, "page"));
+      await saveDraft(page, { title: `Rowan ${stamp}`, slug: `rowan-${stamp}` });
+
+      await createTypeWithReferences(page);
+
+      // The fields admin's "Let editors narrow the search by" step.
+      const field = `${name}_see`;
+      const row = page.locator('li[id^="field-"]').filter({ has: page.locator(`code:text-is("${field}")`) });
+      await row.getByRole("button", { name: /Edit/ }).first().click();
+      await page.locator('[id^="edit-field-rules-"][id$="-selection-filter-tag"]').check();
+      await page.locator('form[id^="edit-field-"] button[type=submit]').first().click();
+      await expect(page.locator("#flash-info")).toContainText("Saved.");
+
+      await newDraftContent(page, name);
+      await saveDraft(page, { title: `Refs ${stamp}`, slug: `refs-${stamp}` });
+
+      const form = page.locator("form[data-dirty]");
+      const dirty = () => form.getAttribute("data-dirty");
+      await expect(form).toHaveAttribute("data-dirty", "false");
+
+      const search = page.locator(`#custom-field-${field}-search`);
+      const listbox = page.locator(`#custom-field-${field}-listbox`);
+      await search.click();
+      await search.pressSequentially(stamp);
+      await expect(listbox.getByRole("option")).toHaveCount(1);
+
+      // The page carries no tag: choosing one empties the results.
+      await page.locator(`#custom-field-${field}-filter-tag`).selectOption({ label: tag });
+      await expect(page.locator(`#custom-field-${field}-filters-empty`)).toContainText(
+        "No matches with these filters.",
+      );
+      await holdsAcross(page, dirty, "false");
+
+      // Clear filters brings the page back and focus to the search.
+      await page.locator(`#custom-field-${field}-filters-clear`).click();
+      await expect(listbox.getByRole("option")).toHaveCount(1);
+      await expect(search).toBeFocused();
+      await holdsAcross(page, dirty, "false");
+    } finally {
+      await deleteTagByName(page, tag);
+    }
+  });
+
   test("edit a connected record in its card from the keyboard (#2283)", async ({ page }) => {
     pageIds.push(await newDraftContent(page, "page"));
     await saveDraft(page, { title: `Linden ${stamp}`, slug: `linden-${stamp}` });

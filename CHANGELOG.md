@@ -58,6 +58,8 @@ else.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` for change notes: a nullable `change_note` column on each `*_versions` table and `site_editorial_settings.change_note_types`. An overlay with its own content types runs `mix ash.codegen` for its `*_versions` tables, as for `change_severity`.**
+  ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255) · [long form](docs/changelog/unreleased.md#change-note-upgrade))
 - **Run `mix ash.migrate`: one additive migration (`edit_inline`, a nullable boolean on `field_definitions`). Older releases never read the column, so rolling the pin back is safe.**
   ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283) · [long form](docs/changelog/unreleased.md#edit-inline-option-upgrade))
 
@@ -78,9 +80,23 @@ else.
   No migration.
   ([long form](docs/changelog/unreleased.md#reference-add-new-off))
 
+- **Editors can narrow a reference field's search while picking: a Type select on any field with several linked types, and Category and Tag selects where the admin ticks "Let editors narrow the search by" (stored as `"filters"` in the field's `selection`); a filter only narrows ([#3224](https://github.com/The-Verscienta/kiln_cms/issues/3224)).**
+  No migration.
+  ([long form](docs/changelog/unreleased.md#reference-picker-filters))
+
+- **Edits can say why: a `change_note` on update, publish and Publish changes is kept on the version and shown in History; a site can make the editor ask for one per content type ("Ask why on every change" on the Safety fields page) ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255)).**
+  ([long form](docs/changelog/unreleased.md#change-note))
+
+- **A reverse field can edit a connection's link fields: "Edit details" on a row opens its link values, and "Save details" saves them as an edit of the source record, as connect and disconnect already do ([#3243](https://github.com/The-Verscienta/kiln_cms/issues/3243)).**
+  ([long form](docs/changelog/unreleased.md#reverse-link-edit))
+
 - **A role can be granted single item types of a Flexible content field (`custom_fields.<field>.<item type>`): its editors may edit, add and remove items of that type and no others ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282)).**
   Reordering needs the whole-field grant; the console shows a partly granted field read-only. No migration.
   ([long form](docs/changelog/unreleased.md#flexible-item-type-grants))
+
+- **The reference picker shows each record's featured image as a small thumbnail in search results, picked rows and reverse-field rows ([#3265](https://github.com/The-Verscienta/kiln_cms/pull/3265)).**
+  Always on; the generated `thumb` variant, a video's poster, or an original already that small, never a large original. No migration.
+  ([long form](docs/changelog/unreleased.md#reference-picker-thumbnails))
 
 - **A Flexible content field is now typed in the GraphQL API and in the generated clients: a `FlexibleItemValue` per item, and a `oneOf` union per field in JSON Schema, OpenAPI, TypeScript, Swift, Kotlin and `kiln-types`. `?include=field_definitions.item_types` works on type definitions.**
   Validating consumers: a flexible field's `items` was `{"type": "object"}` and is now a `$ref` to a union of closed item definitions.
@@ -89,6 +105,11 @@ else.
 - **Conditional fields have four text tests: "contains", "does not contain", "starts with" and "ends with", ignoring case, for text, URL and choice fields ([#3270](https://github.com/The-Verscienta/kiln_cms/pull/3270)).**
   No migration.
   ([long form](docs/changelog/unreleased.md#condition-text-ops))
+
+### Fixed
+
+- **A form's thank-you, not-found and refused (422) pages and the `/newsletter` sign-up and unsubscribe pages follow the visitor's light or dark theme, and with browser storage blocked the console still loads and the theme still applies, just isn't remembered (#2715, #2773).**
+  ([long form](docs/changelog/unreleased.md#theme-script-everywhere))
 
 ## [1.12.0] - 2026-11-21
 

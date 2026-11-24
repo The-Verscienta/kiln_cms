@@ -103,6 +103,41 @@ defmodule KilnCMSWeb.ConnCase do
   end
 
   @doc """
+  Assert `conn` answered `status` with HTML whose inline scripts a browser
+  runs under the response's own policy (#2715): `script-src` names a nonce,
+  and every executable inline `<script>` in `<head>` (no `src`, no data
+  `type` such as JSON-LD) carries exactly that nonce. The root layout's theme
+  script is one of them, so this is the check that a page honors the
+  visitor's light/dark theme. Returns the HTML.
+  """
+  @spec assert_inline_scripts_run(Plug.Conn.t(), pos_integer()) :: String.t()
+  def assert_inline_scripts_run(conn, status) do
+    html = Phoenix.ConnTest.html_response(conn, status)
+
+    [policy] = Plug.Conn.get_resp_header(conn, "content-security-policy")
+
+    [_, nonce] =
+      Regex.run(~r/script-src [^;]*'nonce-([^']+)'/, policy) ||
+        ExUnit.Assertions.flunk("no nonce in script-src: #{policy}")
+
+    inline =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("head script:not([src]):not([type])")
+
+    count = Enum.count(inline)
+
+    ExUnit.Assertions.assert(count >= 1, "no inline script in <head>")
+
+    ExUnit.Assertions.assert(
+      LazyHTML.attribute(inline, "nonce") == List.duplicate(nonce, count),
+      "an inline <head> script does not carry the policy's nonce #{nonce}"
+    )
+
+    html
+  end
+
+  @doc """
   A bare `Phoenix.ConnTest.build_conn/0` peering from loopback — the shared
   rate-limit bucket. Opt in only when a test *needs* every request to share one
   address (e.g. proving a per-account budget is not per-IP).

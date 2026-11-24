@@ -163,32 +163,42 @@
     </script>
     <script nonce={assigns[:csp_nonce]}>
       (() => {
+        // Every storage call goes through this (#2773): with site data blocked
+        // the `localStorage` getter itself throws, and an unguarded read here
+        // left the page with no theme and no listeners. Reads answer null, and
+        // the theme still applies for this page view.
+        const store = {
+          get: (key) => { try { return localStorage.getItem(key); } catch (_) { return null; } },
+          set: (key, value) => { try { localStorage.setItem(key, value); } catch (_) {} },
+          remove: (key) => { try { localStorage.removeItem(key); } catch (_) {} },
+        };
+
         const systemTheme = () => matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 
         const setTheme = (theme) => {
           if (theme === "system") {
-            localStorage.removeItem("phx:theme");
+            store.remove("phx:theme");
             document.documentElement.setAttribute("data-theme", systemTheme());
             document.documentElement.setAttribute("data-theme-source", "system");
           } else {
-            localStorage.setItem("phx:theme", theme);
+            store.set("phx:theme", theme);
             document.documentElement.setAttribute("data-theme", theme);
             document.documentElement.setAttribute("data-theme-source", "user");
           }
         };
         if (!document.documentElement.hasAttribute("data-theme")) {
-          setTheme(localStorage.getItem("phx:theme") || "system");
+          setTheme(store.get("phx:theme") || "system");
         }
         // The console sidebar's icon rail (layouts.ex `console/1`), restored
         // here rather than in app.js so a collapsed rail never paints expanded.
-        if (localStorage.getItem("kiln:sidebar") === "collapsed") {
+        if (store.get("kiln:sidebar") === "collapsed") {
           document.documentElement.setAttribute("data-sidebar", "collapsed");
         }
         // Which nav sections are collapsed (#1319), for the same reason: a
         // section that painted open and then snapped shut would be worse than
         // one that never collapsed. A space-separated list of group keys, read
         // by `[data-nav-collapsed~="..."]` rules in app.css.
-        const navCollapsed = localStorage.getItem("kiln:nav-collapsed");
+        const navCollapsed = store.get("kiln:nav-collapsed");
         if (navCollapsed) {
           document.documentElement.setAttribute("data-nav-collapsed", navCollapsed);
         }

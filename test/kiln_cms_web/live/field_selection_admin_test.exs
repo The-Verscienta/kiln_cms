@@ -379,6 +379,115 @@ defmodule KilnCMSWeb.FieldSelectionAdminTest do
     end
   end
 
+  describe "editor filters (#3224)" do
+    test "ticking them saves selection.filters in a fixed order and reads it back", ctx do
+      field = reference!(ctx.admin)
+      lv = open_edit(build_conn(), ctx.admin, field)
+      step = "#edit-field-rules-#{field.id}-selection"
+
+      assert has_element?(lv, "#{step}-filters legend", "Let editors narrow the search by")
+      refute has_element?(lv, "#{step}-filter-tag[checked]")
+
+      html =
+        lv
+        |> form("#edit-field-#{field.id}",
+          field_definition: %{sel: %{filters: ["tag", "category"]}}
+        )
+        |> render_change()
+
+      assert html =~ "Editors can narrow the search by category and tag."
+
+      lv |> form("#edit-field-#{field.id}") |> render_submit()
+
+      assert stored(field) == %{"filters" => ["category", "tag"]}
+
+      lv = open_edit(build_conn(), ctx.admin, field)
+      assert has_element?(lv, "#{step}-filter-category[checked]")
+      assert has_element?(lv, "#{step}-filter-tag[checked]")
+    end
+
+    test "one filter reads as its own sentence and keeps the other conditions", ctx do
+      field = reference!(ctx.admin, %{selection: %{"states" => ["published"]}})
+      lv = open_edit(build_conn(), ctx.admin, field)
+
+      html =
+        lv
+        |> form("#edit-field-#{field.id}",
+          field_definition: %{sel: %{states: ["published"], filters: ["tag"]}}
+        )
+        |> render_change()
+
+      assert html =~ "Published Page records, newest first. Editors can narrow the search by tag."
+
+      lv |> form("#edit-field-#{field.id}") |> render_submit()
+      assert stored(field) == %{"states" => ["published"], "filters" => ["tag"]}
+    end
+
+    test "unticking removes the key, and a selection left empty is cleared", ctx do
+      field =
+        reference!(ctx.admin, %{selection: %{"sort" => "title", "filters" => ["category"]}})
+
+      lv = open_edit(build_conn(), ctx.admin, field)
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{sel: %{filters: []}})
+      |> render_submit()
+
+      assert stored(field) == %{"sort" => "title"}
+
+      field = reference!(ctx.admin, %{selection: %{"filters" => ["category", "tag"]}})
+      lv = open_edit(build_conn(), ctx.admin, field)
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{sel: %{filters: []}})
+      |> render_submit()
+
+      assert stored(field) == nil
+    end
+
+    test "a forged filter value is refused by the resource and saves nothing", ctx do
+      field = reference!(ctx.admin)
+      lv = open_edit(build_conn(), ctx.admin, field)
+      id = field.id
+
+      # Not a box the form shows: the hand-sent value reaches the resource.
+      html =
+        lv
+        |> element("#edit-field-#{id}")
+        |> render_submit(%{field_definition: %{sel: %{filters: ["category", "author"]}}})
+
+      assert html =~ "filters must be a list among category, tag"
+      assert has_element?(lv, "#edit-field-rules-#{id}-selection p.text-error")
+      assert stored(field) == nil
+    end
+
+    test "warns when the site has more tags than the picker's select lists", ctx do
+      cap = KilnCMS.CMS.ReferenceSelection.filter_option_cap()
+
+      for n <- 1..cap do
+        CMS.create_tag!(%{name: "Many #{n}", slug: "many-#{n}-#{uniq()}"}, actor: ctx.admin)
+      end
+
+      field = reference!(ctx.admin, %{selection: %{"filters" => ["category", "tag"]}})
+      lv = open_edit(build_conn(), ctx.admin, field)
+      step = "#edit-field-rules-#{field.id}-selection"
+
+      assert has_element?(
+               lv,
+               "#{step}-filter-tag-too-many",
+               "more than #{cap} tags, so the picker will not show the tag select"
+             )
+
+      refute has_element?(lv, "#{step}-filter-category-too-many")
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{sel: %{filters: ["category"]}})
+      |> render_change()
+
+      refute has_element?(lv, "#{step}-filter-tag-too-many")
+    end
+  end
+
   describe "FieldSelection.unpack/3" do
     @catalog %{"page" => [%{name: "fsa2_level", field_type: :integer}]}
 
@@ -408,6 +517,18 @@ defmodule KilnCMSWeb.FieldSelectionAdminTest do
       }
 
       assert %{"selection" => nil} = FieldSelection.unpack(params, ["page"], @catalog)
+    end
+
+    test "stores filters in a fixed order and passes an unknown one on" do
+      unpack = fn filters ->
+        %{"field_type" => "reference", "sel" => %{"filters" => filters}}
+        |> FieldSelection.unpack(["page"], @catalog)
+        |> Map.get("selection")
+      end
+
+      assert unpack.(["tag", "", "category", "tag"]) == %{"filters" => ["category", "tag"]}
+      assert unpack.(["author", "tag"]) == %{"filters" => ["tag", "author"]}
+      assert unpack.([""]) == nil
     end
   end
 end

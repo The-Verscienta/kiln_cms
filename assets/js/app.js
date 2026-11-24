@@ -41,6 +41,7 @@ import {FieldConditions} from "./field_conditions"
 import {BodyImageUploader} from "./body_image_uploader"
 import {watchLiveness} from "./liveness"
 import {watchConnectionNotices} from "./connection_notice"
+import {safeStorage} from "./safe_storage"
 
 const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
 
@@ -1159,6 +1160,11 @@ const queueNavSync = () => {
 // Navigating moves aria-current, which changes which sections read as open.
 window.addEventListener("phx:page-loading-stop", syncNavGroups)
 
+// Blocked storage must not stop this file (#2773): LiveSocket reads both stores
+// in its constructor, and the console toggles below write to the local one.
+const localStore = safeStorage("localStorage")
+const sessionStore = safeStorage("sessionStorage")
+
 const toggleNavGroup = key => {
   const collapsed = collapsedGroups()
   const next = collapsed.includes(key)
@@ -1167,9 +1173,9 @@ const toggleNavGroup = key => {
   if (next.length) document.documentElement.dataset.navCollapsed = next.join(" ")
   else delete document.documentElement.dataset.navCollapsed
   try {
-    localStorage.setItem("kiln:nav-collapsed", next.join(" "))
+    localStore.setItem("kiln:nav-collapsed", next.join(" "))
   } catch (_) {
-    // Storage blocked: the section still toggles for this page view.
+    // Storage full: the section still toggles for this page view.
   }
   syncNavGroups()
 }
@@ -1182,6 +1188,8 @@ syncNavGroups()
 const csrfToken = document.querySelector("meta[name='csrf-token']")?.getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
+  localStorage: localStore,
+  sessionStorage: sessionStore,
   params: {_csrf_token: csrfToken},
   hooks: {...colocatedHooks, ...Hooks},
   dom: {
@@ -1426,7 +1434,12 @@ document.addEventListener("click", e => {
     const collapse = document.documentElement.dataset.sidebar !== "collapsed"
     if (collapse) document.documentElement.dataset.sidebar = "collapsed"
     else delete document.documentElement.dataset.sidebar
-    localStorage.setItem("kiln:sidebar", collapse ? "collapsed" : "expanded")
+    try {
+      localStore.setItem("kiln:sidebar", collapse ? "collapsed" : "expanded")
+    } catch (_) {
+      // Storage full: the rail still toggles for this page view, and the
+      // focus hand-off and menu closing below still run.
+    }
     hideSideTip()
     // The clicked toggle just hid itself; hand focus to its twin.
     document.querySelector(collapse ? ".side-expand" : ".side-collapse")?.focus()

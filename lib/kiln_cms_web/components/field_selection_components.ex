@@ -1,7 +1,8 @@
 defmodule KilnCMSWeb.FieldSelectionComponents do
   @moduledoc """
   The "Which records can be picked" step of a relationship on `/editor/fields`
-  (#2285, part 3): states, "only records the editor created", a sort, and per
+  (#2285, part 3): states, "only records the editor created", a sort, the
+  filters editors may narrow the picker's search by (#3224), and per
   ticked target type tags, a category and "field is" rows. Every input posts under
   `field_definition[sel]` and `KilnCMSWeb.FieldSelection.unpack/3` turns the
   posted rows into the `selection` map; the resource judges it, and its
@@ -22,7 +23,9 @@ defmodule KilnCMSWeb.FieldSelectionComponents do
   # The type names this field currently links to.
   attr :targets, :list, required: true
   # `%{tags: [{id, name}], categories: [{id, name}], types: %{name => label},
-  #    fields: %{name => [%{name, label, field_type}]}}`
+  #    fields: %{name => [%{name, label, field_type}]},
+  #    too_many: %{"category" => boolean, "tag" => boolean}}` — `too_many` says
+  #    the site has more of them than the picker's filter select lists.
   attr :catalog, :map, required: true
 
   def selection_step(assigns) do
@@ -43,6 +46,9 @@ defmodule KilnCMSWeb.FieldSelectionComponents do
       assign(assigns,
         view: view,
         states: ReferenceSelection.states(),
+        filter_names: ReferenceSelection.filter_names(),
+        filter_cap: ReferenceSelection.filter_option_cap(),
+        too_many: Map.get(assigns.catalog, :too_many, %{}),
         create_problems:
           Map.new(assigns.targets, &{&1, ReferenceSelection.create_problem(selection, &1)}),
         sentence: FieldSelection.sentence(selection, assigns.targets, lookup),
@@ -121,6 +127,49 @@ defmodule KilnCMSWeb.FieldSelectionComponents do
           <option value="title" selected={@view.sort == "title"}>{gettext("By title")}</option>
         </select>
       </div>
+
+      <fieldset id={"#{@id}-filters"} aria-describedby={"#{@id}-filters-help"}>
+        <legend class="mb-1 text-sm font-medium">
+          {gettext("Let editors narrow the search by")}
+        </legend>
+        <div class="flex flex-wrap gap-2">
+          <label
+            :for={name <- @filter_names}
+            for={"#{@id}-filter-#{name}"}
+            class={[
+              "inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 text-sm transition-colors",
+              if(name in @view.filters,
+                do: "border-primary bg-primary/5",
+                else: "border-base-content/15 hover:border-base-content/30"
+              )
+            ]}
+          >
+            <input
+              type="checkbox"
+              id={"#{@id}-filter-#{name}"}
+              name="field_definition[sel][filters][]"
+              value={name}
+              checked={name in @view.filters}
+              class="size-3.5 rounded border border-base-content/30 accent-primary"
+            />
+            {filter_text(name)}
+          </label>
+        </div>
+        <p id={"#{@id}-filters-help"} class="mt-1 text-xs text-base-content/70">
+          {gettext(
+            "Adds a select beside the picker's search box, so an editor can look through one category or tag while picking. It does not change what the field accepts. A field shown as a dropdown uses it only when it falls back to search."
+          )}
+        </p>
+        <p
+          :for={name <- @filter_names}
+          :if={name in @view.filters and Map.get(@too_many, name, false)}
+          id={"#{@id}-filter-#{name}-too-many"}
+          class="mt-1 flex items-center gap-1.5 text-xs text-warning-ink"
+        >
+          <.icon name="hero-exclamation-triangle" class="size-4 shrink-0" />
+          {too_many_text(name, @filter_cap)}
+        </p>
+      </fieldset>
 
       <div
         :for={type <- @targets}
@@ -330,6 +379,23 @@ defmodule KilnCMSWeb.FieldSelectionComponents do
         not MapSet.member?(known, id),
         do: {id, gettext("(not found)") <> " " <> String.slice(id, 0, 8)}
   end
+
+  defp filter_text("category"), do: gettext("Category")
+  defp filter_text("tag"), do: gettext("Tag")
+
+  defp too_many_text("category", cap),
+    do:
+      gettext(
+        "This site has more than %{count} categories, so the picker will not show the category select.",
+        count: cap
+      )
+
+  defp too_many_text("tag", cap),
+    do:
+      gettext(
+        "This site has more than %{count} tags, so the picker will not show the tag select.",
+        count: cap
+      )
 
   defp state_text("draft"), do: gettext("Draft")
   defp state_text("in_review"), do: gettext("In review")

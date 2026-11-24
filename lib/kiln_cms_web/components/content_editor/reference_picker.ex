@@ -82,6 +82,15 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   A list of references, the reverse field's add control and the related
   content picker (none of which offer a widget) always search.
 
+  ## Thumbnails (#3223)
+
+  Each result and row shows its record's featured image, small and
+  decorative (`alt=""`): the generated `"thumb"` variant or a video's
+  poster, never the original (`thumb/1`). The image loads with the read that
+  lists the records (`thumb_load/0`), as the editor, so a page of results
+  costs one more query per type read, not one per record. A row without one
+  keeps an empty slot only when another row of its list has one.
+
   ## Seams for later workstreams
 
     * `row/1` is public and takes `readonly`, so the reverse list (R4) can
@@ -108,6 +117,37 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   edit messages say which type each record is, and the editor turns the
   tokens into the `%{"id", "type"}` a write needs. The search reads every
   allowed type and merges them into one list in the same order.
+
+  ## Filters while picking (#3224)
+
+  A row of selects above the search box narrows the results while picking:
+
+    * **Type** — shown whenever the field has more than one target type that
+      still resolves. Choosing one searches that type alone; the results keep
+      their `"type:id"` tokens.
+    * **Category** and **Tag** — shown when the field's
+      `selection.filters` turns them on (`ReferenceSelection.filters/1`). The
+      options are the org's categories and tags, name-sorted, read once on
+      the first open (or the first filter change), never per keystroke. Tags
+      are grouped by tag group. When every target type's selection already
+      names `tags_any`, only those tags are offered; when every target type
+      pins a `category`, the category select is left out. A list past
+      `ReferenceSelection.filter_option_cap/0` is not rendered, and a note
+      says so.
+
+  A choice is AND-ed onto the field's own selection
+  (`ReferenceSelection.narrow/2`) and the read still runs as the editor, so a
+  filter only ever narrows: past the selection and past the read policy
+  nothing can be found. The posted values are checked against the options
+  this picker offered; anything else (another org's category, a type the
+  field doesn't allow) is no filter for that select, never an error.
+
+  The selects are named under `_kiln_ref_f`, outside the editor form's
+  params, and carry their own `phx-change`, so a change never marks the
+  document dirty. A change starts the results over at the first page. While a
+  filter is set, create-on-type (#2285) is not offered: its "nothing with
+  this title" check would only see the filtered results. The dropdown widget
+  (#2284) has no filters.
   """
 
   use KilnCMSWeb, :live_component
@@ -120,12 +160,18 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   alias KilnCMS.CMS.FieldAccess
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldWidgets
+  alias KilnCMS.CMS.MediaItem
   alias KilnCMS.CMS.ReferenceSelection
   alias KilnCMSWeb.ContentEditor.PlainField
   alias KilnCMSWeb.ContentEditor.ReferenceInline
   alias KilnCMSWeb.ContentEditor.ReferenceValues
+  alias KilnCMSWeb.MediaComponents
 
   @page_size 20
+
+  # The editor's narrowing choice in the search (#3224): a target type name,
+  # a category id, a tag id, each nil for "any".
+  @no_filter %{type: nil, category: nil, tag: nil}
 
   # The most candidates the dropdown widget lists, across every target type;
   # past it the picker searches instead.
@@ -161,6 +207,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
      |> assign(:summary, nil)
      |> assign(:plans, nil)
      |> assign(:candidates, nil)
+     |> assign(:filter, @no_filter)
+     |> assign(:filter_options, nil)
      |> assign(:creating, nil)
      |> assign(:inline_ok, %{})
      |> assign(:inline_open, %{})
@@ -227,6 +275,13 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     socket =
       if socket.assigns.candidates == nil,
         do: assign(socket, :candidates, candidates(socket)),
+        else: socket
+
+    # The type filter needs no read, so it shows from the start; the category
+    # and tag options wait for the first open (#3224).
+    socket =
+      if socket.assigns.filter_options == nil,
+        do: assign(socket, :filter_options, filter_types(socket.assigns)),
         else: socket
 
     {:ok,
@@ -400,7 +455,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   def handle_event("ref_open", _params, socket) do
     if socket.assigns.open?,
       do: {:noreply, socket},
-      else: {:noreply, socket |> assign(:open?, true) |> search(0)}
+      else: {:noreply, socket |> load_filter_options() |> assign(:open?, true) |> search(0)}
   end
 
   def handle_event("ref_close", _params, socket),
@@ -411,12 +466,38 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
 
     {:noreply,
      socket
+     |> load_filter_options()
      |> assign(:query, query)
      |> assign(:open?, true)
      |> search(0)}
   end
 
   def handle_event("ref_search", _params, socket), do: {:noreply, socket}
+
+  # A filter select changed (#3224). Each value must be one this picker
+  # offered — anything else is "any" for that select — and a key the payload
+  # leaves out keeps its value (a select outside a form posts only itself).
+  # Nothing to narrow on a locked or full field.
+  def handle_event("ref_filter", %{"_kiln_ref_f" => filters}, socket) when is_map(filters) do
+    case Map.get(filters, socket.assigns.key) do
+      %{} = params when socket.assigns.searchable? ->
+        socket = load_filter_options(socket)
+        filter = chosen_filter(socket.assigns.filter, params, socket.assigns.filter_options)
+
+        {:noreply, socket |> assign(:filter, filter) |> assign(:open?, true) |> search(0)}
+
+      _other ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("ref_filter", _params, socket), do: {:noreply, socket}
+
+  def handle_event("ref_filter_clear", _params, socket) do
+    if socket.assigns.searchable?,
+      do: {:noreply, socket |> assign(:filter, @no_filter) |> assign(:open?, true) |> search(0)},
+      else: {:noreply, socket}
+  end
 
   def handle_event("ref_more", _params, socket),
     do: {:noreply, search(socket, length(socket.assigns.results))}
@@ -626,6 +707,9 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
 
     with true <- type != nil and title != "" and String.length(title) <= 255,
          true <- assigns.searchable? and not assigns.locked and not is_list(assigns.candidates),
+         # A filtered search can't say no record has this title (#3224), and a
+         # new draft carries no category or tag to match the filter anyway.
+         false <- filtering?(assigns.filter),
          nil <- ReferenceSelection.create_problem(selection, type),
          %{prefill: {:ok, _values}} = entry <- creatable_type(assigns, type),
          true <-
@@ -894,7 +978,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           query:
             search_filters("", excluded_ids(exclude, ct, definition)) ++
               [
-                select: [:id, :title, :state, :slug, :updated_at],
+                select: [:id, :title, :state, :slug, :updated_at, :featured_image_id],
+                load: thumb_load(),
                 sort: [title: :asc, id: :asc],
                 limit: limit
               ]
@@ -934,7 +1019,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     picked = if multiple?(socket), do: socket.assigns.ids, else: []
     exclude = picked ++ socket.assigns.exclude
 
-    case target_types(definition, tenant) do
+    case definition |> target_types(tenant) |> of_type(socket.assigns.filter.type) do
       [] ->
         socket |> assign(:results, []) |> assign(:more?, false)
 
@@ -973,8 +1058,13 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     |> Enum.take(@page_size + 1)
   end
 
+  # The type filter (#3224): one of the field's own target types, checked when
+  # it was chosen, or every one of them.
+  defp of_type(cts, nil), do: cts
+  defp of_type(cts, type), do: Enum.filter(cts, &(to_string(&1.type) == type))
+
   defp read_type(socket, ct, query, exclude, limit, offset) do
-    %{definition: definition, tenant: tenant, actor: actor} = socket.assigns
+    %{definition: definition, tenant: tenant, actor: actor, filter: filter} = socket.assigns
 
     ContentTypes.list!(
       ct,
@@ -985,14 +1075,16 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           query:
             search_filters(query, excluded_ids(exclude, ct, definition)) ++
               [
-                select: [:id, :title, :state, :slug, :updated_at],
+                select: [:id, :title, :state, :slug, :updated_at, :featured_image_id],
+                load: thumb_load(),
                 sort: search_sort(query, definition),
                 limit: limit,
                 offset: offset
               ]
         ],
         socket.assigns.plans,
-        ct
+        ct,
+        Map.take(filter, [:category, :tag])
       )
     )
   end
@@ -1011,8 +1103,163 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     end
   end
 
-  defp selected(opts, plans, ct),
-    do: ReferenceSelection.read_opts(opts, Map.get(plans, to_string(ct.type), :unfiltered))
+  # The editor's category or tag choice (#3224) is AND-ed onto the field's
+  # plan, so it narrows what the selection offers and never widens it.
+  defp selected(opts, plans, ct, editor \\ %{}) do
+    plan = ReferenceSelection.narrow(Map.get(plans, to_string(ct.type), :unfiltered), editor)
+    ReferenceSelection.read_opts(opts, plan)
+  end
+
+  # ── filters while picking (#3224) ──
+
+  # The type select's options, with nothing read yet: every resolvable target
+  # type on a field that has more than one, else none. Category and tag are
+  # `:pending` until `load_filter_options/1`, or `:off` when the field doesn't
+  # turn them on.
+  defp filter_types(%{definition: definition, tenant: tenant}) do
+    types =
+      case target_types(definition, tenant) do
+        [_, _ | _] = cts -> Enum.map(cts, &%{key: to_string(&1.type), label: &1.label})
+        _one -> []
+      end
+
+    enabled = ReferenceSelection.filters(Map.get(definition, :selection))
+
+    %{
+      types: types,
+      categories: if("category" in enabled, do: :pending, else: :off),
+      tags: if("tag" in enabled, do: :pending, else: :off)
+    }
+  end
+
+  # The category and tag options, read once per picker as the editor in the
+  # editor's tenant: `[]`, a list, or `:too_many` past the cap. A locked
+  # field, or one with no search, never reads them.
+  defp load_filter_options(%{assigns: %{filter_options: %{categories: c, tags: t}}} = socket)
+       when c != :pending and t != :pending,
+       do: socket
+
+  # A locked or full field shows no search, so nothing to narrow: no reads.
+  defp load_filter_options(%{assigns: %{searchable?: false}} = socket), do: socket
+
+  defp load_filter_options(socket) do
+    %{definition: definition, tenant: tenant, filter_options: options} = socket.assigns
+    targets = definition |> target_types(tenant) |> Enum.map(&to_string(&1.type))
+
+    entries =
+      case ReferenceSelection.live(Map.get(definition, :selection), targets, tenant) do
+        %{"by_type" => %{} = by_type} -> Enum.map(targets, &Map.get(by_type, &1, %{}))
+        _none -> Enum.map(targets, fn _type -> %{} end)
+      end
+
+    categories = category_choices(options.categories, entries, socket.assigns)
+    tags = tag_choices(options.tags, entries, socket.assigns)
+
+    assign(socket, :filter_options, %{options | categories: categories, tags: tags})
+  end
+
+  defp category_choices(:pending, entries, assigns) do
+    # Every type already pins one category: there is nothing to narrow.
+    if Enum.all?(entries, &Map.has_key?(&1, "category")),
+      do: [],
+      else: category_options(assigns)
+  end
+
+  defp category_choices(loaded, _entries, _assigns), do: loaded
+
+  defp tag_choices(:pending, entries, assigns) do
+    # Every type names its tags: those are the only ones worth offering.
+    if entries != [] and Enum.all?(entries, &Map.has_key?(&1, "tags_any")),
+      do: tag_options(assigns, entries |> Enum.flat_map(& &1["tags_any"]) |> Enum.uniq()),
+      else: tag_options(assigns, :all)
+  end
+
+  defp tag_choices(loaded, _entries, _assigns), do: loaded
+
+  defp category_options(%{actor: actor, tenant: tenant}) do
+    cap = ReferenceSelection.filter_option_cap()
+
+    [
+      actor: actor,
+      tenant: tenant,
+      query: [select: [:id, :name], sort: [name: :asc, id: :asc], limit: cap + 1]
+    ]
+    |> CMS.list_categories!()
+    |> capped(cap)
+  end
+
+  # `[{group name | nil, tags}]`, groups in their own order, ungrouped last.
+  defp tag_options(%{actor: actor, tenant: tenant}, ids) do
+    cap = ReferenceSelection.filter_option_cap()
+    only = if ids == :all, do: [], else: [filter: [id: [in: ids]]]
+
+    tags =
+      [
+        actor: actor,
+        tenant: tenant,
+        query:
+          only ++
+            [select: [:id, :name, :tag_group_id], sort: [name: :asc, id: :asc], limit: cap + 1]
+      ]
+      |> CMS.list_tags!()
+      |> capped(cap)
+
+    cond do
+      tags in [[], :too_many] -> tags
+      Enum.all?(tags, &is_nil(&1.tag_group_id)) -> [{nil, tags}]
+      true -> group_tags(tags, CMS.list_tag_groups!(actor: actor, tenant: tenant))
+    end
+  end
+
+  defp capped(rows, cap) when length(rows) > cap, do: :too_many
+  defp capped(rows, _cap), do: rows
+
+  # A tag whose group didn't load (or has none) is listed as ungrouped, so no
+  # tag drops out of the select.
+  defp group_tags(tags, groups) do
+    known = MapSet.new(groups, & &1.id)
+    {grouped, loose} = Enum.split_with(tags, &MapSet.member?(known, &1.tag_group_id))
+    by_group = Enum.group_by(grouped, & &1.tag_group_id)
+
+    named =
+      for group <- groups, Map.has_key?(by_group, group.id), do: {group.name, by_group[group.id]}
+
+    cond do
+      named == [] -> [{nil, loose}]
+      loose == [] -> named
+      true -> named ++ [{gettext("Ungrouped"), loose}]
+    end
+  end
+
+  # The filter after a change: each posted value is kept only when it is one
+  # of the options offered, blank (or unknown) is "any", and a key the
+  # payload leaves out keeps its current value.
+  defp chosen_filter(current, params, options) do
+    %{
+      type: chosen(current.type, params, "type", Enum.map(options.types, & &1.key)),
+      category: chosen(current.category, params, "category", option_ids(options.categories)),
+      tag: chosen(current.tag, params, "tag", option_ids(options.tags))
+    }
+  end
+
+  defp chosen(current, params, name, offered) do
+    case Map.fetch(params, name) do
+      {:ok, value} when is_binary(value) -> if value in offered, do: value
+      {:ok, _other} -> nil
+      :error -> current
+    end
+  end
+
+  defp option_ids(options) when is_list(options) do
+    Enum.flat_map(options, fn
+      {_group, tags} -> Enum.map(tags, & &1.id)
+      option -> [option.id]
+    end)
+  end
+
+  defp option_ids(_none), do: []
+
+  defp filtering?(filter), do: filter != @no_filter
 
   # What the active selection reads as, once per picker: a list of short
   # phrases for the footer and the empty state, or `:none` when the field has
@@ -1166,7 +1413,11 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         |> ContentTypes.list!(
           actor: actor,
           tenant: tenant,
-          query: [filter: [id: [in: missing]], select: [:id, :title, :state, :slug]]
+          query: [
+            filter: [id: [in: missing]],
+            select: [:id, :title, :state, :slug, :featured_image_id],
+            load: thumb_load()
+          ]
         )
         |> Enum.map(&to_item(&1, ct, definition))
       end)
@@ -1193,9 +1444,33 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       state: record.state,
       type: ct.type,
       type_label: ct.label,
-      href: ~p"/editor/content/#{type}/#{record.id}"
+      href: ~p"/editor/content/#{type}/#{record.id}",
+      thumb: thumb(record)
     }
   end
+
+  @doc """
+  The `load:` that gives a read of content records what `thumb/1` needs: each
+  record's featured image, with only the fields the thumbnail rule reads. A
+  relationship load, so it runs as the read's own actor and tenant — one
+  query per read, never one per record — and a featured image the actor
+  cannot read, or one in the trash, loads as `nil`.
+  """
+  def thumb_load do
+    [
+      featured_image: Ash.Query.select(MediaItem, [:id, :url, :variants, :content_type, :width])
+    ]
+  end
+
+  @doc """
+  A record's small preview for a row (#3223): its featured image's generated
+  `"thumb"` variant, or a video's poster — never the full-size original —
+  or `nil` when it has none, or when the image was not loaded (`thumb_load/0`).
+  """
+  def thumb(%{featured_image: %MediaItem{} = image}),
+    do: MediaComponents.thumb_src(image, fallback: false)
+
+  def thumb(_record), do: nil
 
   # Each result's connection count through this field when it has a
   # `max_sources` (R1b), so a full target is listed but disabled — "Full —
@@ -1259,7 +1534,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           state: nil,
           type: snapshot["type"] || elem(split_key(id, definition), 0),
           type_label: nil,
-          href: nil
+          href: nil,
+          thumb: nil
         }
       end)
     end)
@@ -1283,6 +1559,9 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       |> assign(:last, length(assigns.items) - 1)
       |> assign(:dropdown?, is_list(assigns.candidates))
       |> assign(:typed, assigns.open? and typed_create(assigns))
+      |> assign(:filtering?, filtering?(assigns.filter))
+      |> assign(:items_thumbs?, Enum.any?(assigns.items, &Map.get(&1, :thumb)))
+      |> assign(:results_thumbs?, Enum.any?(assigns.results, &Map.get(&1, :thumb)))
 
     ~H"""
     <div
@@ -1329,6 +1608,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           sortable={@multiple? and not @locked and @last > 0}
           readonly={@locked}
           target={@myself}
+          thumb_slot={@items_thumbs?}
         >
           <:extra :if={@link_fields != []}>
             <.link_inputs
@@ -1396,6 +1676,13 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         class={["relative", (@rows and @items != []) && "mt-2"]}
         phx-click-away={@open? && JS.push("ref_close", target: @myself)}
       >
+        <.filter_row
+          root={@root}
+          key={@key}
+          filter={@filter}
+          options={@filter_options}
+          target={@myself}
+        />
         <div class="relative">
           <.icon
             name="hero-magnifying-glass"
@@ -1449,6 +1736,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
               )
             ]}
           >
+            <.thumb_image src={result.thumb} slot={@results_thumbs?} />
             <span class="min-w-0 flex-1 truncate">{result.title || gettext("Untitled")}</span>
             <span
               :if={Map.get(result, :full?)}
@@ -1494,7 +1782,29 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
             </span>
             <span class="shrink-0 text-xs text-base-content/70">{gettext("Draft")}</span>
           </li>
-          <li :if={@results == []} role="presentation" class="px-3 py-2 text-sm text-base-content/60">
+          <li
+            :if={@results == [] and @filtering?}
+            id={"#{@root}-filters-empty"}
+            role="presentation"
+            class="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm text-base-content/70"
+          >
+            <span>{gettext("No matches with these filters.")}</span>
+            <button
+              type="button"
+              id={"#{@root}-filters-clear"}
+              phx-click={
+                JS.push("ref_filter_clear", target: @myself) |> JS.focus(to: "##{@root}-search")
+              }
+              class="cursor-pointer rounded text-xs font-medium text-primary-ink transition-colors hover:underline"
+            >
+              {gettext("Clear filters")}
+            </button>
+          </li>
+          <li
+            :if={@results == [] and not @filtering?}
+            role="presentation"
+            class="px-3 py-2 text-sm text-base-content/60"
+          >
             {no_results_label(@query)}
             <span :if={@summary != :none and String.trim(@query) == ""} id={"#{@root}-filter-empty"}>
               {gettext("This field only accepts records that match: %{conditions}.",
@@ -1503,7 +1813,10 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
             </span>
           </li>
           <li
-            :if={@summary != :none and not (@results == [] and String.trim(@query) == "")}
+            :if={
+              @summary != :none and
+                (@filtering? or not (@results == [] and String.trim(@query) == ""))
+            }
             id={"#{@root}-filter"}
             role="presentation"
             class="border-t border-base-content/10 px-3 py-1.5 text-xs text-base-content/70"
@@ -1512,7 +1825,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           </li>
         </ul>
         <p id={"#{@root}-status"} class="sr-only" aria-live="polite">
-          {status_label(@open?, @results, @more?)}
+          {status_label(@open?, @results, @more?, @filtering?)}
         </p>
       </div>
 
@@ -1556,6 +1869,111 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
           <.icon name="hero-exclamation-circle" class="size-4" /> {message}
         </p>
       </div>
+    </div>
+    """
+  end
+
+  attr :root, :string, required: true
+  attr :key, :string, required: true
+  attr :filter, :map, required: true
+  attr :options, :map, required: true
+  attr :target, :any, required: true
+
+  # The filters while picking (#3224): a select per filter that has options,
+  # before the search input in DOM order (so Tab from the input leaves the
+  # picker rather than landing on one) and inside the click-away wrapper.
+  # Each select is named under `_kiln_ref_f`, outside the editor form's
+  # params, with its own `phx-change`, so a change never touches the document.
+  defp filter_row(assigns) do
+    %{types: types, categories: categories, tags: tags} = assigns.options
+
+    assigns =
+      assigns
+      |> assign(:types, types)
+      |> assign(:categories, if(is_list(categories), do: categories, else: []))
+      |> assign(:tags, if(is_list(tags), do: tags, else: []))
+      |> assign(:too_many_categories?, categories == :too_many)
+      |> assign(:too_many_tags?, tags == :too_many)
+      |> assign(:prefix, "_kiln_ref_f[#{assigns.key}]")
+
+    assigns =
+      assign(
+        assigns,
+        :shown?,
+        assigns.types != [] or assigns.categories != [] or assigns.tags != [] or
+          assigns.too_many_categories? or assigns.too_many_tags?
+      )
+
+    ~H"""
+    <div
+      :if={@shown?}
+      id={"#{@root}-filters"}
+      role="group"
+      aria-label={gettext("Narrow the results")}
+      class="mb-1.5 flex flex-wrap items-center gap-2"
+    >
+      <select
+        :if={@types != []}
+        id={"#{@root}-filter-type"}
+        name={"#{@prefix}[type]"}
+        aria-label={gettext("Type")}
+        phx-change="ref_filter"
+        phx-target={@target}
+        class="field-select w-auto py-1 text-sm"
+      >
+        <option value="">{gettext("All types")}</option>
+        <option :for={type <- @types} value={type.key} selected={@filter.type == type.key}>
+          {type.label}
+        </option>
+      </select>
+      <select
+        :if={@categories != []}
+        id={"#{@root}-filter-category"}
+        name={"#{@prefix}[category]"}
+        aria-label={gettext("Category")}
+        phx-change="ref_filter"
+        phx-target={@target}
+        class="field-select w-auto py-1 text-sm"
+      >
+        <option value="">{gettext("Any category")}</option>
+        <option
+          :for={category <- @categories}
+          value={category.id}
+          selected={@filter.category == category.id}
+        >
+          {category.name}
+        </option>
+      </select>
+      <select
+        :if={@tags != []}
+        id={"#{@root}-filter-tag"}
+        name={"#{@prefix}[tag]"}
+        aria-label={gettext("Tag")}
+        phx-change="ref_filter"
+        phx-target={@target}
+        class="field-select w-auto py-1 text-sm"
+      >
+        <option value="">{gettext("Any tag")}</option>
+        <%= for {group, tags} <- @tags do %>
+          <%= if group do %>
+            <optgroup label={group}>
+              <option :for={tag <- tags} value={tag.id} selected={@filter.tag == tag.id}>
+                {tag.name}
+              </option>
+            </optgroup>
+          <% else %>
+            <option :for={tag <- tags} value={tag.id} selected={@filter.tag == tag.id}>
+              {tag.name}
+            </option>
+          <% end %>
+        <% end %>
+      </select>
+      <p :if={@too_many_categories?} class="text-xs text-base-content/70">
+        {gettext("Too many categories to list — search by title instead.")}
+      </p>
+      <p :if={@too_many_tags?} class="text-xs text-base-content/70">
+        {gettext("Too many tags to list — search by title instead.")}
+      </p>
     </div>
     """
   end
@@ -1752,12 +2170,17 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   attr :values, :map, required: true
   attr :title, :string, default: nil
   attr :readonly, :boolean, default: false
+  attr :change, :string, default: nil, doc: "a `phx-change` of the inputs' own"
+  attr :target, :any, default: nil, doc: "the `phx-target` for `change`"
 
-  # One connection's link-field inputs (R3): a compact grid under the row's
-  # title. Plain inputs of the editor form — no `phx-change` of their own, so
-  # an edit validates like any field. Each is labelled with the record, since
-  # every row repeats the same labels.
-  defp link_inputs(assigns) do
+  @doc """
+  One connection's link-field inputs (R3): a compact grid under the row's
+  title. In the picker they are plain inputs of the editor form, with no
+  `phx-change` of their own, so an edit validates like any field. The reverse
+  field (R4b) passes `change` and `target` so its inputs report to it instead.
+  Each is labelled with the record, since every row repeats the same labels.
+  """
+  def link_inputs(assigns) do
     ~H"""
     <div
       id={@id}
@@ -1773,6 +2196,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         name={"#{@name}[#{field.name}]"}
         value={Map.get(@values, field.name)}
         readonly={@readonly}
+        change={@change}
+        target={@target}
       />
     </div>
     """
@@ -1783,6 +2208,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   attr :name, :string, required: true
   attr :value, :any, default: nil
   attr :readonly, :boolean, default: false
+  attr :change, :string, default: nil
+  attr :target, :any, default: nil
 
   defp link_input(%{field: %{field_type: :boolean}} = assigns) do
     ~H"""
@@ -1795,6 +2222,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         value="true"
         checked={@value in [true, "true"]}
         disabled={@readonly}
+        phx-change={@change}
+        phx-target={@target}
         class="size-4 rounded border-base-content/30 accent-primary"
       />
       <label for={@id} class="text-xs text-base-content/70">{@field.label}</label>
@@ -1808,7 +2237,14 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       <label for={@id} class="mb-0.5 block text-[11px] font-medium text-base-content/60">
         {@field.label}<span :if={@field.required} class="text-error"> *</span>
       </label>
-      <select id={@id} name={@name} disabled={@readonly} class="field-select py-1 text-sm">
+      <select
+        id={@id}
+        name={@name}
+        disabled={@readonly}
+        phx-change={@change}
+        phx-target={@target}
+        class="field-select py-1 text-sm"
+      >
         <option value="">{gettext("— None —")}</option>
         <option
           :for={option <- @field.options}
@@ -1840,6 +2276,8 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
         title={@field.help_text}
         autocomplete="off"
         disabled={@readonly}
+        phx-change={@change}
+        phx-target={@target}
         class="field-input py-1 text-sm"
       />
     </div>
@@ -1847,13 +2285,18 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
   end
 
   attr :id, :string, required: true
-  attr :item, :map, required: true, doc: "`id`, `title`, `state`, `type_label`, `href`"
+  attr :item, :map, required: true, doc: "`id`, `title`, `state`, `type_label`, `href`, `thumb`"
   attr :index, :integer, default: 0
   attr :last, :integer, default: 0
   attr :input_name, :any, default: nil, doc: "the `name[]` a list row submits its id under"
   attr :sortable, :boolean, default: false
   attr :readonly, :boolean, default: false
   attr :target, :any, default: nil
+
+  attr :thumb_slot, :boolean,
+    default: false,
+    doc: "whether any row of the list has a thumbnail, so a row without one keeps the space"
+
   slot :extra, doc: "rendered after the title — per-link inputs (R3)"
   slot :actions, doc: "controls of the caller's own, before the row's own (R4b)"
 
@@ -1884,6 +2327,7 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       >
         {@index + 1}
       </span>
+      <.thumb_image src={Map.get(@item, :thumb)} slot={@thumb_slot} />
       <div class="min-w-0 flex-1">
         <p class="truncate text-sm">{@item.title || gettext("Untitled")}</p>
         <p class="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-base-content/60">
@@ -1958,6 +2402,33 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
     """
   end
 
+  attr :src, :string, default: nil
+  attr :slot, :boolean, required: true
+
+  # A row's featured image (#3223), decorative: the title beside it names the
+  # record, so the image adds nothing to the accessible name. A row without
+  # one keeps an empty slot of the same size when another row of its list has
+  # one, so the titles line up; a list where no row has one renders neither.
+  defp thumb_image(assigns) do
+    ~H"""
+    <img
+      :if={@src}
+      src={@src}
+      alt=""
+      aria-hidden="true"
+      loading="lazy"
+      data-ref-thumb
+      class="size-8 shrink-0 rounded bg-base-200 object-cover"
+    />
+    <span
+      :if={!@src and @slot}
+      aria-hidden="true"
+      data-ref-thumb-placeholder
+      class="size-8 shrink-0 rounded bg-base-200"
+    />
+    """
+  end
+
   defp count_label(count, max) when is_integer(max),
     do: gettext("%{count} of %{max}", count: count, max: max)
 
@@ -1972,13 +2443,17 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
       else: gettext("No matches for “%{query}”.", query: String.trim(query))
   end
 
-  defp status_label(false, _results, _more?), do: ""
+  defp status_label(false, _results, _more?, _filtering?), do: ""
 
-  defp status_label(true, results, more?) do
+  defp status_label(true, results, more?, filtering?) do
     count = length(results)
 
-    if more?,
-      do: ngettext("%{count} result, more available", "%{count} results, more available", count),
-      else: ngettext("%{count} result", "%{count} results", count)
+    status =
+      if more?,
+        do:
+          ngettext("%{count} result, more available", "%{count} results, more available", count),
+        else: ngettext("%{count} result", "%{count} results", count)
+
+    if filtering?, do: gettext("%{status} (filtered)", status: status), else: status
   end
 end
