@@ -152,8 +152,16 @@ defmodule KilnCMS.Beta.Round do
 
   # Roles can't be set through `register_with_password` (it always defaults to
   # :viewer so self-registration can't escalate) and beta seats must be
-  # pre-confirmed, so a *new* seat is created directly — the same reasoning, and
-  # the same mechanism, as `priv/repo/seeds.exs`.
+  # pre-confirmed, so a *new* seat's account is seeded directly, as
+  # `priv/repo/seeds.exs` does — but without its role. The seed takes the
+  # attribute default (:viewer) and the seat's tier is then raised through
+  # `ensure_role/2`, the same `:manage_access` an adopted account goes through,
+  # so the grant is audited (#2241: `role_granted` in the default org, recorded
+  # as raised from "viewer") and an admin seat raises the platform `new_admin`
+  # alert (#2245). A seed with the role written in did neither (#2641).
+  #
+  # Both steps share one transaction: a failed grant leaves no account behind
+  # whose generated password was never handed out.
   #
   # An *existing* account is a different problem. `--tester` takes real
   # addresses, so it can land on somebody who already has an account here, and
@@ -170,14 +178,7 @@ defmodule KilnCMS.Beta.Round do
       {:ok, nil} ->
         password = generate_password()
 
-        Ash.Seed.seed!(User, %{
-          email: email,
-          name: name_for(email),
-          hashed_password: Bcrypt.hash_pwd_salt(password),
-          confirmed_at: DateTime.utc_now(),
-          role: role
-        })
-
+        create_seat!(email, password, role)
         new_seat(email, role, password, facilitator?, created?: true)
 
       {:ok, user} ->
@@ -193,6 +194,28 @@ defmodule KilnCMS.Beta.Round do
           created?: false,
           adopted_from: if(was == role, do: nil, else: was)
         )
+    end
+  end
+
+  defp create_seat!(email, password, role) do
+    result =
+      KilnCMS.Repo.transaction(fn ->
+        User
+        |> Ash.Seed.seed!(%{
+          email: email,
+          name: name_for(email),
+          hashed_password: Bcrypt.hash_pwd_salt(password),
+          confirmed_at: DateTime.utc_now()
+        })
+        |> ensure_role(role)
+      end)
+
+    # A failed `:manage_access` inside a transaction it did not open rolls the
+    # whole transaction back with its changeset rather than raising, so the
+    # error is raised here, as the bang call would have outside one.
+    case result do
+      {:ok, user} -> user
+      {:error, error} -> raise Ash.Error.to_error_class(error)
     end
   end
 
