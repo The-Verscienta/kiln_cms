@@ -5,8 +5,8 @@ defmodule KilnCMS.Test.HookedStorage do
 
   Install it with `install/1`, which makes it the `KilnCMS.Storage` adapter
   for the rest of the test. The hooks are a map keyed by operation:
-  `:fetch`, `:fetch_range`, `:fetch_private_range`, `:store` and
-  `:delete_private`. A hook is either
+  `:fetch`, `:fetch_range`, `:fetch_private_range`, `:store`, `:delete`
+  and `:delete_private`. A hook is either
 
     * `{:error, reason}`, returned in place of the call, or
     * a 0- or 1-arity function (given the key), run before the Local call.
@@ -61,10 +61,11 @@ defmodule KilnCMS.Test.HookedStorage do
   def fetch_private_range(key, first, last),
     do: around(:fetch_private_range, key, fn -> Local.fetch_private_range(key, first, last) end)
 
+  def delete(key), do: around(:delete, key, fn -> Local.delete(key) end)
+
   def delete_private(key),
     do: around(:delete_private, key, fn -> Local.delete_private(key) end)
 
-  defdelegate delete(key), to: Local
   defdelegate url(key), to: Local
   defdelegate store_private(key, source_path), to: Local
   defdelegate fetch_private(key), to: Local

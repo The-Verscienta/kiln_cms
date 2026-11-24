@@ -11,9 +11,10 @@ defmodule KilnCMS.Media.VariantWorker do
   temp hand-off) means the job runs correctly on any node.
 
   When processing finishes it broadcasts on `"media:updated"` so an open media
-  library refreshes live. A non-raster upload, a since-deleted item or an
-  original that is definitely missing (`KilnCMS.Storage.not_found?/1`) is a
-  graceful no-op — the original is still served. Any other failed read is
+  library refreshes live. A non-raster upload, a gated item (its original is
+  private), a since-deleted item or an original that is definitely missing
+  (`KilnCMS.Storage.not_found?/1`) is a graceful no-op — the original is still
+  served. Any other failed read is
   retried, up to `max_attempts`, and the job is then discarded (#3066);
   `mix kiln.media.regenerate_variants` re-runs it later.
 
@@ -62,6 +63,14 @@ defmodule KilnCMS.Media.VariantWorker do
       end
     end
   end
+
+  # A gated item's original is in private storage: there is nothing at its
+  # public key to derive from, and public variants of it would publish what
+  # the gate withholds. Nothing to do, whoever enqueued it (a focal-point
+  # re-derive, `regenerate_variants`). Checked before any read, so a public
+  # GET refused for a key that isn't there (S3's 403 without ListBucket)
+  # can't turn a no-op into retries.
+  defp process(%{audience: audience}, _key, _tenant) when audience != :public, do: :ok
 
   # Every read and write here goes to the item's own store (#1559) — the one
   # its row names — resolved once. One that can't be resolved is retried: the

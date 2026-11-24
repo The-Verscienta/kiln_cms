@@ -54,9 +54,11 @@ defmodule KilnCMS.Media.AVStripWorker do
     * The item is gone, or no longer quarantined — someone deleted it, or a
       duplicate job ran — nothing to do.
     * The row is purged **while** the strip runs, after the copy reached the
-      public key (#3068): the release comes back stale, and once a re-read
-      finds no row at all, live or trashed, the job deletes that public copy
-      and the private upload, logs that it withdrew them, and completes. The
+      public key (#3068): the release comes back stale, and once the table
+      holds no row with its id, live or trashed, the job deletes that public
+      copy and the private upload, logs that it withdrew them, and completes.
+      A check or delete that fails is logged with the key; nothing retries it.
+      The
       key is never put in the job's args for a retry to clean up: a job that
       names a key to delete is a delete primitive.
 
@@ -288,9 +290,8 @@ defmodule KilnCMS.Media.AVStripWorker do
   # The release, unless the row went while the strip ran (#3068). The public
   # copy is already stored by then, so a row the reaper or an admin purged
   # meanwhile would leave that copy served at a URL nothing records. A purge
-  # shows up as a `StaleRecord` on the release; the row is then re-read, and
-  # the copy withdrawn only if no row of any kind is left. Anything else
-  # fails the job as before.
+  # shows up as a `StaleRecord` on the release, and the copy is withdrawn
+  # only if no row of any kind is left. Anything else fails the job as before.
   #
   # `{:ok, released}` continues the promotion; `:ok` means there is nothing
   # left for this job to do.
@@ -300,45 +301,39 @@ defmodule KilnCMS.Media.AVStripWorker do
         {:ok, released}
 
       {:error, error} ->
-        if stale?(error), do: withdraw_if_gone(item, key, tenant), else: {:error, error}
+        if stale?(error), do: withdraw_if_gone(item, key), else: {:error, error}
     end
   end
 
   @doc false
   # After a stale release: withdraw the copy this job promoted to `key`, but
-  # only when the row is gone. A row that `:read` still finds is someone
-  # else's to finish (a duplicate job released it). A row only the trash
-  # holds keeps its blobs too: a trashed item can be restored, and today a
-  # trashed row is simply released, so a stale release on one would mean a
-  # filter added to `:release_quarantine` later. Public only so a test can
-  # drive that branch, which no release reaches today.
-  @spec withdraw_if_gone(struct(), String.t(), String.t()) :: :ok | {:error, term()}
-  def withdraw_if_gone(item, key, tenant) do
-    case CMS.get_media_item(item.id,
-           actor: Media.system(),
-           authorize_with: :error,
-           tenant: tenant
-         ) do
-      {:ok, _live} ->
+  # only when no row with this id is left, live or trashed. A live row is
+  # someone else's to finish (a duplicate job released it). A trashed row
+  # keeps its blobs too: it can be restored, and today a trashed row is
+  # simply released, so a stale release on one would mean a filter added to
+  # `:release_quarantine` later. Public only so a test can drive those
+  # branches, which no release reaches today.
+  #
+  # Decided here or never: a retry re-reads the item, finds no row and
+  # completes, so it has no key to clean up. That is why a failed check is
+  # logged as a leak, not as something a retry will fix.
+  @spec withdraw_if_gone(struct(), String.t()) :: :ok | {:error, term()}
+  def withdraw_if_gone(item, key) do
+    case row_exists?(item) do
+      {:ok, true} ->
         :ok
 
-      {:error, error} ->
-        cond do
-          not not_found?(error) ->
-            Logger.error(
-              "Deferred metadata strip for media #{item.id}: its release was stale and its " <>
-                "row could not be re-read (#{inspect(error)}); the copy at its public key " <>
-                "#{key} is kept."
-            )
+      {:ok, false} ->
+        withdraw(item, key)
 
-            {:error, error}
+      {:error, reason} ->
+        Logger.error(
+          "Media #{item.id}'s release was stale, and whether its row still exists could not " <>
+            "be checked (#{inspect(reason)}). Its public copy #{key} will not be cleaned up " <>
+            "automatically; if the item is gone, delete that key from its store by hand."
+        )
 
-          row_exists?(item) ->
-            :ok
-
-          true ->
-            withdraw(item, key)
-        end
+        {:error, reason}
     end
   end
 
@@ -346,30 +341,49 @@ defmodule KilnCMS.Media.AVStripWorker do
   # `:trashed` is admin-only (the pipeline's actor may not read it), so this
   # asks the table directly. It answers only "is there a row", for an id this
   # job already read under its own org.
+  #
+  # The rescue is the boundary: a database error here must be logged with
+  # the key before the job fails, or the leak goes unrecorded.
   defp row_exists?(item) do
-    KilnCMS.Repo.exists?(
-      from(m in "media_items",
-        where: m.id == type(^item.id, :binary_id) and m.org_id == type(^item.org_id, :binary_id)
-      )
-    )
+    {:ok,
+     KilnCMS.Repo.exists?(
+       from(m in "media_items",
+         where: m.id == type(^item.id, :binary_id) and m.org_id == type(^item.org_id, :binary_id)
+       )
+     )}
+  rescue
+    error in [DBConnection.ConnectionError, Postgrex.Error] -> {:error, error}
   end
 
   # Both copies go: the public one this job stored, and the private upload,
   # in case the purger's own delete of it failed. The key is a write-once
   # UUID whose row is gone, so nothing else can be using it. A failed delete
-  # is logged with the key for an operator, as the purge paths do.
+  # is logged with the key for an operator, as the purge paths do; nothing
+  # retries it.
   defp withdraw(item, key) do
-    for {what, result} <- [
-          {"public copy", Storage.delete(key, item)},
-          {"private blob", Storage.delete_private(key, item)}
-        ],
-        result != :ok do
-      Logger.error("Purged media #{item.id} left its #{what} #{key} behind: #{inspect(result)}")
+    case Storage.delete(key, item) do
+      :ok ->
+        Logger.warning(
+          "Media #{item.id} was purged while its strip ran; withdrew the copy at its public key #{key}."
+        )
+
+      {:error, reason} ->
+        Logger.error(
+          "Media #{item.id} was purged while its strip ran, and the copy at its public key " <>
+            "#{key} could not be deleted (#{inspect(reason)}). It stays public until it is " <>
+            "deleted by hand."
+        )
     end
 
-    Logger.warning(
-      "Media #{item.id} was purged while its strip ran; withdrew the copy at its public key #{key}."
-    )
+    case Storage.delete_private(key, item) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error(
+          "Purged media #{item.id} left its private blob #{key} behind: #{inspect(reason)}"
+        )
+    end
 
     :ok
   end
@@ -378,11 +392,6 @@ defmodule KilnCMS.Media.AVStripWorker do
     do: Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1))
 
   defp stale?(_error), do: false
-
-  defp not_found?(%Ash.Error.Invalid{errors: errors}),
-    do: Enum.any?(errors, &match?(%Ash.Error.Query.NotFound{}, &1))
-
-  defp not_found?(_error), do: false
 
   defp release(item, byte_size, tenant) do
     attrs = if byte_size, do: %{byte_size: byte_size}, else: %{}

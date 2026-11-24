@@ -104,9 +104,11 @@ defmodule KilnCMS.Storage do
   adapter can supply it.
 
   An empty blob has no satisfiable range at all, and its total is known: an
-  adapter should answer `{:error, {:range_not_satisfiable, 0}}` for it. A
-  caller reads a bare `:range_not_satisfiable` at `first = 0` as an empty blob
-  too (#3069), since only an empty representation refuses a range at 0.
+  adapter must answer `{:error, {:range_not_satisfiable, 0}}` for it, and
+  only once it knows the blob is empty (#3069). `copy_to_file/3` copies that
+  as an empty file and treats a bare `:range_not_satisfiable` as an error at
+  any offset: taken on trust, a spurious 416 would make an empty copy of a
+  blob that has bytes, and the A/V strip would store it over the upload.
   """
   @callback fetch_range(
               key :: String.t(),
@@ -515,12 +517,6 @@ defmodule KilnCMS.Storage do
 
       # An empty blob has no satisfiable range; an empty file is the right copy.
       {:error, {:range_not_satisfiable, 0}} ->
-        :ok
-
-      # The same answer from an adapter that doesn't know the total (#3069),
-      # which the `fetch_range/3` contract allows. Only at offset 0: past it,
-      # the blob shrank mid-copy, and the copy is short.
-      {:error, :range_not_satisfiable} when offset == 0 ->
         :ok
 
       {:error, reason} ->

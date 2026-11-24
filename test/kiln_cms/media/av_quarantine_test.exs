@@ -556,7 +556,7 @@ defmodule KilnCMS.Media.AVQuarantineTest do
 
       log =
         capture_log(fn ->
-          assert :ok = AVStripWorker.withdraw_if_gone(item, item.storage_key, item.org_id)
+          assert :ok = AVStripWorker.withdraw_if_gone(item, item.storage_key)
         end)
 
       refute log =~ "withdrew"
@@ -569,8 +569,52 @@ defmodule KilnCMS.Media.AVQuarantineTest do
       item = quarantined_upload!(editor)
       promote_by_hand(item)
 
-      assert :ok = AVStripWorker.withdraw_if_gone(item, item.storage_key, item.org_id)
+      assert :ok = AVStripWorker.withdraw_if_gone(item, item.storage_key)
 
+      assert {:ok, _} = Storage.fetch(item.storage_key)
+      assert {:ok, _} = Storage.fetch_private(item.storage_key)
+    end
+
+    test "a withdraw whose public delete fails says so, and claims no withdrawal" do
+      editor = user(%{role: :editor})
+      item = quarantined_upload!(editor)
+      promote_by_hand(item)
+      capture_log(fn -> assert QuarantineReaper.reap(item) end)
+      HookedStorage.install(%{delete: {:error, :eio}})
+
+      log =
+        capture_log(fn ->
+          assert :ok = AVStripWorker.withdraw_if_gone(item, item.storage_key)
+        end)
+
+      refute log =~ "withdrew"
+
+      assert log =~
+               "the copy at its public key #{item.storage_key} could not be deleted (:eio)"
+
+      assert {:ok, _} = Storage.fetch(item.storage_key)
+    end
+
+    # The row check failing is the one case left to an operator: the job's
+    # retry finds no row and completes, so it never comes back to the key.
+    test "a row check that fails logs the key as a leak and withdraws nothing" do
+      editor = user(%{role: :editor})
+      item = quarantined_upload!(editor)
+      promote_by_hand(item)
+
+      # For the rest of the test's sandbox transaction, `media_items` can't be
+      # found, so the check fails with a Postgrex error, as an unreachable
+      # database would.
+      KilnCMS.Repo.query!("SET LOCAL search_path TO pg_catalog")
+
+      log =
+        capture_log(fn ->
+          assert {:error, %Postgrex.Error{}} =
+                   AVStripWorker.withdraw_if_gone(item, item.storage_key)
+        end)
+
+      assert log =~ "Its public copy #{item.storage_key} will not be cleaned up automatically"
+      refute log =~ "withdrew"
       assert {:ok, _} = Storage.fetch(item.storage_key)
       assert {:ok, _} = Storage.fetch_private(item.storage_key)
     end

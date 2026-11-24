@@ -207,16 +207,17 @@ defmodule KilnCMS.StorageTest do
       assert File.read!(dest) == ""
     end
 
-    # #3069: the `fetch_range/3` contract lets an adapter that doesn't know the
-    # total answer a bare `:range_not_satisfiable`. At offset 0 that is an
-    # empty blob; after a chunk it is a blob that shrank mid-copy.
-    test "copy_to_file reads a bare unsatisfiable range at 0 as an empty blob" do
+    # #3069: an empty blob is `{:range_not_satisfiable, 0}`, which an adapter
+    # answers only once it knows the blob is empty. A bare
+    # `:range_not_satisfiable` is not proof of that, even at offset 0: a
+    # spurious 416 on a blob with bytes would otherwise copy as an empty file,
+    # and the A/V strip would store it over the upload.
+    test "copy_to_file fails on a bare unsatisfiable range at offset 0" do
       bare_adapter(fn _first -> {:error, :range_not_satisfiable} end)
       dest = Path.join(System.tmp_dir!(), "copy_#{System.unique_integer([:positive])}")
       on_exit(fn -> File.rm(dest) end)
 
-      assert :ok = Storage.copy_to_file("empty.mp4", dest)
-      assert File.read!(dest) == ""
+      assert {:error, :range_not_satisfiable} = Storage.copy_to_file("empty.mp4", dest)
     end
 
     test "copy_to_file fails on a bare unsatisfiable range after the first chunk" do
