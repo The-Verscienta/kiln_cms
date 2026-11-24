@@ -29453,6 +29453,11 @@ msgstr ""
 msgid "can't let editors create %{type} records: the field's owner condition cannot be met by a new record"
 msgstr ""
 
+#: lib/kiln_cms/cms/validations/field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "can't match text in %{field}: it is not a text, URL or choice field"
+msgstr ""
+
 #: lib/kiln_cms/cms/titles.ex
 #, elixir-autogen, elixir-format
 msgid "can't read %{refs}: the title is built from this template and the slug from the title"
@@ -29534,6 +29539,7 @@ msgid "confirmed"
 msgstr ""
 
 #: lib/kiln_cms/cms/computed/recipes.ex
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "contains"
@@ -29726,6 +29732,11 @@ msgstr ""
 msgid "disabled — every federation route 404s until the operator sets KILN_FEDERATION_ENABLED"
 msgstr ""
 
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "does not contain"
+msgstr ""
+
 #: lib/kiln_cms/cms/field_schema.ex
 #, elixir-autogen, elixir-format
 msgid "doesn't match the schema"
@@ -29843,6 +29854,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "enabled"
+msgstr ""
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "ends with"
 msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex
@@ -31095,6 +31111,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "source format only"
+msgstr ""
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "starts with"
 msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex

@@ -109,6 +109,31 @@ defmodule KilnCMS.CMS.FieldConditionsTest do
       assert %{required_when: ^rule} = field!(admin, %{name: name("n"), required_when: rule})
     end
 
+    test "the text tests need a text, URL or choice field", %{admin: admin, kind: kind} do
+      count = field!(admin, %{name: name("count"), field_type: :integer})
+      rule = %{"field" => count.name, "op" => "contains", "value" => "1"}
+
+      assert error_message!(fn ->
+               field!(admin, %{name: name("n"), visible_when: rule})
+             end) =~ "can't match text in"
+
+      assert error_message!(fn ->
+               field!(admin, %{
+                 name: name("n"),
+                 visible_when: %{"field" => kind.name, "op" => "starts_with", "value" => " "}
+               })
+             end) =~ "needs some text for starts_with"
+
+      for {type, op} <- [string: "contains", url: "starts_with", text: "not_contains"] do
+        target = field!(admin, %{name: name("t"), field_type: type})
+        rule = %{"field" => target.name, "op" => op, "value" => "x"}
+        assert %{visible_when: ^rule} = field!(admin, %{name: name("n"), visible_when: rule})
+      end
+
+      rule = %{"field" => kind.name, "op" => "ends_with", "value" => "her"}
+      assert %{visible_when: ^rule} = field!(admin, %{name: name("n"), visible_when: rule})
+    end
+
     test "link, computed and group fields carry no conditions", %{admin: admin, kind: kind} do
       rule = eq(kind.name, "other")
 
@@ -219,6 +244,22 @@ defmodule KilnCMS.CMS.FieldConditionsTest do
 
       assert {:error, _} =
                CMS.update_post(post, %{custom_fields: %{kind.name => "other"}}, actor: admin)
+    end
+
+    test "a text test decides it on the server, ignoring case", %{admin: admin} do
+      site = field!(admin, %{name: name("site"), field_type: :url})
+
+      contact =
+        field!(admin, %{
+          name: name("contact"),
+          required_when: %{"field" => site.name, "op" => "starts_with", "value" => "http://"}
+        })
+
+      assert error_message!(fn -> post!(admin, %{site.name => "HTTP://example.com"}) end) =~
+               "is required"
+
+      assert {:ok, _} = post(admin, %{site.name => "https://example.com"})
+      assert {:ok, _} = post(admin, %{site.name => "http://x.test", contact.name => "me"})
     end
 
     test "a copy that drops unknown keys skips required_when", %{admin: admin, kind: kind} do
@@ -351,6 +392,18 @@ defmodule KilnCMS.CMS.FieldConditionsTest do
       assert error_message!(fn ->
                CMS.update_field_definition!(kind, %{private: true}, actor: admin)
              end) =~ "private field"
+
+      # A text test refuses a retype to a type with no text.
+      note = field!(admin, %{name: name("txt")})
+
+      field!(admin, %{
+        name: name("reader"),
+        visible_when: %{"field" => note.name, "op" => "contains", "value" => "x"}
+      })
+
+      assert error_message!(fn ->
+               CMS.update_field_definition!(note, %{field_type: :integer}, actor: admin)
+             end) =~ "can't match text in"
 
       # A retype that keeps every rule valid is fine.
       assert %{field_type: :string} =

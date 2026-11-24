@@ -1010,5 +1010,388 @@
       "a": 1
     },
     "expected": false
+  },
+  {
+    "name": "contains matches a substring",
+    "rule": {
+      "field": "k",
+      "op": "contains",
+      "value": "ell"
+    },
+    "values": {
+      "k": "Hello"
+    },
+    "expected": true
+  },
+  {
+    "name": "contains ignores case",
+    "rule": {
+      "field": "k",
+      "op": "contains",
+      "value": "HELLO"
+    },
+    "values": {
+      "k": "say hello there"
+    },
+    "expected": true
+  },
+  {
+    "name": "contains mismatch",
+    "rule": {
+      "field": "k",
+      "op": "contains",
+      "value": "xyz"
+    },
+    "values": {
+      "k": "Hello"
+    },
+    "expected": false
+  },
+  {
+    "name": "contains trims both sides",
+    "rule": {
+      "field": "k",
+      "op": "contains",
+      "value": " world "
+    },
+    "values": {
+      "k": "hello world  "
+    },
+    "expected": true
+  },
+  {
+    "name": "contains on a missing value is false",
+    "rule": {
+      "field": "k",
+      "op": "contains",
+      "value": "a"
+    },
+    "values": {},
+    "expected": false
+  },
+  {
+    "name": "contains on nil is false",
+    "rule": {
+      "field": "k",
+      "op": "contains",
+      "value": "a"
+    },
+    "values": {
+      "k": null
+    },
+    "expected": false
+  },
+  {
+    "name": "contains on a number is false",
+    "rule": {
+      "field": "k",
+      "op": "contains",
+      "value": "12"
+    },
+    "values": {
+      "k": 123
+    },
+    "expected": false
+  },
+  {
+    "name": "contains on a boolean is false",
+    "rule": {
+      "field": "k",
+      "op": "contains",
+      "value": "true"
+    },
+    "values": {
+      "k": true
+    },
+    "expected": false
+  },
+  {
+    "name": "contains on a map is false",
+    "rule": {
+      "field": "k",
+      "op": "contains",
+      "value": "a"
+    },
+    "values": {
+      "k": {
+        "a": "a"
+      }
+    },
+    "expected": false
+  },
+  {
+    "name": "contains on a list matches any member",
+    "rule": {
+      "field": "k",
+      "op": "contains",
+      "value": "ma"
+    },
+    "values": {
+      "k": [
+        "red",
+        "magenta"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "contains on a list with no match",
+    "rule": {
+      "field": "k",
+      "op": "contains",
+      "value": "zz"
+    },
+    "values": {
+      "k": [
+        "red",
+        "magenta"
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "contains ignores case beyond ASCII",
+    "rule": {
+      "field": "k",
+      "op": "contains",
+      "value": "ärger"
+    },
+    "values": {
+      "k": "Großer ÄRGER"
+    },
+    "expected": true
+  },
+  {
+    "name": "a final sigma folds to ς, not σ",
+    "rule": {
+      "field": "k",
+      "op": "ends_with",
+      "value": "οσ"
+    },
+    "values": {
+      "k": "ΟΔΟΣ"
+    },
+    "expected": false
+  },
+  {
+    "name": "ends_with a final sigma",
+    "rule": {
+      "field": "k",
+      "op": "ends_with",
+      "value": "ος"
+    },
+    "values": {
+      "k": "ΟΔΟΣ"
+    },
+    "expected": true
+  },
+  {
+    "name": "not_contains when absent",
+    "rule": {
+      "field": "k",
+      "op": "not_contains",
+      "value": "spam"
+    },
+    "values": {
+      "k": "Hello"
+    },
+    "expected": true
+  },
+  {
+    "name": "not_contains when present",
+    "rule": {
+      "field": "k",
+      "op": "not_contains",
+      "value": "SPAM"
+    },
+    "values": {
+      "k": "no spam here"
+    },
+    "expected": false
+  },
+  {
+    "name": "not_contains on an empty value is true",
+    "rule": {
+      "field": "k",
+      "op": "not_contains",
+      "value": "a"
+    },
+    "values": {
+      "k": ""
+    },
+    "expected": true
+  },
+  {
+    "name": "not_contains on a list holds only when no member contains",
+    "rule": {
+      "field": "k",
+      "op": "not_contains",
+      "value": "red"
+    },
+    "values": {
+      "k": [
+        "blue",
+        "reddish"
+      ]
+    },
+    "expected": false
+  },
+  {
+    "name": "not_contains on a list with no member containing",
+    "rule": {
+      "field": "k",
+      "op": "not_contains",
+      "value": "red"
+    },
+    "values": {
+      "k": [
+        "blue",
+        "green"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "starts_with match",
+    "rule": {
+      "field": "k",
+      "op": "starts_with",
+      "value": "https://"
+    },
+    "values": {
+      "k": "https://example.com"
+    },
+    "expected": true
+  },
+  {
+    "name": "starts_with ignores case",
+    "rule": {
+      "field": "k",
+      "op": "starts_with",
+      "value": "dr."
+    },
+    "values": {
+      "k": "Dr. Who"
+    },
+    "expected": true
+  },
+  {
+    "name": "starts_with mismatch",
+    "rule": {
+      "field": "k",
+      "op": "starts_with",
+      "value": "example"
+    },
+    "values": {
+      "k": "https://example.com"
+    },
+    "expected": false
+  },
+  {
+    "name": "starts_with ignores leading whitespace",
+    "rule": {
+      "field": "k",
+      "op": "starts_with",
+      "value": "dr"
+    },
+    "values": {
+      "k": "  Dr. Who"
+    },
+    "expected": true
+  },
+  {
+    "name": "ends_with match",
+    "rule": {
+      "field": "k",
+      "op": "ends_with",
+      "value": ".pdf"
+    },
+    "values": {
+      "k": "report.PDF"
+    },
+    "expected": true
+  },
+  {
+    "name": "ends_with mismatch",
+    "rule": {
+      "field": "k",
+      "op": "ends_with",
+      "value": ".pdf"
+    },
+    "values": {
+      "k": "report.pdf.zip"
+    },
+    "expected": false
+  },
+  {
+    "name": "ends_with on a list matches any member",
+    "rule": {
+      "field": "k",
+      "op": "ends_with",
+      "value": ".org"
+    },
+    "values": {
+      "k": [
+        "a.com",
+        "b.org"
+      ]
+    },
+    "expected": true
+  },
+  {
+    "name": "contains with a blank value is not a rule",
+    "rule": {
+      "field": "k",
+      "op": "contains",
+      "value": "  "
+    },
+    "values": {
+      "k": "x"
+    },
+    "expected": false
+  },
+  {
+    "name": "contains with no value is not a rule",
+    "rule": {
+      "field": "k",
+      "op": "contains"
+    },
+    "values": {
+      "k": "x"
+    },
+    "expected": false
+  },
+  {
+    "name": "contains with a number value is not a rule",
+    "rule": {
+      "field": "k",
+      "op": "contains",
+      "value": 1
+    },
+    "values": {
+      "k": "1"
+    },
+    "expected": false
+  },
+  {
+    "name": "text tests combine with any",
+    "rule": {
+      "any": [
+        {
+          "field": "k",
+          "op": "starts_with",
+          "value": "a"
+        },
+        {
+          "field": "k",
+          "op": "ends_with",
+          "value": "z"
+        }
+      ]
+    },
+    "values": {
+      "k": "xyz"
+    },
+    "expected": true
   }
 ]

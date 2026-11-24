@@ -1545,8 +1545,10 @@ group's sub-field, the same row).
    date, yes/no or choice field to read.
 3. Under **Show when**, choose **Add a condition**. Pick the field, the test
    (**is**, **is not**, **is one of**, **is empty**, **is not empty**, and
-   **is greater than** / **is less than** for number and date fields) and the
-   value. For **is one of**, type the values separated by commas.
+   **is greater than** / **is less than** for number and date fields, and
+   **contains**, **does not contain**, **starts with** / **ends with** for
+   text, URL and choice fields) and the value. For **is one of**, type the
+   values separated by commas.
 4. Add more tests if you need them. With two or more, a selector appears:
    **All of these are true** or **Any of these is true**.
 5. Do the same under **Required when** if the field should be mandatory only
@@ -1573,7 +1575,8 @@ CMS.create_field_definition!(%{
 ```
 
 A rule is a leaf (`field`, `op`, `value`; `empty` and `not_empty` take no
-`value`, `in` takes a list of 1 to 50) or an `all` / `any` list of rules,
+`value`, `in` takes a list of 1 to 50, and `contains`, `not_contains`,
+`starts_with` and `ends_with` take a non-blank string) or an `all` / `any` list of rules,
 nested at most 3 levels with at most 10 tests. The same attributes read back as
 `visible_when` / `required_when` on a field definition in
 `?include=field_definitions` ([json-api.md](json-api.md)) and in the OpenAPI
@@ -1596,6 +1599,11 @@ What to know before relying on it:
   as one. The browser's `datetime-local` input sends no seconds, so on a
   datetime field these two tests never hold; use a date field, or `is empty`
   / `is not empty`.
+- **Text tests ignore case.** `contains`, `starts_with` and `ends_with`
+  trim and lowercase both sides, so `starts_with "http://"` also matches
+  `HTTP://…`. On a multiple field a test holds when any item matches, so
+  `not_contains` holds only when no item contains the text. They match only
+  text: a number field can't use them.
 - **Renaming and removing.** Renaming a field rewrites the rules that read it.
 
 If saving a definition fails, the message appears under **Conditions**:

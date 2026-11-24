@@ -122,3 +122,11 @@ carries the reasoning.
   - **Known gap.** `fields(names:)` prices every name at the whole selection, and that selection was already over the default `max_complexity` of 200 before flexible items: one `multiple` string field in a generated fragment costs 631, and a flexible field 1241. The generated fragments therefore only run against a raised cap. This predates the change and is left as a follow-up; no test pins the generated fragment's complexity.
   Record: [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md#the-typed-export-pr-5-2282);
   guides: [GraphQL: generate types and fragments](../headless-graphql-api.md#generate-types-and-fragments-for-your-site), [api.md: schema discovery](../api.md#schema-discovery-typed-clients).
+
+<a id="condition-text-ops"></a>
+
+- **Conditional fields can match text.** A **Show when** or **Required when** test in `/editor/fields` now offers **contains**, **does not contain**, **starts with** and **ends with** when it reads a text, URL or choice field: "show **Download notes** when **File URL** ends with `.pdf`". In a rule these are the operators `contains`, `not_contains`, `starts_with` and `ends_with`, each with a non-blank string `value`.
+  - **Matching ignores case and surrounding spaces.** Both sides are trimmed, as for `eq`, and lowercased. The editor's evaluator and the server agree on non-ASCII text too (a Greek word-final sigma folds to ς on both); one shared fixture holds them to it.
+  - **Lists and non-text values.** On a multiple field a test holds when any item matches, so **does not contain** holds only when no item contains the text. An empty value contains nothing. A number, yes/no or date field cannot use these tests: the definition is refused, and so is retyping a field to a non-text type while a text test reads it.
+  - **Additive.** No migration. An older release reading a rule with one of these operators treats it as a rule it cannot read: the field is shown and not required, and the definition cannot be saved until the rule is changed.
+
