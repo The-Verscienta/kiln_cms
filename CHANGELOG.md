@@ -123,6 +123,12 @@ else.
 - **Collaborative editing (the `:collab_prototype` flag, off in production builds): prose typed after a quick rejoin now reaches the record, and a stored room state that won't decode is moved aside to a `corrupt:` row instead of failing every join to that document ([#2756](https://github.com/The-Verscienta/kiln_cms/issues/2756)).**
   ([long form](docs/changelog/unreleased.md#collab-writeback-corrupt-state))
 
+- **Content editor: unsaved Settings on a live page survive the text autosave, and Unpublish, the other workflow buttons, Move to trash, Mark reviewed and Parent refuse until you save them instead of dropping them ([#2776](https://github.com/The-Verscienta/kiln_cms/issues/2776), [#2777](https://github.com/The-Verscienta/kiln_cms/issues/2777)).**
+  ([long form](docs/changelog/unreleased.md#editor-unsaved-settings-kept))
+
+- **Content editor: when a co-editor saves, an idle editor shows their save in place, and one holding unsaved text or a setting they also changed gets the conflict banner at once, so its next edit no longer overwrites theirs ([#2775](https://github.com/The-Verscienta/kiln_cms/issues/2775)).**
+  ([long form](docs/changelog/unreleased.md#editor-peer-save-rebuild))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —
