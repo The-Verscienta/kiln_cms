@@ -86,7 +86,7 @@ else.
   Validating consumers: a flexible field's `items` was `{"type": "object"}` and is now a `$ref` to a union of closed item definitions.
   ([long form](docs/changelog/unreleased.md#flexible-typed-export))
 
-- **Conditional fields have four text tests: "contains", "does not contain", "starts with" and "ends with", ignoring case, for text, URL and choice fields.**
+- **Conditional fields have four text tests: "contains", "does not contain", "starts with" and "ends with", ignoring case, for text, URL and choice fields ([#3270](https://github.com/The-Verscienta/kiln_cms/pull/3270)).**
   No migration.
   ([long form](docs/changelog/unreleased.md#condition-text-ops))
 
