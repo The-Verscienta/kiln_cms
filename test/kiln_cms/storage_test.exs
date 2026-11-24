@@ -35,6 +35,31 @@ defmodule KilnCMS.StorageTest do
     path
   end
 
+  defmodule BareRangeAdapter do
+    @moduledoc false
+    # An adapter that answers `fetch_range/3` with whatever the function in
+    # the app env returns for `first`: the shapes an operator's own adapter
+    # may legally send.
+    def fetch_range(_key, first, _last),
+      do: Application.fetch_env!(:kiln_cms, __MODULE__).(first)
+  end
+
+  # Installs `BareRangeAdapter` as the storage adapter for this test.
+  defp bare_adapter(answer) do
+    previous = Application.fetch_env(:kiln_cms, KilnCMS.Storage)
+    Application.put_env(:kiln_cms, KilnCMS.Storage, adapter: BareRangeAdapter)
+    Application.put_env(:kiln_cms, BareRangeAdapter, answer)
+
+    on_exit(fn ->
+      Application.delete_env(:kiln_cms, BareRangeAdapter)
+
+      case previous do
+        {:ok, value} -> Application.put_env(:kiln_cms, KilnCMS.Storage, value)
+        :error -> Application.delete_env(:kiln_cms, KilnCMS.Storage)
+      end
+    end)
+  end
+
   test "generate_key keeps the lowercased extension and is unique" do
     key = Storage.generate_key("Photo.JPG")
     assert String.ends_with?(key, ".jpg")
@@ -182,6 +207,31 @@ defmodule KilnCMS.StorageTest do
       assert File.read!(dest) == ""
     end
 
+    # #3069: an empty blob is `{:range_not_satisfiable, 0}`, which an adapter
+    # answers only once it knows the blob is empty. A bare
+    # `:range_not_satisfiable` is not proof of that, even at offset 0: a
+    # spurious 416 on a blob with bytes would otherwise copy as an empty file,
+    # and the A/V strip would store it over the upload.
+    test "copy_to_file fails on a bare unsatisfiable range at offset 0" do
+      bare_adapter(fn _first -> {:error, :range_not_satisfiable} end)
+      dest = Path.join(System.tmp_dir!(), "copy_#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm(dest) end)
+
+      assert {:error, :range_not_satisfiable} = Storage.copy_to_file("empty.mp4", dest)
+    end
+
+    test "copy_to_file fails on a bare unsatisfiable range after the first chunk" do
+      bare_adapter(fn
+        0 -> {:ok, %{bytes: "0123", first: 0, last: 3, total: 10}}
+        _first -> {:error, :range_not_satisfiable}
+      end)
+
+      dest = Path.join(System.tmp_dir!(), "copy_#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm(dest) end)
+
+      assert {:error, :range_not_satisfiable} = Storage.copy_to_file("shrank.mp4", dest)
+    end
+
     test "copy_to_file spans several chunks for a blob larger than the chunk size" do
       # 20 MB against an 8 MB chunk: three reads, so the loop's offset
       # arithmetic is exercised rather than short-circuited by a single read.
@@ -214,6 +264,32 @@ defmodule KilnCMS.StorageTest do
       assert {:ok, %{bytes: "012", total: 10}} = Storage.fetch_private_range(key, 0, 2)
       # The public reader must not reach a private blob, ranged or not.
       assert {:error, :enoent} = Storage.fetch_range(key, 0, 2)
+    end
+  end
+
+  describe "not_found?/1 (#3066)" do
+    # The media workers complete a job only on these; everything else is
+    # retried. A shape moving between the two lists is a behaviour change.
+    test "only a definite miss is not-found" do
+      for reason <- [:enoent, :not_found, {:http_error, 404, %{status_code: 404, body: ""}}] do
+        assert Storage.not_found?(reason), inspect(reason)
+      end
+
+      for reason <- [
+            :timeout,
+            :eio,
+            :invalid_key,
+            :private_storage_not_configured,
+            :private_unsupported,
+            :range_not_satisfiable,
+            {:http_error, 403, %{status_code: 403, body: ""}},
+            {:http_error, 500, %{status_code: 500, body: ""}},
+            {:site_storage, :not_found},
+            {:image_backend, :not_found},
+            %{reason: :econnrefused}
+          ] do
+        refute Storage.not_found?(reason), inspect(reason)
+      end
     end
   end
 

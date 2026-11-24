@@ -7143,6 +7143,11 @@ msgstr "No se pudo crear el borrador. Inténtalo de nuevo."
 msgid "Couldn't delete that field."
 msgstr "No se pudo eliminar ese campo."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't delete that field: its section's layout could not be removed with it."
+msgstr "No se pudo eliminar ese campo: el diseño de su sección no se pudo eliminar con él."
+
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't delete that form."
@@ -7212,6 +7217,11 @@ msgstr "No se pudo duplicar ese contenido."
 #, elixir-autogen, elixir-format
 msgid "Couldn't duplicate that form."
 msgstr "No se pudo duplicar ese formulario."
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't duplicate “%{form}”, so nothing was created. Fix the field “%{field}” in this form and try again: %{reason}"
+msgstr "No se pudo duplicar «%{form}», así que no se creó nada. Corrige el campo «%{field}» de este formulario y vuelve a intentarlo: %{reason}"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -7449,6 +7459,16 @@ msgstr "No se pudo guardar el nuevo orden de los campos."
 #, elixir-autogen, elixir-format
 msgid "Couldn't save the new order of item types."
 msgstr "No se pudo guardar el nuevo orden de los tipos de elemento."
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save the new order, so nothing was moved. Fix the field “%{name}” and try again: %{reason}"
+msgstr "No se pudo guardar el nuevo orden, así que no se movió nada. Corrige el campo «%{name}» y vuelve a intentarlo: %{reason}"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save the new order, so nothing was moved: %{reason}"
+msgstr "No se pudo guardar el nuevo orden, así que no se movió nada: %{reason}"
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/structure_live.ex
@@ -9080,6 +9100,11 @@ msgstr "Duplicar"
 #, elixir-autogen, elixir-format
 msgid "Duplicate %{name}"
 msgstr "Duplicar %{name}"
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Duplicate %{name}: copies its settings and fields; its entries stay with the original."
+msgstr "Duplicar %{name}: copia su configuración y sus campos; sus envíos se quedan con el original."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -11035,18 +11060,6 @@ msgstr "Formulario eliminado."
 #, elixir-autogen, elixir-format
 msgid "Form duplicated (inactive until you activate it)."
 msgstr "Formulario duplicado (inactivo hasta que lo active)."
-
-#: lib/kiln_cms_web/live/form_live.ex
-#, elixir-autogen, elixir-format
-msgid "Form duplicated (inactive until you activate it). The field “%{old}” was renamed “%{new}” in the copy: that name is reserved for spam protection."
-msgstr "Formulario duplicado (inactivo hasta que lo actives). El campo «%{old}» se ha renombrado «%{new}» en la copia: ese nombre está reservado para la protección contra spam."
-
-#: lib/kiln_cms_web/live/form_live.ex
-#, elixir-autogen, elixir-format
-msgid "Form duplicated, but a field couldn't be copied: %{names}."
-msgid_plural "Form duplicated, but %{count} fields couldn't be copied: %{names}."
-msgstr[0] "Formulario duplicado, pero no se pudo copiar un campo: %{names}."
-msgstr[1] "Formulario duplicado, pero no se pudieron copiar %{count} campos: %{names}."
 
 #: lib/kiln_cms_web/controllers/form_html.ex
 #, elixir-autogen, elixir-format
@@ -20438,6 +20451,11 @@ msgstr "Guardar vista"
 msgid "Save your changes before changing this content's state."
 msgstr "Guarde sus cambios antes de cambiar el estado de este contenido."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Save your changes first."
+msgstr "Guarda primero tus cambios."
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
@@ -22449,7 +22467,6 @@ msgstr "¡Algo salió mal!"
 #: lib/kiln_cms_web/live/experiments_live.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
-#: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #: lib/kiln_cms_web/live/funnel_live.ex
@@ -24107,8 +24124,13 @@ msgstr "Ganó el control: el documento ya dice eso; no hay nada que promover."
 
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
-msgid "The copy's autoresponder stays off: %{reason}"
-msgstr "La respuesta automática de la copia sigue desactivada: %{reason}"
+msgid "The copy's autoresponder stays off: its subject or body is blank. Fill both in the copy's settings to turn it on."
+msgstr "La respuesta automática de la copia sigue desactivada: su asunto o su cuerpo está vacío. Rellena ambos en la configuración de la copia para activarla."
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "The copy's autoresponder stays off: its template names a field the copy doesn't have (%{tokens})."
+msgstr "La respuesta automática de la copia sigue desactivada: su plantilla nombra un campo que la copia no tiene (%{tokens})."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -24259,6 +24281,16 @@ msgstr "El campo se oculta en el editor mientras esto sea falso. Un campo oculto
 #, elixir-autogen, elixir-format
 msgid "The field must be filled in while this is true."
 msgstr "El campo debe rellenarse mientras esto sea verdadero."
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "The field “%{old}” was renamed “%{new}” in the copy: that name is reserved for spam protection."
+msgstr "El campo «%{old}» se renombró «%{new}» en la copia: ese nombre está reservado para la protección contra el spam."
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "The field “%{old}” was renamed “%{new}” in the copy: that name is reserved for the submission's language."
+msgstr "El campo «%{old}» se renombró «%{new}» en la copia: ese nombre está reservado para el idioma del envío."
 
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #, elixir-autogen, elixir-format
@@ -28725,6 +28757,11 @@ msgstr "No tienes permiso para cambiar el inicio de sesión en dos pasos de este
 msgid "You don't have permission to change this."
 msgstr "No tiene permiso para cambiar esto."
 
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to create forms."
+msgstr "No tienes permiso para crear formularios."
+
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to decide registrations on this site."
@@ -28745,6 +28782,16 @@ msgstr "No tiene permiso para eliminar eso."
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to do that."
 msgstr "No tiene permiso para hacer eso."
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to duplicate forms."
+msgstr "No tienes permiso para duplicar formularios."
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to edit form fields."
+msgstr "No tienes permiso para editar los campos de formulario."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -29706,6 +29753,11 @@ msgstr "control"
 msgid "could not be checked against the schema"
 msgstr "no se pudo validar con el esquema"
 
+#: lib/kiln_cms/cms/validations/section_carried.ex
+#, elixir-autogen, elixir-format
+msgid "could not be checked against the type's fields"
+msgstr "no se pudo comprobar con los campos del tipo"
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -30243,6 +30295,11 @@ msgstr "no es %{value}"
 msgid "is not a backup directory id"
 msgstr "no es un identificador de directorio de copias"
 
+#: lib/kiln_cms/cms/validations/section_carried.ex
+#, elixir-autogen, elixir-format
+msgid "is not a section any top-level field of this type is in"
+msgstr "no es una sección de ningún campo de primer nivel de este tipo"
+
 #: lib/kiln_cms/cms/field_schema.ex
 #, elixir-autogen, elixir-format
 msgid "is not a valid JSON Schema"
@@ -30313,6 +30370,11 @@ msgstr "se publica"
 #, elixir-autogen, elixir-format
 msgid "is reserved for spam protection"
 msgstr "está reservado para la protección antispam"
+
+#: lib/kiln_cms/cms/validations/reserved_field_name.ex
+#, elixir-autogen, elixir-format
+msgid "is reserved for the submission's language"
+msgstr "está reservado para el idioma del envío"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
@@ -31659,6 +31721,11 @@ msgstr "«%{name}» contiene %{count} etiqueta(s). ¿Eliminar el grupo de todos 
 #, elixir-autogen, elixir-format
 msgid "“%{name}” is reserved for spam protection: a visitor who fills this field has their submission discarded. Give it another machine name."
 msgstr "«%{name}» está reservado para la protección contra spam: el envío de un visitante que rellene este campo se descarta. Dale otro nombre de máquina."
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "“%{name}” is reserved for the submission's language: a visitor's answer to this field is also recorded as the language the submission was sent in. Give it another machine name."
+msgstr "«%{name}» está reservado para el idioma del envío: la respuesta de un visitante a este campo también se registra como el idioma en que se envió. Dale otro nombre interno."
 
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format

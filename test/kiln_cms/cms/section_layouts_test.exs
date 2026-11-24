@@ -17,6 +17,8 @@ defmodule KilnCMS.CMS.SectionLayoutsTest do
   alias KilnCMS.CMS.SectionLayouts
   alias KilnCMS.NewerReleaseRows
 
+  import KilnCMS.SectionLayoutFixtures, only: [orphan_layout!: 1]
+
   defp user(role) do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
       email: "slay-#{System.unique_integer([:positive])}@example.com",
@@ -184,6 +186,25 @@ defmodule KilnCMS.CMS.SectionLayoutsTest do
       assert Map.keys(layouts()) == ["Slay Identity"]
     end
 
+    test "a field another write deleted is not a layout failure (#3062)", %{admin: admin} do
+      latin = field!(admin, "slay_latin", "Slay Identity")
+      layout!(admin, "Slay Identity")
+      assert :ok = CMS.destroy_field_definition(latin, actor: admin)
+
+      assert {:error, error} = CMS.destroy_field_definition(latin, actor: admin)
+      refute not_kept?(error)
+
+      assert Enum.any?(
+               Ash.Error.to_error_class(error).errors,
+               &match?(%Ash.Error.Query.NotFound{}, &1)
+             )
+
+      assert {:error, error} =
+               CMS.update_field_definition(latin, %{section: "Slay Names"}, actor: admin)
+
+      refute not_kept?(error)
+    end
+
     test "a write that sets no section or owner reads nothing and moves nothing",
          %{admin: admin} do
       stale = field!(admin, "slay_latin", "Slay Identity")
@@ -271,7 +292,7 @@ defmodule KilnCMS.CMS.SectionLayoutsTest do
   describe "a layout that cannot be kept" do
     test "a refused read deletes nothing", %{admin: admin} do
       field!(admin, "slay_latin", "Slay Identity")
-      layout!(admin, "Slay Gone")
+      orphan_layout!(%{name: "Slay Gone"})
 
       assert {:error, %Ash.Error.Forbidden{}} =
                SectionLayouts.prune({:compiled, :page}, actor: user(:viewer))
@@ -317,16 +338,22 @@ defmodule KilnCMS.CMS.SectionLayoutsTest do
       layout = layout!(admin, "Slay Identity")
       unloadable!(layout)
 
-      assert {:error, _error} =
+      assert {:error, error} =
                CMS.update_field_definition(latin, %{section: "Slay Names"}, actor: admin)
 
+      # Tagged, so the fields admin can name the cause (#3062).
+      assert not_kept?(error)
       assert CMS.get_field_definition!(latin.id, actor: admin).section == "Slay Identity"
 
-      assert {:error, _error} = CMS.destroy_field_definition(latin, actor: admin)
+      assert {:error, error} = CMS.destroy_field_definition(latin, actor: admin)
+      assert not_kept?(error)
       assert {:ok, _still_there} = CMS.get_field_definition(latin.id, actor: admin)
       assert stored_layout_count() == 1
     end
   end
+
+  defp not_kept?(error),
+    do: Enum.any?(Ash.Error.to_error_class(error).errors, &match?(%SectionLayoutNotKept{}, &1))
 
   describe "who may move a section's last field" do
     test "an editor's rename is refused, and the layouts are as they were", %{admin: admin} do

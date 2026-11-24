@@ -22,6 +22,7 @@ defmodule KilnCMSWeb.ReleasePreviewLive do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ReleasePreview
   alias KilnCMSWeb.BlockComponents
+  alias KilnCMSWeb.BlockViews
 
   @impl true
   def mount(%{"token" => token}, _session, socket) do
@@ -31,7 +32,7 @@ defmodule KilnCMSWeb.ReleasePreviewLive do
          # stakeholders hold no actor; id and tenant both come from the token
          # (never the URL), and `same_site/2` pins it to the serving org.
          {:ok, release} <- CMS.get_release(id, authorize?: false, tenant: org_id) do
-      entries = ReleasePreview.overlay(release)
+      entries = release |> ReleasePreview.overlay() |> Enum.map(&put_blocks/1)
 
       {:ok,
        socket
@@ -60,9 +61,14 @@ defmodule KilnCMSWeb.ReleasePreviewLive do
   defp same_site(org_id, %{id: org_id}), do: :ok
   defp same_site(_org_id, _org), do: :error
 
-  defp blocks(record) do
-    BlockComponents.view_blocks(record.blocks)
-  end
+  # Each entry's view maps, built once here rather than in the template:
+  # inlining a fragment reads its target (#2767). Fragments resolve against
+  # what is published NOW, at the host's own audience, so a fragment target
+  # going live in this same release shows its current body, or none.
+  defp put_blocks(%{record: nil} = entry), do: Map.put(entry, :blocks, [])
+
+  defp put_blocks(%{record: record} = entry),
+    do: Map.put(entry, :blocks, BlockViews.document_view_blocks(record.blocks, record))
 
   defp anchor(entry), do: "release-item-#{entry.item.id}"
 
@@ -137,7 +143,7 @@ defmodule KilnCMSWeb.ReleasePreviewLive do
           <%= if entry.record do %>
             <h2 class="text-2xl font-bold tracking-tight">{entry.title}</h2>
             <div class="prose mt-4 max-w-none">
-              <BlockComponents.render_block :for={block <- blocks(entry.record)} block={block} />
+              <BlockComponents.render_block :for={block <- entry.blocks} block={block} />
             </div>
           <% else %>
             <h2 class="text-2xl font-bold tracking-tight">{entry.title}</h2>

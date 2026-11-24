@@ -18,7 +18,12 @@ defmodule KilnCMS.CMS.Changes.BustFormCache do
   `data-kiln-form` placeholder.
 
   After the transaction rather than after the action: a page rebuilt between
-  the bust and the commit would read the old form and be cached again.
+  the bust and the commit would read the old form and be cached again. For the
+  same reason the bust goes through `KilnCMS.AfterCommit.run/1`: a write run
+  inside a transaction it did not open (a form duplicate, a field reorder —
+  `KilnCMS.Forms.Duplicate`, `KilnCMS.Forms.FieldOrder`) has no own
+  transaction to wait for, so the bust is held until the outer one commits,
+  and dropped if it rolls back.
   """
   use Ash.Resource.Change
 
@@ -29,7 +34,8 @@ defmodule KilnCMS.CMS.Changes.BustFormCache do
         result
 
       changeset, result ->
-        KilnCMS.Cache.bust_form_payloads(org_id(changeset, result))
+        org_id = org_id(changeset, result)
+        KilnCMS.AfterCommit.run(fn -> KilnCMS.Cache.bust_form_payloads(org_id) end)
         result
     end)
   end

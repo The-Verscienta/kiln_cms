@@ -278,6 +278,35 @@ defmodule KilnCMSWeb.Tenant do
   end
 
   @doc """
+  Every `KilnCMS.Cache.Hosts` key `org` can be cached under, normalized as
+  `fetch_org/1` normalizes a host before it reads that cache: its custom
+  domain, `<slug>.<base host>`, `<slug>.<console host>` when a console host is
+  set, and, for the default org, the base host and the console host. The base
+  host's entry is also the default-org fallback an unmatched host reads.
+
+  For dropping a changed org's resolutions (#3194,
+  `KilnCMS.Accounts.Changes.BustSiteUrls`); a key that is not cached is a no-op.
+  """
+  @spec host_cache_keys(Accounts.Organization.t()) :: [String.t()]
+  def host_cache_keys(%Accounts.Organization{} = org) do
+    base = base_host()
+    console = KilnCMSWeb.Plugs.ConsoleHost.console_host()
+
+    slug_hosts =
+      if is_binary(org.slug) and org.slug != "",
+        do: Enum.map([base | List.wrap(console)], &"#{org.slug}.#{&1}"),
+        else: []
+
+    default_hosts =
+      if org.id == Accounts.default_org_id(), do: [base | List.wrap(console)], else: []
+
+    (List.wrap(org.custom_domain) ++ slug_hosts ++ default_hosts)
+    |> Enum.map(&normalize/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  @doc """
   `url` as an absolute URL on the given org's own host, or `nil`.
 
   The one absolutizer for page-advertised URLs that crawlers and link-preview

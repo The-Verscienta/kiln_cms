@@ -181,6 +181,28 @@ describe, and deleting an org would strand them. A single-tenant install that
 wants a hard guarantee can set `config :kiln_cms, :multitenancy_enabled, false`,
 which refuses any org beyond the default one.
 
+### Change the slug or custom domain
+
+Updating an org is a platform-admin action too
+(`KilnCMS.Accounts.update_organization/3`), and `mix kiln.org_slugs --fix`
+goes through it. A new `slug` or `custom_domain` moves every absolute URL the
+site renders: canonical, hreflang and Open Graph URLs, the sitemap, feeds and
+`llms.txt`. Once the save commits, Kiln (#3194):
+
+- drops the org's cached host lookups on every node, under its old and its
+  new hosts;
+- moves the `ETag` of every page on the site, so a browser or CDN revalidating
+  a page gets a `200` with the new URLs, never a `304` for the old ones;
+- drops the site's cached sitemaps, feeds and `llms.txt` on every node;
+- queues a purge of the site's CDN key when `KILN_CDN_PURGE_URL` is set.
+
+A save that changes neither field (a rename, say) does none of this.
+
+Fired artifacts (`GET /api/content/:type/:slug`) are not re-fired: a byline
+that links to another record keeps the URL on the old host until the
+document is next published, edited or re-fired. `mix kiln.refire_all`
+re-fires every artifact at once.
+
 ## Serving the console from its own host
 
 By default each org's editor console answers on that org's own host, so a

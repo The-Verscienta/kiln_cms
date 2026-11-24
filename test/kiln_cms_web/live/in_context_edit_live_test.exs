@@ -227,6 +227,86 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
       assert html =~ "Nested right"
     end
 
+    # #2767: a video block read-only showed an empty `<p>`, and a fragment
+    # showed nothing of the content it embeds.
+    test "a video block and a fragment render read-only, the fragment inlined",
+         %{conn: conn} do
+      editor = authed_user(:editor)
+      [clip, video_id, fragment_id] = for _ <- 1..3, do: Ash.UUID.generate()
+
+      shared =
+        Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+          title: "Shared",
+          slug: slug(),
+          state: :published,
+          blocks: [
+            %{"_type" => "heading", "text" => "Shared call to action"},
+            %{"_type" => "quote", "text" => "Shared quote"}
+          ]
+        })
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Media page",
+            slug: slug(),
+            blocks: [
+              %{"_type" => "video", "media_id" => clip, "id" => video_id},
+              %{
+                "_type" => "fragment",
+                "ref" => %{"type" => "page", "id" => shared.id},
+                "id" => fragment_id
+              }
+            ]
+          },
+          actor: editor
+        )
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+
+      assert html =~ ~s(<figure class="kiln-video">)
+      assert html =~ ~s(src="/media/#{clip}/stream")
+
+      # The fragment's whole body sits in its one card, and none of it is
+      # editable here.
+      fragment = element(lv, "#block-wrap-#{fragment_id}") |> render()
+      assert fragment =~ "Shared call to action"
+      assert fragment =~ "Shared quote"
+      refute fragment =~ "contenteditable"
+      assert [_one] = Regex.scan(~r/title="Edit this block in the full editor"/, fragment)
+    end
+
+    # #2769: the editable region was a hard-coded h2. No whitespace may sit
+    # inside it: the hook reads its text back, and an empty region has to be
+    # `:empty` for the placeholder to show.
+    test "an editable heading is its own level, holding only its text", %{conn: conn} do
+      editor = authed_user(:editor)
+      deep = Ash.UUID.generate()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Outlined page",
+            slug: slug(),
+            blocks: [%{"_type" => "heading", "text" => "Subsection", "level" => 3, "id" => deep}]
+          },
+          actor: editor
+        )
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor/site/page/#{page.slug}")
+
+      assert html =~ ~r/<h3[^>]*contenteditable="true"[^>]*data-kiln-block-id="#{deep}"/
+      assert html =~ ~r/data-kiln-block-id="#{deep}"[^>]*>Subsection<\/h3>/
+      refute html =~ "phx-no-format"
+
+      # A new heading starts empty, at the default level.
+      render_click(lv, "open_add", %{"at" => "end"})
+      render_click(lv, "add_block", %{"type" => "heading", "at" => "end"})
+
+      [_, new_id] = Regex.run(~r/<h2[^>]*data-kiln-block-id="([^"]+)"/, render(lv))
+      assert render(lv) =~ ~r/data-kiln-block-id="#{new_id}"[^>]*><\/h2>/
+    end
+
     test "unknown slug and unknown type redirect back to the editor", %{conn: conn} do
       editor = authed_user(:editor)
 

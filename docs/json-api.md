@@ -518,6 +518,13 @@ GET /api/json/posts?custom_filter[_not][color]=red
 GET /api/json/posts?custom_filter[_or][0][price][lt]=10&custom_filter[_or][1][_native][title]=Sale
 ```
 
+Two conditions on one field with the same operator need `_and`, because a
+query string cannot repeat a key: in
+`custom_filter[sku][contains]=AB&custom_filter[sku][contains]=12` the
+query-string decoder (Plug) keeps only the last value before Kiln sees it.
+Send `custom_filter[_and][0][sku][contains]=AB&custom_filter[_and][1][sku][contains]=12`
+to apply both.
+
 `_or` / `_and` hold a list of conditions (a map keyed `0`, `1`, … in a query
 string); `_not` holds one condition. A condition is a map of custom field names
 to the operators above, may itself hold `_or` / `_and` / `_not`, and may hold

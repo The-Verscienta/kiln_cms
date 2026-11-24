@@ -220,6 +220,75 @@ defmodule KilnCMSWeb.ReleaseLiveTest do
     assert preview_html =~ "Previewed page"
   end
 
+  # #2767: the release preview drew an empty `<p>` for a video block and for
+  # a fragment, which it never expanded.
+  test "the release preview shows a draft's video player and inlined fragment" do
+    admin = authed_user(:admin)
+    rel = release(admin, "Media release")
+    clip = Ash.UUID.generate()
+
+    shared =
+      Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+        title: "Shared",
+        slug: slug(),
+        state: :published,
+        blocks: [%{"_type" => "heading", "text" => "Shared call to action"}]
+      })
+
+    page =
+      CMS.create_page!(
+        %{
+          title: "Launch page",
+          slug: slug(),
+          blocks: [
+            %{"_type" => "video", "media_id" => clip},
+            %{"_type" => "fragment", "ref" => %{"type" => "page", "id" => shared.id}}
+          ]
+        },
+        actor: admin
+      )
+
+    {:ok, _} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id},
+        actor: admin
+      )
+
+    token = KilnCMS.CMS.ReleasePreview.sign(%{id: rel.id, org_id: rel.org_id})
+    {:ok, _view, html} = live(build_conn(), ~p"/preview/release/#{token}")
+
+    assert html =~ ~s(<figure class="kiln-video">)
+    assert html =~ ~s(src="/media/#{clip}/stream")
+    assert html =~ "Shared call to action"
+  end
+
+  # #2769: the release preview rendered every heading block as an h2.
+  test "the release preview renders a heading at its own level" do
+    admin = authed_user(:admin)
+    rel = release(admin, "Outline release")
+
+    page =
+      CMS.create_page!(
+        %{
+          title: "Outlined page",
+          slug: slug(),
+          blocks: [%{"_type" => "heading", "text" => "Subsection", "level" => 3}]
+        },
+        actor: admin
+      )
+
+    {:ok, _} =
+      CMS.add_release_item(
+        %{release_id: rel.id, content_type: "page", content_id: page.id},
+        actor: admin
+      )
+
+    token = KilnCMS.CMS.ReleasePreview.sign(%{id: rel.id, org_id: rel.org_id})
+    {:ok, _view, html} = live(build_conn(), ~p"/preview/release/#{token}")
+
+    assert html =~ "<h3>Subsection</h3>"
+  end
+
   test "an expired or forged release preview token shows a dead link, never content" do
     assert {:ok, _view, html} = live(build_conn(), ~p"/preview/release/not-a-real-token")
     assert html =~ "expired"

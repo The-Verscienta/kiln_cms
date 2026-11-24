@@ -26,9 +26,24 @@ defmodule KilnCMS.CMS.FieldSectionTest do
     {:ok, admin: user(:admin)}
   end
 
+  # A layout, and a field of its owner filed under its section first: the
+  # create refuses a section no field is in (#3061).
   defp section!(admin, attrs, opts \\ []) do
-    CMS.create_field_section!(
-      Map.merge(%{content_type: :post, name: "Fsec layout"}, attrs),
+    attrs = Map.merge(%{content_type: :post, name: "Fsec layout"}, attrs)
+    carrier!(admin, attrs, opts)
+    CMS.create_field_section!(attrs, [actor: admin] ++ opts)
+  end
+
+  defp carrier!(admin, attrs, opts, extra \\ %{}) do
+    CMS.create_field_definition!(
+      attrs
+      |> Map.take([:content_type, :type_definition_id])
+      |> Map.merge(%{
+        name: "fsec_carrier_#{System.unique_integer([:positive])}",
+        label: "Carrier",
+        section: attrs.name
+      })
+      |> Map.merge(extra),
       [actor: admin] ++ opts
     )
   end
@@ -101,6 +116,155 @@ defmodule KilnCMS.CMS.FieldSectionTest do
                  %{content_type: :post, name: "X", initially: :maybe},
                  actor: admin
                )
+    end
+  end
+
+  describe "a section no field carries (#3061)" do
+    defp refused_on_name?(result) do
+      match?(
+        {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.InvalidAttribute{field: :name}]}},
+        result
+      )
+    end
+
+    defp stored(owner_attrs, name, opts) do
+      opts = Keyword.put_new(opts, :authorize?, false)
+
+      case owner_attrs do
+        %{type_definition_id: id} -> CMS.field_sections_for_definition!(id, opts)
+        %{content_type: type} -> CMS.field_sections_for!(type, opts)
+      end
+      |> Enum.filter(&(&1.name == name))
+    end
+
+    test "a compiled type's create is refused, and nothing is stored", %{admin: admin} do
+      result =
+        CMS.create_field_section(%{content_type: :post, name: "Fsec nobody"}, actor: admin)
+
+      assert refused_on_name?(result)
+      {:error, %{errors: [error]}} = result
+      assert error.message =~ "not a section any top-level field"
+      assert stored(%{content_type: :post}, "Fsec nobody", []) == []
+    end
+
+    test "a dynamic type's create is refused; once a field is in it, it is allowed",
+         %{admin: admin} do
+      type = CMS.create_type_definition!(%{name: "fsec_dyn", label: "Dyn"}, actor: admin)
+      attrs = %{type_definition_id: type.id, name: "Fsec dyn", display: :tab}
+
+      assert refused_on_name?(CMS.create_field_section(attrs, actor: admin))
+      assert stored(attrs, "Fsec dyn", []) == []
+
+      carrier!(admin, attrs, [])
+      assert {:ok, %{display: :tab}} = CMS.create_field_section(attrs, actor: admin)
+    end
+
+    test "a field of another type in that section does not carry it", %{admin: admin} do
+      carrier!(admin, %{content_type: :page, name: "Fsec elsewhere"}, [])
+
+      assert refused_on_name?(
+               CMS.create_field_section(%{content_type: :post, name: "Fsec elsewhere"},
+                 actor: admin
+               )
+             )
+    end
+
+    test "a group sub-field or a link field in that section does not carry it",
+         %{admin: admin} do
+      group =
+        CMS.create_field_definition!(
+          %{
+            content_type: :post,
+            name: "fsec_g_#{System.unique_integer([:positive])}",
+            label: "Group",
+            field_type: :group
+          },
+          actor: admin
+        )
+
+      ref =
+        CMS.create_field_definition!(
+          %{
+            content_type: :post,
+            name: "fsec_r_#{System.unique_integer([:positive])}",
+            label: "Related",
+            field_type: :reference,
+            target_type: "page"
+          },
+          actor: admin
+        )
+
+      sub =
+        CMS.create_field_definition!(
+          %{group_of_id: group.id, name: "fsec_sub", label: "Sub"},
+          actor: admin
+        )
+
+      link =
+        CMS.create_field_definition!(
+          %{link_of_id: ref.id, name: "fsec_link", label: "Link", field_type: :integer},
+          actor: admin
+        )
+
+      # Neither child keeps a section through the resource, so it is stored
+      # the way a hand-edited row would be.
+      KilnCMS.Repo.query!("UPDATE field_definitions SET section = $1 WHERE id = ANY($2)", [
+        "Fsec nested",
+        Enum.map([sub.id, link.id], &Ecto.UUID.dump!/1)
+      ])
+
+      assert refused_on_name?(
+               CMS.create_field_section(%{content_type: :post, name: "Fsec nested"},
+                 actor: admin
+               )
+             )
+    end
+
+    test "a field of a type this release does not register still carries it",
+         %{admin: admin} do
+      KilnCMS.NewerReleaseRows.field_definition!(%{content_type: "post", section: "Fsec newer"})
+
+      assert {:ok, %{name: "Fsec newer"}} =
+               CMS.create_field_section(%{content_type: :post, name: "Fsec newer"},
+                 actor: admin
+               )
+    end
+
+    test "a field in another site does not carry it, with or without a tenant",
+         %{admin: admin} do
+      other = org("fsec-carrier")
+      carrier!(admin, %{content_type: :post, name: "Fsec theirs"}, tenant: other)
+
+      default = KilnCMS.Accounts.default_org_id()
+      attrs = %{content_type: :post, name: "Fsec theirs"}
+
+      assert refused_on_name?(CMS.create_field_section(attrs, actor: admin, tenant: default))
+
+      # Tenant-less (a fail-open build's global write): the row lands in the
+      # default org, and the check reads that org, not every site.
+      assert refused_on_name?(CMS.create_field_section(attrs, actor: admin))
+      assert stored(attrs, "Fsec theirs", tenant: default) == []
+
+      assert {:ok, %{org_id: org_id}} =
+               CMS.create_field_section(attrs, actor: admin, tenant: other)
+
+      assert org_id == other.id
+    end
+
+    test "a caller the policy refuses gets Forbidden, not the name error", %{admin: _admin} do
+      for actor <- [user(:editor), user(:viewer), nil] do
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 CMS.create_field_section(%{content_type: :post, name: "Fsec nobody"},
+                   actor: actor
+                 )
+      end
+    end
+
+    test "an update changes the layout of a row an older release left", %{admin: admin} do
+      section = KilnCMS.SectionLayoutFixtures.orphan_layout!(%{name: "Fsec left"})
+
+      assert {:ok, %{display: :fieldset}} =
+               CMS.update_field_section(section, %{display: :fieldset}, actor: admin)
     end
   end
 

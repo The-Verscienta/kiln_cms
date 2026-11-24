@@ -34,6 +34,7 @@ defmodule KilnCMSWeb.InContextEditLive do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.TypedBlocks
   alias KilnCMSWeb.BlockComponents
+  alias KilnCMSWeb.BlockViews
   alias KilnCMSWeb.EditorTelemetry
   # Shared inline-editing engine (block working set + Ash write path), also used
   # by the Presentation console (#355).
@@ -172,7 +173,21 @@ defmodule KilnCMSWeb.InContextEditLive do
     # intact. Kept alongside the display descriptors so one edit can't drop a
     # sibling block the way a partial form-params merge would.
     |> assign(:block_inputs, InlineEditing.block_inputs(typed))
-    |> assign(:blocks, InlineEditing.editable_blocks(typed))
+    |> assign(:blocks, typed |> InlineEditing.editable_blocks() |> put_read_only_views(record))
+  end
+
+  # The view maps a read-only block renders (see `block/1`), built once per
+  # load rather than on every render: a fragment is inlined here, which reads
+  # its target (#2767). Carried on the descriptor, so a reorder keeps them; a
+  # block added in this session is always an inline-editable one, with none.
+  defp put_read_only_views(blocks, record) do
+    Enum.map(blocks, fn
+      %{field: nil, struct: struct} = block ->
+        Map.put(block, :views, BlockViews.document_view_blocks([struct], record))
+
+      block ->
+        block
+    end)
   end
 
   # ── events ────────────────────────────────────────────────────────────────
@@ -893,11 +908,19 @@ defmodule KilnCMSWeb.InContextEditLive do
   attr :block, :map, required: true
   attr :region_version, :integer, required: true
 
-  # Inline heading — a `contenteditable` <h2> matching the public block styling.
+  # Inline heading — a `contenteditable` heading at the block's own level
+  # (#2769), sized by the same `.kiln-block h1`..`h6` rules as the public page.
+  # No whitespace inside the tag (`phx-no-format`): the InlineText hook reads
+  # the region's text back, and the `:empty` placeholder needs a truly empty
+  # element.
   defp block(%{block: %{type: "heading"}} = assigns) do
+    assigns = assign(assigns, :tag, "h#{KilnCMS.Blocks.Heading.level(assigns.block.struct)}")
+
     ~H"""
     <div class="kiln-block">
-      <h2
+      <.dynamic_tag
+        phx-no-format
+        tag_name={@tag}
         id={InlineEditing.region_id(@block, @region_version)}
         phx-hook="InlineText"
         phx-update="ignore"
@@ -906,8 +929,8 @@ defmodule KilnCMSWeb.InContextEditLive do
         aria-label={gettext("Edit heading")}
         data-kiln-block-id={@block.id}
         data-placeholder={gettext("Type a heading")}
-        class="min-h-[1.5em] text-xl font-bold outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 empty:before:text-base-content/40 empty:before:content-[attr(data-placeholder)]"
-      >{@block.value}</h2>
+        class="min-h-[1.5em] outline-none focus:ring-2 focus:ring-primary/40 focus:ring-offset-2 empty:before:text-base-content/40 empty:before:content-[attr(data-placeholder)]"
+      >{@block.value}</.dynamic_tag>
     </div>
     """
   end
@@ -955,14 +978,15 @@ defmodule KilnCMSWeb.InContextEditLive do
     """
   end
 
-  # Read-only blocks (image, divider, embed, form, custom): rendered through the
-  # shared public component, un-editable in Phase 1.
+  # Read-only blocks (image, divider, embed, form, media, custom): rendered
+  # through the shared public component, un-editable in Phase 1. A fragment
+  # shows its inlined body here, still one card that drags as one.
   defp block(assigns) do
-    assigns = assign(assigns, :legacy, read_only_block(assigns.block.struct))
+    assigns = assign(assigns, :views, read_only_views(assigns.block))
 
     ~H"""
     <div class="kiln-block relative" title={gettext("Edit this block in the full editor")}>
-      <BlockComponents.render_block block={@legacy} />
+      <BlockComponents.render_block :for={view <- @views} block={view} />
     </div>
     """
   end
@@ -980,10 +1004,11 @@ defmodule KilnCMSWeb.InContextEditLive do
   # fallback, which meant every new data-carrying block rendered blank on this
   # surface until someone remembered to add it. The builder already has a total
   # fallback of its own, so there is nothing for the list to protect.
-  defp read_only_block(struct) do
-    [view] = BlockComponents.view_blocks([struct])
-    view
-  end
+  #
+  # The views come from `put_read_only_views/2`; a descriptor without them
+  # renders its struct un-expanded, which reads nothing.
+  defp read_only_views(%{views: views}), do: views
+  defp read_only_views(%{struct: struct}), do: BlockComponents.view_blocks([struct])
 
   # Stable-id region element id, keyed by `region_version` so a save/restore
   # remounts the region and reloads its content.

@@ -131,6 +131,27 @@ defmodule KilnCMSWeb.EditorLiveFiltersTest do
              |> length() == 4
     end
 
+    # #2741 pins what the list relies on: `Filters` hands on at most one
+    # condition per field and op, so the chips drawn from `conditions/1` are
+    # exactly what reaches the query. The first in URL order is kept.
+    test "a second condition on the same field and op keeps only the first" do
+      for {cf, kept} <- [
+            {"note:contains:b;note:contains:a", "b"},
+            {"note:contains:a;note:contains:b", "a"}
+          ] do
+        filters = parse(%{"type" => "post", "cf" => cf})
+        assert [%{field: "note", op: "contains", value: ^kept}] = Filters.conditions(filters)
+        assert filters["cf"] == "note:contains:" <> kept
+        assert parse(Filters.to_params(filters)) == filters
+      end
+
+      # and the dropped one is not a field that went away
+      assert Filters.dropped_conditions(
+               %{"type" => "post", "cf" => "note:contains:a;note:contains:b"},
+               ctx()
+             ) == 0
+    end
+
     test "the encoded string never exceeds what a saved view stores" do
       long = String.duplicate("é", 60)
       cf = Enum.map_join(~w(a b c d), ";", fn _ -> cf("note", "contains", long) end)
@@ -306,6 +327,26 @@ defmodule KilnCMSWeb.EditorLiveFiltersTest do
       refute stale?.(%{"type" => "post", "sort" => "field:price"})
       refute stale?.(%{"type" => "post", "sort" => "title"})
       refute stale?.(%{"type" => "post"})
+    end
+
+    test "lossy? is stale?, or a stored value that reads back as the default (#2785)" do
+      lossy? = &Filters.lossy?(&1, ctx())
+
+      assert lossy?.(%{"type" => "post", "cf" => "ghost:eq:1"})
+      assert lossy?.(%{"type" => "post", "sort" => "field:ghost"})
+      assert lossy?.(%{"locale" => "zz"})
+      assert lossy?.(%{"type" => "gone"})
+      assert lossy?.(%{"sort" => "nonsense"})
+      assert lossy?.(%{"status" => "draft", "consent_missing" => "nope"})
+
+      # A category or tag that is gone keeps its id; nothing else was lost.
+      refute lossy?.(%{"category" => Ecto.UUID.generate()})
+      refute lossy?.(%{})
+      refute lossy?.(%{"status" => "all", "type" => "all", "sort" => "updated"})
+      refute lossy?.(%{"q" => "  "})
+      refute lossy?.(%{"q" => " x ", "status" => "draft", "locale" => "en"})
+      refute lossy?.(%{"type" => "post", "cf" => "price:gte:1", "sort" => "-field:price"})
+      refute Filters.lossy?(nil, ctx())
     end
 
     test "the lookup is asked only when cf or a field sort needs it" do

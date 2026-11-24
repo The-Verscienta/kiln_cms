@@ -292,6 +292,37 @@ under the input what the public form does with it:
 A default that matches nothing (`Red` for an option `red`, `3.5` stars) is
 saved but pre-selects nothing.
 
+### Reorder fields and copy a field
+
+The order of the fields on the builder's preview is the order of the public
+form. You need the **admin** role.
+
+1. Open **Forms** (`/editor/forms`) and click the form's name. Hover over a
+   field on the preview, or click it: a small toolbar appears at its top
+   right, with a drag handle (arrows, labeled **Reorder field** and the
+   field's label), a copy icon (**Duplicate field**) and a trash icon.
+2. To move the field, drag it by the handle to its new place and drop it.
+   The new order is saved as you drop, with no message.
+3. To copy the field, click the copy icon. The copy appears right after the
+   original, with the same label and settings and the next free machine name
+   (`email_2` for `email`, then `email_3`), and its settings open in **Field
+   settings**. Rename it there.
+
+A new order is saved whole or not at all. Moving a field rewrites the
+position of every field that moved, and if any one of them is refused,
+none of them is moved: the preview goes back to the saved order, and a
+message at the corner of the screen names the field, for example *Couldn't
+save the new order, so nothing was moved. Fix the field “topic” and try
+again: Invalid value provided for options: a select field must list at
+least one option.*
+
+That happens when a field was saved by an older release with a setting
+Kiln now refuses, here a dropdown with no options. Click the named field,
+fix the setting its error names (in this example, enter at least one line
+under **Options — one per line**), and drag again. A field copied just
+before such a refusal is kept, sharing its original's place in the order
+until the reorder succeeds.
+
 ### Fix a field named website
 
 The public form carries a hidden spam trap, an input named `website` that
@@ -329,6 +360,46 @@ renamed field cannot be named `website` again. Nothing changes for the spam
 trap itself: `GET /api/forms/<slug>` still reports `"honeypot_field":
 "website"`, and the public form still renders the hidden input.
 
+### Fix a field named locale
+
+A submission records the language it was sent in from a param named
+`locale`, which a headless frontend sends in the request body (both client
+libraries' `submitForm` / `submit_form` send their `locale` option that way).
+A field of your own with the machine name `locale` posts its answer under that
+same name, so the answer is also recorded as the submission's language. A
+form asking *Preferred language* with a free-text answer of `Spanish,
+please` records that as the language.
+
+Kiln no longer lets a field take that name. A form that already has one
+keeps working: it renders the field, the answer is stored with the entry like
+any other, and `GET /api/forms/<slug>` lists the field. Until it is renamed,
+the answer is also recorded as the submission's language, and the builder
+flags the field. You need the **admin** role.
+
+1. Open **Forms** (`/editor/forms`) and click the form's name. On the
+   preview, the field shows **Reserved name**, with a warning icon, under its
+   machine name.
+2. Click the field. Under **Machine name**, **Field settings** says
+   *“locale” is reserved for the submission's language: a visitor's answer to
+   this field is also recorded as the language the submission was sent in.
+   Give it another machine name.*
+3. Change **Machine name** to another name, for example `preferred_language`,
+   and leave the input (or press Enter). The panel says **Saved.**, the new
+   name appears under the field on the preview, and the **Reserved name** flag
+   and the note go away.
+
+The rename behaves like any other
+([above](#edit-and-rename-form-fields)): `[field:locale]` tokens in the
+**Confirmations** template become `[field:preferred_language]`, entries
+already received keep the old key, and a headless frontend that posts the
+field's answer as `locale` needs the new name. It keeps sending `locale` for
+the submission's language: that param, and the client libraries that send
+it, are unchanged.
+
+Until the field is renamed, Kiln refuses to change its **Type** (the message
+is *is reserved for the submission's language*, under **Machine name**), and
+no field can be named `locale` again.
+
 ### Errors you can see
 
 | Message | Meaning |
@@ -344,6 +415,8 @@ trap itself: `GET /api/forms/<slug>` still reports `"honeypot_field":
 | must be a whole number from 1 to 10 | A rating's **Stars** is not a whole number from 1 to 10. |
 | a hidden field can't be required | Hidden fields are filled by the page or a script, never by the visitor, so **Required** is refused on them. |
 | is reserved for spam protection | The machine name `website` is the honeypot input's, so no field of any type can take it, whether you add, rename or retype a field. A field that already has it is refused a change of **Type** too; give it another machine name first. See [Fix a field named website](#fix-a-field-named-website). |
+| is reserved for the submission's language | The machine name `locale` is the param a submission's language is recorded from, so no field of any type can take it, whether you add, rename or retype a field. A field that already has it is refused a change of **Type** too; give it another machine name first. See [Fix a field named locale](#fix-a-field-named-locale). |
+| Couldn't save the new order, so nothing was moved. Fix the field “topic” and try again: … | Shown when you drag a field: one of the fields that moved was refused, so no field was moved. See [Reorder fields and copy a field](#reorder-fields-and-copy-a-field). |
 | The autoresponder uses [field:email]: remove it from the Confirmations template first. | Shown when you delete a field: the autoresponder is on and its subject or body uses this field's token. See [Delete a field the autoresponder uses](#delete-a-field-the-autoresponder-uses). |
 
 An error that belongs to no input in the panel, such as a permission error,
@@ -356,8 +429,9 @@ you can start a similar form without building it again. Its entries are not
 copied. You need the **admin** role.
 
 1. Open **Forms** (`/editor/forms`). Under *Your forms*, find the form and
-   click the copy icon on its row (its tooltip reads **Duplicate** and the
-   form's name).
+   click the copy icon on its row. Its tooltip reads *Duplicate* and the
+   form's name, then *copies its settings and fields; its entries stay with
+   the original.*
 2. A message says *Form duplicated (inactive until you activate it).*, and a
    new row appears: the name with ` (copy)` after it, marked **Inactive**,
    with the slug `<slug>-copy` (`<slug>-copy-2` and so on when that is
@@ -369,6 +443,10 @@ copied. You need the **admin** role.
 The copy's **Confirmations** template, and whether it is switched on, follow
 the original's.
 
+A duplicate is made whole or not at all: the copy, every one of its fields
+and its autoresponder are saved together, so a duplicate that fails leaves
+no partial copy behind.
+
 What the message can say besides:
 
 - *… The field “website” was renamed “website_2” in the copy: that name is
@@ -376,14 +454,34 @@ What the message can say besides:
   ([Fix a field named website](#fix-a-field-named-website)). The copy's field
   is `website_2` (or the next free name), and its `[field:website]` tokens
   read `[field:website_2]`. The original is not changed.
-- *Form duplicated, but a field couldn't be copied: topic.* A field
-  of the original is no longer valid, for example a dropdown with no options,
-  so the copy was made without it. Add it to the copy by hand.
-- *The copy's autoresponder stays off: …* The original's
-  autoresponder is on, but the copy could not switch it on, usually because
-  its template names a field that could not be copied. A renamed `website`
-  token is still rewritten. Fix the template in the copy's
-  **Confirmations** tab and switch it on there.
+- *… The field “locale” was renamed “locale_2” in the copy: that name is
+  reserved for the submission's language.* The same for a field named
+  `locale` ([Fix a field named locale](#fix-a-field-named-locale)): the
+  copy's field is `locale_2`, and its `[field:locale]` tokens read
+  `[field:locale_2]`.
+- *Couldn't duplicate “Contact”, so nothing was created. Fix the field
+  “topic” in this form and try again: Invalid value provided for options: a
+  select field must list at least one option.* (with the form's and the
+  field's names, and the field's error). A field of the original was saved by
+  an older release with a setting Kiln now refuses, here a dropdown with no
+  options. No copy exists. Open the original in the builder, click the named
+  field, fix the setting its error names, and duplicate again. The same
+  field also stops the original's fields being reordered
+  ([Reorder fields and copy a field](#reorder-fields-and-copy-a-field)).
+- A message with no field name, such as *"http://insecure.test" is not an
+  allowed CSP source. …*, is about one of the original's settings, here an
+  embedding origin on its **Embed** tab. No copy exists either: fix the
+  setting in the original and duplicate again.
+- *The copy's autoresponder stays off: its template names a field the copy
+  doesn't have ([field:gone]).* (with the unknown tokens). The original's
+  autoresponder is on, but its **Confirmations** subject or body names a
+  field it no longer has. The copy is made, with its autoresponder off; a
+  renamed `website` or `locale` token is still rewritten. Fix the template in
+  the copy's **Confirmations** tab and switch it on there.
+- *The copy's autoresponder stays off: its subject or body is blank. Fill
+  both in the copy's settings to turn it on.* The original's autoresponder is
+  on with an empty subject or body. The copy is made, with its autoresponder
+  off; fill both in its **Confirmations** tab and switch it on there.
 
 ## Share a form at its own address
 

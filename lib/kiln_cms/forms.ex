@@ -10,7 +10,9 @@ defmodule KilnCMS.Forms do
       silently discarded, giving spam software nothing to learn from). No
       admin field may take that name (`reserved_field_names/0`, #2267): a
       field that already had it keeps working, but a visitor who fills it
-      trips the honeypot, so the builder flags it;
+      trips the honeypot, so the builder flags it. `locale` is reserved the
+      same way (#2716): it is the param that records the submission's
+      language (`submit/3`'s `:locale`);
     * **coercion + validation** per `FormField` (required, type coercion to
       JSON-native values, select membership, email shape), unknown keys
       dropped;
@@ -60,6 +62,10 @@ defmodule KilnCMS.Forms do
   @actor_override {__MODULE__, :actor_override}
 
   @honeypot_field "website"
+  # The param a submission's language is recorded from (`submit/3`'s
+  # `:locale`, read by `KilnCMSWeb.FormController` from the same params as the
+  # fields), so no field may take it either (#2716).
+  @locale_field "locale"
   @rendered_at_field "_kiln_rendered_at"
   # The human-verification token (#2249), and the name Turnstile's own markup
   # would post it under — accepted when ours is absent, so a headless front
@@ -127,18 +133,34 @@ defmodule KilnCMS.Forms do
   def honeypot_field, do: @honeypot_field
 
   @doc """
-  The machine names no `KilnCMS.CMS.FormField` may take (#2267): the honeypot
-  input's. A field named like it would discard every submission that fills
-  it. `KilnCMS.CMS.Validations.ReservedFieldName` refuses them, the form
-  builder flags a field that already carries one, and a form duplicate
-  renames it in the copy.
+  The machine names no `KilnCMS.CMS.FormField` may take:
+
+    * the honeypot input's (#2267). A field named like it would discard
+      every submission that fills it;
+    * `locale` (#2716), the param a submission's language is recorded from.
+      A visitor's answer to a field named like it would also be recorded as
+      the submission's language.
+
+  `KilnCMS.CMS.Validations.ReservedFieldName` refuses them, the form builder
+  flags a field that already carries one, and a form duplicate renames it in
+  the copy. `reserved_field_reason/1` says which reason applies.
   """
   @spec reserved_field_names() :: [String.t()]
-  def reserved_field_names, do: [@honeypot_field]
+  def reserved_field_names, do: [@honeypot_field, @locale_field]
 
   @doc "Whether `name` is one of `reserved_field_names/0`."
   @spec reserved_field_name?(term()) :: boolean()
   def reserved_field_name?(name), do: name in reserved_field_names()
+
+  @doc """
+  Why `name` is reserved (`reserved_field_names/0`): `:honeypot` (spam
+  protection), `:locale` (the submission's language), or `nil` for a name
+  that isn't.
+  """
+  @spec reserved_field_reason(term()) :: :honeypot | :locale | nil
+  def reserved_field_reason(@honeypot_field), do: :honeypot
+  def reserved_field_reason(@locale_field), do: :locale
+  def reserved_field_reason(_name), do: nil
 
   @doc """
   A machine name based on `base` that none of `fields` carries: `base` itself,
