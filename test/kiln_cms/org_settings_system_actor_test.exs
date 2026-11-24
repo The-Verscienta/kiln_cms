@@ -68,6 +68,77 @@ defmodule KilnCMS.OrgSettingsSystemActorTest do
     assert OrgSettings.with_actor(nil, fn -> OrgSettings.system(:feeds) end) == nil
   end
 
+  describe "with_actor/3, one subsystem's override (#2535)" do
+    test "takes away only the subsystem it names" do
+      OrgSettings.with_actor(:registrations, nil, fn ->
+        assert OrgSettings.system(:registrations) == nil
+        assert %SystemActor{subsystem: :admin_allowlist} = OrgSettings.system(:admin_allowlist)
+        assert %SystemActor{subsystem: :branding} = OrgSettings.system(:branding)
+      end)
+    end
+
+    test "is restored after a normal return and after a raise" do
+      assert :done = OrgSettings.with_actor(:registrations, nil, fn -> :done end)
+      assert %SystemActor{subsystem: :registrations} = OrgSettings.system(:registrations)
+
+      assert_raise RuntimeError, fn ->
+        OrgSettings.with_actor(:registrations, nil, fn -> raise "boom" end)
+      end
+
+      assert %SystemActor{subsystem: :registrations} = OrgSettings.system(:registrations)
+    end
+
+    test "nests: the inner override wins, and the outer one is back afterwards" do
+      other = SystemActor.new(:feeds)
+
+      OrgSettings.with_actor(:registrations, nil, fn ->
+        OrgSettings.with_actor(:registrations, other, fn ->
+          assert OrgSettings.system(:registrations) == other
+        end)
+
+        assert OrgSettings.system(:registrations) == nil
+      end)
+
+      assert %SystemActor{subsystem: :registrations} = OrgSettings.system(:registrations)
+    end
+
+    test "with_actor/2 answers for every subsystem, over a per-subsystem override" do
+      other = SystemActor.new(:feeds)
+
+      OrgSettings.with_actor(:registrations, other, fn ->
+        OrgSettings.with_actor(nil, fn ->
+          assert OrgSettings.system(:registrations) == nil
+          assert OrgSettings.system(:admin_allowlist) == nil
+        end)
+
+        assert OrgSettings.system(:registrations) == other
+      end)
+    end
+
+    # `:security` names both the retention row and the prune worker's grant;
+    # a test that takes the worker's grant away must still read the window.
+    test "is not SystemActor's override of the same name" do
+      SystemActor.with_override(:security, nil, fn ->
+        assert %SystemActor{subsystem: :security} = OrgSettings.system(:security)
+      end)
+    end
+
+    test "refuses the registration read and leaves another resolver's read alone", ctx do
+      alias KilnCMS.Accounts.RegistrationPolicy
+
+      log =
+        capture_log(fn ->
+          OrgSettings.with_actor(:registrations, nil, fn ->
+            assert RegistrationPolicy.settings(ctx.org.id) == {:error, :unavailable}
+            assert KilnCMS.Security.AdminAllowlist.policy(ctx.org.id, :sign_in) == :off
+          end)
+        end)
+
+      assert log =~ "registration approval lookup failed"
+      refute log =~ "admin allowlist lookup failed"
+    end
+  end
+
   describe "FeedSettings" do
     test "the system reads the row but cannot save it; no actor reads nothing", ctx do
       row =
