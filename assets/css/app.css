@@ -2125,7 +2125,7 @@ pre.highlight .gs {
 /* Headings across the shell — the chrome's own and the fired content's
    (`.kiln-block` sets size/weight per level; the preset supplies family and
    tracking, and its weight only where the block styles don't). */
-.public-shell :is(h1, h2, h3, h4) {
+.public-shell :is(h1, h2, h3, h4, h5, h6) {
   font-family: var(--public-heading-font);
   letter-spacing: var(--public-heading-tracking);
 }
@@ -2143,7 +2143,7 @@ pre.highlight .gs {
    theme. */
 
 /* Display type: condensed, uppercase, tight leading. */
-[data-public-theme="monograph"] :is(h1, h2, h3, h4) {
+[data-public-theme="monograph"] :is(h1, h2, h3, h4, h5, h6) {
   font-stretch: condensed;
   font-weight: var(--public-heading-weight);
   line-height: 0.92;
