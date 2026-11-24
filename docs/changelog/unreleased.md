@@ -253,6 +253,18 @@ carries the reasoning.
   No migration, no configuration.
   ([#2785](https://github.com/The-Verscienta/kiln_cms/issues/2785), [#2741](https://github.com/The-Verscienta/kiln_cms/issues/2741))
 
+
+<a id="collab-writeback-corrupt-state"></a>
+
+- **Collaborative editing: prose typed after a quick rejoin now reaches the record, and a stored room state that won't decode no longer breaks the document (#2756).**
+  - **Who is affected.** Only deployments that turned the `:collab_prototype` flag on. A production build pins it off (`config/prod.exs`), so a default install is not affected.
+  - **The write-back.** When the last editor leaves a room, or the server shuts down, the room writes its converged prose back into the draft's rich-text blocks. Whether that write was pending was decided by the same check that schedules the 15-second checkpoint to `collab_doc_states`, so a client who rejoined before the previous checkpoint had run, typed, and then left (or was still attached at a deploy) left that prose in `collab_doc_states` and never in the record's blocks. Every update now marks the write-back pending on its own. While editors are present, the elected client persister still saves as before.
+  - **A corrupt stored state.** A `collab_doc_states` row that won't decode made every attach to that document fail: the editor got `unavailable`, and the room's next checkpoint would have overwritten bytes that may hold prose no record has. Now the row is applied to a fresh document and, if that fails, renamed to `corrupt:<key>:<unix_ms>:<random>` instead of being applied or overwritten. The rename only takes the bytes that were read, and if another server has written a row under the real key in the meantime, that row is restored instead. Otherwise the room starts empty, the record's blocks are untouched, and the first editor to join seeds the room from the record.
+  - **For operators.** Each quarantine is logged at error: `Collab doc state for <key> is corrupt and was not restored (<n> bytes: <reason>). The bytes were moved to corrupt:…`. When another server got there first, a warning says so. Quarantined rows stay for 30 days from the quarantine and are then removed by the existing prune. To list them: `SELECT doc_key, octet_length(state), updated_at FROM collab_doc_states WHERE doc_key LIKE 'corrupt:%'` (see [the collaborative editing spike](../collaborative-editing-spike.md), finding 7).
+  No migration, no configuration. Rolling back is safe: an older release never reads the `corrupt:` rows, and its prune removes them after 30 days.
+  ([#2756](https://github.com/The-Verscienta/kiln_cms/issues/2756))
+
+
 <a id="public-page-weak-etag"></a>
 
 - **Public pages carry a weak `ETag`, so they leave Kiln compressed and revalidate however a CDN or browser sends the tag back; a change to a site's slug or custom domain now moves its pages' `ETag`s and drops what was cached under its old URLs (#2766, #3194).**

@@ -306,6 +306,26 @@ Findings against the §3 risks:
    *history*; the prose itself is still safe via the autosave path. Dead
    sessions prune after 30 days. Persistence is config-gated off in the test
    suite (sandbox ownership), exercised by its own sync durability tests.
+
+   A stored state that will not decode is neither applied nor overwritten
+   (#2756). It used to crash the doc server on every attach, and the next
+   checkpoint would have replaced bytes that may hold prose no record has.
+   Now the row is renamed to `corrupt:<key>:<unix_ms>:<random>`, which no
+   document resolves to, and logged at error with the key, the byte size and
+   the decode error. The rename matches on the bytes that were read, so a
+   valid row another server wrote in the meantime is left alone; if one is
+   under the real key after the rename (written in between or just after),
+   that row is restored instead. Otherwise the room starts empty: the record's
+   blocks are untouched, because an empty fragment never materializes, and
+   the first client to join seeds the room from the record. A quarantined row
+   gets a fresh `updated_at`, so the existing prune removes it 30 days after
+   the quarantine. To inspect them:
+
+   ```sql
+   SELECT doc_key, octet_length(state), updated_at
+   FROM collab_doc_states
+   WHERE doc_key LIKE 'corrupt:%';
+   ```
 8. **Server-side checkpoint materialization: built** (§6.4's option (b) —
    the last item). `Crdt.Materializer` reassembles a fragment's
    ProseMirror-node XML into the TipTap JSON document the browser would have
@@ -319,6 +339,12 @@ Findings against the §3 risks:
    editor already saved the converged content. This closes the one gap client
    persistence couldn't cover: every editor crashing before their autosave
    debounce fired.
+
+   Every update marks the write-back pending, independently of the 15 s
+   checkpoint (#2756). The two used to share one flag check, so a client who
+   rejoined before the previous checkpoint had run, typed and left (or was
+   still attached at a deploy) left that prose in `collab_doc_states` and
+   never in the record's blocks.
 
    > It materialized to **HTML in `legacy_html`** until #830's follow-up, which
    > meant it closed nothing: Portable Text is authoritative, so the cast nulls
