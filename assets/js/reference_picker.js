@@ -24,8 +24,11 @@ export const ReferencePicker = {
     this.active = -1
     this.pending = null
     this.onKey = e => this.key(e)
+    // A new query, or a changed filter select (#3224), is a new result set:
+    // the highlight starts over rather than landing on whatever record now
+    // sits at the old index.
     this.onInput = e => {
-      if (e.target.matches("[data-ref-search]")) this.active = -1
+      if (e.target.matches('[data-ref-search], select[name^="_kiln_ref_f"]')) this.active = -1
     }
     // Capture, so the note is taken before LiveView handles the click.
     this.onClick = e => this.noteFocus(e.target)

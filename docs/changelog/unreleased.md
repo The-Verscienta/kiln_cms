@@ -65,6 +65,14 @@ carries the reasoning.
   - **Not a filter, not access control.** It narrows no read: the search lists what it did before. An editor who may create the type can still create the record from its own screen. The server checks it too, so a forged create event from the picker creates nothing.
   - **Outside the editor.** `GET /api/schema` reports it in `x-kiln-selection` when off; field sync carries it with the rest of `selection`. No migration.
 
+<a id="reference-picker-filters"></a>
+
+- **Editors can narrow a reference field's search by type, category or tag while picking (#3224).** A row of selects now sits above the picker's search box. **Type** (*All types*, then each linked type) shows on its own on any field that links to more than one content type. **Category** (*Any category*) and **Tag** (*Any tag*, grouped by tag group) show on a field whose admin turns them on: in the fields admin, step 6 (**Which records can be picked**) has a new **Let editors narrow the search by** with **Category** and **Tag** checkboxes, and the step's closing sentence adds *Editors can narrow the search by category and tag.* A screen reader announces a filtered count as *N results (filtered)*, and an empty list says *No matches with these filters.* with a **Clear filters** button.
+  - **A filter only narrows.** The choice is AND-ed onto the field's own selection and the search still runs as the editor, so it never offers a record the field would refuse or the editor can't read. A posted value the picker did not offer (another site's category, a type the field doesn't link to) is ignored. Changing a select does not mark the document as changed.
+  - **What is left out.** When every linked type pins a category, there is no category select; when every linked type lists tags, only those tags are offered. Past 500 categories or tags, that select is not shown (*Too many tags to list — search by title instead.*), and the fields admin warns when the box is ticked. Create-on-type is not offered while a filter is set; **Add new** is. The dropdown widget has no filters.
+  - **Stored as** `"filters": ["category", "tag"]` (either or both) in the field's `selection` (#2285). It is a picker setting like `sort`, not a condition: it never refuses a write. A bad value is refused with *filters is empty*, *lists a filter twice* or *filters must be a list among category, tag*. `GET /api/schema` reports it in `x-kiln-selection`. Field sync does not carry it, as it carries no part of `selection`. No migration.
+  - See [Narrow a reference search by type, category or tag](../extending-content.md#narrow-a-reference-search-by-type-category-or-tag).
+
 <a id="change-note"></a>
 
 - **An edit can say why, and the editor can ask (#3255).** Versions recorded what changed and who changed it; now they can record why.
@@ -72,6 +80,14 @@ carries the reasoning.
   - **Asking for one.** The Safety fields page (`/editor/safety-fields`) has an **Ask why on every change** checkbox per content type (stored as `change_note_types` on the site's editorial settings). For a listed type the editor shows **Why this change?** under the action bar; a draft's **Save** and **Publish changes** are refused until it is filled in (*Say why you made this change, then save again.*), and the note is cleared once the write lands. A published record's working-copy saves (and autosaves) take no note: the change readers see is Publish changes, which does.
   - **Only the editor asks.** The API, MCP, the reverse field, inline record cards, scheduled publishes and internal jobs are never refused for leaving a note out, the same posture change severity takes: a surface that cannot ask must not fail for it.
   - **In code.** `KilnCMS.CMS.ChangeNotes` (`required?/2`, `normalize/1`), `Changes.RecordChangeNote` (into `paper_trail_metadata`, before `RecordChangeSeverity`), and the `require_change_note` context marker for a caller that does ask.
+
+<a id="reverse-link-edit"></a>
+
+- **A connection's link fields can be edited from the reverse field (#3243).** On a record's reverse field (R4, "Recipes using this ingredient") whose reference has link fields (R3), each row the editor may change offers **Edit details**. It opens the connection's link-field inputs under the row, filled from the source's working copy, so a pending change is what the edit starts from, with **Save details** and **Cancel**. One row edits at a time.
+  - **An edit of the source.** Save is the same write as connecting or disconnecting from this side (R4b, D23): the source's own update as the editor, or a save of its working copy when it is published (the row then says *Saved to the working copy of “Source”*). Its policies, validations, history and optimistic lock apply, and a failure stays on that row.
+  - **What is written.** Only the reference's own link fields. A value left out keeps what the connection stored; an emptied input clears it. Nothing is written when nothing changed. If the source no longer connects to this record, the save is refused (*“Source” no longer connects to this record.*).
+  - **Who.** A row whose source the editor may not change shows its lock and no **Edit details**; the server checks again, so a forged event writes nothing.
+  - **In code.** `KilnCMS.CMS.ReverseFields.set_link/5` and `link_values/3`. The inputs are named under `_kiln_reverse_link`, outside the editor form's params, so typing in them never changes the record being edited. No migration.
 
 <a id="flexible-media-reference"></a>
 
@@ -145,6 +161,7 @@ carries the reasoning.
   Record: [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md#the-typed-export-pr-5-2282);
   guides: [GraphQL: generate types and fragments](../headless-graphql-api.md#generate-types-and-fragments-for-your-site), [api.md: schema discovery](../api.md#schema-discovery-typed-clients).
 
+
 ## Changed
 
 <a id="form-field-locale-reserved"></a>
@@ -157,6 +174,37 @@ carries the reasoning.
   - **For developers.** `KilnCMS.Forms.reserved_field_names/0` now returns `["website", "locale"]`, and the new `KilnCMS.Forms.reserved_field_reason/1` says which reason applies (`:honeypot`, `:locale` or `nil`). No migration.
 
 ## Fixed
+
+<a id="theme-script-everywhere"></a>
+
+- **The light/dark theme now applies on form answers and newsletter pages, and survives blocked browser storage (#2715, #2773).**
+  - **Form and newsletter pages (#2715).** The on-site answers to a form
+    submission (the thank-you page, the 404 for an unknown or inactive form,
+    and the 422 re-render of a refused submission) and the `/newsletter`
+    sign-up answer and unsubscribe pages render the site's layout, whose
+    inline script sets the theme before first paint. Their pipeline,
+    `:public_form`, sent a static Content-Security-Policy with no nonce, so
+    the browser refused that script and these pages always rendered light,
+    whatever the visitor's system setting or chosen theme. The pipeline now
+    sends the same per-request nonce policy as the rest of the site
+    (`script-src 'self' 'nonce-…'`). A form that shows a human-verification
+    widget still widens `script-src` with the provider on the re-render, and
+    keeps the nonce. An embedded form's iframe still gets its own embed
+    policy, and `POST /api/forms/:slug` still answers JSON; only its CSP
+    header value changes. None of these pages is cached by a shared cache,
+    so a nonce is never replayed. The newsletter confirm page already ran
+    under the browser pipeline and was not affected.
+  - **Blocked storage (#2773).** With site data blocked (Chrome's
+    `localStorage` getter throws), storage turned off (Firefox's is `null`),
+    or a full store, the layout's theme script stopped part-way and LiveView
+    never started, because its constructor reads both stores: the console
+    did not load. Every storage call in the theme script is now guarded, and
+    `app.js` hands LiveView a store that falls back to memory for the page
+    view (`assets/js/safe_storage.js`). The page takes the system theme, the
+    theme switch and the sidebar and nav-section toggles work, and none of
+    those choices is remembered on the next page load.
+  No migration, no configuration.
+  ([#2715](https://github.com/The-Verscienta/kiln_cms/issues/2715), [#2773](https://github.com/The-Verscienta/kiln_cms/issues/2773))
 
 <a id="form-reorder-duplicate-all-or-nothing"></a>
 

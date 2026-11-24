@@ -323,10 +323,62 @@ defmodule KilnCMSWeb.FormControllerTest do
       assert ok.status == 200
       assert bad.status == 422
       assert [policy] = csp(ok)
-      assert csp(bad) == [policy]
+      assert [bad_policy] = csp(bad)
+      # Each response carries its own nonce (#2715); everything else matches.
+      assert strip_nonce(bad_policy) == strip_nonce(policy)
       assert policy =~ "frame-ancestors 'self'"
     end
   end
+
+  # #2715: these pages render the root layout, whose inline theme script sets
+  # `data-theme` from the visitor's choice or system theme. It only runs when
+  # the policy's nonce is on the tag; the pipeline used to send no nonce at
+  # all, so every on-site answer rendered light.
+  describe "the on-site answers run the theme script (#2715)" do
+    test "the thank-you page", %{conn: conn} do
+      form = form!()
+      conn = conn |> unique_ip() |> post("/forms/#{form.slug}", %{"email" => "a@b.co"})
+
+      assert_inline_scripts_run(conn, 200)
+    end
+
+    test "the 422 re-render", %{conn: conn} do
+      form = form!()
+      conn = conn |> unique_ip() |> post("/forms/#{form.slug}", %{"email" => "nope"})
+
+      assert_inline_scripts_run(conn, 422)
+    end
+
+    test "an unknown form's 404", %{conn: conn} do
+      conn =
+        conn
+        |> unique_ip()
+        |> post("/forms/fc-none-#{System.unique_integer([:positive])}", %{"email" => "a@b.co"})
+
+      assert_inline_scripts_run(conn, 404)
+    end
+
+    test "an inactive form's 404", %{conn: conn} do
+      form = form!(%{active: false})
+      conn = conn |> unique_ip() |> post("/forms/#{form.slug}", %{"email" => "a@b.co"})
+
+      assert_inline_scripts_run(conn, 404)
+    end
+
+    test "a JSON submission answers JSON, unaffected", %{conn: conn} do
+      form = form!()
+
+      conn =
+        conn
+        |> unique_ip()
+        |> put_req_header("content-type", "application/json")
+        |> post("/api/forms/#{form.slug}", Jason.encode!(%{email: "a@b.co"}))
+
+      assert json_response(conn, 200)["ok"] == true
+    end
+  end
+
+  defp strip_nonce(policy), do: String.replace(policy, ~r/ 'nonce-[^']+'/, "")
 
   test "POST /api/forms/:slug accepts JSON and returns field errors", %{conn: conn} do
     form = form!()

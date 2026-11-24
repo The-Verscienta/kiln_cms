@@ -80,8 +80,15 @@ else.
   No migration.
   ([long form](docs/changelog/unreleased.md#reference-add-new-off))
 
+- **Editors can narrow a reference field's search while picking: a Type select on any field with several linked types, and Category and Tag selects where the admin ticks "Let editors narrow the search by" (stored as `"filters"` in the field's `selection`); a filter only narrows ([#3224](https://github.com/The-Verscienta/kiln_cms/issues/3224)).**
+  No migration.
+  ([long form](docs/changelog/unreleased.md#reference-picker-filters))
+
 - **Edits can say why: a `change_note` on update, publish and Publish changes is kept on the version and shown in History; a site can make the editor ask for one per content type ("Ask why on every change" on the Safety fields page) ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255)).**
   ([long form](docs/changelog/unreleased.md#change-note))
+
+- **A reverse field can edit a connection's link fields: "Edit details" on a row opens its link values, and "Save details" saves them as an edit of the source record, as connect and disconnect already do ([#3243](https://github.com/The-Verscienta/kiln_cms/issues/3243)).**
+  ([long form](docs/changelog/unreleased.md#reverse-link-edit))
 
 - **A role can be granted single item types of a Flexible content field (`custom_fields.<field>.<item type>`): its editors may edit, add and remove items of that type and no others ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282)).**
   Reordering needs the whole-field grant; the console shows a partly granted field read-only. No migration.
@@ -102,6 +109,9 @@ else.
   ([long form](docs/changelog/unreleased.md#form-field-locale-reserved))
 
 ### Fixed
+
+- **A form's thank-you, not-found and refused (422) pages and the `/newsletter` sign-up and unsubscribe pages follow the visitor's light or dark theme, and with browser storage blocked the console still loads and the theme still applies, just isn't remembered (#2715, #2773).**
+  ([long form](docs/changelog/unreleased.md#theme-script-everywhere))
 
 - **Reordering a form's fields and duplicating a form are all-or-nothing: a refused write rolls everything back and the message names the field to fix ([#2717](https://github.com/The-Verscienta/kiln_cms/issues/2717)).**
   A legacy-invalid field (a dropdown with no options) now blocks the reorder and refuses the whole duplicate instead of being dropped from the copy.

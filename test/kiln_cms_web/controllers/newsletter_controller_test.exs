@@ -152,6 +152,36 @@ defmodule KilnCMSWeb.NewsletterControllerTest do
     assert html_response(conn, 200) =~ "not recognized"
   end
 
+  # #2715: the `/newsletter/*` pages render the root layout under the
+  # `:public_form` pipeline, whose policy used to carry no nonce, so the
+  # layout's theme script never ran and they always rendered light.
+  describe "the newsletter pages run the theme script (#2715)" do
+    test "the unsubscribe confirmation page", %{conn: conn} do
+      sub = subscriber()
+      conn = get(conn, ~p"/newsletter/unsubscribe/#{sub.unsubscribe_token}")
+
+      assert assert_inline_scripts_run(conn, 200) =~ "unsubscribe"
+    end
+
+    test "the one-click unsubscribe answer", %{conn: conn} do
+      sub = subscriber()
+      conn = post(conn, ~p"/newsletter/unsubscribe/#{sub.unsubscribe_token}")
+
+      assert assert_inline_scripts_run(conn, 200) =~ "unsubscribed"
+    end
+
+    test "the sign-up answer", %{conn: conn} do
+      conn =
+        conn
+        |> unique_ip()
+        |> post(~p"/newsletter/subscribe", %{
+          "email" => "theme-#{System.unique_integer([:positive])}@example.com"
+        })
+
+      assert_inline_scripts_run(conn, 200)
+    end
+  end
+
   describe "POST /newsletter/subscribe (#586)" do
     defp address, do: "signup-#{System.unique_integer([:positive])}@example.com"
 
