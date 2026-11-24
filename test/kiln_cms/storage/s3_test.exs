@@ -417,8 +417,8 @@ defmodule KilnCMS.Storage.S3Test do
 
       assert_received {:mp, :complete, complete}
 
-      # ex_aws_s3 2.6 escapes the ETag's quotes in the XML body (an XML
-      # parser reads `&quot;` back as `"`, so the store sees the same ETag).
+      # ex_aws_s3 2.6 XML-escapes the ETag's quotes (EEF-CVE-2026-131902 and
+      # siblings); S3 reads `&quot;etag-1&quot;` as `"etag-1"`.
       for n <- 1..4,
           do:
             assert(complete =~ "<PartNumber>#{n}</PartNumber><ETag>&quot;etag-#{n}&quot;</ETag>")

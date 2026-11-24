@@ -242,6 +242,15 @@ config :kiln_cms, KilnCMSWeb.Endpoint,
 config :kiln_cms, KilnCMS.Keys.Vault,
   previous_secret_key_bases: List.wrap(System.get_env("PREVIOUS_SECRET_KEY_BASE"))
 
+# Signs keyset pagination cursors (#3272), so Ash decodes only cursors this
+# deployment issued: a forged one is refused before it is decoded
+# (EEF-CVE-2026-124283). Derived from SECRET_KEY_BASE, as Ash's installer does,
+# so Ash never signs with the key Phoenix is given and every node that shares
+# SECRET_KEY_BASE accepts the others' cursors. Rotating SECRET_KEY_BASE
+# invalidates cursors in flight: a client restarts its pagination.
+config :ash,
+  keyset_signing_secret: :crypto.mac(:hmac, :sha256, secret_key_base, "ash keyset signing")
+
 config :kiln_cms,
   token_signing_secret:
     System.get_env("TOKEN_SIGNING_SECRET") ||

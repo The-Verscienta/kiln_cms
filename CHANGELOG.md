@@ -54,147 +54,171 @@ else.
   entries to three lines and fails on an entry with nowhere to link.
 -->
 
-## [Unreleased]
+## [1.12.1] - 2026-11-23
+
+Long form: [docs/changelog/v1.12.1.md](docs/changelog/v1.12.1.md) —
+the 1.12.1 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
+
+What's new in the 1.12 line, with examples and migration steps: [docs/whats-new/v1.12.md](docs/whats-new/v1.12.md).
 
 ### Upgrade notes
 
 - **Run `mix ash.migrate` for change notes: a nullable `change_note` column on each `*_versions` table and `site_editorial_settings.change_note_types`. An overlay with its own content types runs `mix ash.codegen` for its `*_versions` tables, as for `change_severity`.**
-  ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255) · [long form](docs/changelog/unreleased.md#change-note-upgrade))
+  ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255) · [long form](docs/changelog/v1.12.1.md#change-note-upgrade))
+
 - **Run `mix ash.migrate`: one additive migration (`edit_inline`, a nullable boolean on `field_definitions`). Older releases never read the column, so rolling the pin back is safe.**
-  ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283) · [long form](docs/changelog/unreleased.md#edit-inline-option-upgrade))
+  ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283) · [long form](docs/changelog/v1.12.1.md#edit-inline-option-upgrade))
+
+- **Keyset cursors are now signed with a key derived from `SECRET_KEY_BASE`: a cursor issued before the upgrade, or by a node with a different `SECRET_KEY_BASE`, is refused with an invalid-keyset error, and the client has to start again from the first page. Nothing to configure.**
+  ([#3272](https://github.com/The-Verscienta/kiln_cms/pull/3272) · [long form](docs/changelog/v1.12.1.md#keyset-signing-upgrade))
+
 - **About 10 minutes after boot, a job deletes the section layouts no field carries, left by 1.9.x and 1.10.x (#3060), and logs each one at info. Nothing to do; `:section_layout_sweep_on_boot` turns it off. Rolling back is safe; what it deleted stays deleted.**
-  ([long form](docs/changelog/unreleased.md#section-layout-sweep-upgrade))
+  ([long form](docs/changelog/v1.12.1.md#section-layout-sweep-upgrade))
+
 - **About 10 minutes after boot, a job cancels release items left `pending` on published, rolled-back or archived releases (#3072), logging each at info. Upgrading from 1.10.x or earlier with a rolling deploy longer than that: run `KilnCMS.Release.cancel_stranded_release_items()` over `rpc` once it finishes. Rolling back is safe.**
-  ([long form](docs/changelog/unreleased.md#stranded-release-item-sweep-upgrade))
+  ([long form](docs/changelog/v1.12.1.md#stranded-release-item-sweep-upgrade))
+
 - **Run `mix ash.migrate`: two additive migrations on `billing_webhook_events` (two nullable columns, then a partial index built `CONCURRENTLY`), and the webhook sweeper's new Oban queue, `billing_sweeper`; a hand-built `queues:` must add `billing_sweeper: 1`. Rolling back is safe ([#3159](https://github.com/The-Verscienta/kiln_cms/issues/3159)).**
   Unsettled events recorded before the upgrade, and any older than 3 days, are given up on and logged at error, not replayed.
-  ([long form](docs/changelog/unreleased.md#billing-webhook-sweeper-upgrade))
+  ([long form](docs/changelog/v1.12.1.md#billing-webhook-sweeper-upgrade))
 
 ### Known issues
 
+- **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check; check those on hex.pm by hand.**
+  ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/v1.12.0.md#plugin-health-tail-packages-unknown))
+
+- **A site storage profile on a region ExAws doesn't know (Backblaze B2 `us-west-004`, Wasabi `us-central-1`) fails on every upload and read; keep such sites on the instance's storage until the fix.**
+  ([#3085](https://github.com/The-Verscienta/kiln_cms/issues/3085) · [long form](docs/changelog/v1.12.0.md#site-storage-unknown-region))
+
+- **A page opened at its path alias shows no reference byline and leaves inherited (`:fallback`) fields blank, though the same page at its slug shows both; link to the slug where that matters.**
+  ([#3193](https://github.com/The-Verscienta/kiln_cms/issues/3193) · [long form](docs/changelog/v1.12.0.md#alias-page-bylines-fallback))
+
 - **A release preview shows a fragment's currently published body, not the version the same release will publish; open the target's own entry in the preview to review it.**
-  ([#3289](https://github.com/The-Verscienta/kiln_cms/issues/3289) · [long form](docs/changelog/unreleased.md#release-preview-fragments))
+  ([#3289](https://github.com/The-Verscienta/kiln_cms/issues/3289) · [long form](docs/changelog/v1.12.1.md#release-preview-fragments))
 
 ### Added
 
 - **A reference field can show a record card for each connected record: tick "Let editors edit the related record here" in the fields admin and each connected record the editor may change gets an "Edit the record" card ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
-  ([long form](docs/changelog/unreleased.md#edit-inline-option))
+  ([long form](docs/changelog/v1.12.1.md#edit-inline-option))
+
 - **The record card now edits the record: its title and plain fields are inputs with their own Save, Discard and status chip; a published record's edits go to its working copy, and the parent's Save does not save the card ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
-  ([long form](docs/changelog/unreleased.md#edit-inline-card-save))
+  ([long form](docs/changelog/v1.12.1.md#edit-inline-card-save))
+
 - **The editor now warns before leaving with unsaved record-card edits, the parent's Save and workflow steps save those cards first and stop at the first failure, an "Add new" record opens its card, and a row with unsaved card edits cannot be removed or replaced ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
-  ([long form](docs/changelog/unreleased.md#edit-inline-dirty-guard))
+  ([long form](docs/changelog/v1.12.1.md#edit-inline-dirty-guard))
 
 - **An item of a Flexible content field can hold a single image or a link to one record: pick them inside the card, saved as snapshots rebuilt from the record, masked when the reader can't see the record.**
   Re-saving such a record on the previous release fails validation; reads work.
-  ([long form](docs/changelog/unreleased.md#flexible-media-reference))
+  ([long form](docs/changelog/v1.12.1.md#flexible-media-reference))
 
 - **A reference field can turn off the picker's "Add new": untick "Offer “Add new” in the picker" in the fields admin (stored as `"add_new": false` in the field's `selection`) and editors connect only records that already exist, from both sides of the relationship ([#3222](https://github.com/The-Verscienta/kiln_cms/issues/3222)).**
   No migration.
-  ([long form](docs/changelog/unreleased.md#reference-add-new-off))
+  ([long form](docs/changelog/v1.12.1.md#reference-add-new-off))
 
 - **Editors can narrow a reference field's search while picking: a Type select on any field with several linked types, and Category and Tag selects where the admin ticks "Let editors narrow the search by" (stored as `"filters"` in the field's `selection`); a filter only narrows ([#3224](https://github.com/The-Verscienta/kiln_cms/issues/3224)).**
   No migration.
-  ([long form](docs/changelog/unreleased.md#reference-picker-filters))
+  ([long form](docs/changelog/v1.12.1.md#reference-picker-filters))
 
 - **Edits can say why: a `change_note` on update, publish and Publish changes is kept on the version and shown in History; a site can make the editor ask for one per content type ("Ask why on every change" on the Safety fields page) ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255)).**
-  ([long form](docs/changelog/unreleased.md#change-note))
+  ([long form](docs/changelog/v1.12.1.md#change-note))
 
 - **A reverse field can edit a connection's link fields: "Edit details" on a row opens its link values, and "Save details" saves them as an edit of the source record, as connect and disconnect already do ([#3243](https://github.com/The-Verscienta/kiln_cms/issues/3243)).**
-  ([long form](docs/changelog/unreleased.md#reverse-link-edit))
+  ([long form](docs/changelog/v1.12.1.md#reverse-link-edit))
 
 - **A role can be granted single item types of a Flexible content field (`custom_fields.<field>.<item type>`): its editors may edit, add and remove items of that type and no others ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282)).**
   Reordering needs the whole-field grant; the console shows a partly granted field read-only. No migration.
-  ([long form](docs/changelog/unreleased.md#flexible-item-type-grants))
+  ([long form](docs/changelog/v1.12.1.md#flexible-item-type-grants))
 
 - **The reference picker shows each record's featured image as a small thumbnail in search results, picked rows and reverse-field rows ([#3265](https://github.com/The-Verscienta/kiln_cms/pull/3265)).**
   Always on; the generated `thumb` variant, a video's poster, or an original already that small, never a large original. No migration.
-  ([long form](docs/changelog/unreleased.md#reference-picker-thumbnails))
+  ([long form](docs/changelog/v1.12.1.md#reference-picker-thumbnails))
 
 - **A Flexible content field is now typed in the GraphQL API and in the generated clients: a `FlexibleItemValue` per item, and a `oneOf` union per field in JSON Schema, OpenAPI, TypeScript, Swift, Kotlin and `kiln-types`. `?include=field_definitions.item_types` works on type definitions.**
   Validating consumers: a flexible field's `items` was `{"type": "object"}` and is now a `$ref` to a union of closed item definitions.
-  ([long form](docs/changelog/unreleased.md#flexible-typed-export))
+  ([long form](docs/changelog/v1.12.1.md#flexible-typed-export))
 
 ### Changed
 
 - **A form field can no longer be named `locale`, the param a submission's language is recorded from; an existing one keeps working but is flagged in the builder until renamed, and a duplicate names it `locale_2` ([#2716](https://github.com/The-Verscienta/kiln_cms/issues/2716)).**
   Admins: rename flagged fields. Body `locale` and the SDKs are unchanged. No migration.
-  ([long form](docs/changelog/unreleased.md#form-field-locale-reserved))
+  ([long form](docs/changelog/v1.12.1.md#form-field-locale-reserved))
 
 - **`create_field_section` refuses a layout for a section no top-level field of its type is in, as `Invalid` on `name`: create the field first. A field sync import now writes fields before sections (#3061).**
-  ([long form](docs/changelog/unreleased.md#field-section-create-needs-a-carrier))
+  ([long form](docs/changelog/v1.12.1.md#field-section-create-needs-a-carrier))
 
 ### Fixed
 
 - **With `:keyword_any` among the floor legs, a long document whose only match is a late passage is no longer dropped by the relevance floor on a large site: the floor now finds the document's own chunk however many other rows sit nearer the query (#2814, #2873).**
   Only deployments that list `:keyword_any` (or `:fuzzy`) in `SEARCH_SEMANTIC_FLOOR_LEGS` are affected. No migration.
-  ([long form](docs/changelog/unreleased.md#floor-reads-hits-chunks-exactly))
+  ([long form](docs/changelog/v1.12.1.md#floor-reads-hits-chunks-exactly))
 
 - **A form's thank-you, not-found and refused (422) pages and the `/newsletter` sign-up and unsubscribe pages follow the visitor's light or dark theme, and with browser storage blocked the console still loads and the theme still applies, just isn't remembered (#2715, #2773).**
-  ([long form](docs/changelog/unreleased.md#theme-script-everywhere))
+  ([long form](docs/changelog/v1.12.1.md#theme-script-everywhere))
 
 - **Reordering a form's fields and duplicating a form are all-or-nothing: a refused write rolls everything back and the message names the field to fix ([#2717](https://github.com/The-Verscienta/kiln_cms/issues/2717)).**
   A legacy-invalid field (a dropdown with no options) now blocks the reorder and refuses the whole duplicate instead of being dropped from the copy.
-  ([long form](docs/changelog/unreleased.md#form-reorder-duplicate-all-or-nothing))
+  ([long form](docs/changelog/v1.12.1.md#form-reorder-duplicate-all-or-nothing))
 
 - **A saved view that lost a field, locale, type or sort since it was saved is marked current, with its "no longer applies" message and its Rename / Delete bar, only when you open it, not on the plain list or a list filtered to what it has left; the field-filter builder no longer drops a second condition on one field and operator (#2785, #2741).**
-  ([long form](docs/changelog/unreleased.md#content-list-saved-view-matching))
+  ([long form](docs/changelog/v1.12.1.md#content-list-saved-view-matching))
 
 - **Collaborative editing (the `:collab_prototype` flag, off in production builds): prose typed after a quick rejoin now reaches the record, and a stored room state that won't decode is moved aside to a `corrupt:` row instead of failing every join to that document ([#2756](https://github.com/The-Verscienta/kiln_cms/issues/2756)).**
-  ([long form](docs/changelog/unreleased.md#collab-writeback-corrupt-state))
+  ([long form](docs/changelog/v1.12.1.md#collab-writeback-corrupt-state))
 
 - **Public pages carry a weak `ETag`, so they leave Kiln compressed and a `W/`, listed or `*` `If-None-Match` gets a `304`; a site's slug or custom-domain change moves its pages' `ETag`s and drops its cached sitemaps, feeds and `llms.txt` (#2766, #3194).**
   Every page's `ETag` changes once on upgrade: one `200` per revalidating client.
-  ([long form](docs/changelog/unreleased.md#public-page-weak-etag))
+  ([long form](docs/changelog/v1.12.1.md#public-page-weak-etag))
 
 - **Content editor: unsaved Settings on a live page survive the text autosave, and Unpublish, the other workflow buttons, Move to trash, Mark reviewed and Parent refuse until you save them instead of dropping them ([#2776](https://github.com/The-Verscienta/kiln_cms/issues/2776), [#2777](https://github.com/The-Verscienta/kiln_cms/issues/2777)).**
-  ([long form](docs/changelog/unreleased.md#editor-unsaved-settings-kept))
+  ([long form](docs/changelog/v1.12.1.md#editor-unsaved-settings-kept))
 
 - **Content editor: when a co-editor saves, an idle editor shows their save in place, and one holding unsaved text or a setting they also changed gets the conflict banner at once, so its next edit no longer overwrites theirs ([#2775](https://github.com/The-Verscienta/kiln_cms/issues/2775)).**
-  ([long form](docs/changelog/unreleased.md#editor-peer-save-rebuild))
+  ([long form](docs/changelog/v1.12.1.md#editor-peer-save-rebuild))
 
 - **Video, audio and file blocks render their player or download link on the live page and in every preview, previews inline fragment blocks at the document's saved audience, and heading blocks render at their own level (`<h1>` to `<h6>`), all as the published page has them ([#2767](https://github.com/The-Verscienta/kiln_cms/issues/2767), [#2769](https://github.com/The-Verscienta/kiln_cms/issues/2769)).**
-  ([long form](docs/changelog/unreleased.md#public-block-render))
+  ([long form](docs/changelog/v1.12.1.md#public-block-render))
 
 - **Section layouts left without a field are deleted after boot, a layout can't be created as its section empties, and a field delete refused by its section's layout now says so instead of a generic error (#3060, #3061, #3062).**
-  ([long form](docs/changelog/unreleased.md#section-layouts-swept))
+  ([long form](docs/changelog/v1.12.1.md#section-layouts-swept))
 
 - **Image variant and A/V probe jobs retry a failed read of the original (3 attempts, about a minute) and complete only when the store says it is gone; a variant job reads nothing for a gated item ([#3066](https://github.com/The-Verscienta/kiln_cms/issues/3066)).**
   Each failed attempt now reaches error tracking; before, a failed read from the operator's or a site's store completed the job, leaving no dimensions, variants, duration or poster.
-  ([long form](docs/changelog/unreleased.md#media-job-read-retry))
+  ([long form](docs/changelog/v1.12.1.md#media-job-read-retry))
 
 - **Delete permanently in the media trash also removes a gated or quarantined item's private original, which stayed in private storage with no row ([#3067](https://github.com/The-Verscienta/kiln_cms/issues/3067)).**
   Orphans left by a failed delete are not swept, by design; the long form says why and how to remove one.
-  ([long form](docs/changelog/unreleased.md#media-purge-private-original))
+  ([long form](docs/changelog/v1.12.1.md#media-purge-private-original))
 
 - **A quarantined upload purged while its metadata strip runs no longer leaves its public copy behind: the strip withdraws it, and the reaper skips an item whose strip is executing ([#3068](https://github.com/The-Verscienta/kiln_cms/issues/3068)).**
-  ([long form](docs/changelog/unreleased.md#av-strip-purge-withdraw))
+  ([long form](docs/changelog/v1.12.1.md#av-strip-purge-withdraw))
 
 - **An empty file on S3 copies as an empty file, and a ranged request at 0 gets `416` with `Content-Range: bytes */0`; Kiln confirms the object is empty with one `HEAD` first ([#3069](https://github.com/The-Verscienta/kiln_cms/issues/3069)).**
-  ([long form](docs/changelog/unreleased.md#s3-empty-object-range))
+  ([long form](docs/changelog/v1.12.1.md#s3-empty-object-range))
 
 - **Content stuck in a release that already went live can join another release again: a boot job cancels items left `pending` on published, rolled-back or archived releases ([#3072](https://github.com/The-Verscienta/kiln_cms/issues/3072)).**
-  ([long form](docs/changelog/unreleased.md#stranded-release-items-freed))
+  ([long form](docs/changelog/v1.12.1.md#stranded-release-items-freed))
 
 - **A release's item cap is exact: two adds at once at one below the cap no longer leave it one over. Adds to one release now take turns ([#3073](https://github.com/The-Verscienta/kiln_cms/issues/3073)).**
-  ([long form](docs/changelog/unreleased.md#release-cap-exact))
+  ([long form](docs/changelog/v1.12.1.md#release-cap-exact))
 
 - **Comping a membership the provider may still bill (`active`, `past_due` or `incomplete` with a subscription id) is refused with `Billing.Errors.StillBilled`: cancel at the provider immediately, wait for the cancellation, then comp. Fixes the 1.12.0 known issue ([#3156](https://github.com/The-Verscienta/kiln_cms/issues/3156)).**
-  ([long form](docs/changelog/unreleased.md#comp-refused-while-billed))
+  ([long form](docs/changelog/v1.12.1.md#comp-refused-while-billed))
 
 - **A member rejoining after a cancellation gets a membership without the old subscription's id, period end and cancel flag, so that subscription's late events can no longer cancel or revive the new checkout; the provider customer is kept ([#3157](https://github.com/The-Verscienta/kiln_cms/issues/3157)).**
-  ([long form](docs/changelog/unreleased.md#restart-drops-old-subscription))
+  ([long form](docs/changelog/v1.12.1.md#restart-drops-old-subscription))
 
 - **Billing webhook events acknowledged but never processed (no job, failed after 8 attempts, stuck `processing`) are re-enqueued every 10 minutes, up to 3 times within 3 days, then given up on with an error log and `[:kiln_cms, :billing, :webhook_event, :gave_up]` ([#3159](https://github.com/The-Verscienta/kiln_cms/issues/3159)).**
   A replayed checkout no longer moves a membership's ordering stamp back.
-  ([long form](docs/changelog/unreleased.md#billing-webhook-sweeper))
+  ([long form](docs/changelog/v1.12.1.md#billing-webhook-sweeper))
 
 ### Security
 
-- **ash 3.38.1 fixes EEF-CVE-2026-124283 (GHSA-m5v6-3qwf-6w9r, high): a forged keyset pagination cursor could smuggle struct-wrapped values into the query, for SQL injection or code execution. The JSON:API collection reads, including the anonymous published feeds, take `page[after]` and `page[before]`, so releases locked to ash 3.31.3 through 3.37.x were exposed. Keyset cursors issued before the upgrade are refused; a client starts again from the first page.**
-  ([#3311](https://github.com/The-Verscienta/kiln_cms/pull/3311) · [long form](docs/changelog/unreleased.md#ash-keyset-cursor-forgery))
+- **Ash 3.38.0: a forged keyset pagination cursor (`page[after]`/`page[before]`) could run code or inject SQL through a keyset-paginated read, without signing in (EEF-CVE-2026-124283, GHSA-m5v6-3qwf-6w9r).**
+  ([#3272](https://github.com/The-Verscienta/kiln_cms/pull/3272) · [long form](docs/changelog/v1.12.1.md#ash-keyset-cursor-cve))
 
-- **ex_aws 2.8.1, ex_aws_s3 2.6.0 and db_connection 2.10.3 fix ten advisories published on 2026-11-24 (S3 request host, key and XML injection, an IMDSv2 token redirect, and code execution through a forged `DBConnection.Stream`); no known exposure in Kiln, which mints its own object keys, addresses buckets path-style and follows no redirects.**
-  ([#3311](https://github.com/The-Verscienta/kiln_cms/pull/3311) · [long form](docs/changelog/unreleased.md#ex-aws-db-connection-advisories))
+- **Dependency updates for advisories published during the release: `ex_aws` 2.8.1 and `ex_aws_s3` 2.6.0 (S3 key and bucket-name encoding, redirects on the instance metadata token request, XML and header injection), `db_connection` 2.10.3 (EEF-CVE-2026-133555) and `ash` 3.38.1 (EEF-CVE-2026-120299).**
+  ([#3272](https://github.com/The-Verscienta/kiln_cms/pull/3272) · [long form](docs/changelog/v1.12.1.md#dependency-advisories-1-12-1))
 
 ## [1.12.0] - 2026-11-21
 

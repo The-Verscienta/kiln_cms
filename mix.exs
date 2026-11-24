@@ -11,7 +11,7 @@ Code.require_file(Path.expand("config/project_deps_hook.exs", __DIR__))
 defmodule KilnCMS.MixProject do
   use Mix.Project
 
-  @version "1.12.0"
+  @version "1.12.1"
   @source_url "https://github.com/The-Verscienta/kiln_cms"
 
   def project do
@@ -834,7 +834,7 @@ defmodule KilnCMS.MixProject do
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:ash_phoenix, "~> 2.0"},
       {:ash_postgres, "~> 2.0"},
-      {:ash, "~> 3.38"},
+      {:ash, "~> 3.38 and >= 3.38.1"},
       # The compile-time plugin contract (`Kiln.Plugin`, `Kiln.Block`,
       # `Kiln.FieldType`, …) lives in its own package so a plugin can depend on
       # it without depending on the core, and so ship as a Hex, git or path
