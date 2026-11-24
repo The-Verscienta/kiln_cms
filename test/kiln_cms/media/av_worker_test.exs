@@ -193,6 +193,50 @@ defmodule KilnCMS.Media.AVWorkerTest do
     end
   end
 
+  # #3066: only an original that is definitely missing completes the job. A
+  # read that merely failed is retried, or the item never gets its duration
+  # or poster: nothing re-runs this job for an A/V item.
+  describe "reading the original" do
+    alias KilnCMS.Test.HookedStorage
+
+    test "a transient read error fails the job for a retry and writes nothing" do
+      item = video!()
+      HookedStorage.install(%{fetch_range: {:error, :eio}})
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :eio} = perform(item)
+        end)
+
+      assert log =~ "will retry"
+      refute log =~ "nothing to probe"
+
+      reloaded = CMS.get_media_item!(item.id, authorize?: false)
+      assert reloaded.duration_seconds == nil
+      assert reloaded.variants == %{}
+    end
+
+    test "a gated item's private read failing is retried too" do
+      {:ok, gated} = CMS.update_media_item(video!(), %{audience: :member}, authorize?: false)
+      HookedStorage.install(%{fetch_private_range: {:error, {:http_error, 500, %{}}}})
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, {:http_error, 500, _}} = perform(gated)
+      end)
+    end
+
+    test "an object store's 404, or a :not_found, completes the job" do
+      for reason <- [{:http_error, 404, %{status_code: 404, body: ""}}, :not_found] do
+        item = video!()
+        HookedStorage.install(%{fetch_range: {:error, reason}})
+
+        log = ExUnit.CaptureLog.capture_log(fn -> assert :ok = perform(item) end)
+
+        assert log =~ "nothing to probe"
+      end
+    end
+  end
+
   test "the job declares a finite ceiling" do
     # Not decoration: closing an Erlang port does not signal the OS child, so
     # an ffmpeg spinning on CPU is bounded by its own `-timelimit` and this is

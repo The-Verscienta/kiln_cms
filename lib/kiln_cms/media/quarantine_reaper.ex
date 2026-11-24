@@ -18,6 +18,12 @@ defmodule KilnCMS.Media.QuarantineReaper do
   item has no variants or derivatives to delete: derivation is enqueued only
   on release.
 
+  An item whose strip job is **executing** right now, and started within the
+  last 30 minutes, is skipped until a later sweep (#3068). A strip that is
+  only queued, scheduled or waiting to retry does not hold off the reaper. If
+  a purge does land while a strip runs, the strip withdraws the public copy
+  it promoted (see `KilnCMS.Media.AVStripWorker`).
+
   Hourly by default (`config :kiln_cms, :media_quarantine_reaper_cron`,
   `KILN_MEDIA_QUARANTINE_REAPER_CRON`; `false` disables). The window is
   generous on purpose — an hour of retries with backoff is nowhere near it —
@@ -32,10 +38,16 @@ defmodule KilnCMS.Media.QuarantineReaper do
   use Oban.Worker, queue: :media, max_attempts: 1, unique: [period: 3_000]
 
   alias KilnCMS.{CMS, Media, Storage}
+  alias KilnCMS.Media.AVStripWorker
+
+  import Ecto.Query, only: [from: 2]
 
   require Logger
 
   @max_age_hours 24
+
+  # How recently a running strip must have started to hold off the reaper.
+  @running_window_minutes 30
 
   @doc "How old (in hours) a quarantined item must be before the reaper takes it."
   @spec max_age_hours() :: pos_integer()
@@ -66,6 +78,40 @@ defmodule KilnCMS.Media.QuarantineReaper do
   @doc false
   @spec reap(struct()) :: boolean()
   def reap(item) do
+    if strip_running?(item) do
+      Logger.info("Not reaping quarantined media #{item.id}: its metadata strip is running now.")
+
+      false
+    else
+      purge(item)
+    end
+  end
+
+  # A strip that is executing right now is left to finish (#3068): reaping
+  # it would throw away an upload whose strip was about to succeed. Only
+  # `executing`: a job queued but never run is the stuck case this reaper
+  # exists for, and a paused `:media` queue must not hold rows for ever. And
+  # only one attempted within `@running_window_minutes`, well past the
+  # strip's own 10-minute timeout, so a job left `executing` by a dead node
+  # stops protecting its row even with `Oban.Plugins.Lifeline` off.
+  #
+  # Oban's jobs table is not an Ash resource, so this is a plain query, as in
+  # `KilnCMS.Firing.FireWorker`. It reads every org's jobs, and answers only
+  # whether this item's strip is running.
+  defp strip_running?(item) do
+    since = DateTime.add(DateTime.utc_now(), -@running_window_minutes * 60, :second)
+
+    KilnCMS.Repo.exists?(
+      from(j in Oban.Job,
+        where:
+          j.worker == ^inspect(AVStripWorker) and j.state == "executing" and
+            j.attempted_at > ^since and
+            fragment("?->>'media_item_id'", j.args) == ^item.id
+      )
+    )
+  end
+
+  defp purge(item) do
     Logger.warning(
       "Reaping quarantined media #{item.id} (#{item.filename}): its metadata strip never " <>
         "completed within #{max_age_hours()}h. Re-upload the file."

@@ -106,9 +106,14 @@ counted as deleted or as skipped.
 
 The media library's trash (**Media**, then **Trash**, admins only) works the
 same way: **Delete permanently** removes a file that is still in the trash,
-along with its stored original, variants and cached transforms. If someone
-restored the file after your list loaded, the file and everything stored for
-it stay, including a file that was trashed while its upload was still being
+along with its stored original, variants and cached transforms. For a gated
+file (one with an audience other than public), or an upload trashed while
+Kiln still held it for its metadata strip, the original is in private
+storage, and that goes too (#3067). If that last delete fails, the file is
+still reported as deleted and the error log names the stored file to remove
+by hand ([Orphaned private blobs](media-pipeline.md#orphaned-private-blobs-no-sweep-by-design)).
+If someone restored the file after your list loaded, the file and everything
+stored for it stay, including a file that was trashed while its upload was still being
 processed. **Restore** there likewise acts only on a file still in the
 trash. Either way, a refused click says what happened (see
 [What can go wrong](#what-can-go-wrong)) and the trash list reloads.
@@ -276,7 +281,12 @@ were never saved, so paste them in again after the restore.
   quarantined, and only `KilnCMS.Media.system/0` may run it: every person,
   admins included, is refused (`Ash.Error.Forbidden`), and the system actor
   may not run `:purge`. A caller that deletes stored files should do so only
-  after the purge returns `:ok`, as the media library does.
+  after the purge returns `:ok`, as the media library does. For an item whose
+  original is in private storage (`KilnCMS.Media.private_original?/1`: gated
+  or quarantined), that means `KilnCMS.Storage.delete_private/2` on its
+  `storage_key` as well as the public deletes; record the key before the
+  purge. Only call it for such an item: a store with no private bucket, or an
+  image backend, refuses it.
 - `KilnCMS.CMS.MediaItem`'s `:restore` (`CMS.restore_media_item`) takes only
   a row that is still trashed (#2611), like content's. A struct loaded while
   the item was in the trash gets the same `StaleRecord` once someone has

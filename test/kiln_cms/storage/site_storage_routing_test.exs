@@ -211,6 +211,30 @@ defmodule KilnCMS.Storage.SiteStorageRoutingTest do
              {:error, {:site_storage, :credentials_unreadable}}
   end
 
+  # #3066: the variant job retries a site store's failed read and completes
+  # only on its 404. A 403 is what S3 answers for a missing key when the
+  # credentials lack ListBucket, so it is not proof the file is gone.
+  test "the variant job retries a site store's refused read and completes on its 404",
+       %{org: org, bucket: bucket} = ctx do
+    save!(org)
+    {:ok, item} = upload(org, ctx.actor)
+    args = %{"media_item_id" => item.id, "org_id" => org.id}
+
+    Req.Test.stub(KilnCMS.Storage.S3, fn conn -> Plug.Conn.send_resp(conn, 403, "") end)
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert {:error, {:http_error, 403, _}} =
+               KilnCMS.Media.VariantWorker.perform(%Oban.Job{args: args})
+    end)
+
+    Agent.update(bucket, fn _ -> %{} end)
+    Req.Test.stub(KilnCMS.Storage.S3, fn conn -> Plug.Conn.send_resp(conn, 404, "") end)
+
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert :ok = KilnCMS.Media.VariantWorker.perform(%Oban.Job{args: args})
+    end)
+  end
+
   test "a direct upload stages in the site's private bucket and lands in its store",
        %{org: org, bucket: bucket} = ctx do
     row = save!(org, %{private_bucket: "site-private"})
