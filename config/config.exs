@@ -68,6 +68,11 @@ config :kiln_cms, Oban,
     # newer recurrence engine there would recompute with the old engine and
     # complete it. One job per engine version per day, so concurrency one.
     occurrence_backfill: 1,
+    # The billing webhook sweeper's AshOban scheduler and worker jobs (#3159,
+    # `KilnCMS.Billing.WebhookEvent`). Its own queue for the reason above: a
+    # node of the previous release polls `:default`, and fetching a job for a
+    # worker module it does not have fails it.
+    billing_sweeper: 1,
     default: 10
   ],
   repo: KilnCMS.Repo,

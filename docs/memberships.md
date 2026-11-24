@@ -357,7 +357,8 @@ How the worker recovers on its own:
   redelivery in the meantime can enqueue a fresh job.
 
 A crash **after** the `200` is never redelivered by the provider. Recovery there
-is the rescue above, Oban's retry and the 10-minute takeover.
+is the rescue above, Oban's retry, the 10-minute takeover and
+[the webhook sweeper](#the-webhook-sweeper).
 
 A taken-over event is applied again from the start. If the first run had already
 committed its membership change before dying, a second `MembershipEvent` row
@@ -365,19 +366,103 @@ committed its membership change before dying, a second `MembershipEvent` row
 because entitlements are recomputed from current state. Ordering between events
 is a separate concern (#2749).
 
-Three windows are still open and wait for the sweeper in #3159: a job that uses
-all its attempts leaves the event `failed` until the provider redelivers it; a
-`processed` stamp that fails to save leaves the event `processing` (the
-10-minute takeover covers it only once something re-enqueues it); and `received`
-rows recorded before this change have no job. Upgrading needs no migration or
-config, and a rolling deploy is safe: an old node enqueues a non-unique job,
-which the claim then catches.
-
 **Diagnosing "the member paid but has no access"** starts with the recorded
 events: each one carries its status and, when it was ignored or failed, the
 reason ([Find out why a billing event was ignored](#find-out-why-a-billing-event-was-ignored)).
 Every entitlement change also appears in the governance trail with the audience
 delta and the provider event that caused it.
+
+### The webhook sweeper
+
+Some events are acknowledged and then left with no job, and the provider does
+not redeliver an event it saw acknowledged. A sweeper finds them (#3159). Every
+10 minutes it looks for an unsettled event that nothing will process:
+
+| The event is | and | Why it has no job |
+|---|---|---|
+| `received` | was recorded more than 10 minutes ago and has no job waiting or running | its job was lost, or it was recorded before enqueueing became atomic |
+| `failed` | has no job waiting or running | its job used all 8 attempts |
+| `processing` | was claimed more than 10 minutes ago and has no job waiting | its `processed` stamp did not save, or the worker died |
+
+A job counts as waiting when it is `available`, `scheduled`, `retryable` or
+`suspended`, and as running when it is `executing`. For a `processing` event a
+running job does not count: a node killed mid-run leaves its job `executing`
+until `Oban.Lifeline` rescues it, 180 minutes later.
+
+The sweeper does one of two things with each such event:
+
+- **Re-enqueue it**, if it was received less than 3 days ago (the provider's
+  own retry window) and has been re-enqueued fewer than 3 times. The count is
+  kept in the row's `redrive_count`. A `processing` event is set back to
+  `failed` first, so the new job's claim does not wait out another 10 minutes.
+  The server logs a warning,
+  `billing webhook evt_… (customer.subscription.updated) had no job to process it; re-enqueued (1 of 3)`.
+  The new job is an ordinary one: 8 attempts, and the event goes through the
+  same ordering checks as any other ([Late, repeated and foreign events](#late-repeated-and-foreign-events)).
+- **Give up on it**, once it has been re-enqueued 3 times, was received 3 or
+  more days ago, or was recorded before the sweeper existed (its
+  `redrive_count` is empty). The row's `gave_up_at` is set, a `processing`
+  event is set to `failed`, and the server logs at error:
+  `billing webhook evt_… (customer.subscription.updated) was never processed and will not be retried (re-enqueued 3 times). Fix the cause, then resend the event from the provider's dashboard.`
+  It also emits the telemetry event
+  `[:kiln_cms, :billing, :webhook_event, :gave_up]`
+  ([observability.md](observability.md#billing-webhooks)). The sweeper does
+  not pick the event up again unless a resend re-arms it (below).
+
+Old events are given up on, not replayed, because applying one now could undo
+what later events did. For example, a stale "subscription active" event would
+give a canceled member access again if the membership has no ordering stamp
+to compare it with. An event recorded before the upgrade is given up on for
+the same reason, however recent it is. After the upgrade, expect one such
+error line for each event an earlier release left unsettled with no job.
+
+The 3 days bound when the sweeper re-enqueues, not when an event can be
+applied. A job enqueued just inside the window still has its 8 attempts,
+about 15 hours of backoff, so an event can be applied up to about 3.6 days
+after it was received. And a job left `executing` by a dead node is rescued
+by `Oban.Lifeline` whatever the row's `gave_up_at`, so it can still claim and
+apply an event the sweeper has given up on.
+
+To find the events the sweeper gave up on:
+
+```sql
+SELECT provider_event_id, type, status, redrive_count, error, inserted_at, gave_up_at
+FROM billing_webhook_events
+WHERE gave_up_at IS NOT NULL
+ORDER BY gave_up_at DESC;
+```
+
+`error` holds the last attempt's error, when there was one. Fix the cause, then
+resend the event from the provider's dashboard. The resend re-enqueues the
+event, and the job's claim clears `gave_up_at`. It does not reset
+`redrive_count`: if that job fails all 8 attempts too, an event given up on
+after its 3 re-enqueues, for its age or as recorded before the upgrade is
+given up on again at the next sweep, without another redrive. Before you
+resend an old event, check in the provider's dashboard that it is still the latest one for
+that subscription. A resent event goes through the ordering checks like any
+other, and on a membership with no ordering stamp nothing stops an old one
+from undoing a later change.
+
+Not covered by the sweeper:
+
+- A membership with no ordering stamp (`last_provider_event_at`, set by every
+  event applied since 1.12) has nothing to order a redriven event against.
+  Within the 3 days, a redriven event older than a change made since can
+  still undo it.
+- A checkout completion applies the state Kiln retrieves from the provider,
+  and is not ordered. A replayed one older than the membership's stamp no
+  longer moves the stamp back, but one for a different subscription than the
+  stored one still sets the stamp to its own `created`, even an older one.
+- The console does not show recorded provider events. A given-up event shows
+  only in the SQL above, the server log and the telemetry event.
+
+Upgrading adds two columns to `billing_webhook_events` (`redrive_count` and
+`gave_up_at`, both nullable) and a partial index, in two additive migrations,
+and a new Oban queue, `billing_sweeper`
+([deploy.md](deploy.md#upgrading-a-deployment)). A rolling deploy is safe: an old node enqueues a non-unique job, which the claim
+then catches, and an event an old node records has no `redrive_count`, so if
+its job fails for good the sweeper gives up on it rather than replaying it.
+Rolling back is safe; the previous release reads neither column.
 
 ### Organizations
 
@@ -458,7 +543,10 @@ Details worth knowing:
 - Checkout completion applies the state Kiln just retrieved from the provider,
   which is newer than any event: it is exempt from the ordering check, and the
   row is stamped with the checkout event's own `created` (the provider's clock,
-  the same one later events carry), not the server's clock.
+  the same one later events carry), not the server's clock. A replayed checkout
+  older than the stored stamp, for the same subscription, still applies but
+  leaves the stamp where it was (#3159), so an event the stamp already outranks
+  stays out of order.
 - `invoice.payment_failed` carries its subscription id at
   `parent.subscription_details.subscription` on the newer Stripe API shape, and
   at `subscription` on the older one. Both are read.
@@ -522,8 +610,10 @@ failed, the reason in `error`. You need read access to the database.
 5. For a `failed` row, `error` holds the last attempt's error and the server
    log has a matching line, `billing webhook evt_… failed: …` (or `… raised: …`
    for an exception). Oban retries it (8 attempts, with backoff) and the row
-   becomes `processed` when one succeeds. Once the attempts run out it stays
-   `failed` until the provider redelivers the event.
+   becomes `processed` when one succeeds. Once the attempts run out, the
+   sweeper re-enqueues it, up to 3 times within 3 days of receipt, and then
+   gives up on it and sets `gave_up_at`
+   ([The webhook sweeper](#the-webhook-sweeper)).
 
 What you can run into:
 
@@ -533,10 +623,13 @@ What you can run into:
   nothing recorded). The provider's dashboard shows the response code for each
   delivery.
 - **A row stuck at `received`, `failed` or `processing`.** Its job has not
-  run, ran out of attempts, or the worker died. Resending the event from the
-  provider's dashboard re-enqueues a `received` or `failed` row, and a
-  `processing` one once its claim is more than 10 minutes old
-  ([Webhook delivery and recovery](#webhook-delivery-and-recovery)).
+  run, ran out of attempts, or the worker died. The sweeper re-enqueues such a
+  row at the first 10-minute sweep after it qualifies ([The webhook sweeper](#the-webhook-sweeper)
+  has the thresholds), up to 3 times while the event is less than 3 days old. If `gave_up_at` is set, the sweeper has stopped: the server log
+  has a `… was never processed and will not be retried …` line for it. Fix
+  the cause, then resend the event from the provider's dashboard, which
+  re-enqueues a `received` or `failed` row, and a `processing` one once its
+  claim is more than 10 minutes old.
 - **Old rows are all still there.** Nothing purges recorded events yet,
   `processed` and `ignored` ones included, and each row keeps the event's
   payload, which carries the customer's email and amounts.

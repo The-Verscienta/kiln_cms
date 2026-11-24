@@ -558,8 +558,9 @@ defmodule KilnCMS.Search do
   ## How a lexical hit is judged
 
   By the nearest distance it has: its document's distance (loaded for it if
-  the semantic leg did not return it), its nearest block's (one indexed query
-  over the hits' own blocks), and its tag's when the tag leg found it. A hit
+  the semantic leg did not return it), its nearest block's or chunk's (every
+  block and chunk of the hits themselves, read by id, so none is lost to the
+  approximate index walk), and its tag's when the tag leg found it. A hit
   whose record has no embedding — not yet embedded, or the query could not be
   embedded at all — is **kept**: a lexical match with nothing to judge it by
   is still a match, whereas the v1.1.0 rule floors a semantic-only hit with
@@ -2173,19 +2174,39 @@ defmodule KilnCMS.Search do
   # (#1940) is exactly the hit whose head vector never saw that passage, and
   # judging it by the head alone is the blind spot `semantic_floor_legs/0`
   # documents.
+  #
+  # Every grain of these documents is read and measured, not the nearest
+  # few: the hits are already known, so this is a lookup, not a search. A
+  # nearest-first read filtered to the ids can be served by the HNSW index,
+  # and that walk gives up after `hnsw.max_scan_tuples` rows. On a site with
+  # that many grains nearer the query than the hit's own, the hit's chunk
+  # never came back, and the hit was judged by its head and dropped (#2814).
   defp hit_block_distances(ids, vector, floor) do
     with true <- block_leg?() or chunk_long_documents?(),
          true <- floor.filters == %{},
          type when is_atom(type) and not is_nil(type) <-
            KilnCMS.CMS.ContentTypes.type_atom(floor.resource) do
-      tenant = floor.read_opts[:tenant]
+      opts = [
+        actor: KilnCMS.SystemActor.new(:search),
+        tenant: floor.read_opts[:tenant],
+        query: [select: [:document_id]],
+        load: [semantic_distance: %{query_vector: vector}]
+      ]
 
       [
-        if(block_leg?(), do: nearest_blocks(vector, type, tenant, ids), else: []),
-        if(chunk_long_documents?(), do: nearest_chunks(vector, type, tenant, ids), else: [])
+        if(block_leg?(),
+          do: KilnCMS.SearchIndex.block_embeddings_for_documents!(type, ids, opts),
+          else: []
+        ),
+        if(chunk_long_documents?(),
+          do: KilnCMS.SearchIndex.document_chunk_embeddings_for_documents!(type, ids, opts),
+          else: []
+        )
       ]
-      |> nearest_sections()
-      |> Map.new()
+      |> Enum.concat()
+      |> Enum.reduce(%{}, fn %{document_id: id, semantic_distance: distance}, acc ->
+        Map.update(acc, id, distance, &min(&1, distance))
+      end)
     else
       _ -> %{}
     end
@@ -2303,19 +2324,13 @@ defmodule KilnCMS.Search do
   # `[{document_id, distance}]`, nearest first, each document once — at its
   # nearest block. Reads a multiple of the candidate count in blocks because
   # a long document contributes many of them.
-  #
-  # `ids` narrows the read to those documents' blocks — the floor measuring
-  # a lexical hit (`hit_block_distances/3`). Still the nearest
-  # `@block_candidates` blocks, nearest first, so each listed document comes
-  # back at its nearest block unless that many of the others' are nearer.
-  defp nearest_blocks(vector, type, tenant, ids \\ nil) do
+  defp nearest_blocks(vector, type, tenant) do
     KilnCMS.Search.BlockEmbedding
     |> Ash.Query.for_read(:nearest_to_vector, %{
       vector: vector,
       document_type: type,
       limit: @block_candidates
     })
-    |> then(&if(ids, do: Ash.Query.filter(&1, document_id in ^ids), else: &1))
     |> Ash.Query.load(semantic_distance: %{query_vector: vector})
     |> Ash.read!(actor: KilnCMS.SystemActor.new(:search), tenant: tenant)
     |> Enum.reduce({[], MapSet.new()}, fn row, {acc, seen} ->
@@ -2350,16 +2365,12 @@ defmodule KilnCMS.Search do
   # `[{document_id, distance}]`, nearest first, each document once — at its
   # nearest chunk. A long document has up to `chunk_max_per_document/0`
   # chunks, so the leg reads the block leg's multiple of the candidate count.
-  #
-  # `ids` narrows the read to those documents' chunks — the floor measuring
-  # a lexical hit (`hit_block_distances/3`), as `nearest_blocks/4` does.
-  defp nearest_chunks(vector, type, tenant, ids \\ nil) do
+  defp nearest_chunks(vector, type, tenant) do
     %{vector: vector, document_type: type, limit: @block_candidates}
     |> KilnCMS.SearchIndex.nearest_document_chunk_embeddings!(
       actor: KilnCMS.SystemActor.new(:search),
       tenant: tenant,
-      load: [semantic_distance: %{query_vector: vector}],
-      query: if(ids, do: [filter: [document_id: [in: ids]]], else: [])
+      load: [semantic_distance: %{query_vector: vector}]
     )
     |> Enum.map(&{&1.document_id, &1.semantic_distance})
     |> then(&nearest_sections([&1]))
