@@ -77,6 +77,32 @@ defmodule KilnCMSWeb.ContentControllerTest do
       assert html =~ ~s(<a href="#1-getting-started">above</a>)
     end
 
+    # #2769: every heading block rendered as an h2, flattening the outline the
+    # fired artifact (and the `:json`/`:llm` outputs) keep.
+    test "heading blocks render at their own level, with their anchors", %{conn: conn} do
+      page =
+        page(%{
+          blocks: [
+            %{"_type" => "heading", "text" => "A", "level" => 1},
+            %{"_type" => "heading", "text" => "B", "level" => 3}
+          ]
+        })
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ ~s(<h1 id="a">A</h1>)
+      assert html =~ ~s(<h3 id="b">B</h3>)
+    end
+
+    test "a Markdown import keeps its outline on the live page", %{conn: conn} do
+      page = page(%{blocks: KilnCMS.Markdown.to_blocks("# A\n\n### B", sections: true)})
+
+      html = conn |> get(~p"/#{page.slug}") |> html_response(200)
+
+      assert html =~ ~s(<h1 id="a">A</h1>)
+      assert html =~ ~s(<h3 id="b">B</h3>)
+    end
+
     # The guard on `HeadingAnchors.reserved_ids/0`: a heading-free page's ids
     # are all chrome, and every one must be reserved — otherwise a heading with
     # the same words would duplicate it. A new id in the public layout fails
@@ -143,6 +169,98 @@ defmodule KilnCMSWeb.ContentControllerTest do
       html = conn |> get(~p"/#{host.slug}") |> html_response(200)
 
       refute html =~ "Unannounced launch"
+    end
+
+    # #2767: video, audio and file blocks fell to the empty `custom` view, so
+    # the live page drew `<p></p>` where the fired artifact has the player.
+    test "video, audio and file blocks render their player and download link", %{conn: conn} do
+      [vid, poster, captions, aud, file] = for _ <- 1..5, do: Ash.UUID.generate()
+
+      video = %{
+        "_type" => "video",
+        "media_id" => vid,
+        "poster_media_id" => poster,
+        "captions_media_id" => captions,
+        "title" => "Studio tour"
+      }
+
+      page =
+        page(%{
+          blocks: [
+            video,
+            %{"_type" => "audio", "media_id" => aud, "title" => "Episode 1"},
+            %{"_type" => "file", "media_id" => file, "title" => "Price list", "byte_size" => 4096}
+          ]
+        })
+
+      conn = get(conn, ~p"/#{page.slug}")
+      html = html_response(conn, 200)
+
+      assert html =~ ~s(<figure class="kiln-video">)
+      assert html =~ ~s(src="/media/#{vid}/stream")
+      assert html =~ ~s(poster="/media/#{poster}/stream")
+      assert html =~ ~s(<track kind="captions" src="/media/#{captions}/stream")
+      assert html =~ ~s(<audio src="/media/#{aud}/stream")
+      assert html =~ ~s(href="/media/#{file}/download" download)
+      assert html =~ "kiln-file-size"
+      refute html =~ ~r/<div class="kiln-block"[^>]*>\s*<p>\s*<\/p>/
+
+      # The same-origin route is what the CSP's `media-src` already admits.
+      assert [csp] = get_resp_header(conn, "content-security-policy")
+      assert csp =~ "media-src 'self'"
+    end
+
+    test "a video inside columns and inside a fragment renders", %{conn: conn} do
+      [in_columns, in_fragment] = for _ <- 1..2, do: Ash.UUID.generate()
+
+      shared =
+        page(%{
+          title: "Shared clip",
+          blocks: [%{"_type" => "video", "media_id" => in_fragment}]
+        })
+
+      host =
+        page(%{
+          blocks: [
+            %{
+              "_type" => "columns",
+              "layout" => "1-1",
+              "columns" => [
+                %{"blocks" => [%{"_type" => "video", "media_id" => in_columns}]},
+                %{"blocks" => []}
+              ]
+            },
+            %{"_type" => "fragment", "ref" => %{"type" => "page", "id" => shared.id}}
+          ]
+        })
+
+      html = conn |> get(~p"/#{host.slug}") |> html_response(200)
+
+      assert html =~ ~s(src="/media/#{in_columns}/stream")
+      assert html =~ ~s(src="/media/#{in_fragment}/stream")
+    end
+
+    # The reader's audience decides delivery's expansion: an anonymous reader of
+    # a public page gets no `:member` fragment, so not the media route inside it.
+    test "a member fragment's video does not reach an anonymous reader", %{conn: conn} do
+      clip = Ash.UUID.generate()
+
+      gated =
+        page(%{
+          title: "Members clip",
+          audience: :member,
+          blocks: [%{"_type" => "video", "media_id" => clip}]
+        })
+
+      host =
+        page(%{
+          blocks: [%{"_type" => "fragment", "ref" => %{"type" => "page", "id" => gated.id}}]
+        })
+
+      html = conn |> get(~p"/#{host.slug}") |> html_response(200)
+
+      refute html =~ "/media/#{clip}/stream"
+      refute html =~ "kiln-video"
     end
 
     test "image blocks render a responsive srcset + alt from the media library", %{conn: conn} do

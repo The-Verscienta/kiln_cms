@@ -88,6 +88,12 @@ the same when you switch back to Blocks. A heading block holds plain text,
 so bold or italic in a heading is dropped; a heading with a link (other than
 a bare URL) or an image in it stays in the text, where the link survives.
 
+A heading block renders at its own level on the published page and in every
+preview: `#` as `<h1>`, `###` as `<h3>`, down to `<h6>`. The page title is
+already the page's `<h1>`, so a `#` heading further down the file becomes a
+second one; start sections at `##` if you want the title to be the only
+`<h1>`.
+
 Unlike a paste, an import keeps images: a standalone image becomes an **image
 block** (its alt text and its `"title"` as the caption), and a YouTube or Vimeo
 link on a line of its own becomes an **embed block**. Imported images still

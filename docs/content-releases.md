@@ -46,7 +46,11 @@ groups: **Planned** (open, scheduled, publishing, failed), **Published**, and
 4. **Preview it.** **Create preview link** mints a short-lived, shareable URL
    showing every document as the release would publish it, plus everything the
    release takes down. No editor account needed to open it — useful for
-   sign-off with people outside the CMS.
+   sign-off with people outside the CMS. A shared block embedded with a
+   fragment shows as it is published **now**: if the release also changes the
+   shared document, its new body shows under that document's own entry in
+   the preview, not inside the pages that embed it
+   ([#3289](https://github.com/The-Verscienta/kiln_cms/issues/3289)).
 5. **Ship it.** Either set a **Go live at** datetime (a minute-resolution cron
    fires it, same cadence as per-item scheduling) or hit **Publish now**.
 

@@ -21,6 +21,7 @@ defmodule KilnCMSWeb.PreviewLive do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMSWeb.BlockComponents
+  alias KilnCMSWeb.BlockViews
   alias KilnCMSWeb.Presence
 
   @doc "PubSub topic the editor broadcasts on for a given content item."
@@ -111,8 +112,9 @@ defmodule KilnCMSWeb.PreviewLive do
 
   defp content_blocks(record) do
     # Blocks are the typed union (Kiln v2); the shared renderer's view maps
-    # are built straight from them (columns recurse).
-    BlockComponents.view_blocks(record.blocks)
+    # are built straight from them (columns recurse), with fragments inlined
+    # at the document's saved audience, as the fired artifact has them (#2767).
+    BlockViews.document_view_blocks(record.blocks, record)
   end
 
   @impl true

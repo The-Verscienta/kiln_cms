@@ -156,6 +156,52 @@ defmodule KilnCMSWeb.PreviewLiveTest do
     refute html =~ "2 viewing"
   end
 
+  # #2767: the pop-out preview drew an empty `<p>` for a video block and for
+  # a fragment, which it never expanded.
+  test "the pop-out preview shows a video player and an inlined fragment" do
+    clip = Ash.UUID.generate()
+
+    shared =
+      Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+        title: "Shared",
+        slug: "prev-shared-#{System.unique_integer([:positive])}",
+        state: :published,
+        blocks: [%{"_type" => "heading", "text" => "Shared call to action"}]
+      })
+
+    draft =
+      Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+        title: "Draft",
+        slug: "prev-#{System.unique_integer([:positive])}",
+        state: :draft,
+        blocks: [
+          %{"_type" => "video", "media_id" => clip},
+          %{"_type" => "fragment", "ref" => %{"type" => "page", "id" => shared.id}}
+        ]
+      })
+
+    {:ok, _lv, html} = live(conn_for("Alice"), ~p"/editor/preview/page/#{draft.id}")
+
+    assert html =~ ~s(<figure class="kiln-video">)
+    assert html =~ ~s(src="/media/#{clip}/stream")
+    assert html =~ "Shared call to action"
+  end
+
+  # #2769: the preview rendered every heading block as an h2.
+  test "the pop-out preview renders a heading at its own level" do
+    draft =
+      Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+        title: "Draft",
+        slug: "prev-#{System.unique_integer([:positive])}",
+        state: :draft,
+        blocks: [%{"_type" => "heading", "text" => "Subsection", "level" => 3}]
+      })
+
+    {:ok, _lv, html} = live(conn_for("Alice"), ~p"/editor/preview/page/#{draft.id}")
+
+    assert html =~ "<h3>Subsection</h3>"
+  end
+
   describe "shared locale switcher (#378)" do
     defp with_translation(page) do
       CMS.create_page!(

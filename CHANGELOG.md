@@ -63,6 +63,11 @@ else.
 - **Run `mix ash.migrate`: one additive migration (`edit_inline`, a nullable boolean on `field_definitions`). Older releases never read the column, so rolling the pin back is safe.**
   ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283) · [long form](docs/changelog/unreleased.md#edit-inline-option-upgrade))
 
+### Known issues
+
+- **A release preview shows a fragment's currently published body, not the version the same release will publish; open the target's own entry in the preview to review it.**
+  ([#3289](https://github.com/The-Verscienta/kiln_cms/issues/3289) · [long form](docs/changelog/unreleased.md#release-preview-fragments))
+
 ### Added
 
 - **A reference field can show a record card for each connected record: tick "Let editors edit the related record here" in the fields admin and each connected record the editor may change gets an "Edit the record" card ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
@@ -132,6 +137,9 @@ else.
 
 - **Content editor: when a co-editor saves, an idle editor shows their save in place, and one holding unsaved text or a setting they also changed gets the conflict banner at once, so its next edit no longer overwrites theirs ([#2775](https://github.com/The-Verscienta/kiln_cms/issues/2775)).**
   ([long form](docs/changelog/unreleased.md#editor-peer-save-rebuild))
+
+- **Video, audio and file blocks render their player or download link on the live page and in every preview, previews inline fragment blocks at the document's saved audience, and heading blocks render at their own level (`<h1>` to `<h6>`), all as the published page has them ([#2767](https://github.com/The-Verscienta/kiln_cms/issues/2767), [#2769](https://github.com/The-Verscienta/kiln_cms/issues/2769)).**
+  ([long form](docs/changelog/unreleased.md#public-block-render))
 
 ## [1.12.0] - 2026-11-21
 

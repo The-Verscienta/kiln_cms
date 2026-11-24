@@ -3451,15 +3451,24 @@ decision A3 ("resolve/embed at fire time") taken literally. That is why one
 small module buys the whole feature: all four fired surfaces (`:web`, `:json`,
 `:llm`, `:json_ld`) see one flat tree and need no knowledge of fragments at all.
 
-Two callers: `Firing.Engine.fire/2` (so artifacts carry the resolved body) and
-`KilnCMSWeb.ContentController` (HTML delivery renders live from the block tree,
-not from an artifact).
+It runs in three places: `Firing.Engine.fire/2` (so artifacts carry the
+resolved body), the content editor's Preview tab, and
+[`KilnCMSWeb.BlockViews.document_view_blocks/3`](../lib/kiln_cms_web/block_views.ex),
+which every surface that renders a document's block tree live goes through:
+HTML delivery (`KilnCMSWeb.ContentController`, which renders from the block
+tree rather than from an artifact), the pop-out preview, a shared preview
+link, a release preview link, the in-context editor's read-only blocks, and the
+updates the content editor and the presentation console push to open
+previews. `KilnCMSWeb.BlockComponents.view_blocks/1` never expands a fragment
+(it has no org or audience to resolve one with) and renders an unexpanded one
+as nothing, so a new surface that skips `document_view_blocks/3` shows every
+fragment as a gap (#2767).
 
-**Not** reached yet: write-time derivations (the `search_text` column, block
-embeddings, `word_count`, `reading_time_minutes`) and the editor's own preview
-/ SEO / a11y panels all run over the raw tree, so fragment text is invisible to
-search and doesn't count towards reading time. Tracked in #910 — expanding
-there means making a write depend on a read.
+The editor's SEO and readability panel scores the expanded tree too, and each
+fire recomputes the `search_text` column from it (#910). **Not** reached yet:
+the other write-time derivations (block embeddings, `word_count`,
+`reading_time_minutes`) run over the raw tree, so fragment text doesn't count
+towards reading time — expanding there means making a write depend on a read.
 
 ### The re-fire wave already existed
 
@@ -3489,6 +3498,20 @@ feeds, static export, the newsletter — resolves the host through a
 carrying content stricter than its host would hand a gated body to anonymous
 callers on all four. The rule is: an artifact is never more permissive than the
 document carrying it.
+
+Previews follow the artifact's rule, not the viewer's: the editor's Preview tab
+and pop-out, a shared preview link, a release preview and the in-context editor
+all expand at the document's **saved** audience (`Engine.host_audiences/1`, the
+default of `document_view_blocks/3`), so no preview shows text the published
+page won't have. A guest holding a preview link to a `:member` page sees its
+`:member` fragments, because the published page shows them to its readers; a
+`:public` page shows the guest none. An audience changed in the editor but not
+yet saved does not count until it is saved. Live delivery passes the
+**reader's** audiences instead (`audiences:`), as it did before.
+
+A release preview resolves each fragment as its target is published now, not
+as the release will leave it, so a target the same release changes or first
+publishes previews with its current body, or none (#3289).
 
 Because an HTML payload can now embed another document's body, the re-fire wave
 also busts each referrer's **delivery** cache, not just its artifact — that
