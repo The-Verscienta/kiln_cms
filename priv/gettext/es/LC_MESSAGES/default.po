@@ -7366,6 +7366,11 @@ msgstr "No se pudo revocar esa clave."
 msgid "Couldn't rotate that signing secret."
 msgstr "No se pudo rotar ese secreto de firma."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save a related record, so this record was not saved. Fix it below, then save again."
+msgstr "No se pudo guardar un registro relacionado, así que este registro no se guardó. Corríjalo abajo y vuelva a guardar."
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't save that item."
@@ -7396,6 +7401,11 @@ msgstr "No se pudo guardar el nuevo orden de los tipos de elemento."
 #, elixir-autogen, elixir-format
 msgid "Couldn't save the new order."
 msgstr "No se pudo guardar el nuevo orden."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save the related record “%{title}”, so this record was not saved. Fix it below, then save again."
+msgstr "No se pudo guardar el registro relacionado «%{title}», así que este registro no se guardó. Corríjalo abajo y vuelva a guardar."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -20282,6 +20292,11 @@ msgstr "Guardar el origen de la clave"
 msgid "Save or discard the changes to this record before closing it."
 msgstr "Guarde o descarte los cambios de este registro antes de cerrarlo."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Save or discard the changes to this record before removing it."
+msgstr "Guarde o descarte los cambios de este registro antes de quitarlo."
+
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save platform alerts"
@@ -20338,6 +20353,20 @@ msgstr "Guarde sus cambios antes de cambiar el estado de este contenido."
 #, elixir-autogen, elixir-format
 msgid "Saved"
 msgstr "Guardado"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved %{count} related record, but couldn't save another, so this record was not saved. Fix it below, then save again."
+msgid_plural "Saved %{count} related records, but couldn't save another, so this record was not saved. Fix it below, then save again."
+msgstr[0] "Se guardó %{count} registro relacionado, pero no se pudo guardar otro, así que este registro no se guardó. Corríjalo abajo y vuelva a guardar."
+msgstr[1] "Se guardaron %{count} registros relacionados, pero no se pudo guardar otro, así que este registro no se guardó. Corríjalo abajo y vuelva a guardar."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved %{count} related record, but couldn't save “%{title}”, so this record was not saved. Fix it below, then save again."
+msgid_plural "Saved %{count} related records, but couldn't save “%{title}”, so this record was not saved. Fix it below, then save again."
+msgstr[0] "Se guardó %{count} registro relacionado, pero no se pudo guardar «%{title}», así que este registro no se guardó. Corríjalo abajo y vuelva a guardar."
+msgstr[1] "Se guardaron %{count} registros relacionados, pero no se pudo guardar «%{title}», así que este registro no se guardó. Corríjalo abajo y vuelva a guardar."
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format

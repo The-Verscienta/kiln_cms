@@ -601,8 +601,8 @@ Editing a connected record from the field itself (`edit_inline`) is planned in
 [inline-reference-editing-plan.md](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/plans/inline-reference-editing-plan.md)
 ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)): a card per
 connected row, saved on its own. Built so far: the option, a read-only card
-and the card's own Save (the unsaved-changes guard and the cascade are not
-built); see [Edit related records in place](extending-content.md#edit-related-records-in-place)
+the card's own Save, the unsaved-changes guard, and the parent's Save saving
+dirty cards first; see [Edit related records in place](extending-content.md#edit-related-records-in-place)
 and [ADR 0081](decisions/0081-an-inline-edited-related-record-is-saved-on-its-own-and-the-option-is-its-own-column-with-no-write-api.md).
 
 - Replace the reference `<select>` with a picker component: search-as-you-type
