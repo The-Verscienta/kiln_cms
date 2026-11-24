@@ -77,6 +77,9 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
     {lv, html}
   end
 
+  # The saved-view bar's Delete button, shown while `view` is the one on screen.
+  defp view_bar(view), do: "button[phx-click=delete_view][phx-value-id='#{view.id}']"
+
   # The page ids on screen, in order.
   defp ids(html) do
     ~r/id="page-([0-9a-f-]{36})"/ |> Regex.scan(html) |> Enum.map(&List.last/1)
@@ -454,12 +457,130 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
 
       CMS.destroy_field_definition!(price, actor: admin)
 
-      {:ok, lv, _html} = live(conn, "/editor?type=page&q=#{prefix}")
+      # The list its re-read params equal is not the view (#2785): no
+      # message, no current pill, no Rename/Delete bar.
+      {:ok, lv, html} = live(conn, "/editor?type=page&q=#{prefix}")
+      refute html =~ "named a field"
+      refute has_element?(lv, "#view-#{view.id}[aria-current=page]")
+      refute has_element?(lv, view_bar(view))
+
+      # Opening the view keeps its own URL, condition and all, and says so.
       lv |> element("#view-#{view.id}") |> render_click()
+      assert assert_patch(lv) =~ "cf=elff_price"
       html = render(lv)
       assert Enum.sort(ids(html)) == Enum.sort([low.id, high.id])
       assert html =~ "named a field that no longer applies"
-      refute assert_patch(lv) =~ "cf="
+      assert has_element?(lv, "#view-#{view.id}[aria-current=page]")
+      refute has_element?(lv, "#field-filter-chip-0")
+
+      # Its bar is how a stale view is deleted; then the message is gone.
+      lv |> element(view_bar(view)) |> render_click()
+      lv |> element("button[phx-click=confirm_delete_view]") |> render_click()
+      refute has_element?(lv, "#view-#{view.id}")
+
+      {:ok, _lv, html} = live(conn, "/editor?type=page&q=#{prefix}")
+      refute html =~ "named a field"
+    end
+
+    test "a shared view left with no conditions is not the plain list (#2785)", %{
+      conn: conn,
+      admin: admin
+    } do
+      # No type: several types are in play, so its condition never applied.
+      view =
+        CMS.create_saved_view!(
+          %{name: "Cheap #{uniq()}", params: %{"cf" => "elff_price:gte:10"}, shared: true},
+          actor: admin
+        )
+
+      editor_conn = log_in(build_conn(), authed_user(:editor))
+
+      for c <- [conn, editor_conn], _reload <- 1..2 do
+        {:ok, lv, html} = live(c, "/editor")
+        refute html =~ "named a field"
+        refute has_element?(lv, "#view-#{view.id}[aria-current=page]")
+        refute has_element?(lv, view_bar(view))
+      end
+
+      {:ok, lv, _html} = live(conn, "/editor")
+      lv |> element("#view-#{view.id}") |> render_click()
+      assert assert_patch(lv) =~ "cf=elff_price"
+      assert render(lv) =~ "named a field that no longer applies"
+      assert has_element?(lv, "#view-#{view.id}[aria-current=page]")
+      assert has_element?(lv, view_bar(view))
+    end
+
+    test "a view that keeps one condition is not the list filtering on that one", %{
+      conn: conn,
+      admin: admin,
+      prefix: prefix,
+      price: price
+    } do
+      a_cheap = a_page(prefix, %{"elff_note" => "a", "elff_price" => 1})
+      a_dear = a_page(prefix, %{"elff_note" => "a", "elff_price" => 99})
+      _b = a_page(prefix, %{"elff_note" => "b", "elff_price" => 99})
+
+      view =
+        CMS.create_saved_view!(
+          %{
+            name: "A, dear",
+            params: %{
+              "type" => "page",
+              "q" => prefix,
+              "cf" => "elff_note:eq:a;elff_price:gte:50"
+            }
+          },
+          actor: admin
+        )
+
+      CMS.destroy_field_definition!(price, actor: admin)
+
+      {lv, html} = open(conn, prefix, %{"cf" => "elff_note:eq:a"})
+      assert Enum.sort(ids(html)) == Enum.sort([a_cheap.id, a_dear.id])
+      refute html =~ "named a field"
+      refute has_element?(lv, "#view-#{view.id}[aria-current=page]")
+      refute has_element?(lv, view_bar(view))
+
+      lv |> element("#view-#{view.id}") |> render_click()
+      assert_patch(lv)
+      html = render(lv)
+      assert Enum.sort(ids(html)) == Enum.sort([a_cheap.id, a_dear.id])
+      assert html =~ "named a field that no longer applies"
+      assert has_element?(lv, "#view-#{view.id}[aria-current=page]")
+      assert has_element?(lv, "#field-filter-chip-0")
+      refute has_element?(lv, "#field-filter-chip-1")
+    end
+
+    test "a stale view is matched on its cleaned params, not the raw stored map", %{
+      conn: conn,
+      admin: admin,
+      prefix: prefix,
+      price: price
+    } do
+      # Stored before `clean_params` narrowed what a view keeps: an unknown
+      # key and padded values. Seeded past the change that cleans them.
+      view =
+        Ash.Seed.seed!(KilnCMS.CMS.SavedView, %{
+          name: "Legacy",
+          owner_id: admin.id,
+          params: %{
+            "type" => "page",
+            "q" => " #{prefix} ",
+            "cf" => "elff_price:gte:50",
+            "legacy" => "1"
+          }
+        })
+
+      CMS.destroy_field_definition!(price, actor: admin)
+
+      {:ok, lv, _html} = live(conn, "/editor?type=page&q=#{prefix}")
+      refute has_element?(lv, "#view-#{view.id}[aria-current=page]")
+
+      lv |> element("#view-#{view.id}") |> render_click()
+      path = assert_patch(lv)
+      refute path =~ "legacy"
+      assert render(lv) =~ "named a field that no longer applies"
+      assert has_element?(lv, "#view-#{view.id}[aria-current=page]")
     end
 
     test "a read that fails after validation clears the field filter and flashes, on Load more too",
@@ -505,10 +626,14 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
 
       CMS.destroy_field_definition!(price, actor: admin)
 
-      {:ok, lv, _html} = live(conn, "/editor?type=page&q=#{prefix}")
+      {:ok, lv, html} = live(conn, "/editor?type=page&q=#{prefix}")
+      refute html =~ "named a field"
+      refute has_element?(lv, "#view-#{view.id}[aria-current=page]")
+
       lv |> element("#view-#{view.id}") |> render_click()
+      assert assert_patch(lv) =~ "sort=-field%3Aelff_price"
       assert render(lv) =~ "named a field that no longer applies"
-      refute assert_patch(lv) =~ "sort="
+      assert has_element?(lv, "#view-#{view.id}[aria-current=page]")
     end
 
     test "a failing first load clears the field query once and ends on the plain list", %{

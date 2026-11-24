@@ -83,6 +83,9 @@ defmodule KilnCMSWeb.EditorLiveViewsTest do
 
   defp prefix, do: "vw#{uniq()}"
 
+  # The saved-view bar's Delete button, shown while `view` is the one on screen.
+  defp view_bar(view), do: "button[phx-click=delete_view][phx-value-id='#{view.id}']"
+
   defp visible_ids(html) do
     ~r/id="(?:post|page)-([0-9a-f-]{36})"/
     |> Regex.scan(html)
@@ -438,6 +441,66 @@ defmodule KilnCMSWeb.EditorLiveViewsTest do
       lv |> element("#view-#{view.id}") |> render_click()
       assert_patch(lv)
       assert render(lv) =~ "Category: a deleted category"
+    end
+  end
+
+  # #2785: a view that loses nothing on a re-read is still recognised by what
+  # it applies, wherever the URL came from; one that lost something only by
+  # its own URL.
+  describe "which saved view is on screen" do
+    test "a view with no field conditions matches a hand-typed URL, as before", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      view =
+        CMS.create_saved_view!(%{name: "Drafts", params: %{"status" => "draft"}},
+          actor: editor,
+          tenant: Accounts.default_org_id()
+        )
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor?status=draft")
+      assert has_element?(lv, "#view-#{view.id}[aria-current=page]")
+      assert has_element?(lv, view_bar(view))
+      refute has_element?(lv, "#view-stale-#{view.id}")
+      refute html =~ "named a field"
+    end
+
+    test "a view saved with no params is the plain list", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      view =
+        CMS.create_saved_view!(%{name: "Everything", params: %{}},
+          actor: editor,
+          tenant: Accounts.default_org_id()
+        )
+
+      {:ok, lv, html} = conn |> log_in(editor) |> live(~p"/editor")
+      assert has_element?(lv, view_bar(view))
+      refute has_element?(lv, "#view-stale-#{view.id}")
+      refute html =~ "named a field"
+    end
+
+    test "a view whose locale is gone is not the plain list, but opens as itself", %{conn: conn} do
+      editor = authed_user(:editor)
+
+      view =
+        CMS.create_saved_view!(%{name: "Zed", params: %{"locale" => "zz"}},
+          actor: editor,
+          tenant: Accounts.default_org_id()
+        )
+
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor")
+      refute has_element?(lv, "#view-#{view.id}[aria-current=page]")
+      refute has_element?(lv, view_bar(view))
+      assert has_element?(lv, "#view-all[aria-current=page]")
+
+      lv |> element("#view-#{view.id}") |> render_click()
+      assert assert_patch(lv) == ~p"/editor?locale=zz"
+      assert has_element?(lv, "#view-#{view.id}[aria-current=page]")
+      refute has_element?(lv, "#view-all[aria-current=page]")
+      assert has_element?(lv, view_bar(view))
+      # Not a field: no stale mark and no message.
+      refute has_element?(lv, "#view-stale-#{view.id}")
+      refute render(lv) =~ "named a field"
     end
   end
 end

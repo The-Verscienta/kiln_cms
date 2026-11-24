@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.EditorLive do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.ListFields
+  alias KilnCMS.CMS.SavedView
   alias KilnCMS.Compliance
   alias KilnCMS.Compliance.Settings
   alias KilnCMS.I18n
@@ -94,6 +95,10 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:total_capped?, false)
      |> assign(:saved_view_params, %{})
      |> assign(:stale_views, MapSet.new())
+     # Views that lost something on that re-read, and the URL's own params:
+     # such a view is recognised only by its stored params (#2785).
+     |> assign(:lossy_views, MapSet.new())
+     |> assign(:url_params, %{})
      # The add-a-condition form's draft: the field and op picked and the value
      # typed so far. Held server-side so the value control can follow the field.
      |> assign(:ff_draft, %{field: nil, op: nil, value: ""})
@@ -119,12 +124,15 @@ defmodule KilnCMSWeb.EditorLive do
     |> assign_saved_view_params()
   end
 
-  # Each saved view's params as the list would apply them today, and which
-  # views name a field condition that no longer applies (a field deleted or
-  # made private since the view was saved). A view with a `cf` or a field sort
-  # needs its type's field definitions, read once per such type, so the render never
-  # touches the database. Before `handle_params` has loaded the types there is
-  # nothing to check against.
+  # Each saved view's link, which views name a field condition that no longer
+  # applies (a field deleted or made private since the view was saved), and
+  # which lost anything at all on a re-read (`Filters.lossy?/2`). A view that
+  # lost nothing links to its params as the list would apply them today; a
+  # lossy one links to what it stored, so opening it is told apart from the
+  # list its re-read params happen to equal (`view_on_screen?/3`). A view with
+  # a `cf` or a field sort needs its type's field definitions, read once per
+  # such type, so the render never touches the database. Before
+  # `handle_params` has loaded the types there is nothing to check against.
   defp assign_saved_view_params(%{assigns: %{content_types: _}} = socket) do
     ctx = filter_ctx(socket)
 
@@ -138,18 +146,41 @@ defmodule KilnCMSWeb.EditorLive do
 
     ctx = Map.put(ctx, :fields, &Map.get(cache, &1, []))
 
-    params = Map.new(socket.assigns.saved_views, &{&1.id, view_params(&1, ctx)})
-
     stale =
       for view <- socket.assigns.saved_views,
           Filters.stale?(view.params, ctx),
           into: MapSet.new(),
           do: view.id
 
-    socket |> assign(:saved_view_params, params) |> assign(:stale_views, stale)
+    lossy =
+      for view <- socket.assigns.saved_views,
+          view.id in stale or Filters.lossy?(view.params, ctx),
+          into: MapSet.new(),
+          do: view.id
+
+    params =
+      Map.new(socket.assigns.saved_views, fn view ->
+        if view.id in lossy,
+          do: {view.id, SavedView.clean_params(view.params)},
+          else: {view.id, view_params(view, ctx)}
+      end)
+
+    socket
+    |> assign(:saved_view_params, params)
+    |> assign(:stale_views, stale)
+    |> assign(:lossy_views, lossy)
   end
 
   defp assign_saved_view_params(socket), do: socket
+
+  # Whether `view` is the one on screen. A view that lost nothing on a re-read
+  # is recognised by what it applies, as the built-in views are; a lossy one
+  # only by its own stored params in the URL, since what it applies may be
+  # the plain list or anyone's list that filters on what is left (#2785).
+  defp view_on_screen?(view, assigns, current) do
+    link = Map.get(assigns.saved_view_params, view.id)
+    if view.id in assigns.lossy_views, do: link == assigns.url_params, else: link == current
+  end
 
   # Only what the list renders — without a select, every row drags its whole
   # blocks JSONB tree (plus search_text and embedding) into the LiveView heap.
@@ -1205,6 +1236,7 @@ defmodule KilnCMSWeb.EditorLive do
     {:noreply,
      socket
      |> assign(:filters, filters)
+     |> assign(:url_params, SavedView.clean_params(params))
      |> assign(:status, filters["status"])
      |> assign(:type, filters["type"])
      |> assign(:query, filters["q"])
@@ -1285,13 +1317,13 @@ defmodule KilnCMSWeb.EditorLive do
 
   # Opening a saved view whose field conditions no longer apply is said out
   # loud: the list narrows less than the view was saved to, never silently.
+  # Only opening that view says it (a stale view is lossy, so that is its own
+  # stored URL), not every list its re-read params happen to equal.
   defp flash_stale_view(socket) do
-    %{filters: filters, saved_views: views, saved_view_params: params, stale_views: stale} =
-      socket.assigns
-
+    %{filters: filters, saved_views: views, stale_views: stale} = socket.assigns
     current = Filters.to_params(filters)
 
-    case Enum.find(views, &(&1.id in stale and Map.get(params, &1.id) == current)) do
+    case Enum.find(views, &(&1.id in stale and view_on_screen?(&1, socket.assigns, current))) do
       nil ->
         socket
 
@@ -1345,8 +1377,9 @@ defmodule KilnCMSWeb.EditorLive do
   defp params_path(params) when params == %{}, do: ~p"/editor"
   defp params_path(params), do: ~p"/editor?#{params}"
 
-  # A view's link: its params, re-read under today's types and locales so a
-  # stale view links to what it would actually show.
+  # A view's link when it lost nothing: its params, re-read under today's
+  # types and locales (a lossy view links to what it stored instead,
+  # `assign_saved_view_params/1`).
   defp view_params(view, ctx), do: view.params |> Filters.parse(ctx) |> Filters.to_params()
 
   # Patches the URL to the current filter with `changes` applied.
@@ -2948,7 +2981,9 @@ defmodule KilnCMSWeb.EditorLive do
   @panel_keys ~w(author category tag locale health reviewed consent_missing from to scheduled cf)
 
   # The view on screen, if any: the first built-in or saved view whose filter
-  # is exactly the current one.
+  # is exactly the current one. A lossy saved view matched its own stored URL
+  # (`view_on_screen?/3`), which is more specific than a built-in view its
+  # re-read params happen to equal, so it is the one marked current.
   defp assign_views(assigns) do
     ctx = %{types: Enum.map(assigns.content_types, &type_value/1), locales: assigns.locales}
     current = Filters.to_params(assigns.filters)
@@ -2958,10 +2993,12 @@ defmodule KilnCMSWeb.EditorLive do
         Map.put(view, :path, params_path(view_params(view, ctx)))
       end)
 
-    active_default = Enum.find(defaults, &(view_params(&1, ctx) == current))
+    active_saved = Enum.find(assigns.saved_views, &view_on_screen?(&1, assigns, current))
 
-    active_saved =
-      Enum.find(assigns.saved_views, &(Map.get(assigns.saved_view_params, &1.id) == current))
+    active_default =
+      if active_saved && active_saved.id in assigns.lossy_views,
+        do: nil,
+        else: Enum.find(defaults, &(view_params(&1, ctx) == current))
 
     assigns
     |> assign(:filter_ctx, ctx)

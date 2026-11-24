@@ -329,6 +329,26 @@ defmodule KilnCMSWeb.EditorLiveFiltersTest do
       refute stale?.(%{"type" => "post"})
     end
 
+    test "lossy? is stale?, or a stored value that reads back as the default (#2785)" do
+      lossy? = &Filters.lossy?(&1, ctx())
+
+      assert lossy?.(%{"type" => "post", "cf" => "ghost:eq:1"})
+      assert lossy?.(%{"type" => "post", "sort" => "field:ghost"})
+      assert lossy?.(%{"locale" => "zz"})
+      assert lossy?.(%{"type" => "gone"})
+      assert lossy?.(%{"sort" => "nonsense"})
+      assert lossy?.(%{"status" => "draft", "consent_missing" => "nope"})
+
+      # A category or tag that is gone keeps its id; nothing else was lost.
+      refute lossy?.(%{"category" => Ecto.UUID.generate()})
+      refute lossy?.(%{})
+      refute lossy?.(%{"status" => "all", "type" => "all", "sort" => "updated"})
+      refute lossy?.(%{"q" => "  "})
+      refute lossy?.(%{"q" => " x ", "status" => "draft", "locale" => "en"})
+      refute lossy?.(%{"type" => "post", "cf" => "price:gte:1", "sort" => "-field:price"})
+      refute Filters.lossy?(nil, ctx())
+    end
+
     test "the lookup is asked only when cf or a field sort needs it" do
       ctx = %{types: ["post"], locales: ["en"], fields: fn _ -> flunk("read definitions") end}
       Filters.parse(%{"type" => "post", "q" => "x", "sort" => "title"}, ctx)

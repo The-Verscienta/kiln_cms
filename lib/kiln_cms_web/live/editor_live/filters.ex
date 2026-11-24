@@ -377,6 +377,38 @@ defmodule KilnCMSWeb.EditorLive.Filters do
   def stale?(_params, _ctx), do: false
 
   @doc """
+  Whether reading the view `params` today lost anything it named: it is
+  `stale?/2`, or a key it set to something other than the default (a locale
+  no longer configured, a type gone, a built-in sort or consent kind no
+  longer offered) parses back to nothing or to the default.
+
+  `stale?/2` decides the warning and the message; this decides how a view is
+  recognised. A lossy view's re-read params can equal a list it never was
+  (the plain list, or one that filters on what is left), so it is the view
+  on screen only when the URL is its own stored params (#2785).
+  """
+  @spec lossy?(map(), map()) :: boolean()
+  def lossy?(params, ctx) when is_map(params) do
+    stale?(params, ctx) or narrowed_less?(params, ctx)
+  end
+
+  def lossy?(_params, _ctx), do: false
+
+  # `cf` is left to `stale?/2` (`dropped_conditions/2`), which knows a
+  # condition from a malformed segment. A category or tag that is gone keeps
+  # its id, so it is not a loss.
+  defp narrowed_less?(params, ctx) do
+    parsed = parse(params, ctx)
+
+    params
+    |> SavedView.clean_params()
+    |> Enum.any?(fn {key, value} ->
+      default = Map.get(@defaults, key)
+      key != "cf" and value != default and Map.get(parsed, key) in [nil, "", default]
+    end)
+  end
+
+  @doc """
   Whether `params` ask for something only a type's field definitions can
   validate: a `cf`, or a `field:`/`-field:` sort.
   """
