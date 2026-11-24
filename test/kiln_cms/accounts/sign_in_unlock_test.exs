@@ -12,7 +12,7 @@ defmodule KilnCMS.Accounts.SignInUnlockTest do
 
   @moduletag :capture_log
 
-  import KilnCMS.ChallengeFixtures, only: [enable!: 0]
+  import KilnCMS.ChallengeFixtures, only: [enable!: 0, pin_windows!: 1]
   import Swoosh.TestAssertions
 
   alias KilnCMS.Accounts
@@ -495,6 +495,9 @@ defmodule KilnCMS.Accounts.SignInUnlockTest do
 
     test "with adaptive challenges, a challenge is still asked for and then admits" do
       enable!()
+      # Pinned before the pause (#2649): a window boundary after the spending
+      # would make the sign-in's charge free, and nothing would be asked.
+      pin_windows!([:account])
       {_user, address, token} = paused_with_link()
       # The paused account has also spent its free attempts before a challenge.
       for _ <- 1..Challenge.threshold(:account),
