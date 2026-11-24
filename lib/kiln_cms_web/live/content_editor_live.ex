@@ -5065,6 +5065,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     socket
     |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
     |> assign(:settings_dirty?, true)
+    # The picked featured image's row is resolved from the form's value, which
+    # the rebuild had reset to the record's.
+    |> refresh_featured_media()
     |> refresh_preview()
   end
 
@@ -6495,7 +6498,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # | `:synced` (the persister saves its text) or already in conflict | kept | as before |
   # | Unsaved text: `:pending`, `:error` or `:unsaved` | kept | the conflict banner, now |
   # | Busy: a view or question computed against the record is open | kept | its next write meets the lock |
-  # | Idle, unsaved Settings at most | rebuilt from the save | it sees the save in place |
+  # | Unsaved Settings, and the peer changed a setting | kept | the conflict banner, now |
+  # | Idle, or unsaved Settings over a peer's text | rebuilt from the save | it sees the save in place |
   #
   # The version list refreshes in every row: it is read-only, and it drags an
   # open comparison along with it.
@@ -6512,9 +6516,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   #
   # So `@record` moves only together with everything built from it
   # (`assign_record/2`), and only for a session that has nothing of its own
-  # the rebuild would throw away — except unsaved Settings, which are put
-  # back on the rebuilt form exactly as after this session's own text
-  # autosave (`keep_settings_edits/3`). A session holding unsaved text keeps
+  # the rebuild would throw away — except unsaved Settings over a peer's
+  # text, which are put back on the rebuilt form exactly as after this
+  # session's own text autosave (`keep_settings_edits/3`). Over a peer's
+  # settings they would revert those at the next Save, so that session holds
+  # and is told, as unsaved text is (`settings_moved?/2`). A session holding unsaved text keeps
   # its old record, so its next save fails the lock; the banner is raised at
   # once instead of at that save, unless the write did not take the lock (a
   # transition, a move, Mark reviewed) or another editor persists this
@@ -6541,8 +6547,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
   rescue
     # The record went away, or this session may no longer read it. Keeping the
     # last known state is the same thing every other read failure here does, and
-    # far better than crashing an editor over someone else's save.
-    _error -> socket
+    # far better than crashing an editor over someone else's save. Logged, so a
+    # failing rebuild is not silent.
+    error ->
+      Logger.warning(
+        "Editor could not take in a peer's save of #{socket.assigns.kind} " <>
+          "#{socket.assigns.record.id}: #{Exception.message(error)}"
+      )
+
+      socket
   catch
     # A pool or GenServer timeout inside Ash arrives as an exit, which `rescue`
     # does not catch — and a bystander's editor must not die because of the
@@ -6563,24 +6576,69 @@ defmodule KilnCMSWeb.ContentEditorLive do
       busy?(socket) ->
         load_versions(socket)
 
+      socket.assigns.settings_dirty? and settings_moved?(socket.assigns.record, record) ->
+        socket |> load_versions() |> conflict_if_locked_out(record)
+
       true ->
         rebuild_from_saved(socket, record)
     end
   end
 
+  # Whether a peer's write changed anything on the Settings side — every field
+  # the editor's `:update` form takes besides `title` and `blocks`, read off
+  # the working view (so a held setting counts), plus the held tags and
+  # related content. Unsaved Settings can be put back over a peer's TEXT, but
+  # put back over the peer's settings they would revert them at the next Save
+  # without a word (the browser posts every input, not only the changed ones),
+  # so that case is a conflict instead.
+  defp settings_moved?(before, after_save),
+    do: settings_side(before) != settings_side(after_save)
+
+  defp settings_side(record) do
+    resource = record.__struct__
+    view = WorkingCopy.view(record)
+    fields = Ash.Resource.Info.action(resource, :update).accept -- [:title, :blocks]
+
+    links =
+      Map.new(WorkingCopy.held_relationships(resource), fn {_argument, relationship} ->
+        {relationship, linked_ids(Map.get(record, relationship))}
+      end)
+
+    {Map.take(view, fields), links}
+  end
+
+  defp linked_ids(loaded) when is_list(loaded),
+    do: loaded |> Enum.map(&to_string(&1.id)) |> Enum.sort()
+
+  defp linked_ids(_not_loaded), do: :not_loaded
+
   # Text this session has not persisted: waiting for the debounce, refused by
   # validation, or on content that does not autosave.
   defp unsaved_text?(socket), do: socket.assigns.save_state in [:pending, :error, :unsaved]
 
+  @busy_while_open [
+    :markdown_mode,
+    :publish_conflicts,
+    :severity_ask,
+    :cascade,
+    :seo_drafts,
+    :assist_block,
+    :restore_preview,
+    :seo_links,
+    :intel_tags,
+    :intel_duplicates
+  ]
+  @busy_while_running [:seo_drafting?, :seo_links_loading?, :intel_loading?]
+
   # Something open on screen that was computed against the record and that a
   # rebuild would close or invalidate: the Markdown view, the Publish-changes
   # or severity question, a Save cascade, the inline record cards, an AI
-  # proposal (asked for or on screen), a version-restore preview.
+  # proposal (asked for or on screen), a version-restore preview, the
+  # internal-link or content-intelligence panel (loading or open).
   defp busy?(%{assigns: assigns}) do
-    assigns.markdown_mode != nil or assigns.publish_conflicts != nil or
-      assigns.severity_ask != nil or assigns.cascade != nil or assigns.inline_dirty != %{} or
-      assigns.seo_drafting? or assigns.seo_drafts != nil or assigns.assist_block != nil or
-      assigns.restore_preview != nil
+    assigns.inline_dirty != %{} or
+      Enum.any?(@busy_while_open, &(Map.fetch!(assigns, &1) != nil)) or
+      Enum.any?(@busy_while_running, &Map.fetch!(assigns, &1))
   end
 
   # The peer's write took the lock this session's next save would need, so say
@@ -6610,29 +6668,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # (`phx-update="ignore"`), so it remounts onto the rebuilt form
   # (`reset_editors/1`). With one, every tab's TipTap is bound to the shared
   # document, which a record write does not change: a remount would only cost
-  # the caret and a channel rejoin. Its own bodies mirror that document and
-  # are at least as fresh as the record, so they stay; the rest of the form —
-  # title, settings, columns — is the record's.
+  # the caret and a channel rejoin. The bodies are the record's either way —
+  # an idle session's own equal what it last saved, and keeping them instead
+  # could undo a peer's Discard or version restore.
   defp carry_rich_text(socket, %{collab_token: nil}), do: reset_editors(socket)
-
-  defp carry_rich_text(socket, previous) do
-    rich_bodies = Map.merge(socket.assigns.rich_bodies, previous.rich_bodies)
-
-    if rich_bodies == socket.assigns.rich_bodies do
-      socket
-    else
-      params =
-        socket.assigns.form
-        |> form_params_with_blocks()
-        |> inject_children(socket.assigns.block_children)
-        |> inject_rich_bodies(rich_bodies)
-
-      socket
-      |> assign(:rich_bodies, rich_bodies)
-      |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
-      |> refresh_preview()
-    end
-  end
+  defp carry_rich_text(socket, _previous), do: socket
 
   # Rewrite the picker's ticks into the merge verbs (#638).
   #

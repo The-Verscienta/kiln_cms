@@ -485,6 +485,37 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
       assert live.seo_description == "Typed, not saved"
     end
 
+    # The picked image is shown from a row resolved off the form's value; one
+    # created after the editor opened is outside its media window, so the row
+    # has to be resolved again for the form the edits went back onto.
+    test "a picked featured image stays shown", %{conn: conn} do
+      editor = authed_user(:editor)
+      page = live_page(authed_user(:admin))
+      {:ok, lv, _html} = open(conn, editor, page)
+
+      image =
+        CMS.create_media_item!(
+          %{
+            filename: "picked-later.png",
+            content_type: "image/png",
+            byte_size: 1024,
+            storage_key: "uploads/picked-later-#{System.unique_integer([:positive])}.png",
+            url: "/uploads/picked-later.png"
+          },
+          actor: editor
+        )
+
+      render_click(lv, "pick_image", %{"index" => "featured", "id" => image.id})
+      assert render(lv) =~ "picked-later.png"
+
+      type_title(lv, "Edited")
+      html = autosave(lv)
+
+      assert html =~ "picked-later.png"
+      assert html =~ "Unsaved changes"
+      assert has_element?(lv, ~s(input[name="form[featured_image_id]"][value="#{image.id}"]))
+    end
+
     # The settings go back without `blocks`: `Form.params/1` does not carry
     # the rich-text bodies, so re-sending them would blank the body just saved.
     test "a body pushed by the editor hook is saved and the settings kept", %{conn: conn} do

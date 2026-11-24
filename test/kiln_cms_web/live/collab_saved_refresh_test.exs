@@ -400,6 +400,38 @@ defmodule KilnCMSWeb.CollabSavedRefreshTest do
     end
   end
 
+  # Put back over a peer's settings, unsaved Settings would revert them at the
+  # next Save — the browser posts every input, not only the changed ones — so
+  # that session holds and is told instead of being rebuilt.
+  describe "unsaved Settings, collaboration off" do
+    setup do
+      collab_off()
+      :ok
+    end
+
+    test "a peer's settings Save is a conflict, not a silent revert", %{conn: conn} do
+      admin = authed_user(:admin)
+      category = CMS.create_category!(%{name: "B's pick", slug: slug()}, actor: admin)
+      page = CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: admin)
+      page = CMS.publish_page!(page, %{}, actor: admin)
+      %{a: a, lv_a: lv_a, lv_b: lv_b} = two_sessions(conn, page, :admin)
+
+      edit(lv_a, "seo_title", "Typed by A")
+
+      lv_b |> form("#page-editor") |> render_submit(%{"form" => %{"category_id" => category.id}})
+
+      await(lv_a, &(&1 =~ ~s(id="edit-conflict")))
+      assert has_element?(lv_a, ~s(input[name="form[seo_title]"][value="Typed by A"]))
+
+      # A's Save is refused by the lock rather than reverting B's category.
+      lv_a |> form("#page-editor") |> render_submit()
+
+      view = page.id |> CMS.get_page!(actor: a) |> WorkingCopy.view()
+      assert view.category_id == category.id
+      assert view.seo_title == nil
+    end
+  end
+
   describe "a session with unsaved text, collaboration off" do
     setup do
       collab_off()
@@ -431,12 +463,20 @@ defmodule KilnCMSWeb.CollabSavedRefreshTest do
   describe "collaboration on" do
     # The co-editor's explicit Save of a field outside the shared document
     # reaches the idle persister's form, without remounting its rich-text
-    # editor (bound to the shared document, which the write did not change);
-    # the persister's next autosave then keeps it.
+    # editor (bound to the shared document, which the write did not change).
+    # The bodies are the record's — what the co-editor saved — and the
+    # persister's next autosave keeps both.
     test "the idle persister takes in a co-editor's Save", %{conn: conn} do
       page = rich_text_page(authed_user())
+      [%Ash.Union{value: block}] = page.blocks
       %{low: low, persister: persister, co_editor: co_editor} = both_present(conn, page)
       host = rich_host_id(persister)
+
+      render_hook(co_editor, "rich_text_body", %{
+        "id" => block.id,
+        "idx" => "0",
+        "doc" => doc([para("saved by the co-editor")])
+      })
 
       edit(co_editor, "seo_title", "Saved by the co-editor")
       co_editor |> form("#page-editor") |> render_submit()
@@ -451,6 +491,7 @@ defmodule KilnCMSWeb.CollabSavedRefreshTest do
       saved = CMS.get_page!(page.id, actor: low)
       assert saved.title == "Beta"
       assert saved.seo_title == "Saved by the co-editor"
+      assert body_text(page, low) == "saved by the co-editor"
     end
 
     # The persister writes the shared text for everyone, so a session with text
