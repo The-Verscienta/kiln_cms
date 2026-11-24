@@ -292,6 +292,35 @@ defmodule KilnCMSWeb.ApiKeyLiveTest do
       assert row =~ "Expired"
       refute row =~ "Not accepted"
     end
+
+    # An erased owner's key signs in on no release, so the "a release that
+    # knows the scope will accept it again" hint would be false. The backfill
+    # revokes such keys; until it runs, the row reads like any other key
+    # refused for its owner.
+    test "an erased owner's key is not offered as one a newer release accepts", %{conn: conn} do
+      admin = authed_user(:admin)
+      owner = authed_user(:editor)
+
+      key =
+        KilnCMS.Accounts.mint_api_key!(
+          owner.id,
+          "erased-owner",
+          DateTime.add(DateTime.utc_now(), 30, :day),
+          actor: admin
+        )
+
+      NewerReleaseRows.api_key_scope!(key.id)
+
+      KilnCMS.Repo.query!("UPDATE users SET anonymized_at = now() WHERE id = $1", [
+        Ecto.UUID.dump!(owner.id)
+      ])
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/api-keys")
+
+      row = lv |> element("#api-key-#{key.id}") |> render()
+      refute row =~ "Not accepted"
+      refute row =~ "will accept it again"
+    end
   end
 
   describe "audit log (#2241)" do

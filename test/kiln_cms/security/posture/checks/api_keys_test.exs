@@ -143,6 +143,9 @@ defmodule KilnCMS.Security.Posture.Checks.ApiKeysTest do
       result = run()
       assert result.status == :fail
       assert result.facts.unrecognized_scope_keys == 1
+      # Named alongside the admin key, not only once that one is fixed.
+      assert length(result.details) == 2
+      assert Enum.any?(result.details, &(&1 =~ key.name))
     end
 
     test "is named alongside an old key", %{operator: operator} do

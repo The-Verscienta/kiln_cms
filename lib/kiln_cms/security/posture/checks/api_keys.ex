@@ -100,7 +100,9 @@ defmodule KilnCMS.Security.Posture.Checks.ApiKeys do
             "%{count} keys can write content as an administrator.",
             length(admin_write)
           ),
-          Keyword.put(opts, :details, labels(admin_write))
+          # The unrecognized-scope keys too, so fixing the admin key is not
+          # the first time they are named.
+          Keyword.put(opts, :details, labels(admin_write ++ unrecognized))
         )
 
       review != [] ->

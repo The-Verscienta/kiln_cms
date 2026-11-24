@@ -210,8 +210,10 @@ defmodule KilnCMSWeb.ApiKeyLive do
 
   # Unrevoked and unexpired, but refused at sign-in because this release does
   # not know its scope. "Expired" would be wrong: a release that knows the
-  # scope signs it in again.
-  defp status(%{access: %UnknownAtom{}, expires_at: expires_at}) do
+  # scope signs it in again. Not for an erased owner's key, which no release
+  # signs in, so the hint would be false: that falls through like any other
+  # key refused for its owner.
+  defp status(%{access: %UnknownAtom{}, expires_at: expires_at, user: %{anonymized_at: nil}}) do
     if DateTime.after?(expires_at, DateTime.utc_now()),
       do: {:unrecognized, gettext("Not accepted")},
       else: {:expired, gettext("Expired")}
