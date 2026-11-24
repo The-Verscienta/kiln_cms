@@ -766,8 +766,8 @@ the pin with `mix kiln.update`, which prints those sections before it does —
 
 **Your own Oban `queues:` list.** A deployment that builds Oban's `queues:`
 itself rather than keeping `config/config.exs`'s must add each queue a
-release introduces, or that queue's jobs are accepted and never run. Two are
-easy to miss because nothing visible waits on them:
+release introduces, or that queue's jobs are accepted and never run. Three
+are easy to miss because nothing visible waits on them:
 
 - `backup_steps: 1` (1.9): every in-app backup step. Without it a backup
   request is accepted and never starts.
@@ -775,6 +775,9 @@ easy to miss because nothing visible waits on them:
   ([Events](events.md#recomputing-stored-dates-at-boot)). Without it a release
   that changes how recurrence rules expand keeps listing events by the old
   dates.
+- `billing_sweeper: 1`: the billing webhook sweeper, every ten minutes
+  ([Memberships](memberships.md#the-webhook-sweeper)). Without it a payment event
+  that was acknowledged and never processed stays that way, with no log line.
 
 Each is concurrency 1; if you size `POOL_SIZE` as the sum of queue limits plus
 web traffic, add one for each. The per-directory backup queues,

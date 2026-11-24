@@ -79,6 +79,10 @@ What's new in the 1.12 line, with examples and migration steps: [docs/whats-new/
 - **About 10 minutes after boot, a job cancels release items left `pending` on published, rolled-back or archived releases (#3072), logging each at info. Upgrading from 1.10.x or earlier with a rolling deploy longer than that: run `KilnCMS.Release.cancel_stranded_release_items()` over `rpc` once it finishes. Rolling back is safe.**
   ([long form](docs/changelog/v1.12.1.md#stranded-release-item-sweep-upgrade))
 
+- **Run `mix ash.migrate`: two additive migrations on `billing_webhook_events` (two nullable columns, then a partial index built `CONCURRENTLY`), and the webhook sweeper's new Oban queue, `billing_sweeper`; a hand-built `queues:` must add `billing_sweeper: 1`. Rolling back is safe ([#3159](https://github.com/The-Verscienta/kiln_cms/issues/3159)).**
+  Unsettled events recorded before the upgrade, and any older than 3 days, are given up on and logged at error, not replayed.
+  ([long form](docs/changelog/v1.12.1.md#billing-webhook-sweeper-upgrade))
+
 ### Known issues
 
 - **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check; check those on hex.pm by hand.**
@@ -145,6 +149,10 @@ What's new in the 1.12 line, with examples and migration steps: [docs/whats-new/
 
 ### Fixed
 
+- **With `:keyword_any` among the floor legs, a long document whose only match is a late passage is no longer dropped by the relevance floor on a large site: the floor now finds the document's own chunk however many other rows sit nearer the query (#2814, #2873).**
+  Only deployments that list `:keyword_any` (or `:fuzzy`) in `SEARCH_SEMANTIC_FLOOR_LEGS` are affected. No migration.
+  ([long form](docs/changelog/v1.12.1.md#floor-reads-hits-chunks-exactly))
+
 - **A form's thank-you, not-found and refused (422) pages and the `/newsletter` sign-up and unsubscribe pages follow the visitor's light or dark theme, and with browser storage blocked the console still loads and the theme still applies, just isn't remembered (#2715, #2773).**
   ([long form](docs/changelog/v1.12.1.md#theme-script-everywhere))
 
@@ -199,6 +207,10 @@ What's new in the 1.12 line, with examples and migration steps: [docs/whats-new/
 
 - **A member rejoining after a cancellation gets a membership without the old subscription's id, period end and cancel flag, so that subscription's late events can no longer cancel or revive the new checkout; the provider customer is kept ([#3157](https://github.com/The-Verscienta/kiln_cms/issues/3157)).**
   ([long form](docs/changelog/v1.12.1.md#restart-drops-old-subscription))
+
+- **Billing webhook events acknowledged but never processed (no job, failed after 8 attempts, stuck `processing`) are re-enqueued every 10 minutes, up to 3 times within 3 days, then given up on with an error log and `[:kiln_cms, :billing, :webhook_event, :gave_up]` ([#3159](https://github.com/The-Verscienta/kiln_cms/issues/3159)).**
+  A replayed checkout no longer moves a membership's ordering stamp back.
+  ([long form](docs/changelog/v1.12.1.md#billing-webhook-sweeper))
 
 ### Security
 

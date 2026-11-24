@@ -562,6 +562,29 @@ deadline run longer than the grace; the per-leg times in `Server-Timing` on a
 partial `GET /api/search` response
 ([api.md](api.md#search-budget-and-server-timing)) show which leg is slow.
 
+## Billing webhooks
+
+The billing webhook sweeper re-enqueues a recorded provider event that has no
+job to process it, and gives up on one after 3 re-enqueues, once it is 3 days
+old, or when it was recorded before the upgrade that added the sweeper (#3159;
+[memberships.md](memberships.md#the-webhook-sweeper)). Each give-up emits one event,
+from
+[`report_webhook_event_given_up.ex`](../lib/kiln_cms/billing/changes/report_webhook_event_given_up.ex),
+after the `gave_up_at` stamp commits. It is not in
+`KilnCMSWeb.Telemetry.metrics/0`: attach a `:telemetry` handler to count it.
+
+| Event | Emitted when | Measurements | Metadata |
+|-------|--------------|--------------|----------|
+| `[:kiln_cms, :billing, :webhook_event, :gave_up]` | The sweeper stopped retrying an acknowledged provider event that was never processed. Once per give-up; a resend from the provider's dashboard clears `gave_up_at`, and a second give-up emits again | `count` (always `1`) | `webhook_event_id` (the `billing_webhook_events` row), `event_id` (the provider's id, `evt_…`, which its dashboard searches by), `type` (the provider's event type), `redrive_count` (re-enqueues made; `nil` for an event recorded before the sweeper, which is given up on without one) |
+
+No payload is attached: it carries customer data. Each give-up also logs at
+`error`,
+`billing webhook evt_… (customer.subscription.updated) was never processed and will not be retried (re-enqueued 3 times). Fix the cause, then resend the event from the provider's dashboard.`,
+and each re-enqueue logs at `warning`,
+`billing webhook evt_… (customer.subscription.updated) had no job to process it; re-enqueued (1 of 3)`.
+Any give-up is worth an alert: a member's payment, renewal or cancellation
+has not been applied.
+
 ## Where the metrics go
 
 The matching `Telemetry.Metrics` definitions live in
