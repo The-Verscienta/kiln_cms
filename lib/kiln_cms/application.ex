@@ -316,6 +316,7 @@ defmodule KilnCMS.Application do
       enqueue_totp_secret_backfill()
       enqueue_erasure_backfill()
       enqueue_private_args_scrub()
+      enqueue_section_layout_sweep()
       {:ok, pid}
     end
   end
@@ -392,6 +393,15 @@ defmodule KilnCMS.Application do
   defp enqueue_private_args_scrub do
     if Application.get_env(:kiln_cms, :private_args_scrub_on_boot, true) do
       KilnCMS.Jobs.PrivateArgsScrub.enqueue()
+    end
+  end
+
+  # Section layouts no field carries, left by 1.9.x and 1.10.x (#3060), are
+  # deleted: see `KilnCMS.CMS.SectionLayoutSweep`. Off in `:test` and `:e2e`
+  # for the committed-`oban_jobs` reason above.
+  defp enqueue_section_layout_sweep do
+    if Application.get_env(:kiln_cms, :section_layout_sweep_on_boot, true) do
+      KilnCMS.CMS.SectionLayoutSweep.enqueue()
     end
   end
 

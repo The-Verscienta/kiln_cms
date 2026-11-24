@@ -1785,6 +1785,14 @@ CMS.create_field_section!(
 accordion. A section with no `FieldSection` row is an `:auto` accordion, and
 the fields admin deletes a row you set back to that default.
 
+File a field under the section before you create its layout:
+`create_field_section` refuses a `name` no top-level field of that type is in
+(a link field, a group sub-field or a flexible item type's field does not
+count), with `{:error, %Ash.Error.Invalid{}}` holding an
+`Ash.Error.Changes.InvalidAttribute` on `:name`, *is not a section any
+top-level field of this type is in*. A layout with no field would otherwise
+be inherited by the next field filed under that name.
+
 `GET /api/schema` (and `mix kiln.export.schema`) reports the layout on each
 field, for a client that builds its own form from the schema. Defaults are
 left out: `x-kiln-section-display` appears only for a `fieldset` or `tab`
@@ -1832,9 +1840,9 @@ What to know before relying on it:
   field, clearing its **Section**, or moving it to another section deletes
   the section's layout in the same save, by any route: this page, a field
   sync import, or code. If a field is later filed under that name, the
-  section starts as a default accordion. A layout left behind by a release
-  before this change stays until you next change a layout in the
-  **Sections of** panel (shown while some field of the type has a section).
+  section starts as a default accordion. Layouts left behind by 1.9.x and
+  1.10.x are deleted by a job about ten minutes after the server starts;
+  see [Remove section layouts older releases left behind](#remove-section-layouts-older-releases-left-behind).
 - **Width is per section.** A narrow field shares a row only with the
   fields of its own section, and with neighbours in `position` order. A
   conditional field that is hidden leaves no gap.
@@ -1846,7 +1854,9 @@ What to know before relying on it:
   so a section another admin has just added keeps its layout. A field
   **Save** or **Delete** reads the field's current section the same way, so
   a page loaded before another admin moved fields still keeps the right
-  layouts.
+  layouts. The boot job that removes old layouts checks each one again just
+  before deleting it, so a field you file under such a section while it runs
+  keeps the layout.
 
 Why a layout is its own row, keyed by the section name: [ADR 0046](decisions/0046-a-sections-layout-is-its-own-row-keyed-by-the-section-name-not-a-setting-on-each-field.md).
 
@@ -1856,11 +1866,69 @@ If something does not save, the page shows one of these:
 |---|---|
 | `You can't change custom fields.` | You are no longer an admin of this site (the role was changed after the page loaded). Nothing was written. |
 | `Couldn't save the section layout.` | In the **Sections of** panel: the layout write failed, typically because another admin saved the same section's layout at the same moment. Reload the page and set it again. After a field **Save**: the section's layout could not be moved or deleted with the field's new section, so the field was **not** saved either and the form stays open. Reload the page and try again. |
-| `Couldn't delete that field.` | The field was not deleted. Among other causes, the layout of the section it was the last field of could not be deleted with it. Reload the page and try again. |
+| `Couldn't delete that field: its section's layout could not be removed with it.` | The field was the last of its section, and that section's layout could not be deleted with it, so the field was **not** deleted either. The usual cause is a layout row this release cannot read, one a newer release wrote before the site was rolled back. Delete the field on the release that wrote the layout. |
+| `Couldn't delete that field.` | The field was not deleted: the delete was refused, or another admin deleted the field since the page loaded. Reload the page and try again. |
 
 The page lists the sections as they were when it loaded. A layout you set for
 a section another admin has since emptied (by renaming or deleting its last
 field) is not kept; reload to see the current list.
+
+### Remove section layouts older releases left behind
+
+Releases 1.9.x and 1.10.x could leave a section's layout behind after its
+last field had gone, and a field filed under that name later took the old
+tab or fieldset on. You don't need to do anything: about ten minutes after
+each start, a job (`KilnCMS.CMS.SectionLayoutSweep`) deletes every layout no
+top-level field of its type is in, on every site, and logs each one at info
+with its site, type, name, `display` and `initially`. To run it now, for
+example after restoring an older backup, you need shell access to the
+running release:
+
+1. List what it would delete:
+
+   ```bash
+   bin/kiln_cms rpc 'KilnCMS.Release.prune_section_layouts(dry_run: true)'
+   ```
+
+   You see one line per layout, then a summary:
+
+   ```text
+   Would delete "Clinical" of {:compiled, :post} in org 0c5f2a3e-7d1b-4c9e-9a6f-2b8d4e1f7a90 (display: tab, initially: auto)
+   Section layouts: 1 pruned, 0 skipped (unknown type), 0 failed
+   ```
+
+   Add `org_id: "<uuid>"` to look at one site only.
+2. Delete them:
+
+   ```bash
+   bin/kiln_cms rpc 'KilnCMS.Release.prune_section_layouts()'
+   ```
+
+   The lines now read `Deleted …`. Running it again finds nothing more to
+   delete (`0 pruned`).
+3. To keep a layout it deleted, file a field under that section again and
+   set the layout in the **Sections of** panel, using the `display` and
+   `initially` from the line.
+
+What the counts mean, and what can go wrong:
+
+- **skipped (unknown type)** — layouts of a content type this release does
+  not register (a removed plugin's). They are kept: the type's fields are
+  still stored, and it may come back. A field of such a type also still
+  counts as carrying its section.
+- **failed** — a type whose fields or layouts could not be read or deleted;
+  the log has a warning, `section layout sweep could not prune …`, with the
+  error. The other types are still swept. A layout row this release cannot
+  load (written by a newer release before a rollback) fails its type on
+  every run, since the sweep can't tell what it would delete. The boot job
+  ends in error on any failure, and Oban retries it, up to 3 attempts.
+- **`This needs the running application …`** — you used `bin/kiln_cms eval`.
+  Use `rpc`: each delete clears the serving node's caches of the type.
+
+A layout someone deletes while the sweep runs is not a failure, and a field
+filed under a section while the sweep runs keeps that section's layout. To
+turn the boot job off, set `config :kiln_cms, :section_layout_sweep_on_boot,
+false`.
 
 ### Choose how editors fill in a field
 
@@ -2559,6 +2627,7 @@ imports.
 | "is already an item type of this field" | The machine name is taken within this flexible field. |
 | "A flexible field can't be changed to another type, or the other way round. Add a new field and delete this one." | The hint beside the disabled **Field type** select when you edit a flexible field. |
 | "Couldn't delete that. Check the count and try again." | The delete was refused or failed, most likely because an item was saved after the count; the dialog shows the number again, so confirm again. |
+| "Couldn't delete that field: its section's layout could not be removed with it." | The flexible field was the last of its section, and that section's layout could not be deleted with it; nothing was deleted, and the dialog closes. See [Lay out custom fields as tabs, fieldsets or columns](#lay-out-custom-fields-as-tabs-fieldsets-or-columns). |
 | "Couldn't save the new order of item types." | The reorder was not saved; try again. |
 
 ### Define a flexible field from code
@@ -2780,6 +2849,7 @@ first: deleting a field can't be undone, and a field export
 | You see | Meaning |
 |---|---|
 | *… reads this field in a condition: remove that condition first.* | Another field's condition (**Show when** or **Required when**) reads this field; the message names that field. Edit it, choose **Remove condition**, and delete again. If the field named is listed under **Fields of an unknown type**, it can't be edited: delete it first (or bring its type back), then delete this one. A field-definition destroy from code says the same: `is used in the conditions of …; remove those conditions first`. |
+| *Couldn't delete that field: its section's layout could not be removed with it.* | The field was the last of its section, and that section's layout could not be deleted with it; nothing was deleted. See [Lay out custom fields as tabs, fieldsets or columns](#lay-out-custom-fields-as-tabs-fieldsets-or-columns). |
 | *Couldn't delete that field.* | The delete was refused for another reason, or the field is already gone. Reload the page. |
 | *That field can't be edited.* | The field was deleted, or its type became unknown, since the page loaded. The list reloads. |
 | `is not a field type this release knows, so the field can't be changed: delete it, or upgrade Kiln or reinstall the plugin that provides it` | An update of the field from code. Only a destroy is allowed. |

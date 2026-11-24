@@ -7143,6 +7143,11 @@ msgstr ""
 msgid "Couldn't delete that field."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't delete that field: its section's layout could not be removed with it."
+msgstr ""
+
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't delete that form."
@@ -29748,6 +29753,11 @@ msgstr ""
 msgid "could not be checked against the schema"
 msgstr ""
 
+#: lib/kiln_cms/cms/validations/section_carried.ex
+#, elixir-autogen, elixir-format
+msgid "could not be checked against the type's fields"
+msgstr ""
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -30283,6 +30293,11 @@ msgstr ""
 #: lib/kiln_cms/backups/destination_config/changes/adopt.ex
 #, elixir-autogen, elixir-format
 msgid "is not a backup directory id"
+msgstr ""
+
+#: lib/kiln_cms/cms/validations/section_carried.ex
+#, elixir-autogen, elixir-format
+msgid "is not a section any top-level field of this type is in"
 msgstr ""
 
 #: lib/kiln_cms/cms/field_schema.ex

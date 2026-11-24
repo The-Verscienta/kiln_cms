@@ -185,6 +185,49 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
+  Delete the section layouts no field carries any more, on every site
+  (#3060): the rows 1.9.x and 1.10.x left behind, which a field later filed
+  under the same name would inherit. The boot job
+  `KilnCMS.CMS.SectionLayoutSweep` does this ten minutes after each start;
+  this runs it now, for example after restoring an older backup.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.prune_section_layouts(dry_run: true)'
+      bin/kiln_cms rpc 'KilnCMS.Release.prune_section_layouts()'
+
+  Options: `dry_run: true` lists what it would delete and deletes nothing;
+  `org_id: "<uuid>"` limits it to one site. Prints each layout and a
+  summary, and returns the sweep's result, or `{:error, message}`.
+
+  Through `rpc`, not `eval`: each delete busts the type registry and the
+  delivery schema, which must reach the serving node's caches.
+  """
+  @spec prune_section_layouts(keyword()) ::
+          KilnCMS.CMS.SectionLayoutSweep.result() | {:error, String.t()}
+  def prune_section_layouts(opts \\ []), do: run_section_layout_prune(opts, serving?())
+
+  # `serving?` is an argument only so the test can take the `eval` branch.
+  @doc false
+  def run_section_layout_prune(opts, serving?) do
+    if serving? do
+      result = KilnCMS.CMS.SectionLayoutSweep.run(opts)
+      verb = if opts[:dry_run] == true, do: "Would delete", else: "Deleted"
+
+      for layout <- result.layouts do
+        IO.puts(
+          "#{verb} #{inspect(layout.name)} of #{inspect(layout.owner)} in org #{layout.org_id} " <>
+            "(display: #{layout.display}, initially: #{layout.initially})"
+        )
+      end
+
+      IO.puts("Section layouts: " <> KilnCMS.CMS.SectionLayoutSweep.summary(result))
+      result
+    else
+      IO.puts(@needs_running_node)
+      {:error, @needs_running_node}
+    end
+  end
+
+  @doc """
   `mix kiln.deprecations` for a release (#1538, #1543): report the accounts and
   queued jobs still holding data only a removed surface read, and optionally
   move the accounts onto a membership first.

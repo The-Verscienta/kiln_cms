@@ -62,6 +62,8 @@ else.
   ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255) · [long form](docs/changelog/unreleased.md#change-note-upgrade))
 - **Run `mix ash.migrate`: one additive migration (`edit_inline`, a nullable boolean on `field_definitions`). Older releases never read the column, so rolling the pin back is safe.**
   ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283) · [long form](docs/changelog/unreleased.md#edit-inline-option-upgrade))
+- **About 10 minutes after boot, a job deletes the section layouts no field carries, left by 1.9.x and 1.10.x (#3060), and logs each one at info. Nothing to do; `:section_layout_sweep_on_boot` turns it off. Rolling back is safe; what it deleted stays deleted.**
+  ([long form](docs/changelog/unreleased.md#section-layout-sweep-upgrade))
 
 ### Known issues
 
@@ -113,6 +115,9 @@ else.
   Admins: rename flagged fields. Body `locale` and the SDKs are unchanged. No migration.
   ([long form](docs/changelog/unreleased.md#form-field-locale-reserved))
 
+- **`create_field_section` refuses a layout for a section no top-level field of its type is in, as `Invalid` on `name`: create the field first. A field sync import now writes fields before sections (#3061).**
+  ([long form](docs/changelog/unreleased.md#field-section-create-needs-a-carrier))
+
 ### Fixed
 
 - **A form's thank-you, not-found and refused (422) pages and the `/newsletter` sign-up and unsubscribe pages follow the visitor's light or dark theme, and with browser storage blocked the console still loads and the theme still applies, just isn't remembered (#2715, #2773).**
@@ -140,6 +145,9 @@ else.
 
 - **Video, audio and file blocks render their player or download link on the live page and in every preview, previews inline fragment blocks at the document's saved audience, and heading blocks render at their own level (`<h1>` to `<h6>`), all as the published page has them ([#2767](https://github.com/The-Verscienta/kiln_cms/issues/2767), [#2769](https://github.com/The-Verscienta/kiln_cms/issues/2769)).**
   ([long form](docs/changelog/unreleased.md#public-block-render))
+
+- **Section layouts left without a field are deleted after boot, a layout can't be created as its section empties, and a field delete refused by its section's layout now says so instead of a generic error (#3060, #3061, #3062).**
+  ([long form](docs/changelog/unreleased.md#section-layouts-swept))
 
 ## [1.12.0] - 2026-11-21
 
