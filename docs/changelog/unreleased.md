@@ -980,6 +980,7 @@ carries the reasoning.
     unchanged, since the host application's lock decides which ash a plugin
     runs on. No migration and no configuration; rolling the pin back reopens
     the hole.
+  ([#3311](https://github.com/The-Verscienta/kiln_cms/pull/3311))
 
 <a id="ex-aws-db-connection-advisories"></a>
 
@@ -1011,3 +1012,4 @@ carries the reasoning.
   - `mix.exs` now requires `ex_aws ~> 2.8` and `ex_aws_s3 ~> 2.6`.
     `db_connection` comes in through Postgrex and is held at 2.10.3 by the
     lock. No migration and no configuration.
+  ([#3311](https://github.com/The-Verscienta/kiln_cms/pull/3311))

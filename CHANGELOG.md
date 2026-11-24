@@ -191,10 +191,10 @@ else.
 ### Security
 
 - **ash 3.38.1 fixes EEF-CVE-2026-124283 (GHSA-m5v6-3qwf-6w9r, high): a forged keyset pagination cursor could smuggle struct-wrapped values into the query, for SQL injection or code execution. The JSON:API collection reads, including the anonymous published feeds, take `page[after]` and `page[before]`, so releases locked to ash 3.31.3 through 3.37.x were exposed. Keyset cursors issued before the upgrade are refused; a client starts again from the first page.**
-  ([long form](docs/changelog/unreleased.md#ash-keyset-cursor-forgery))
+  ([#3311](https://github.com/The-Verscienta/kiln_cms/pull/3311) · [long form](docs/changelog/unreleased.md#ash-keyset-cursor-forgery))
 
 - **ex_aws 2.8.1, ex_aws_s3 2.6.0 and db_connection 2.10.3 fix ten advisories published on 2026-11-24 (S3 request host, key and XML injection, an IMDSv2 token redirect, and code execution through a forged `DBConnection.Stream`); no known exposure in Kiln, which mints its own object keys, addresses buckets path-style and follows no redirects.**
-  ([long form](docs/changelog/unreleased.md#ex-aws-db-connection-advisories))
+  ([#3311](https://github.com/The-Verscienta/kiln_cms/pull/3311) · [long form](docs/changelog/unreleased.md#ex-aws-db-connection-advisories))
 
 ## [1.12.0] - 2026-11-21
 
