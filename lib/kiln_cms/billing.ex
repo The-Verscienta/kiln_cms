@@ -141,6 +141,9 @@ defmodule KilnCMS.Billing do
       define :mark_webhook_event_processed, action: :mark_processed
       define :mark_webhook_event_ignored, action: :mark_ignored
       define :mark_webhook_event_failed, action: :mark_failed
+      # The sweeper's (#3159), reachable only through its AshOban triggers.
+      define :redrive_webhook_event, action: :redrive
+      define :give_up_webhook_event, action: :give_up
       define :get_webhook_event, action: :read, get_by: [:id]
       define :webhook_event_by_event_id, action: :by_event_id, args: [:provider_event_id]
       define :recent_webhook_events, action: :recent

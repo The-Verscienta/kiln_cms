@@ -29,11 +29,13 @@ defmodule KilnCMS.Billing.WebhookWorker do
   can never be mistaken for a dead one. An exception, exit or throw inside
   `Subscriptions.apply/1` is caught and settled as `:failed`, and Oban retries.
 
-  Known windows that still need a periodic sweeper (follow-up): a job that
-  exhausts `max_attempts` leaves the event `:failed` until the provider happens to
-  redeliver; a `:mark_processed` stamp that does not save leaves the event
-  `:processing`; and `:received` rows recorded before enqueue became atomic have
-  no job.
+  An event this worker leaves without a job is picked up by the sweeper on
+  `KilnCMS.Billing.WebhookEvent` (#3159): a job that exhausts `max_attempts`
+  leaves the event `:failed`, a `:mark_processed` stamp that does not save
+  leaves it `:processing`, and `:received` rows recorded before enqueue became
+  atomic have no job. The sweeper re-enqueues such an event up to three times
+  within the provider's three-day retry window, then gives up on it and says so
+  (an error log and telemetry); see the "The sweeper" section there.
 
   `{:cancel, reason}` is used for permanently unactionable conditions — already
   claimed, unresolvable, an unhandled type — so Oban stops retrying. Transient
@@ -62,8 +64,8 @@ defmodule KilnCMS.Billing.WebhookWorker do
   Enqueues the job for a recorded event. `{:ok, job}` also covers a unique
   conflict (the pending job is returned), which is success: the event is queued.
 
-  Called from `WebhookEvent`'s `:receive` inside its transaction, and by the
-  receiver when a redelivery finds an unsettled row.
+  Called from `WebhookEvent`'s `:receive` and `:redrive` inside their
+  transactions, and by the receiver when a redelivery finds an unsettled row.
   """
   @spec enqueue(map()) :: {:ok, Oban.Job.t()} | {:error, term()}
   def enqueue(%{id: id}) do
