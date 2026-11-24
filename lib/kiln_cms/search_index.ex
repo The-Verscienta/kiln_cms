@@ -12,6 +12,11 @@ defmodule KilnCMS.SearchIndex do
     resource KilnCMS.Search.BlockEmbedding do
       define :upsert_block_embedding, action: :upsert
       define :block_embeddings_for, action: :for_document, args: [:document_type, :document_id]
+
+      define :block_embeddings_for_documents,
+        action: :for_documents,
+        args: [:document_type, :document_ids]
+
       define :nearest_block_embeddings, action: :nearest_to_vector
       # Per-document centroids averaged in SQL (#1596, `KilnCMS.Organize`).
       define :document_centroids, action: :document_centroids, args: [:document_ids]
@@ -30,6 +35,10 @@ defmodule KilnCMS.SearchIndex do
       define :document_chunk_embeddings_for,
         action: :for_document,
         args: [:document_type, :document_id]
+
+      define :document_chunk_embeddings_for_documents,
+        action: :for_documents,
+        args: [:document_type, :document_ids]
 
       define :nearest_document_chunk_embeddings, action: :nearest_to_vector
       define :destroy_document_chunk_embedding, action: :destroy

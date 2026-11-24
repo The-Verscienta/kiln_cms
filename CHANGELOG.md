@@ -95,6 +95,12 @@ else.
   Validating consumers: a flexible field's `items` was `{"type": "object"}` and is now a `$ref` to a union of closed item definitions.
   ([long form](docs/changelog/unreleased.md#flexible-typed-export))
 
+### Fixed
+
+- **With `:keyword_any` among the floor legs, a long document whose only match is a late passage is no longer dropped by the relevance floor on a large site: the floor now finds the document's own chunk however many other rows sit nearer the query (#2814, #2873).**
+  Only deployments that list `:keyword_any` (or `:fuzzy`) in `SEARCH_SEMANTIC_FLOOR_LEGS` are affected. No migration.
+  ([long form](docs/changelog/unreleased.md#floor-reads-hits-chunks-exactly))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —

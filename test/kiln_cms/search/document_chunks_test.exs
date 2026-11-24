@@ -55,6 +55,32 @@ defmodule KilnCMS.Search.DocumentChunksTest do
     end
   end
 
+  # `TruncatingEmbedder` with the marker on its own axis instead of on axis
+  # 0, the unit vector every other test that embeds the marker shares. Rows a test
+  # piles up around this axis, even rolled back, stay in the HNSW index as
+  # dead entries until a vacuum; on this axis they sit at cosine distance 1
+  # from every other test's query, so they crowd no other test's search.
+  defmodule OwnAxisEmbedder do
+    @moduledoc false
+    @behaviour KilnCMS.Search.Embedder
+
+    @window_words 60
+    @axis 300
+
+    def axis, do: @axis
+
+    @impl true
+    def embed(text) do
+      seen = text |> String.split() |> Enum.take(@window_words) |> Enum.join(" ")
+
+      if seen =~ "quokkamarker" do
+        {:ok, List.replace_at(List.duplicate(0.0, 384), @axis, 1.0)}
+      else
+        TruncatingEmbedder.embed(text)
+      end
+    end
+  end
+
   defmodule FailingEmbedder do
     @moduledoc false
     @behaviour KilnCMS.Search.Embedder
@@ -136,6 +162,61 @@ defmodule KilnCMS.Search.DocumentChunksTest do
     )
     |> Enum.sort_by(& &1.chunk_index)
   end
+
+  # A long page that only the `:keyword_any` leg returns, and the query that
+  # finds it. Its marker chunk sits 0.1 from the query, inside the 0.2 floor
+  # these tests set, and its head vector is far beyond it.
+  #
+  # Enough documents sit exactly on the query, head and chunk, to fill the
+  # semantic and block legs, so the page arrives through `:keyword_any`
+  # alone. "zebra" is in no document, so the full keyword leg misses; the
+  # marker's lexeme is the any-term match. The query embeds onto `axis`
+  # (axis 0, the unit vector, under `TruncatingEmbedder`).
+  defp keyword_any_only_page(admin, axis \\ 0) do
+    on_axis = basis(axis)
+    # Cosine distance 0.1 from `on_axis`.
+    near =
+      on_axis |> List.replace_at(axis, 0.9) |> List.replace_at(axis + 1, :math.sqrt(1 - 0.81))
+
+    page = long_page(admin)
+
+    fillers =
+      for n <- 1..55,
+          do: CMS.create_page!(%{title: "filler #{n}", slug: slug()}, actor: admin)
+
+    KilnCMS.DataCase.drain_oban()
+
+    for filler <- fillers do
+      Ash.Seed.update!(filler, %{embedding: on_axis, embedded_at: DateTime.utc_now()})
+
+      SearchIndex.create_document_chunk_embedding!(
+        [
+          %{
+            document_type: :page,
+            document_id: filler.id,
+            chunk_index: 0,
+            content_hash: "filler-#{filler.id}",
+            embedding: on_axis,
+            embedded_at: DateTime.utc_now()
+          }
+        ],
+        actor: system(),
+        tenant: filler.org_id
+      )
+    end
+
+    [chunk | _] = page |> chunks_of() |> Enum.reverse()
+    Ash.Seed.update!(chunk, %{embedding: near})
+
+    put_search_env(
+      semantic_floor_legs: [:semantic, :block, :tag, :keyword_any],
+      semantic_max_distance: 0.2
+    )
+
+    {page, "#{@marker} zebra"}
+  end
+
+  defp basis(axis), do: List.replace_at(List.duplicate(0.0, 384), axis, 1.0)
 
   defp reload(page), do: CMS.get_page!(page.id, authorize?: false, tenant: page.org_id)
 
@@ -416,52 +497,7 @@ defmodule KilnCMS.Search.DocumentChunksTest do
       # or a late-passage match is judged by the head vector that never saw
       # it — the blind spot the floor-legs docs send operators here to close.
       admin = user(:admin)
-      unit = [1.0 | List.duplicate(0.0, 383)]
-      # Cosine distance 0.1 from `unit`.
-      near = [0.9, :math.sqrt(1 - 0.81) | List.duplicate(0.0, 382)]
-
-      page = long_page(admin)
-
-      # Enough documents sitting exactly on the query, head and chunk, to
-      # fill the semantic and block legs, so the target arrives through
-      # `:keyword_any` alone.
-      fillers =
-        for n <- 1..55,
-            do: CMS.create_page!(%{title: "filler #{n}", slug: slug()}, actor: admin)
-
-      KilnCMS.DataCase.drain_oban()
-
-      for filler <- fillers do
-        Ash.Seed.update!(filler, %{embedding: unit, embedded_at: DateTime.utc_now()})
-
-        SearchIndex.create_document_chunk_embedding!(
-          [
-            %{
-              document_type: :page,
-              document_id: filler.id,
-              chunk_index: 0,
-              content_hash: "filler-#{filler.id}",
-              embedding: unit,
-              embedded_at: DateTime.utc_now()
-            }
-          ],
-          actor: system(),
-          tenant: filler.org_id
-        )
-      end
-
-      # The target's chunk sits at 0.1 — inside the floor, behind every filler.
-      [chunk | _] = page |> chunks_of() |> Enum.reverse()
-      Ash.Seed.update!(chunk, %{embedding: near})
-
-      # "zebra" is in no document, so the full keyword leg misses; the
-      # marker's lexeme is the any-term match. The query embeds onto `unit`.
-      query = "#{@marker} zebra"
-
-      put_search_env(
-        semantic_floor_legs: [:semantic, :block, :tag, :keyword_any],
-        semantic_max_distance: 0.2
-      )
+      {page, query} = keyword_any_only_page(admin)
 
       kept = Enum.find(Search.hybrid(:page, query, actor: admin, limit: 80), &(&1.id == page.id))
       assert kept, "judged by its chunk (0.1), within the floor"
@@ -470,6 +506,55 @@ defmodule KilnCMS.Search.DocumentChunksTest do
       # Its head alone is far beyond 0.2: without chunks the floor drops it.
       put_search_env(chunk_long_documents: false)
       refute page.id in hit_ids(Search.hybrid(:page, query, actor: admin, limit: 80))
+    end
+
+    # Drops `document_chunk_embeddings`' btree indexes inside the sandbox, an
+    # ACCESS EXCLUSIVE lock until rollback: run alone, in the `:table_lock`
+    # pass (`test/test_helper.exs`).
+    @tag :table_lock
+    test "the floor finds the hit's own chunk however many rows sit nearer the query (#2814)" do
+      # The lookup used to be a nearest-first read filtered to the hit's id,
+      # which the HNSW index may serve. That walk stops after
+      # `hnsw.max_scan_tuples` rows, so with that many chunks nearer the
+      # query than the hit's own, its chunk never came back and the hit was
+      # judged by its head. In CI the suite's other marker chunks, which embed
+      # exactly onto the query, filled that budget now and then.
+      #
+      # Here 500 chunks of another type sit on the query, nearer than the
+      # hit's own, and the cap is lowered below that. The btree indexes on the
+      # document's id are dropped and sequential and bitmap scans turned off,
+      # so a nearest-first read has only the HNSW index left, as on a large
+      # site where the planner prefers it. The query has an axis of its own
+      # (`OwnAxisEmbedder`), so the crowd's dead index entries crowd no other
+      # test.
+      put_search_env(embedder: OwnAxisEmbedder)
+      axis = OwnAxisEmbedder.axis()
+      admin = user(:admin)
+      {page, query} = keyword_any_only_page(admin, axis)
+
+      Repo.query!(
+        "INSERT INTO document_chunk_embeddings " <>
+          "(org_id, document_type, document_id, chunk_index, content_hash, embedding, embedded_at) " <>
+          "SELECT $1::uuid, 'post', gen_random_uuid(), 0, 'crowd', $2, now() " <>
+          "FROM generate_series(1, 500)",
+        [Ecto.UUID.dump!(page.org_id), Pgvector.new(basis(axis))]
+      )
+
+      # Both undone with the test's sandbox transaction.
+      for index <-
+            ~w(document_chunk_embeddings_doc_lookup_index document_chunk_embeddings_doc_chunk_index),
+          do: Repo.query!("DROP INDEX #{index}")
+
+      for setting <- [
+            "hnsw.max_scan_tuples = 100",
+            "enable_seqscan = off",
+            "enable_bitmapscan = off"
+          ],
+          do: Repo.query!("SET LOCAL #{setting}")
+
+      kept = Enum.find(Search.hybrid(:page, query, actor: admin, limit: 80), &(&1.id == page.id))
+      assert kept, "judged by its chunk (0.1), within the floor"
+      assert Search.hit_legs(kept) == [:keyword_any]
     end
 
     test "the floor judges by min(head, chunk): a chunk beyond the floor does not rescue" do
