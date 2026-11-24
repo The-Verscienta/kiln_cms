@@ -335,5 +335,8 @@ curl -s https://your-kiln-host/mcp \
   custom field outside the owner's field grant is refused.
 - Keys expire and can be revoked instantly at `/editor/api-keys`; a revoked
   key 401s on the next request.
+- A key minted by a newer Kiln release with a scope this release doesn't know
+  401s too, for example after a rollback; mint the client a new key
+  ([API keys](api.md#api-keys-third-party-access)).
 - Every write is attributed to the key's owning user in versions/audit trails —
   another reason to give each LLM integration its own account.

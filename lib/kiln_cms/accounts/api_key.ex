@@ -36,6 +36,21 @@ defmodule KilnCMS.Accounts.ApiKey do
   chose. The action takes no input: there is nothing for the caller to widen.
   See `KilnCMS.Accounts.Changes.RotateDraftWriteKey` and ADR 0012.
 
+  ## A scope this release does not know (#2604)
+
+  `access` is a `KilnCMS.Types.KnownAtom`: a key a newer release minted with a
+  scope this one lacks (a rollback, a rolling deploy) loads with
+  `%KilnCMS.Types.UnknownAtom{}` as its scope, rather than failing every read
+  that meets it. Such a key **authenticates as nothing**: `User.valid_api_keys`
+  admits only the scopes in `KilnCMS.Accounts.ApiKey.Scope`, so it is refused
+  exactly as a revoked key is. That filter is the sole gate. The content
+  policies are not a second one: their write gate admits only `:read_write`,
+  but the drafts-only clamps match `:draft_write` exactly, so an actor carrying
+  an unknown scope would read as its owner.
+  The key still lists, revokes and is revoked by erasure, and a release that
+  knows its scope signs it in again. Writes stay strict: no scope outside
+  `Scope.known/0` can be minted.
+
   For a pure public-content integrator, mint a `:read` key on a dedicated
   `:viewer` account. For an LLM author, mint a `:read_write` key on an
   `:editor` account — its drafts still go through admin review to publish.
@@ -257,11 +272,16 @@ defmodule KilnCMS.Accounts.ApiKey do
     # off `actor.__metadata__.api_key` — see Checks.ApiKeyWithoutWriteAccess).
     # Set at mint and immutable after (no update action accepts it): upgrading
     # a credential's power in place is a footgun, so mint a new key instead.
-    attribute :access, :atom do
+    #
+    # `KnownAtom`, not `:atom` (docs/releasing.md, "New values in an atom
+    # column"): a scope a later release adds loads here as an `UnknownAtom`
+    # after a rollback instead of failing the key's lookup and the whole key
+    # list. Such a key never signs in (`User.valid_api_keys`, see `Scope`).
+    attribute :access, KilnCMS.Types.KnownAtom do
       allow_nil? false
       public? true
       default :read
-      constraints one_of: [:read, :read_write, :draft_write]
+      constraints one_of: KilnCMS.Accounts.ApiKey.Scope.known()
     end
 
     # Keys are always expiring — no immortal credentials.
@@ -303,9 +323,15 @@ defmodule KilnCMS.Accounts.ApiKey do
   calculations do
     # An erased account's key is never valid, revoked or not: it is refused at
     # sign-in (`User.valid_api_keys`), so it must not show as active either.
+    #
+    # Nor is a key whose scope this release does not know (#2604): the same
+    # filter as `User.valid_api_keys`.
     calculate :valid,
               :boolean,
-              expr(is_nil(revoked_at) and expires_at > now() and is_nil(user.anonymized_at))
+              expr(
+                is_nil(revoked_at) and expires_at > now() and is_nil(user.anonymized_at) and
+                  access in ^KilnCMS.Accounts.ApiKey.Scope.known()
+              )
   end
 
   identities do

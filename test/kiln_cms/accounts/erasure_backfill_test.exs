@@ -482,6 +482,18 @@ defmodule KilnCMS.Accounts.ErasureBackfillTest do
       refute revoked_at(live)
     end
 
+    # A scope a newer release minted (#2604) is read and revoked like any other.
+    test "revokes an erased account's key whose scope this release does not know" do
+      [key] = tombstone_with_keys(1)
+      KilnCMS.NewerReleaseRows.api_key_scope!(key.id)
+
+      assert ErasureBackfill.run() == %{@nothing | api_keys: 1}
+
+      row = KilnCMS.NewerReleaseRows.stored_row("api_keys", key.id)
+      assert row["revoked_at"]
+      assert row["access"] == KilnCMS.NewerReleaseRows.unknown()
+    end
+
     test "leaves a key erasure already revoked as it was" do
       [key] = tombstone_with_keys(1)
       admin = user(%{role: :admin})

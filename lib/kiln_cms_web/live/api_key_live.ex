@@ -15,10 +15,16 @@ defmodule KilnCMSWeb.ApiKeyLive do
   the service can exchange the key for a fresh one itself (`POST
   /api/keys/rotate`). The list shows each key's window and where it came from,
   and a key retired by rotation reads "Rotated", not "Revoked".
+
+  A key whose scope this release does not know (minted by a newer release,
+  #2604) lists as "Unrecognized scope" and "Not accepted": it does not sign in
+  here, would sign in again on a release that knows the scope, and can be
+  revoked like any other.
   """
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Types.UnknownAtom
 
   import KilnCMSWeb.RoleDisplay, only: [role_label: 1]
 
@@ -189,14 +195,39 @@ defmodule KilnCMSWeb.ApiKeyLive do
 
   defp access_label(:read_write), do: gettext("Read + write")
   defp access_label(:draft_write), do: gettext("Drafts only")
-  defp access_label(_), do: gettext("Read-only")
+  defp access_label(:read), do: gettext("Read-only")
+
+  # A scope a newer release minted (#2604): named as stored, never as a scope
+  # this release knows, since it may grant less than read.
+  defp access_label(%UnknownAtom{value: scope}),
+    do: gettext("Unrecognized scope (%{scope})", scope: scope)
 
   defp status(%{revoked_at: at, rotated_to: %KilnCMS.Accounts.ApiKey{}}) when not is_nil(at),
     do: {:rotated, gettext("Rotated")}
 
   defp status(%{revoked_at: at}) when not is_nil(at), do: {:revoked, gettext("Revoked")}
   defp status(%{valid: true}), do: {:active, gettext("Active")}
+
+  # Unrevoked and unexpired, but refused at sign-in because this release does
+  # not know its scope. "Expired" would be wrong: a release that knows the
+  # scope signs it in again. Not for an erased owner's key, which no release
+  # signs in, so the hint would be false: that falls through like any other
+  # key refused for its owner.
+  defp status(%{access: %UnknownAtom{}, expires_at: expires_at, user: %{anonymized_at: nil}}) do
+    if DateTime.after?(expires_at, DateTime.utc_now()),
+      do: {:unrecognized, gettext("Not accepted")},
+      else: {:expired, gettext("Expired")}
+  end
+
   defp status(_), do: {:expired, gettext("Expired")}
+
+  defp status_hint(:unrecognized),
+    do:
+      gettext(
+        "This release does not know the key's scope, so the key does not sign in here. A release that knows the scope will accept it again: revoke it if that is not wanted."
+      )
+
+  defp status_hint(_kind), do: nil
 
   @impl true
   def render(assigns) do
@@ -374,13 +405,17 @@ defmodule KilnCMSWeb.ApiKeyLive do
                   </td>
                   <td class="py-2 pr-3">
                     <% {kind, label} = status(key) %>
-                    <span class={[
-                      "rounded px-1.5 py-0.5 text-xs font-medium",
-                      kind == :active && "bg-success/15 text-success-ink",
-                      kind == :revoked && "bg-error/15 text-error-ink",
-                      kind == :rotated && "bg-base-200 text-base-content/70",
-                      kind == :expired && "bg-base-200 text-base-content/70"
-                    ]}>
+                    <span
+                      title={status_hint(kind)}
+                      class={[
+                        "rounded px-1.5 py-0.5 text-xs font-medium",
+                        kind == :active && "bg-success/15 text-success-ink",
+                        kind == :revoked && "bg-error/15 text-error-ink",
+                        kind == :rotated && "bg-base-200 text-base-content/70",
+                        kind == :expired && "bg-base-200 text-base-content/70",
+                        kind == :unrecognized && "bg-warning/15 text-warning-ink"
+                      ]}
+                    >
                       {label}
                     </span>
                   </td>

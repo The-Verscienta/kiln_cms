@@ -64,6 +64,10 @@ else.
 
 ### Fixed
 
+- **An API key minted by a newer release with a scope this one doesn't know no longer breaks key lookups, the API keys page, revoke or erasure; it is refused at sign-in like a revoked key, and the security posture warns about it (#2604).**
+  No migration; rolling the pin back is safe. The posture JSON's `core.api_keys` check gains the fact `unrecognized_scope_keys`.
+  ([long form](docs/changelog/unreleased.md#api-key-unknown-scope))
+
 - **A timeout, cancel or fence stops an external program (qpdf, ffmpeg/ffprobe, `pg_dump`, `pg_restore`, `tar`, `rclone`) by a process-group kill from a small `sh` wrapper, never a pid kill from the VM, so it can't signal an unrelated process that reused the pid ([#2624](https://github.com/The-Verscienta/kiln_cms/issues/2624)).**
   The program's own children stop with it, and so does the program when the VM exits. No migration.
   ([long form](docs/changelog/unreleased.md#external-command-group-kill))

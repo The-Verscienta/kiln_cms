@@ -353,6 +353,13 @@ msgid_plural "%{count} keys can write content as an administrator."
 msgstr[0] "%{count} clé peut écrire du contenu en tant qu'administrateur."
 msgstr[1] "%{count} clés peuvent écrire du contenu en tant qu'administrateur."
 
+#: lib/kiln_cms/security/posture/checks/api_keys.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} key has a scope this release does not know: it does not sign in here, but will on a release that knows the scope. Revoke it if it is not wanted."
+msgid_plural "%{count} keys have a scope this release does not know: they do not sign in here, but will on a release that knows the scope. Revoke them if they are not wanted."
+msgstr[0] "%{count} clé a une portée que cette version ne connaît pas : elle ne se connecte pas ici, mais le fera sur une version qui connaît cette portée. Révoquez-la si elle n'est pas voulue."
+msgstr[1] "%{count} clés ont une portée que cette version ne connaît pas : elles ne se connectent pas ici, mais le feront sur une version qui connaît cette portée. Révoquez-les si elles ne sont pas voulues."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} later request folded into it"
@@ -1524,6 +1531,11 @@ msgid "%{units} and %{count} more"
 msgid_plural "%{units} and %{count} more"
 msgstr[0] "%{units} et %{count} autre"
 msgstr[1] "%{units} et %{count} autres"
+
+#: lib/kiln_cms/security/posture/checks/api_keys.ex
+#, elixir-autogen, elixir-format
+msgid "%{unrecognized} Some keys are also over 180 days old (their age stands in for last use, which keys don't record yet) or expire more than a year from now."
+msgstr "%{unrecognized} Certaines clés ont aussi plus de 180 jours (leur âge tient lieu de dernière utilisation, que les clés n'enregistrent pas encore) ou expirent dans plus d'un an."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -15803,6 +15815,11 @@ msgstr "Aucun : immédiatement"
 msgid "Not a usable provider"
 msgstr "Fournisseur inutilisable"
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Not accepted"
+msgstr "Non acceptée"
+
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
 msgid "Not applicable"
@@ -25777,6 +25794,11 @@ msgstr "Ce lancement a changé depuis que vous l’avez ouvert. Il a été recha
 msgid "This release did not ship. Nothing went live."
 msgstr "Ce lancement n'a pas été publié. Rien n'est passé en ligne."
 
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "This release does not know the key's scope, so the key does not sign in here. A release that knows the scope will accept it again: revoke it if that is not wanted."
+msgstr "Cette version ne connaît pas la portée de la clé : la clé ne se connecte donc pas ici. Une version qui connaît cette portée l'acceptera de nouveau : révoquez-la si ce n'est pas voulu."
+
 #: lib/kiln_cms_web/live/release_live.ex
 #, elixir-autogen, elixir-format
 msgid "This release has nothing to publish."
@@ -26992,6 +27014,11 @@ msgstr "Non lu (%{count})"
 #, elixir-autogen, elixir-format
 msgid "Unrecognized event (%{type})"
 msgstr "Événement non reconnu (%{type})"
+
+#: lib/kiln_cms_web/live/api_key_live.ex
+#, elixir-autogen, elixir-format
+msgid "Unrecognized scope (%{scope})"
+msgstr "Portée non reconnue (%{scope})"
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex

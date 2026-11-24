@@ -268,7 +268,7 @@ Each check has an id, used in logs, telemetry and by plugins. A check with no
 | Two-step sign-in for platform administrators (`core.operator_second_factor`) | This installation | Every platform administrator and whether each has an authenticator app | A platform administrator has none | | N/A: no platform administrators | **Your settings** (`/editor/settings`), by each person |
 | HTTPS and secure cookies (`core.transport`) | This installation | What the running release was built with: `force_ssl`, HSTS, the public URL's scheme, the session cookie's `Secure` flag | Any of the four is off | | N/A: not a production build | Environment |
 | Exposed endpoints (`core.exposed_endpoints`) | This installation | The metrics listener's settings, `API_DOCS_ENABLED`, `GRAPHQL_INTROSPECTION_ENABLED` | Metrics on every interface with no token | The API explorer or GraphQL introspection is on | | Environment |
-| API keys (`core.api_keys`) | This installation | Every valid API key on the installation and its owner | A read-write key owned by an administrator | A key over 180 days old, or expiring more than a year from now | N/A: no valid keys | **Operations → API keys** (`/editor/api-keys`) |
+| API keys (`core.api_keys`) | This installation | Every unrevoked, unexpired API key on the installation and its owner | A read-write key owned by an administrator | A key over 180 days old, expiring more than a year from now, or with a scope this release doesn't know | N/A: no valid keys, and none with an unknown scope | **Operations → API keys** (`/editor/api-keys`) |
 | Human verification (`core.human_verification`) | This installation | The human-verification settings | | No usable provider, both checks off, or `KILN_CHALLENGE_DISABLED` | | Environment |
 | Kiln version (`core.release`) | This installation | The cached answer of the update check | | A newer release exists | Unknown: no answer yet, or the update check failed. N/A: `KILN_UPDATE_CHECK=false` | **Operations → System** (`/editor/system`) |
 | Security notices for Kiln (`core.security_notices`) | This installation | The cached security notices feed, against the running Kiln's version | A notice of any severity covers this version | | Unknown: no answer yet, the feed didn't answer or its URL is invalid, a notice names Kiln but can't be matched, or this build's version can't be read. N/A: `KILN_UPDATE_CHECK=false`, or the notices feed is off | **Operations → System** (`/editor/system`) |
@@ -445,7 +445,8 @@ release was built with, not the config files. On any other build the line is
 
 ### API keys
 
-Every key on the installation that is valid now (not revoked, not expired):
+Every key on the installation that is not revoked or expired, and whose
+owner's account has not been erased:
 
 - A **read-write** key whose owner is an administrator anywhere (a platform
   administrator, including by a temporary grant, or an active administrator
@@ -454,6 +455,25 @@ Every key on the installation that is valid now (not revoked, not expired):
 - A key created more than 180 days ago, or expiring more than 365 days from
   now, is **Review**. Keys don't record when they were last used yet, so age
   stands in for "unused".
+- A key whose **scope this release doesn't know** (minted by a newer release,
+  met after a rollback or during a rolling deploy, #2604) is **Review**,
+  never **Fix now**. It doesn't sign in on this release, but a release that
+  knows the scope accepts it again, so review it and revoke it if it isn't
+  wanted. When the check is **Fix now** for an administrator's read-write
+  key, these keys are named in **Details** as well.
+
+Its facts: `valid_keys` counts the keys that sign in on this release, and
+`admin_read_write`, `older_than_180_days` and `expiring_after_365_days` count
+among those. `unrecognized_scope_keys` counts the unknown-scope keys, which
+are in none of the others. An installation whose only live keys have an
+unknown scope is **Review**, not N/A.
+
+During a rolling deploy that adds a scope, the line can differ by node: a
+node still on the older release warns about keys minted with the new scope,
+and a node on the newer release passes them. The
+[JSON endpoint](#monitor-the-posture-from-a-script) caches each node's answer
+for up to 30 seconds, so a monitor behind a load balancer can see both until
+every node runs the newer release.
 
 **Details** names each key and its owner's email address. Revoke or replace
 keys under **Operations → API keys**.

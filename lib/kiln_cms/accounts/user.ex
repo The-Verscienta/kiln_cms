@@ -1955,8 +1955,19 @@ defmodule KilnCMS.Accounts.User do
     # (`ErasureBackfill` revokes them). Filtering here, rather
     # than on the sign-in read, makes such a key take the same path as a
     # revoked one, so the refusal cannot be told apart from any other.
+    #
+    # So does a key whose scope this release does not know (#2604): a scope a
+    # newer release minted loads as an `UnknownAtom` and must authenticate as
+    # nothing, since it may be narrower than read. This filter is the SOLE
+    # gate: the content policies' drafts-only clamps match `:draft_write` and
+    # do not refuse reads for an unknown scope. No log line: the key is simply
+    # not found, and logging it would cost an extra read on the
+    # unauthenticated path.
     has_many :valid_api_keys, KilnCMS.Accounts.ApiKey do
-      filter expr(is_nil(revoked_at) and expires_at > now() and is_nil(user.anonymized_at))
+      filter expr(
+               is_nil(revoked_at) and expires_at > now() and is_nil(user.anonymized_at) and
+                 access in ^KilnCMS.Accounts.ApiKey.Scope.known()
+             )
     end
 
     # Org memberships (epic #336): which organizations this (global) user belongs

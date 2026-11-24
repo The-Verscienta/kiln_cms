@@ -4,6 +4,9 @@ defmodule KilnCMS.Accounts.ApiKeyTest do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.ApiKey
+  alias KilnCMS.Accounts.Checks.{ApiKeyWithoutWriteAccess, DraftWriteKey}
+  alias KilnCMS.NewerReleaseRows
+  alias KilnCMS.Types.UnknownAtom
 
   defp user(role) do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -224,4 +227,103 @@ defmodule KilnCMS.Accounts.ApiKeyTest do
       assert :ok = KilnCMS.CMS.destroy_page(p2, actor: write_actor)
     end
   end
+
+  # A key a newer release minted with a scope this one does not know (#2604),
+  # met after a rollback or during a rolling deploy.
+  describe "a scope this release does not know" do
+    setup do
+      admin = user(:admin)
+      owner = user(:viewer)
+      key = mint(owner, admin)
+      %{admin: admin, owner: owner, key: key, plaintext: plaintext(key)}
+    end
+
+    test "loads as an UnknownAtom from a get and from both lists", ctx do
+      NewerReleaseRows.api_key_scope!(ctx.key.id)
+      unknown = %UnknownAtom{value: NewerReleaseRows.unknown()}
+
+      assert Accounts.get_api_key!(ctx.key.id, actor: ctx.admin).access == unknown
+      assert [%{access: ^unknown}] = Accounts.list_api_keys!(ctx.owner.id, actor: ctx.admin)
+
+      assert %{access: ^unknown} =
+               [actor: ctx.admin] |> Accounts.list_all_api_keys!() |> by_id(ctx.key.id)
+    end
+
+    # A release older than this one's predecessor read any existing atom as
+    # itself: "admin" is an atom every VM holds, and outside `one_of`.
+    test "a stored scope naming an existing atom loads as unknown too", ctx do
+      NewerReleaseRows.api_key_scope!(ctx.key.id, "admin")
+
+      assert Accounts.get_api_key!(ctx.key.id, actor: ctx.admin).access ==
+               %UnknownAtom{value: "admin"}
+
+      assert Accounts.actor_from_api_key(ctx.plaintext) == :error
+    end
+
+    test "is not valid and drops out of valid_api_keys", ctx do
+      NewerReleaseRows.api_key_scope!(ctx.key.id)
+
+      assert Ash.load!(Accounts.get_api_key!(ctx.key.id, actor: ctx.admin), [:valid],
+               actor: ctx.admin
+             ).valid == false
+
+      assert Ash.load!(ctx.owner, [:valid_api_keys], actor: ctx.admin).valid_api_keys == []
+    end
+
+    test "resolves to no actor, where the same key with a known scope did", ctx do
+      assert {:ok, %{id: id}} = Accounts.actor_from_api_key(ctx.plaintext)
+      assert id == ctx.owner.id
+
+      NewerReleaseRows.api_key_scope!(ctx.key.id)
+      assert Accounts.actor_from_api_key(ctx.plaintext) == :error
+
+      # A release that knows the scope signs it in again.
+      NewerReleaseRows.api_key_scope!(ctx.key.id, "read")
+      assert {:ok, _actor} = Accounts.actor_from_api_key(ctx.plaintext)
+    end
+
+    test "can be revoked, leaving the stored scope as it was", ctx do
+      NewerReleaseRows.api_key_scope!(ctx.key.id)
+      loaded = Accounts.get_api_key!(ctx.key.id, actor: ctx.admin)
+
+      assert %{revoked_at: %DateTime{}} = Accounts.revoke_api_key!(loaded, actor: ctx.admin)
+
+      row = NewerReleaseRows.stored_row("api_keys", ctx.key.id)
+      assert row["access"] == NewerReleaseRows.unknown()
+      assert row["revoked_at"]
+    end
+
+    # The sign-in filter is the only gate. The content policies do refuse
+    # writes, but the drafts-only clamps on reads would not apply.
+    test "an actor carrying one is refused writes but not clamped as drafts-only", ctx do
+      NewerReleaseRows.api_key_scope!(ctx.key.id)
+      loaded = Accounts.get_api_key!(ctx.key.id, actor: ctx.admin)
+      actor = key_actor(ctx.admin, loaded)
+
+      assert ApiKeyWithoutWriteAccess.match?(actor, %{}, [])
+      refute DraftWriteKey.draft_write?(actor)
+    end
+  end
+
+  describe "minting a scope" do
+    test "this release does not know is refused" do
+      admin = user(:admin)
+
+      for access <- [NewerReleaseRows.unknown(), :ok, %UnknownAtom{value: "read"}] do
+        assert {:error, %Ash.Error.Invalid{}} =
+                 Accounts.mint_api_key(
+                   user(:viewer).id,
+                   "nope",
+                   DateTime.add(DateTime.utc_now(), 1, :day),
+                   %{access: access},
+                   actor: admin
+                 ),
+               "minted #{inspect(access)}"
+      end
+    end
+  end
+
+  defp plaintext(key), do: Ash.Resource.get_metadata(key, :plaintext_api_key)
+
+  defp by_id(keys, id), do: Enum.find(keys, &(&1.id == id))
 end

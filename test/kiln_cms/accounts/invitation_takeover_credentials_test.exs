@@ -212,6 +212,22 @@ defmodule KilnCMS.Accounts.InvitationTakeoverCredentialsTest do
                )
     end
 
+    # A key a newer release minted with a scope this one does not know
+    # (#2604): it does not sign in here, but would on that release, so the
+    # takeover revokes it too.
+    test "revokes a key whose scope this release does not know", %{admin: admin} do
+      {invitation, token} = invite!(admin)
+      squatter = squatter!(invitation)
+      key = key!(squatter, admin)
+      KilnCMS.NewerReleaseRows.api_key_scope!(key.id)
+
+      assert {:ok, _accepted} = accept(squatter, token)
+
+      row = KilnCMS.NewerReleaseRows.stored_row("api_keys", key.id)
+      assert row["revoked_at"]
+      assert row["access"] == KilnCMS.NewerReleaseRows.unknown()
+    end
+
     test "reads the factors from the row, not the struct it was handed", %{admin: admin} do
       {invitation, token} = invite!(admin)
       # The caller's read, before the stranger enrolled anything.

@@ -889,8 +889,30 @@ So the rule for a column, or an embedded attribute, that will grow:
    that can run beside it, and N reads the row.
 
 The switch has to ship **at least one release before** the first new value,
-for the same reason a contract step waits a release. `Security.Event.type`
-and `Notification.event` are already `KnownAtom`.
+for the same reason a contract step waits a release. `Security.Event.type`,
+`Notification.event` and `ApiKey.access` are already `KnownAtom`.
+
+**A column that grants authority** needs one more thing: at authentication,
+an `UnknownAtom` must grant nothing. A value the older release doesn't know
+may be narrower than anything it knows, so it can't fall through to a
+default. `ApiKey.access` is the example (#2604):
+
+- **The sign-in filter is the only gate.** `User.valid_api_keys` admits a key
+  only when its scope is in `KilnCMS.Accounts.ApiKey.Scope.known/0`, so an
+  unknown-scope key is refused exactly as a revoked one. The content policies
+  are not a second gate: their write check admits only `:read_write`, but the
+  drafts-only clamps match `:draft_write` exactly, so an actor carrying an
+  unknown scope would read as its owner if the filter let it through.
+  Hardening the clamps is tracked in
+  [#3316](https://github.com/The-Verscienta/kiln_cms/issues/3316).
+- **Mint keys with a new scope only once every node runs the release that
+  introduced it.** Until then an older node refuses them, so a service using
+  one fails on some requests and not others.
+- **The guarantee holds back to the release that made `access` a
+  `KnownAtom`, and no further.** A release older than that loads a stored
+  scope whose name is an existing atom (`"admin"`, say) as that atom and
+  signs the key in, since its filter doesn't look at the scope. So the first
+  new scope ships no earlier than the release after that one.
 
 The same hazard, and the same two-step rule, covers:
 

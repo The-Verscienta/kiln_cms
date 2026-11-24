@@ -24,7 +24,8 @@ document is about the network edge.
 - **Auth tokens** — AshAuthentication JWTs, magic-link and password-reset
   tokens, preview tokens, collab and bridge socket tokens.
 - **API keys** — `kiln_…` bearer keys carrying a `:read`, `:read_write` or
-  `:draft_write` scope.
+  `:draft_write` scope. A key whose stored scope this release doesn't know (a
+  newer release minted it) authenticates as nothing, never as read (#2604).
 - **Tenant isolation** — one deployment serves multiple organizations; content,
   media, branding and analytics must not cross org boundaries.
 - **Media & object storage** — uploaded files and their storage credentials.
