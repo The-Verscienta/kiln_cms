@@ -1386,6 +1386,11 @@ msgstr "%{sentence} Chaque %{type} les liste sous « %{label} »."
 
 #: lib/kiln_cms_web/field_selection.ex
 #, elixir-autogen, elixir-format
+msgid "%{sentence} Editors can't add new records from here."
+msgstr "%{sentence} Les éditeurs ne peuvent pas ajouter de nouveaux enregistrements ici."
+
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
 msgid "%{sentence} Typing a new name offers to create a draft %{type}."
 msgstr "%{sentence} Saisir un nouveau nom propose de créer un brouillon %{type}."
 
@@ -3369,6 +3374,11 @@ msgstr "Ajouté au lancement."
 #, elixir-autogen, elixir-format
 msgid "Added to the working copy — publish changes to make it live"
 msgstr "Ajouté à la copie de travail — publiez les modifications pour la mettre en ligne"
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Adding new records"
+msgstr "Ajout de nouveaux enregistrements"
 
 #: lib/kiln_cms/cms/field_types/link.ex
 #, elixir-autogen, elixir-format
@@ -13386,6 +13396,11 @@ msgstr "Permettez la connexion à ce site via votre propre fournisseur d'identit
 msgid "Let this server prune these backups — only if that server is retired or this installation moved here."
 msgstr "Laisser ce serveur supprimer ces anciennes sauvegardes — seulement si ce serveur-là est retiré ou si cette installation a été déplacée ici."
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Lets an editor create a new draft and connect it in one step, here and from the other side of the relationship. Turn it off to have editors connect only records that already exist."
+msgstr "Permet à un éditeur de créer un nouveau brouillon et de le connecter en une seule étape, ici et depuis l’autre côté de la relation. Désactivez-le pour que les éditeurs ne connectent que des enregistrements existants."
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Letters, digits, hyphens and underscores."
@@ -16249,6 +16264,11 @@ msgstr "Désactivée : on peut se connecter depuis n’importe quel réseau."
 #, elixir-autogen, elixir-format
 msgid "Offer this provider on the sign-in page"
 msgstr "Proposer ce fournisseur sur la page de connexion"
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Offer “Add new” in the picker"
+msgstr "Proposer « Ajouter » dans le sélecteur"
 
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format

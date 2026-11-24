@@ -25,8 +25,9 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
 
   ## Create and connect
 
-  Next to the search, the picker offers "Add new *Type*" for each target type
-  the editor may create (`ContentTypes.can_create?/4`, the type's generated
+  Next to the search, the picker offers "Add new *Type*" (unless the field's
+  selection says `"add_new" => false`) for each target type the editor may
+  create (`ContentTypes.can_create?/4`, the type's generated
   `can_create_*?` helper — the policy the create itself runs). It opens a
   small form inline: the title and the type's required fields that have no
   default, nothing else. The record is created as the editor, through the
@@ -812,11 +813,19 @@ defmodule KilnCMSWeb.ContentEditor.ReferencePicker do
 
   defp creatable(%{definition: definition, tenant: tenant, actor: actor}) do
     selection = Map.get(definition, :selection)
-    create_type = ReferenceSelection.create_type(selection)
 
-    definition
-    |> target_types(tenant)
-    |> Enum.flat_map(&creatable_for(&1, create_type, selection, actor, tenant))
+    # `"add_new" => false` (the field's selection) offers no create at all:
+    # neither "Add new" nor create-on-type, and `ref_new` / `ref_new_create` /
+    # `ref_create_typed` find no entry, so a forged event creates nothing.
+    if ReferenceSelection.add_new?(selection) do
+      create_type = ReferenceSelection.create_type(selection)
+
+      definition
+      |> target_types(tenant)
+      |> Enum.flat_map(&creatable_for(&1, create_type, selection, actor, tenant))
+    else
+      []
+    end
   end
 
   defp creatable_for(ct, create_type, selection, actor, tenant) do
