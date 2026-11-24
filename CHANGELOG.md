@@ -76,7 +76,7 @@ else.
   Reordering needs the whole-field grant; the console shows a partly granted field read-only. No migration.
   ([long form](docs/changelog/unreleased.md#flexible-item-type-grants))
 
-- **The reference picker shows each record's featured image as a small thumbnail in search results, picked rows and reverse-field rows ([#3223](https://github.com/The-Verscienta/kiln_cms/issues/3223)).**
+- **The reference picker shows each record's featured image as a small thumbnail in search results, picked rows and reverse-field rows ([#3265](https://github.com/The-Verscienta/kiln_cms/pull/3265)).**
   Always on; the generated `thumb` variant, a video's poster, or an original already that small, never a large original. No migration.
   ([long form](docs/changelog/unreleased.md#reference-picker-thumbnails))
 
