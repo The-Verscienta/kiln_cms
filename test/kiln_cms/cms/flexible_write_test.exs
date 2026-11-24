@@ -686,7 +686,7 @@ defmodule KilnCMS.CMS.FlexibleWriteTest do
     end
   end
 
-  describe "field grants (per-key grants arrive with the editor, a later PR)" do
+  describe "field grants (item-type grants: flexible_grants_test.exs)" do
     test "a custom_fields.fw_sections grant lets an editor write the field", %{admin: admin} do
       editor = user(:editor, %{field_grants: %{"post" => ["title", "custom_fields.fw_sections"]}})
 
@@ -700,22 +700,6 @@ defmodule KilnCMS.CMS.FlexibleWriteTest do
                )
 
       assert [%{"text" => "e"}] = updated.custom_fields["fw_sections"]
-    end
-
-    test "a custom_fields.fw_sections.hero grant is not understood and writes nothing", %{
-      admin: admin
-    } do
-      editor =
-        user(:editor, %{field_grants: %{"post" => ["title", "custom_fields.fw_sections.hero"]}})
-
-      post = post!(admin, %{})
-
-      assert {:error, _} =
-               update_post(
-                 post,
-                 %{"fw_sections" => [%{"_type" => "hero", "headline" => "h"}]},
-                 editor
-               )
     end
   end
 

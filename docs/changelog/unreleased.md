@@ -70,3 +70,36 @@ carries the reasoning.
     sub-field.
   Record: [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md#media-and-reference-inside-items-pr-3-2282);
   guide: [Build flexible content in the admin](../extending-content.md#build-flexible-content-in-the-admin).
+
+<a id="flexible-item-type-grants"></a>
+
+- **A role can be granted single item types of a Flexible content field (#2282).**
+  - **The entry.** `custom_fields.<field>.<item type>` in a type's write grants
+    (for example `custom_fields.sections.hero`). The editor may edit the items
+    of that type (any of their sub-fields, settings and nested items), add
+    items of that type and remove them. The whole-field entry
+    (`custom_fields.sections`) still covers everything.
+  - **What stays refused.** An item of another type is untouched: changing,
+    adding or removing one is refused, naming the type
+    (`custom_fields.sections.quote cannot be changed: outside your field
+    grant…`). An item whose type changes needs both types. Putting the
+    surviving items in a different order needs the whole-field entry, because
+    it moves items of every type. Items are matched by their `_id`, so
+    inserting an item in the middle is not a reorder.
+  - **Pickers.** In **Field grants** on the team page, a flexible field lists
+    its item types beneath it, indented as a group's sub-fields are. A stored
+    entry for a type that no longer exists shows as "(not found)".
+  - **Copies and imports.** A duplicate, a translation and an import made by
+    such an editor carry the items of the granted types only; the field is
+    listed among the withheld keys when any item was left out.
+  - **The console.** As for a group with only sub-field entries, the editor
+    shows the field read-only unless the whole field is granted. The grant is
+    enforced on every write path (API, forms, imports), so a client that
+    writes the field works within it; editing the permitted items in the
+    console is a follow-up.
+  - **No migration.** A grant is an entry in the existing `field_grants` list.
+    Before this release the entry was accepted but matched nothing, so an
+    editor holding it was refused every write to the field; a role that
+    already holds one now writes what it names.
+  Record: [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md#item-type-grants-pr-4-2282);
+  guide: [Field grants](../granular-rbac.md#write-field_grants-keys).

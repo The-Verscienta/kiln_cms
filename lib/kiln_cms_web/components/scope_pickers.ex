@@ -280,6 +280,17 @@ defmodule KilnCMSWeb.ScopePickers do
         }
   end
 
+  # A flexible field's item types are the grants beneath it (#2282): the items
+  # of one type, but not their order.
+  defp group_entries(%{field_type: :flexible} = flexible) do
+    for type <- FieldDefinition.item_types(flexible),
+        do: %{
+          key: FieldAccess.key([flexible.name, type.name]),
+          label: definition_label(type),
+          depth: 1
+        }
+  end
+
   defp group_entries(_definition), do: []
 
   defp entry(definition, depth),
@@ -456,7 +467,7 @@ defmodule KilnCMSWeb.ScopePickers do
             </p>
             <p class="text-xs text-base-content/70">
               {gettext(
-                "Tick Custom fields (all of them) above for every custom field, or pick individual ones here. A group's own box lets them add, remove and reorder its rows; a field under it lets them change just that field in every row. With any of these ticked, creating a document is held to them too."
+                "Tick Custom fields (all of them) above for every custom field, or pick individual ones here. A group's own box lets them add, remove and reorder its rows; a field under it lets them change just that field in every row. A flexible field's own box lets them change every item and reorder them; a type under it lets them edit, add and remove just the items of that type. With any of these ticked, creating a document is held to them too."
               )}
             </p>
             <ul class="space-y-1">

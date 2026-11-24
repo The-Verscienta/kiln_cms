@@ -11,7 +11,18 @@ defmodule KilnCMS.CMS.FieldAccess do
     * `custom_fields.<group>` — a whole `:group` field, rows added, removed and
       reordered included (the same shape as `<name>`, told apart by the
       definitions, not the syntax);
-    * `custom_fields.<group>.<sub>` — one sub-field, in every row.
+    * `custom_fields.<group>.<sub>` — one sub-field, in every row;
+    * `custom_fields.<flexible>` — a whole `:flexible` field: every item, and
+      adding, removing and reordering them (#2282);
+    * `custom_fields.<flexible>.<item type>` — the items of one item type:
+      editing them, adding them and removing them, but not reordering and not
+      touching the items of any other type.
+
+  The second segment of a two-segment entry is told apart by the definitions:
+  a sub-field of a group, or an item type of a flexible field. An item type
+  carries the grant of its sub-fields (a third segment is not part of the
+  grammar). A flexible field cannot be private, so an item type is never a
+  read-grant entry.
 
   A field name matches `\\A[a-z][a-z0-9_]*\\z`, so a dot is unambiguous. Link
   fields (details on a reference's connections) are not grantable on their own:
@@ -24,7 +35,8 @@ defmodule KilnCMS.CMS.FieldAccess do
 
   A write grant is the list of entries for a type, or `nil` for "no
   restriction". `writable?/2` is plain membership: the bare entry, the field's
-  own entry, or (for a sub-field) its group's entry.
+  own entry, or (for a sub-field or an item type) its group's or flexible
+  field's entry.
 
   ## Read
 
@@ -101,7 +113,8 @@ defmodule KilnCMS.CMS.FieldAccess do
   May the editor holding write `grant` write the field at `path`?
 
   `nil` is unrestricted. Otherwise the bare `custom_fields`, the field's own
-  entry, or — for a sub-field — its group's entry.
+  entry, or — for a sub-field or an item type — its group's or flexible
+  field's entry.
   """
   @spec writable?(grant(), path()) :: boolean()
   def writable?(nil, _path), do: true
@@ -168,6 +181,24 @@ defmodule KilnCMS.CMS.FieldAccess do
   @doc "The syntax-only form of `valid_read_entry?/2`, for the write-time shape check."
   @spec read_entry_shape?(term()) :: boolean()
   def read_entry_shape?(entry), do: parse(entry) in [:all] or match?({:field, _}, parse(entry))
+
+  @doc """
+  The items of a flexible field's stored `value` that the editor holding write
+  `grant` may write, by item type: `{:ok, items}` (possibly empty), or `:error`
+  when `value` is not a list of items (maps with a binary `_type`). Order is
+  kept. Used where a whole value is carried over for an editor (a copy, an
+  import) and only the granted item types may travel.
+  """
+  @spec writable_items(grant(), String.t(), term()) :: {:ok, [map()]} | :error
+  def writable_items(grant, name, [_ | _] = value) do
+    if Enum.all?(value, &(is_map(&1) and is_binary(Map.get(&1, "_type")))) do
+      {:ok, Enum.filter(value, &writable?(grant, [name, Map.fetch!(&1, "_type")]))}
+    else
+      :error
+    end
+  end
+
+  def writable_items(_grant, _name, _value), do: :error
 
   defp top_level?(definition), do: KilnCMS.CMS.FieldDefinition.top_level?(definition)
 end

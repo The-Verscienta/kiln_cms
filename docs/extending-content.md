@@ -2416,6 +2416,15 @@ If the items can't be counted it says so. A flexible field's type can't be
 changed, and no other field can become one: the **Field type** select is
 disabled when editing it.
 
+**Who may edit which items.** An editor's role can be limited to some item
+types: on `/editor/team`, under **Field grants**, tick the item types beneath
+the flexible field (the entry is `custom_fields.<field>.<item type>`). Those
+editors may edit, add and remove items of those types and no others;
+reordering needs the whole field's box. See
+[Write: `field_grants` keys](granular-rbac.md#write-field_grants-keys). The
+console shows such a field read-only; the limit applies to the API and to
+imports.
+
 **What can go wrong in the admin**
 
 | You see | Meaning |

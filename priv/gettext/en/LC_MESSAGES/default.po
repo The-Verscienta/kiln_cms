@@ -26069,7 +26069,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
-msgid "Tick Custom fields (all of them) above for every custom field, or pick individual ones here. A group's own box lets them add, remove and reorder its rows; a field under it lets them change just that field in every row. With any of these ticked, creating a document is held to them too."
+msgid "Tick Custom fields (all of them) above for every custom field, or pick individual ones here. A group's own box lets them add, remove and reorder its rows; a field under it lets them change just that field in every row. A flexible field's own box lets them change every item and reorder them; a type under it lets them edit, add and remove just the items of that type. With any of these ticked, creating a document is held to them too."
 msgstr ""
 
 #: lib/kiln_cms_web/live/translations_live.ex
