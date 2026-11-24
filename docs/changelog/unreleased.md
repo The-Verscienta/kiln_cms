@@ -65,6 +65,14 @@ carries the reasoning.
   - **Not a filter, not access control.** It narrows no read: the search lists what it did before. An editor who may create the type can still create the record from its own screen. The server checks it too, so a forged create event from the picker creates nothing.
   - **Outside the editor.** `GET /api/schema` reports it in `x-kiln-selection` when off; field sync carries it with the rest of `selection`. No migration.
 
+<a id="reference-picker-filters"></a>
+
+- **Editors can narrow a reference field's search by type, category or tag while picking (#3224).** A row of selects now sits above the picker's search box. **Type** (*All types*, then each linked type) shows on its own on any field that links to more than one content type. **Category** (*Any category*) and **Tag** (*Any tag*, grouped by tag group) show on a field whose admin turns them on: in the fields admin, step 6 (**Which records can be picked**) has a new **Let editors narrow the search by** with **Category** and **Tag** checkboxes, and the step's closing sentence adds *Editors can narrow the search by category and tag.* A screen reader announces a filtered count as *N results (filtered)*, and an empty list says *No matches with these filters.* with a **Clear filters** button.
+  - **A filter only narrows.** The choice is AND-ed onto the field's own selection and the search still runs as the editor, so it never offers a record the field would refuse or the editor can't read. A posted value the picker did not offer (another site's category, a type the field doesn't link to) is ignored. Changing a select does not mark the document as changed.
+  - **What is left out.** When every linked type pins a category, there is no category select; when every linked type lists tags, only those tags are offered. Past 500 categories or tags, that select is not shown (*Too many tags to list — search by title instead.*), and the fields admin warns when the box is ticked. Create-on-type is not offered while a filter is set; **Add new** is. The dropdown widget has no filters.
+  - **Stored as** `"filters": ["category", "tag"]` (either or both) in the field's `selection` (#2285). It is a picker setting like `sort`, not a condition: it never refuses a write. A bad value is refused with *filters is empty*, *lists a filter twice* or *filters must be a list among category, tag*. `GET /api/schema` reports it in `x-kiln-selection`. Field sync does not carry it, as it carries no part of `selection`. No migration.
+  - See [Narrow a reference search by type, category or tag](../extending-content.md#narrow-a-reference-search-by-type-category-or-tag).
+
 <a id="change-note"></a>
 
 - **An edit can say why, and the editor can ask (#3255).** Versions recorded what changed and who changed it; now they can record why.

@@ -61,6 +61,31 @@ defmodule KilnCMS.CMS.ReferenceSelectionTest do
     Exception.message(error)
   end
 
+  defp create_with(admin, selection) do
+    CMS.create_field_definition(
+      %{
+        content_type: :post,
+        name: name(),
+        label: "L",
+        field_type: :reference,
+        target_type: "page",
+        selection: selection
+      },
+      actor: admin
+    )
+  end
+
+  defp page!(admin, title, attrs) do
+    CMS.create_page!(Map.merge(%{title: title, slug: slug()}, attrs), actor: admin)
+  end
+
+  defp titles(plan, admin) do
+    "page"
+    |> ContentTypes.list!(ReferenceSelection.read_opts([actor: admin], plan))
+    |> Enum.map(& &1.title)
+    |> Enum.sort()
+  end
+
   setup do
     %{admin: user(:admin)}
   end
@@ -736,6 +761,164 @@ defmodule KilnCMS.CMS.ReferenceSelectionTest do
 
       assert {:ok, [filter: [[state: _], _tags], arguments: %{}]} =
                ReferenceSelection.query_for(field.selection, "page", admin, nil)
+    end
+  end
+
+  describe "editor filters (#3224)" do
+    test "filters is stored as given and read back in a fixed order", %{admin: admin} do
+      assert {:ok, field} = create_with(admin, %{"filters" => ["tag", "category"]})
+      assert field.selection == %{"filters" => ["tag", "category"]}
+      assert ReferenceSelection.filters(field.selection) == ["category", "tag"]
+
+      assert ReferenceSelection.filters(nil) == []
+      assert ReferenceSelection.filters(%{"sort" => "title"}) == []
+      assert ReferenceSelection.filters(%{filters: [:tag]}) == ["tag"]
+    end
+
+    test "a bad filters shape is refused", %{admin: admin} do
+      for {filters, fragment} <- [
+            {[], "filters is empty"},
+            {["category", "category"], "lists a filter twice"},
+            {["tags"], "filters must be a list among category, tag"},
+            {["type"], "filters must be a list among category, tag"},
+            {"category", "filters must be a list among category, tag"},
+            {[1], "filters must be a list among category, tag"}
+          ] do
+        message = refusal(fn -> create_with(admin, %{"filters" => filters}) end)
+        assert message =~ fragment, "#{inspect(filters)}: #{message}"
+      end
+    end
+
+    test "filters alone does not filter, and does not stand in create's way", %{admin: admin} do
+      selection = %{"filters" => ["category"], "create" => %{"type" => "page"}}
+
+      assert {:ok, :unfiltered} = ReferenceSelection.query_for(selection, "page", admin, nil)
+      assert ReferenceSelection.create_problem(selection, "page") == nil
+      assert {:ok, _field} = create_with(admin, selection)
+
+      page = page!(admin, "Any", %{})
+
+      assert ReferenceSelection.accepted_ids(
+               %{"filters" => ["tag"]},
+               "page",
+               [page.id],
+               actor: admin
+             ) == [page.id]
+    end
+
+    test "live/3 keeps filters" do
+      assert ReferenceSelection.live(%{"filters" => ["category", "tag"]}, ["page"], nil) ==
+               %{"filters" => ["category", "tag"]}
+
+      assert ReferenceSelection.live(
+               %{"filters" => ["tag"], "states" => ["published"]},
+               ["page"],
+               nil
+             ) == %{"filters" => ["tag"], "states" => ["published"]}
+    end
+
+    test "narrow/2 with no choice leaves the plan as it is", %{admin: admin} do
+      assert ReferenceSelection.narrow(:unfiltered, %{category: nil, tag: nil}) == :unfiltered
+      assert ReferenceSelection.narrow(:unfiltered, %{}) == :unfiltered
+
+      {:ok, plan} =
+        ReferenceSelection.query_for(%{"states" => ["draft"]}, "page", admin, nil)
+
+      assert ReferenceSelection.narrow(plan, %{category: "", tag: nil}) == plan
+    end
+
+    test "narrow/2 appends to the plan and keeps its arguments", %{admin: admin} do
+      page_field!(admin, %{})
+      category = category!(admin)
+
+      {:ok, [filter: filters, arguments: arguments] = plan} =
+        ReferenceSelection.query_for(
+          %{
+            "states" => ["draft"],
+            "by_type" => %{"page" => %{"fields" => %{"diet" => "vegan"}}}
+          },
+          "page",
+          admin,
+          nil
+        )
+
+      assert arguments != %{}
+
+      assert [filter: narrowed, arguments: ^arguments] =
+               ReferenceSelection.narrow(plan, %{category: category.id})
+
+      assert narrowed == filters ++ [[category_id: category.id]]
+
+      assert [filter: [[category_id: id]], arguments: %{}] =
+               ReferenceSelection.narrow(:unfiltered, %{category: category.id})
+
+      assert id == category.id
+    end
+
+    test "an editor's category or tag ANDs onto the selection in a real read", %{admin: admin} do
+      field_category = category!(admin)
+      other_category = category!(admin)
+      tag = tag!(admin)
+
+      page!(admin, "In field category", %{category_id: field_category.id})
+
+      page!(admin, "In field category, tagged", %{
+        category_id: field_category.id,
+        tag_ids: [tag.id]
+      })
+
+      page!(admin, "In other category", %{category_id: other_category.id})
+
+      page!(admin, "In other category, tagged", %{
+        category_id: other_category.id,
+        tag_ids: [tag.id]
+      })
+
+      selection = %{
+        "filters" => ["category", "tag"],
+        "by_type" => %{"page" => %{"category" => field_category.id}}
+      }
+
+      {:ok, plan} = ReferenceSelection.query_for(selection, "page", admin, nil)
+
+      assert titles(plan, admin) == ["In field category", "In field category, tagged"]
+
+      # The editor's tag narrows inside the field's category.
+      assert titles(ReferenceSelection.narrow(plan, %{tag: tag.id}), admin) ==
+               ["In field category, tagged"]
+
+      # Another category never widens past the field's: nothing matches both.
+      assert titles(ReferenceSelection.narrow(plan, %{category: other_category.id}), admin) == []
+
+      assert titles(
+               ReferenceSelection.narrow(plan, %{category: other_category.id, tag: tag.id}),
+               admin
+             ) == []
+
+      # With no field condition, the editor's choice alone narrows.
+      {:ok, :unfiltered} =
+        ReferenceSelection.query_for(%{"filters" => ["category"]}, "page", admin, nil)
+
+      assert titles(ReferenceSelection.narrow(:unfiltered, %{category: other_category.id}), admin) ==
+               ["In other category", "In other category, tagged"]
+    end
+
+    test "a chosen id that is gone or not an id is kept and matches nothing", %{admin: admin} do
+      category = category!(admin)
+      page!(admin, "Unfiled", %{})
+      CMS.destroy_category!(category, actor: admin)
+
+      assert "Unfiled" in titles(:unfiltered, admin)
+
+      gone = ReferenceSelection.narrow(:unfiltered, %{category: category.id})
+      assert [filter: [[category_id: _]], arguments: %{}] = gone
+      assert titles(gone, admin) == []
+
+      assert titles(ReferenceSelection.narrow(:unfiltered, %{tag: Ecto.UUID.generate()}), admin) ==
+               []
+
+      assert titles(ReferenceSelection.narrow(:unfiltered, %{tag: "not-a-uuid"}), admin) == []
+      assert titles(ReferenceSelection.narrow(:unfiltered, %{category: 42}), admin) == []
     end
   end
 end

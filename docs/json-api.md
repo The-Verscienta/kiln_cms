@@ -1059,6 +1059,8 @@ validation error on the field, in the same shape as an unresolvable target:
 records read `… aren't among the records this field accepts.`). A record the
 field already holds is never re-judged, and removing or reordering is never
 refused. The schema export reports the live selection as `x-kiln-selection`.
+Its `sort` and `filters` keys only configure the editor's picker; they never
+refuse a write.
 A field set to let editors create what they type
 ([extending-content.md](extending-content.md#let-editors-create-what-they-type))
 reports `"create"` there too, but that is an editor shortcut only: the API

@@ -80,6 +80,10 @@ else.
   No migration.
   ([long form](docs/changelog/unreleased.md#reference-add-new-off))
 
+- **Editors can narrow a reference field's search while picking: a Type select on any field with several linked types, and Category and Tag selects where the admin ticks "Let editors narrow the search by" (stored as `"filters"` in the field's `selection`); a filter only narrows ([#3224](https://github.com/The-Verscienta/kiln_cms/issues/3224)).**
+  No migration.
+  ([long form](docs/changelog/unreleased.md#reference-picker-filters))
+
 - **Edits can say why: a `change_note` on update, publish and Publish changes is kept on the version and shown in History; a site can make the editor ask for one per content type ("Ask why on every change" on the Safety fields page) ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255)).**
   ([long form](docs/changelog/unreleased.md#change-note))
 
