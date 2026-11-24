@@ -112,6 +112,10 @@ defmodule KilnCMS.Accounts.Organization do
       # moving its host. `mix kiln.org_slugs` lists and fixes those rows.
       change KilnCMS.Accounts.Changes.NormalizeOrgSlug
       validate KilnCMS.Accounts.Validations.OrgSlugIsHostLabel, where: [changing(:slug)]
+
+      # A new slug or custom domain moves every absolute URL a page renders
+      # (#3194): its ETag, and the cached sitemap, feeds and llms.txt.
+      change KilnCMS.Accounts.Changes.BustSiteUrls
     end
 
     # Tenant resolution: fetch an org by its subdomain slug (used by the routing
