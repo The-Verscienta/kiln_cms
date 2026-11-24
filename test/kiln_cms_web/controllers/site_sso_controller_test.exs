@@ -10,6 +10,7 @@ defmodule KilnCMSWeb.SiteSsoControllerTest do
   """
   use KilnCMSWeb.ConnCase, async: true
 
+  import ExUnit.CaptureLog
   import Phoenix.LiveViewTest
 
   alias KilnCMS.Accounts
@@ -33,7 +34,7 @@ defmodule KilnCMSWeb.SiteSsoControllerTest do
   # and the parked state/nonce, read back off the authorization URL.
   defp start(conn, org, key) do
     F.stub_provider!(key, %{})
-    conn = conn |> org_conn(org) |> get(~p"/auth/site-sso")
+    conn = conn |> org_conn(org) |> get(~p"/auth/site-sso") |> assert_controller_answered()
 
     location = redirected_to(conn, 302)
     assert String.starts_with?(location, F.issuer() <> "/authorize?")
@@ -48,6 +49,36 @@ defmodule KilnCMSWeb.SiteSsoControllerTest do
     |> recycle()
     |> org_conn(org)
     |> get(~p"/auth/site-sso/callback", %{"code" => "c0de", "state" => query["state"]})
+    |> assert_controller_answered()
+  end
+
+  # Both routes always answer with a redirect: `SiteSsoController.refuse/3`
+  # redirects too. Anything else came from a gate in front of the controller
+  # whose read failed with nothing to fall back on (#2535): the sign-in
+  # `KilnCMSWeb.Plugs.AdminAllowlist` on a site's first read, with no
+  # last-known list yet (503, `retry-after: 30`, HTML), or
+  # `KilnCMSWeb.Plugs.SetTenant`, though only under strict host matching,
+  # which the test config turns off (503, `retry-after: 2`, text/plain).
+  # Say which, rather than leaving `redirected_to/2` to report a bare status.
+  defp assert_controller_answered(%Plug.Conn{status: 302} = conn), do: conn
+
+  defp assert_controller_answered(conn) do
+    retry_after = get_resp_header(conn, "retry-after")
+    body = conn.resp_body || ""
+
+    producer =
+      case retry_after do
+        ["2"] -> "KilnCMSWeb.Plugs.SetTenant"
+        ["30"] -> "KilnCMSWeb.Plugs.AdminAllowlist"
+        _other -> "not a known gate"
+      end
+
+    flunk("""
+    expected a redirect from SiteSsoController, got #{inspect(conn.status)} from #{producer}
+      retry-after: #{inspect(retry_after)}
+      content-type: #{inspect(get_resp_header(conn, "content-type"))}
+      body: #{inspect(binary_part(body, 0, min(byte_size(body), 120)))}
+    """)
   end
 
   test "the authorization request names this site's callback URL and PKCE",
@@ -157,12 +188,29 @@ defmodule KilnCMSWeb.SiteSsoControllerTest do
        %{conn: conn, org: org, domain: domain, key: key} do
     {conn, query} = start(conn, org, key)
 
-    conn =
-      KilnCMS.OrgSettings.with_actor(nil, fn ->
-        finish(conn, org, key, query, %{"email" => "later@#{domain}", "email_verified" => true})
+    # Only the registration read is refused (#2535). The unscoped
+    # `OrgSettings.with_actor/2` would refuse every uncached settings read the
+    # callback makes, and a provider read that failed under load would answer
+    # the same flash. The two log lines name the refusal this test means: the
+    # site's refusal line, and the registration read's degrade carrying the
+    # policy's Forbidden (a pool failure on that same read would carry a
+    # connection error instead).
+    {conn, log} =
+      with_log(fn ->
+        KilnCMS.OrgSettings.with_actor(:registrations, nil, fn ->
+          finish(conn, org, key, query, %{"email" => "later@#{domain}", "email_verified" => true})
+        end)
       end)
 
+    assert conn.status == 302
+    assert get_resp_header(conn, "retry-after") == []
     assert redirected_to(conn) == "/sign-in"
+
+    assert log =~
+             "Site single sign-on refused on #{org.id}: the site's registration settings could not be read"
+
+    assert log =~ ~r/registration approval lookup failed.*Forbidden/
+
     assert get_session(conn, "user_token") == nil
 
     assert Phoenix.Flash.get(conn.assigns.flash, :error) =~

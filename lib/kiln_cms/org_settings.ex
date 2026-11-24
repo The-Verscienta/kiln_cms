@@ -61,10 +61,11 @@ defmodule KilnCMS.OrgSettings do
 
   Take the actor in the caller, before `resolve/2`, and close over it in
   `read`: a cache miss usually runs `read` on a Cachex courier process, where
-  the `with_actor/2` test seam (process-local) does not reach. Only a miss from
-  a caller that holds a database connection (inside a transaction) runs `read`
-  in the caller, uncached (`KilnCMS.Cache.fetch/3`), so a resolver that takes
-  the actor inside `read` would pass there and fail everywhere else.
+  the test seams (`with_actor/2`, and `with_actor/3` for one subsystem; both
+  process-local) do not reach. Only a miss from a caller that holds a database
+  connection (inside a transaction) runs `read` in the caller, uncached
+  (`KilnCMS.Cache.fetch/3`), so a resolver that takes the actor inside `read`
+  would pass there and fail everywhere else.
 
   **With `authorize_with: :error`, always.** A refused read filters to "no
   row", and "no row" is `build.(nil)`, the operator config, which is *cached*
@@ -75,7 +76,7 @@ defmodule KilnCMS.OrgSettings do
 
   require Logger
 
-  # See `with_actor/2`.
+  # See `with_actor/2` and `with_actor/3`.
   @actor_override {__MODULE__, :actor_override}
 
   @doc """
@@ -85,28 +86,53 @@ defmodule KilnCMS.OrgSettings do
   @spec system(atom()) :: KilnCMS.SystemActor.t() | nil
   def system(subsystem) when is_atom(subsystem) do
     case Process.get(@actor_override, :unset) do
-      :unset -> KilnCMS.SystemActor.new(subsystem)
-      actor -> actor
+      :unset ->
+        case Process.get(subsystem_override(subsystem), :unset) do
+          :unset -> KilnCMS.SystemActor.new(subsystem)
+          actor -> actor
+        end
+
+      actor ->
+        actor
     end
   end
 
   @doc false
   # Test seam (#1659): run `fun` with `system/1` answering `actor` in this
-  # process, so a test can take the grant away and prove each resolver fails
-  # CLOSED to its fallback instead of caching the operator config.
-  # Process-local, and nothing on a request path calls it; code that could call
-  # it could equally pass any actor it liked.
+  # process for EVERY subsystem, so a test can take the grants away and prove
+  # each resolver fails CLOSED to its fallback instead of caching the operator
+  # config. It wins over `with_actor/3`. Over HTTP it also refuses every other
+  # resolver the request reads (the admin allowlist, branding, ...), so a test
+  # of one decision there wants `with_actor/3`. Process-local, and nothing on a
+  # request path calls it; code that could call it could equally pass any
+  # actor it liked.
   @spec with_actor(term(), (-> result)) :: result when result: term()
-  def with_actor(actor, fun) do
-    previous = Process.get(@actor_override, :unset)
-    Process.put(@actor_override, actor)
+  def with_actor(actor, fun), do: with_override(@actor_override, actor, fun)
+
+  @doc false
+  # Test seam (#2535): `with_actor/2` for one subsystem only, so a test can
+  # refuse one resolver's read and leave the rest of the request alone.
+  #
+  # A key of OrgSettings' own rather than `KilnCMS.SystemActor.with_override/3`:
+  # some subsystems (`:security`, `:security_alerts`) name both a settings row
+  # and a worker's grant, and their tests take the worker's grant away through
+  # that override while the settings read still answers.
+  @spec with_actor(atom(), term(), (-> result)) :: result when result: term()
+  def with_actor(subsystem, actor, fun) when is_atom(subsystem),
+    do: with_override(subsystem_override(subsystem), actor, fun)
+
+  defp subsystem_override(subsystem), do: {__MODULE__, :actor_override, subsystem}
+
+  defp with_override(key, actor, fun) do
+    previous = Process.get(key, :unset)
+    Process.put(key, actor)
 
     try do
       fun.()
     after
       if previous == :unset,
-        do: Process.delete(@actor_override),
-        else: Process.put(@actor_override, previous)
+        do: Process.delete(key),
+        else: Process.put(key, previous)
     end
   end
 
