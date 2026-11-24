@@ -122,7 +122,7 @@ defmodule KilnCMSWeb.FormLive do
   defp api_url(form, org), do: KilnCMSWeb.Tenant.base_url(org) <> "/api/forms/#{form.slug}"
 
   # Copies `form`'s fields onto `copy`, renaming a reserved name to the first
-  # free `website_2`, `website_3`, … Returns the renames made (`[{old, new}]`)
+  # free `website_2`, `locale_2`, … Returns the renames made (`[{old, new}]`)
   # and the source names of the fields that couldn't be created.
   defp copy_fields(form, copy, opts) do
     fields = CMS.form_fields_for!(form.id, opts)
@@ -172,11 +172,29 @@ defmodule KilnCMSWeb.FormLive do
   defp duplicated_message([]), do: gettext("Form duplicated (inactive until you activate it).")
 
   defp duplicated_message(renames) do
-    gettext(
-      "Form duplicated (inactive until you activate it). The field “%{old}” was renamed “%{new}” in the copy: that name is reserved for spam protection.",
-      old: Enum.map_join(renames, ", ", &elem(&1, 0)),
-      new: Enum.map_join(renames, ", ", &elem(&1, 1))
+    Enum.join(
+      [duplicated_message([]) | Enum.map(renames, &renamed_message/1)],
+      " "
     )
+  end
+
+  # One sentence per renamed field, saying why its name is reserved.
+  defp renamed_message({old, new}) do
+    case KilnCMS.Forms.reserved_field_reason(old) do
+      :honeypot ->
+        gettext(
+          "The field “%{old}” was renamed “%{new}” in the copy: that name is reserved for spam protection.",
+          old: old,
+          new: new
+        )
+
+      :locale ->
+        gettext(
+          "The field “%{old}” was renamed “%{new}” in the copy: that name is reserved for the submission's language.",
+          old: old,
+          new: new
+        )
+    end
   end
 
   defp put_duplicate_errors(socket, failed, autoresponder) do

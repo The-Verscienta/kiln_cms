@@ -450,6 +450,23 @@ defmodule KilnCMSWeb.FormBuilderLive do
   defp challenge_title(:unavailable),
     do: gettext("Held: the verification service couldn't be reached.")
 
+  # Why a stored field's name is reserved, for its settings panel.
+  defp reserved_name_note(name) do
+    case KilnCMS.Forms.reserved_field_reason(name) do
+      :honeypot ->
+        gettext(
+          "“%{name}” is reserved for spam protection: a visitor who fills this field has their submission discarded. Give it another machine name.",
+          name: name
+        )
+
+      :locale ->
+        gettext(
+          "“%{name}” is reserved for the submission's language: a visitor's answer to this field is also recorded as the language the submission was sent in. Give it another machine name.",
+          name: name
+        )
+    end
+  end
+
   # --- data --------------------------------------------------------------------
 
   defp copy_field(socket, field, fields) do
@@ -1027,7 +1044,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   >
                     {field.name}
                   </p>
-                  <%!-- A name the honeypot uses (#2267): kept working, but flagged. --%>
+                  <%!-- A reserved name (#2267, #2716): kept working, but flagged. --%>
                   <p
                     :if={KilnCMS.Forms.reserved_field_name?(field.name)}
                     id={"canvas-field-reserved-#{field.id}"}
@@ -1118,10 +1135,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                       class="mt-1 flex items-start gap-1 text-xs text-warning-ink"
                     >
                       <.icon name="hero-exclamation-triangle" class="mt-px size-4 shrink-0" />
-                      {gettext(
-                        "“%{name}” is reserved for spam protection: a visitor who fills this field has their submission discarded. Give it another machine name.",
-                        name: selected.name
-                      )}
+                      {reserved_name_note(selected.name)}
                     </p>
                     <p id="fs-name-hint" class="mt-1 text-xs text-base-content/60">
                       {gettext(

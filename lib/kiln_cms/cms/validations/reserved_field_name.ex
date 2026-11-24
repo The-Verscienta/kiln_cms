@@ -1,9 +1,14 @@
 defmodule KilnCMS.CMS.Validations.ReservedFieldName do
   @moduledoc """
-  A `KilnCMS.CMS.FormField` can't be named like the honeypot input
-  (`KilnCMS.Forms.reserved_field_names/0`, #2267), whatever its type: a
-  visitor who fills such a field trips the honeypot, and the submission is
-  discarded as spam.
+  A `KilnCMS.CMS.FormField` can't take a reserved name
+  (`KilnCMS.Forms.reserved_field_names/0`), whatever its type:
+
+    * the honeypot input's (#2267): a visitor who fills such a field trips
+      the honeypot, and the submission is discarded as spam;
+    * `locale` (#2716): the submission's language is recorded from the param
+      of that name, so a visitor's answer would be recorded as it too.
+
+  The refusal says which, per name (`KilnCMS.Forms.reserved_field_reason/1`).
 
   The rule guards choosing the name, so it runs on create and on an update
   that changes `name` or `field_type`. #2261 already refused a retype of such
@@ -22,17 +27,19 @@ defmodule KilnCMS.CMS.Validations.ReservedFieldName do
 
   @impl true
   def validate(changeset, _opts, _context) do
-    if choosing_name?(changeset) and
-         KilnCMS.Forms.reserved_field_name?(Ash.Changeset.get_attribute(changeset, :name)) do
-      {:error,
-       InvalidAttribute.exception(
-         field: :name,
-         message: gettext("is reserved for spam protection")
-       )}
+    reason =
+      choosing_name?(changeset) &&
+        KilnCMS.Forms.reserved_field_reason(Ash.Changeset.get_attribute(changeset, :name))
+
+    if reason do
+      {:error, InvalidAttribute.exception(field: :name, message: message(reason))}
     else
       :ok
     end
   end
+
+  defp message(:honeypot), do: gettext("is reserved for spam protection")
+  defp message(:locale), do: gettext("is reserved for the submission's language")
 
   defp choosing_name?(%{action_type: :create}), do: true
 

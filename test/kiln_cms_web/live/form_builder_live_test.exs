@@ -1112,7 +1112,7 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     # The builder over a form that has a `website` field from before the name
     # was reserved (the create action refuses it now, so it is seeded), after
     # an ordinary one.
-    defp legacy_builder(conn, admin) do
+    defp legacy_builder(conn, admin, name \\ "website") do
       form =
         CMS.create_form!(%{name: "Contact", slug: "fb-hp-#{System.unique_integer([:positive])}"},
           actor: admin
@@ -1127,8 +1127,8 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
       legacy =
         Ash.Seed.seed!(KilnCMS.CMS.FormField, %{
           form_id: form.id,
-          name: "website",
-          label: "Website",
+          name: name,
+          label: "Legacy",
           field_type: :string,
           position: 1
         })
@@ -1195,6 +1195,58 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
       assert lv |> element("#fs-name") |> render() =~ ~s(value="website")
       assert lv |> element("#fs-name-error") |> render() =~ "is reserved for spam protection"
       # Only a stored name is flagged, not a refused draft.
+      refute has_element?(lv, "#fs-name-reserved")
+    end
+  end
+
+  describe "a legacy field named locale (#2716)" do
+    test "is flagged on the canvas and in its settings, saying why", %{conn: conn} do
+      {form, email, legacy, lv} = legacy_builder(conn, authed_user(:admin), "locale")
+
+      assert lv |> element("#canvas-field-reserved-#{legacy.id}") |> render() =~ "Reserved name"
+      refute has_element?(lv, "#canvas-field-reserved-#{email.id}")
+
+      selector = open_settings(lv, legacy)
+      note = lv |> element("#fs-name-reserved") |> render()
+
+      assert note =~ "is reserved for the submission&#39;s language"
+      refute note =~ "spam protection"
+
+      change(lv, selector, legacy, %{"name" => "language"}, "name")
+
+      assert names(form) == ["email", "language"]
+      refute has_element?(lv, "#canvas-field-reserved-#{legacy.id}")
+      refute has_element?(lv, "#fs-name-reserved")
+    end
+
+    test "a retype is refused inline, saying why", %{conn: conn} do
+      {form, _email, legacy, lv} = legacy_builder(conn, authed_user(:admin), "locale")
+
+      selector = open_settings(lv, legacy)
+      change(lv, selector, legacy, %{"name" => "locale", "field_type" => "text"}, "field_type")
+
+      assert [_email, %{name: "locale", field_type: :string}] =
+               CMS.form_fields_for!(form.id, authorize?: false)
+
+      assert lv |> element("#fs-name-error") |> render() =~
+               "is reserved for the submission&#39;s language"
+    end
+
+    test "typing the name into a field is refused inline, saying why", %{conn: conn} do
+      {form, [field], lv, _html} =
+        builder(conn, authed_user(:admin), %{}, [
+          %{name: "language", label: "Language", field_type: :string}
+        ])
+
+      selector = open_settings(lv, field)
+      change(lv, selector, field, %{"name" => "locale"}, "name")
+
+      assert names(form) == ["language"]
+      assert lv |> element("#fs-name") |> render() =~ ~s(value="locale")
+
+      error = lv |> element("#fs-name-error") |> render()
+      assert error =~ "is reserved for the submission&#39;s language"
+      refute error =~ "spam protection"
       refute has_element?(lv, "#fs-name-reserved")
     end
   end

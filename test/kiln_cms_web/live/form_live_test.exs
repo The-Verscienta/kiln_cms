@@ -228,7 +228,9 @@ defmodule KilnCMSWeb.FormLiveTest do
 
       html = duplicate(conn, admin, form)
 
-      assert html =~ "was renamed “website_2” in the copy"
+      assert html =~
+               "The field “website” was renamed “website_2” in the copy: that name is reserved for spam protection."
+
       refute html =~ "couldn"
 
       copy = copy_of(form)
@@ -243,6 +245,53 @@ defmodule KilnCMSWeb.FormLiveTest do
 
       assert CMS.get_form!(form.id, authorize?: false).autoresponder_subject ==
                "Hi [field:website]"
+    end
+
+    test "a field named locale is renamed locale_2 in the copy, saying why", %{conn: conn} do
+      admin = authed_user(:admin)
+      slug = "fl-loc-#{System.unique_integer([:positive])}"
+      form = CMS.create_form!(%{name: "Contact", slug: slug}, actor: admin)
+
+      CMS.create_form_field!(
+        %{form_id: form.id, name: "email", label: "Email", field_type: :email},
+        actor: admin
+      )
+
+      # From before the name was reserved (#2716): the action refuses it now.
+      Ash.Seed.seed!(KilnCMS.CMS.FormField, %{
+        form_id: form.id,
+        name: "locale",
+        label: "Language",
+        field_type: :string,
+        position: 1
+      })
+
+      form =
+        CMS.update_form!(
+          form,
+          %{
+            autoresponder_enabled: true,
+            autoresponder_subject: "Hi [field:locale]",
+            autoresponder_body: "Sent to [field:email]."
+          },
+          actor: admin
+        )
+
+      html = duplicate(conn, admin, form)
+
+      assert html =~ "Form duplicated (inactive until you activate it)."
+
+      assert html =~
+               "The field “locale” was renamed “locale_2” in the copy: that name is reserved for the submission&#39;s language."
+
+      refute html =~ "spam protection"
+      refute html =~ "couldn"
+
+      copy = copy_of(form)
+      assert field_names(copy) == ["email", "locale_2"]
+      assert copy.autoresponder_enabled
+      assert copy.autoresponder_subject == "Hi [field:locale_2]"
+      assert field_names(form) == ["email", "locale"]
     end
 
     test "a field that can't be copied is named, not dropped silently", %{conn: conn} do
