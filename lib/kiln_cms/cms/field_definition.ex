@@ -1293,7 +1293,8 @@ defmodule KilnCMS.CMS.FieldDefinition do
 
     # A `:flexible` field's item types — `:group` rows, each declaring one
     # kind of item — in editor order. Includable through JSON:API
-    # (`include=field_definitions.item_types`).
+    # (`include=field_definitions.item_types`, and each item type's
+    # `group_fields`, down to the depth cap: see `KilnCMS.CMS.TypeDefinition`).
     has_many :item_types, __MODULE__ do
       destination_attribute :flex_of_id
       sort position: :asc, name: :asc

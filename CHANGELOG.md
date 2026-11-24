@@ -85,6 +85,10 @@ else.
   Reordering needs the whole-field grant; the console shows a partly granted field read-only. No migration.
   ([long form](docs/changelog/unreleased.md#flexible-item-type-grants))
 
+- **A Flexible content field is now typed in the GraphQL API and in the generated clients: a `FlexibleItemValue` per item, and a `oneOf` union per field in JSON Schema, OpenAPI, TypeScript, Swift, Kotlin and `kiln-types`. `?include=field_definitions.item_types` works on type definitions.**
+  Validating consumers: a flexible field's `items` was `{"type": "object"}` and is now a `$ref` to a union of closed item definitions.
+  ([long form](docs/changelog/unreleased.md#flexible-typed-export))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —

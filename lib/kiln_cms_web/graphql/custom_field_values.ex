@@ -34,6 +34,7 @@ defmodule KilnCMSWeb.Graphql.CustomFieldValues do
   defp object_for(:datetime), do: :date_time_value
   defp object_for(:list), do: :list_value
   defp object_for(:group), do: :group_value
+  defp object_for(:flexible_item), do: :flexible_item_value
   defp object_for(:reference), do: :reference_value
   defp object_for(:media), do: :media_value
   defp object_for(:geolocation), do: :geolocation_value
@@ -111,6 +112,28 @@ defmodule KilnCMSWeb.Graphql.CustomFieldValues do
   object :group_value do
     interface :custom_field_value
     field :name, non_null(:string)
+
+    field :fields, non_null(list_of(non_null(:custom_field_value))) do
+      complexity &GraphqlLimits.list_complexity/3
+    end
+  end
+
+  @desc """
+  One item of a `flexible` field (#2282): its `id` and `type` (the item type's
+  name), the values of the item type's settings and the values of its other
+  sub-fields, each as a `CustomFieldValue`. A `flexible` field is always a
+  `ListValue` of these. An item whose type the site no longer defines is left
+  out.
+  """
+  object :flexible_item_value do
+    interface :custom_field_value
+    field :name, non_null(:string)
+    field :id, :id
+    field :type, non_null(:string)
+
+    field :settings, non_null(list_of(non_null(:custom_field_value))) do
+      complexity &GraphqlLimits.list_complexity/3
+    end
 
     field :fields, non_null(list_of(non_null(:custom_field_value))) do
       complexity &GraphqlLimits.list_complexity/3

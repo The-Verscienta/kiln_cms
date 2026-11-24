@@ -371,4 +371,83 @@ defmodule KilnCMSWeb.TypeDefinitionsApiTest do
       assert details =~ "Dosages (dosages[1].colour) is not a sub-field of this group"
     end
   end
+
+  # A `:flexible` field (#2282): its item types come back through
+  # `include=field_definitions.item_types`, and so does everything under them
+  # down to the three flexible levels a definition may nest.
+  describe "a flexible field" do
+    setup %{admin: admin, definition: d} do
+      define = fn attrs ->
+        CMS.create_field_definition!(Map.merge(%{label: "Field"}, attrs), actor: admin)
+      end
+
+      l1 = define.(%{type_definition_id: d.id, name: "sections", field_type: :flexible})
+      hero = define.(%{name: "hero", field_type: :group, flex_of_id: l1.id})
+      headline = define.(%{name: "headline", field_type: :string, group_of_id: hero.id})
+      l2 = define.(%{name: "cols", field_type: :flexible, group_of_id: hero.id})
+      text = define.(%{name: "text", field_type: :group, flex_of_id: l2.id})
+      l3 = define.(%{name: "inner", field_type: :flexible, group_of_id: text.id})
+      leaf = define.(%{name: "leaf", field_type: :group, flex_of_id: l3.id})
+      note = define.(%{name: "note", field_type: :string, group_of_id: leaf.id})
+
+      %{l1: l1, hero: hero, headline: headline, leaf: leaf, note: note}
+    end
+
+    @deep "field_definitions.item_types.group_fields.item_types.group_fields.item_types.group_fields"
+
+    test "include=field_definitions.item_types carries the item types",
+         %{definition: d, l1: l1, hero: hero} do
+      key = mint(user(:editor), :read)
+
+      {200, %{"data" => data, "included" => included}} =
+        req(:get, "/api/json/type-definitions/#{d.id}?include=field_definitions.item_types",
+          key: key
+        )
+
+      # The type lists the flexible field, never its item types.
+      assert %{"relationships" => %{"field_definitions" => %{"data" => [ref]}}} = data
+      assert ref["id"] == l1.id
+
+      by_id = Map.new(included, &{&1["id"], &1})
+      assert %{"attributes" => %{"field_type" => "flexible"}} = by_id[l1.id]
+
+      assert %{"relationships" => %{"item_types" => %{"data" => [%{"id" => hero_id}]}}} =
+               by_id[l1.id]
+
+      assert hero_id == hero.id
+
+      assert %{"attributes" => %{"field_type" => "group", "flex_of_id" => owner}} =
+               by_id[hero.id]
+
+      assert owner == l1.id
+    end
+
+    test "the whole tree is includable to the nesting cap",
+         %{definition: d, l1: l1, hero: hero, headline: headline, leaf: leaf, note: note} do
+      key = mint(user(:editor), :read)
+
+      {200, %{"included" => included}} =
+        req(:get, "/api/json/type-definitions/#{d.id}?include=#{@deep}", key: key)
+
+      ids = MapSet.new(included, & &1["id"])
+
+      for definition <- [l1, hero, headline, leaf, note],
+          do: assert(definition.id in ids, "#{definition.name} is not included")
+
+      # Three flexible levels, as many as `FieldDefinition` allows: the path
+      # list in `KilnCMS.CMS.TypeDefinition` is written out, so this pins it.
+      assert KilnCMS.CMS.FieldDefinition.max_flexible_depth() == 3
+    end
+
+    test "a path deeper than the cap is refused", %{definition: d} do
+      key = mint(user(:editor), :read)
+
+      assert {400, _} =
+               req(
+                 :get,
+                 "/api/json/type-definitions/#{d.id}?include=#{@deep}.item_types",
+                 key: key
+               )
+    end
+  end
 end

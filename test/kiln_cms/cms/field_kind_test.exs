@@ -51,6 +51,7 @@ defmodule KilnCMS.CMS.FieldKindTest do
       :reference,
       :media,
       :geolocation,
+      :flexible_item,
       :json
     ]
 
@@ -75,7 +76,7 @@ defmodule KilnCMS.CMS.FieldKindTest do
       media: :media,
       reference: :reference,
       group: :group,
-      flexible: :json
+      flexible: :flexible_item
     }
 
     assert Enum.sort(FieldTypes.core()) == Enum.sort(Map.keys(expected))

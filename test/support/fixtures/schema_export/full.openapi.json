@@ -1657,6 +1657,18 @@
                 ],
                 "x-kiln-min-items": 1
               },
+              "sections": {
+                "description": "Items of mixed types, in the order the editor arranged them. Each item names its type in `_type`.",
+                "items": {
+                  "$ref": "#/components/schemas/flex_post_sections"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "x-kiln-max-items": 12,
+                "x-kiln-min-items": 1
+              },
               "seo": {
                 "additionalProperties": false,
                 "properties": {
@@ -2039,6 +2051,209 @@
           }
         ],
         "title": "Document"
+      },
+      "flex_post_sections": {
+        "description": "One item of the flexible field `sections` of `post`, told apart by `_type`. An item whose type has since been removed can still appear in an older revision or a point-in-time read (`?as_of=`): treat an unrecognized `_type` as an unknown item.",
+        "discriminator": {
+          "mapping": {
+            "hero": "#/components/schemas/flex_post_sections_hero",
+            "hero_cols": "#/components/schemas/flex_post_sections_hero_cols_2",
+            "quote": "#/components/schemas/flex_post_sections_quote"
+          },
+          "propertyName": "_type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/flex_post_sections_hero"
+          },
+          {
+            "$ref": "#/components/schemas/flex_post_sections_hero_cols_2"
+          },
+          {
+            "$ref": "#/components/schemas/flex_post_sections_quote"
+          }
+        ],
+        "x-kiln-flexible": {
+          "content_type": "post",
+          "field": "sections",
+          "path": [
+            "sections"
+          ]
+        }
+      },
+      "flex_post_sections_hero": {
+        "additionalProperties": false,
+        "description": "An item of the `hero` type.",
+        "properties": {
+          "_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "_settings": {
+            "additionalProperties": false,
+            "description": "The item's settings, apart from its content.",
+            "properties": {
+              "background": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
+          },
+          "_type": {
+            "const": "hero"
+          },
+          "cols": {
+            "description": "Items of mixed types, in the order the editor arranged them. Each item names its type in `_type`.",
+            "items": {
+              "$ref": "#/components/schemas/flex_post_sections_hero_cols"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "headline": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/media_snapshot"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Snapshot of the picked media item.",
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "link": {
+            "description": "Write-time snapshot of a referenced record.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "x-kiln-target-types": [
+              "post"
+            ]
+          }
+        },
+        "required": [
+          "_id",
+          "_type"
+        ],
+        "type": "object"
+      },
+      "flex_post_sections_hero_cols": {
+        "description": "One item of the flexible field `cols` of `post`, told apart by `_type`. An item whose type has since been removed can still appear in an older revision or a point-in-time read (`?as_of=`): treat an unrecognized `_type` as an unknown item.",
+        "discriminator": {
+          "mapping": {
+            "text": "#/components/schemas/flex_post_sections_hero_cols_text"
+          },
+          "propertyName": "_type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/flex_post_sections_hero_cols_text"
+          }
+        ],
+        "x-kiln-flexible": {
+          "content_type": "post",
+          "field": "sections",
+          "path": [
+            "sections",
+            "hero",
+            "cols"
+          ]
+        }
+      },
+      "flex_post_sections_hero_cols_2": {
+        "additionalProperties": false,
+        "description": "An item of the `hero_cols` type.",
+        "properties": {
+          "_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "_type": {
+            "const": "hero_cols"
+          },
+          "count": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "_id",
+          "_type"
+        ],
+        "type": "object"
+      },
+      "flex_post_sections_hero_cols_text": {
+        "additionalProperties": false,
+        "description": "An item of the `text` type.",
+        "properties": {
+          "_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "_type": {
+            "const": "text"
+          },
+          "body": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "_id",
+          "_type"
+        ],
+        "type": "object"
+      },
+      "flex_post_sections_quote": {
+        "additionalProperties": false,
+        "description": "An item of the `quote` type.",
+        "properties": {
+          "_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "_type": {
+            "const": "quote"
+          },
+          "cite": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "_id",
+          "_type"
+        ],
+        "type": "object",
+        "x-kiln-max-items": 2
       },
       "media_snapshot": {
         "additionalProperties": true,

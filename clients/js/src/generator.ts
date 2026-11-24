@@ -47,8 +47,12 @@ export function emitTypes(document: SchemaDocument): string {
 
   const blockDefs = entries.filter(([name]) => name.startsWith("block_"));
   const contentDefs = entries.filter(([name]) => name.startsWith("content_"));
+  // A flexible field's item types and the unions over them (#2282); the
+  // `flex_` prefix is reserved for them, so they never land in `Shared`.
+  const flexDefs = entries.filter(([name]) => name.startsWith("flex_"));
   const sharedDefs = entries.filter(
-    ([name]) => !name.startsWith("block_") && !name.startsWith("content_"),
+    ([name]) =>
+      !name.startsWith("block_") && !name.startsWith("content_") && !name.startsWith("flex_"),
   );
 
   const sections = [
@@ -56,6 +60,10 @@ export function emitTypes(document: SchemaDocument): string {
     section("Shared", declarations(sharedDefs.filter(([, schema]) => !isUnion(schema)))),
     section("Blocks", declarations(blockDefs.filter(([, schema]) => !isUnion(schema)))),
     section("Block union", [unionAlias("KilnBlock", defs.block)]),
+    section("Flexible items", [
+      ...declarations(flexDefs.filter(([, schema]) => !isUnion(schema))),
+      ...flexUnions(flexDefs.filter(([, schema]) => isUnion(schema))),
+    ]),
     section("Documents", declarations(contentDefs)),
     section("Document union", [documentUnion(contentDefs.map(([name]) => name))]),
   ];
@@ -99,6 +107,20 @@ function unionAlias(name: string, schema: JsonSchema | undefined): string {
   if (schema?.oneOf === undefined) return "";
   const members = schema.oneOf.map((ref) => typeName(refTarget(ref))).join("\n  | ");
   return `export type ${name} =\n  | ${members};`;
+}
+
+// A flexible field's item union: an alias over the item interfaces, which each
+// member's `_type` literal tells apart. Sorted by def name, as the interfaces are.
+function flexUnions(defs: [string, JsonSchema][]): string[] {
+  return defs
+    .slice()
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([name, schema]) => {
+      const members = (schema.oneOf ?? [])
+        .map((ref) => typeName(refTarget(ref)))
+        .join("\n  | ");
+      return `${docComment(schema)}export type ${typeName(name)} =\n  | ${members};`;
+    });
 }
 
 function documentUnion(names: string[]): string {

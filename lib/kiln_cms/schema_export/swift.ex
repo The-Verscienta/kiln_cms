@@ -69,15 +69,26 @@ defmodule KilnCMS.SchemaExport.Swift do
   def emit(document) do
     model = Walk.model(document)
     names = top_level_names(model)
-    ctx = %{names: names, kinds: model.defs, reserved: MapSet.new(Map.values(names))}
+
+    ctx = %{
+      names: names,
+      kinds: model.defs,
+      reserved: MapSet.new(Map.values(names)),
+      unions: emitted_unions(model, names)
+    }
 
     [
       header(model),
       section("Shared", Enum.map(model.shared, &declaration(&1, ctx))),
       section("Blocks", Enum.map(model.blocks, &declaration(&1, ctx))),
-      section("Block union", [tagged_union("Block", model.block_union, ctx)]),
+      section("Block union", [tagged_union(model.block_union, ctx)]),
+      section(
+        "Flexible items",
+        Enum.map(model.flex_items, &declaration(&1, ctx)) ++
+          Enum.map(model.unions, &tagged_union(&1, ctx))
+      ),
       section("Documents", Enum.map(model.documents, &declaration(&1, ctx))),
-      section("Document union", [tagged_union("Document", model.document_union, ctx)]),
+      section("Document union", [tagged_union(model.document_union, ctx)]),
       section("JSONValue", [json_value()])
     ]
     |> Enum.reject(&(&1 == ""))
@@ -217,7 +228,9 @@ defmodule KilnCMS.SchemaExport.Swift do
     // `fields(names: [...])`, which returns `KilnCustomFieldValue`s. Values
     // arrive under per-kind aliases (`asString`, `asInt`, ...) because GraphQL
     // forbids one response key with several types. The fragment goes one level
-    // into lists and groups.
+    // into lists and groups, and into a flexible field's items
+    // (`.flexibleItem`: `id`, `type`, `settings` and `fields`) without following
+    // a nested flexible field or group.
     //
     // A field that is unknown, deleted, private to the reader or of another
     // kind than the accessor is `null` (or absent from `fields`), so the server
@@ -240,6 +253,7 @@ defmodule KilnCMS.SchemaExport.Swift do
         case media(name: String, value: KilnMediaValue)
         case list(name: String, items: [KilnCustomFieldValue])
         case group(name: String, fields: [KilnCustomFieldValue])
+        case flexibleItem(name: String, id: String?, type: String, settings: [KilnCustomFieldValue], fields: [KilnCustomFieldValue])
         /// A value kind this schema does not know — one added since it was generated.
         case unknown(typename: String, name: String)
 
@@ -250,14 +264,14 @@ defmodule KilnCMS.SchemaExport.Swift do
                  .boolean(let name, _), .date(let name, _), .dateTime(let name, _),
                  .geolocation(let name, _), .json(let name, _), .reference(let name, _),
                  .media(let name, _), .list(let name, _), .group(let name, _),
-                 .unknown(_, let name):
+                 .flexibleItem(let name, _, _, _, _), .unknown(_, let name):
                 return name
             }
         }
 
         private enum CodingKeys: String, CodingKey {
             case typename = "__typename"
-            case name, asString, asInt, asFloat, asBoolean, asDate, asDateTime, asJson, ids, items, fields
+            case name, asString, asInt, asFloat, asBoolean, asDate, asDateTime, asJson, ids, items, fields, id, type, settings
         }
 
         public init(from decoder: Decoder) throws {
@@ -277,6 +291,7 @@ defmodule KilnCMS.SchemaExport.Swift do
             case "MediaValue": self = .media(name: name, value: try KilnMediaValue(from: decoder))
             case "ListValue": self = .list(name: name, items: try container.decode([KilnCustomFieldValue].self, forKey: .items))
             case "GroupValue": self = .group(name: name, fields: try container.decode([KilnCustomFieldValue].self, forKey: .fields))
+            case "FlexibleItemValue": self = .flexibleItem(name: name, id: try container.decodeIfPresent(String.self, forKey: .id), type: try container.decode(String.self, forKey: .type), settings: try container.decode([KilnCustomFieldValue].self, forKey: .settings), fields: try container.decode([KilnCustomFieldValue].self, forKey: .fields))
             default: self = .unknown(typename: typename, name: name)
             }
         }
@@ -320,6 +335,12 @@ defmodule KilnCMS.SchemaExport.Swift do
                 try container.encode(items, forKey: .items)
             case .group(_, let fields):
                 try container.encode("GroupValue", forKey: .typename)
+                try container.encode(fields, forKey: .fields)
+            case .flexibleItem(_, let id, let type, let settings, let fields):
+                try container.encode("FlexibleItemValue", forKey: .typename)
+                try container.encodeIfPresent(id, forKey: .id)
+                try container.encode(type, forKey: .type)
+                try container.encode(settings, forKey: .settings)
                 try container.encode(fields, forKey: .fields)
             case .unknown(let typename, _):
                 try container.encode(typename, forKey: .typename)
@@ -421,12 +442,20 @@ defmodule KilnCMS.SchemaExport.Swift do
   # are claimed first, so a site whose content type happens to be called
   # `json_value` gets a suffixed name rather than shadowing the helper.
   defp top_level_names(model) do
-    decls = model.shared ++ model.blocks ++ model.documents
+    decls = model.shared ++ model.blocks ++ model.flex_items ++ model.documents
     union = if model.block_union, do: [model.block_union.name], else: []
     taken = MapSet.new(~w(Block Document JSONValue))
 
-    {names, _taken} =
+    {names, taken} =
       Enum.reduce(Enum.map(decls, & &1.name), {%{}, taken}, fn name, {acc, taken} ->
+        swift = unique(base_type_name(name), taken)
+        {Map.put(acc, name, swift), MapSet.put(taken, swift)}
+      end)
+
+    # A flexible field's union is a type of its own (#2282), named like any
+    # other def, so a clash with a struct or the bundled names gets a suffix.
+    {names, _taken} =
+      Enum.reduce(model.unions, {names, taken}, fn %{name: name}, {acc, taken} ->
         swift = unique(base_type_name(name), taken)
         {Map.put(acc, name, swift), MapSet.put(taken, swift)}
       end)
@@ -435,6 +464,17 @@ defmodule KilnCMS.SchemaExport.Swift do
     # `$defs` entry, so it takes no key here (a shared def called `document`
     # already holds that one).
     Map.merge(names, Map.new(union, &{&1, "Block"}))
+  end
+
+  # The unions that get an enum: the block union (as ever, whatever its
+  # members), and a flexible field's once it has a member to decode.
+  defp emitted_unions(model, names) do
+    block = if model.block_union, do: [model.block_union.name], else: []
+
+    flexible =
+      for union <- model.unions, union_rows(union, names) != [], do: union.name
+
+    MapSet.new(block ++ flexible)
   end
 
   defp base_type_name("block_" <> rest), do: upper_camel(rest) <> "Block"
@@ -601,7 +641,7 @@ defmodule KilnCMS.SchemaExport.Swift do
     swift =
       case scope.kinds[name] do
         kind when kind in [:object, :opaque] -> scope.names[name]
-        :union -> if scope.names[name] == "Block", do: "Block", else: "JSONValue"
+        :union -> if name in scope.unions, do: scope.names[name], else: "JSONValue"
         nil -> "JSONValue"
       end
 
@@ -731,26 +771,37 @@ defmodule KilnCMS.SchemaExport.Swift do
 
   # ── tagged unions ───────────────────────────────────────────────────────────
 
-  defp tagged_union(_name, nil, _ctx), do: ""
-  defp tagged_union(_name, %{members: []}, _ctx), do: ""
+  defp tagged_union(nil, _ctx), do: ""
 
-  defp tagged_union(name, %{tag: tag, members: members}, ctx) do
-    # A member without a `const` tag cannot be told apart on the wire, so it
-    # gets no case; it decodes as `.unknown` like any other unlisted type.
-    members = Enum.filter(members, &(is_binary(&1.tag) and Map.has_key?(ctx.names, &1.def)))
+  defp tagged_union(%{tag: tag} = union, ctx) do
+    rows = union_rows(union, ctx.names)
+
+    if rows == [] do
+      ""
+    else
+      swift_name = if union.origin == :document, do: "Document", else: ctx.names[union.name]
+      emit_tagged_union(swift_name, union, tag, rows, ctx)
+    end
+  end
+
+  # A member without a `const` tag cannot be told apart on the wire, so it
+  # gets no case; it decodes as `.unknown` like any other unlisted type.
+  defp union_rows(%{members: members}, names),
+    do: Enum.filter(members, &(is_binary(&1.tag) and Map.has_key?(names, &1.def)))
+
+  defp emit_tagged_union(name, union, tag, members, ctx) do
     cases = enum_cases(Enum.map(members, & &1.tag), ["type"])
     rows = Enum.zip(members, Enum.map(cases, &elem(&1, 1)))
     i1 = @indent
     i2 = i1 <> @indent
     i3 = i2 <> @indent
 
-    what = if name == "Block", do: "block", else: "content"
+    {summary, unknown_doc} = union_docs(union, tag)
 
     """
-    /// Any #{what} in a fired `:json` artifact, told apart by `#{tag}`.
-    public indirect enum #{name}: #{@conformances} {
+    #{doc(summary, "")}public indirect enum #{name}: #{@conformances} {
     #{Enum.map_join(rows, "\n", fn {m, c} -> "#{i1}case #{ident(c)}(#{ctx.names[m.def]})" end)}
-    #{i1}/// A #{what} type this build does not know — one added after it was generated.
+    #{i1}/// #{unknown_doc}
     #{i1}case unknown(type: String)
 
     #{i1}private enum TagKey: String, CodingKey {
@@ -782,6 +833,23 @@ defmodule KilnCMS.SchemaExport.Swift do
     #{i1}}
     }\
     """
+  end
+
+  defp flexible_field(%{flexible: %{"path" => [_ | _] = path}}), do: List.last(path)
+  defp flexible_field(union), do: union.name
+
+  defp union_docs(%{origin: :flexible} = union, tag) do
+    summary =
+      "One item of the flexible field `#{flexible_field(union)}`, told apart by `#{tag}`."
+
+    {summary, "An item type this build does not know — one added after it was generated."}
+  end
+
+  defp union_docs(%{origin: origin}, tag) do
+    what = if origin == :block, do: "block", else: "content"
+
+    {"Any #{what} in a fired `:json` artifact, told apart by `#{tag}`.",
+     "A #{what} type this build does not know — one added after it was generated."}
   end
 
   defp json_value do

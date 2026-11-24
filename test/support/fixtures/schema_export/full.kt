@@ -485,6 +485,124 @@ public object BlockSerializer : KSerializer<Block> {
 
 // endregion
 
+// region Flexible items
+
+/** An item of the `hero` type. */
+@Serializable
+public data class FlexPostSectionsHero(
+    @SerialName("_id") public val id: String,
+    /** The item's settings, apart from its content. */
+    @SerialName("_settings") public val settings: Settings? = null,
+    @SerialName("_type") public val type: String,
+    /** Items of mixed types, in the order the editor arranged them. Each item names its type in `_type`. */
+    public val cols: List<FlexPostSectionsHeroCols>? = null,
+    public val headline: String? = null,
+    /** Snapshot of the picked media item. */
+    public val image: MediaSnapshot? = null,
+    /**
+     * Write-time snapshot of a referenced record.
+     *
+     * Links to: `post`.
+     */
+    public val link: JsonObject? = null,
+) : FlexPostSections {
+    @Serializable
+    public data class Settings(
+        public val background: String? = null,
+    )
+}
+
+/** An item of the `hero_cols` type. */
+@Serializable
+public data class FlexPostSectionsHeroCols2(
+    @SerialName("_id") public val id: String,
+    @SerialName("_type") public val type: String,
+    public val count: Long? = null,
+) : FlexPostSections
+
+/** An item of the `text` type. */
+@Serializable
+public data class FlexPostSectionsHeroColsText(
+    @SerialName("_id") public val id: String,
+    @SerialName("_type") public val type: String,
+    public val body: String? = null,
+) : FlexPostSectionsHeroCols
+
+/** An item of the `quote` type. */
+@Serializable
+public data class FlexPostSectionsQuote(
+    @SerialName("_id") public val id: String,
+    @SerialName("_type") public val type: String,
+    public val cite: String? = null,
+    public val text: String? = null,
+) : FlexPostSections
+
+/** One item of the flexible field `sections`, told apart by `_type`. */
+@Serializable(with = FlexPostSectionsSerializer::class)
+public sealed interface FlexPostSections {
+    /** An item type this build does not know — one added after it was generated. */
+    public data class Unknown(public val type: String, public val raw: JsonObject) : FlexPostSections
+}
+
+/** Reads a [FlexPostSections] by its `_type`; JSON only. */
+public object FlexPostSectionsSerializer : KSerializer<FlexPostSections> {
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("FlexPostSections")
+
+    override fun deserialize(decoder: Decoder): FlexPostSections {
+        val input = decoder as? JsonDecoder ?: throw SerializationException("FlexPostSections decodes from JSON only")
+        val raw = input.decodeJsonElement().jsonObject
+        return when (val type = (raw["_type"] as? JsonPrimitive)?.contentOrNull) {
+            "hero" -> input.json.decodeFromJsonElement(FlexPostSectionsHero.serializer(), raw)
+            "hero_cols" -> input.json.decodeFromJsonElement(FlexPostSectionsHeroCols2.serializer(), raw)
+            "quote" -> input.json.decodeFromJsonElement(FlexPostSectionsQuote.serializer(), raw)
+            else -> FlexPostSections.Unknown(type.orEmpty(), raw)
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: FlexPostSections) {
+        val output = encoder as? JsonEncoder ?: throw SerializationException("FlexPostSections encodes to JSON only")
+        val raw = when (value) {
+            is FlexPostSectionsHero -> output.json.encodeToJsonElement(FlexPostSectionsHero.serializer(), value).tagged("_type", "hero")
+            is FlexPostSectionsHeroCols2 -> output.json.encodeToJsonElement(FlexPostSectionsHeroCols2.serializer(), value).tagged("_type", "hero_cols")
+            is FlexPostSectionsQuote -> output.json.encodeToJsonElement(FlexPostSectionsQuote.serializer(), value).tagged("_type", "quote")
+            is FlexPostSections.Unknown -> value.raw
+        }
+        output.encodeJsonElement(raw)
+    }
+}
+
+/** One item of the flexible field `cols`, told apart by `_type`. */
+@Serializable(with = FlexPostSectionsHeroColsSerializer::class)
+public sealed interface FlexPostSectionsHeroCols {
+    /** An item type this build does not know — one added after it was generated. */
+    public data class Unknown(public val type: String, public val raw: JsonObject) : FlexPostSectionsHeroCols
+}
+
+/** Reads a [FlexPostSectionsHeroCols] by its `_type`; JSON only. */
+public object FlexPostSectionsHeroColsSerializer : KSerializer<FlexPostSectionsHeroCols> {
+    override val descriptor: SerialDescriptor = buildClassSerialDescriptor("FlexPostSectionsHeroCols")
+
+    override fun deserialize(decoder: Decoder): FlexPostSectionsHeroCols {
+        val input = decoder as? JsonDecoder ?: throw SerializationException("FlexPostSectionsHeroCols decodes from JSON only")
+        val raw = input.decodeJsonElement().jsonObject
+        return when (val type = (raw["_type"] as? JsonPrimitive)?.contentOrNull) {
+            "text" -> input.json.decodeFromJsonElement(FlexPostSectionsHeroColsText.serializer(), raw)
+            else -> FlexPostSectionsHeroCols.Unknown(type.orEmpty(), raw)
+        }
+    }
+
+    override fun serialize(encoder: Encoder, value: FlexPostSectionsHeroCols) {
+        val output = encoder as? JsonEncoder ?: throw SerializationException("FlexPostSectionsHeroCols encodes to JSON only")
+        val raw = when (value) {
+            is FlexPostSectionsHeroColsText -> output.json.encodeToJsonElement(FlexPostSectionsHeroColsText.serializer(), value).tagged("_type", "text")
+            is FlexPostSectionsHeroCols.Unknown -> value.raw
+        }
+        output.encodeJsonElement(raw)
+    }
+}
+
+// endregion
+
 // region Documents
 
 /** A published `Page` as fired to the `:json` surface. */
@@ -585,6 +703,8 @@ public data class PostDocument(
         public val related: List<RelatedItem>? = null,
         /** The items, in the order the editor arranged them. */
         public val scores: List<Long>? = null,
+        /** Items of mixed types, in the order the editor arranged them. Each item names its type in `_type`. */
+        public val sections: List<FlexPostSections>? = null,
         public val seo: Seo? = null,
         public val source: Source? = null,
         public val specs: List<SpecsItem>? = null,
