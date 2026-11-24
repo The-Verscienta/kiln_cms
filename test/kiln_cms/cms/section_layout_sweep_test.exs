@@ -191,6 +191,44 @@ defmodule KilnCMS.CMS.SectionLayoutSweepTest do
     assert rows == [["Sweep Broken"], ["Sweep Page Gone"]]
   end
 
+  test "a field filed under the section after the sweep's read keeps its layout",
+       %{admin: admin, site: site} do
+    orphan!(site, %{name: "Sweep Late"})
+    orphan!(site, %{name: "Sweep Gone"})
+
+    # Between the read that found both and their deletes, an admin files a
+    # field under one of them.
+    late = fn
+      %{name: "Sweep Late"} -> field!(admin, site, %{section: "Sweep Late"})
+      _layout -> :ok
+    end
+
+    {result, _log} = swept(org_id: site.id, before_prune: late)
+
+    assert %{pruned: 1, failed: 0, layouts: [%{name: "Sweep Gone"}]} = result
+    assert names(site) == ["Sweep Late"]
+  end
+
+  test "a layout another writer deleted first is neither pruned here nor a failure",
+       %{site: site} do
+    first = orphan!(site, %{name: "Sweep Raced"})
+    orphan!(site, %{name: "Sweep Gone"})
+
+    # Another pruner (the fields admin, a field write) gets there first.
+    raced = fn
+      %{name: "Sweep Raced"} ->
+        :ok = CMS.destroy_field_section(first, authorize?: false, tenant: site)
+
+      _layout ->
+        :ok
+    end
+
+    {result, _log} = swept(org_id: site.id, before_prune: raced)
+
+    assert %{pruned: 1, failed: 0, layouts: [%{name: "Sweep Gone"}]} = result
+    assert names(site) == []
+  end
+
   test "a dry run reports what it would delete, and deletes nothing", %{site: site} do
     orphan!(site, %{name: "Sweep Gone"})
 

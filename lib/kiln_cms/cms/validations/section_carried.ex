@@ -22,11 +22,6 @@ defmodule KilnCMS.CMS.Validations.SectionCarried do
   lock the move's prune could run before the create committed, and the new
   row would be left with nothing to lay out.
 
-  Two writers can still meet head-on: a field sync import holding a field it
-  moved, and an admin's create waiting on it while holding a lock the import
-  needs next. Postgres detects that deadlock and fails one of them, which
-  the caller sees as an ordinary failed write.
-
   A field of a type this release does not register (#2605) still carries
   its section, as everywhere else in `SectionLayouts`.
 

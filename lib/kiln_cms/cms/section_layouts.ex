@@ -21,7 +21,7 @@ defmodule KilnCMS.CMS.SectionLayouts do
     * `KilnCMS.CMS.Validations.SectionCarried`, which refuses a
       `FieldSection` create for a name no field carries (`carrier?/3`, #3061);
     * `KilnCMS.CMS.SectionLayoutSweep`, which prunes the rows older releases
-      left behind (`prune_uncarried/2`, `uncarried/2`, #3060).
+      left behind (`uncarried/2`, `prune_if_uncarried/3`, #3060).
 
   Every read here is fresh, never a caller's copy: two admins on the same
   type each see the other's new sections, so a prune decided from a page
@@ -39,9 +39,11 @@ defmodule KilnCMS.CMS.SectionLayouts do
 
   require Ash.Query
 
+  alias KilnCMS.AfterCommit
   alias KilnCMS.CMS
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FieldSection
+  alias KilnCMS.Repo
 
   @typedoc "A layout's owner: a compiled content type or a dynamic type's id."
   @type owner :: {:compiled, atom()} | {:dynamic, Ecto.UUID.t()}
@@ -139,6 +141,57 @@ defmodule KilnCMS.CMS.SectionLayouts do
       {:error, error} -> {:halt, {:error, error}}
     end
   end
+
+  @doc """
+  Destroys one layout `uncarried/2` found, unless a field carries its name
+  by now: re-checked with `carrier?/3` in the same transaction as the
+  destroy, so a field filed under it since that read keeps its layout, and
+  a move of a field out of it waits for the destroy. Opens its own
+  transaction, so call it outside one, never from a field write.
+
+  `{:ok, :pruned}`, `{:ok, :carried}` (left alone), or `{:ok, :gone}` when
+  another writer deleted the row first (nothing left to do), else the
+  refused or failed read or destroy.
+  """
+  @spec prune_if_uncarried(owner(), struct(), keyword()) ::
+          {:ok, :pruned | :carried | :gone} | {:error, term()}
+  def prune_if_uncarried(owner, row, opts) do
+    opts =
+      Keyword.update(opts, :context, AfterCommit.context(), &Map.merge(&1, AfterCommit.context()))
+
+    # Held by `deferring/1` until the commit: the destroy's cache bust must
+    # not run before the row is gone for other readers.
+    in_transaction = fn -> Repo.transaction(fn -> recheck_and_destroy(owner, row, opts) end) end
+
+    case AfterCommit.deferring(in_transaction) do
+      {:ok, outcome} -> {:ok, outcome}
+      {:error, error} -> if gone?(error), do: {:ok, :gone}, else: {:error, error_class(error)}
+    end
+  end
+
+  defp recheck_and_destroy(owner, row, opts) do
+    with {:ok, false} <- carrier?(owner, row.name, opts),
+         :ok <- CMS.destroy_field_section(row, opts) do
+      :pruned
+    else
+      {:ok, true} -> :carried
+      {:error, error} -> Repo.rollback(error)
+    end
+  end
+
+  # Deleted by another writer between the read and the destroy.
+  defp gone?(error) do
+    error
+    |> error_class()
+    |> Map.get(:errors, [])
+    |> Enum.any?(
+      &(match?(%Ash.Error.Changes.StaleRecord{}, &1) or match?(%Ash.Error.Query.NotFound{}, &1))
+    )
+  end
+
+  # A rollback Ash issued carries the query or changeset it failed.
+  defp error_class(%{errors: errors}) when is_list(errors), do: Ash.Error.to_error_class(errors)
+  defp error_class(error), do: Ash.Error.to_error_class(error)
 
   @doc """
   The owner's layouts whose name no top-level field carries, read now,
