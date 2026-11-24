@@ -204,16 +204,23 @@ defmodule KilnCMS.CMS.ReleaseItem do
       change set_attribute(:status, :rolled_back)
     end
 
-    # The unvalidated twin of `:cancel`, for `Changes.CancelPendingReleaseItems`.
-    # It runs from an `after_action` hook on the release's own `:archive`, by
-    # which point the release row already reads `:archived` inside the
-    # transaction — so `:cancel`'s `ReleaseOpenForEdit` validation would refuse
-    # the very write that archiving requires.
+    # The unvalidated twin of `:cancel`, for `Changes.CancelPendingReleaseItems`
+    # and `KilnCMS.CMS.StrandedReleaseItemSweep` (#3072). The first runs from an
+    # `after_action` hook on the release's own `:archive`, by which point the
+    # release row already reads `:archived` inside the transaction — so
+    # `:cancel`'s `ReleaseOpenForEdit` validation would refuse the very write
+    # that archiving requires; the second frees items on releases that already
+    # closed.
     update :mark_cancelled do
       description "System: the release was closed out without shipping this item."
       accept []
       require_atomic? false
 
+      # Compare-and-swap (#3072), like `:mark_applied`: only a still-pending
+      # item is cancelled. An `:applied` or `:rolled_back` item is rollback's
+      # record and must never be rewritten from a stale read; a miss is a
+      # `StaleRecord`, which both callers take as "already free".
+      change filter(expr(status == :pending))
       change set_attribute(:status, :cancelled)
     end
 

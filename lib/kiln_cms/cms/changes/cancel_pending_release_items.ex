@@ -18,6 +18,12 @@ defmodule KilnCMS.CMS.Changes.CancelPendingReleaseItems do
   a `mark_*` write no person may reach. The read uses `authorize_with:
   :error`: a refused read would filter to "nothing pending", archive the
   release, and leave its items reserving their content forever.
+
+  An item another writer freed between the read and its cancel
+  (`KilnCMS.CMS.StrandedReleaseItemSweep`, #3072) is a stale miss on
+  `:mark_cancelled`'s compare-and-swap. That item is free already, which is
+  all the archive needs, so the archive goes on; any other error still
+  aborts the archive.
   """
   use Ash.Resource.Change
 
@@ -37,7 +43,15 @@ defmodule KilnCMS.CMS.Changes.CancelPendingReleaseItems do
       |> Ash.Context.to_opts()
       |> Keyword.merge(tenant: release.org_id, authorize_with: :error)
 
-    write_opts = [actor: KilnCMS.CMS.Bookkeeping.system(), tenant: release.org_id]
+    # `rollback_on_error?: false`: an error comes back to `cancel_one/3`,
+    # which decides, rather than rolling the archive back from inside the
+    # write. (Ash already hands a stale miss back without a rollback; this
+    # keeps that from depending on it.)
+    write_opts = [
+      actor: KilnCMS.CMS.Bookkeeping.system(),
+      tenant: release.org_id,
+      rollback_on_error?: false
+    ]
 
     with {:ok, items} <-
            KilnCMS.CMS.list_release_items_with_status(release.id, :pending, read_opts) do
@@ -47,8 +61,14 @@ defmodule KilnCMS.CMS.Changes.CancelPendingReleaseItems do
 
   defp cancel_one(item, :ok, opts) do
     case KilnCMS.CMS.mark_release_item_cancelled(item, %{}, opts) do
-      {:ok, _} -> {:cont, :ok}
-      {:error, reason} -> {:halt, {:error, reason}}
+      {:ok, _} ->
+        {:cont, :ok}
+
+      {:error, reason} ->
+        # Freed by another writer since the read: free is what archiving needs.
+        if KilnCMS.CMS.Releases.stale?(reason),
+          do: {:cont, :ok},
+          else: {:halt, {:error, reason}}
     end
   end
 end

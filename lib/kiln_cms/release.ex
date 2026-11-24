@@ -228,6 +228,53 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
+  Cancel the release items left `:pending` on releases that already went
+  live, were rolled back or archived, on every site (#3072): items that
+  will never ship with their release, and that keep their record out of
+  every other release. The boot job `KilnCMS.CMS.StrandedReleaseItemSweep`
+  does this ten minutes after each start; this runs it now, for example
+  after a rolling deploy that took longer than that, or after restoring a
+  backup from before 1.12.0.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.cancel_stranded_release_items(dry_run: true)'
+      bin/kiln_cms rpc 'KilnCMS.Release.cancel_stranded_release_items()'
+
+  Options: `dry_run: true` lists what it would cancel and cancels nothing;
+  `org_id: "<uuid>"` limits it to one site. Prints each item and a
+  summary, and returns the sweep's result, or `{:error, message}`.
+
+  Through `rpc`, not `eval`, like `prune_section_layouts/1`: the boot job
+  covers a node that is not serving yet.
+  """
+  @spec cancel_stranded_release_items(keyword()) ::
+          KilnCMS.CMS.StrandedReleaseItemSweep.result() | {:error, String.t()}
+  def cancel_stranded_release_items(opts \\ []),
+    do: run_stranded_release_item_cancel(opts, serving?())
+
+  # `serving?` is an argument only so the test can take the `eval` branch.
+  @doc false
+  def run_stranded_release_item_cancel(opts, serving?) do
+    if serving? do
+      result = KilnCMS.CMS.StrandedReleaseItemSweep.run(opts)
+      verb = if opts[:dry_run] == true, do: "Would cancel", else: "Cancelled"
+
+      for item <- result.items do
+        IO.puts(
+          "#{verb} item #{item.item_id} (#{item.action} #{item.content_type} " <>
+            "#{item.content_id}) of #{item.release_state} release #{item.release_id} " <>
+            "in org #{item.org_id}"
+        )
+      end
+
+      IO.puts("Stranded release items: " <> KilnCMS.CMS.StrandedReleaseItemSweep.summary(result))
+      result
+    else
+      IO.puts(@needs_running_node)
+      {:error, @needs_running_node}
+    end
+  end
+
+  @doc """
   `mix kiln.deprecations` for a release (#1538, #1543): report the accounts and
   queued jobs still holding data only a removed surface read, and optionally
   move the accounts onto a membership first.

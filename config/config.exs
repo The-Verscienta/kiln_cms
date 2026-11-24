@@ -693,6 +693,14 @@ config :kiln_cms, :erasure_backfill_on_boot, true
 # day; a redundant run deletes nothing.
 config :kiln_cms, :section_layout_sweep_on_boot, true
 
+# Whether booting enqueues the stranded release item sweep
+# (`KilnCMS.CMS.StrandedReleaseItemSweep`, #3072): release items left pending
+# on a release that already went live, was rolled back or archived are
+# cancelled, so their records can join another release. Each is logged at
+# info. Ten minutes after boot, deduplicated for a day; a redundant run
+# cancels nothing.
+config :kiln_cms, :stranded_release_item_sweep_on_boot, true
+
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means
 # no SSO strategy is compiled — no sign-in button, no OAuth routes, zero
