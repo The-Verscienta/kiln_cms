@@ -234,6 +234,20 @@ defmodule KilnCMS.Media.IngestTest do
       assert message =~ "boom"
       assert media_count() == before
     end
+
+    test "a bound that is not a positive integer is refused, not read as no bound" do
+      # The stub would answer at once, so an unbounded fetch would succeed.
+      serve_after(0)
+      before = media_count()
+
+      for bad <- [0, -1, :infinity, 1.5] do
+        assert_raise ArgumentError, ~r/:fetch_timeout must be a positive integer/, fn ->
+          Ingest.store_url("https://media.test/cat.png", actor: actor(), fetch_timeout: bad)
+        end
+      end
+
+      assert media_count() == before
+    end
   end
 
   describe "store_file/3" do

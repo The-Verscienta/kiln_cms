@@ -884,11 +884,11 @@ defmodule KilnCMS.Portability.ImportTest do
                Enum.map(slow, &"https://old.example.com#{&1}")
     end
 
-    test "the deadline is per asset: a host group may take longer than it in total", %{
-      actor: actor
-    } do
-      # 10 × 100 ms is 1 s of serial fetching against a 500 ms deadline. Under a
-      # per-group bound the group would be killed halfway.
+    test "a host group whose assets each meet the deadline imports them all, however long it runs",
+         %{actor: actor} do
+      # 10 × 100 ms is 1 s of serial fetching against a 500 ms deadline. This
+      # guards against the deadline being applied to a whole host group, which
+      # would kill this one halfway.
       stub_origin(100)
       paths = for n <- 1..10, do: "/fast-#{n}.png"
 
@@ -925,6 +925,83 @@ defmodule KilnCMS.Portability.ImportTest do
       for path <- rest do
         assert reasons["https://old.example.com#{path}"] == :host_unresponsive
         refute_received {:fetched, ^path}
+      end
+    end
+
+    # SafeFetch's own connect or receive timeout reaches the import as a string
+    # (`"request failed: " <> inspect(%Req.TransportError{reason: :timeout})`),
+    # not as our `{:fetch_timeout, ms}`. A dead origin usually fails this way,
+    # well inside the deadline, so the breaker has to count it too.
+    defp stub_transport_errors(reason) do
+      test = self()
+
+      Req.Test.stub(KilnCMS.Media.Ingest, fn conn ->
+        send(test, {:fetched, conn.request_path})
+
+        if String.starts_with?(conn.request_path, "/dead") do
+          Req.Test.transport_error(conn, reason)
+        else
+          conn
+          |> Plug.Conn.put_resp_content_type("image/png")
+          |> Plug.Conn.send_resp(200, png())
+        end
+      end)
+    end
+
+    test "three transport timeouts in a row trip the breaker too", %{actor: actor} do
+      stub_transport_errors(:timeout)
+      dead = ["/dead-1.png", "/dead-2.png", "/dead-3.png"]
+      rest = ["/fast-1.png", "/fast-2.png"]
+
+      {:ok, report} = Import.run_envelope(sideload_envelope(dead ++ rest), actor: actor)
+
+      assert report.media.imported == 0
+      reasons = Map.new(report.media.failed, &{&1.url, &1.reason})
+
+      for path <- dead do
+        assert reasons["https://old.example.com#{path}"] =~ "TransportError"
+        assert reasons["https://old.example.com#{path}"] =~ "reason: :timeout"
+        assert_received {:fetched, ^path}
+      end
+
+      for path <- rest do
+        assert reasons["https://old.example.com#{path}"] == :host_unresponsive
+        refute_received {:fetched, ^path}
+      end
+    end
+
+    for reason <- [:econnrefused, :closed] do
+      test "a #{inspect(reason)} transport error answers fast and does not trip the breaker", %{
+        actor: actor
+      } do
+        stub_transport_errors(unquote(reason))
+        dead = ["/dead-1.png", "/dead-2.png", "/dead-3.png"]
+        rest = ["/fast-1.png", "/fast-2.png"]
+
+        {:ok, report} = Import.run_envelope(sideload_envelope(dead ++ rest), actor: actor)
+
+        assert report.media.imported == 2
+        assert length(report.media.failed) == 3
+        refute Enum.any?(report.media.failed, &(&1.reason == :host_unresponsive))
+
+        for path <- rest, do: assert_received({:fetched, ^path})
+      end
+    end
+
+    for bad <- [nil, 0, -5, :infinity] do
+      test "a media_fetch_timeout of #{inspect(bad)} means the default, not a failed asset", %{
+        actor: actor
+      } do
+        stub_origin(0)
+
+        {:ok, report} =
+          Import.run_envelope(sideload_envelope(["/fast-1.png"]),
+            actor: actor,
+            media_fetch_timeout: unquote(bad)
+          )
+
+        assert report.media.imported == 1
+        assert report.media.failed == []
       end
     end
 

@@ -102,7 +102,8 @@ defmodule KilnCMS.Portability.Import do
     * `:skip_media` — do not sideload images (default `false`). Blocks keep the
       source URLs, so the imported site hotlinks the old one.
     * `:media_fetch_timeout` — the most one image download may take, in
-      milliseconds (default `60_000`). An image past it is reported failed
+      milliseconds (default `60_000`; anything but a positive integer means
+      the default). An image past it is reported failed
       with `{:fetch_timeout, ms}` and its block keeps the source URL. After
       three timeouts in a row on one host, that host's remaining images are
       reported `:host_unresponsive` without being requested.
@@ -619,10 +620,12 @@ defmodule KilnCMS.Portability.Import do
   # `Ingest.store_url/2`), so nothing that writes a row is ever killed.
   #
   # The bound is deliberately generous: 60 s for one asset, which a 25 MB file
-  # (the download cap) only meets at about 420 KB/s or better. The trade is that
-  # a host answering nothing costs 60 s per asset, which is what the breaker
-  # below is for. There is no bound on the phase as a whole; the progress lines
-  # show it moving.
+  # (the download cap) only meets at about 420 KB/s or better. It is the
+  # ceiling for a server that trickles bytes; a host answering nothing usually
+  # fails sooner, on SafeFetch's 5 s connect timeout or Ingest's 30 s receive
+  # timeout. Either way each dead asset costs seconds, which is what the
+  # breaker below is for. There is no bound on the phase as a whole; the
+  # progress lines show it moving.
   @sideload_concurrency 8
   @sideload_fetch_timeout 60_000
 
@@ -630,7 +633,7 @@ defmodule KilnCMS.Portability.Import do
     by_host = Enum.group_by(wanted, &host_of/1)
     total = length(wanted)
     progress = progress_fun(opts, total, "media")
-    fetch_timeout = Keyword.get(opts, :media_fetch_timeout, @sideload_fetch_timeout)
+    fetch_timeout = fetch_timeout(opts)
 
     results =
       by_host
@@ -645,9 +648,10 @@ defmodule KilnCMS.Portability.Import do
         {:ok, list} ->
           list
 
-        # Defensive: `store/3` rescues and the stream has no timeout, so a
-        # worker has no expected way to exit. If one does, that host's assets
-        # are reported under its name rather than lost without a trace.
+        # Unreachable under normal linking: `store/3` rescues and catches
+        # exits and the stream has no timeout, so a worker only exits if it is
+        # killed from outside. Kept so that case reports the host's assets
+        # under its name rather than losing them without a trace.
         {:exit, {{host, _assets}, reason}} ->
           [{:error, %{url: "(#{host}) worker exited", reason: reason}}]
       end)
@@ -674,9 +678,20 @@ defmodule KilnCMS.Portability.Import do
     }
   end
 
-  # A host that has stopped answering would otherwise cost the full deadline
-  # for every asset it holds: 300 images behind a dead origin is five hours of
-  # waiting to be told 300 times what the third timeout already said. After
+  # Anything but a positive integer (`nil`, `0`, a negative, `:infinity`) is
+  # the default: an unbounded download is what #2720's deadline exists to
+  # prevent, and a zero or negative one would fail every asset unrequested.
+  defp fetch_timeout(opts) do
+    case Keyword.get(opts, :media_fetch_timeout) do
+      ms when is_integer(ms) and ms > 0 -> ms
+      _other -> @sideload_fetch_timeout
+    end
+  end
+
+  # A host that has stopped answering would otherwise cost a timeout for every
+  # asset it holds: 300 images behind a dead origin is 25 minutes at a 5 s
+  # connect timeout, and hours at the full deadline, of waiting to be told 300
+  # times what the third timeout already said. After
   # this many timeouts in a row the rest of that host's assets are reported
   # `:host_unresponsive` without a request. Any answer that is not a timeout,
   # a 404 included, shows the host is there and resets the count.
@@ -711,13 +726,16 @@ defmodule KilnCMS.Portability.Import do
   end
 
   # Our own deadline, and SafeFetch's connect or receive timeout, which it
-  # reports as a string (`SafeFetch.get/2` stringifies transport errors).
+  # reports as a string (`SafeFetch.get/2` stringifies transport errors as
+  # `"request failed: " <> inspect(reason)`). The match is on the inspected
+  # `TransportError{reason: :timeout}` (Req's or Mint's), so a refused or
+  # closed connection, which answers fast, does not count.
   # A skipped asset counts too, so a tripped breaker stays tripped.
   defp timed_out?({:error, %{reason: {:fetch_timeout, _ms}}}), do: true
   defp timed_out?({:error, %{reason: :host_unresponsive}}), do: true
 
-  defp timed_out?({:error, %{reason: "request failed: %Req.TransportError{reason: :timeout}"}}),
-    do: true
+  defp timed_out?({:error, %{reason: "request failed: " <> reason}}),
+    do: String.contains?(reason, "TransportError{reason: :timeout}")
 
   defp timed_out?(_result), do: false
 
@@ -746,10 +764,11 @@ defmodule KilnCMS.Portability.Import do
   # uploader in any export format, so the honest value is none at all.
   # `cache_bust: :defer`: `sideload/2` issues one clear for the whole run.
   #
-  # The rescue is the per-asset boundary. This runs in a stream worker linked
-  # to the import, so an exception here would end the whole run and lose the
-  # report of everything already created. One asset's surprise is that asset's
-  # failure, like any other.
+  # The rescue and catch are the per-asset boundary. This runs in a stream
+  # worker linked to the import, so an exception or exit here (a
+  # `GenServer.call` timing out inside the store, say) would end the whole run
+  # and lose the report of everything already created. One asset's surprise
+  # is that asset's failure, like any other.
   defp store(asset, opts, fetch_timeout) do
     Ingest.store_url(
       asset.url,
@@ -758,6 +777,8 @@ defmodule KilnCMS.Portability.Import do
     )
   rescue
     error -> {:error, {:exception, Exception.message(error)}}
+  catch
+    :exit, reason -> {:error, {:exit, Exception.format_exit(reason)}}
   end
 
   defp host_of(%{url: url}) do

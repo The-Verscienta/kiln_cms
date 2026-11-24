@@ -320,30 +320,39 @@ defmodule KilnCMS.SafeFetch do
   def request_on_private_pool(options) do
     {connect_options, options} = Keyword.pop(options, :connect_options, [])
     pool = Req.Finch.pool_options(connect_options: connect_options)
+    # Watching before the pool exists, so there is no moment when the pool is
+    # running, unlinked and unwatched (see `start_pool/3`).
+    watcher = watch()
 
-    case start_pool(pool, System.monotonic_time(:millisecond) + @slot_wait_ms) do
-      {:ok, name, pid} ->
-        watcher = watch(pid)
+    try do
+      case start_pool(pool, watcher, System.monotonic_time(:millisecond) + @slot_wait_ms) do
+        {:ok, name, pid} ->
+          try do
+            Req.request(Req.new(Keyword.put(options, :finch, name: name)))
+          after
+            stop_pool(pid)
+          end
 
-        try do
-          Req.request(Req.new(Keyword.put(options, :finch, name: name)))
-        after
-          send(watcher, :done)
-          stop_pool(pid)
-        end
-
-      :busy ->
-        {:error, :too_many_outbound_requests}
+        :busy ->
+          {:error, :too_many_outbound_requests}
+      end
+    after
+      send(watcher, :done)
     end
   end
 
-  # The name is the lock: a slot whose Finch is running is taken. Unlinked at
-  # once, so a caller that traps exits never sees the pool's `:EXIT`.
-  defp start_pool(pool, deadline) do
+  # The name is the lock: a slot whose Finch is running is taken. Unlinked so
+  # a caller that traps exits never sees the pool's `:EXIT`, but only once the
+  # watcher has the pid: until then the link stops the pool if the caller dies
+  # (a supervisor exits with its parent), and from then on the watcher does.
+  # Signals between two processes arrive in order, so the watcher always has
+  # the `{:pool, pid}` before the caller's `:DOWN`.
+  defp start_pool(pool, watcher, deadline) do
     started =
       Enum.find_value(Enum.shuffle(@pool_slots), fn name ->
         case Finch.start_link(name: name, pools: %{default: pool}) do
           {:ok, pid} ->
+            send(watcher, {:pool, pid})
             Process.unlink(pid)
             {:ok, name, pid}
 
@@ -361,25 +370,51 @@ defmodule KilnCMS.SafeFetch do
 
       true ->
         Process.sleep(25)
-        start_pool(pool, deadline)
+        start_pool(pool, watcher, deadline)
     end
   end
 
   # `after` does not run for a caller that is killed (a timed-out task), and
   # the pool is not linked to it. This stops the pool in that case, so a slot
-  # cannot stay taken by a request nobody is waiting for.
-  defp watch(pool) do
+  # cannot stay taken by a request nobody is waiting for. It is started before
+  # the pool and told the pool's pid before the caller unlinks from it.
+  defp watch do
     caller = self()
 
     spawn(fn ->
       ref = Process.monitor(caller)
-
-      receive do
-        :done -> :ok
-        {:DOWN, ^ref, :process, _pid, _reason} -> stop_pool(pool)
-      end
+      watch_loop(ref, nil)
     end)
   end
+
+  defp watch_loop(ref, pool) do
+    receive do
+      {:pool, pid} ->
+        watch_loop(ref, pid)
+
+      :done ->
+        :ok
+
+      {:DOWN, ^ref, :process, _pid, _reason} ->
+        pool |> late_pool() |> stop_watched_pool()
+    end
+  end
+
+  # A caller already dead when the watcher monitored it gives a `:noproc`
+  # `:DOWN` the runtime raises, not the caller, so the caller's last
+  # `{:pool, pid}` is checked for rather than assumed to have come first.
+  defp late_pool(nil) do
+    receive do
+      {:pool, pid} -> pid
+    after
+      0 -> nil
+    end
+  end
+
+  defp late_pool(pid), do: pid
+
+  defp stop_watched_pool(nil), do: :ok
+  defp stop_watched_pool(pid), do: stop_pool(pid)
 
   defp stop_pool(pid) do
     Supervisor.stop(pid, :normal, 5_000)

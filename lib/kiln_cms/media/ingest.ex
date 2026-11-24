@@ -143,6 +143,9 @@ defmodule KilnCMS.Media.Ingest do
   that raises gives `{:error, {:fetch_crashed, message}}`. The bound stops
   before anything is written: the sniff, the store and the `MediaItem` create
   run after it, so a killed fetch leaves no temp file, blob or row behind.
+  A `:fetch_timeout` other than `nil` or a positive integer raises
+  `ArgumentError`, since quietly reading it as "no bound" would drop the
+  deadline the caller asked for.
   """
   @spec store_url(String.t(), opts()) :: {:ok, struct()} | {:error, term()}
   # `path` is this module's own `write_temp/1` temp file (a UUID under
@@ -753,8 +756,19 @@ defmodule KilnCMS.Media.Ingest do
     fetch = fn -> download(url, Keyword.get(opts, :max_redirects, 0)) end
 
     case Keyword.get(opts, :fetch_timeout) do
-      nil -> fetch.()
-      ms when is_integer(ms) and ms > 0 -> bounded(fetch, ms)
+      nil ->
+        fetch.()
+
+      ms when is_integer(ms) and ms > 0 ->
+        bounded(fetch, ms)
+
+      # Only `nil` means "no bound". A zero, negative or non-integer value is a
+      # caller bug, and quietly reading it as unbounded would drop the very
+      # deadline the caller asked for.
+      other ->
+        raise ArgumentError,
+              ":fetch_timeout must be a positive integer (milliseconds) or nil, " <>
+                "got: #{inspect(other)}"
     end
   end
 
