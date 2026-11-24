@@ -17,6 +17,15 @@ defmodule KilnCMS.CMS.ReferenceSelection do
         }
       }
 
+  `"add_new" => false` turns off the picker's "Add new *Type*" (and the
+  create-on-type row) for the field, on both sides of the relationship: the
+  field's own picker and the reverse field's on each target. It is not a
+  condition and narrows no read; it only stops the picker creating records,
+  so a site can keep editors from making thin drafts from a relationship.
+  Absent or `true` is the default, "Add new" offered. Like the rest of the
+  map it is not an access control: the editor may still create the record
+  from its own type's screen.
+
   Conditions AND together. A condition names what the server knows how to
   evaluate; raw filters are never accepted. The map is **not an access
   control**: it is one more `AND` on a read the actor's own policy already
@@ -64,7 +73,7 @@ defmodule KilnCMS.CMS.ReferenceSelection do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
 
-  @top_keys ~w(states owner sort by_type create)
+  @top_keys ~w(states owner sort by_type create add_new)
   @type_keys ~w(tags_any category fields)
   @states ~w(draft in_review published archived)
   @state_atoms %{
@@ -152,7 +161,8 @@ defmodule KilnCMS.CMS.ReferenceSelection do
          :ok <- states_shape(Map.get(map, "states")),
          :ok <- owner_shape(Map.get(map, "owner")),
          :ok <- sort_shape(Map.get(map, "sort")),
-         :ok <- create_shape(Map.get(map, "create")) do
+         :ok <- create_shape(Map.get(map, "create")),
+         :ok <- add_new_shape(Map.get(map, "add_new"), Map.get(map, "create")) do
       by_type_shape(Map.get(map, "by_type"))
     end
   end
@@ -163,6 +173,16 @@ defmodule KilnCMS.CMS.ReferenceSelection do
     do: :ok
 
   defp create_shape(_other), do: {:error, "create must be {\"type\": a target type name}"}
+
+  defp add_new_shape(nil, _create), do: :ok
+  defp add_new_shape(true, _create), do: :ok
+
+  defp add_new_shape(false, nil), do: :ok
+
+  defp add_new_shape(false, _create),
+    do: {:error, "create needs add_new: a field that may not add new records can't create them"}
+
+  defp add_new_shape(_other, _create), do: {:error, "add_new must be true or false"}
 
   defp known_keys(map, allowed, what) do
     case Map.keys(map) -- allowed do
@@ -495,6 +515,18 @@ defmodule KilnCMS.CMS.ReferenceSelection do
   # --- create-on-type (#2285, part 4) ----------------------------------------
 
   @doc """
+  Whether the picker may create a record for a field with `selection`: false
+  only for `"add_new" => false`.
+  """
+  @spec add_new?(term()) :: boolean()
+  def add_new?(selection) do
+    case normalize(selection) do
+      %{"add_new" => false} -> false
+      _other -> true
+    end
+  end
+
+  @doc """
   The target type a selection lets editors create on the fly, or `nil`:
   `create: %{"type" => name}`.
   """
@@ -627,7 +659,8 @@ defmodule KilnCMS.CMS.ReferenceSelection do
     case normalize(selection) do
       %{} = map ->
         map
-        |> Map.take(~w(states owner sort by_type create))
+        |> Map.take(~w(states owner sort by_type create add_new))
+        |> live_add_new()
         |> live_create(targets)
         |> live_by_type(targets, org_id)
         |> normalize()
@@ -642,6 +675,10 @@ defmodule KilnCMS.CMS.ReferenceSelection do
   end
 
   defp live_create(map, _targets), do: Map.delete(map, "create")
+
+  # Only the non-default value is reported.
+  defp live_add_new(%{"add_new" => false} = map), do: map
+  defp live_add_new(map), do: Map.delete(map, "add_new")
 
   defp live_by_type(%{"by_type" => %{} = by_type} = map, targets, org_id) do
     live =

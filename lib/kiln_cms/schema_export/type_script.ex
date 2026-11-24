@@ -47,6 +47,7 @@ defmodule KilnCMS.SchemaExport.TypeScript do
       section("Shared", declarations(model.shared)),
       section("Blocks", declarations(model.blocks)),
       section("Block union", [union_alias("KilnBlock", model.block_union)]),
+      section("Flexible items", declarations(model.flex_items) ++ flex_unions(model.unions)),
       section("Documents", declarations(model.documents)),
       section("Document union", [document_union(model.document_union.members)])
     ]
@@ -99,7 +100,9 @@ defmodule KilnCMS.SchemaExport.TypeScript do
     // `fields(names: [...])`, which returns `CustomFieldValue`s; narrow them on
     // `__typename`. Values arrive under per-kind aliases (`asString`, `asInt`,
     // ...) because GraphQL forbids one response key with several types. The
-    // fragment goes one level into lists and groups.
+    // fragment goes one level into lists and groups, and into a flexible
+    // field's items (`FlexibleItemValue`: `id`, `type`, its `settings` and its
+    // `fields`) without following a nested flexible field or group.
     //
     // A field that is unknown, deleted, private to the reader or of another
     // kind than the accessor is `null` (or absent from `fields`), so the
@@ -147,7 +150,15 @@ defmodule KilnCMS.SchemaExport.TypeScript do
           }>;
         }
       | { __typename: "ListValue"; name: string; items: KilnCustomFieldValue[] }
-      | { __typename: "GroupValue"; name: string; fields: KilnCustomFieldValue[] };
+      | { __typename: "GroupValue"; name: string; fields: KilnCustomFieldValue[] }
+      | {
+          __typename: "FlexibleItemValue";
+          name: string;
+          id: string | null;
+          type: string;
+          settings: KilnCustomFieldValue[];
+          fields: KilnCustomFieldValue[];
+        };
     """
   end
 
@@ -208,6 +219,17 @@ defmodule KilnCMS.SchemaExport.TypeScript do
   defp union_alias(name, %{members: members}) do
     members = Enum.map_join(members, "\n  | ", &type_name(&1.def))
     "export type #{name} =\n  | #{members};"
+  end
+
+  # A flexible field's item union (#2282): an alias over the item interfaces,
+  # which every member's `_type` literal tells apart. No catch-all member — an
+  # item whose type was removed is the caller's to narrow away.
+  defp flex_unions(unions) do
+    Enum.map(unions, fn %{members: members} = union ->
+      members = Enum.map_join(members, "\n  | ", &type_name(&1.def))
+      comment = if union.description, do: doc_comment(union), else: ""
+      "#{comment}export type #{type_name(union.name)} =\n  | #{members};"
+    end)
   end
 
   defp document_union([]), do: ""

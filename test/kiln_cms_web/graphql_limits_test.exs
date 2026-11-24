@@ -155,6 +155,97 @@ defmodule KilnCMSWeb.GraphqlLimitsTest do
 
       assert Enum.any?(messages(gql(conn, %{query: nested})), &(&1 =~ "is too complex"))
     end
+
+    # A flexible item's `settings` and `fields` are each a list priced like a
+    # group's: nested twice over a page they are over the cap, one level is not.
+    test "a flexible item's settings and fields are priced as unlimited lists", %{conn: conn} do
+      for list <- ["settings", "fields"] do
+        nested = """
+        { publishedPosts(limit: 25) { results {
+          fields(names: ["s"]) { ... on ListValue { items { ... on FlexibleItemValue {
+            #{list} { ... on ListValue { items { ... on FlexibleItemValue { #{list} { name } } } } }
+          } } } }
+        } } }
+        """
+
+        assert Enum.any?(messages(gql(conn, %{query: nested})), &(&1 =~ "is too complex")),
+               "nested #{list} was not priced"
+      end
+
+      one_level = """
+      { publishedPosts(limit: 1) { results {
+        fields(names: ["s"]) { ... on ListValue { items { ... on FlexibleItemValue {
+          id type settings { name } fields { name }
+        } } } }
+      } } }
+      """
+
+      refute Map.has_key?(gql(conn, %{query: one_level}), "errors")
+    end
+
+    # The fragment the typed export generates for a flexible field must be a
+    # valid document, under the token limit, and select a flexible item one
+    # level deep (`SchemaExport.GraphQL`), not through its nested flexible
+    # fields.
+    #
+    # Its complexity is NOT asserted against `max_complexity`: `fields(names:)`
+    # prices every name at the whole selection, and that selection was already
+    # over the cap before flexible items (a single `multiple` string field is
+    # 631 against 200, measured on `/gql`), so the generated fragments only run
+    # with a raised cap. See the report on #2282 PR 5.
+    test "the generated fragment for a flexible field is a valid, small document", %{conn: _conn} do
+      admin =
+        Ash.Seed.seed!(User, %{
+          email: "gql-limits-flex-#{System.unique_integer([:positive])}@example.com",
+          hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+          confirmed_at: DateTime.utc_now(),
+          role: :admin
+        })
+
+      define = fn attrs ->
+        CMS.create_field_definition!(Map.merge(%{label: "Field"}, attrs), actor: admin)
+      end
+
+      sections = define.(%{content_type: :post, name: "sections", field_type: :flexible})
+      hero = define.(%{name: "hero", field_type: :group, flex_of_id: sections.id})
+      define.(%{name: "headline", field_type: :string, group_of_id: hero.id})
+
+      define.(%{
+        name: "background",
+        field_type: :string,
+        group_of_id: hero.id,
+        item_setting: true
+      })
+
+      nested = define.(%{name: "cols", field_type: :flexible, group_of_id: hero.id})
+      define.(%{name: "text", field_type: :group, flex_of_id: nested.id})
+
+      define.(%{content_type: :post, name: "price", field_type: :float})
+      define.(%{content_type: :post, name: "synonyms", field_type: :string, multiple: true})
+
+      document = KilnCMS.SchemaExport.json_schema(graphql: true)
+
+      [section] =
+        document
+        |> KilnCMS.SchemaExport.Walk.model()
+        |> KilnCMS.SchemaExport.GraphQL.types(& &1)
+        |> Enum.filter(&(&1.on == "Post"))
+
+      fragment = KilnCMS.SchemaExport.GraphQL.fragment("PostCustomFields", section)
+      assert fragment =~ "... on FlexibleItemValue { id type settings"
+      assert length(String.split(fragment, "... on FlexibleItemValue")) == 2
+
+      query = "{ publishedPosts(limit: 1) { results { ...PostCustomFields } } }\n" <> fragment
+
+      assert {:ok, tokens} = Absinthe.Lexer.tokenize(query)
+      assert length(tokens) < GraphqlLimits.token_limit()
+
+      # Every field and fragment type in it exists in the schema.
+      assert {:ok, %{data: %{"publishedPosts" => %{"results" => []}}} = result} =
+               Absinthe.run(query, KilnCMSWeb.GraphqlSchema, context: %{actor: nil})
+
+      refute Map.has_key?(result, :errors)
+    end
   end
 
   describe "the socket" do

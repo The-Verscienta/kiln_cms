@@ -21,10 +21,20 @@ defmodule KilnCMS.SchemaExport.Walk do
     * `:format_version` — `x-kiln.artifact_format_version`, or `nil`.
     * `:shared`, `:blocks`, `:documents` — `t:decl/0`s, sorted by `$defs`
       name. A `$defs` entry that is itself a `oneOf` union is not a
-      declaration; the block union is described by `:block_union` instead, and
-      any other union is dropped (a `$ref` to one reads as `t:type/0`
-      `{:ref, name}` with nothing behind it — emitters fall back to their
-      "any JSON" type).
+      declaration; the block union is described by `:block_union` instead, a
+      flexible field's by `:unions`, and any other union is dropped (a `$ref`
+      to one reads as `t:type/0` `{:ref, name}` with nothing behind it —
+      emitters fall back to their "any JSON" type).
+    * `:flex_items` — the `flex_` definitions that are objects (a flexible
+      field's item types, #2282), as `t:decl/0`s sorted by name.
+    * `:unions` — every other `oneOf` union an emitter must name: a flexible
+      field's items (`flex_`, reserved like `block_` and `content_`, so a
+      member never lands in `:shared`). Each is
+      `%{name: "flex_post_sections", tag: "_type", members: [...], origin:
+      :flexible, flexible: %{content_type, field, path}, description: ...}`,
+      members shaped like the block union's, in `oneOf` order. The def name is
+      a label, not an address: the `x-kiln-flexible` annotation says which
+      field the union belongs to, so an emitter never parses a name.
     * `:block_union` — `%{name: "block", tag: "_type", members: [...]}` in
       `oneOf` order, each member `%{def: "block_x", tag: "x" | nil}` (the
       member's `const` discriminator value), or `nil` without one.
@@ -57,6 +67,7 @@ defmodule KilnCMS.SchemaExport.Walk do
           description: String.t() | nil,
           target_types: [String.t()],
           graphql_kind: String.t() | nil,
+          graphql_item_kind: String.t() | nil,
           type: type()
         }
 
@@ -92,14 +103,19 @@ defmodule KilnCMS.SchemaExport.Walk do
   @type union :: %{
           name: String.t(),
           tag: String.t(),
-          members: [%{def: String.t(), tag: term()}]
+          members: [%{def: String.t(), tag: term()}],
+          origin: :block | :document | :flexible,
+          description: String.t() | nil,
+          flexible: %{String.t() => term()} | nil
         }
 
   @type model :: %{
           format_version: term(),
           shared: [decl()],
           blocks: [decl()],
+          flex_items: [decl()],
           documents: [decl()],
+          unions: [union()],
           block_union: union() | nil,
           document_union: union(),
           defs: %{String.t() => :object | :opaque | :union}
@@ -118,6 +134,7 @@ defmodule KilnCMS.SchemaExport.Walk do
     defs = Map.get(document, "$defs", %{})
 
     {block_defs, rest} = Enum.split_with(defs, fn {name, _} -> block_def?(name) end)
+    {flex_defs, rest} = Enum.split_with(rest, fn {name, _} -> flex_def?(name) end)
     {content_defs, shared_defs} = Enum.split_with(rest, fn {name, _} -> content_def?(name) end)
 
     documents = declarations(content_defs, opts)
@@ -126,12 +143,17 @@ defmodule KilnCMS.SchemaExport.Walk do
       format_version: document |> Map.get("x-kiln", %{}) |> Map.get("artifact_format_version"),
       shared: shared_defs |> Enum.reject(&union?/1) |> declarations(opts),
       blocks: block_defs |> Enum.reject(&union?/1) |> declarations(opts),
+      flex_items: flex_defs |> Enum.reject(&union?/1) |> declarations(opts),
       documents: documents,
+      unions: flex_unions(flex_defs, defs),
       block_union: block_union(defs),
       document_union: %{
         name: "document",
         tag: "type",
-        members: Enum.map(documents, &%{def: &1.name, tag: tag_value(defs, &1.name, "type")})
+        members: Enum.map(documents, &%{def: &1.name, tag: tag_value(defs, &1.name, "type")}),
+        origin: :document,
+        description: nil,
+        flexible: nil
       },
       defs: Map.new(defs, fn {name, schema} -> {name, def_kind(schema)} end)
     }
@@ -271,6 +293,7 @@ defmodule KilnCMS.SchemaExport.Walk do
         description: Map.get(value, "description"),
         target_types: target_types(value),
         graphql_kind: Map.get(value, "x-kiln-graphql-kind"),
+        graphql_item_kind: Map.get(value, "x-kiln-graphql-item-kind"),
         type: type(value, opts)
       }
     end)
@@ -294,6 +317,9 @@ defmodule KilnCMS.SchemaExport.Walk do
         %{
           name: @block_union,
           tag: tag,
+          origin: :block,
+          description: Map.get(schema, "description"),
+          flexible: nil,
           members:
             Enum.map(members, fn member ->
               name = member |> Map.get("$ref", "") |> ref_target()
@@ -306,6 +332,31 @@ defmodule KilnCMS.SchemaExport.Walk do
     end
   end
 
+  # The flexible fields' unions (#2282), sorted by def name. A member that is
+  # not a `$ref` is skipped; one without a `const` tag keeps `tag: nil`, which
+  # an emitter leaves without a case, as it does for a block.
+  defp flex_unions(flex_defs, defs) do
+    flex_defs
+    |> Enum.filter(&union?/1)
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.map(fn {name, %{"oneOf" => members} = schema} ->
+      tag = get_in(schema, ["discriminator", "propertyName"]) || "_type"
+
+      %{
+        name: name,
+        tag: tag,
+        origin: :flexible,
+        description: Map.get(schema, "description"),
+        flexible: Map.get(schema, "x-kiln-flexible"),
+        members:
+          for %{"$ref" => ref} <- members do
+            member = ref_target(ref)
+            %{def: member, tag: tag_value(defs, member, tag)}
+          end
+      }
+    end)
+  end
+
   defp tag_value(defs, name, tag), do: get_in(defs, [name, "properties", tag, "const"])
 
   defp union?({_name, schema}), do: Map.has_key?(schema, "oneOf")
@@ -316,6 +367,9 @@ defmodule KilnCMS.SchemaExport.Walk do
 
   defp block_def?("block_" <> _), do: true
   defp block_def?(_), do: false
+
+  defp flex_def?("flex_" <> _), do: true
+  defp flex_def?(_), do: false
 
   defp content_def?(name), do: String.starts_with?(name, "content_")
 end

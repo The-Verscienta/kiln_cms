@@ -41,6 +41,7 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.ReferenceSelection
   alias KilnCMS.CMS.ReverseFields
   alias KilnCMSWeb.ContentEditor.ReferencePicker
 
@@ -214,7 +215,8 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
         actor: actor,
         tenant: tenant,
         offset: offset,
-        limit: @page_size
+        limit: @page_size,
+        load: ReferencePicker.thumb_load()
       )
 
     # A page past the end (rows removed since) falls back to the last page.
@@ -248,7 +250,7 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
 
           type ->
             [record.id] ==
-              CMS.ReferenceSelection.accepted_ids(selection, type, [record.id],
+              ReferenceSelection.accepted_ids(selection, type, [record.id],
                 actor: actor,
                 tenant: tenant
               )
@@ -285,11 +287,9 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
   @impl true
   def render(assigns) do
     assigns =
-      assign(
-        assigns,
-        :root,
-        "reverse-field-#{assigns.reverse.source_type}-#{assigns.reverse.field}"
-      )
+      assigns
+      |> assign(:root, "reverse-field-#{assigns.reverse.source_type}-#{assigns.reverse.field}")
+      |> assign(:thumbs?, Enum.any?(assigns.rows, &ReferencePicker.thumb(&1.source)))
 
     ~H"""
     <div
@@ -340,6 +340,7 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
           id={"#{@root}-#{row.source.id}"}
           item={item(row, @reverse)}
           readonly
+          thumb_slot={@thumbs?}
         >
           <:extra>
             <.connection_details
@@ -462,7 +463,9 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
   end
 
   # The add control searches the source type as if it were a list field of
-  # this record: one type, any number, nothing to show of its own.
+  # this record: one type, any number, nothing to show of its own. A field
+  # whose selection turns "Add new" off (`"add_new" => false`) turns it off
+  # here too, so the relationship makes no new records from either side.
   defp picker_definition(reverse) do
     %FieldDefinition{
       name: "reverse-#{reverse.source_type}-#{reverse.field}",
@@ -471,8 +474,15 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
       target_type: reverse.source_type,
       target_types: [],
       multiple: true,
-      link_fields: []
+      link_fields: [],
+      selection: reverse_selection(reverse.definition)
     }
+  end
+
+  defp reverse_selection(definition) do
+    if ReferenceSelection.add_new?(Map.get(definition, :selection)),
+      do: nil,
+      else: %{"add_new" => false}
   end
 
   attr :row, :map, required: true
@@ -584,7 +594,8 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
       title: source.title,
       state: source.state,
       type_label: reverse.source_label,
-      href: ~p"/editor/content/#{reverse.source_type}/#{source.id}"
+      href: ~p"/editor/content/#{reverse.source_type}/#{source.id}",
+      thumb: ReferencePicker.thumb(source)
     }
   end
 

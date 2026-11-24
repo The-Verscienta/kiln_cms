@@ -13,6 +13,16 @@ carries the reasoning.
 
 ## Added
 
+<a id="reference-picker-thumbnails"></a>
+
+- **The reference picker shows each record's featured image as a thumbnail (#3223).** Every search result, every picked row and every row of a reverse field now shows a small (32 px) thumbnail of the record's **Featured image**, so records with similar titles are easy to tell apart. It is always on; there is no setting per field.
+  - **Which image.** The image's generated `thumb` variant, or a video's poster frame. An image 400 px wide or narrower has no `thumb` (variants never upscale), so the picker shows the original, which is already that small. It never loads a larger original, so a record shows no thumbnail when a wider featured image has no `thumb` variant (uploaded or processed without variants). An admin's **Regenerate variants** on `/media` writes the missing ones. A featured image in the trash shows none.
+  - **Layout.** When some rows of a list have a thumbnail, the rows without one keep an empty square of the same size so the titles line up. A list where no row has one, as on a site that uses no featured images, looks as it did before.
+  - **Accessibility.** The thumbnail is decorative (`alt=""`, `aria-hidden`): the options' and rows' accessible names, roles and keyboard behavior are unchanged.
+  - **Cost.** The featured image is loaded with the read that lists the records, as the editor: one more query per type the picker reads, not one per record.
+  - **For developers.** The media library's thumbnail rule is now public as `KilnCMSWeb.MediaComponents.thumb_src/2` (pass `fallback: false` to skip the fallback to an original wider than the `thumb` variant; `KilnCMS.ImageProcessor.thumb_width/0` is that width), and `KilnCMS.CMS.ReverseFields.rows/3` takes a `:load` option, loaded on each source record as the caller. No migration, no configuration, nothing to do to upgrade.
+  - Guide: **Thumbnails in the picker** under the reference field in [Extending content](../extending-content.md).
+
 <a id="edit-inline-option"></a>
 
 - **A reference field can show a record card for each connected record (#2283).** In the fields admin, a top-level reference field has a new step 7, **Editing the linked records**, with a checkbox: **Let editors edit the related record here**. With it ticked, each connected record in the editor gets an **Edit the record** button under its row (**Hide the record** once open). It opens a card with the record's title and its plain fields (text, number, yes/no, date, URL and select fields), a note when it is a draft or has unpublished changes, and an **Open in the full editor** link. Other fields, such as media and rich text, are edited in the full editor, and the card says so. The card edits the record (see the next entry); the plan is in [docs/plans/inline-reference-editing-plan.md](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/plans/inline-reference-editing-plan.md).
@@ -43,6 +53,13 @@ carries the reasoning.
   - **Not yet.** The limit of 10 open cards is still counted per field, not across the whole form. The draft autosave and *Move to trash* do not save cards.
   - See [Edit related records in place](../extending-content.md#edit-related-records-in-place).
 
+<a id="reference-add-new-off"></a>
+
+- **A reference field can turn off the picker's "Add new" (#3222).** In the fields admin, step 6 (**Which records can be picked**) has a new checkbox, **Offer “Add new” in the picker**, ticked by default. Untick it and the field's picker offers no **Add new *Type*** and no create-on-type row: editors connect only records that already exist. Use it where a record made from a picker would be a thin draft, such as a catalogue whose records need their own fields filled in before they mean anything.
+  - **Both sides.** The reverse field on each target turns its **Add new** off too, so the relationship makes no new records from either side.
+  - **Stored as** `"add_new": false` in the field's `selection` (#2285); only the off value is stored, so a field that never changes it keeps the selection it had. `"add_new"` must be `true` or `false`, and `false` beside `"create"` is refused (*create needs add_new*); unticking the box in the admin clears create-on-type for you.
+  - **Not a filter, not access control.** It narrows no read: the search lists what it did before. An editor who may create the type can still create the record from its own screen. The server checks it too, so a forged create event from the picker creates nothing.
+  - **Outside the editor.** `GET /api/schema` reports it in `x-kiln-selection` when off; field sync carries it with the rest of `selection`. No migration.
 
 <a id="flexible-media-reference"></a>
 
@@ -103,6 +120,18 @@ carries the reasoning.
     already holds one now writes what it names.
   Record: [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md#item-type-grants-pr-4-2282);
   guide: [Field grants](../granular-rbac.md#write-field_grants-keys).
+
+<a id="flexible-typed-export"></a>
+
+- **A Flexible content field is typed end to end: in GraphQL as `FlexibleItemValue`, and in the schema export as a `oneOf` union of closed item types for JSON Schema, OpenAPI, TypeScript, Swift, Kotlin and `kiln-types` (#2282).**
+  - **GraphQL.** A flexible field stays a `ListValue`; each element is one `FlexibleItemValue { name id type settings fields }` (a `CustomFieldValue`, as `GroupValue` is). `type` is the item type's name, `settings` holds the item type's setting sub-fields and `fields` the rest, each a `CustomFieldValue`. An item whose `_type` the site no longer defines (an orphan, left in an older revision) is left out of the list. Nesting follows the definitions' own cap of three flexible levels. A flexible item's `settings` and `fields` are priced as unlimited lists, like a group's rows, under `max_complexity`.
+  - **The schema export (`GET /api/schema`, `mix kiln.export.schema`).** Each flexible field's `items` is a `$ref` to a union def named `flex_<type>_<field>` in `$defs`, whose members are `flex_*` defs, one per item type, told apart by `_type` (a `discriminator` with an explicit `mapping` in OpenAPI). A member is closed (`additionalProperties: false`), requires only `_id` and `_type`, and carries `_settings` only when the item type has settings. A per-type item cap is the annotation `x-kiln-max-items` on the member. The union def carries `x-kiln-flexible` (`content_type`, `field`, `path`): a def name is a label that gets a `_2` suffix when two paths collide, so read that annotation, never the name. The `flex_` prefix is reserved in `$defs`. A field with no item types yet stays `{"type": "object"}`.
+  - **Generated types.** TypeScript and `kiln-types` emit an interface per item type and a union alias per field; Swift an enum with an `.unknown` case and Kotlin a sealed interface with an `Unknown` class, so an item type added after you generated still decodes. The typed GraphQL formats select a flexible item one level deep (`... on FlexibleItemValue { id type settings { … } fields { … } }`), not through a nested flexible field or group, and a `FlexibleItemValue` case joins the Swift and Kotlin `CustomFieldValue` types. The generated fragment selects scalar parts only: an image or reference inside an item is not fetched by it.
+  - **Type definitions over JSON:API.** `?include=field_definitions.item_types` now works, with `.group_fields` after it, down to the three flexible levels a definition may nest; a deeper path is a `400` (`invalid_includes`).
+  - **Upgrade for validating consumers.** The schema is tighter: a flexible field's `items` was `{"type": "object"}` and is now a `$ref` to the union, so a validator or generated client that checked items as any object now checks `_type` and the item type's keys, and refuses an unknown key. Regenerate generated clients and commit the diff. Flexible content is still unreleased as a feature (its admin and editor entry is held until the plan's last PR; 1.11 shipped only the API-level model), so this is not counted as a break of a 1.x contract. There is no migration and no data change, and the `kiln_reporting_v1` views are untouched.
+  - **Known gap.** `fields(names:)` prices every name at the whole selection, and that selection was already over the default `max_complexity` of 200 before flexible items: one `multiple` string field in a generated fragment costs 631, and a flexible field 1241. The generated fragments therefore only run against a raised cap. This predates the change and is left as a follow-up; no test pins the generated fragment's complexity.
+  Record: [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md#the-typed-export-pr-5-2282);
+  guides: [GraphQL: generate types and fragments](../headless-graphql-api.md#generate-types-and-fragments-for-your-site), [api.md: schema discovery](../api.md#schema-discovery-typed-clients).
 
 ## Fixed
 

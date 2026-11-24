@@ -1454,6 +1454,21 @@ input EntrySortInput {
   highlightInput: EntryHighlightFieldInput
 }
 
+"""
+One item of a `flexible` field (#2282): its `id` and `type` (the item type's
+name), the values of the item type's settings and the values of its other
+sub-fields, each as a `CustomFieldValue`. A `flexible` field is always a
+`ListValue` of these. An item whose type the site no longer defines is left
+out.
+"""
+type FlexibleItemValue implements CustomFieldValue {
+  name: String!
+  id: ID
+  type: String!
+  settings: [CustomFieldValue!]!
+  fields: [CustomFieldValue!]!
+}
+
 "Operators for a `float` custom field."
 input FloatFilter {
   eq: Float

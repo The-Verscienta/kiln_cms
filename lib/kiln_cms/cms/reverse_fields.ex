@@ -116,7 +116,9 @@ defmodule KilnCMS.CMS.ReverseFields do
   @doc """
   One page of the records connecting to `target` through `reverse`, as the
   caller (`:actor`, `:tenant`) may see them, ordered by title — and how many
-  there are in all. `:offset` and `:limit` (default 10) pick the page.
+  there are in all. `:offset` and `:limit` (default 10) pick the page, and
+  `:load` (default none) is loaded on each source in the same read, as the
+  caller — the editor's row thumbnails (#3223).
 
   A connection is listed once it is **live** (an edge) or **pending**: a
   published source whose working copy connects the target, not yet published
@@ -220,7 +222,8 @@ defmodule KilnCMS.CMS.ReverseFields do
               filter: filter,
               sort: [title: :asc, id: :asc],
               offset: Keyword.get(opts, :offset, 0),
-              limit: Keyword.get(opts, :limit, 10)
+              limit: Keyword.get(opts, :limit, 10),
+              load: Keyword.get(opts, :load, [])
             ]
           ]
       )

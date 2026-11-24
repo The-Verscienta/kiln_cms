@@ -55,6 +55,10 @@ defmodule KilnCMSWeb.Graphql.CustomFields do
   # be written through the API; the cap bounds what one value can build.
   @max_group_depth 3
 
+  # Flexible items nest through an item type's sub-fields, one level per
+  # `:flexible` field; the cap is the definitions' own (`FieldDefinition`).
+  @max_flexible_depth KilnCMS.CMS.FieldDefinition.max_flexible_depth()
+
   @doc "Resolver for `customString(name:)`."
   def custom_string(parent, args, resolution), do: scalar(parent, args, resolution, :string)
   @doc "Resolver for `customInt(name:)`."
@@ -142,6 +146,10 @@ defmodule KilnCMSWeb.Graphql.CustomFields do
   defp build_kind(:date, _d, name, v, _depth), do: date(name, v)
   defp build_kind(:datetime, _d, name, v, _depth), do: datetime(name, v)
   defp build_kind(:group, d, _name, v, depth) when is_map(v), do: group(d, v, depth)
+
+  defp build_kind(:flexible_item, d, _name, v, depth) when is_map(v),
+    do: flexible_item(d, v, depth)
+
   defp build_kind(:reference, _d, name, v, _depth), do: reference(name, v)
   defp build_kind(:media, _d, name, v, _depth), do: media(name, v)
   defp build_kind(:geolocation, _d, name, v, _depth), do: geolocation(name, v)
@@ -210,6 +218,49 @@ defmodule KilnCMSWeb.Graphql.CustomFields do
   end
 
   defp group(_definition, _row, _depth), do: nil
+
+  # One item of a flexible field. The item type is found by `_type` among the
+  # field's loaded `item_types`; an item naming a type the site no longer
+  # defines (an orphan) is left out, as any value that does not fit is. Its
+  # `item_setting` sub-fields are `settings`, read from `_settings`; the rest
+  # are `fields`, read from the item itself.
+  defp flexible_item(definition, item, depth) when depth < @max_flexible_depth do
+    with type_name when is_binary(type_name) <- Map.get(item, "_type"),
+         %{} = type <- Enum.find(item_types(definition), &(&1.name == type_name)) do
+      {settings, content} = Enum.split_with(sub_fields(type), & &1.item_setting)
+      held = if is_map(item["_settings"]), do: item["_settings"], else: %{}
+
+      %{
+        __kind__: :flexible_item,
+        name: definition.name,
+        id: if(is_binary(item["_id"]), do: item["_id"]),
+        type: type_name,
+        settings: sub_values(settings, held, depth),
+        fields: sub_values(content, item, depth)
+      }
+    else
+      _orphan -> nil
+    end
+  end
+
+  defp flexible_item(_definition, _item, _depth), do: nil
+
+  defp sub_values(subs, row, depth),
+    do: for(sub <- subs, value = build(sub, Map.get(row, sub.name), depth + 1), do: value)
+
+  defp item_types(definition) do
+    case Map.get(definition, :item_types) do
+      types when is_list(types) -> types
+      _not_loaded -> []
+    end
+  end
+
+  defp sub_fields(type) do
+    case Map.get(type, :group_fields) do
+      subs when is_list(subs) -> subs
+      _not_loaded -> []
+    end
+  end
 
   defp reference(name, raw) do
     case ids(raw) do
