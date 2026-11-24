@@ -117,6 +117,9 @@ else.
   A legacy-invalid field (a dropdown with no options) now blocks the reorder and refuses the whole duplicate instead of being dropped from the copy.
   ([long form](docs/changelog/unreleased.md#form-reorder-duplicate-all-or-nothing))
 
+- **Collaborative editing (the `:collab_prototype` flag, off in production builds): prose typed after a quick rejoin now reaches the record, and a stored room state that won't decode is moved aside to a `corrupt:` row instead of failing every join to that document ([#2756](https://github.com/The-Verscienta/kiln_cms/issues/2756)).**
+  ([long form](docs/changelog/unreleased.md#collab-writeback-corrupt-state))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —
