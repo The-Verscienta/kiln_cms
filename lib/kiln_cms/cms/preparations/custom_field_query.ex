@@ -134,6 +134,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.Lists
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.Relations
   alias KilnCMS.CMS.ScalarLists
+  alias KilnCMS.CMS.Types.JsonScalar
 
   @operators ~w(eq not_eq gt gte lt lte in ilike contains starts_with null is_nil)
 
@@ -1487,10 +1488,14 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # null lowest), and an array/object cursor value cannot be bound back into
   # the keyset filter (`jsonb > integer[]`), which fails the page-2 read.
   # Neither is a value a field of a sortable type holds unless it was retyped.
+  #
+  # Typed `JsonScalar` so a keyset cursor value is bound back as `jsonb` and
+  # compared by the same jsonb rules the sort orders by; untyped, ash types
+  # the cursor literal and casts the key to it (`::float` on a string row).
   defp sort_expr(%{name: name}, table) do
     if IndexedCustomFields.valid?(table, name) do
       # The expression a declared btree is built on (#2359), name inlined.
-      Ash.Sort.expr_sort(^range_field(name, table))
+      Ash.Sort.expr_sort(^range_field(name, table), JsonScalar)
     else
       bound_sort_expr(name)
     end
@@ -1506,7 +1511,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         ^name,
         ^ref(:custom_fields),
         ^name
-      )
+      ),
+      JsonScalar
     )
   end
 
