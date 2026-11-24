@@ -121,6 +121,25 @@ defmodule KilnCMSWeb.EditorLiveFieldFiltersTest do
       refute render(lv) =~ "1 item"
     end
 
+    # #2741: the chips on screen are exactly the conditions applied. A second
+    # condition on the same field and op is not one of them (the first in the
+    # URL is kept), so it neither shows a chip nor narrows the rows.
+    test "a repeated field and op: one chip, and the rows follow that chip alone", %{
+      conn: conn,
+      prefix: prefix
+    } do
+      ab12 = a_page(prefix, %{"elff_note" => "AB-12"})
+      ab99 = a_page(prefix, %{"elff_note" => "AB-99"})
+      _xy12 = a_page(prefix, %{"elff_note" => "XY-12"})
+
+      {lv, html} = open(conn, prefix, %{"cf" => "elff_note:contains:AB;elff_note:contains:12"})
+
+      assert Enum.sort(ids(html)) == Enum.sort([ab12.id, ab99.id])
+      assert has_element?(lv, "#content-count", "2 items")
+      assert has_element?(lv, "#field-filter-chip-0", "AB")
+      refute has_element?(lv, "#field-filter-chip-1")
+    end
+
     test "a text condition is a case-insensitive substring, metacharacters literal", %{
       conn: conn,
       prefix: prefix

@@ -348,8 +348,11 @@ defmodule KilnCMSWeb.EditorLive.Filters do
         definitions = params |> field_type_in_play(ctx) |> field_definitions(ctx)
         by_name = Map.new(definitions, &{&1.name, &1})
 
-        # Distinct, well-formed conditions only: a repeated one, a malformed
-        # segment, or one past the cap lost nothing the view meant.
+        # Only what a field change took away counts. A malformed segment, or
+        # a valid one past the cap, was never applied. A second condition on
+        # the same field and op is dropped by `parse/2` whatever the fields
+        # are (`canonicalize/1` keeps the first), so it is not counted either,
+        # even when its value differs.
         cf
         |> decode_segments()
         |> Enum.uniq_by(&{&1.field, &1.op})

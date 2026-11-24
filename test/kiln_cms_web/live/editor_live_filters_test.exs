@@ -131,6 +131,27 @@ defmodule KilnCMSWeb.EditorLiveFiltersTest do
              |> length() == 4
     end
 
+    # #2741 pins what the list relies on: `Filters` hands on at most one
+    # condition per field and op, so the chips drawn from `conditions/1` are
+    # exactly what reaches the query. The first in URL order is kept.
+    test "a second condition on the same field and op keeps only the first" do
+      for {cf, kept} <- [
+            {"note:contains:b;note:contains:a", "b"},
+            {"note:contains:a;note:contains:b", "a"}
+          ] do
+        filters = parse(%{"type" => "post", "cf" => cf})
+        assert [%{field: "note", op: "contains", value: ^kept}] = Filters.conditions(filters)
+        assert filters["cf"] == "note:contains:" <> kept
+        assert parse(Filters.to_params(filters)) == filters
+      end
+
+      # and the dropped one is not a field that went away
+      assert Filters.dropped_conditions(
+               %{"type" => "post", "cf" => "note:contains:a;note:contains:b"},
+               ctx()
+             ) == 0
+    end
+
     test "the encoded string never exceeds what a saved view stores" do
       long = String.duplicate("é", 60)
       cf = Enum.map_join(~w(a b c d), ";", fn _ -> cf("note", "contains", long) end)

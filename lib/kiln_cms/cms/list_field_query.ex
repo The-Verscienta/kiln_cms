@@ -4,9 +4,10 @@ defmodule KilnCMS.CMS.ListFieldQuery do
   into the read arguments the `CustomFieldQuery` preparation understands.
 
   This is the **only** place the list names `custom_filter` / `custom_sort`:
-  the list holds `%{field:, op:, value:}` conditions and a `{name, dir}`
-  sort, and `arguments/2` is the one function that knows how they spell as
-  API arguments. When that vocabulary moves (#2292) this body is what changes.
+  the list holds `%{field:, op:, value:}` conditions, all of which apply,
+  and a `{name, dir}` sort, and `arguments/3` is the one function that knows
+  how they spell as API arguments. When that vocabulary moves (#2292) this
+  body is what changes.
 
   A condition's `op` is the list's own, per field type (`ops/1`):
 
@@ -186,6 +187,13 @@ defmodule KilnCMS.CMS.ListFieldQuery do
   list with neither passes no arguments at all. `definitions` are the field
   definitions the conditions were validated against (a condition's type picks
   how its value is spelled).
+
+  Every condition applies. Two on the same field that spell as the same API
+  op (two `contains`, or two datetime `lte`, which both become `lt`) cannot
+  share the field's map, so the first stays there and each later one goes in
+  a top-level `"_and"` list of `%{field => %{op => value}}`, in input order.
+  An exact repeat is dropped, and there is no `"_and"` key when nothing
+  repeats.
   """
   @spec arguments([condition()], sort(), [map()]) :: map()
   def arguments(conditions, sort, definitions) do
@@ -198,14 +206,28 @@ defmodule KilnCMS.CMS.ListFieldQuery do
 
   defp put_filter(args, [], _types), do: args
 
+  # The first operand for a field and API op goes in the field's flat map; a
+  # later one with the same pair would overwrite it there, so it goes in the
+  # `_and` group instead (a field name starts with a letter, so `_and` cannot
+  # be one). Every member of a `custom_filter` is ANDed, so no condition is
+  # lost whoever built the list.
   defp put_filter(args, conditions, types) do
-    filter =
-      Enum.reduce(conditions, %{}, fn %{field: field, op: op, value: value}, acc ->
-        Enum.reduce(spell(Map.get(types, field), op, value), acc, fn {api_op, api_value}, acc ->
-          Map.update(acc, field, %{api_op => api_value}, &Map.put(&1, api_op, api_value))
-        end)
+    {flat, repeats} =
+      conditions
+      |> Enum.flat_map(fn %{field: field, op: op, value: value} ->
+        for {api_op, api_value} <- spell(Map.get(types, field), op, value),
+            do: {field, api_op, api_value}
+      end)
+      |> Enum.uniq()
+      |> Enum.reduce({%{}, []}, fn {field, api_op, api_value}, {flat, repeats} ->
+        if flat |> Map.get(field, %{}) |> Map.has_key?(api_op),
+          do: {flat, [%{field => %{api_op => api_value}} | repeats]},
+          else:
+            {Map.update(flat, field, %{api_op => api_value}, &Map.put(&1, api_op, api_value)),
+             repeats}
       end)
 
+    filter = if repeats == [], do: flat, else: Map.put(flat, "_and", Enum.reverse(repeats))
     Map.put(args, :custom_filter, filter)
   end
 
