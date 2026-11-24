@@ -5372,6 +5372,7 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
@@ -9224,6 +9225,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_destinations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Edit destination: %{kind}"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Edit details"
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -20287,6 +20293,7 @@ msgstr ""
 msgid "Save detail"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save details"
@@ -20420,6 +20427,11 @@ msgstr ""
 msgid "Saved on its own"
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Saved the details in “%{title}”."
+msgstr ""
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saved the view “%{name}”."
@@ -20429,6 +20441,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
 msgid "Saved to the working copy"
+msgstr ""
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Saved to the working copy of “%{title}”."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
@@ -31589,6 +31606,11 @@ msgid "“%{title}” can't be deleted for good: 1 record still links to it thro
 msgid_plural "“%{title}” can't be deleted for good: %{count} records still link to it through “%{field}”, which doesn't allow that. Remove the links first, or change the field's setting under Fields."
 msgstr[0] ""
 msgstr[1] ""
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "“%{title}” no longer connects to this record."
+msgstr ""
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format

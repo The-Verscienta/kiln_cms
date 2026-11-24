@@ -349,7 +349,11 @@ UI" workflow, scoped to fields.
   published, so the source's permissions, validations, history and lock all
   apply. A held change is marked "goes live when *Source* is published", a
   source the editor may not change shows a lock, and a source someone else
-  saved in the meantime fails on its own row.
+  saved in the meantime fails on its own row. When the reference has link
+  fields, **Edit details** on a row opens that connection's link values
+  (starting from the source's working copy) with **Save details**, the same
+  edit of the source (`ReverseFields.set_link/5`): a quantity or role can be
+  changed from either side.
 - **Item bounds**: on any list (`multiple: true`), optional
   `min_items` / `max_items` bound how many items a value holds once it holds
   any — an empty optional field is still allowed; `required` asks for at

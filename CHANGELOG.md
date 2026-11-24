@@ -83,6 +83,9 @@ else.
 - **Edits can say why: a `change_note` on update, publish and Publish changes is kept on the version and shown in History; a site can make the editor ask for one per content type ("Ask why on every change" on the Safety fields page) ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255)).**
   ([long form](docs/changelog/unreleased.md#change-note))
 
+- **A reverse field can edit a connection's link fields: "Edit details" on a row opens its link values, and "Save details" saves them as an edit of the source record, as connect and disconnect already do ([#3243](https://github.com/The-Verscienta/kiln_cms/issues/3243)).**
+  ([long form](docs/changelog/unreleased.md#reverse-link-edit))
+
 - **A role can be granted single item types of a Flexible content field (`custom_fields.<field>.<item type>`): its editors may edit, add and remove items of that type and no others ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282)).**
   Reordering needs the whole-field grant; the console shows a partly granted field read-only. No migration.
   ([long form](docs/changelog/unreleased.md#flexible-item-type-grants))
