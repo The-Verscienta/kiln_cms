@@ -711,8 +711,7 @@ defmodule KilnCMSWeb.BillingWebhookControllerTest do
           user_id: u.id,
           tier_id: tier().id,
           status: :incomplete,
-          provider_subscription_id: "sub_stub",
-          last_provider_event_at: DateTime.add(DateTime.utc_now(), 1, :day)
+          provider_subscription_id: "sub_stub"
         })
 
       event =
@@ -726,6 +725,37 @@ defmodule KilnCMSWeb.BillingWebhookControllerTest do
       reloaded = Billing.get_membership!(m.id, authorize?: false, tenant: m.org_id)
       assert reloaded.status == :active
       assert DateTime.to_unix(reloaded.last_provider_event_at) == event["created"]
+    end
+
+    test "a checkout older than the stamp still applies, but leaves the stamp where it was" do
+      # A replayed checkout (#3159): applied, as a live state is, but stamping
+      # its older `created` would let an event the stamp already outranks
+      # apply after it.
+      stub_subscription()
+      u = member()
+      stored = DateTime.add(DateTime.utc_now(), 1, :day) |> DateTime.truncate(:second)
+
+      m =
+        Ash.Seed.seed!(Billing.Membership, %{
+          org_id: default_org_id(),
+          user_id: u.id,
+          tier_id: tier().id,
+          status: :incomplete,
+          provider_subscription_id: "sub_stub",
+          last_provider_event_at: stored
+        })
+
+      event =
+        m
+        |> checkout_event()
+        |> put_in(["data", "object", "subscription"], "sub_stub")
+        |> Map.put("created", System.os_time(:second) - 3600)
+
+      assert {:ok, _} = Billing.Subscriptions.apply(event)
+
+      reloaded = Billing.get_membership!(m.id, authorize?: false, tenant: m.org_id)
+      assert reloaded.status == :active
+      assert DateTime.compare(reloaded.last_provider_event_at, stored) == :eq
     end
   end
 

@@ -41,7 +41,9 @@ defmodule KilnCMS.Billing.WebhookEvent do
   redeliver an event it saw acknowledged: a `:received` row recorded before
   enqueue became atomic (or whose job was lost), a `:failed` row whose job used
   its `max_attempts`, and a `:processing` row whose settle stamp did not save.
-  Two AshOban triggers on `:default` look every ten minutes (`stranded?`):
+  Two AshOban triggers look every ten minutes (`stranded?`). They run on their
+  own `:billing_sweeper` queue: a node of the previous release polls
+  `:default` and has no worker module for their jobs.
 
     * `:redrive` re-enqueues the event and counts it in `redrive_count`. A
       `:received` row is left alone for `received_grace_minutes/0`, and any row
@@ -51,12 +53,23 @@ defmodule KilnCMS.Billing.WebhookEvent do
       is released to `:failed` so the new job's claim succeeds.
     * `:give_up` stamps `gave_up_at`, logs at `error` and emits
       `[:kiln_cms, :billing, :webhook_event, :gave_up]`, once the event has
-      been re-enqueued `max_redrives/0` times or is older than
-      `redrive_window_days/0`. An older event is never replayed: applied now
-      it could undo later events, for instance re-granting a canceled member
-      whose row has no event stamp for `KilnCMS.Billing.EventGuard` to order
-      against. Rows recorded before 1.12 and still unsettled are given up on,
-      not replayed, for the same reason.
+      been re-enqueued `max_redrives/0` times, is older than
+      `redrive_window_days/0`, or has no `redrive_count`. An older event is
+      not redriven: applied now it could undo later events, for instance
+      re-granting a canceled member whose row has no event stamp for
+      `KilnCMS.Billing.EventGuard` to order against. A row with no
+      `redrive_count` was recorded before the sweeper existed (`:receive`
+      sets it to 0; the column has no default), by an earlier release or by a
+      node of the previous release during a rolling deploy. Unsettled, it is
+      given up on, not replayed, for the same reason, however young.
+
+  The window is not a hard cutoff on when an event is applied. A redrive just
+  inside `redrive_window_days/0` enqueues a job with the worker's full
+  `max_attempts` (8, about 15 hours of backoff), so a redriven event can still
+  be applied about 3.6 days after it was received. And a job orphaned
+  `executing` by a dead node is rescued by `Oban.Lifeline` (180 minutes)
+  whatever the row's `gave_up_at`, so it can still claim and apply an event
+  the sweeper has given up on.
 
   A given-up event waits for an operator to fix the cause and resend it from
   the provider's dashboard (`WHERE gave_up_at IS NOT NULL` lists them). The
@@ -143,7 +156,7 @@ defmodule KilnCMS.Billing.WebhookEvent do
     triggers do
       trigger :redrive do
         action :redrive
-        queue :default
+        queue :billing_sweeper
         scheduler_cron "*/10 * * * *"
         max_attempts 3
         worker_read_action :read
@@ -156,7 +169,7 @@ defmodule KilnCMS.Billing.WebhookEvent do
 
       trigger :give_up do
         action :give_up
-        queue :default
+        queue :billing_sweeper
         scheduler_cron "*/10 * * * *"
         max_attempts 3
         worker_read_action :read
@@ -178,6 +191,11 @@ defmodule KilnCMS.Billing.WebhookEvent do
     # left a `:received` row nothing would ever process.
     create :receive do
       accept [:provider, :provider_event_id, :type, :payload]
+
+      # The sweeper replays only rows whose count is set (#3159). The column
+      # has no default, so a row recorded before the sweeper, or by a node
+      # still on the previous release, is null and given up on, never replayed.
+      change set_attribute(:redrive_count, 0)
 
       change after_action(fn _changeset, record, _context ->
                case KilnCMS.Billing.WebhookWorker.enqueue(record) do
@@ -360,9 +378,15 @@ defmodule KilnCMS.Billing.WebhookEvent do
 
     # How many times the sweeper has re-enqueued this event (#3159). Never reset:
     # a resent event that keeps failing goes back to give-up, not round again.
+    #
+    # `:receive` sets it to 0. Null marks a row recorded before the sweeper: by
+    # an earlier release, or by a node still on the previous release during a
+    # rolling deploy. The column deliberately has no default, so those rows
+    # stay null and an unsettled one is given up on, not replayed: nothing
+    # tells it apart from an event the membership's ordering stamp predates.
+    # A null row the previous release's own job settles is unaffected.
     attribute :redrive_count, :integer do
-      allow_nil? false
-      default 0
+      allow_nil? true
       public? false
     end
 
@@ -426,7 +450,8 @@ defmodule KilnCMS.Billing.WebhookEvent do
     calculate :redrive_due?,
               :boolean,
               expr(
-                stranded? and inserted_at > ago(^@redrive_window_days, :day) and
+                stranded? and not is_nil(redrive_count) and
+                  inserted_at > ago(^@redrive_window_days, :day) and
                   redrive_count < ^@max_redrives
               ),
               public?: false
@@ -435,7 +460,8 @@ defmodule KilnCMS.Billing.WebhookEvent do
               :boolean,
               expr(
                 stranded? and
-                  (inserted_at <= ago(^@redrive_window_days, :day) or
+                  (is_nil(redrive_count) or
+                     inserted_at <= ago(^@redrive_window_days, :day) or
                      redrive_count >= ^@max_redrives)
               ),
               public?: false

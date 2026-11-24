@@ -32,10 +32,18 @@ defmodule KilnCMS.Billing.WebhookWorker do
   An event this worker leaves without a job is picked up by the sweeper on
   `KilnCMS.Billing.WebhookEvent` (#3159): a job that exhausts `max_attempts`
   leaves the event `:failed`, a `:mark_processed` stamp that does not save
-  leaves it `:processing`, and `:received` rows recorded before enqueue became
-  atomic have no job. The sweeper re-enqueues such an event up to three times
-  within the provider's three-day retry window, then gives up on it and says so
-  (an error log and telemetry); see the "The sweeper" section there.
+  leaves it `:processing`, and a `:received` row's job can be lost. The
+  sweeper re-enqueues such an event up to three times while it is within the
+  provider's three-day retry window, then gives up on it and says so (an error
+  log and telemetry); see the "The sweeper" section there. A row recorded
+  before the sweeper existed (no `redrive_count`) is given up on, not replayed.
+
+  The three days bound when the sweeper re-enqueues, not when an event is
+  applied: a job it enqueues near the end of the window still has its 8
+  attempts (about 15 hours of backoff), so an event can be applied up to
+  about 3.6 days after it was received; and a job of this worker orphaned
+  `executing` and rescued by `Oban.Lifeline` can still claim a row the
+  sweeper gave up on.
 
   `{:cancel, reason}` is used for permanently unactionable conditions — already
   claimed, unresolvable, an unhandled type — so Oban stops retrying. Transient

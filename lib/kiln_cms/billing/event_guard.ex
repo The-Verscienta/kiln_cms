@@ -44,7 +44,9 @@ defmodule KilnCMS.Billing.EventGuard do
       two *different* events in the same second, in the wrong order;
     * a state retrieved live (`:live`) is exempt. It is stamped with the
       checkout event's own `created` (the provider's clock, the same one later
-      events carry), never the local clock;
+      events carry), never the local clock. A replayed checkout older than the
+      stamp leaves the stamp where it was
+      (`KilnCMS.Billing.Changes.GuardProviderEvent`, #3159);
     * an event with no usable `created` is accepted (the caller logs it).
   """
 
@@ -120,7 +122,13 @@ defmodule KilnCMS.Billing.EventGuard do
     end
   end
 
-  defp same_subscription?(%{provider_subscription_id: nil}, _event), do: true
-  defp same_subscription?(_row, %{subscription_id: nil}), do: true
-  defp same_subscription?(row, event), do: row.provider_subscription_id == event.subscription_id
+  @doc """
+  Whether the event is ordered against the row's `last_provider_event_at`: it
+  is about the stored subscription, or either side names none. A different
+  subscription starts its own ordering.
+  """
+  @spec same_subscription?(row(), event()) :: boolean()
+  def same_subscription?(%{provider_subscription_id: nil}, _event), do: true
+  def same_subscription?(_row, %{subscription_id: nil}), do: true
+  def same_subscription?(row, event), do: row.provider_subscription_id == event.subscription_id
 end

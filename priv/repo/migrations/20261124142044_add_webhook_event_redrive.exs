@@ -9,7 +9,7 @@ defmodule KilnCMS.Repo.Migrations.AddWebhookEventRedrive do
 
   def up do
     alter table(:billing_webhook_events) do
-      add :redrive_count, :bigint, null: false, default: 0
+      add :redrive_count, :bigint
       add :gave_up_at, :utc_datetime_usec
     end
   end

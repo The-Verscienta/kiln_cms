@@ -17,12 +17,14 @@ defmodule KilnCMS.Billing.WebhookSweeperTest do
   the bound: three redrives, then give-up; and the age bound, so an event
   older than the provider's retry window is given up on, never replayed.
 
-  The triggers run on `:default`. `AshOban.schedule_and_run_triggers/2` drains
-  only the queues of the triggers it runs, so the `:billing` job a redrive
-  inserts stays in the queue for the test to look at until it drains it.
+  The triggers run on `:billing_sweeper`. `AshOban.schedule_and_run_triggers/2`
+  drains only the queues of the triggers it runs, so the `:billing` job a
+  redrive inserts stays in the queue for the test to look at until it drains
+  it.
 
   `async: false`: one test sets `:billing_webhook_insert`, the enqueue seam,
-  which is application env.
+  and the replayed-checkout tests select the provider double, both of which
+  are application env.
   """
   use KilnCMS.DataCase, async: false
 
@@ -59,6 +61,7 @@ defmodule KilnCMS.Billing.WebhookSweeperTest do
           type: "ping",
           payload: %{"type" => "ping"},
           status: :received,
+          redrive_count: 0,
           inserted_at: at,
           updated_at: at
         },
@@ -235,6 +238,17 @@ defmodule KilnCMS.Billing.WebhookSweeperTest do
     end
   end
 
+  test "the sweeper runs on its own queue, which a previous release's node does not poll" do
+    # A node of the previous release polls `:default` and has no worker module
+    # for these jobs.
+    for trigger <- AshOban.Info.oban_triggers(WebhookEvent) do
+      assert {trigger.name, trigger.queue, trigger.scheduler_queue} ==
+               {trigger.name, :billing_sweeper, :billing_sweeper}
+    end
+
+    assert Application.fetch_env!(:kiln_cms, Oban)[:queues][:billing_sweeper] == 1
+  end
+
   test "settled rows are never touched" do
     for status <- [:processed, :ignored] do
       row = event_row(%{status: status, at: minutes_ago(60 * 24 * 5)})
@@ -369,6 +383,49 @@ defmodule KilnCMS.Billing.WebhookSweeperTest do
     end
   end
 
+  describe "rows recorded before the sweeper" do
+    test "`:receive` counts from 0, so a row it records can be redriven" do
+      # authorize?: false, as the receiver records: a webhook has no actor and
+      # the provider's signature is the grant.
+      row =
+        Billing.receive_webhook_event!(
+          %{provider: :stripe, provider_event_id: "evt_#{uniq()}", type: "ping", payload: %{}},
+          authorize?: false
+        )
+
+      assert reload(row).redrive_count == 0
+    end
+
+    test "an unsettled one with no count is given up on, however young, never replayed" do
+      # A null count: recorded by an earlier release, or by a node still on
+      # the previous release during a rolling deploy. Inside the redrive
+      # window and past every grace period, so only the null keeps it from
+      # being replayed.
+      attach_gave_up()
+
+      for {status, at} <- [received: 60, failed: 60, processing: 11] do
+        row = event_row(%{status: status, redrive_count: nil, at: minutes_ago(at)})
+
+        log = capture_log(fn -> sweep() end)
+
+        assert %{gave_up_at: %DateTime{}, redrive_count: nil} = reload(row)
+        assert jobs_for(row) == []
+        assert log =~ "recorded before the sweeper, so not replayed"
+
+        row_id = row.id
+        assert_received {:gave_up, _, %{webhook_event_id: ^row_id, redrive_count: nil}}
+      end
+    end
+
+    test "a settled one with no count is never touched" do
+      row = event_row(%{status: :processed, redrive_count: nil})
+
+      sweep()
+
+      assert_untouched(row)
+    end
+  end
+
   test "a same-event replay after a lost settle stamp applies again and changes nothing" do
     m = membership(%{status: :incomplete})
     payload = subscription_updated(m, "active")
@@ -405,6 +462,88 @@ defmodule KilnCMS.Billing.WebhookSweeperTest do
     assert membership_webhook_jobs() == webhooks
   end
 
+  describe "a replayed checkout" do
+    # `checkout.session.completed` retrieves the subscription from the
+    # provider, so the double is selected through app env (see
+    # `KilnCMS.StubBillingProvider`) and billing is configured.
+    setup do
+      previous = Application.get_env(:kiln_cms, KilnCMS.Billing, [])
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Billing,
+        Keyword.put(previous, :provider, KilnCMS.StubBillingProvider)
+      )
+
+      on_exit(fn ->
+        Application.put_env(:kiln_cms, KilnCMS.Billing, previous)
+        Application.delete_env(:kiln_cms, :stub_billing_provider)
+      end)
+
+      settings = Billing.ensure_settings!()
+
+      {:ok, settings} =
+        Billing.store_billing_secret(settings, :secret_key, "sk_test_abc", authorize?: false)
+
+      {:ok, _settings} =
+        Billing.store_billing_secret(settings, :webhook_secret, "whsec_test", authorize?: false)
+
+      :ok
+    end
+
+    test "does not move the ordering stamp back, so an older `active` cannot re-grant" do
+      # T0 < T1 < T2: the checkout, an `active` the provider is still retrying,
+      # and the cancel that was applied.
+      t0 = DateTime.truncate(minutes_ago(120), :second)
+      t1 = DateTime.truncate(minutes_ago(90), :second)
+      t2 = DateTime.truncate(minutes_ago(60), :second)
+
+      m = membership(%{status: :canceled, last_provider_event_at: t2})
+
+      KilnCMS.StubBillingProvider.put(
+        :subscription,
+        KilnCMS.StubBillingProvider.subscription(m.provider_subscription_id, "canceled")
+      )
+
+      checkout = checkout_completed(m, t0)
+
+      row =
+        event_row(%{
+          provider_event_id: checkout["id"],
+          type: checkout["type"],
+          payload: checkout,
+          status: :failed,
+          at: t0
+        })
+
+      sweep()
+      drain_oban()
+
+      assert %{status: :processed} = reload(row)
+      assert %{status: :canceled} = reloaded = reload_membership(m)
+      assert DateTime.compare(reloaded.last_provider_event_at, t2) == :eq
+
+      active =
+        subscription_updated(m, "active")
+        |> Map.put("created", DateTime.to_unix(t1))
+
+      late =
+        event_row(%{
+          provider_event_id: active["id"],
+          type: active["type"],
+          payload: active,
+          at: minutes_ago(30)
+        })
+
+      assert :ok = WebhookWorker.perform(%Oban.Job{args: %{"webhook_event_id" => late.id}})
+
+      assert %{status: :ignored} = reload(late)
+      assert %{status: :canceled} = reloaded = reload_membership(m)
+      assert DateTime.compare(reloaded.last_provider_event_at, t2) == :eq
+      assert audiences_of(m.user_id) == []
+    end
+  end
+
   describe "the triggers and their actions agree (ADR 0074)" do
     test "an action run on a row its trigger would not pick fails with a single StaleRecord" do
       settled = event_row(%{status: :processed})
@@ -435,7 +574,7 @@ defmodule KilnCMS.Billing.WebhookSweeperTest do
       # The provider resent it in between.
       {:ok, _job} = WebhookWorker.enqueue(row)
 
-      assert %{success: 1} = Oban.drain_queue(queue: :default)
+      assert %{success: 1} = Oban.drain_queue(queue: :billing_sweeper)
       assert %{redrive_count: 0} = reload(row)
       assert length(jobs_for(row)) == 1
     end
@@ -527,6 +666,28 @@ defmodule KilnCMS.Billing.WebhookSweeperTest do
           "id" => m.provider_subscription_id,
           "status" => status,
           "customer" => m.provider_customer_id
+        }
+      }
+    }
+  end
+
+  defp checkout_completed(m, created) do
+    %{
+      "id" => "evt_#{uniq()}",
+      "type" => "checkout.session.completed",
+      "created" => DateTime.to_unix(created),
+      "data" => %{
+        "object" => %{
+          "object" => "checkout.session",
+          "id" => "cs_#{uniq()}",
+          "mode" => "subscription",
+          "customer" => m.provider_customer_id,
+          "subscription" => m.provider_subscription_id,
+          "metadata" => %{
+            "membership_id" => m.id,
+            "org_id" => m.org_id,
+            "user_id" => m.user_id
+          }
         }
       }
     }
