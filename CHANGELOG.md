@@ -163,6 +163,12 @@ else.
 - **An empty file on S3 copies as an empty file, and a ranged request at 0 gets `416` with `Content-Range: bytes */0`; Kiln confirms the object is empty with one `HEAD` first ([#3069](https://github.com/The-Verscienta/kiln_cms/issues/3069)).**
   ([long form](docs/changelog/unreleased.md#s3-empty-object-range))
 
+- **Comping a membership the provider may still bill (`active`, `past_due` or `incomplete` with a subscription id) is refused with `Billing.Errors.StillBilled`: cancel at the provider immediately, wait for the cancellation, then comp. Fixes the 1.12.0 known issue ([#3156](https://github.com/The-Verscienta/kiln_cms/issues/3156)).**
+  ([long form](docs/changelog/unreleased.md#comp-refused-while-billed))
+
+- **A member rejoining after a cancellation gets a membership without the old subscription's id, period end and cancel flag, so that subscription's late events can no longer cancel or revive the new checkout; the provider customer is kept ([#3157](https://github.com/The-Verscienta/kiln_cms/issues/3157)).**
+  ([long form](docs/changelog/unreleased.md#restart-drops-old-subscription))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —
