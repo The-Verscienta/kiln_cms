@@ -231,7 +231,33 @@ defmodule KilnCMSWeb.FieldSelectionComponents do
         </p>
       </div>
 
-      <fieldset id={"#{@id}-create"} class="space-y-1 rounded-lg border border-base-content/10 p-3">
+      <fieldset id={"#{@id}-add-new"} class="space-y-1 rounded-lg border border-base-content/10 p-3">
+        <legend class="px-1 text-sm font-medium">
+          {gettext("Adding new records")}
+        </legend>
+        <input type="hidden" name="field_definition[sel][add_new]" value="false" />
+        <label class="flex items-center gap-2 text-sm" for={"#{@id}-add-new-on"}>
+          <input
+            type="checkbox"
+            id={"#{@id}-add-new-on"}
+            name="field_definition[sel][add_new]"
+            value="true"
+            checked={@view.add_new?}
+          />
+          {gettext("Offer “Add new” in the picker")}
+        </label>
+        <p class="text-xs text-base-content/70">
+          {gettext(
+            "Lets an editor create a new draft and connect it in one step, here and from the other side of the relationship. Turn it off to have editors connect only records that already exist."
+          )}
+        </p>
+      </fieldset>
+
+      <fieldset
+        :if={@view.add_new?}
+        id={"#{@id}-create"}
+        class="space-y-1 rounded-lg border border-base-content/10 p-3"
+      >
         <legend class="px-1 text-sm font-medium">
           {gettext("Let editors create what they type")}
         </legend>

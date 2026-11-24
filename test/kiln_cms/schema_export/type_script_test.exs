@@ -351,7 +351,7 @@ defmodule KilnCMS.SchemaExport.TypeScriptTest do
       assert ts =~ "  price: number | null;"
       assert ts =~ "  onSale: boolean | null;"
       refute ts =~ "  fields(names: [\""
-      refute ts =~ "  fields: KilnCustomFieldValue[];"
+      refute ts =~ "\n  fields: KilnCustomFieldValue[];"
     end
 
     test "kinds without a scalar accessor go through fields(names:)" do
@@ -371,7 +371,7 @@ defmodule KilnCMS.SchemaExport.TypeScriptTest do
       assert ts =~ ~s|fields(names: ["gallery", "seo", "venue"]) {|
       assert ts =~ "... on GeolocationValue { lat lng label zoom }"
       assert ts =~ ~s|__typename: "GeolocationValue";|
-      assert ts =~ "  fields: KilnCustomFieldValue[];"
+      assert ts =~ "\n  fields: KilnCustomFieldValue[];"
       assert ts =~ "... on ListValue {"
       assert ts =~ ~s|price: customFloat(name: "price")|
     end

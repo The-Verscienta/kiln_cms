@@ -1386,6 +1386,11 @@ msgstr "%{sentence} Cada %{type} los muestra como «%{label}»."
 
 #: lib/kiln_cms_web/field_selection.ex
 #, elixir-autogen, elixir-format
+msgid "%{sentence} Editors can't add new records from here."
+msgstr "%{sentence} Los editores no pueden añadir registros nuevos desde aquí."
+
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
 msgid "%{sentence} Typing a new name offers to create a draft %{type}."
 msgstr "%{sentence} Escribir un nombre nuevo ofrece crear un borrador de %{type}."
 
@@ -3369,6 +3374,11 @@ msgstr "Añadido al lanzamiento."
 #, elixir-autogen, elixir-format
 msgid "Added to the working copy — publish changes to make it live"
 msgstr "Añadido a la copia de trabajo — publique los cambios para que sea visible"
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Adding new records"
+msgstr "Añadir registros nuevos"
 
 #: lib/kiln_cms/cms/field_types/link.ex
 #, elixir-autogen, elixir-format
@@ -13396,6 +13406,11 @@ msgstr "Permite iniciar sesión en este sitio con tu propio proveedor de identid
 msgid "Let this server prune these backups — only if that server is retired or this installation moved here."
 msgstr "Permitir que este servidor elimine estas copias antiguas — solo si ese servidor está retirado o esta instalación se trasladó aquí."
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Lets an editor create a new draft and connect it in one step, here and from the other side of the relationship. Turn it off to have editors connect only records that already exist."
+msgstr "Permite a un editor crear un borrador nuevo y conectarlo en un solo paso, aquí y desde el otro lado de la relación. Desactívalo para que los editores solo conecten registros que ya existen."
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Letters, digits, hyphens and underscores."
@@ -16259,6 +16274,11 @@ msgstr "Desactivada: se puede iniciar sesión desde cualquier red."
 #, elixir-autogen, elixir-format
 msgid "Offer this provider on the sign-in page"
 msgstr "Ofrecer este proveedor en la página de inicio de sesión"
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Offer “Add new” in the picker"
+msgstr "Ofrecer «Añadir nuevo» en el selector"
 
 #: lib/kiln_cms_web/controllers/offline_controller.ex
 #, elixir-autogen, elixir-format

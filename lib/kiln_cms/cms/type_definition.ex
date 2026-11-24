@@ -36,7 +36,19 @@ defmodule KilnCMS.CMS.TypeDefinition do
     # `?include=field_definitions` hands a client the `custom_fields` schema in
     # the same call (AshJsonApi 400s on any include not declared here), and
     # `field_definitions.group_fields` the sub-fields of each group among them.
-    includes field_definitions: [:group_fields]
+    # A flexible field's item types (#2282) are `item_types`, and an item type's
+    # sub-fields are its `group_fields`; a sub-field may itself be a flexible
+    # field, so the path repeats down to `FieldDefinition.max_flexible_depth/0`
+    # (3) flexible levels. Written out, not computed, because this DSL must not
+    # call into another resource at compile time; a test pins the depth.
+    includes field_definitions: [
+               :group_fields,
+               item_types: [
+                 group_fields: [
+                   item_types: [group_fields: [item_types: [:group_fields]]]
+                 ]
+               ]
+             ]
 
     routes do
       base "/type-definitions"

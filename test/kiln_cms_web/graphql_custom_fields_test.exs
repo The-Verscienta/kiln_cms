@@ -673,4 +673,183 @@ defmodule KilnCMSWeb.GraphqlCustomFieldsTest do
       assert CMS.get_page!(page.id, actor: admin).custom_fields == %{}
     end
   end
+
+  # A flexible field (#2282): `fields(names:)` serves it as a `ListValue` of
+  # `FlexibleItemValue`s, each with its settings and its other sub-fields.
+  describe "a flexible field" do
+    setup %{admin: admin} do
+      child = fn parent, attrs ->
+        define!(admin, Map.merge(%{content_type: nil, group_of_id: parent.id}, attrs))
+      end
+
+      item = fn flexible, name, attrs ->
+        define!(
+          admin,
+          Map.merge(
+            %{name: name, field_type: :group, flex_of_id: flexible.id, content_type: nil},
+            attrs
+          )
+        )
+      end
+
+      # sections (1) > hero.cols (2) > text.inner (3) > leaf.note
+      sections = define!(admin, %{name: "sections", field_type: :flexible})
+      hero = item.(sections, "hero", %{position: 0})
+      quote_type = item.(sections, "quote", %{position: 1})
+      child.(hero, %{name: "headline", field_type: :string, position: 0})
+      child.(hero, %{name: "background", field_type: :string, item_setting: true, position: 1})
+      child.(hero, %{name: "size", field_type: :integer, item_setting: true, position: 2})
+      cols = child.(hero, %{name: "cols", field_type: :flexible, position: 3})
+      child.(quote_type, %{name: "cite", field_type: :string})
+
+      text = item.(cols, "text", %{})
+      child.(text, %{name: "body", field_type: :string, position: 0})
+      inner = child.(text, %{name: "inner", field_type: :flexible, position: 1})
+      leaf = item.(inner, "leaf", %{})
+      child.(leaf, %{name: "note", field_type: :string})
+
+      %{sections: sections}
+    end
+
+    @flexible_query """
+    query ($slug: String!) {
+      postBySlug(slug: $slug, locale: "en") {
+        fields(names: ["sections"]) {
+          __typename
+          name
+          ... on ListValue {
+            items {
+              __typename
+              ... on FlexibleItemValue {
+                name id type
+                settings { name ... on StringValue { value } ... on IntValue { value } }
+                fields {
+                  name
+                  ... on StringValue { value }
+                  ... on ListValue {
+                    items {
+                      ... on FlexibleItemValue {
+                        id type
+                        fields {
+                          name
+                          ... on StringValue { value }
+                          ... on ListValue {
+                            items {
+                              ... on FlexibleItemValue { type fields { name ... on StringValue { value } } }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+
+    defp flexible_items(post) do
+      assert %{"postBySlug" => %{"fields" => [%{"__typename" => "ListValue"} = list]}} =
+               run!(@flexible_query, %{"slug" => post.slug})
+
+      list["items"]
+    end
+
+    test "three nested levels serve each item with its settings apart from its fields",
+         %{admin: admin} do
+      post =
+        post!(admin, %{
+          "sections" => [
+            %{
+              "_type" => "hero",
+              "headline" => "Hi",
+              "_settings" => %{"background" => "dark", "size" => 3},
+              "cols" => [
+                %{
+                  "_type" => "text",
+                  "body" => "Two",
+                  "inner" => [%{"_type" => "leaf", "note" => "deep"}]
+                }
+              ]
+            },
+            %{"_type" => "quote", "cite" => "Ann"}
+          ]
+        })
+
+      assert [hero, quote_item] = flexible_items(post)
+
+      assert %{"__typename" => "FlexibleItemValue", "name" => "sections", "type" => "hero"} = hero
+      assert is_binary(hero["id"])
+
+      assert Enum.sort_by(hero["settings"], & &1["name"]) == [
+               %{"name" => "background", "value" => "dark"},
+               %{"name" => "size", "value" => 3}
+             ]
+
+      assert %{"value" => "Hi"} = Enum.find(hero["fields"], &(&1["name"] == "headline"))
+      refute Enum.any?(hero["fields"], &(&1["name"] in ["background", "size"]))
+
+      # Level 2, then level 3.
+      assert %{"items" => [text]} = Enum.find(hero["fields"], &(&1["name"] == "cols"))
+      assert %{"type" => "text"} = text
+      assert %{"value" => "Two"} = Enum.find(text["fields"], &(&1["name"] == "body"))
+
+      assert %{"items" => [leaf]} = Enum.find(text["fields"], &(&1["name"] == "inner"))
+      assert %{"type" => "leaf", "fields" => [%{"name" => "note", "value" => "deep"}]} = leaf
+
+      assert %{"type" => "quote", "settings" => []} = quote_item
+      assert [%{"name" => "cite", "value" => "Ann"}] = quote_item["fields"]
+    end
+
+    test "an item of a type the site no longer defines, or that is not an object, is left out",
+         %{admin: admin} do
+      post = post!(admin, %{"sections" => [%{"_type" => "quote", "cite" => "Ann"}]})
+
+      stored = [
+        %{"_id" => Ecto.UUID.generate(), "_type" => "gone", "cite" => "x"},
+        "junk",
+        42,
+        %{"_id" => Ecto.UUID.generate()},
+        %{"_id" => Ecto.UUID.generate(), "_type" => "quote", "cite" => "Bo"},
+        %{"_type" => "quote", "cite" => "no id"}
+      ]
+
+      # A write refuses these, so seed the stored data: the orphan is what an
+      # older revision or a retired item type leaves behind.
+      KilnCMS.Repo.query!("UPDATE posts SET custom_fields = $1::jsonb WHERE id = $2", [
+        %{"sections" => stored},
+        Ecto.UUID.dump!(post.id)
+      ])
+
+      assert [%{"type" => "quote", "fields" => [%{"value" => "Bo"}]} = first, second] =
+               flexible_items(post)
+
+      assert is_binary(first["id"])
+      # No `_id` is served as `null`, not dropped.
+      assert %{"type" => "quote", "id" => nil} = second
+    end
+
+    test "settings that are not an object read as none", %{admin: admin} do
+      post = post!(admin, %{"sections" => [%{"_type" => "quote", "cite" => "Ann"}]})
+
+      KilnCMS.Repo.query!("UPDATE posts SET custom_fields = $1::jsonb WHERE id = $2", [
+        %{
+          "sections" => [
+            %{
+              "_id" => Ecto.UUID.generate(),
+              "_type" => "hero",
+              "headline" => "H",
+              "_settings" => "dark"
+            }
+          ]
+        },
+        Ecto.UUID.dump!(post.id)
+      ])
+
+      assert [%{"type" => "hero", "settings" => []}] = flexible_items(post)
+    end
+  end
 end

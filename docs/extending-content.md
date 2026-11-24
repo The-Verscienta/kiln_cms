@@ -2009,8 +2009,12 @@ field and every write path apply it (#2285). You need the admin role.
    empty to not filter on that field. Only plain, non-private fields are
    listed; a value on a number or yes/no field is saved as a number or a
    boolean.
-6. Optionally, under **Let editors create what they type**, choose **Yes,
-   create a new *Type***. See
+6. Under **Adding new records**, **Offer “Add new” in the picker** is ticked
+   by default. Untick it to have editors connect only records that already
+   exist: the picker, and the reverse field on each target, then offer no
+   **Add new**. It is stored as `"add_new": false` and filters nothing.
+   With it ticked, optionally choose **Yes, create a new *Type*** under
+   **Let editors create what they type**. See
    [Let editors create what they type](#let-editors-create-what-they-type).
 7. Read the sentence at the end of the step, which restates the setting, for
    example *Editors are offered: Published Page records, tagged vegan, newest
@@ -2058,7 +2062,9 @@ relationship back to a plain value clears the selection.
    name to a value, `{"in": [...]}` or `{"not_eq": value}` (only non-private
    fields with a plain value, see the errors table below; not `text`, media,
    reference, group, geolocation or link). `create` is `{"type": "<one of the
-   target types>"}`. Conditions AND together.
+   target types>"}`. `add_new` is `false` to turn off the picker's **Add
+   new** on both sides (it may not stand beside `create`), and is left out
+   otherwise; it is not a condition. Conditions AND together.
 2. Write a reference as usual (editor, reverse field, JSON:API, GraphQL, MCP,
    import). A target the filter rejects fails the save on that field, for
    example `“Only a draft” isn't one of the records this field accepts.`
@@ -2522,11 +2528,24 @@ What the definition rows are:
    every save so the item keeps its identity.
 
 3. Over JSON:API, a content write takes the same `custom_fields` shape. The
-   type-definitions endpoint doesn't include a flexible field's `item_types`
-   (`?include=field_definitions.item_types` is refused); read them with the
-   MCP `read_field_definitions` tool or from a `mix kiln.fields.export` file
-   (`flex_of_id` names the owning field; `item_setting` marks a setting on a
-   sub-field).
+   type-definitions endpoint includes a flexible field's item types:
+   `?include=field_definitions.item_types` (add `.group_fields` for their
+   sub-fields), down to the three flexible levels a definition may nest. They
+   are also in the MCP `read_field_definitions` tool and in a
+   `mix kiln.fields.export` file (`flex_of_id` names the owning field;
+   `item_setting` marks a setting on a sub-field).
+4. Over GraphQL, a flexible field is a `ListValue` whose `items` are
+   `FlexibleItemValue`s: `id`, `type` (the item type's name), `settings` (the
+   `item_setting` sub-fields) and `fields` (the rest), each a
+   `CustomFieldValue`. An item whose `_type` the site no longer defines is
+   left out. Read it with `fields(names: ["sections"])`; see
+   [the GraphQL guide](headless-graphql-api.md#read-custom-fields-typed-by-kind).
+5. In the typed export (`GET /api/schema`, `mix kiln.export.schema`, the
+   `kiln-types` CLI) each flexible field is a union over its item types, told
+   apart by `_type`: switch on it and keep a default branch for an item type
+   added after you generated. See
+   [api.md](api.md#schema-discovery-typed-clients) and
+   [native-apps.md](native-apps.md).
 
 Things to know:
 

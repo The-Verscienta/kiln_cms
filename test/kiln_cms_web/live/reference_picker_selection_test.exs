@@ -384,6 +384,63 @@ defmodule KilnCMSWeb.ReferencePickerSelectionTest do
     end
   end
 
+  describe "add_new: false" do
+    test "the picker offers no Add new, and a forged event creates nothing", ctx do
+      field!(ctx.admin, "no_new", %{"add_new" => false}, %{multiple: true})
+      lv = open_editor(build_conn(), ctx.admin, ctx.post)
+
+      assert has_element?(lv, "#custom-field-no_new-search")
+      refute has_element?(lv, "#custom-field-no_new-new-page")
+
+      lv |> element("#custom-field-no_new") |> render_hook("ref_new", %{"type" => "page"})
+      refute has_element?(lv, "#custom-field-no_new-new-form")
+
+      lv |> element("#custom-field-no_new") |> render_hook("ref_new_create", %{})
+      lv |> element("#custom-field-no_new") |> render_hook("ref_create_typed", %{})
+      assert option_ids(lv, "no_new") == []
+    end
+
+    test "connecting existing records still works", ctx do
+      field!(ctx.admin, "no_new_pick", %{"add_new" => false}, %{multiple: true})
+      lv = open_editor(build_conn(), ctx.admin, ctx.post)
+
+      search(lv, "no_new_pick", ctx.word)
+      assert ctx.published.id in option_ids(lv, "no_new_pick")
+    end
+
+    test "a field that leaves it on offers Add new", ctx do
+      field!(ctx.admin, "with_new", %{"states" => ["draft", "published"]}, %{multiple: true})
+      lv = open_editor(build_conn(), ctx.admin, ctx.post)
+
+      assert has_element?(lv, "#custom-field-with_new-new-page", "Add new Page")
+    end
+
+    test "the reverse field offers no Add new either", ctx do
+      field!(ctx.admin, "rev_no_new_#{uniq()}", %{"add_new" => false}, %{
+        multiple: true,
+        inverse_label: "Hosts"
+      })
+
+      {:ok, lv, _html} =
+        build_conn() |> log_in(ctx.admin) |> live(~p"/editor/content/page/#{ctx.published.id}")
+
+      assert has_element?(lv, "[data-reverse-field] [data-reference-picker]")
+      refute has_element?(lv, "[data-reverse-field] [id$=-new-post]")
+    end
+
+    test "the reverse field of a field that leaves it on offers Add new", ctx do
+      field!(ctx.admin, "rev_new_#{uniq()}", %{"states" => ["published"]}, %{
+        multiple: true,
+        inverse_label: "Hosts"
+      })
+
+      {:ok, lv, _html} =
+        build_conn() |> log_in(ctx.admin) |> live(~p"/editor/content/page/#{ctx.published.id}")
+
+      assert has_element?(lv, "[data-reverse-field] [id$=-new-post]")
+    end
+  end
+
   describe "create-on-type" do
     defp creating_field!(ctx, name, selection, extra \\ %{}) do
       field!(ctx.admin, name, Map.put(selection, "create", %{"type" => "page"}), extra)

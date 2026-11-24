@@ -118,7 +118,11 @@ defmodule KilnCMS.SchemaExport.Kotlin do
 
     model = Walk.model(document)
     names = top_level_names(model)
-    unions = [{"Block", model.block_union}, {"Document", model.document_union}]
+    flex_unions = for union <- model.unions, do: {names[union.name], union}
+
+    unions =
+      [{"Block", model.block_union}, {"Document", model.document_union}] ++ flex_unions
+
     rows = Map.new(unions, fn {name, union} -> {name, union_rows(union, names, model.defs)} end)
 
     ctx = %{
@@ -126,7 +130,8 @@ defmodule KilnCMS.SchemaExport.Kotlin do
       kinds: model.defs,
       reserved: MapSet.new(Map.values(names)),
       supertypes:
-        Map.new(Enum.flat_map(rows, fn {union, rows} -> Enum.map(rows, &{&1.def, union}) end))
+        Map.new(Enum.flat_map(rows, fn {union, rows} -> Enum.map(rows, &{&1.def, union}) end)),
+      unions: emitted_unions(model, names, rows)
     }
 
     union? = Enum.any?(rows, fn {_name, rows} -> rows != [] end)
@@ -137,6 +142,13 @@ defmodule KilnCMS.SchemaExport.Kotlin do
       section("Shared", Enum.map(model.shared, &declaration(&1, ctx))),
       section("Blocks", Enum.map(model.blocks, &declaration(&1, ctx))),
       section("Block union", [tagged_union("Block", model.block_union, rows["Block"], ctx)]),
+      section(
+        "Flexible items",
+        Enum.map(model.flex_items, &declaration(&1, ctx)) ++
+          Enum.map(flex_unions, fn {name, union} ->
+            tagged_union(name, union, rows[name], ctx)
+          end)
+      ),
       section("Documents", Enum.map(model.documents, &declaration(&1, ctx))),
       section("Document union", [
         tagged_union("Document", model.document_union, rows["Document"], ctx)
@@ -152,6 +164,7 @@ defmodule KilnCMS.SchemaExport.Kotlin do
     taken =
       taken_set(
         Map.values(names) ++
+          Enum.map(model.unions, &(names[&1.name] <> "Serializer")) ++
           ~w(Block BlockSerializer Document DocumentSerializer KilnJson KilnCustomFieldValue
              KilnCustomFieldValueSerializer)
       )
@@ -247,7 +260,8 @@ defmodule KilnCMS.SchemaExport.Kotlin do
         "ReferenceValue",
         "MediaValue",
         "ListValue",
-        "GroupValue"
+        "GroupValue",
+        "FlexibleItemValue"
       ]
 
     i1 = @indent
@@ -280,7 +294,9 @@ defmodule KilnCMS.SchemaExport.Kotlin do
      * `fields(names: [...])`, which returns `KilnCustomFieldValue`s. Values
      * arrive under per-kind aliases (`asString`, `asInt`, ...) because GraphQL
      * forbids one response key with several types. The fragment goes one level
-     * into lists and groups.
+     * into lists and groups, and into a flexible field's items
+     * (`FlexibleItemValue`: `id`, `type`, `settings` and `fields`) without
+     * following a nested flexible field or group.
      *
      * A field that is unknown, deleted, private to the reader or of another
      * kind than the accessor is `null` (or absent from `fields`), so the server
@@ -355,6 +371,15 @@ defmodule KilnCMS.SchemaExport.Kotlin do
     #{i1}@Serializable
     #{i1}public data class GroupValue(
     #{i2}public override val name: String,
+    #{i2}public val fields: List<KilnCustomFieldValue>,
+    #{i1}) : KilnCustomFieldValue
+
+    #{i1}@Serializable
+    #{i1}public data class FlexibleItemValue(
+    #{i2}public override val name: String,
+    #{i2}public val id: String? = null,
+    #{i2}public val type: String,
+    #{i2}public val settings: List<KilnCustomFieldValue>,
     #{i2}public val fields: List<KilnCustomFieldValue>,
     #{i1}) : KilnCustomFieldValue
 
@@ -444,17 +469,45 @@ defmodule KilnCMS.SchemaExport.Kotlin do
   # are claimed first, so a site whose shared definition is called `document`
   # gets a suffixed name rather than shadowing the union.
   defp top_level_names(model) do
-    decls = model.shared ++ model.blocks ++ model.documents
+    decls = model.shared ++ model.blocks ++ model.flex_items ++ model.documents
     union = if model.block_union, do: [model.block_union.name], else: []
     taken = taken_set(~w(Block BlockSerializer Document DocumentSerializer KilnJson))
 
-    {names, _taken} =
+    {names, taken} =
       Enum.reduce(Enum.map(decls, & &1.name), {%{}, taken}, fn name, {acc, taken} ->
         kotlin = unique(base_type_name(name), taken)
         {Map.put(acc, name, kotlin), MapSet.put(taken, fold(kotlin))}
       end)
 
+    # A flexible field's union (#2282) is a sealed interface with a
+    # `<Name>Serializer` beside it: both names must be free.
+    {names, _taken} =
+      Enum.reduce(model.unions, {names, taken}, fn %{name: name}, {acc, taken} ->
+        kotlin = unique_union(base_type_name(name), taken)
+        taken = taken |> MapSet.put(fold(kotlin)) |> MapSet.put(fold(kotlin <> "Serializer"))
+        {Map.put(acc, name, kotlin), taken}
+      end)
+
     Map.merge(names, Map.new(union, &{&1, "Block"}))
+  end
+
+  defp unique_union(name, taken) do
+    candidate = unique(name, taken)
+
+    if MapSet.member?(taken, fold(candidate <> "Serializer")),
+      do: unique_union(candidate <> "Item", taken),
+      else: candidate
+  end
+
+  # The unions that get a sealed interface: the block union (as ever), and a
+  # flexible field's once it has a member to decode.
+  defp emitted_unions(model, names, rows) do
+    block = if model.block_union, do: [model.block_union.name], else: []
+
+    flexible =
+      for union <- model.unions, rows[names[union.name]] != [], do: union.name
+
+    MapSet.new(block ++ flexible)
   end
 
   defp base_type_name("block_" <> rest), do: upper_camel(rest) <> "Block"
@@ -603,7 +656,7 @@ defmodule KilnCMS.SchemaExport.Kotlin do
     kotlin =
       case scope.kinds[name] do
         kind when kind in [:object, :opaque] -> scope.names[name]
-        :union -> if scope.names[name] == "Block", do: "Block", else: "JsonElement"
+        :union -> if name in scope.unions, do: scope.names[name], else: "JsonElement"
         nil -> "JsonElement"
       end
 
@@ -733,18 +786,18 @@ defmodule KilnCMS.SchemaExport.Kotlin do
 
   defp tagged_union(_name, _union, [], _ctx), do: ""
 
-  defp tagged_union(name, %{tag: tag}, rows, ctx) do
+  defp tagged_union(name, %{tag: tag} = union, rows, ctx) do
     i1 = @indent
     i2 = i1 <> @indent
     i3 = i2 <> @indent
-    what = if name == "Block", do: "block", else: "content"
+    {summary, unknown_doc} = union_docs(name, union, tag)
     serializer = name <> "Serializer"
 
     """
-    /** Any #{what} in a fired `:json` artifact, told apart by `#{tag}`. */
+    /** #{summary} */
     @Serializable(with = #{serializer}::class)
     public sealed interface #{name} {
-    #{i1}/** A #{what} type this build does not know — one added after it was generated. */
+    #{i1}/** #{unknown_doc} */
     #{i1}public data class Unknown(public val type: String, public val raw: JsonObject) : #{name}
     }
 
@@ -771,6 +824,21 @@ defmodule KilnCMS.SchemaExport.Kotlin do
     #{i1}}
     }\
     """
+  end
+
+  defp flexible_field(%{flexible: %{"path" => [_ | _] = path}}), do: List.last(path)
+  defp flexible_field(union), do: union.name
+
+  defp union_docs(_name, %{origin: :flexible} = union, tag) do
+    {"One item of the flexible field `#{flexible_field(union)}`, told apart by `#{tag}`.",
+     "An item type this build does not know — one added after it was generated."}
+  end
+
+  defp union_docs(name, _union, tag) do
+    what = if name == "Block", do: "block", else: "content"
+
+    {"Any #{what} in a fired `:json` artifact, told apart by `#{tag}`.",
+     "A #{what} type this build does not know — one added after it was generated."}
   end
 
   defp json_config(union?) do

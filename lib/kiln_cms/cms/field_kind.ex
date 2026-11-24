@@ -22,7 +22,8 @@ defmodule KilnCMS.CMS.FieldKind do
   | `:media`     | `:media`                                                     |
   | `:geolocation` | `:geolocation` (`lat`, `lng`, `label`, `zoom`)             |
   | `:list`      | any definition with `multiple: true`                         |
-  | `:json`      | `:flexible` (each item), and anything else: `:json`, `:range`, `:key_value`, `:link`, `:address`, `:computed`, `:datetime_range`, `:recurrence`, |
+  | `:flexible_item` | `:flexible` (each item; the field is `multiple`, so it is served as a `:list` of them) |
+  | `:json`      | anything else: `:json`, `:range`, `:key_value`, `:link`, `:address`, `:computed`, `:datetime_range`, `:recurrence`, |
   |              | and a plugin type that does not implement `c:Kiln.FieldType.graphql_kind/1` |
 
   Core types are mapped here directly. A `Kiln.FieldType` module (built-in or
@@ -49,6 +50,7 @@ defmodule KilnCMS.CMS.FieldKind do
           | :reference
           | :media
           | :geolocation
+          | :flexible_item
           | :json
 
   @typedoc "A kind as served: an `t:item_kind/0`, or `:list` for a `multiple` field."
@@ -78,9 +80,8 @@ defmodule KilnCMS.CMS.FieldKind do
     reference: :reference,
     group: :group,
     # A list of typed items (`multiple` is forced on, so it is served as a
-    # `:list`): each item is generic JSON until the typed export
-    # (`FlexibleValue`, #2282) lands.
-    flexible: :json
+    # `:list`): each item is one `FlexibleItemValue` (#2282).
+    flexible: :flexible_item
   }
 
   @doc """

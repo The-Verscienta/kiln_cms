@@ -306,6 +306,50 @@ defmodule KilnCMSWeb.FieldSelectionAdminTest do
     end
   end
 
+  describe "Add new" do
+    test "is on by default, and saving leaves the selection alone", ctx do
+      field = reference!(ctx.admin)
+      lv = open_edit(build_conn(), ctx.admin, field)
+      step = "#edit-field-rules-#{field.id}-selection"
+
+      assert has_element?(lv, "#{step}-add-new-on[checked]")
+      lv |> form("#edit-field-#{field.id}") |> render_submit()
+
+      assert stored(field) == nil
+    end
+
+    test "turning it off saves add_new: false, hides create-on-type and says so", ctx do
+      field = reference!(ctx.admin, %{selection: %{"create" => %{"type" => "page"}}})
+      lv = open_edit(build_conn(), ctx.admin, field)
+      step = "#edit-field-rules-#{field.id}-selection"
+
+      html =
+        lv
+        |> form("#edit-field-#{field.id}", field_definition: %{sel: %{add_new: "false"}})
+        |> render_change()
+
+      assert html =~ "Editors can&#39;t add new records from here."
+      refute has_element?(lv, "#{step}-create")
+
+      lv |> form("#edit-field-#{field.id}") |> render_submit()
+      assert stored(field) == %{"add_new" => false}
+    end
+
+    test "turning it back on clears the setting", ctx do
+      field = reference!(ctx.admin, %{selection: %{"add_new" => false}})
+      lv = open_edit(build_conn(), ctx.admin, field)
+      step = "#edit-field-rules-#{field.id}-selection"
+
+      refute has_element?(lv, "#{step}-add-new-on[checked]")
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{sel: %{add_new: "true"}})
+      |> render_submit()
+
+      assert stored(field) == nil
+    end
+  end
+
   describe "adding a field" do
     test "a new relationship can carry a selection", ctx do
       {:ok, lv, _html} = build_conn() |> log_in(ctx.admin) |> live(~p"/editor/fields")

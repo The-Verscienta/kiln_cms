@@ -1538,9 +1538,10 @@ Notable properties:
   present only when set (`{"country": "NL", "postal_code": "1234 AB"}`);
 - a `flexible` custom field is an array of objects in the order the editor
   arranged them. Each item carries `_id`, `_type` (its item type's name), that
-  item type's keys and, when it has settings, `_settings`. The items are typed
-  as generic objects for now, with `x-kiln-min-items` / `x-kiln-max-items`
-  when the field sets bounds;
+  item type's keys and, when it has settings, `_settings`. The items are a
+  `$ref` to a `oneOf` union (`flex_*` in `$defs`) over closed item definitions,
+  told apart by `_type`, with `x-kiln-min-items` / `x-kiln-max-items` when the
+  field sets bounds;
 - a list field of a plugin's type that takes lists is an array of the type's
   own `json_schema/1` for one item, its `null` removed, with `uniqueItems`
   only when the type drops repeats. A **held list**, one whose plugin type

@@ -76,12 +76,20 @@ else.
   Re-saving such a record on the previous release fails validation; reads work.
   ([long form](docs/changelog/unreleased.md#flexible-media-reference))
 
+- **A reference field can turn off the picker's "Add new": untick "Offer “Add new” in the picker" in the fields admin (stored as `"add_new": false` in the field's `selection`) and editors connect only records that already exist, from both sides of the relationship ([#3222](https://github.com/The-Verscienta/kiln_cms/issues/3222)).**
+  No migration.
+  ([long form](docs/changelog/unreleased.md#reference-add-new-off))
+
 - **Edits can say why: a `change_note` on update, publish and Publish changes is kept on the version and shown in History; a site can make the editor ask for one per content type ("Ask why on every change" on the Safety fields page) ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255)).**
   ([long form](docs/changelog/unreleased.md#change-note))
 
 - **A role can be granted single item types of a Flexible content field (`custom_fields.<field>.<item type>`): its editors may edit, add and remove items of that type and no others ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282)).**
   Reordering needs the whole-field grant; the console shows a partly granted field read-only. No migration.
   ([long form](docs/changelog/unreleased.md#flexible-item-type-grants))
+
+- **A Flexible content field is now typed in the GraphQL API and in the generated clients: a `FlexibleItemValue` per item, and a `oneOf` union per field in JSON Schema, OpenAPI, TypeScript, Swift, Kotlin and `kiln-types`. `?include=field_definitions.item_types` works on type definitions.**
+  Validating consumers: a flexible field's `items` was `{"type": "object"}` and is now a `$ref` to a union of closed item definitions.
+  ([long form](docs/changelog/unreleased.md#flexible-typed-export))
 
 ## [1.12.0] - 2026-11-21
 

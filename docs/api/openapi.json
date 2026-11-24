@@ -31345,7 +31345,7 @@
             "name": "include",
             "required": false,
             "schema": {
-              "pattern": "^(field_definitions|field_definitions.group_fields)(,(field_definitions|field_definitions.group_fields))*$",
+              "pattern": "^(field_definitions|field_definitions.group_fields|field_definitions.item_types|field_definitions.item_types.group_fields|field_definitions.item_types.group_fields.item_types|field_definitions.item_types.group_fields.item_types.group_fields|field_definitions.item_types.group_fields.item_types.group_fields.item_types|field_definitions.item_types.group_fields.item_types.group_fields.item_types.group_fields)(,(field_definitions|field_definitions.group_fields|field_definitions.item_types|field_definitions.item_types.group_fields|field_definitions.item_types.group_fields.item_types|field_definitions.item_types.group_fields.item_types.group_fields|field_definitions.item_types.group_fields.item_types.group_fields.item_types|field_definitions.item_types.group_fields.item_types.group_fields.item_types.group_fields))*$",
               "type": "string"
             },
             "style": "form"
@@ -31440,7 +31440,7 @@
             "name": "include",
             "required": false,
             "schema": {
-              "pattern": "^(field_definitions|field_definitions.group_fields)(,(field_definitions|field_definitions.group_fields))*$",
+              "pattern": "^(field_definitions|field_definitions.group_fields|field_definitions.item_types|field_definitions.item_types.group_fields|field_definitions.item_types.group_fields.item_types|field_definitions.item_types.group_fields.item_types.group_fields|field_definitions.item_types.group_fields.item_types.group_fields.item_types|field_definitions.item_types.group_fields.item_types.group_fields.item_types.group_fields)(,(field_definitions|field_definitions.group_fields|field_definitions.item_types|field_definitions.item_types.group_fields|field_definitions.item_types.group_fields.item_types|field_definitions.item_types.group_fields.item_types.group_fields|field_definitions.item_types.group_fields.item_types.group_fields.item_types|field_definitions.item_types.group_fields.item_types.group_fields.item_types.group_fields))*$",
               "type": "string"
             },
             "style": "form"
@@ -31529,7 +31529,7 @@
             "name": "include",
             "required": false,
             "schema": {
-              "pattern": "^(field_definitions|field_definitions.group_fields)(,(field_definitions|field_definitions.group_fields))*$",
+              "pattern": "^(field_definitions|field_definitions.group_fields|field_definitions.item_types|field_definitions.item_types.group_fields|field_definitions.item_types.group_fields.item_types|field_definitions.item_types.group_fields.item_types.group_fields|field_definitions.item_types.group_fields.item_types.group_fields.item_types|field_definitions.item_types.group_fields.item_types.group_fields.item_types.group_fields)(,(field_definitions|field_definitions.group_fields|field_definitions.item_types|field_definitions.item_types.group_fields|field_definitions.item_types.group_fields.item_types|field_definitions.item_types.group_fields.item_types.group_fields|field_definitions.item_types.group_fields.item_types.group_fields.item_types|field_definitions.item_types.group_fields.item_types.group_fields.item_types.group_fields))*$",
               "type": "string"
             },
             "style": "form"

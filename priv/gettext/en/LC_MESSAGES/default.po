@@ -1386,6 +1386,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/field_selection.ex
 #, elixir-autogen, elixir-format
+msgid "%{sentence} Editors can't add new records from here."
+msgstr ""
+
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
 msgid "%{sentence} Typing a new name offers to create a draft %{type}."
 msgstr ""
 
@@ -3368,6 +3373,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Added to the working copy — publish changes to make it live"
+msgstr ""
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Adding new records"
 msgstr ""
 
 #: lib/kiln_cms/cms/field_types/link.ex
@@ -13396,6 +13406,11 @@ msgstr ""
 msgid "Let this server prune these backups — only if that server is retired or this installation moved here."
 msgstr ""
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Lets an editor create a new draft and connect it in one step, here and from the other side of the relationship. Turn it off to have editors connect only records that already exist."
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Letters, digits, hyphens and underscores."
@@ -16258,6 +16273,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Offer this provider on the sign-in page"
+msgstr ""
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Offer “Add new” in the picker"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/offline_controller.ex

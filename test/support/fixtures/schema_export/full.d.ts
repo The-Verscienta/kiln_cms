@@ -272,6 +272,52 @@ export type KilnBlock =
   | VideoBlock;
 
 
+// -- Flexible items ----------------------------------------------
+
+/** An item of the `hero` type. */
+export interface FlexPostSectionsHero {
+  _id: string;
+  _settings?: { background?: string | null };
+  _type: "hero";
+  cols?: Array<FlexPostSectionsHeroCols> | null;
+  headline?: string | null;
+  image?: MediaSnapshot | null;
+  link?: /* links to: "post" */ Record<string, unknown> | null;
+}
+
+/** An item of the `hero_cols` type. */
+export interface FlexPostSectionsHeroCols2 {
+  _id: string;
+  _type: "hero_cols";
+  count?: number | null;
+}
+
+/** An item of the `text` type. */
+export interface FlexPostSectionsHeroColsText {
+  _id: string;
+  _type: "text";
+  body?: string | null;
+}
+
+/** An item of the `quote` type. */
+export interface FlexPostSectionsQuote {
+  _id: string;
+  _type: "quote";
+  cite?: string | null;
+  text?: string | null;
+}
+
+/** One item of the flexible field `sections` of `post`, told apart by `_type`. An item whose type has since been removed can still appear in an older revision or a point-in-time read (`?as_of=`): treat an unrecognized `_type` as an unknown item. */
+export type FlexPostSections =
+  | FlexPostSectionsHero
+  | FlexPostSectionsHeroCols2
+  | FlexPostSectionsQuote;
+
+/** One item of the flexible field `cols` of `post`, told apart by `_type`. An item whose type has since been removed can still appear in an older revision or a point-in-time read (`?as_of=`): treat an unrecognized `_type` as an unknown item. */
+export type FlexPostSectionsHeroCols =
+  | FlexPostSectionsHeroColsText;
+
+
 // -- Documents ---------------------------------------------------
 
 /** A published `Page` as fired to the `:json` surface. */
@@ -291,7 +337,7 @@ export interface PageDocument {
 /** A published `Post` as fired to the `:json` surface. */
 export interface PostDocument {
   blocks: Array<KilnBlock>;
-  custom_fields: { accent?: string | null; code_sample?: string | null; contact_email?: string | null; contacts?: Array<string> | null; dosages?: Array<{ amount?: number | null; form?: string | null; unit?: string | null }> | null; event_dates?: Array<string> | null; extra?: Record<string, unknown> | Array<unknown> | null; featured?: boolean | null; gallery?: Array<MediaSnapshot> | null; handle?: string | null; hero?: MediaSnapshot | null; homepage?: string | null; launch_date?: string | null; office?: { address_line1?: string; address_line2?: string; administrative_area?: string; country: string; locality?: string; postal_code?: string } | null; opens_at?: string | null; parent?: /* links to: "post" */ Record<string, unknown> | null; phone?: string | null; price_band?: { max?: number; min?: number } | { max?: string; min?: string } | null; properties?: Array<string> | null; published_at?: string | null; rating?: number | null; read_time?: number | null; related?: /* links to: "post" */ Array<{ id: string; slug?: string | null; title?: string | null; type: string }> | null; scores?: Array<number> | null; seo?: { no_index?: boolean | null; title?: string | null } | null; source?: { label?: string; rel?: string; target?: "_blank" | "_self"; url: string } | null; specs?: Array<{ key: string; value: string }> | null; subtitle?: string | null; summary?: string | null; synonyms?: Array<string> | null; tier?: string | null; where?: { label?: string; lat?: number; lng?: number; zoom?: number } | null };
+  custom_fields: { accent?: string | null; code_sample?: string | null; contact_email?: string | null; contacts?: Array<string> | null; dosages?: Array<{ amount?: number | null; form?: string | null; unit?: string | null }> | null; event_dates?: Array<string> | null; extra?: Record<string, unknown> | Array<unknown> | null; featured?: boolean | null; gallery?: Array<MediaSnapshot> | null; handle?: string | null; hero?: MediaSnapshot | null; homepage?: string | null; launch_date?: string | null; office?: { address_line1?: string; address_line2?: string; administrative_area?: string; country: string; locality?: string; postal_code?: string } | null; opens_at?: string | null; parent?: /* links to: "post" */ Record<string, unknown> | null; phone?: string | null; price_band?: { max?: number; min?: number } | { max?: string; min?: string } | null; properties?: Array<string> | null; published_at?: string | null; rating?: number | null; read_time?: number | null; related?: /* links to: "post" */ Array<{ id: string; slug?: string | null; title?: string | null; type: string }> | null; scores?: Array<number> | null; sections?: Array<FlexPostSections> | null; seo?: { no_index?: boolean | null; title?: string | null } | null; source?: { label?: string; rel?: string; target?: "_blank" | "_self"; url: string } | null; specs?: Array<{ key: string; value: string }> | null; subtitle?: string | null; summary?: string | null; synonyms?: Array<string> | null; tier?: string | null; where?: { label?: string; lat?: number; lng?: number; zoom?: number } | null };
   custom_fields_plain?: { summary?: string | null };
   id: string;
   inherited_fields?: Record<string, unknown>;

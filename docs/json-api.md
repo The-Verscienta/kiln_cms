@@ -1306,9 +1306,10 @@ value (see
 `?include=field_definitions.group_fields` adds the sub-fields of
 each `:group` field — the keys each of its rows takes; a sub-field names its
 group in `group_of_id`.
-The **item types** of a `:flexible` field cannot be included yet:
-`?include=field_definitions.item_types` is a `400` (`invalid_includes`),
-because the type's include list names `group_fields` only. An item type is a
+`?include=field_definitions.item_types` adds the **item types** of each
+`:flexible` field, and `.group_fields` after it the sub-fields of those, down
+to the three flexible levels a definition may nest (a deeper path is a `400`,
+`invalid_includes`). An item type is a
 `:group`-typed definition whose `flex_of_id` names the flexible field, and
 `item_setting` marks a sub-field that is one of the item's settings; MCP's
 `read_field_definitions` lists them with the other definitions.

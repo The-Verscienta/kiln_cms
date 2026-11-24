@@ -2,10 +2,10 @@
 
 **Status:** PR 1 of 7 (section 9: model and write path) merged (#2969);
 PR 2 (admin Item types panel, editor cards, field-sync `item_types`) merged
-(#2980); PR 3 (media and reference in items) merged (#3217); PR 4 (grants) is on its own branch: the
-item-type grant is judged item by item, by `_id`, and reordering needs the whole-field grant
+(#2980); PR 3 (media and reference in items) merged (#3217); PR 4 (grants) merged (#3220)
 ([ADR 0065](decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md#item-type-grants-pr-4-2282));
-PRs 5 to 7 are plan only. Design record for
+PR 5 (API and typed export) is on branch `feat/2282-flexible-content-pr5-api-export`, not yet merged;
+PRs 6 and 7 are plan only. Design record for
 [#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282), written from a
 read of the model as it stood on 2026-11-10 (after custom-field waves 1–5). Read
 the resources for current behavior and this for *why*. Nothing here is a
@@ -13,10 +13,8 @@ decision until the PR that carries it merges; the open questions are in §10.
 The decisions PR 1 makes are argued in
 [ADR 0065](decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
 
-**PR 3 (media and reference inside items)** is built on branch
-`feat/2282-flexible-content-pr3-media-reference`, not yet merged; where it
-differs from this plan is listed under "Where PR 3 differs" below the PR 2
-list. PRs 4 to 7 are plan only.
+Where PR 3 differs from this plan is listed under "Where PR 3 differs" below
+the PR 2 list, and PR 5's under "Where PR 5 differs" below that.
 
 **Where PR 2 differs from this plan** (the code is right; this text is
 unchanged below):
@@ -58,11 +56,32 @@ unchanged below):
 - **Not changed here: `SchemaExport`'s GraphQL fragment for a repeating
   group's rows.** `SchemaExport.GraphQL.group_row/0` selects scalar values
   only; a row's media or reference is not fetched by the generated fragment.
-  Because groups are not lifted and flexible fields are exported as generic
-  JSON until PR 5, no value can reach it yet; it changes with the goldens in
-  PR 5, once.
+  PR 5 selects a flexible item's settings and fields the same way (scalar
+  values, one level), so a media or reference sub-field is not fetched by the
+  generated fragment either.
 - `FieldDisplay`, the fired-artifact refresh, the re-fire graph, `Resnapshot`
   and the maintenance task cover items, as listed in §6.
+
+**Where PR 5 differs from this plan** (the code is right; this text is
+unchanged below):
+
+- GraphQL has no `FlexibleValue`. A flexible field stays a `ListValue` (it is
+  `multiple`-forced) and each element is a `FlexibleItemValue` with `id`,
+  `type`, `settings` and `fields`, as a repeating group is a list of
+  `GroupValue`s. An item of an unknown type is left out.
+- The export's `oneOf` is hoisted into `$defs` (`flex_*`, reserved like
+  `block_` and `content_`) with a `$ref` on the field, and each union carries
+  `x-kiln-flexible` so no emitter parses a def name. `Walk.model/2` gains
+  `:unions` and `:flex_items`. The generated GraphQL fragment goes one level
+  into an item.
+- JSON:API's `?include=field_definitions.item_types` works, nested down to the
+  depth cap; PR 1 to 3 had it refused.
+- **Found, not fixed:** `custom_fields_complexity` prices every
+  `fields(names:)` name at the whole selection. Even one `multiple` string
+  field's generated fragment costs 631 against the default `max_complexity` of
+  200, and a flexible field makes it 1241, so the generated fragments only run
+  with a raised cap. This predates PR 5, so it is a follow-up and no test
+  asserts the fragment's complexity.
 
 **Where PR 1 differs from this plan** (the code is right; this text is
 unchanged below):
@@ -433,7 +452,7 @@ until PR 2**.
 | 2 | **Admin + editor (one PR)** | "Item types" panel, "Setting" checkbox, per-type `max_items`, purge-count warning; `FieldSync` `item_types` nesting; item cards (recursive for nested flexible sub-fields, each level collapsible), add menu, drag/move/duplicate/remove, collapse, settings section, `_id` wire form, error paths, scalar sub-fields; e2e. Split admin from editor only if size demands, because the admin panel alone is a dead end. Gettext for new strings. | 1 |
 | 3 | **Media + reference inside items** | `item_field_types` = link types + `:media` + `:reference` (group parity, Q1); snapshots at write; path pickers addressed by `_id`; `Firing.CustomFields` refresh recursion; edges with path + re-fire; `FieldDisplay.collect`; `SyncFieldValues`. Highest risk; changes the `GroupValue` shape if groups are included. | 2 |
 | 4 | **Grants** | Per-item-type grants, validators and pickers, `_id`-based `EnforceCustomFieldGrants` rewrite, copy-path handling. | 1 |
-| 5 | **API + typed export** | GraphQL `FlexibleValue`, `SchemaExport` `oneOf`, TS/Swift/Kotlin/GraphQL emitters, goldens, `clients/` (js, elixir) and `kiln_client`, docs. **After 3**, so the emitters and goldens change once. | 1, 3 |
+| 5 | **API + typed export** (done on its branch; see "Where PR 5 differs") | GraphQL `FlexibleValue`, `SchemaExport` `oneOf`, TS/Swift/Kotlin/GraphQL emitters, goldens, `clients/` (js, elixir) and `kiln_client`, docs. **After 3**, so the emitters and goldens change once. | 1, 3 |
 | 6 | **Search + diff + display** | Walker skips meta keys and `searchable` becomes allowed, `VersionDiff` per item, `FieldDisplay` (coordinate with 3, which also edits it), history rendering. | 1 (after 3 for `FieldDisplay`) |
 | 7 | **`:llm` / `:json_ld` projection + theme helper** | Per Q2; `FlexibleItems` helper docs. | 1, decision |
 
