@@ -73,6 +73,7 @@ defmodule KilnCMS.Media.DirectUpload do
   """
 
   alias KilnCMS.Media.{Ingest, StagedUploadClaim, StagedUploadCleanup, Upload}
+  alias KilnCMS.Repo
   alias KilnCMS.Storage
 
   @salt "media direct upload"
@@ -152,19 +153,32 @@ defmodule KilnCMS.Media.DirectUpload do
   `{:error, :size_mismatch}`, `{:error, :claim_lost}` (the cleanup job's
   claim lapsed mid-completion; see "Single use"), or anything
   `Ingest.store_file/3` returns.
+
+  Never call it inside a `Repo.transaction`: the claim's row lock would be
+  held until that transaction commits, and the claim's heartbeat renews it
+  from another connection, so it would wait on that lock throughout (see
+  `KilnCMS.Media.StagedUploadClaim`, "Not inside a transaction"). It raises
+  `ArgumentError` if it is.
   """
   @spec complete(String.t(), Upload.metadata(), term(), String.t() | nil) ::
           {:ok, struct()} | {:error, term()}
   def complete(token, metadata, actor, org_id) when is_binary(token) do
+    if Repo.in_transaction?() do
+      raise ArgumentError,
+            "DirectUpload.complete/4 must not run inside a transaction: " <>
+              "its claim's heartbeat would wait on the claim's own row lock"
+    end
+
     with {:ok, claims} <- verify(token, actor, org_id),
          {:ok, claim} <- StagedUploadClaim.claim(claims.key) do
       heartbeat = StagedUploadClaim.start_heartbeat(claim)
 
-      # On a raise the heartbeat still stops, the claim is left to lapse, and
-      # the cleanup job deletes the object when it does.
+      # On a raise the heartbeat still stops. One before the object was found
+      # gives the claim back (`find_staged/4`); one after leaves it to lapse,
+      # and the cleanup job deletes the object when it does.
       {consumed?, result} =
         try do
-          consume(claims, heartbeat, metadata, actor, org_id)
+          consume(claims, claim, heartbeat, metadata, actor, org_id)
         after
           StagedUploadClaim.stop_heartbeat(heartbeat)
         end
@@ -212,17 +226,33 @@ defmodule KilnCMS.Media.DirectUpload do
 
   # `{consumed?, result}`: consumed once a staged object was found, which is
   # also when it is deleted, whatever the ingest's outcome.
-  defp consume(claims, heartbeat, metadata, actor, org_id) do
+  defp consume(claims, claim, heartbeat, metadata, actor, org_id) do
+    case find_staged(claims, claim, heartbeat, org_id) do
+      {:ok, staged, size} ->
+        try do
+          {true, ingest_staged(claims, staged, size, claim, metadata, actor, org_id)}
+        after
+          Storage.delete_private(claims.key, staged)
+        end
+
+      error ->
+        {false, error}
+    end
+  end
+
+  # Not a boundary that handles the raise: it re-raises. Nothing has been
+  # consumed yet, so the claim is given back first rather than left to lapse,
+  # which would spend a token whose object is still there to complete.
+  defp find_staged(claims, claim, heartbeat, org_id) do
     with {:ok, staged} <- staged_store(claims, org_id),
          {:ok, size} <- staged_size(claims.key, staged) do
-      try do
-        {true, ingest_staged(claims, staged, size, heartbeat, metadata, actor, org_id)}
-      after
-        Storage.delete_private(claims.key, staged)
-      end
-    else
-      error -> {false, error}
+      {:ok, staged, size}
     end
+  rescue
+    exception ->
+      StagedUploadClaim.stop_heartbeat(heartbeat)
+      :ok = StagedUploadClaim.settle(claim, false)
+      reraise exception, __STACKTRACE__
   end
 
   # The staged size is re-read rather than trusted from the token: the signed
@@ -230,13 +260,13 @@ defmodule KilnCMS.Media.DirectUpload do
   # store's promise, and the check is one ranged read. A claim lost during the
   # copy means the cleanup job may have deleted the object under it, so the
   # copy is not ingested.
-  defp ingest_staged(claims, staged, size, heartbeat, metadata, actor, org_id) do
+  defp ingest_staged(claims, staged, size, claim, metadata, actor, org_id) do
     tmp = Path.join(System.tmp_dir!(), "kiln-direct-#{Ecto.UUID.generate()}")
 
     try do
       with :ok <- same_size(size, claims.byte_size),
            :ok <- Storage.copy_to_file(claims.key, tmp, private?: true, at: staged),
-           :ok <- still_claimed(heartbeat) do
+           :ok <- still_claimed(claim) do
         Upload.from_file(tmp, claims.filename, metadata, actor, org_id)
       end
     after
@@ -251,8 +281,14 @@ defmodule KilnCMS.Media.DirectUpload do
 
   defp or_claim_lost(ok, _heartbeat), do: ok
 
-  defp still_claimed(heartbeat) do
-    if StagedUploadClaim.lost?(heartbeat), do: {:error, :claim_lost}, else: :ok
+  # Asked of the database rather than the heartbeat's flag, which is only as
+  # fresh as its last beat: the copy must not be ingested unless the claim
+  # holds now. A renewal that could not be made counts as lost too.
+  defp still_claimed(claim) do
+    case StagedUploadClaim.renew(claim) do
+      :ok -> :ok
+      _lost_or_failed -> {:error, :claim_lost}
+    end
   end
 
   defp schedule_cleanup(key, org_id, site) do

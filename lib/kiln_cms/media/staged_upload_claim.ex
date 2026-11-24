@@ -13,15 +13,18 @@ defmodule KilnCMS.Media.StagedUploadClaim do
     * `claim/1` takes the lease: one `UPDATE` of the job row that is still
       `scheduled` and carries no claim, pushing `scheduled_at` out by the
       lease and recording the claim id and the original `scheduled_at` in the
-      job's `meta`. Exactly one caller wins. No row means there is nothing to
-      complete: the job already ran (the token is spent or expired), another
-      completion holds the claim, an earlier completion consumed the token, or
-      the job was never queued.
+      job's `meta`. At most one caller wins, and none once the job is due or
+      within the stager margin (five seconds) of it (see "Oban's stager"
+      below). No row means there is nothing to complete: the job already ran
+      or is about to (the token is spent or expired), another completion
+      holds the claim, an earlier completion consumed the token, or the job
+      was never queued.
     * `start_heartbeat/1` renews the lease every `heartbeat_ms` for as long as
       the completion runs: the copy down, the metadata strip, the variants
       and the create. A renewal that matches no row means the lease was lost
-      (the job is running or ran); the completion sees that with `lost?/1`
-      and gives up with `:claim_lost`. The heartbeat is linked to the
+      (the job is running or ran, or its lease came within the stager
+      margin); the completion sees that with `lost?/1`, and once more with a
+      last `renew/1` after the copy, and gives up with `:claim_lost`. The heartbeat is linked to the
       completion, so a completion that dies stops renewing, the lease lapses,
       and the job deletes the object.
     * `settle/2` ends it. A consumed upload (the object was found and the
@@ -37,9 +40,29 @@ defmodule KilnCMS.Media.StagedUploadClaim do
   holds the lease. It is `clock_timestamp()` rather than `now()`, which is
   the start of the enclosing transaction: the same in production, where each
   statement is its own transaction, but a lease renewed inside a transaction
-  (every test runs in one) would otherwise never move. Oban's stager compares `scheduled_at` with its own node's
-  clock; the margin between a renewal and the lease's end (by default four
-  minutes) absorbs any skew between the two.
+  (every test runs in one) would otherwise never move. Oban's stager compares
+  `scheduled_at` with its own node's clock; the margin between a renewal and
+  the lease's end (by default four minutes) absorbs any skew between the two.
+
+  ## Oban's stager
+
+  The stager (`Oban.Engines.Basic.stage_jobs/3`) is one
+  `UPDATE … FROM (SELECT id … WHERE scheduled_at <= now LIMIT n)` that takes
+  no row lock in its subquery. A claim or renewal that commits between that
+  subquery and the stager's update does not stop the job being staged: the
+  update moves it to `available` all the same. So a claim or renewal only
+  matches a row whose `scheduled_at` is still more than the stager margin
+  (five seconds) ahead of the database's clock, a row no
+  stager can already have selected. A job due sooner than that is refused
+  (`claim/1`) or counts as lost (`renew/1`).
+
+  ## Not inside a transaction
+
+  None of this may run inside a `Repo.transaction`. The claim's `UPDATE`
+  would hold the job row's lock until that transaction commits, and the
+  heartbeat renews from its own process on another connection, so its first
+  renewal would wait on that lock for as long as the completion runs.
+  `KilnCMS.Media.DirectUpload.complete/4` refuses to start inside one.
 
   `lease_ms` (default 300 000) and `heartbeat_ms` (default 60 000) are read
   from `config :kiln_cms, #{inspect(__MODULE__)}`, so tests can shorten them.
@@ -53,6 +76,10 @@ defmodule KilnCMS.Media.StagedUploadClaim do
   @default_lease_ms 300_000
   @default_heartbeat_ms 60_000
 
+  # How far ahead of the database's clock a job's `scheduled_at` must still be
+  # for a claim or renewal to touch it (see "Oban's stager").
+  @stager_margin_ms 5_000
+
   @typedoc "A held claim: the staging key and the claim's own id."
   @type t :: %{key: String.t(), id: String.t()}
 
@@ -63,17 +90,20 @@ defmodule KilnCMS.Media.StagedUploadClaim do
   # key in its args, which the `oban_jobs` GIN index on `args` serves.
   @job "worker = $1 AND args @> $2 AND state = 'scheduled'"
 
+  # A row a stager could already have selected is never claimed or renewed.
+  @not_due "scheduled_at > timezone('UTC', clock_timestamp()) + interval '#{@stager_margin_ms} milliseconds'"
+
   @claim_sql """
   UPDATE oban_jobs
   SET scheduled_at = timezone('UTC', clock_timestamp()) + $3::integer * interval '1 millisecond',
       meta = meta || jsonb_build_object('claim', $4::text, 'claim_scheduled_at', scheduled_at)
-  WHERE #{@job} AND NOT jsonb_exists(meta, 'claim')
+  WHERE #{@job} AND #{@not_due} AND NOT jsonb_exists(meta, 'claim')
   """
 
   @renew_sql """
   UPDATE oban_jobs
   SET scheduled_at = timezone('UTC', clock_timestamp()) + $4::integer * interval '1 millisecond'
-  WHERE #{@job} AND meta->>'claim' = $3
+  WHERE #{@job} AND #{@not_due} AND meta->>'claim' = $3
   """
 
   @consumed_sql """
@@ -91,7 +121,8 @@ defmodule KilnCMS.Media.StagedUploadClaim do
 
   @doc """
   Take the lease on `key`'s cleanup job. `{:ok, claim}`, or
-  `{:error, :not_uploaded}` when no unclaimed, still-scheduled job exists.
+  `{:error, :not_uploaded}` when no unclaimed, still-scheduled job exists
+  that is due more than the stager margin from now.
   """
   @spec claim(String.t()) :: {:ok, t()} | {:error, :not_uploaded}
   def claim(key) when is_binary(key) do
@@ -104,7 +135,8 @@ defmodule KilnCMS.Media.StagedUploadClaim do
   end
 
   @doc """
-  Renew the lease. `:ok`, `:lost` when the claim no longer holds the job, or
+  Renew the lease. `:ok`, `:lost` when the claim no longer holds the job (or
+  the lease is already within the stager margin of its end), or
   `{:error, reason}` when the database could not be asked (a missed beat,
   not a lost claim: the lease outlasts several).
   """
@@ -179,8 +211,20 @@ defmodule KilnCMS.Media.StagedUploadClaim do
     after
       interval ->
         case renew(claim) do
-          :lost -> :atomics.put(lost, 1, 1)
-          _renewed_or_missed -> beat(claim, interval, lost)
+          :ok ->
+            beat(claim, interval, lost)
+
+          :lost ->
+            :atomics.put(lost, 1, 1)
+
+          # A missed beat: the lease outlasts several, so keep beating.
+          {:error, reason} ->
+            Logger.warning(
+              "Direct upload #{claim.key}: the cleanup claim's renewal failed " <>
+                "(#{inspect(reason)}); retrying at the next beat."
+            )
+
+            beat(claim, interval, lost)
         end
     end
   end

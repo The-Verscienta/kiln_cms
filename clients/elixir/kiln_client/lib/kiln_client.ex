@@ -923,6 +923,7 @@ defmodule KilnClient do
   — `PUT` exactly `byte_size` bytes to `"upload_url"` with `"headers"` as given,
   then `complete_direct_upload/2`. A 501 means the server's storage can't
   presign (it needs S3 with a private bucket); use `upload_media/2` instead.
+  A 502 (`storage_failed`) means no upload was issued; try again.
   """
   @spec begin_direct_upload(String.t(), pos_integer(), keyword()) ::
           {:ok, map()} | {:error, Error.t()}

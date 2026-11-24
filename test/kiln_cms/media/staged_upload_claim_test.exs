@@ -25,6 +25,9 @@ defmodule KilnCMS.Media.StagedUploadClaimTest do
     Repo.one!(from j in Oban.Job, where: fragment("? @> ?", j.args, ^%{"key" => key}))
   end
 
+  defp set_scheduled_at(key, at),
+    do: Repo.update_all(from(j in Oban.Job, where: j.id == ^job(key).id), set: [scheduled_at: at])
+
   defp set_state(key, state),
     do: Repo.update_all(from(j in Oban.Job, where: j.id == ^job(key).id), set: [state: state])
 
@@ -51,6 +54,21 @@ defmodule KilnCMS.Media.StagedUploadClaimTest do
 
     set_state(key, "executing")
     assert {:error, :not_uploaded} = StagedUploadClaim.claim(key)
+  end
+
+  test "a job due within the stager margin is not claimed", %{key: key} do
+    set_scheduled_at(key, DateTime.add(DateTime.utc_now(), 2))
+    assert {:error, :not_uploaded} = StagedUploadClaim.claim(key)
+
+    set_scheduled_at(key, DateTime.add(DateTime.utc_now(), 30))
+    assert {:ok, _claim} = StagedUploadClaim.claim(key)
+  end
+
+  test "a lease within the stager margin of its end is lost, not renewed", %{key: key} do
+    {:ok, claim} = StagedUploadClaim.claim(key)
+    set_scheduled_at(key, DateTime.add(DateTime.utc_now(), 2))
+
+    assert :lost = StagedUploadClaim.renew(claim)
   end
 
   test "renewal holds while the claim does, and is lost once the job moves on", %{key: key} do

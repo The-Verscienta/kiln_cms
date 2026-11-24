@@ -5,6 +5,14 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Upgrade notes
+
+<a id="direct-upload-claim-upgrade"></a>
+
+- **The direct-upload cleanup fix takes effect once every node runs this release (#2724).** A completion now claims its upload's cleanup job before it reads the staged object ([below](#direct-upload-cleanup-claim)). During a rolling deploy, a `POST /api/media/uploads/complete` that lands on an older node doesn't claim, so it can still lose its staged object to a cleanup that comes due mid-copy, or to a concurrent completion; the client sees the old failure (`415 unsupported_media_type`) and starts the upload again. Nothing to configure, and no migration: the claim lives in the existing `oban_jobs` row (`meta` and `scheduled_at`).
+  - **A token with no cleanup job can't be completed.** Completion now requires the job, so a token an older release issued when its cleanup failed to queue (it logged `staging cleanup was not queued`) answers `422 not_uploaded`. Start that upload again; what it staged is left to the bucket's lifecycle rule on `direct-uploads/`, if you have one ([media-pipeline.md](../media-pipeline.md#direct-uploads)).
+  - **Rolling back is safe.** An older release ignores the claim in `meta`: a job a completion was holding runs when its lease ends, at most five minutes later, and deletes the staged object as before.
+
 ## Added
 
 <a id="condition-text-ops"></a>
@@ -58,3 +66,13 @@ carries the reasoning.
   - **For library callers.** `KilnCMS.Media.Ingest.store_url/2` takes a new `:fetch_timeout` option (milliseconds, default no bound), and `KilnCMS.Portability.Import.run/2` takes `:media_fetch_timeout` (default `60_000`; anything but a positive integer means the default). A `:fetch_timeout` that is not `nil` or a positive integer raises `ArgumentError`. There is no CLI flag for either.
   - **Not fixed here.** An envelope import still does not sideload body images that resolve through the envelope's media manifest; they keep hotlinking the source. That is [#3326](https://github.com/The-Verscienta/kiln_cms/issues/3326).
   - **No migration; rolling the pin back is safe.** An older release goes back to the shared 120-second timeout.
+
+<a id="direct-upload-cleanup-claim"></a>
+
+- **A direct-upload completion holds off its staging cleanup until it is done (#2724).** `POST /api/media/uploads` queues `KilnCMS.Media.StagedUploadCleanup` to delete the staged object a minute after the token expires. A completion sent near the end of the token's hour, for a file whose copy down from the bucket took longer than that minute, had the object deleted under it; the truncated copy failed the byte sniff and the client got `415 unsupported_media_type`. Two completions of the same token at the same time could do the same to each other: each deleted the object when it finished, whatever the other was still reading.
+  - **What happens now.** A completion first claims the cleanup job (`KilnCMS.Media.StagedUploadClaim`): one compare-and-set `UPDATE` of its `oban_jobs` row records a claim in `meta` and moves `scheduled_at` out by a 300-second lease, which a heartbeat renews every 60 seconds until the completion has finished. The job isn't due while the lease holds, so the delete can't run mid-copy however long the copy, the metadata strip and the variants take. When the completion has consumed the object it makes the job due at once; the job deletes again, which retries a staged-object delete that failed.
+  - **One completion per token.** Only one completion can claim the job, so a concurrent second completion answers `422 not_uploaded`, and one item is created. A completion sent before the client's `PUT` landed finds nothing, gives the claim back and leaves the token usable, as before.
+  - **A lost claim.** If the heartbeat stalls past the lease (the database unreachable for minutes) and the job runs, the completion stores nothing and answers `502 storage_failed`, "The upload was interrupted before it could be stored. Start it again with POST /api/media/uploads." The token is spent. A completion whose node dies leaves its lease to lapse, and the job then deletes the object.
+  - **Issuing an upload.** `POST /api/media/uploads` now answers `502 storage_failed` when the cleanup job can't be queued (it used to log a warning and issue the upload anyway), since completing needs the job. Retry.
+  - **For library callers.** `KilnCMS.Media.StagedUploadCleanup.schedule/4` returns `{:error, reason}` instead of `:ok` when the job can't be inserted; `KilnCMS.Media.DirectUpload.begin/3` returns `{:error, :storage_failed}` then, and `complete/4` can return `{:error, :claim_lost}`. The lease and heartbeat are `config :kiln_cms, KilnCMS.Media.StagedUploadClaim, lease_ms: 300_000, heartbeat_ms: 60_000`, there for tests to shorten. `docs/media-pipeline.md` ("Direct uploads") has the full lifecycle.
+  - **No migration; rolling the pin back is safe.** See the [upgrade note](#direct-upload-claim-upgrade) for rolling deploys.

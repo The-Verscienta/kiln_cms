@@ -143,8 +143,11 @@ defmodule KilnCMSWeb.MediaDirectUploadTest do
 
   defp media_count(ctx), do: length(CMS.list_media_items!(actor: ctx.editor))
 
-  # Both settings are read when a completion starts, so a test that sets them
-  # sets them for its own completions only (the module is `async: false`).
+  # `lease_ms` is read on every claim and renewal, `heartbeat_ms` when a
+  # completion's heartbeat starts; the module is `async: false`, so a test
+  # that sets them sets them for its own completions only. A lease must be
+  # longer than the claim's five-second stager margin, or its first renewal
+  # finds it lost.
   defp short_lease(lease_ms, heartbeat_ms) do
     previous = Application.get_env(:kiln_cms, StagedUploadClaim)
 
@@ -270,16 +273,37 @@ defmodule KilnCMSWeb.MediaDirectUploadTest do
   end
 
   describe "the cleanup job and a completion (#2724)" do
+    test "a cleanup already due is not claimed: a stager may have selected it", ctx do
+      %{data: data, path: path} = begin(ctx, @png)
+      put_object(ctx.bucket, path, @png)
+
+      # Due now: a stager's select may already hold the row, and a claim
+      # committing under it would not stop it being staged.
+      set_scheduled_at(path, DateTime.utc_now())
+      original = cleanup_job(path)
+
+      assert complete(ctx, data["token"]) |> error_code(422) == "not_uploaded"
+      assert media_count(ctx) == 0
+
+      job = cleanup_job(path)
+      assert job.meta == original.meta
+      assert job.scheduled_at == original.scheduled_at
+      assert %{success: 1} = run_due_media_jobs()
+      refute Map.has_key?(objects(ctx.bucket), path)
+    end
+
     test "the cleanup comes due mid-copy and is held off until the completion finishes", ctx do
       %{data: data, path: path} = begin(ctx, @png)
       put_object(ctx.bucket, path, @png)
-      original = cleanup_job(path).scheduled_at
 
-      # The token is about to expire: its cleanup is due now.
-      set_scheduled_at(path, DateTime.utc_now())
+      # The token is about to expire: its cleanup is due in thirty seconds,
+      # comfortably past the claim's stager margin.
+      original = DateTime.add(DateTime.utc_now(), 30)
+      set_scheduled_at(path, original)
 
       during_copy(ctx, fn ->
-        assert %{success: 0} = run_due_media_jobs()
+        # A stager a minute on: past the cleanup's own schedule, inside the lease.
+        assert %{success: 0} = run_due_media_jobs(DateTime.add(DateTime.utc_now(), 60))
         assert Map.has_key?(objects(ctx.bucket), path)
 
         job = cleanup_job(path)
@@ -299,19 +323,20 @@ defmodule KilnCMSWeb.MediaDirectUploadTest do
     end
 
     test "the heartbeat renews the lease for as long as the completion runs", ctx do
-      short_lease(400, 50)
+      short_lease(5_400, 50)
       %{data: data, path: path} = begin(ctx, @png)
       put_object(ctx.bucket, path, @png)
 
       during_copy(ctx, fn ->
         first = cleanup_job(path).scheduled_at
-        # Three leases' worth: without renewals the job would long be due.
         Process.sleep(1_200)
 
         renewed = cleanup_job(path).scheduled_at
         assert DateTime.compare(renewed, first) == :gt
         assert DateTime.compare(renewed, DateTime.utc_now()) == :gt
-        assert %{success: 0} = run_due_media_jobs()
+        # A stager past the first lease's end: without renewals the job would
+        # be due by then.
+        assert %{success: 0} = run_due_media_jobs(DateTime.add(first, 500, :millisecond))
       end)
 
       assert complete(ctx, data["token"]) |> json_response(201)
@@ -319,7 +344,7 @@ defmodule KilnCMSWeb.MediaDirectUploadTest do
     end
 
     test "a claim lost mid-copy aborts the completion with a retry-from-the-start 502", ctx do
-      short_lease(400, 50)
+      short_lease(5_400, 50)
       %{data: data, path: path} = begin(ctx, @png)
       put_object(ctx.bucket, path, @png)
 
@@ -343,6 +368,22 @@ defmodule KilnCMSWeb.MediaDirectUploadTest do
       assert media_count(ctx) == 0
 
       assert complete(ctx, data["token"]) |> error_code(422) == "not_uploaded"
+    end
+
+    test "the claim is asked again after the copy, not read from the last beat", ctx do
+      # No beat lands during this completion, so its flag never moves.
+      short_lease(300_000, 60_000)
+      %{data: data, path: path} = begin(ctx, @png)
+      put_object(ctx.bucket, path, @png)
+
+      during_copy(ctx, fn ->
+        # The job has been staged and is running; it has not deleted yet.
+        from(j in Oban.Job, where: j.id == ^cleanup_job(path).id)
+        |> KilnCMS.Repo.update_all(set: [state: "executing"])
+      end)
+
+      assert complete(ctx, data["token"]) |> error_code(502) == "storage_failed"
+      assert media_count(ctx) == 0
     end
 
     test "a completion that dies leaves its claim to lapse, and the job then deletes", ctx do
@@ -380,6 +421,42 @@ defmodule KilnCMSWeb.MediaDirectUploadTest do
       assert_received {:second, second}
       assert error_code(second, 422) == "not_uploaded"
       assert media_count(ctx) == 1
+    end
+
+    test "a raise before the staged object is found does not spend the token", ctx do
+      %{data: data, path: path} = begin(ctx, @png)
+      put_object(ctx.bucket, path, @png)
+      original = cleanup_job(path)
+
+      # The one-byte size probe raises; every other request is the bucket's.
+      Req.Test.stub(KilnCMS.Storage.S3, fn conn ->
+        if Plug.Conn.get_req_header(conn, "range") == ["bytes=0-0"],
+          do: raise("size probe exploded"),
+          else: s3_request(conn, ctx.bucket, ctx.hooks)
+      end)
+
+      assert_raise RuntimeError, "size probe exploded", fn ->
+        complete(ctx, data["token"])
+      end
+
+      # The claim is given back and the original schedule restored.
+      job = cleanup_job(path)
+      assert job.meta == original.meta
+      assert job.scheduled_at == original.scheduled_at
+
+      fake_s3(ctx.bucket, ctx.hooks)
+      assert complete(ctx, data["token"]) |> json_response(201)
+      assert media_count(ctx) == 1
+    end
+
+    test "complete refuses to run inside a transaction", ctx do
+      %{data: data} = begin(ctx, @png)
+
+      KilnCMS.Repo.transaction(fn ->
+        assert_raise ArgumentError, ~r/inside a transaction/, fn ->
+          KilnCMS.Media.DirectUpload.complete(data["token"], %{}, ctx.editor, nil)
+        end
+      end)
     end
 
     test "a completion before the PUT landed does not spend the token", ctx do
