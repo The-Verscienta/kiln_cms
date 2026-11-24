@@ -159,3 +159,8 @@ config :kiln_cms, :collab_prototype, false
 # The breached-password check (#2240) calls a third party on every password
 # set; the browser suite must never depend on it.
 config :kiln_cms, KilnCMS.Accounts.BreachedPassword, enabled: false
+
+# Signs keyset pagination cursors (#3272). Without a secret Ash 3.38 encodes
+# cursors as JSON, which the untyped key of a reference or media field sort
+# (`CustomFieldQuery.Relations.sort_key/2`) cannot be. Production derives its own from SECRET_KEY_BASE (runtime/prod/web.exs).
+config :ash, keyset_signing_secret: "jYej/ofZdIEHVOvfnGVSthLTDsuKYDVWMrdqTUh3Fmc"

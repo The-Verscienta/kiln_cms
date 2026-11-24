@@ -12,7 +12,7 @@
   where it applies.
 - **Changelog** — the Unreleased section of
   [CHANGELOG.md](../../CHANGELOG.md), under Added
-  ([long form](../changelog/unreleased.md#edit-inline-option)).
+  ([long form](../changelog/v1.12.1.md#edit-inline-option)).
 
 ## The problem
 

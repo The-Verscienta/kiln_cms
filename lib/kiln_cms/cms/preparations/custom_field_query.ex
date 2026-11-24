@@ -1487,10 +1487,12 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # null lowest), and an array/object cursor value cannot be bound back into
   # the keyset filter (`jsonb > integer[]`), which fails the page-2 read.
   # Neither is a value a field of a sortable type holds unless it was retyped.
+  #
+  # Typed `JsonbSortKey` so the keyset filter compares in jsonb too (#3272).
   defp sort_expr(%{name: name}, table) do
     if IndexedCustomFields.valid?(table, name) do
       # The expression a declared btree is built on (#2359), name inlined.
-      Ash.Sort.expr_sort(^range_field(name, table))
+      Ash.Sort.expr_sort(^range_field(name, table), KilnCMS.CMS.Types.JsonbSortKey)
     else
       bound_sort_expr(name)
     end
@@ -1506,7 +1508,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         ^name,
         ^ref(:custom_fields),
         ^name
-      )
+      ),
+      KilnCMS.CMS.Types.JsonbSortKey
     )
   end
 
