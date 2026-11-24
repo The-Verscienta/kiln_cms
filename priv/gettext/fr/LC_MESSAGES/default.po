@@ -7366,6 +7366,11 @@ msgstr "Révocation de cette clé impossible."
 msgid "Couldn't rotate that signing secret."
 msgstr "Impossible de renouveler ce secret de signature."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save a related record, so this record was not saved. Fix it below, then save again."
+msgstr "Un enregistrement lié n’a pas pu être enregistré, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't save that item."
@@ -7396,6 +7401,11 @@ msgstr "Impossible d'enregistrer le nouvel ordre des types d'élément."
 #, elixir-autogen, elixir-format
 msgid "Couldn't save the new order."
 msgstr "Impossible d'enregistrer le nouvel ordre."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save the related record “%{title}”, so this record was not saved. Fix it below, then save again."
+msgstr "L’enregistrement lié « %{title} » n’a pas pu être enregistré, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -20282,6 +20292,11 @@ msgstr "Enregistrer la source de la clé"
 msgid "Save or discard the changes to this record before closing it."
 msgstr "Enregistrez ou annulez les modifications de cet enregistrement avant de le fermer."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Save or discard the changes to this record before removing it."
+msgstr "Enregistrez ou annulez les modifications de cet enregistrement avant de le retirer."
+
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save platform alerts"
@@ -20338,6 +20353,20 @@ msgstr "Enregistrez vos modifications avant de changer l'état de ce contenu."
 #, elixir-autogen, elixir-format
 msgid "Saved"
 msgstr "Enregistré"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved %{count} related record, but couldn't save another, so this record was not saved. Fix it below, then save again."
+msgid_plural "Saved %{count} related records, but couldn't save another, so this record was not saved. Fix it below, then save again."
+msgstr[0] "%{count} enregistrement lié a été enregistré, mais un autre n’a pas pu l’être, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
+msgstr[1] "%{count} enregistrements liés ont été enregistrés, mais un autre n’a pas pu l’être, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved %{count} related record, but couldn't save “%{title}”, so this record was not saved. Fix it below, then save again."
+msgid_plural "Saved %{count} related records, but couldn't save “%{title}”, so this record was not saved. Fix it below, then save again."
+msgstr[0] "%{count} enregistrement lié a été enregistré, mais « %{title} » n’a pas pu l’être, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
+msgstr[1] "%{count} enregistrements liés ont été enregistrés, mais « %{title} » n’a pas pu l’être, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
@@ -26033,8 +26062,8 @@ msgstr "jeudi"
 
 #: lib/kiln_cms_web/components/scope_pickers.ex
 #, elixir-autogen, elixir-format
-msgid "Tick Custom fields (all of them) above for every custom field, or pick individual ones here. A group's own box lets them add, remove and reorder its rows; a field under it lets them change just that field in every row. With any of these ticked, creating a document is held to them too."
-msgstr "Cochez Champs personnalisés (tous) ci-dessus pour tous les champs personnalisés, ou choisissez des champs individuels ici. La case d'un groupe leur permet d'ajouter, de retirer et de réordonner ses lignes ; un champ placé dessous leur permet de ne modifier que ce champ dans chaque ligne. Dès que l'un d'eux est coché, la création d'un document y est aussi limitée."
+msgid "Tick Custom fields (all of them) above for every custom field, or pick individual ones here. A group's own box lets them add, remove and reorder its rows; a field under it lets them change just that field in every row. A flexible field's own box lets them change every item and reorder them; a type under it lets them edit, add and remove just the items of that type. With any of these ticked, creating a document is held to them too."
+msgstr "Cochez Champs personnalisés (tous) ci-dessus pour tous les champs personnalisés, ou choisissez des champs individuels ici. La case d'un groupe leur permet d'ajouter, de retirer et de réordonner ses lignes ; un champ placé dessous leur permet de ne modifier que ce champ dans chaque ligne. La case d'un champ flexible leur permet de modifier tous ses éléments et de les réordonner ; un type placé dessous leur permet de modifier, d'ajouter et de retirer uniquement les éléments de ce type. Dès que l'un d'eux est coché, la création d'un document y est aussi limitée."
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format

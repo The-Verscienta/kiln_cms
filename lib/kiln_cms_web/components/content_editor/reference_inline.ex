@@ -8,9 +8,10 @@ defmodule KilnCMSWeb.ContentEditor.ReferenceInline do
   Nothing here touches the parent: the card's *Save* runs the child's `:update`
   (a draft) or `:save_working_copy` (a published record, whose live text does
   not move until its own *Publish changes*), as the actor, in the parent's
-  tenant, and then re-reads the record. The parent's Save does not save the
-  card (the plan's third step adds that cascade) and the card never connects,
-  disconnects or reorders anything.
+  tenant, and then re-reads the record. The parent's Save saves a card
+  with unsaved edits *first*, by asking it to run its own save (the cascade,
+  I3: `update/2` with `cascade:`), and the card never connects, disconnects or
+  reorders anything.
 
   The rules the card keeps:
 
@@ -136,6 +137,26 @@ defmodule KilnCMSWeb.ContentEditor.ReferenceInline do
   def mount(socket), do: {:ok, socket |> assign(:loaded?, false) |> assign(:dirty?, false)}
 
   @impl true
+  # The parent's Save asking this card to save first (#2283, I3). The card
+  # runs its own save and answers with how it went; it never reports twice
+  # for one request.
+  def update(%{cascade: ref}, socket) do
+    # A card the field no longer allows to edit (not connected, locked,
+    # refused) is not written on the parent's behalf either.
+    socket =
+      if socket.assigns.status == :dirty and editing?(socket), do: save(socket), else: socket
+
+    status = socket.assigns.status
+    outcome = if status in [:clean, :saved, :saved_copy], do: :ok, else: :error
+
+    send(
+      self(),
+      {__MODULE__, {:cascade, ref, socket.assigns.key, outcome, socket.assigns.values["title"]}}
+    )
+
+    {:ok, socket}
+  end
+
   def update(assigns, socket) do
     socket = assign(socket, assigns)
 

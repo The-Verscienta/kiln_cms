@@ -29,9 +29,19 @@ carries the reasoning.
   - **Errors stay on the card.** A failed save shows *N problems on this record. Nothing was saved.*, the messages under the inputs they belong to, and moves focus to the first invalid input. A blank title is refused (*Give it a title.*). A record the editor may no longer change says *You can't change this record.* A field a condition hides on the card is not sent.
   - **Someone else changed it.** If the record was changed, published, unpublished or trashed after the card read it, the save writes nothing, the chip says **Changed by someone else**, and **Reload this record** discards the card's edits and reads the record again.
   - **Keyboard.** Enter in a card input saves the card (it does not submit the parent's form); Escape closes the card.
-  - **Closing and leaving.** A card with unsaved edits cannot be closed (*Save or discard the changes to this record before closing it.*). **The parent's Save does not save the card**, and navigating away from the parent loses unsaved card edits: the unsaved-changes guard is the next part (2b), and saving every card with the parent is a later part. Save the card first.
+  - **Closing and leaving.** A card with unsaved edits cannot be closed (*Save or discard the changes to this record before closing it.*). Navigating away is guarded, and the parent's Save saves the card first (see the next entry).
   - **What the card shows.** The title is read-only for a type with a title template. A field the editor's grant does not allow is read-only, a private field their read grant hides is not shown, and a field a condition hides is not shown. If the parent field itself is read-only (a read-only grant, a held list or a localization lock), the card still opens but its inputs and Save are disabled. The record being edited never gets a card on its own field. Creating a record and opening its card on create is not part of this release.
   - See [Edit related records in place](../extending-content.md#edit-related-records-in-place) and [ADR 0081](../decisions/0081-an-inline-edited-related-record-is-saved-on-its-own-and-the-option-is-its-own-column-with-no-write-api.md).
+
+
+<a id="edit-inline-dirty-guard"></a>
+
+- **Unsaved record-card edits now count as unsaved changes, and the parent's Save saves them first (#2283, part 2b).** A card with unsaved edits turns on the editor's unsaved-changes guard, so closing the tab, reloading, or following a link such as **← All content** asks first (*You have unsaved changes. Leave without saving?*). Saving or discarding the last dirty card turns the guard off again. The parent's own save indicator and autosave are not touched: editing another record is not an edit of this one.
+  - **A dirty row stays put.** **Remove**, replacing a single reference by picking another record, and choosing another option in the dropdown are refused while the row's card has unsaved edits (*Save or discard the changes to this record before removing it.*), because the card, and what was typed in it, would go with the row. Save or discard first.
+  - **Add new opens the card.** On a field with **Let editors edit the related record here** ticked, a record made with **Add new** (or by typing a title and choosing **Create**) opens its card at once, so the rest of its fields can be filled without leaving. The draft is created at the same moment as before, by the same click; only the card is new. If the editor may not change the new record, or ten cards are already open on the field, it stays a plain row.
+  - **Save saves the cards first.** When the parent is saved (the Save button or a workflow step such as publish), every card with unsaved edits is saved before it, one at a time, in the order they are on screen. Each is its own save, with its own authorization, version and webhooks; there is no one transaction. The first card that fails stops the run: that card shows its errors, the parent is **not** saved and keeps what you typed, and a message says how many cards were saved (*Saved 1 related record, but couldn't save “Title”, so this record was not saved.*). Cards already saved stay saved. Fix the card and save again: only the cards still unsaved run. A card that does not answer within 20 seconds counts as a failure.
+  - **Not yet.** The limit of 10 open cards is still counted per field, not across the whole form. The draft autosave and *Move to trash* do not save cards.
+  - See [Edit related records in place](../extending-content.md#edit-related-records-in-place).
 
 
 <a id="flexible-media-reference"></a>
@@ -60,3 +70,36 @@ carries the reasoning.
     sub-field.
   Record: [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md#media-and-reference-inside-items-pr-3-2282);
   guide: [Build flexible content in the admin](../extending-content.md#build-flexible-content-in-the-admin).
+
+<a id="flexible-item-type-grants"></a>
+
+- **A role can be granted single item types of a Flexible content field (#2282).**
+  - **The entry.** `custom_fields.<field>.<item type>` in a type's write grants
+    (for example `custom_fields.sections.hero`). The editor may edit the items
+    of that type (any of their sub-fields, settings and nested items), add
+    items of that type and remove them. The whole-field entry
+    (`custom_fields.sections`) still covers everything.
+  - **What stays refused.** An item of another type is untouched: changing,
+    adding or removing one is refused, naming the type
+    (`custom_fields.sections.quote cannot be changed: outside your field
+    grant…`). An item whose type changes needs both types. Putting the
+    surviving items in a different order needs the whole-field entry, because
+    it moves items of every type. Items are matched by their `_id`, so
+    inserting an item in the middle is not a reorder.
+  - **Pickers.** In **Field grants** on the team page, a flexible field lists
+    its item types beneath it, indented as a group's sub-fields are. A stored
+    entry for a type that no longer exists shows as "(not found)".
+  - **Copies and imports.** A duplicate, a translation and an import made by
+    such an editor carry the items of the granted types only; the field is
+    listed among the withheld keys when any item was left out.
+  - **The console.** As for a group with only sub-field entries, the editor
+    shows the field read-only unless the whole field is granted. The grant is
+    enforced on every write path (API, forms, imports), so a client that
+    writes the field works within it; editing the permitted items in the
+    console is a follow-up.
+  - **No migration.** A grant is an entry in the existing `field_grants` list.
+    Before this release the entry was accepted but matched nothing, so an
+    editor holding it was refused every write to the field; a role that
+    already holds one now writes what it names.
+  Record: [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md#item-type-grants-pr-4-2282);
+  guide: [Field grants](../granular-rbac.md#write-field_grants-keys).

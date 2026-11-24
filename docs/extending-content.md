@@ -2252,6 +2252,9 @@ writes only that related record. The plan, with what is still to come, is
 7. Choose **Hide the record** (or press Escape) to close the card. A card with
    unsaved changes does not close: save or discard first.
 
+A record you make from the field with **Add new** opens its card straight
+away, so you can fill in its other fields without leaving the page.
+
 From code, it is one attribute on the field definition:
 
 ```elixir
@@ -2265,13 +2268,18 @@ What to know before relying on it:
 
 - **A related record is saved on its own.** The card has its own Save and its
   own status: the related record is never written through the parent form,
-  and there is no one transaction for both. **The parent's Save does not save
-  the card**, and the card's Save does not save the parent. They are separate
-  writes (as with "Add new"), so a failure on one leaves the other as it was.
-- **Unsaved card edits are lost when you leave the page.** Closing a card
-  with unsaved edits is refused, but navigating away, reloading or switching
-  version does not warn yet; that guard is the next part of the plan. Save
-  each card before leaving.
+  and there is no one transaction for both. **Saving the parent saves the cards
+  with unsaved edits first**, one at a time, each as its own write; the first
+  one that fails stops the run and the parent is not saved (it keeps what you
+  typed, and the cards already saved stay saved). Fix the card, then save
+  again. A card's own Save never saves the parent.
+- **Unsaved card edits are guarded like the parent's own.** A card with
+  unsaved changes turns on the editor's leave-page warning (closing the tab,
+  reloading, following a link), and it stays on until every such card is saved
+  or discarded. The parent's save indicator does not change, and nothing is
+  autosaved for the parent. A row with unsaved card edits cannot be removed or
+  replaced until you save or discard them. Restoring another version of the
+  parent is not guarded by this: save or discard the cards first.
 - **Draft or working copy.** A draft is updated in place. A published record
   gets `save_working_copy` with the title as `working_title`; its live text
   does not change until that record's own **Publish changes**.
@@ -2407,6 +2415,15 @@ the question and your click, the dialog shows the new number and asks again.
 If the items can't be counted it says so. A flexible field's type can't be
 changed, and no other field can become one: the **Field type** select is
 disabled when editing it.
+
+**Who may edit which items.** An editor's role can be limited to some item
+types: on `/editor/team`, under **Field grants**, tick the item types beneath
+the flexible field (the entry is `custom_fields.<field>.<item type>`). Those
+editors may edit, add and remove items of those types and no others;
+reordering needs the whole field's box. See
+[Write: `field_grants` keys](granular-rbac.md#write-field_grants-keys). The
+console shows such a field read-only; the limit applies to the API and to
+imports.
 
 **What can go wrong in the admin**
 
