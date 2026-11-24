@@ -233,8 +233,8 @@ defmodule KilnCMS.Release do
   will never ship with their release, and that keep their record out of
   every other release. The boot job `KilnCMS.CMS.StrandedReleaseItemSweep`
   does this ten minutes after each start; this runs it now, for example
-  after a rolling deploy that took longer than that, or after restoring a
-  backup from before 1.12.0.
+  after a rolling deploy from 1.10.x or earlier that took longer than that,
+  or after restoring a backup from before 1.11.0.
 
       bin/kiln_cms rpc 'KilnCMS.Release.cancel_stranded_release_items(dry_run: true)'
       bin/kiln_cms rpc 'KilnCMS.Release.cancel_stranded_release_items()'

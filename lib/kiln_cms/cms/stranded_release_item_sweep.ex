@@ -4,12 +4,13 @@ defmodule KilnCMS.CMS.StrandedReleaseItemSweep do
   longer ship them, on every site (#3072).
 
   A `KilnCMS.CMS.ReleaseItem` reserves its content record against every other
-  release while it is `:pending`. Before 1.12.0 (#2740), an add that raced
+  release while it is `:pending`. Before 1.11.0 (#2740), an add that raced
   the go-live claim could insert an item the go-live never read, leaving it
   `:pending` on a `:published` release, and the record could never join
-  another release. An old node still serving during a rolling deploy to 1.12.0
-  or later can do the same. Nothing in the console frees such an item: the
-  release no longer takes edits, and archiving it ends its group rollback.
+  another release. An old node (1.10.x or earlier) still serving during a
+  rolling deploy to 1.11.0 or later can do the same. Nothing in the console
+  frees such an item: the release no longer takes edits, and archiving it
+  ends its group rollback.
 
   ## Which releases
 
@@ -67,7 +68,7 @@ defmodule KilnCMS.CMS.StrandedReleaseItemSweep do
   failure ends the job in error, so Oban retries it with backoff, up to three
   attempts.
 
-  Once no supported upgrade path starts at 1.11.x or earlier, this module can
+  Once no supported upgrade path starts at 1.10.x or earlier, this module can
   be removed (in the next major release, at the latest).
   """
   use Oban.Worker,
