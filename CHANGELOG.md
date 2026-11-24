@@ -58,6 +58,8 @@ else.
 
 ### Upgrade notes
 
+- **Run `mix ash.migrate` for change notes: a nullable `change_note` column on each `*_versions` table and `site_editorial_settings.change_note_types`. An overlay with its own content types runs `mix ash.codegen` for its `*_versions` tables, as for `change_severity`.**
+  ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255) · [long form](docs/changelog/unreleased.md#change-note-upgrade))
 - **Run `mix ash.migrate`: one additive migration (`edit_inline`, a nullable boolean on `field_definitions`). Older releases never read the column, so rolling the pin back is safe.**
   ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283) · [long form](docs/changelog/unreleased.md#edit-inline-option-upgrade))
 
@@ -73,6 +75,9 @@ else.
 - **An item of a Flexible content field can hold a single image or a link to one record: pick them inside the card, saved as snapshots rebuilt from the record, masked when the reader can't see the record.**
   Re-saving such a record on the previous release fails validation; reads work.
   ([long form](docs/changelog/unreleased.md#flexible-media-reference))
+
+- **Edits can say why: a `change_note` on update, publish and Publish changes is kept on the version and shown in History; a site can make the editor ask for one per content type ("Ask why on every change" on the Safety fields page) ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255)).**
+  ([long form](docs/changelog/unreleased.md#change-note))
 
 - **A role can be granted single item types of a Flexible content field (`custom_fields.<field>.<item type>`): its editors may edit, add and remove items of that type and no others ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282)).**
   Reordering needs the whole-field grant; the console shows a partly granted field read-only. No migration.

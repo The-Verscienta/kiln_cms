@@ -33,6 +33,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.ChangeNotes
   alias KilnCMS.CMS.Changes.ApplyCustomFields
   alias KilnCMS.CMS.Changes.RestoreVersion
   alias KilnCMS.CMS.ContentLinks
@@ -209,6 +210,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:kind, content_type.type)
     |> assign(:content_type, content_type)
     |> assign(:reverse_fields, [])
+    |> assign(:change_note_required?, false)
+    |> assign(:change_note, "")
+    |> assign(:change_note_error?, false)
     |> assign(:actor, socket.assigns.current_user)
     |> assign(:record, nil)
     |> assign(:can_restore?, false)
@@ -325,6 +329,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # The other side of every reference that may point at this type and names
     # it (R4): read-only lists of the records connecting here.
     |> assign(:reverse_fields, ReverseFields.for_type(content_type.type, org))
+    # Why this change (`KilnCMS.CMS.ChangeNotes`): asked next to Save when the
+    # site lists this type. The note rides on a draft's Save and on Publish
+    # changes, and is cleared once one of them lands.
+    |> assign(
+      :change_note_required?,
+      ChangeNotes.required?(Accounts.org_id(org), content_type.type)
+    )
+    |> assign(:change_note, "")
+    |> assign(:change_note_error?, false)
     |> assign(:slug_targets, slug_targets(content_type))
     # The type's own field-type tokens (#804), off the definitions this
     # mount already loaded — so the live preview derives through exactly
@@ -1084,6 +1097,42 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:parent_path, ContentTree.ancestors(kind, record, opts))
   end
 
+  attr :value, :string, required: true
+  attr :error?, :boolean, default: false
+  attr :published?, :boolean, default: false
+
+  # Why this change (`KilnCMS.CMS.ChangeNotes`), for a type the site lists. Named
+  # outside the editor form's params with a `phx-change` of its own, so typing
+  # here never marks the record dirty; Save and Publish changes carry it.
+  defp change_note_input(assigns) do
+    ~H"""
+    <div id="change-note" class="border-b border-base-content/10 bg-base-100 px-4 py-2">
+      <label for="change-note-input" class="mb-1 block text-xs font-medium text-base-content/70">
+        {if @published?,
+          do: gettext("Why this change? Asked when you publish your changes."),
+          else: gettext("Why this change? Asked when you save.")}
+      </label>
+      <input
+        type="text"
+        id="change-note-input"
+        name="_kiln_change_note"
+        value={@value}
+        phx-change="change_note"
+        phx-debounce="300"
+        maxlength={ChangeNotes.max_length()}
+        autocomplete="off"
+        placeholder={gettext("For example: dose corrected to match the cited source")}
+        aria-invalid={@error? && "true"}
+        aria-describedby={@error? && "change-note-error"}
+        class={["field-input w-full text-sm", @error? && "border-error"]}
+      />
+      <p :if={@error?} id="change-note-error" class="mt-1 text-xs text-error">
+        {gettext("Say why you made this change.")}
+      </p>
+    </div>
+    """
+  end
+
   attr :choice, :string, default: nil
   attr :error?, :boolean, default: false
 
@@ -1694,7 +1743,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> AshPhoenix.Form.for_update(:update,
       actor: actor,
       tenant: record.org_id,
-      forms: [auto?: true]
+      forms: [auto?: true],
+      # A draft's Save asks for a change note when the site lists the type
+      # (`Changes.RecordChangeNote` judges, at submit only).
+      context: %{require_change_note: true}
     )
     |> to_form()
   end
@@ -2010,6 +2062,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp dirty_scope(_target), do: :text
 
   defp save_draft(socket, params) do
+    params = Map.merge(params, change_note_params(socket))
+
     result =
       EditorTelemetry.span(:save, %{kind: socket.assigns.kind}, fn ->
         AshPhoenix.Form.submit(socket.assigns.form, params: params)
@@ -2020,13 +2074,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
         {:noreply, saved(socket, record)}
 
       {:error, form} ->
-        if stale_conflict?(form) do
-          {:noreply, flag_conflict(socket)}
-        else
-          {:noreply,
-           socket
-           |> assign(:form, form)
-           |> flash_save_errors()}
+        cond do
+          stale_conflict?(form) ->
+            {:noreply, flag_conflict(socket)}
+
+          change_note_missing?(form) ->
+            {:noreply, change_note_asked(socket)}
+
+          true ->
+            {:noreply,
+             socket
+             |> assign(:form, form)
+             |> flash_save_errors()}
         end
     end
   end
@@ -2144,6 +2203,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> broadcast_saved()
     |> mark_saved()
     |> assign(:settings_dirty?, false)
+    |> clear_change_note()
     |> put_flash(:info, saved_message(reloaded))
   end
 
@@ -3752,8 +3812,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  def handle_event("save", %{"form" => params}, socket) when is_map(params) do
-    socket = cancel_autosave_timer(socket)
+  def handle_event("save", %{"form" => params} = all, socket) when is_map(params) do
+    socket =
+      socket
+      |> cancel_autosave_timer()
+      |> take_change_note(all)
 
     params =
       params
@@ -3856,6 +3919,16 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # the answer; the action is the judge of whether it was needed, so a forged
   # choice buys nothing. Only the three severities are taken, and only while the
   # question is open.
+  def handle_event("change_note", %{"_kiln_change_note" => note}, socket) when is_binary(note) do
+    socket = assign(socket, :change_note, note)
+
+    if ChangeNotes.normalize(note),
+      do: {:noreply, assign(socket, :change_note_error?, false)},
+      else: {:noreply, socket}
+  end
+
+  def handle_event("change_note", _params, socket), do: {:noreply, socket}
+
   def handle_event("severity_choose", %{"severity" => severity}, socket)
       when is_binary(severity) do
     chosen = Enum.find(Severity.severities(), &(Atom.to_string(&1) == severity))
@@ -5546,14 +5619,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
       AshPhoenix.Form.for_update(record, :publish_changes,
         actor: actor,
         tenant: record.org_id,
-        context: %{require_change_severity: true}
+        context: %{require_change_severity: true, require_change_note: true}
       )
+
+    params =
+      %{"resolve" => resolve}
+      |> Map.merge(severity_params(socket))
+      |> Map.merge(change_note_params(socket))
 
     result =
       EditorTelemetry.span(:workflow, %{kind: kind, action: "publish_changes"}, fn ->
-        AshPhoenix.Form.submit(form,
-          params: Map.merge(%{"resolve" => resolve}, severity_params(socket))
-        )
+        AshPhoenix.Form.submit(form, params: params)
       end)
 
     case result do
@@ -5561,6 +5637,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
         socket
         |> close_conflicts()
         |> close_severity()
+        |> clear_change_note()
         |> assign_record(fetch!(kind, updated.id, actor, record.org_id))
         |> broadcast_saved()
         |> mark_saved()
@@ -5572,6 +5649,9 @@ defmodule KilnCMSWeb.ContentEditorLive do
           stale_conflict?(form) ->
             flag_conflict(socket)
 
+          change_note_missing?(form) ->
+            socket |> close_conflicts() |> change_note_asked()
+
           severity_missing?(form.source.errors) ->
             socket |> close_conflicts() |> severity_asked("publish_changes", resolve)
 
@@ -5582,6 +5662,40 @@ defmodule KilnCMSWeb.ContentEditorLive do
         end
     end
   end
+
+  # ── Change note ─────────────────────────────────────────────────────────────
+
+  # The note typed next to Save, carried by the save's own params (it is named
+  # outside the editor form's, so a keystroke there never touches the record).
+  defp take_change_note(socket, %{"_kiln_change_note" => note}) when is_binary(note),
+    do: assign(socket, :change_note, note)
+
+  defp take_change_note(socket, _params), do: socket
+
+  defp change_note_params(socket) do
+    case ChangeNotes.normalize(socket.assigns[:change_note]) do
+      nil -> %{}
+      note -> %{"change_note" => note}
+    end
+  end
+
+  # Whether a refused write was refused for a missing change note. Either
+  # form shape (the editor's `to_form` wrapper or a bare AshPhoenix form) goes
+  # through `changeset_errors/1`; an error class nests its errors.
+  defp change_note_missing?(form), do: form |> changeset_errors() |> Enum.any?(&note_error?/1)
+
+  defp note_error?(%{field: :change_note}), do: true
+  defp note_error?(%{errors: errors}) when is_list(errors), do: Enum.any?(errors, &note_error?/1)
+  defp note_error?(_other), do: false
+
+  defp change_note_asked(socket) do
+    socket
+    |> assign(:change_note_error?, true)
+    |> put_flash(:error, gettext("Say why you made this change, then save again."))
+  end
+
+  defp clear_change_note(socket),
+    do: assign(socket, change_note: "", change_note_error?: false)
 
   # ── Change severity ─────────────────────────────────────────────────────────
 
@@ -7961,6 +8075,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
           word_count={@seo_body_stats.word_count}
           a11y_report={@a11y_report}
           backlink_count={@backlink_count}
+        />
+
+        <.change_note_input
+          :if={@change_note_required? and @may_write?}
+          value={@change_note}
+          error?={@change_note_error?}
+          published?={@record.state == :published}
         />
 
         <.publish_conflicts

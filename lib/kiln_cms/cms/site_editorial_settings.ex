@@ -47,7 +47,7 @@ defmodule KilnCMS.CMS.SiteEditorialSettings do
   # go-live, neither of which has a person reading. `save` is not admitted.
   use KilnCMS.CMS.OrgSettings,
     table: "site_editorial_settings",
-    accept: [:auto_complete_tasks_on_publish, :editors_can_publish],
+    accept: [:auto_complete_tasks_on_publish, :editors_can_publish, :change_note_types],
     read: :editor,
     update?: false,
     system_actions: [read: :cms_settings]
@@ -71,6 +71,16 @@ defmodule KilnCMS.CMS.SiteEditorialSettings do
       default false
       allow_nil? false
       public? true
+    end
+
+    # The content types whose editor asks *why* on a draft's Save and on
+    # Publish changes (`KilnCMS.CMS.ChangeNotes`), by type name. Empty: no
+    # type asks, which is where every site was before change notes existed.
+    attribute :change_note_types, {:array, :string} do
+      default []
+      allow_nil? false
+      public? true
+      constraints max_length: 200, items: [max_length: 200]
     end
   end
 end

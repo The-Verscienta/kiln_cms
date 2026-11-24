@@ -3711,6 +3711,7 @@ input PostSortInput {
 
 input PublishEntryInput {
   changeSeverity: String
+  changeNote: String
   expectedLockVersion: Int
 }
 
@@ -3725,6 +3726,7 @@ type PublishEntryResult {
 
 input PublishPageInput {
   changeSeverity: String
+  changeNote: String
   expectedLockVersion: Int
 }
 
@@ -3739,6 +3741,7 @@ type PublishPageResult {
 
 input PublishPostInput {
   changeSeverity: String
+  changeNote: String
   expectedLockVersion: Int
 }
 
@@ -5011,6 +5014,7 @@ input UpdateEntryInput {
   categoryId: ID
   featuredImageId: ID
   changeSeverity: String
+  changeNote: String
   expectedLockVersion: Int
   tagIds: [ID!]
   addTagIds: [ID!]
@@ -5075,6 +5079,7 @@ input UpdatePageInput {
   categoryId: ID
   featuredImageId: ID
   changeSeverity: String
+  changeNote: String
   expectedLockVersion: Int
   tagIds: [ID!]
   addTagIds: [ID!]
@@ -5120,6 +5125,7 @@ input UpdatePostInput {
   categoryId: ID
   featuredImageId: ID
   changeSeverity: String
+  changeNote: String
   expectedLockVersion: Int
   tagIds: [ID!]
   addTagIds: [ID!]
