@@ -82,6 +82,13 @@ Check the slice in the editor and on the site before running the rest.
 Re-running skips everything that already exists. Add `--drain-media` if no Kiln
 node is processing background jobs where you run it.
 
+A long run prints `media: N/T` and then `records: N/T` every 25 items. Images
+listed under **Media that could not be fetched** were skipped, by URL, and
+their posts still show the image from your Ghost site. Re-running does not
+retry them, because their posts already exist: upload each one to the media
+library and swap it into its post. See
+[Images that could not be fetched](../content-portability.md#images-that-could-not-be-fetched).
+
 ## 4. Check redirects, then switch over
 
 Ghost serves both posts and pages at `/<slug>/`. In Kiln, posts are at

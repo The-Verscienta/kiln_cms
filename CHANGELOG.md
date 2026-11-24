@@ -76,6 +76,9 @@ else.
 - **A seat `mix kiln.beta.round` creates now records its `role_granted` in the default site's security log (raised from viewer), and an admin seat raises the platform `new_admin` alert (#2641).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#beta-round-seat-audited))
+- **A large WordPress, Ghost or envelope import no longer loses its media after two minutes: each image download has its own 60-second deadline, a slow image is listed by URL, and an unresponsive host is skipped after three timeouts in a row (#2720).**
+  WordPress and Ghost imports now print `media:` and `records:` progress. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#import-media-per-asset-deadline))
 
 ## [1.12.1] - 2026-11-23
 
