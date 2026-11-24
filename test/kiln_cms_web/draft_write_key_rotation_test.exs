@@ -16,6 +16,7 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.ApiKeyReuse
+  alias KilnCMS.NewerReleaseRows
   alias KilnCMS.Test.SecurityAlerts
 
   defp user(role) do
@@ -346,6 +347,35 @@ defmodule KilnCMSWeb.DraftWriteKeyRotationTest do
 
       assert :ok = ApiKeyReuse.check(forged)
       assert [_live] = live_in(ctx.key.id)
+    end
+  end
+
+  # Keys a newer release minted with a scope this one does not know (#2604)
+  # now load, so reuse detection reads them too.
+  describe "a scope this release does not know" do
+    test "a rotated-away key presented after the grace period still burns its lineage" do
+      SecurityAlerts.enable()
+      {key, secret} = mint(user(:viewer))
+
+      {_conn, %{"data" => %{"id" => new_id}}} = rotate("Bearer #{secret}")
+      age(new_id)
+      NewerReleaseRows.api_key_scope!(key.id)
+      NewerReleaseRows.api_key_scope!(new_id)
+
+      assert :reuse_detected = ApiKeyReuse.check(secret)
+      assert [] = live_in(key.id)
+      assert NewerReleaseRows.stored_row("api_keys", new_id)["revoked_at"]
+    end
+
+    test "a live key with no successor burns nothing: it is refused, not reused" do
+      {key, secret} = mint(user(:viewer))
+      NewerReleaseRows.api_key_scope!(key.id)
+
+      {conn, _} = rotate("Bearer #{secret}")
+      assert conn.status == 401
+
+      assert :ok = ApiKeyReuse.check(secret)
+      assert NewerReleaseRows.stored_row("api_keys", key.id)["revoked_at"] == nil
     end
   end
 

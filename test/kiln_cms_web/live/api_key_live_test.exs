@@ -237,6 +237,63 @@ defmodule KilnCMSWeb.ApiKeyLiveTest do
     end
   end
 
+  # A key a newer release minted with a scope this one does not know (#2604).
+  describe "a scope this release does not know" do
+    alias KilnCMS.NewerReleaseRows
+
+    test "lists with its stored name and Not accepted, and can be revoked", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      key =
+        KilnCMS.Accounts.mint_api_key!(
+          admin.id,
+          "from-newer",
+          DateTime.add(DateTime.utc_now(), 30, :day),
+          actor: admin
+        )
+
+      NewerReleaseRows.api_key_scope!(key.id)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/api-keys")
+
+      row = lv |> element("#api-key-#{key.id}") |> render()
+      assert row =~ "Unrecognized scope (#{NewerReleaseRows.unknown()})"
+      assert row =~ "Not accepted"
+      assert row =~ "does not sign in here"
+      refute row =~ "Read-only"
+      refute row =~ "Expired"
+
+      html =
+        lv
+        |> element("#api-key-#{key.id} button", "Revoke")
+        |> render_click()
+
+      assert html =~ "Key revoked."
+      assert lv |> element("#api-key-#{key.id}") |> render() =~ "Revoked"
+      assert NewerReleaseRows.stored_row("api_keys", key.id)["revoked_at"]
+    end
+
+    test "an expired one reads Expired", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      key =
+        KilnCMS.Accounts.mint_api_key!(
+          admin.id,
+          "from-newer",
+          DateTime.add(DateTime.utc_now(), -1, :minute),
+          actor: admin
+        )
+
+      NewerReleaseRows.api_key_scope!(key.id)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/api-keys")
+
+      row = lv |> element("#api-key-#{key.id}") |> render()
+      assert row =~ "Expired"
+      refute row =~ "Not accepted"
+    end
+  end
+
   describe "audit log (#2241)" do
     test "minting and revoking from the console records both, in this site's log", %{conn: conn} do
       admin = authed_user(:admin)

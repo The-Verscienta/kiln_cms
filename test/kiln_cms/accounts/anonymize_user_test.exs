@@ -98,6 +98,26 @@ defmodule KilnCMS.Accounts.AnonymizeUserTest do
       assert revoked.purpose == "revocation"
     end
 
+    # A key a newer release minted with a scope this one does not know
+    # (#2604): erasure reads it like any other key and revokes it.
+    test "revokes an API key whose scope this release does not know", %{
+      admin: admin,
+      subject: subject
+    } do
+      key =
+        Accounts.mint_api_key!(subject.id, "newer", DateTime.add(DateTime.utc_now(), 7, :day),
+          actor: admin
+        )
+
+      KilnCMS.NewerReleaseRows.api_key_scope!(key.id)
+
+      assert {:ok, _} = Accounts.anonymize_user(subject, actor: admin)
+
+      row = KilnCMS.NewerReleaseRows.stored_row("api_keys", key.id)
+      assert row["revoked_at"]
+      assert row["access"] == KilnCMS.NewerReleaseRows.unknown()
+    end
+
     test "nulls the actor on the user's audit events", %{admin: admin, subject: subject} do
       event = event_by(subject)
 

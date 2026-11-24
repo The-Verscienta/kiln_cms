@@ -109,4 +109,66 @@ defmodule KilnCMS.Security.Posture.Checks.ApiKeysTest do
     mint!(operator, operator, %{access: :read_write})
     assert %{status: :n_a} = run(now: DateTime.add(DateTime.utc_now(), 31, :day))
   end
+
+  # A key a newer release minted with a scope this one does not know (#2604).
+  describe "a scope this release does not know" do
+    alias KilnCMS.NewerReleaseRows
+
+    test "warns, counted apart from the keys that sign in here", %{operator: operator} do
+      mint!(user(:editor), operator)
+      key = mint!(user(:editor), operator, %{name: "newer"})
+      NewerReleaseRows.api_key_scope!(key.id)
+
+      result = run()
+      assert result.status == :warn
+      assert result.facts.valid_keys == 1
+      assert result.facts.unrecognized_scope_keys == 1
+      assert result.summary =~ "scope this release does not know"
+      assert [detail] = result.details
+      assert detail =~ "newer"
+    end
+
+    test "alone, it still warns rather than being not applicable", %{operator: operator} do
+      key = mint!(operator, operator, %{access: :read_write})
+      NewerReleaseRows.api_key_scope!(key.id)
+
+      assert %{status: :warn, facts: %{valid_keys: 0, unrecognized_scope_keys: 1}} = run()
+    end
+
+    test "an administrator's read-write key still fails", %{operator: operator} do
+      mint!(operator, operator, %{access: :read_write, name: "robot"})
+      key = mint!(user(:editor), operator)
+      NewerReleaseRows.api_key_scope!(key.id)
+
+      result = run()
+      assert result.status == :fail
+      assert result.facts.unrecognized_scope_keys == 1
+    end
+
+    test "is named alongside an old key", %{operator: operator} do
+      mint!(user(:editor), operator, %{expires_at: DateTime.add(DateTime.utc_now(), 400, :day)})
+      key = mint!(user(:editor), operator)
+      NewerReleaseRows.api_key_scope!(key.id)
+
+      result = run()
+      assert result.status == :warn
+      assert result.summary =~ "scope this release does not know"
+      assert result.summary =~ "more than a year"
+      assert length(result.details) == 2
+    end
+
+    test "a revoked or expired one is ignored", %{operator: operator} do
+      revoked = mint!(user(:editor), operator)
+      NewerReleaseRows.api_key_scope!(revoked.id)
+      {:ok, _} = Accounts.revoke_api_key(revoked, actor: operator)
+
+      assert %{status: :n_a, facts: %{unrecognized_scope_keys: 0}} = run()
+
+      expiring = mint!(user(:editor), operator)
+      NewerReleaseRows.api_key_scope!(expiring.id)
+
+      assert %{status: :n_a, facts: %{unrecognized_scope_keys: 0}} =
+               run(now: DateTime.add(DateTime.utc_now(), 31, :day))
+    end
+  end
 end
