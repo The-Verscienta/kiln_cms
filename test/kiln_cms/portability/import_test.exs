@@ -786,6 +786,163 @@ defmodule KilnCMS.Portability.ImportTest do
     end
   end
 
+  describe "sideload deadlines (#2720)" do
+    # One post with an image block per path, all on one host, so every asset
+    # lands in the same host group and is fetched one after another.
+    #
+    # `"media_id" => nil` keeps each block media-bearing (so its url is
+    # collected for sideloading) without naming a manifest entry. A block that
+    # names one has its `media_id` removed by `remap_one/3` before the url is
+    # collected, so a manifest-resolved image is never sideloaded at all; that
+    # is a separate, filed bug, and this fixture steers around it.
+    defp sideload_envelope(paths) do
+      %{
+        "records" => [
+          %{
+            "type" => "post",
+            "title" => "Gallery of a slow origin",
+            "slug" => "slow-origin",
+            "locale" => "en",
+            "state" => "draft",
+            "blocks" =>
+              Enum.map(paths, fn path ->
+                %{
+                  "type" => "image",
+                  "value" => %{"url" => "https://old.example.com#{path}", "media_id" => nil}
+                }
+              end)
+          }
+        ]
+      }
+    end
+
+    # "/slow…" paths answer after `slow_ms`, far past any deadline these tests
+    # set, so a slow asset only ever fails by being killed; every other path
+    # answers after `fast_ms`. Each request is reported to the test.
+    defp stub_origin(fast_ms, slow_ms \\ 5_000) do
+      test = self()
+
+      Req.Test.stub(KilnCMS.Media.Ingest, fn conn ->
+        send(test, {:fetched, conn.request_path})
+
+        conn.request_path
+        |> String.starts_with?("/slow")
+        |> if(do: slow_ms, else: fast_ms)
+        |> Process.sleep()
+
+        conn
+        |> Plug.Conn.put_resp_content_type("image/png")
+        |> Plug.Conn.send_resp(200, png())
+      end)
+    end
+
+    defp image_blocks(actor) do
+      posts(actor)
+      |> find("slow-origin")
+      |> Map.fetch!(:blocks)
+      |> Enum.filter(&(&1.type == :image))
+    end
+
+    defp media_ids(actor), do: actor |> media_items() |> MapSet.new(& &1.id)
+    defp media_items(actor), do: CMS.list_media_items!(actor: actor)
+
+    test "a slow asset fails alone; the rest of its host's assets import and are linked", %{
+      actor: actor
+    } do
+      stub_origin(0)
+      fast = for n <- 1..8, do: "/fast-#{n}.png"
+      slow = ["/slow-1.png", "/slow-2.png"]
+      # Interleaved, so the slow ones sit between fast ones in the serial run.
+      paths =
+        Enum.take(fast, 3) ++
+          [hd(slow)] ++ Enum.slice(fast, 3, 3) ++ tl(slow) ++ Enum.drop(fast, 6)
+
+      before = media_ids(actor)
+
+      {:ok, report} =
+        Import.run_envelope(sideload_envelope(paths), actor: actor, media_fetch_timeout: 1_000)
+
+      assert report.media.imported == 8
+
+      assert report.media.failed |> Enum.map(& &1.url) |> Enum.sort() ==
+               Enum.map(slow, &"https://old.example.com#{&1}")
+
+      assert Enum.all?(report.media.failed, &(&1.reason == {:fetch_timeout, 1_000}))
+
+      # Exactly the 8 that arrived were created, and every one is referenced:
+      # nothing orphaned in the library, nothing killed halfway through a write.
+      created = MapSet.difference(media_ids(actor), before)
+      assert MapSet.size(created) == 8
+
+      blocks = image_blocks(actor)
+      assert length(blocks) == 10
+      {linked, unlinked} = Enum.split_with(blocks, &is_binary(&1.value.media_id))
+
+      assert MapSet.new(linked, & &1.value.media_id) == created
+
+      assert unlinked |> Enum.map(& &1.value.url) |> Enum.sort() ==
+               Enum.map(slow, &"https://old.example.com#{&1}")
+    end
+
+    test "the deadline is per asset: a host group may take longer than it in total", %{
+      actor: actor
+    } do
+      # 10 × 100 ms is 1 s of serial fetching against a 500 ms deadline. Under a
+      # per-group bound the group would be killed halfway.
+      stub_origin(100)
+      paths = for n <- 1..10, do: "/fast-#{n}.png"
+
+      {:ok, report} =
+        Import.run_envelope(sideload_envelope(paths), actor: actor, media_fetch_timeout: 500)
+
+      assert report.media.imported == 10
+      assert report.media.failed == []
+      assert Enum.all?(image_blocks(actor), &is_binary(&1.value.media_id))
+    end
+
+    test "after three timeouts in a row a host's remaining assets are not requested", %{
+      actor: actor
+    } do
+      stub_origin(0)
+      slow = ["/slow-1.png", "/slow-2.png", "/slow-3.png"]
+      rest = ["/fast-1.png", "/fast-2.png"]
+
+      {:ok, report} =
+        Import.run_envelope(sideload_envelope(slow ++ rest),
+          actor: actor,
+          media_fetch_timeout: 200
+        )
+
+      assert report.media.imported == 0
+
+      reasons = Map.new(report.media.failed, &{&1.url, &1.reason})
+
+      for path <- slow do
+        assert reasons["https://old.example.com#{path}"] == {:fetch_timeout, 200}
+        assert_received {:fetched, ^path}
+      end
+
+      for path <- rest do
+        assert reasons["https://old.example.com#{path}"] == :host_unresponsive
+        refute_received {:fetched, ^path}
+      end
+    end
+
+    test "a success resets the count, so scattered timeouts never trip the breaker", %{
+      actor: actor
+    } do
+      stub_origin(0)
+      paths = ["/slow-1.png", "/slow-2.png", "/fast-1.png", "/slow-3.png", "/fast-2.png"]
+
+      {:ok, report} =
+        Import.run_envelope(sideload_envelope(paths), actor: actor, media_fetch_timeout: 200)
+
+      assert report.media.imported == 2
+      assert length(report.media.failed) == 3
+      assert Enum.all?(report.media.failed, &(&1.reason == {:fetch_timeout, 200}))
+    end
+  end
+
   describe "WXR size ceiling (#951)" do
     test "a file past the parser's ceiling is refused with the size, not OOM-killed" do
       path = Path.join(System.tmp_dir!(), "huge-#{System.unique_integer([:positive])}.xml")

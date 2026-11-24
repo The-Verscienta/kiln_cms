@@ -91,6 +91,24 @@ defmodule KilnCMS.ReleaseImportTest do
       assert CMS.list_redirects!(actor: ctx.actor, tenant: org.id) == []
     end
 
+    # #2720: only the envelope import passed its output function on as the
+    # progress sink, so a WordPress or Ghost import (the ones with a long media
+    # phase) printed nothing between the parse counts and the final report.
+    test "progress is printed through the command's output function", ctx do
+      path = write!(ctx, "export.xml", WXRFixture.wxr())
+      test = self()
+
+      assert {:ok, _report} =
+               KilnCMS.Portability.Commands.import_wordpress(
+                 path,
+                 [actor: ctx.actor.email, skip_media: true],
+                 &send(test, {:out, &1})
+               )
+
+      # 3 records, so the only tick is the final "records: 3/3".
+      assert_received {:out, "records: 3/3"}
+    end
+
     test "drain_media: runs the media queue before returning", ctx do
       path = write!(ctx, "export.xml", WXRFixture.wxr())
 

@@ -178,6 +178,64 @@ defmodule KilnCMS.Media.IngestTest do
     end
   end
 
+  describe "store_url/2 :fetch_timeout (#2720)" do
+    # The importer fetches hundreds of URLs one after another per host, and
+    # SafeFetch's `receive_timeout` is a gap between chunks rather than a total.
+    # `:fetch_timeout` is the wall-clock bound that makes one stalled server cost
+    # one asset.
+
+    # Serves `png/0` after `delay` ms.
+    defp serve_after(delay) do
+      Req.Test.stub(KilnCMS.Media.Ingest, fn conn ->
+        Process.sleep(delay)
+        Plug.Conn.send_resp(conn, 200, png())
+      end)
+    end
+
+    test "a download past the deadline is an error naming it, and stores nothing" do
+      serve_after(500)
+      before = media_count()
+
+      assert {:error, {:fetch_timeout, 50}} =
+               Ingest.store_url("https://media.test/slow.png", actor: actor(), fetch_timeout: 50)
+
+      assert media_count() == before
+    end
+
+    test "a download inside the deadline is stored as usual" do
+      serve_after(50)
+
+      assert {:ok, item} =
+               Ingest.store_url("https://media.test/cat.png",
+                 actor: actor(),
+                 fetch_timeout: 5_000
+               )
+
+      assert item.filename == "cat.png"
+    end
+
+    test "without the option a slow download is not cut short" do
+      # The upload API's from-URL path passes no bound, and must behave as before.
+      serve_after(200)
+
+      assert {:ok, _item} = Ingest.store_url("https://media.test/cat.png", actor: actor())
+    end
+
+    test "a download that raises is this asset's error, not the caller's crash" do
+      Req.Test.stub(KilnCMS.Media.Ingest, fn _conn -> raise "boom" end)
+      before = media_count()
+
+      assert {:error, {:fetch_crashed, message}} =
+               Ingest.store_url("https://media.test/cat.png",
+                 actor: actor(),
+                 fetch_timeout: 5_000
+               )
+
+      assert message =~ "boom"
+      assert media_count() == before
+    end
+  end
+
   describe "store_file/3" do
     test "refuses a file no processor recognises, and writes nothing" do
       path = Path.join(System.tmp_dir!(), "ingest-#{System.unique_integer([:positive])}.bin")
