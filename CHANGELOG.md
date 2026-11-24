@@ -107,6 +107,9 @@ else.
 - **A form's thank-you, not-found and refused (422) pages and the `/newsletter` sign-up and unsubscribe pages follow the visitor's light or dark theme, and with browser storage blocked the console still loads and the theme still applies, just isn't remembered (#2715, #2773).**
   ([long form](docs/changelog/unreleased.md#theme-script-everywhere))
 
+- **A saved view that lost a field, locale, type or sort since it was saved is marked current, with its "no longer applies" message and its Rename / Delete bar, only when you open it, not on the plain list or a list filtered to what it has left; the field-filter builder no longer drops a second condition on one field and operator (#2785, #2741).**
+  ([long form](docs/changelog/unreleased.md#content-list-saved-view-matching))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —

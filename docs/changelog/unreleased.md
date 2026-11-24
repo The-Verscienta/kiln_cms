@@ -193,3 +193,38 @@ carries the reasoning.
     those choices is remembered on the next page load.
   No migration, no configuration.
   ([#2715](https://github.com/The-Verscienta/kiln_cms/issues/2715), [#2773](https://github.com/The-Verscienta/kiln_cms/issues/2773))
+
+<a id="content-list-saved-view-matching"></a>
+
+- **A saved view that lost something it named is current only when you open it, so its message and its Rename / Delete bar no longer follow you to other lists, and the field-filter builder never drops a repeated condition (#2785, #2741).**
+  - **Saved views (#2785).** A view is re-read under today's fields, types,
+    locales and sorts. When that re-read dropped something (a field condition
+    or field sort on a field since deleted, made private or retyped, a locale
+    no longer configured, a content type that is gone, or a built-in sort or
+    consent kind no longer offered), what was left could equal another list:
+    the plain list for a view whose only condition was lost, or the list any
+    editor filtered by hand to the conditions it still had. Every load of that
+    list then showed *The view "…" named a field that no longer applies, so
+    that condition was left out.*, marked the view as current and showed its
+    Rename / Delete bar. A shared view did this for every editor on the site.
+    Such a view now links to the params it was saved with (cleaned the way a
+    saved view's params are), and is the view on screen only when the URL
+    carries exactly those; the list still applies only what exists. Opened
+    that way it is current even when a built-in view or another saved view
+    would match what is left, so its bar shows and **Save view** stays
+    hidden. The message still shows only for a lost field condition or field
+    sort. A view that lost nothing matches as before, by what it applies, and
+    a deleted category or tag is not a loss (the view keeps its id). Stored
+    views are not rewritten.
+  - **Field-filter builder (#2741).** `KilnCMS.CMS.ListFieldQuery.arguments/3`
+    put two conditions with the same field and API operator in one map key,
+    so the second silently replaced the first. The content list never sends
+    two: it keeps one condition per field and condition (adding the same
+    field and condition again replaces the earlier one, and a hand-edited
+    `cf` keeps the first), so nothing changes on screen. The builder now
+    keeps the first in the field's map and puts each later one in a
+    top-level `_and` group, so every condition it is given applies whoever
+    calls it; an exact repeat is dropped. Whether the list itself should AND
+    two values of one field and condition is an open question (#3277).
+  No migration, no configuration.
+  ([#2785](https://github.com/The-Verscienta/kiln_cms/issues/2785), [#2741](https://github.com/The-Verscienta/kiln_cms/issues/2741))
