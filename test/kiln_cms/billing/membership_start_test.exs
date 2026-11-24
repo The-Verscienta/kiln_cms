@@ -4,8 +4,9 @@ defmodule KilnCMS.Billing.MembershipStartTest do
 
   A re-click on "join" must never demote a live membership (#2747): the guard
   is the action's `upsert_condition`, so these call `Billing.start_membership`
-  directly, with no controller in front of it. A restart drops the old
-  subscription and keeps the provider customer (#3157).
+  directly, with no controller in front of it. A restart of a `:canceled` row
+  drops the old subscription and keeps the provider customer (#3157); a
+  restart of an `:incomplete` row keeps the checkout in progress (#3156).
   """
   use KilnCMS.DataCase, async: false
 
@@ -125,31 +126,47 @@ defmodule KilnCMS.Billing.MembershipStartTest do
       assert started.status == :incomplete
       refute started.__metadata__[:upsert_skipped]
     end
+  end
 
-    test "a #{status} restart drops the old subscription and keeps the customer (#3157)" do
-      u = user()
-      t = tier()
-      row = seed(u, t, unquote(status), @old_subscription)
+  test "a canceled restart drops the old subscription and keeps the customer (#3157)" do
+    u = user()
+    t = tier()
+    row = seed(u, t, :canceled, @old_subscription)
 
-      assert {:ok, started} = start(u, t)
-      assert started.id == row.id
+    assert {:ok, started} = start(u, t)
+    assert started.id == row.id
 
-      stored = reload(row)
-      assert stored.status == :incomplete
-      assert stored.provider_subscription_id == nil
-      assert stored.current_period_end == nil
-      assert stored.cancel_at_period_end == false
-      # Checkout reuses the customer, and the billing portal needs it.
-      assert stored.provider_customer_id == "cus_1"
-      # Kept, so an older event for the old subscription stays out of order.
-      assert stored.last_provider_event_at == @stamp
+    stored = reload(row)
+    assert stored.status == :incomplete
+    assert stored.provider_subscription_id == nil
+    assert stored.current_period_end == nil
+    assert stored.cancel_at_period_end == false
+    # Checkout reuses the customer, and the billing portal needs it.
+    assert stored.provider_customer_id == "cus_1"
+    # Kept, so an older event for the old subscription stays out of order.
+    assert stored.last_provider_event_at == @stamp
 
-      assert Billing.membership_by_subscription("sub_a",
-               authorize?: false,
-               not_found_error?: false
-             ) ==
-               {:ok, nil}
-    end
+    assert Billing.membership_by_subscription("sub_a",
+             authorize?: false,
+             not_found_error?: false
+           ) ==
+             {:ok, nil}
+  end
+
+  test "an incomplete restart keeps the checkout in progress (#3156)" do
+    # The subscription on an `:incomplete` row is the checkout the member may
+    # still be paying (a payment challenge, say); a re-click must not drop it.
+    u = user()
+    t = tier()
+    row = seed(u, t, :incomplete, @old_subscription)
+
+    assert {:ok, started} = start(u, t)
+    assert started.id == row.id
+    refute started.__metadata__[:upsert_skipped]
+
+    stored = reload(row)
+    assert stored.status == :incomplete
+    assert Map.take(stored, Map.keys(@old_subscription)) == @old_subscription
   end
 
   test "no row yet: creates an :incomplete one" do

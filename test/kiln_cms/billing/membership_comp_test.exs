@@ -251,12 +251,19 @@ defmodule KilnCMS.Billing.MembershipCompTest do
     end
 
     test "an erased account is refused as erased, not as billed" do
+      # The row is one the comp guard would refuse as billed too, so this
+      # pins which refusal wins: the account check comes first.
       erased = user(:viewer, %{anonymized_at: DateTime.utc_now()})
       t = tier()
+      row = seed(erased, t, :active, billed(:active))
 
       assert {:error, %Ash.Error.Invalid{errors: errors}} = comp(erased, t, user(:admin))
       assert Enum.any?(errors, &match?(%AccountErased{}, &1))
       refute Enum.any?(errors, &match?(%StillBilled{}, &1))
+
+      stored = reload(row)
+      assert stored.status == :active
+      assert stored.provider_subscription_id == "sub_1"
     end
   end
 end

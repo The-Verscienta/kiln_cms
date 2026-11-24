@@ -3,11 +3,13 @@ defmodule KilnCMS.Billing.RestartLateEventsTest do
   A restarted membership and the late events of the subscription it had
   (#3157).
 
-  A restart (`Membership.:start` over a `:canceled` or `:incomplete` row)
-  drops the old subscription's id and keeps the ordering stamp, so
-  `KilnCMS.Billing.EventGuard` ignores a terminal event for the old
-  subscription as `:other_subscription` and an older one as `:out_of_order`.
-  A new subscription still takes the row over. Driven through
+  A restart of a `:canceled` row (`Membership.:start`) drops the old
+  subscription's id and keeps the ordering stamp. The old subscription's
+  events still resolve to the row by metadata; `KilnCMS.Billing.EventGuard`
+  ignores a terminal one as `:other_subscription` and an older one as
+  `:out_of_order`. A new subscription still takes the row over. A restart of
+  an `:incomplete` row keeps its subscription, the checkout in progress, so a
+  comp stays refused while it can still be paid (#3156). Driven through
   `Subscriptions.apply/1`, the webhook worker's own entry point.
 
   `async: false`: the checkout case selects `KilnCMS.StubBillingProvider`
@@ -20,6 +22,7 @@ defmodule KilnCMS.Billing.RestartLateEventsTest do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.User
   alias KilnCMS.Billing
+  alias KilnCMS.Billing.Errors.StillBilled
   alias KilnCMS.Billing.Membership
   alias KilnCMS.Billing.Subscriptions
   alias KilnCMS.CMS.Audiences
@@ -73,6 +76,50 @@ defmodule KilnCMS.Billing.RestartLateEventsTest do
       })
 
     {member, t, row}
+  end
+
+  # A member part way through checkout A: the row is `:incomplete` and holds
+  # "sub_a", which a payment challenge may still turn into a paid one.
+  defp checkout_in_progress do
+    member = user()
+    t = tier()
+
+    row =
+      Ash.Seed.seed!(Membership, %{
+        org_id: org_id(),
+        user_id: member.id,
+        tier_id: t.id,
+        status: :incomplete,
+        provider_subscription_id: "sub_a",
+        provider_customer_id: "cus_1",
+        last_provider_event_at: stamp(@t)
+      })
+
+    {member, t, row}
+  end
+
+  defp comp(member, t) do
+    Billing.comp_membership(%{user_id: member.id, tier_id: t.id},
+      actor: user(:admin),
+      tenant: org_id()
+    )
+  end
+
+  defp checkout_completed(m, sub_id, created) do
+    %{
+      "id" => "evt_#{uniq()}",
+      "type" => "checkout.session.completed",
+      "created" => created,
+      "data" => %{
+        "object" => %{
+          "id" => "cs_#{uniq()}",
+          "mode" => "subscription",
+          "subscription" => sub_id,
+          "customer" => "cus_1",
+          "metadata" => metadata(m)
+        }
+      }
+    }
   end
 
   defp restart(member, t) do
@@ -149,7 +196,7 @@ defmodule KilnCMS.Billing.RestartLateEventsTest do
     assert stored.provider_subscription_id == "sub_b"
   end
 
-  test "the old subscription no longer resolves to the restarted row" do
+  test "the old subscription id no longer finds the restarted row by subscription" do
     {member, t, _row} = canceled_member(stamp(@t))
     restart(member, t)
 
@@ -158,6 +205,43 @@ defmodule KilnCMS.Billing.RestartLateEventsTest do
                authorize?: false,
                not_found_error?: false
              )
+  end
+
+  describe "a restart while checkout A is in progress" do
+    test "keeps sub_a, so a comp is still refused as billed" do
+      {member, t, row} = checkout_in_progress()
+      restart(member, t)
+
+      assert reload(row).provider_subscription_id == "sub_a"
+
+      assert {:error, %Ash.Error.Invalid{errors: [%StillBilled{}]}} = comp(member, t)
+
+      stored = reload(row)
+      assert stored.status == :incomplete
+      assert stored.provider_subscription_id == "sub_a"
+    end
+
+    test "A completing afterwards still activates the row" do
+      {member, t, row} = checkout_in_progress()
+      restart(member, t)
+
+      assert {:ok, %{status: :active}} =
+               Subscriptions.apply(updated(row, "sub_a", "active", @t + 100))
+
+      assert reload(row).provider_subscription_id == "sub_a"
+    end
+
+    test "an event for a new subscription B still takes the row over" do
+      {member, t, row} = checkout_in_progress()
+      restart(member, t)
+
+      assert {:ok, %{status: :active}} =
+               Subscriptions.apply(updated(row, "sub_b", "active", @t + 100))
+
+      stored = reload(row)
+      assert stored.provider_subscription_id == "sub_b"
+      assert @gated in Accounts.get_user!(member.id, authorize?: false).audiences
+    end
   end
 
   describe "checkout for a new subscription" do
@@ -214,34 +298,16 @@ defmodule KilnCMS.Billing.RestartLateEventsTest do
       assert stored.provider_customer_id == "cus_1"
       assert stored.cancel_at_period_end == false
     end
-  end
 
-  test "an uncomp stamps a row that had no provider event, so a restart is protected" do
-    # A row that never had an event stamped (pre-#2749, say) is comped and
-    # uncomped, then restarted. A late event for the subscription it had
-    # before the comp is out of order rather than reviving the row.
-    {member, t, row} = canceled_member(nil)
-    admin = user(:admin)
+    test "for B applies over an incomplete row still holding A" do
+      {member, t, row} = checkout_in_progress()
+      restart(member, t)
 
-    comped =
-      Billing.comp_membership!(%{user_id: member.id, tier_id: t.id},
-        actor: admin,
-        tenant: org_id()
-      )
+      assert {:ok, %{status: :active}} =
+               Subscriptions.apply(checkout_completed(row, "sub_b", @t + 100))
 
-    before_uncomp = DateTime.to_unix(DateTime.utc_now()) - 3_600
-    Billing.uncomp_membership!(comped, actor: admin, tenant: org_id())
-
-    uncomped = reload(row)
-    assert uncomped.status == :canceled
-    assert %DateTime{microsecond: {0, _}} = uncomped.last_provider_event_at
-
-    restart(member, t)
-
-    assert {:ignored, :out_of_order} =
-             Subscriptions.apply(updated(row, "sub_a", "active", before_uncomp))
-
-    assert reload(row).status == :incomplete
+      assert reload(row).provider_subscription_id == "sub_b"
+    end
   end
 
   test "an uncomp keeps a stamp the provider set" do

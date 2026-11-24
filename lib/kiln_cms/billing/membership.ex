@@ -83,13 +83,22 @@ defmodule KilnCMS.Billing.Membership do
     # carry a stable membership id. Upserts, so re-clicking "join" reuses an
     # abandoned or ended row rather than violating the identity.
     #
-    # A restart drops the old subscription (#3157): its id, period end and
-    # cancel flag describe a subscription that is over, and keeping the id let
-    # that subscription's late events resolve to, and act on, the restarted
-    # row. With the id gone, `KilnCMS.Billing.EventGuard` ignores a terminal
-    # event for it as `:other_subscription` and an older one as
-    # `:out_of_order` (the stamp is kept). The provider customer is kept on
-    # purpose: checkout reuses it so the member is not duplicated at the
+    # A restart over a `:canceled` row drops the old subscription (#3157):
+    # its id, period end and cancel flag describe a subscription that is over.
+    # The old subscription's late events still resolve to the row (by the
+    # membership id in their metadata); what changes is
+    # `KilnCMS.Billing.EventGuard`'s verdict on them. With no stored id it
+    # ignores a terminal one as `:other_subscription` and an older one as
+    # `:out_of_order` (the stamp is kept). A non-terminal one created in the
+    # same second as the stamp still applies: the guard's equal-stamp rule
+    # protects only a `:canceled` row, and the row is now `:incomplete`.
+    #
+    # A restart over an `:incomplete` row keeps them: that subscription is
+    # the checkout still in progress (say, mid payment challenge), and
+    # dropping its id would let a comp through `:comp`'s guard while it can
+    # still be paid (#3156). A new checkout replaces it under the guard's
+    # rules for an `:incomplete` row. The provider customer is kept either
+    # way: checkout reuses it so the member is not duplicated at the
     # provider, and the billing portal needs it.
     create :start do
       accept [:user_id, :tier_id]
@@ -119,10 +128,29 @@ defmodule KilnCMS.Billing.Membership do
       # registration wait for this row, or this row for it.
       change KilnCMS.Accounts.Changes.LockAccount
 
+      # A fresh row starts with no subscription. On conflict the three fields
+      # are computed from the existing row (an atomic in an upsert evaluates
+      # against it, not against the inserted values): cleared on a
+      # `:canceled` row, kept on an `:incomplete` one (see above).
       change set_attribute(:status, :incomplete)
       change set_attribute(:provider_subscription_id, nil)
       change set_attribute(:current_period_end, nil)
       change set_attribute(:cancel_at_period_end, false)
+
+      change atomic_update(
+               :provider_subscription_id,
+               expr(if status == :canceled, do: nil, else: provider_subscription_id)
+             )
+
+      change atomic_update(
+               :current_period_end,
+               expr(if status == :canceled, do: nil, else: current_period_end)
+             )
+
+      change atomic_update(
+               :cancel_at_period_end,
+               expr(if status == :canceled, do: false, else: cancel_at_period_end)
+             )
 
       # Nothing to sell to an account whose registration here awaits approval
       # or was rejected (#2251): its membership row grants nothing.
@@ -233,24 +261,6 @@ defmodule KilnCMS.Billing.Membership do
       change KilnCMS.Billing.Changes.SettleErasedAccount
       change set_attribute(:status, :canceled)
       change set_attribute(:canceled_at, &DateTime.utc_now/0)
-
-      # A row that never had a provider event applied has no ordering stamp,
-      # and a null stamp accepts any event (#2749). Stamp the uncomp itself, to
-      # the second like the provider's own `created`, so a late event for a
-      # subscription from before the comp is `:out_of_order` once the member
-      # restarts (#3157). An existing stamp is the provider's and is kept.
-      change fn changeset, _context ->
-        if is_nil(changeset.data.last_provider_event_at) do
-          Ash.Changeset.force_change_attribute(
-            changeset,
-            :last_provider_event_at,
-            DateTime.truncate(DateTime.utc_now(), :second)
-          )
-        else
-          changeset
-        end
-      end
-
       change KilnCMS.Billing.Changes.RecordTransition
     end
 
