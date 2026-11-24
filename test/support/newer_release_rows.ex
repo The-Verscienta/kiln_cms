@@ -2,11 +2,11 @@ defmodule KilnCMS.NewerReleaseRows do
   @moduledoc """
   Rows a newer release wrote, for testing how this one reads them (#2509).
 
-  A security event, a notification or a custom field definition (#2605)
-  whose type this release does not know cannot be made through the resource
-  (input stays strict), so it is inserted as raw SQL, the way the newer
-  release's code would have stored it. The stored name is a string no code in
-  this VM names as an atom.
+  A security event, a notification, a custom field definition (#2605) or a
+  section layout (#3060) whose type this release does not know cannot be
+  made through the resource (input stays strict), so it is inserted as raw
+  SQL, the way the newer release's code would have stored it. The stored
+  name is a string no code in this VM names as an atom.
   """
 
   @unknown "zz_from_a_newer_release_2509"
@@ -124,6 +124,37 @@ defmodule KilnCMS.NewerReleaseRows do
         Map.get(attrs, :validation, %{}),
         Map.get(attrs, :position, 0),
         attrs[:section]
+      ]
+    )
+
+    id
+  end
+
+  @doc """
+  Insert a `field_sections` row (#3060) whose compiled `content_type`
+  (default `unknown/0`) this release may not register: a removed plugin's
+  type. Takes `:org_id`, `:content_type`, `:type_definition_id`, `:name`,
+  `:display` and `:initially`. Returns its id.
+  """
+  @spec field_section!(map()) :: Ecto.UUID.t()
+  def field_section!(attrs \\ %{}) do
+    id = Ecto.UUID.generate()
+
+    KilnCMS.Repo.query!(
+      """
+      INSERT INTO field_sections
+        (id, org_id, content_type, type_definition_id, name, display, "initially",
+         inserted_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
+      """,
+      [
+        dump(id),
+        dump(Map.get(attrs, :org_id, KilnCMS.Accounts.default_org_id())),
+        Map.get(attrs, :content_type, @unknown),
+        dump(attrs[:type_definition_id]),
+        Map.get(attrs, :name, "newer_#{System.unique_integer([:positive])}"),
+        Map.get(attrs, :display, "tab"),
+        Map.get(attrs, :initially, "auto")
       ]
     )
 

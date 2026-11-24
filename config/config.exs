@@ -686,6 +686,13 @@ config :kiln_cms, :totp_secret_backfill_on_boot, true
 # a redundant run writes nothing.
 config :kiln_cms, :erasure_backfill_on_boot, true
 
+# Whether booting enqueues the section layout sweep
+# (`KilnCMS.CMS.SectionLayoutSweep`, #3060): section layouts no field carries
+# any more, left by 1.9.x and 1.10.x, are deleted, so a field filed under that
+# name later does not inherit them. Ten minutes after boot, deduplicated for a
+# day; a redundant run deletes nothing.
+config :kiln_cms, :section_layout_sweep_on_boot, true
+
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means
 # no SSO strategy is compiled — no sign-in button, no OAuth routes, zero

@@ -343,6 +343,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             )
           )
 
+        {:error, error} ->
+          put_flash(socket, :error, delete_failed_message(error))
+
         _ ->
           put_flash(socket, :error, gettext("Couldn't delete that field."))
       end
@@ -793,12 +796,31 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> AshPhoenix.Form.raw_errors(for_path: :all)
       |> Map.values()
       |> List.flatten()
-      |> Enum.any?(&match?(%SectionLayoutNotKept{}, &1))
+      |> layout_not_kept?()
 
     if not_kept?,
       do: put_flash(socket, :error, gettext("Couldn't save the section layout.")),
       else: socket
   end
+
+  # Whether a refused field write was refused because its section's layout
+  # could not be kept in step: a list of errors, or an Ash error of any class.
+  defp layout_not_kept?(errors) when is_list(errors),
+    do: Enum.any?(errors, &match?(%SectionLayoutNotKept{}, &1))
+
+  defp layout_not_kept?(error),
+    do: error |> Ash.Error.to_error_class() |> Map.get(:errors, []) |> layout_not_kept?()
+
+  # A field delete refused (#3062): name the section layout when that was the
+  # cause, as a save does.
+  defp delete_failed_message(error) do
+    if layout_not_kept?(error),
+      do: layout_not_removed_message(),
+      else: gettext("Couldn't delete that field.")
+  end
+
+  defp layout_not_removed_message,
+    do: gettext("Couldn't delete that field: its section's layout could not be removed with it.")
 
   defp written?(:ok), do: true
   defp written?({:ok, _}), do: true
@@ -1520,16 +1542,29 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           )
         )
 
-      {:error, _error} ->
-        # Most likely an item saved since the count: show the number again.
-        socket
-        |> assign(:delete_confirm, %{
-          id: definition.id,
-          counted: count_stored(socket.assigns, definition),
-          changed?: true
-        })
-        |> put_flash(:error, gettext("Couldn't delete that. Check the count and try again."))
+      # The section layout, not the count, refused it (#3062): say so, and
+      # close the dialog, since asking again would fail the same way. Only a
+      # flexible field has a section; an item type's delete never gets here.
+      {:error, error} ->
+        if layout_not_kept?(error) do
+          socket
+          |> assign(:delete_confirm, nil)
+          |> put_flash(:error, layout_not_removed_message())
+        else
+          ask_again(socket, definition)
+        end
     end
+  end
+
+  # Most likely an item saved since the count: show the number again.
+  defp ask_again(socket, definition) do
+    socket
+    |> assign(:delete_confirm, %{
+      id: definition.id,
+      counted: count_stored(socket.assigns, definition),
+      changed?: true
+    })
+    |> put_flash(:error, gettext("Couldn't delete that. Check the count and try again."))
   end
 
   # --- order helpers ---------------------------------------------------------
