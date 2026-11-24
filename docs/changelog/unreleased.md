@@ -160,3 +160,36 @@ carries the reasoning.
   - **Known gap.** `fields(names:)` prices every name at the whole selection, and that selection was already over the default `max_complexity` of 200 before flexible items: one `multiple` string field in a generated fragment costs 631, and a flexible field 1241. The generated fragments therefore only run against a raised cap. This predates the change and is left as a follow-up; no test pins the generated fragment's complexity.
   Record: [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md#the-typed-export-pr-5-2282);
   guides: [GraphQL: generate types and fragments](../headless-graphql-api.md#generate-types-and-fragments-for-your-site), [api.md: schema discovery](../api.md#schema-discovery-typed-clients).
+
+## Fixed
+
+<a id="theme-script-everywhere"></a>
+
+- **The light/dark theme now applies on form answers and newsletter pages, and survives blocked browser storage (#2715, #2773).**
+  - **Form and newsletter pages (#2715).** The on-site answers to a form
+    submission (the thank-you page, the 404 for an unknown or inactive form,
+    and the 422 re-render of a refused submission) and the `/newsletter`
+    sign-up answer and unsubscribe pages render the site's layout, whose
+    inline script sets the theme before first paint. Their pipeline,
+    `:public_form`, sent a static Content-Security-Policy with no nonce, so
+    the browser refused that script and these pages always rendered light,
+    whatever the visitor's system setting or chosen theme. The pipeline now
+    sends the same per-request nonce policy as the rest of the site
+    (`script-src 'self' 'nonce-…'`). A form that shows a human-verification
+    widget still widens `script-src` with the provider on the re-render, and
+    keeps the nonce. An embedded form's iframe still gets its own embed
+    policy, and `POST /api/forms/:slug` still answers JSON; only its CSP
+    header value changes. None of these pages is cached by a shared cache,
+    so a nonce is never replayed. The newsletter confirm page already ran
+    under the browser pipeline and was not affected.
+  - **Blocked storage (#2773).** With site data blocked (Chrome's
+    `localStorage` getter throws), storage turned off (Firefox's is `null`),
+    or a full store, the layout's theme script stopped part-way and LiveView
+    never started, because its constructor reads both stores: the console
+    did not load. Every storage call in the theme script is now guarded, and
+    `app.js` hands LiveView a store that falls back to memory for the page
+    view (`assets/js/safe_storage.js`). The page takes the system theme, the
+    theme switch and the sidebar and nav-section toggles work, and none of
+    those choices is remembered on the next page load.
+  No migration, no configuration.
+  ([#2715](https://github.com/The-Verscienta/kiln_cms/issues/2715), [#2773](https://github.com/The-Verscienta/kiln_cms/issues/2773))

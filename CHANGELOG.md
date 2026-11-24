@@ -102,6 +102,11 @@ else.
   Validating consumers: a flexible field's `items` was `{"type": "object"}` and is now a `$ref` to a union of closed item definitions.
   ([long form](docs/changelog/unreleased.md#flexible-typed-export))
 
+### Fixed
+
+- **A form's thank-you, not-found and refused (422) pages and the `/newsletter` sign-up and unsubscribe pages follow the visitor's light or dark theme, and with browser storage blocked the console still loads and the theme still applies, just isn't remembered (#2715, #2773).**
+  ([long form](docs/changelog/unreleased.md#theme-script-everywhere))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —
