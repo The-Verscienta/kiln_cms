@@ -933,7 +933,6 @@ carries the reasoning.
   [The webhook sweeper](../memberships.md#the-webhook-sweeper) and
   [Billing webhooks](../observability.md#billing-webhooks).
 
-
 ## Security
 
 <a id="ash-keyset-cursor-forgery"></a>
