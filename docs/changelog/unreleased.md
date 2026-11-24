@@ -834,3 +834,82 @@ carries the reasoning.
   No migration, no configuration. Rolling the pin back is safe; rows
   restarted meanwhile stay cleared.
   ([#3157](https://github.com/The-Verscienta/kiln_cms/issues/3157))
+
+## Security
+
+<a id="ash-keyset-cursor-forgery"></a>
+
+- **ash 3.38.1 fixes EEF-CVE-2026-124283 (GHSA-m5v6-3qwf-6w9r, high).** Ash
+  encoded a keyset cursor as an Erlang term and decoded the one a client sent
+  back with `:erlang.binary_to_term/2` in `:safe` mode, then refused a term
+  that was an Ash expression. Wrapping the value in another struct got past
+  that check, and the decoded value was spliced into the query's filter:
+  SQL injection, or code execution where the value was evaluated. Every
+  release of ash from 3.31.3 up to 3.38.0 was affected; Kiln's lock had
+  3.37.2.
+  - **Exposure.** Kiln was exposed. The JSON:API collection reads accept
+    `page[after]` and `page[before]` (see
+    [Pagination](../json-api.md)), and the published-content feeds are
+    world-readable, so the cursor needed no account. The keyset pages behind
+    the security logs are built on the server and never take a cursor from
+    the browser, and the GraphQL queries are offset-paginated.
+  - **The fix.** Without `config :ash, :keyset_signing_secret`, which Kiln
+    does not set, ash 3.38 encodes a cursor as base64 JSON. Decoding JSON
+    can only give plain data, and each value is cast back with its field's
+    type, the way a value in a client's filter is. With the secret set,
+    cursors are signed terms and a cursor whose signature does not verify is
+    never decoded. ash 3.38.1 also fixes CVE-2026-120299 (GHSA-rwmx-99mc-qr2x),
+    keyword input fields cast with storage casting, and encodes a sort value
+    whose type it cannot determine as JSON instead of leaving the record
+    without a cursor.
+  - **Cursors issued before the upgrade are refused.** One from an older
+    release is an Erlang term, not JSON, so it is now an invalid keyset
+    (`400`). A consumer that was paging through a feed during the upgrade
+    starts again from the first page. Offset pagination and Kiln's own sync,
+    change-feed and revision-history cursors are unaffected.
+  - **Custom-field sorts are typed.** Since 3.37.5, ash types an untyped
+    literal from what it holds. A custom-field sort key is an untyped `jsonb`
+    expression, so the page after a cursor at `3.5` compared
+    `(custom_fields -> name)::float > 3.5` and failed with a 500 on any row
+    holding a string there (a field retyped after rows were written). The key
+    is now typed `KilnCMS.CMS.Types.JsonScalar`, and the cursor value is bound
+    as `jsonb` and compared by the same jsonb rules the sort orders by. A
+    cursor carrying a list or a map is refused as an invalid keyset.
+  - `mix.exs` now requires `ash ~> 3.38`, so a lock cannot resolve back to an
+    affected release. The `kiln_plugin` SDK's own development lock and the
+    `sdk/fixtures/dep_plugin` test fixture's lock move from ash 3.37.6 to
+    3.38.1 too; the SDK's requirement (`~> 3.34`) is
+    unchanged, since the host application's lock decides which ash a plugin
+    runs on. No migration and no configuration; rolling the pin back reopens
+    the hole.
+
+<a id="ex-aws-db-connection-advisories"></a>
+
+- **ex_aws 2.8.1, ex_aws_s3 2.6.0 and db_connection 2.10.3 fix ten
+  advisories published on 2026-11-24.** They landed the same day as the ash
+  one above and kept `mix hex.audit` red on their own, so they move with it.
+  - **ex_aws 2.7.0 → 2.8.1** (EEF-CVE-2026-59697, -59698, -62269, -120720):
+    the IMDSv2 token request followed redirects; `..` in an S3 key was
+    resolved client-side, escaping a key prefix; a `?` in a key could
+    truncate it into the query string; a bucket name was put into the
+    request host unchecked with `virtual_host: true`.
+  - **ex_aws_s3 2.5.9 → 2.6.0** (EEF-CVE-2026-131902, -63582, -63583,
+    -63585, -65621): XML and ACL-header injection, presigned URL hosts taken
+    from the bucket name, and CRLF injection through object metadata.
+  - **db_connection 2.10.2 → 2.10.3** (EEF-CVE-2026-133555): a forged
+    `DBConnection.Stream` struct could run code through its `:log` option.
+  - **Exposure.** None known. Media and backup object keys are minted by
+    Kiln (UUIDs, and backup names from a timestamp), S3 requests are
+    path-style, and `KilnCMS.Storage.S3.ReqClient`, the HTTP client ex_aws
+    is configured with, never follows a redirect. Kiln deserializes no
+    client-supplied Erlang terms, which a forged stream struct would need.
+  - **What changes.** ex_aws now signs an S3 URL's path exactly as given,
+    percent-encoded. The backup S3 destination builds its own URLs and signs
+    them with `ExAws.Auth.headers/6`; its keys, prefixes and bucket names
+    only ever hold characters that need no encoding, so its signatures are
+    unchanged. ex_aws_s3 now escapes the quotes around each part's ETag in
+    a multipart upload's completion body (`&quot;`), which a store's XML
+    parser reads back as the same ETag.
+  - `mix.exs` now requires `ex_aws ~> 2.8` and `ex_aws_s3 ~> 2.6`.
+    `db_connection` comes in through Postgrex and is held at 2.10.3 by the
+    lock. No migration and no configuration.
