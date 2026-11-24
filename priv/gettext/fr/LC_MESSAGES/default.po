@@ -7376,6 +7376,11 @@ msgstr "Révocation de cette clé impossible."
 msgid "Couldn't rotate that signing secret."
 msgstr "Impossible de renouveler ce secret de signature."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save a related record, so this record was not saved. Fix it below, then save again."
+msgstr "Un enregistrement lié n’a pas pu être enregistré, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't save that item."
@@ -7406,6 +7411,11 @@ msgstr "Impossible d'enregistrer le nouvel ordre des types d'élément."
 #, elixir-autogen, elixir-format
 msgid "Couldn't save the new order."
 msgstr "Impossible d'enregistrer le nouvel ordre."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save the related record “%{title}”, so this record was not saved. Fix it below, then save again."
+msgstr "L’enregistrement lié « %{title} » n’a pas pu être enregistré, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -20302,6 +20312,11 @@ msgstr "Enregistrer la source de la clé"
 msgid "Save or discard the changes to this record before closing it."
 msgstr "Enregistrez ou annulez les modifications de cet enregistrement avant de le fermer."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Save or discard the changes to this record before removing it."
+msgstr "Enregistrez ou annulez les modifications de cet enregistrement avant de le retirer."
+
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save platform alerts"
@@ -20358,6 +20373,20 @@ msgstr "Enregistrez vos modifications avant de changer l'état de ce contenu."
 #, elixir-autogen, elixir-format
 msgid "Saved"
 msgstr "Enregistré"
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved %{count} related record, but couldn't save another, so this record was not saved. Fix it below, then save again."
+msgid_plural "Saved %{count} related records, but couldn't save another, so this record was not saved. Fix it below, then save again."
+msgstr[0] "%{count} enregistrement lié a été enregistré, mais un autre n’a pas pu l’être, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
+msgstr[1] "%{count} enregistrements liés ont été enregistrés, mais un autre n’a pas pu l’être, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved %{count} related record, but couldn't save “%{title}”, so this record was not saved. Fix it below, then save again."
+msgid_plural "Saved %{count} related records, but couldn't save “%{title}”, so this record was not saved. Fix it below, then save again."
+msgstr[0] "%{count} enregistrement lié a été enregistré, mais « %{title} » n’a pas pu l’être, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
+msgstr[1] "%{count} enregistrements liés ont été enregistrés, mais « %{title} » n’a pas pu l’être, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
