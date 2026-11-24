@@ -10,6 +10,7 @@ defmodule KilnCMS.Beta.RoundTest do
   alias KilnCMS.Beta
   alias KilnCMS.Beta.Round
   alias KilnCMS.CMS
+  alias KilnCMS.Test.SecurityAlerts
 
   # Each test gets its own round label so the idempotent-by-email/slug lookups
   # can't collide across the suite (`async: false` shares the sandbox).
@@ -33,6 +34,15 @@ defmodule KilnCMS.Beta.RoundTest do
 
   defp page_by_slug(slug),
     do: CMS.list_pages!(query: [filter: [slug: slug]], authorize?: false, tenant: tenant())
+
+  # The `role_granted` events for one account in the default org's log, oldest
+  # first. authorize?: false — the test reads the log back, as the round has
+  # no signed-in admin.
+  defp role_grants(user_id) do
+    KilnCMS.Security.list_events!(tenant: tenant(), authorize?: false)
+    |> Enum.filter(&(&1.type == :role_granted and &1.target_id == user_id))
+    |> Enum.sort_by(& &1.inserted_at, DateTime)
+  end
 
   describe "seats" do
     test "an authoring round gets editor testers plus one admin facilitator" do
@@ -126,6 +136,90 @@ defmodule KilnCMS.Beta.RoundTest do
       assert_raise ArgumentError, ~r/between 1 and 12/, fn ->
         Round.run(round: label(), testers: 0, seed?: false)
       end
+    end
+  end
+
+  describe "a new seat's grant (#2641)" do
+    # A new seat used to be seeded with its role written in, which runs no
+    # action: no `role_granted` (#2241) and no `new_admin` alert (#2245). It is
+    # now seeded at the default :viewer and raised through `:manage_access`.
+
+    test "the facilitator's admin seat is audited and raises the platform new_admin alert" do
+      # Alerts are off for the suite; `enable/0` is an `Application.put_env`,
+      # which is why this module is `async: false`.
+      SecurityAlerts.enable()
+
+      summary = Round.run(round: label(), testers: 1, seed?: false)
+      facilitator = Enum.find(summary.seats, & &1.facilitator?)
+      assert facilitator.created?
+
+      assert [grant] = role_grants(user(facilitator.email).id)
+      assert grant.org_id == tenant()
+      assert grant.metadata["role"] == "admin"
+      assert grant.metadata["previous_role"] == "viewer"
+      assert grant.metadata["level"] == "platform"
+
+      # The facilitator's is the round's only alert: the editor tester's grant
+      # raises none (below).
+      assert Enum.map(SecurityAlerts.dispatches(), &{&1["scope"], &1["kind"]}) ==
+               [{"platform", "new_admin"}]
+    end
+
+    test "an editor tester's seat is audited and raises no alert at all" do
+      SecurityAlerts.enable()
+
+      # The facilitator already holds its seat, so its step changes nothing and
+      # raises nothing: any alert left is the tester's.
+      facilitator_email = "beta-facilitator-#{label()}@beta.kiln.test"
+
+      Ash.Seed.seed!(Accounts.User, %{
+        email: facilitator_email,
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :admin
+      })
+
+      summary =
+        Round.run(
+          round: label(),
+          testers: 1,
+          facilitator_email: facilitator_email,
+          seed?: false
+        )
+
+      [tester] = summary.testers
+      assert tester.created?
+
+      assert [grant] = role_grants(user(tester.email).id)
+      assert grant.metadata["role"] == "editor"
+      assert grant.metadata["previous_role"] == "viewer"
+      assert grant.metadata["level"] == "platform"
+
+      # A platform role raised short of admin alerts nobody: neither
+      # `new_admin` nor `role_elevation`.
+      assert SecurityAlerts.dispatches() == []
+    end
+
+    test "the seat is still pre-confirmed, and its generated password signs in" do
+      summary = Round.run(round: label(), testers: 1, seed?: false)
+      [tester] = summary.testers
+      assert tester.created?
+
+      account = user(tester.email)
+      assert account.role == :editor
+      assert account.confirmed_at != nil
+
+      strategy = AshAuthentication.Info.strategy!(Accounts.User, :password)
+
+      assert {:ok, signed_in} =
+               AshAuthentication.Strategy.action(
+                 strategy,
+                 :sign_in,
+                 %{"email" => tester.email, "password" => tester.password},
+                 []
+               )
+
+      assert signed_in.id == account.id
     end
   end
 
@@ -225,12 +319,14 @@ defmodule KilnCMS.Beta.RoundTest do
 
       Round.run(shape: :operator, round: round, emails: [tester.email], seed?: false)
 
-      # authorize?: false — the test reads the log back, as the round has no admin.
-      events = KilnCMS.Security.list_events!(tenant: tenant(), authorize?: false)
-
-      assert [event] = Enum.filter(events, &(&1.type == :role_granted and &1.target_id == id))
-      assert event.metadata["role"] == "admin"
-      assert event.metadata["level"] == "platform"
+      # The first run's grant (the new seat raised to :editor, #2641), then the
+      # adoption's (:editor to :admin).
+      assert [created, adopted] = role_grants(id)
+      assert created.metadata["role"] == "editor"
+      assert created.metadata["previous_role"] == "viewer"
+      assert adopted.metadata["role"] == "admin"
+      assert adopted.metadata["previous_role"] == "editor"
+      assert adopted.metadata["level"] == "platform"
     end
 
     test "seeded content is not duplicated" do

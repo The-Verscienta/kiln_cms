@@ -58,7 +58,10 @@ defmodule KilnCMS.Beta do
       when testers need password reset to work. An address that already has an
       account here **adopts** it: the account's role is moved to the seat's
       tier (through `:manage_access`, so live sockets are evicted) and the
-      handout says so loudly.
+      handout says so loudly. A new seat's tier goes through `:manage_access`
+      too, raised from the default viewer, so every seat's grant is in the
+      default org's security log and an admin seat raises the `new_admin`
+      alert.
     * `:round` — round label used in generated emails and seeded slugs
       (default `"1"`). Re-running the same label is idempotent.
     * `:domain` — email domain for generated seats (default `"beta.kiln.test"`).

@@ -411,6 +411,16 @@ its role moves to the seat's tier and the handout says so. That's the right
 behaviour for an internal tester who already signs in, but it means an operator
 round can hand somebody `:admin`; put the role back when the round ends.
 
+**Every seat's role is in the security log.** Whether it is new or adopted, a
+seat gets its tier through the same role change an admin makes on
+**Accounts**, so the default site's **Security log** (`/editor/security-log`)
+shows a **Role granted** row for it (**Role revoked** for an adopted account
+moved down, nothing for one already at the seat's tier), with no one under
+**Who** and the seat's account as **Target**. A new seat is recorded as raised from the default
+viewer, since that is what a new account starts as. Each admin seat (the facilitator, or every tester of an operator round) also
+sends the platform admins a **new admin** alert, so tell them before you run
+the task. See [security-events.md](security-events.md).
+
 - [x] Pick the round shape (authoring vs operator) and provision testers at the
       right tier — `--shape`. An authoring round gets `editor` testers; an
       operator round is `admin` throughout.

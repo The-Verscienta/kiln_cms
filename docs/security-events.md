@@ -265,6 +265,19 @@ role records two events: the `elevation_granted` of the new grant, and a
 `role_revoked` (`role` `admin`, `change` `grant_revoked`) for the admin power
 it ended.
 
+A seat that `mix kiln.beta.round` creates (`KilnCMS.Beta`) is a new account
+whose tier is then raised through `User` `:manage_access`, so it records one
+`role_granted` in the default site's log: `level` `platform`, no person (the
+task runs with no signed-in user), and `previous_role` `viewer`, because a new
+account starts at the default viewer and is raised from there in the same
+transaction. An admin seat (the facilitator of an authoring round, every
+tester of an operator round) also raises the platform `new_admin`
+[alert](security-alerts.md); an editor seat raises none, as a platform role
+raised short of admin never does. An address that already has an account is
+adopted, and records a `role_granted` or `role_revoked` from the role it held,
+or nothing if it already held the seat's tier. Before #2641 a new seat was
+written straight to the database and recorded nothing.
+
 For `api_key_created`, `via` is `rotate` when the key was minted by rotating
 its predecessor (absent for a key an admin minted). For
 `api_key_reuse_detected`, `name` is the presented key's name and `revoked` the
@@ -462,7 +475,9 @@ labels the account only if it belongs to that site (a membership on it, or the
 legacy no-membership account on the default site); an account of another site
 appears as an unknown address. A role change is written to the log of the
 membership's own site, whichever site the admin was viewing; a user's global
-role is written to the site the request ran on. Invitation events likewise go to
+role is written to the site the request ran on (`mix kiln.beta.round`, which
+has no request, writes its seats' role changes to the default site's).
+Invitation events likewise go to
 the invited site's log. Registration events go to the log of the site the registration
 waits on, which may be the default site for a sign-up on another site's host,
 whichever host the deciding admin was on. A canceled backup belongs to the
@@ -559,6 +574,9 @@ recorded as long as it names a user actor and a tenant.
 | Thing | Status | Reason |
 |---|---|---|
 | Plugin install or enable | Not applicable | Plugins are compiled into the release; there is no runtime path that installs or enables one, so there is nothing to hook. A change shows up as a deploy. |
+| The instance's first admin, created at `/setup` (`User` `:bootstrap_admin`) | Not recorded | The action creates the account with its role already set; it is not a role change through `:manage_access`, so no `role_granted` is written and no `new_admin` alert raised. It runs only while the instance has no admin at all (`KilnCMS.Accounts.Checks.NoAdminExists`), so there is no earlier admin to alert or to read the log. |
+| Accounts created by `priv/repo/seeds.exs` (`ADMIN_EMAIL`, `EDITOR_EMAIL`) | Not recorded | The seed script writes each account with `Ash.Seed`, which runs no action, so nothing records the role. It is the development and CI path for a fresh database, and refuses `MIX_ENV=prod` unless `ALLOW_PROD_SEEDS=confirm` and both passwords are overridden. Run against an instance that already has admins, a new `ADMIN_EMAIL` account appears with no event and no alert, so raise an account to admin there on **Accounts** (`/editor/accounts`, see [account-administration.md](account-administration.md)) instead, which is recorded. |
+| The staging admin a scrub creates (`KilnCMS.Staging.Scrub`, `STAGING_ADMIN_EMAIL`) | Not recorded | The scrub writes the account with `Ash.Seed`, after it has anonymized every real account and purged both security logs and the pending alerts. The clone has no history left to add the event to and no one who could receive an alert. See [staging-environments.md](staging-environments.md). |
 | Remember-me sign-in | Not recorded | A valid remember-me cookie is turned into a session by the read plug (`store_in_session/2`), which never passes through `AuthController.complete_sign_in/4`. The original sign-in that issued the cookie is recorded. |
 | Failed magic-link, SSO and passkey sign-ins | Not recorded | Only the password action (`:sign_in_with_password`) and the second-factor prompt have an audit hook. The other strategies do not have a point where a refusal is observed. The successful ones are recorded (`sign_in` with `method`). A passkey refused *at the second-factor prompt* is recorded, as a wrong code is (#2247). |
 | Sign-in with a token (`:sign_in_with_token`) | Not recorded | Not audited: no hook. |
