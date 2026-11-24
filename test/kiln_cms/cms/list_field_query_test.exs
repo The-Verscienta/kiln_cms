@@ -88,6 +88,72 @@ defmodule KilnCMS.CMS.ListFieldQueryTest do
                "at" => %{"gte" => "2026-03-01T00:00:00", "lt" => "2026-04-01T00:00:00"}
              }
     end
+
+    # #2741: the field's map holds one operand per op, so a second condition
+    # on the same field and API op must not overwrite the first.
+    test "a second condition on one field and op is ANDed through _and, not dropped" do
+      args =
+        ListFieldQuery.arguments(
+          [
+            %{field: "sku", op: "contains", value: "a"},
+            %{field: "sku", op: "contains", value: "b"},
+            %{field: "sku", op: "contains", value: "c"}
+          ],
+          nil,
+          [%{name: "sku", field_type: :string}]
+        )
+
+      assert args.custom_filter == %{
+               "sku" => %{"ilike" => "%a%"},
+               "_and" => [%{"sku" => %{"ilike" => "%b%"}}, %{"sku" => %{"ilike" => "%c%"}}]
+             }
+    end
+
+    test "a repeated range op goes in _and; the other ops stay flat" do
+      args =
+        ListFieldQuery.arguments(
+          [
+            %{field: "price", op: "gte", value: "10"},
+            %{field: "price", op: "lte", value: "50"},
+            %{field: "price", op: "gte", value: "20"}
+          ],
+          nil,
+          [%{name: "price", field_type: :integer}]
+        )
+
+      assert args.custom_filter == %{
+               "price" => %{"gte" => "10", "lte" => "50"},
+               "_and" => [%{"price" => %{"gte" => "20"}}]
+             }
+    end
+
+    test "two datetime lte, both spelled lt, keep both days" do
+      args =
+        ListFieldQuery.arguments(
+          [
+            %{field: "at", op: "lte", value: "2026-03-31"},
+            %{field: "at", op: "lte", value: "2026-03-10"}
+          ],
+          nil,
+          [%{name: "at", field_type: :datetime}]
+        )
+
+      assert args.custom_filter == %{
+               "at" => %{"lt" => "2026-04-01T00:00:00"},
+               "_and" => [%{"at" => %{"lt" => "2026-03-11T00:00:00"}}]
+             }
+    end
+
+    test "an exact repeat is one condition, with no _and" do
+      condition = %{field: "sku", op: "contains", value: "a"}
+
+      args =
+        ListFieldQuery.arguments([condition, condition], nil, [
+          %{name: "sku", field_type: :string}
+        ])
+
+      assert args.custom_filter == %{"sku" => %{"ilike" => "%a%"}}
+    end
   end
 
   describe "cast/3" do
@@ -272,6 +338,42 @@ defmodule KilnCMS.CMS.ListFieldQueryTest do
       # Without arguments the call is the one it always was.
       assert length(ContentTypes.list!(:page, opts)) == 4
       assert ContentTypes.count!(:page, opts) == 4
+    end
+
+    test "two contains on one field narrow by both, in list and count (#2741)", %{admin: admin} do
+      name = "sku#{uniq()}"
+
+      CMS.create_field_definition!(
+        %{content_type: :page, label: "SKU", name: name, field_type: :string},
+        actor: admin
+      )
+
+      title = "lfq #{uniq()}"
+
+      mk = fn value ->
+        CMS.create_page!(%{title: title, slug: "lfq-#{uniq()}", custom_fields: %{name => value}},
+          actor: admin
+        )
+      end
+
+      both = mk.("AB-12")
+      _ab = mk.("AB-99")
+      _twelve = mk.("XY-12")
+
+      arguments =
+        ListFieldQuery.arguments(
+          [
+            %{field: name, op: "contains", value: "AB"},
+            %{field: name, op: "contains", value: "12"}
+          ],
+          nil,
+          [%{name: name, field_type: :string}]
+        )
+
+      opts = [actor: admin, arguments: arguments, query: [filter: [title: title]]]
+      assert [row] = ContentTypes.list!(:page, opts)
+      assert row.id == both.id
+      assert ContentTypes.count!(:page, opts) == 1
     end
 
     test "a dynamic type with a private field: list and count agree, and the field is the editor's",
