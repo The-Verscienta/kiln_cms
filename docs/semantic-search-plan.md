@@ -440,7 +440,12 @@ Two things follow:
 
 - **Recall is good, not guaranteed.** At the scan-tuple ceiling the answer is
   still a short list. Nothing downstream may claim exhaustiveness — near-
-  duplicate detection reads as if it does, and it does not.
+  duplicate detection reads as if it does, and it does not. Where a caller
+  needs the distances of rows it already holds, it reads them by id with no
+  ordering on the vector, so the HNSW index cannot serve the read: the
+  relevance floor measures a lexical hit's blocks and chunks that way, after
+  a nearest-first read filtered to the hit's id lost its chunk to this
+  ceiling (#2814).
 - **If searches feel lossy on a large corpus**, raise `hnsw.ef_search` before
   reaching for a bigger index; it widens each batch. `KILN_HNSW_EF_SEARCH`
   (or `config :kiln_cms, KilnCMS.Repo, vector_scan: [ef_search: N]`) sets it on

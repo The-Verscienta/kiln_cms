@@ -94,6 +94,19 @@ defmodule KilnCMS.Search.DocumentChunkEmbedding do
       filter expr(document_type == ^arg(:document_type) and document_id == ^arg(:document_id))
     end
 
+    # Every embedded chunk of the listed documents, in no order, for the
+    # relevance floor. Exact, as `KilnCMS.Search.BlockEmbedding`'s
+    # `:for_documents` is, and for the same reason (#2814).
+    read :for_documents do
+      argument :document_type, :atom, allow_nil?: false
+      argument :document_ids, {:array, :uuid}, allow_nil?: false
+
+      filter expr(
+               not is_nil(embedding) and document_type == ^arg(:document_type) and
+                 document_id in ^arg(:document_ids)
+             )
+    end
+
     create :create do
       primary? true
 

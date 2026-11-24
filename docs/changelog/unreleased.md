@@ -113,6 +113,42 @@ carries the reasoning.
   upgrade starts at 1.10.x or earlier.
   See [Free content held by a release that already went live](../content-releases.md#free-content-held-by-a-release-that-already-went-live).
 
+<a id="billing-webhook-sweeper-upgrade"></a>
+
+- **Run `mix ash.migrate` for the billing webhook sweeper (#3159): two additive migrations on `billing_webhook_events`, and a new Oban queue, `billing_sweeper`. Unsettled events recorded before the upgrade, and any older than 3 days, are given up on and logged at error, not replayed. Rolling back is safe.**
+  - **Migrations.** The first adds two nullable columns, `redrive_count`
+    (no default, no backfill) and `gave_up_at`. The second builds a partial
+    index, `billing_webhook_events_status_inserted_at_index` on
+    `(status, inserted_at)` where `status IN ('received', 'processing', 'failed')`,
+    `CONCURRENTLY`, outside a transaction. If that build fails or is
+    canceled it leaves an `INVALID` index and a rerun fails on the name:
+    drop it with `DROP INDEX CONCURRENTLY billing_webhook_events_status_inserted_at_index;`
+    and migrate again ([releasing.md](../releasing.md#migrations-expand-migrate-contract)).
+  - **The queue.** The sweeper's AshOban scheduler and worker jobs run on
+    `billing_sweeper`, concurrency 1, not on `default`, where a node of the
+    previous release would fetch a job for a worker module it does not have.
+    A deployment that builds Oban's `queues:` list itself must add
+    `billing_sweeper: 1`, or the sweeper never runs and nothing says so. Add
+    one connection to `POOL_SIZE` if you size it by the sum of queue limits.
+  - **What the first sweeps log.** Rows recorded before the upgrade have no
+    `redrive_count`. Kiln can't tell whether replaying one now would undo a
+    later change (a stale "subscription active" event re-granting a canceled
+    member whose membership has no ordering stamp), so each one left
+    `received`, `failed` or stuck `processing` with no job is given up on,
+    not re-enqueued, however recent, and so is any unsettled event older
+    than 3 days. Expect one line per such row, at error:
+    `billing webhook evt_… (customer.subscription.updated) was never processed and will not be retried (recorded before the sweeper, so not replayed). Fix the cause, then resend the event from the provider's dashboard.`
+    List them with `SELECT provider_event_id, type, status, error FROM billing_webhook_events WHERE gave_up_at IS NOT NULL;`,
+    check each member's membership, and resend from the provider's
+    dashboard any event that is still the latest for its subscription.
+  - **Rolling deploy.** An event a node of the previous release records has
+    no `redrive_count` either; its own job still settles it, and if that job
+    fails for good the sweeper gives up on it rather than replaying it.
+  - **Rolling back** is safe: the previous release reads neither column and
+    does not poll `billing_sweeper`. A sweeper job left queued waits there
+    until you upgrade again.
+  See [The webhook sweeper](../memberships.md#the-webhook-sweeper).
+
 ## Known issues
 
 <a id="release-preview-fragments"></a>
@@ -310,6 +346,14 @@ carries the reasoning.
   No migration, no configuration.
 
 ## Fixed
+
+<a id="floor-reads-hits-chunks-exactly"></a>
+
+- **The relevance floor finds a keyword hit's own chunks and blocks however many other rows sit nearer the query (#2814, #2873).** With `:keyword_any` (or `:fuzzy`) in `semantic_floor_legs`, a hit only that leg returned is judged by the nearest of its document's distance and its blocks' and chunks' distances. A long document whose only match is a late passage relies on its chunk, because its head vector never saw that passage.
+  - **What went wrong.** The floor looked those blocks and chunks up with the block leg's nearest-first read, filtered to the hits' ids. Postgres could serve that read from the HNSW index, and a filtered HNSW walk gives up after `hnsw.max_scan_tuples` rows (20 000 by default). When more rows than that sat nearer the query than the hit's own chunk, the chunk never came back, the hit was judged by its head vector alone, and the floor dropped a real match. Whether it happened depended on the query planner's choice, so it came and went. In CI it surfaced as the intermittent `DocumentChunksTest` failure tracked in #2814 and #2873.
+  - **The fix.** The hits are already known, so the floor now reads every embedded block and chunk of those documents by id (new `:for_documents` reads on `BlockEmbedding` and `DocumentChunkEmbedding`) and takes the nearest itself. With no ordering on the vector, the HNSW index cannot serve the read, so nothing is lost to an approximate walk. The cost is bounded by the hits being judged (at most the legs' candidate count) times their blocks and chunks.
+  - **Who is affected.** Only sites that add `:keyword_any` or `:fuzzy` to `SEARCH_SEMANTIC_FLOOR_LEGS`. The default legs judge only semantic hits, which carry their distances already and never ran this lookup.
+  - **Tests.** A new test, run in the `:table_lock` pass (`mix test --only table_lock`), drops the chunk table's btree indexes inside its sandbox and lowers `hnsw.max_scan_tuples`, so a nearest-first read has only the HNSW path. It fails on the old lookup and passes on the new one.
 
 <a id="theme-script-everywhere"></a>
 
@@ -834,6 +878,61 @@ carries the reasoning.
   No migration, no configuration. Rolling the pin back is safe; rows
   restarted meanwhile stay cleared.
   ([#3157](https://github.com/The-Verscienta/kiln_cms/issues/3157))
+
+
+<a id="billing-webhook-sweeper"></a>
+
+- **A billing webhook event that was acknowledged and never processed is re-enqueued, up to 3 times within 3 days of receipt, then given up on with an error log and a telemetry event, where before it stayed unprocessed until the provider happened to resend it (#3159).**
+  The provider does not redeliver an event it saw acknowledged, and three
+  windows left one with no job: a `received` row whose job was lost or that
+  was recorded before enqueueing became atomic (#2748), a `failed` row whose
+  job used all 8 attempts, and a row left `processing` because its
+  `processed` stamp did not save or its worker died. A member's payment,
+  renewal or cancellation could then go unapplied with nothing on any
+  dashboard.
+  - **The sweeper.** Two AshOban triggers on `KilnCMS.Billing.WebhookEvent`
+    run every 10 minutes. They pick a `received` row more than 10 minutes
+    old with no job waiting or running, a `failed` row with no job waiting
+    or running, and a `processing` row claimed more than 10 minutes ago
+    with no job waiting (an `executing` job doesn't count there: a dead
+    node's job stays `executing` until `Oban.Lifeline` rescues it, 180
+    minutes later).
+  - **Re-enqueue.** `:redrive` enqueues a `WebhookWorker` job in the same
+    transaction, increments `redrive_count`, sets a `processing` row back
+    to `failed` so the new claim succeeds at once, and logs a warning
+    (`… had no job to process it; re-enqueued (1 of 3)`). The event goes
+    through the same ordering checks as any other.
+  - **Give up.** `:give_up` sets `gave_up_at`, logs at error and emits
+    `[:kiln_cms, :billing, :webhook_event, :gave_up]` (`%{count: 1}`;
+    metadata `webhook_event_id`, `event_id`, `type`, `redrive_count`, the
+    last `nil` for an event recorded before the sweeper). It does this once
+    an event has been re-enqueued 3 times, was received 3 or more days ago,
+    or has no `redrive_count`. Older events aren't replayed because applied
+    now they could undo what later ones did.
+  - **Re-arming.** Resending the event from the provider's dashboard
+    re-enqueues it, and the job's claim clears `gave_up_at`. It keeps
+    `redrive_count`, so an event that fails again is given up on again.
+  - **Not a hard cutoff.** A job enqueued just inside the 3 days still has
+    its 8 attempts (about 15 hours of backoff), so an event can be applied
+    up to about 3.6 days after it was received; and a job `Oban.Lifeline`
+    rescues can still claim an event the sweeper gave up on.
+  - **Ordering stamp.** A replayed checkout completion older than the
+    membership's `last_provider_event_at`, for the same subscription, still
+    applies but no longer moves the stamp back
+    (`KilnCMS.Billing.Changes.GuardProviderEvent`), so an event the stamp
+    already outranked can't apply after it. A checkout for a different
+    subscription still sets the stamp to its own `created`.
+  - **Still open.** A membership with no ordering stamp has nothing to order
+    a redriven event against within the 3 days. The console doesn't list
+    provider events; given-up ones show only in the log, the telemetry event
+    and `billing_webhook_events.gave_up_at`.
+  - **Who can run it.** Only the two triggers, through AshOban's bypass: no
+    person and no system actor may call `:redrive` or `:give_up`.
+  The migration, queue and upgrade behavior are under
+  [the upgrade note](#billing-webhook-sweeper-upgrade). See
+  [The webhook sweeper](../memberships.md#the-webhook-sweeper) and
+  [Billing webhooks](../observability.md#billing-webhooks).
+
 
 ## Security
 

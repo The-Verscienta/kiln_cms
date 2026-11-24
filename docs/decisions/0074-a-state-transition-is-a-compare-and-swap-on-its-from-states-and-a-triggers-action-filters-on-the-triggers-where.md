@@ -124,6 +124,18 @@ Two consequences for whoever writes the action:
 - A trigger action that does not filter will not be canceled by the race: it
   will be written, which is the bug.
 
+All of the above is AshOban's path for an action with
+`require_atomic? false`, as every action named above has. For a trigger
+update action whose `require_atomic?` is true (Ash's default when the action
+does not set it), its worker (`deps/ash_oban` 0.8.14) runs the action as a
+bulk update over a query for the row's primary key, the trigger's `where`
+included, so a row that stopped matching is a zero-row `UPDATE`: the job
+completes, having written nothing, and no `StaleRecord` is raised. The filter
+still belongs on the action, because a direct call (a test, a console)
+does not go through that query, and there it is the single `StaleRecord`
+above. `KilnCMS.Billing.WebhookEvent`'s `:redrive` and `:give_up` (#3159)
+are written this way, and its sweeper tests cover both paths.
+
 ### How a LiveView answers a stale result
 
 Reload and say so. A stale result is not a failure of the request, and

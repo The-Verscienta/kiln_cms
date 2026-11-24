@@ -49,6 +49,22 @@ defmodule KilnCMS.Search.BlockEmbedding do
       filter expr(document_type == ^arg(:document_type) and document_id == ^arg(:document_id))
     end
 
+    # Every embedded block of the listed documents, in no order: the relevance
+    # floor measuring hits it already holds (`KilnCMS.Search`, "How a lexical
+    # hit is judged"). Exact by construction. With no `ORDER BY` on the vector
+    # the HNSW index cannot serve it, so a block is never lost to the
+    # approximate walk that `:nearest_to_vector` takes, which gives up after
+    # `hnsw.max_scan_tuples` rows when many other rows sit nearer (#2814).
+    read :for_documents do
+      argument :document_type, :atom, allow_nil?: false
+      argument :document_ids, {:array, :uuid}, allow_nil?: false
+
+      filter expr(
+               not is_nil(embedding) and document_type == ^arg(:document_type) and
+                 document_id in ^arg(:document_ids)
+             )
+    end
+
     create :upsert do
       upsert? true
       upsert_identity :doc_block
