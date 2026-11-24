@@ -174,6 +174,12 @@ else.
 - **A release's item cap is exact: two adds at once at one below the cap no longer leave it one over. Adds to one release now take turns ([#3073](https://github.com/The-Verscienta/kiln_cms/issues/3073)).**
   ([long form](docs/changelog/unreleased.md#release-cap-exact))
 
+- **Comping a membership the provider may still bill (`active`, `past_due` or `incomplete` with a subscription id) is refused with `Billing.Errors.StillBilled`: cancel at the provider immediately, wait for the cancellation, then comp. Fixes the 1.12.0 known issue ([#3156](https://github.com/The-Verscienta/kiln_cms/issues/3156)).**
+  ([long form](docs/changelog/unreleased.md#comp-refused-while-billed))
+
+- **A member rejoining after a cancellation gets a membership without the old subscription's id, period end and cancel flag, so that subscription's late events can no longer cancel or revive the new checkout; the provider customer is kept ([#3157](https://github.com/The-Verscienta/kiln_cms/issues/3157)).**
+  ([long form](docs/changelog/unreleased.md#restart-drops-old-subscription))
+
 - **Billing webhook events acknowledged but never processed (no job, failed after 8 attempts, stuck `processing`) are re-enqueued every 10 minutes, up to 3 times within 3 days, then given up on with an error log and `[:kiln_cms, :billing, :webhook_event, :gave_up]` ([#3159](https://github.com/The-Verscienta/kiln_cms/issues/3159)).**
   A replayed checkout no longer moves a membership's ordering stamp back.
   ([long form](docs/changelog/unreleased.md#billing-webhook-sweeper))

@@ -801,6 +801,77 @@ carries the reasoning.
   No migration, no configuration. Rolling the pin back is safe; the older
   release counts outside the transaction again.
 
+
+<a id="comp-refused-while-billed"></a>
+
+- **Comping a membership the provider may still bill is refused (#3156). This fixes the 1.12.0 known issue "Comping a member whose provider subscription is still active doesn't cancel it."**
+  - **What was wrong.** `Billing.comp_membership/2` set an `active` or
+    `past_due` membership to `comped` and left its provider subscription
+    running. Since 1.12.0 a `comped` row ignores every provider event
+    (`comped_not_provider_managed`), so the provider went on charging the
+    member, and their later cancellation or failed payment never reached the
+    row.
+  - **Now.** A comp over a membership that is `active`, `past_due` or
+    `incomplete` and holds a provider subscription id returns
+    `{:error, %Ash.Error.Invalid{}}` carrying
+    `KilnCMS.Billing.Errors.StillBilled` (on `:status`), and changes nothing:
+    no audit row, no recompute, no `membership.activated`. An `incomplete`
+    row counts because a checkout in the middle of a payment challenge can
+    still be paid. The check is part of the upsert itself (its
+    `ON CONFLICT … WHERE`), so it holds against a provider event committing at
+    the same moment. A comp that goes through also clears the old
+    subscription's id, period end and "cancel at period end" flag, so the
+    account page shows no stale renewal date; the provider customer id stays.
+  - **What to do.** To comp a paying member, cancel the subscription in the
+    provider's dashboard **immediately** (a cancellation at period end keeps it
+    `active` until then), wait for the membership to turn `canceled`, then
+    comp. The member has no access between the two, and a subscribed webhook
+    endpoint gets `membership.canceled` and then `membership.activated`. A
+    comp that stays refused means the cancellation has not arrived: look its
+    event up in `billing_webhook_events`. See
+    [Comp a member](../memberships.md#comp-a-member).
+  - **Not covered.** An `incomplete` membership with no subscription id is
+    comped, though the member may already have paid while the checkout's
+    `checkout.session.completed` is still on its way; Kiln cannot tell. Check
+    the provider's dashboard before comping an `incomplete` member.
+    Memberships comped on 1.12.0 or earlier keep ignoring provider events and
+    may still be billed: cancel those subscriptions in the provider's
+    dashboard.
+  - No UI calls `comp_membership` yet; the refusal's message is not translated.
+  No migration, no configuration. Rolling the pin back is safe, and brings the
+  old behavior back.
+  ([#3156](https://github.com/The-Verscienta/kiln_cms/issues/3156))
+
+<a id="restart-drops-old-subscription"></a>
+
+- **A member who rejoins after a cancellation no longer carries the old subscription into the new checkout (#3157).**
+  - **What was wrong.** Choosing a tier again restarts the same membership
+    row, and the restart reset only its status. The row kept the ended
+    subscription's id, period end and "cancel at period end" flag, so a late
+    cancellation of the old subscription could cancel the new checkout, and on
+    a row with no ordering stamp a retried update of the old subscription
+    could revive it on a dead subscription.
+  - **Now.** Restarting a `canceled` membership clears those three fields.
+    The old subscription's events still resolve to the row by the membership id
+    in their metadata, but a cancellation for it is ignored
+    (`other_subscription`) and one older than the last applied event is
+    `out_of_order`. Restarting an `incomplete` membership keeps them: that
+    subscription is the checkout still in progress, and keeping its id is what
+    makes a comp over it refused (above). The provider customer id is kept in
+    both cases, though #3157 suggested clearing it: checkout reuses it so the
+    member is not duplicated at the provider, and **Manage billing** needs it.
+    The ordering stamp is kept too.
+  - **Remaining gaps.** A non-cancelling event for the old subscription
+    created in the same second as the stamp still applies to the restarted
+    (`incomplete`) row. A row with no stamp, one with no provider event since
+    1.12.0 (canceled only by an uncomp, for example), applies any
+    non-cancelling event for its old subscription after a restart. See
+    [Late, repeated and foreign events](../memberships.md#late-repeated-and-foreign-events).
+  No migration, no configuration. Rolling the pin back is safe; rows
+  restarted meanwhile stay cleared.
+  ([#3157](https://github.com/The-Verscienta/kiln_cms/issues/3157))
+
+
 <a id="billing-webhook-sweeper"></a>
 
 - **A billing webhook event that was acknowledged and never processed is re-enqueued, up to 3 times within 3 days of receipt, then given up on with an error log and a telemetry event, where before it stayed unprocessed until the provider happened to resend it (#3159).**

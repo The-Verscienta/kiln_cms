@@ -12,8 +12,9 @@ defmodule KilnCMS.Billing.EventGuard do
   ## Subscription identity
 
     * A `:comped` row is not provider-managed: every provider event is ignored
-      (`:comped_not_provider_managed`). Comping a paying member does not cancel
-      the provider subscription (#3156).
+      (`:comped_not_provider_managed`). A comp over a row the provider may
+      still bill is refused (#3156), so this matters for rows comped before
+      that, whose provider subscription may still be live.
     * An entitling row that holds a provider subscription id ignores an event
       about a different one (`:other_subscription`). A row that does not entitle
       accepts a different subscription only when it is `:incomplete` (an
@@ -28,7 +29,14 @@ defmodule KilnCMS.Billing.EventGuard do
       cancels a subscription the row does not hold. With no stored id on a row
       that does not entitle there is nothing to cancel and no way to tell
       whether the event is stale; an entitling row with no stored id fails open
-      as above.
+      as above. A restart of a `:canceled` row (`Membership.:start`) and a
+      comp drop the stored id and keep the stamp (#3157). The old
+      subscription's events still resolve to the row by metadata; its
+      terminal ones are then ignored here and its older ones under ordering
+      below. A non-terminal one created in the same second as the stamp still
+      applies to a restarted row, which is `:incomplete`: the equal-stamp
+      rule below protects only a `:canceled` row. A restart of an
+      `:incomplete` row keeps its id, the checkout still in progress.
 
   ## Ordering
 
