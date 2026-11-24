@@ -109,6 +109,32 @@ defmodule Mix.Tasks.Kiln.ChangelogTest do
     end
   end
 
+  describe "stray_lines/1" do
+    test "returns what bullets/1 drops, with its index in the section body" do
+      body = """
+
+      Intro paragraph.
+      - **One.** Wraps
+        onto an indented line.
+      not indented
+      * star
+
+        indented, but after the entry ended
+      """
+
+      assert Changelog.stray_lines(body) == [
+               {1, "Intro paragraph."},
+               {4, "not indented"},
+               {5, "* star"},
+               {7, "  indented, but after the entry ended"}
+             ]
+    end
+
+    test "is empty for entries, indented continuations and blank lines" do
+      assert Changelog.stray_lines("\n- **One.**\n  more\n\n  para\n- **Two.**\n\n") == []
+    end
+  end
+
   describe "summarize/1" do
     test "a bold lead that is a whole sentence is the summary" do
       assert Changelog.summarize("- **A thing happened.** Then paragraphs of why.") ==

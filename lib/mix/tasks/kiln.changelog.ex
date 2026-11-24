@@ -41,6 +41,11 @@ defmodule Mix.Tasks.Kiln.Changelog do
     * an entry carries no link at all (no issue/PR reference and no long-form
       link), so a reader has nowhere to go for the detail;
     * a release uses a section name outside the nine above;
+    * a line in a bullet section (every section but the three note sections)
+      belongs to no entry — a paragraph, a `* ` bullet, a continuation line
+      that is not indented. Only `- ` bullets and their two-space-indented
+      continuations are entries, and `--condense` would delete the rest
+      without archiving it, so it refuses to run while any is left;
     * a long-form link points at a file or anchor that does not exist;
     * two summaries in one release link the *same* long form — the archive has
       one block under that anchor, and `--condense` would write it out once per
@@ -260,42 +265,76 @@ defmodule Mix.Tasks.Kiln.Changelog do
   # the first `### ` (a release preamble, as 0.1.0 has) comes back as
   # `{nil, text}`.
   def sections(body) do
-    [lead | rest] = String.split(body, ~r/^### /m)
-
-    lead_section = if String.trim(lead) == "", do: [], else: [{nil, lead}]
-
-    lead_section ++
-      Enum.map(rest, fn chunk ->
-        [name, rest] =
-          case String.split(chunk, "\n", parts: 2) do
-            [name] -> [name, ""]
-            pair -> pair
-          end
-
-        name = String.trim(name)
-        {Map.get(@legacy_sections, name, name), rest}
-      end)
+    body
+    |> located_sections()
+    |> Enum.reject(fn {name, text, _offset} -> name == nil and String.trim(text) == "" end)
+    |> Enum.map(fn {name, text, _offset} -> {name, text} end)
   end
+
+  # `sections/1` with each section body's first line as a zero-based line
+  # offset into the release body, so `--check` can point at a line in the file.
+  defp located_sections(body) do
+    body
+    |> String.split(~r/^(?=### )/m)
+    |> Enum.map_reduce(0, fn chunk, offset ->
+      {locate_section(chunk, offset), offset + length(String.split(chunk, "\n")) - 1}
+    end)
+    |> elem(0)
+  end
+
+  defp locate_section("### " <> rest, offset) do
+    [name, text] =
+      case String.split(rest, "\n", parts: 2) do
+        [name] -> [name, ""]
+        pair -> pair
+      end
+
+    name = String.trim(name)
+    {Map.get(@legacy_sections, name, name), text, offset + 1}
+  end
+
+  defp locate_section(lead, offset), do: {nil, lead, offset}
 
   @doc false
   # Top-level `- ` bullets, each with its indented continuation lines.
-  def bullets(body) do
-    body
-    |> String.split("\n")
-    |> Enum.reduce({[], nil}, fn line, {done, current} ->
-      cond do
-        String.starts_with?(line, "- ") ->
-          {push(done, current), [line]}
+  def bullets(body), do: body |> scan_bullets() |> elem(0)
 
-        current != nil and (line == "" or String.starts_with?(line, "  ")) ->
-          {done, [line | current]}
+  @doc false
+  # The non-blank lines of a bullet section that `bullets/1` does not keep, as
+  # `{index, line}` with a zero-based index into the section body: a paragraph,
+  # a `* ` bullet, a continuation that is not indented. Every reader of a bullet
+  # section goes through `bullets/1`, so `--condense` would rewrite the file
+  # without these lines and archive none of them (#2732).
+  def stray_lines(body), do: body |> scan_bullets() |> elem(1)
 
-        true ->
-          {push(done, current), nil}
-      end
-    end)
-    |> then(fn {done, current} -> Enum.reverse(push(done, current)) end)
-    |> Enum.map(&(&1 |> Enum.reverse() |> Enum.join("\n") |> String.trim_trailing()))
+  defp scan_bullets(body) do
+    {done, current, strays} =
+      body
+      |> String.split("\n")
+      |> Enum.with_index()
+      |> Enum.reduce({[], nil, []}, fn {line, i}, {done, current, strays} ->
+        cond do
+          String.starts_with?(line, "- ") ->
+            {push(done, current), [line], strays}
+
+          current != nil and (line == "" or String.starts_with?(line, "  ")) ->
+            {done, [line | current], strays}
+
+          String.trim(line) == "" ->
+            {push(done, current), nil, strays}
+
+          true ->
+            {push(done, current), nil, [{i, line} | strays]}
+        end
+      end)
+
+    bullets =
+      done
+      |> push(current)
+      |> Enum.reverse()
+      |> Enum.map(&(&1 |> Enum.reverse() |> Enum.join("\n") |> String.trim_trailing()))
+
+    {bullets, Enum.reverse(strays)}
   end
 
   defp push(done, nil), do: done
@@ -463,6 +502,21 @@ defmodule Mix.Tasks.Kiln.Changelog do
   defp condense do
     text = File.read!(@changelog)
     {preamble, releases, footer} = parse(text)
+
+    # A line no entry owns is rewritten out of the file and archived nowhere,
+    # so stop before writing anything rather than delete it.
+    case stray_problems(text, releases) do
+      [] ->
+        :ok
+
+      problems ->
+        Mix.shell().error(Enum.join(problems, "\n\n"))
+
+        Mix.raise(
+          "#{length(problems)} section(s) hold text --condense would drop. Nothing was written."
+        )
+    end
+
     prs = pull_request_index()
 
     File.mkdir_p!(@archive_dir)
@@ -1284,9 +1338,50 @@ defmodule Mix.Tasks.Kiln.Changelog do
           (release.body
            |> sections()
            |> Enum.flat_map(&check_section(release, &1)))
-      end) ++ check_links(text) ++ check_duplicate_anchors()
+      end) ++ stray_problems(text, releases) ++ check_links(text) ++ check_duplicate_anchors()
 
     report(problems)
+  end
+
+  # Text in a bullet section that belongs to no `- ` entry: a paragraph, a `* `
+  # list, a continuation line that is not indented. Without this an entry
+  # written that way has no units, so it passes every check above — and
+  # `--condense` then deletes it (#2732). The prose sections (`@note_sections`)
+  # and a release's preamble keep every line, so only bullet sections are read.
+  defp stray_problems(text, releases) do
+    file_lines = String.split(text, "\n")
+
+    Enum.flat_map(releases, fn release ->
+      # The release body starts on the line after its `## ` heading; `+ 2`
+      # makes that a one-based line number.
+      first = Enum.find_index(file_lines, &(&1 == "## " <> release.heading)) + 2
+
+      release.body
+      |> located_sections()
+      |> Enum.reject(fn {name, _text, _offset} -> name == nil or name in @note_sections end)
+      |> Enum.flat_map(&section_strays(release, first, &1))
+    end)
+  end
+
+  defp section_strays(release, first, {name, body, offset}) do
+    case stray_lines(body) do
+      [] -> []
+      strays -> [stray_message(release, name, first + offset, strays)]
+    end
+  end
+
+  defp stray_message(release, name, first, strays) do
+    listed = Enum.map_join(strays, "\n", fn {i, line} -> "    line #{first + i}: #{line}" end)
+
+    """
+    #{describe(release)} / #{name}: #{length(strays)} line(s) belong to no entry.
+
+    #{listed}
+
+    Only `- ` bullets and their two-space-indented continuation lines are
+    entries here; `--condense` would delete the rest without archiving it.
+    Start each entry with `- `, and indent its continuation lines by two spaces.
+    """
   end
 
   # Two summaries in one release pointing at one long form. The archive holds a
