@@ -314,16 +314,23 @@ defmodule KilnCMS.Docs.GuideImagesTest do
   # Every image of the guide that is not at a URL, as
   # `%{src, alt, path, standalone?, html?}`, where `path` is the file it names,
   # resolved against the guide to a repo-root-relative path.
+  #
+  # A guide whose text has neither `![` nor `<img` cannot hold an image, so it
+  # is not parsed: Earmark over all ~260 extras takes seconds, and twice that
+  # on a loaded CI shard ran this module past ExUnit's 60 s timeout.
   defp images(root, extra) do
-    {_, ast, _} =
-      root
-      |> Path.join(extra)
-      |> File.read!()
-      |> EarmarkParser.as_ast(gfm: true, breaks: false, pure_links: true, math: true)
+    markdown = root |> Path.join(extra) |> File.read!()
 
-    for image <- collect_top(ast),
-        not external?(image.src),
-        do: Map.put(image, :path, repo_path(image.src, extra))
+    if Regex.match?(~r/!\[|<img/i, markdown) do
+      {_, ast, _} =
+        EarmarkParser.as_ast(markdown, gfm: true, breaks: false, pure_links: true, math: true)
+
+      for image <- collect_top(ast),
+          not external?(image.src),
+          do: Map.put(image, :path, repo_path(image.src, extra))
+    else
+      []
+    end
   end
 
   # `{"img", …}` nodes, noting whether each is the only thing in a top-level
