@@ -194,7 +194,10 @@ defmodule KilnCMS.Portability.Commands do
             redirects: Keyword.get(opts, :redirects, true),
             locale: Keyword.get(opts, :locale, "en"),
             on_conflict: on_conflict(opts[:on_conflict]),
-            author_map: author_map
+            author_map: author_map,
+            # WordPress and Ghost are the imports with the long media phase,
+            # so they are the ones an operator most needs to see moving.
+            progress: shell
           ] ++ maybe(:limit, opts[:limit])
 
       # `run/2` reports per-record failures inside the report rather than

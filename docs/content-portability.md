@@ -140,8 +140,10 @@ it turns a ten-minute import into an hours-long one for assets nobody asked
 for. Body images and featured images are fetched; orphans are not.
 
 **An unreachable image does not cost you the post.** The block keeps the
-source URL (so it renders, hotlinked) and the failure is listed in the report
-for you to re-upload.
+source URL (so it renders, hotlinked) and the failure is listed in the report,
+by URL, for you to re-upload. A slow image is skipped after 60 seconds, and the
+images around it are still stored and linked; see
+[Images that could not be fetched](#images-that-could-not-be-fetched).
 
 **Multiple categories collapse to one.** WordPress allows many, Kiln has one.
 The first is kept.
@@ -303,9 +305,36 @@ re-running is safe, because what already landed is skipped.
 Media sideloading runs concurrently, grouped so **no single host sees more than
 one in-flight request**. A WordPress export points overwhelmingly at one origin,
 so a flat concurrency pool would just be eight parallel requests at the site
-you are migrating away from.
+you are migrating away from. It also means one origin's images are fetched one
+after another, so the media phase of a large single-site export takes as long
+as that origin needs: 500 images at a second each is over eight minutes.
 
-Both phases print progress every 25 items:
+**Each image has its own deadline: 60 seconds**, wall clock, for the whole
+download (DNS, connect, waiting for a fetch slot, and the body).
+The 5-second connect timeout and the 30-second limit on a connection that goes
+silent still apply inside it, so a host that is down usually fails an image in
+seconds; the 60 seconds catches a server that keeps trickling bytes. An image past the deadline is skipped: its block keeps the
+source URL and the report lists it. Every image that did arrive is stored and
+linked as usual. The deadline is per image and not per host because a host's
+images run in sequence: a shared deadline grows too short as the export grows.
+The phase as a whole has no time limit; the progress lines below show it
+moving.
+
+The 60 seconds is a trade. An import downloads at most 25 MB per file, and a
+file that size arrives inside 60 seconds only at about 420 KB/s sustained (a
+10 MB image, the image cap, needs about 170 KB/s). A large file on a slower
+origin is skipped, and you upload it by hand (see below).
+
+**A host that stops answering is cut off after three timeouts in a row.** Its
+remaining images are reported `:host_unresponsive` without being requested, so
+a dead origin costs three timeouts rather than one for every image it holds.
+A timeout here is the 60-second deadline or a connect or receive timeout; a
+refused connection answers at once and does not count. Any answer
+that is not a timeout, a `404` included, resets the count. The log gets one
+warning naming the host.
+
+Both phases print progress every 25 items and at the end, for WordPress, Ghost
+and envelope imports alike:
 
 ```
 media: 150/512
@@ -321,6 +350,27 @@ queue — otherwise the jobs sit `available` and imported images render full siz
 until a node picks them up.
 
 `--limit` is still the way to try a slice first.
+
+### Images that could not be fetched
+
+The report ends with a list headed `Media that could not be fetched`: one line
+per image, its URL and the reason. A failed image never fails its post; the
+block keeps the source URL, so the page renders with the image hotlinked from
+the old site until you replace it. The reasons you are most likely to see:
+
+| Reason | What happened |
+|---|---|
+| `{:fetch_timeout, 60000}` | The download was still running at the 60-second deadline. |
+| `:host_unresponsive` | Not requested: the host had already timed out three times in a row. |
+| `{:http_status, 404}` (or another status) | The origin answered, but not with the file. |
+| `:too_large` | Over the 25 MB download cap, or over the cap for its kind once stored (10 MB for an image). |
+| `{:fetch_crashed, message}`, `{:exception, message}` or `{:exit, message}` | The fetch or the store raised or exited. That image is skipped; the run carries on. |
+| `:too_many_outbound_requests` | The node had too many background tasks running to start the fetch. |
+
+**Re-running does not retry them.** A re-run skips every post that already
+exists, and it only fetches images for the posts it is about to create. Upload
+each listed image to the media library yourself, then replace the image in the
+posts that use it (or set it as the featured image).
 
 ### Uses
 
@@ -406,7 +456,10 @@ resolves the host once, checks the answer, and connects to that *literal
 address* with SNI pointed back at the real name, which is what stops a name
 being re-resolved to `169.254.169.254` between the check and the connection.
 Redirects are refused rather than followed (a followed redirect is a fresh
-resolution the pin never sees), and the body is capped.
+resolution the pin never sees), and the body is capped. Each fetch also runs
+under the importer's 60-second deadline, which covers DNS, the connect, waiting
+for a SafeFetch pool slot and the body, but not storing the file or
+creating its media item: a fetch cut off at the deadline has written nothing.
 
 ## Extending to another source
 
