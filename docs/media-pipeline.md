@@ -922,6 +922,16 @@ public one can be gated later, which would leave a baked URL pointing at a
 blob that has since moved. A pasted `url` field remains for media hosted
 somewhere else entirely, and is used only when no library item is set.
 
+The live page and every preview render these blocks, and the `file` block,
+with the block's own `:web` HTML: the same markup the fired artifact carries,
+so the player's poster, caption track, muted autoplay and loop, and the
+download's size badge, cannot differ between the two (#2767). Delivery never
+looks the media item up or swaps in a storage or CDN URL: the `src` and `href`
+are always the routes above, which `MediaDownloadController` authorizes on
+every request. A page embedding a members-only video therefore stays
+shared-cacheable, its HTML names no private URL, and a reader without the
+audience gets a 404 from the route, not the bytes.
+
 ### Streaming and `Range`
 
 `GET /media/:id/stream`
