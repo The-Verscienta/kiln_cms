@@ -89,12 +89,13 @@ defmodule KilnCMS.CMS.StrandedReleaseItemSweep do
   @typedoc """
   What a run did: the items cancelled (or, in a dry run, that would be), each
   as `%{org_id, release_id, release_state, item_id, content_type, content_id,
-  action}`, and how many releases failed.
+  action}`, how many releases failed, and whether it was a dry run.
   """
   @type result :: %{
           cancelled: non_neg_integer(),
           failed: non_neg_integer(),
-          items: [map()]
+          items: [map()],
+          dry_run?: boolean()
         }
 
   @impl Oban.Worker
@@ -112,22 +113,26 @@ defmodule KilnCMS.CMS.StrandedReleaseItemSweep do
 
   @doc """
   Run the sweep. Options: `dry_run: true` reads and reports without
-  cancelling; `org_id:` limits it to one site. See the moduledoc.
+  cancelling; `org_id:` limits it to one site, and raises `ArgumentError` if
+  it is not a UUID. See the moduledoc.
 
-  `before_cancel:` is a test seam: a one-argument function called with each
-  item between the read that found it and its cancel, so a test can act in
-  that window. Nothing else passes it.
+  `around_cancel:` is a test seam: a two-argument function called with each
+  item, after the read that found it, and a zero-argument function that
+  cancels it (resolving the actor as it runs) and must be called and its
+  result returned. A test can act in that window, or run the cancel under
+  another actor. Nothing else passes it.
   """
   @spec run(keyword()) :: result()
   def run(opts \\ []) do
     run_opts = %{
       dry_run?: opts[:dry_run] == true,
-      before_cancel: Keyword.get(opts, :before_cancel, fn _item -> :ok end)
+      around_cancel: Keyword.get(opts, :around_cancel, fn _item, cancel -> cancel.() end)
     }
 
-    empty = %{cancelled: 0, failed: 0, items: []}
+    empty = %{cancelled: 0, failed: 0, items: [], dry_run?: run_opts.dry_run?}
 
     opts[:org_id]
+    |> org_id!()
     |> releases()
     |> Enum.reduce(empty, &sweep(&1, &2, run_opts))
     |> Map.update!(:items, &Enum.reverse/1)
@@ -135,7 +140,21 @@ defmodule KilnCMS.CMS.StrandedReleaseItemSweep do
 
   @doc "A one-line summary of a run's result."
   @spec summary(result()) :: String.t()
+  def summary(%{dry_run?: true} = result),
+    do: "would cancel #{result.cancelled}, #{result.failed} failed"
+
   def summary(result), do: "#{result.cancelled} cancelled, #{result.failed} failed"
+
+  # Cast here, not in the query: an `org_id:` that is not a UUID would
+  # otherwise surface as an `Ecto.Query.CastError` from deep inside the read.
+  defp org_id!(nil), do: nil
+
+  defp org_id!(org_id) do
+    case Ecto.UUID.cast(org_id) do
+      {:ok, uuid} -> uuid
+      :error -> raise ArgumentError, "org_id is not a UUID: #{inspect(org_id)}"
+    end
+  end
 
   # Each closed release with a pending item, per item site. Read through Ecto
   # across every site: this is a sweep over the whole instance, and each
@@ -192,11 +211,10 @@ defmodule KilnCMS.CMS.StrandedReleaseItemSweep do
 
   # One at a time, each a compare-and-swap in its own transaction.
   defp cancel(items, org_id, run_opts) do
-    opts = [actor: CMS.Bookkeeping.system(), tenant: org_id]
-
     Enum.reduce_while(items, {:ok, []}, fn item, {:ok, cancelled} ->
-      run_opts.before_cancel.(item)
-      cancel_one(item, cancelled, opts)
+      run_opts.around_cancel.(item, fn ->
+        cancel_one(item, cancelled, actor: CMS.Bookkeeping.system(), tenant: org_id)
+      end)
     end)
     |> case do
       {:ok, cancelled} -> {:ok, Enum.reverse(cancelled)}

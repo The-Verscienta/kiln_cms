@@ -241,7 +241,8 @@ defmodule KilnCMS.Release do
 
   Options: `dry_run: true` lists what it would cancel and cancels nothing;
   `org_id: "<uuid>"` limits it to one site. Prints each item and a
-  summary, and returns the sweep's result, or `{:error, message}`.
+  summary, and returns the sweep's result, or `{:error, message}` (an
+  `org_id:` that is not a UUID is one).
 
   Through `rpc`, not `eval`, like `prune_section_layouts/1`: the boot job
   covers a node that is not serving yet.
@@ -254,6 +255,28 @@ defmodule KilnCMS.Release do
   # `serving?` is an argument only so the test can take the `eval` branch.
   @doc false
   def run_stranded_release_item_cancel(opts, serving?) do
+    with :ok <- stranded_org_id(opts[:org_id]) do
+      cancel_stranded(opts, serving?)
+    end
+  end
+
+  # The sweep raises on an `org_id:` that is not a UUID; an operator typing
+  # one at `rpc` gets the message instead.
+  defp stranded_org_id(nil), do: :ok
+
+  defp stranded_org_id(org_id) do
+    case Ecto.UUID.cast(org_id) do
+      {:ok, _uuid} ->
+        :ok
+
+      :error ->
+        message = "org_id is not a UUID: #{inspect(org_id)}"
+        IO.puts(message)
+        {:error, message}
+    end
+  end
+
+  defp cancel_stranded(opts, serving?) do
     if serving? do
       result = KilnCMS.CMS.StrandedReleaseItemSweep.run(opts)
       verb = if opts[:dry_run] == true, do: "Would cancel", else: "Cancelled"

@@ -23,7 +23,9 @@ defmodule KilnCMS.CMS.Validations.ReleaseWithinSizeLimit do
   first would be an upgrade if the first were ever `FOR SHARE`, and two adds
   holding the share lock would deadlock on each other's upgrade. The lock
   order and the cost of serializing adds are in `ReleaseOpenForEdit`'s
-  moduledoc. The count loads at most `cap` rows, under the lock.
+  moduledoc. The count reads every pending item of the release, under the
+  lock; the cap keeps that at most `cap` rows unless it was lowered after the
+  release filled.
 
   Configure it per install (see `KilnCMS.CMS.Releases.max_items/0`):
 

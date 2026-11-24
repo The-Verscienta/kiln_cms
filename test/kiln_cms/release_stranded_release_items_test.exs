@@ -95,10 +95,23 @@ defmodule KilnCMS.ReleaseStrandedReleaseItemsTest do
           end)
 
         assert output =~ "Would cancel item #{item.id}"
+        assert output =~ "Stranded release items: would cancel 1, 0 failed"
+        refute output =~ "1 cancelled"
       end)
 
     assert log =~ "would cancel item #{item.id}"
     assert status(item, site) == :pending
+  end
+
+  test "an org_id that is not a UUID is an error, not a crash", %{item: item} do
+    output =
+      capture_io(fn ->
+        assert {:error, ~s(org_id is not a UUID: "acme")} =
+                 Release.run_stranded_release_item_cancel([org_id: "acme"], true)
+      end)
+
+    assert output =~ ~s(org_id is not a UUID: "acme")
+    assert status(item, %{id: item.org_id}) == :pending
   end
 
   test "under eval it refuses, and cancels nothing", %{site: site, item: item} do

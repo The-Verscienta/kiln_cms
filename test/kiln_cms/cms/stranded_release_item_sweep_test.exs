@@ -154,7 +154,7 @@ defmodule KilnCMS.CMS.StrandedReleaseItemSweepTest do
 
     {result, log} = swept(org_id: site.id)
 
-    assert result == %{cancelled: 0, failed: 0, items: []}
+    assert result == %{cancelled: 0, failed: 0, items: [], dry_run?: false}
     assert status(item, site) == :cancelled
     refute log =~ "stranded release item sweep"
   end
@@ -181,10 +181,26 @@ defmodule KilnCMS.CMS.StrandedReleaseItemSweepTest do
 
     {result, log} = swept(org_id: site.id, dry_run: true)
 
-    assert %{cancelled: 1, items: [%{item_id: item_id}]} = result
+    assert %{cancelled: 1, dry_run?: true, items: [%{item_id: item_id}]} = result
     assert item_id == item.id
     assert log =~ "would cancel item #{item.id}"
     assert status(item, site) == :pending
+  end
+
+  test "the summary says what a dry run would cancel, not that it cancelled", %{site: site} do
+    item!(site, release!(site, :published))
+
+    {dry, _log} = swept(org_id: site.id, dry_run: true)
+    assert StrandedReleaseItemSweep.summary(dry) == "would cancel 1, 0 failed"
+
+    {real, _log} = swept(org_id: site.id)
+    assert StrandedReleaseItemSweep.summary(real) == "1 cancelled, 0 failed"
+  end
+
+  test "an org_id that is not a UUID is refused up front" do
+    assert_raise ArgumentError, ~s(org_id is not a UUID: "acme"), fn ->
+      StrandedReleaseItemSweep.run(org_id: "acme")
+    end
   end
 
   test "an item applied between the read and the cancel is not rewritten", %{site: site} do
@@ -193,8 +209,9 @@ defmodule KilnCMS.CMS.StrandedReleaseItemSweepTest do
     {result, _log} =
       swept(
         org_id: site.id,
-        before_cancel: fn found ->
+        around_cancel: fn found, cancel ->
           Ash.Seed.update!(found, %{status: :applied})
+          cancel.()
         end
       )
 
@@ -215,14 +232,52 @@ defmodule KilnCMS.CMS.StrandedReleaseItemSweepTest do
   end
 
   test "a release whose item cannot be cancelled fails, and the sweep goes on", %{site: site} do
-    item = item!(site, release!(site, :published))
+    # Releases are swept in id order within a site: the first one fails.
+    [first, second] =
+      [release!(site, :published), release!(site, :published)] |> Enum.sort_by(& &1.id)
+
+    refused = item!(site, first)
+    freed = item!(site, second)
 
     {result, log} =
-      CMS.Bookkeeping.with_actor(nil, fn -> swept(org_id: site.id) end)
+      swept(
+        org_id: site.id,
+        around_cancel: fn found, cancel ->
+          if found.release_id == first.id,
+            do: CMS.Bookkeeping.with_actor(nil, cancel),
+            else: cancel.()
+        end
+      )
 
-    assert %{cancelled: 0, failed: 1} = result
-    assert log =~ "in org #{site.id}"
-    assert status(item, site) == :pending
+    assert %{cancelled: 1, failed: 1, items: [%{item_id: item_id}]} = result
+    assert item_id == freed.id
+    assert log =~ "could not cancel the items of release #{first.id} in org #{site.id}"
+    assert status(refused, site) == :pending
+    assert status(freed, site) == :cancelled
+  end
+
+  test "items cancelled before one that fails stay cancelled and are reported", %{site: site} do
+    published = release!(site, :published)
+    # Read in the order they were added.
+    done = item!(site, published)
+    refused = item!(site, published)
+
+    {result, log} =
+      swept(
+        org_id: site.id,
+        around_cancel: fn found, cancel ->
+          if found.id == refused.id,
+            do: CMS.Bookkeeping.with_actor(nil, cancel),
+            else: cancel.()
+        end
+      )
+
+    assert %{cancelled: 1, failed: 1, items: [%{item_id: item_id}]} = result
+    assert item_id == done.id
+    assert log =~ "stranded release item sweep cancelled item #{done.id}"
+    assert log =~ "could not cancel the items of release #{published.id}"
+    assert status(done, site) == :cancelled
+    assert status(refused, site) == :pending
   end
 
   test "each cancelled item is logged with its site, release, state and record", %{site: site} do

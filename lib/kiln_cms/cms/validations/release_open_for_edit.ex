@@ -11,12 +11,14 @@ defmodule KilnCMS.CMS.Validations.ReleaseOpenForEdit do
   ## Checked under a lock, inside the write (#2740)
 
   The actions run this with `before_action?: true`, so the release is read
-  inside the item write's own transaction, `FOR SHARE`. That lock is what makes
-  the check hold until the item commits rather than only at the moment it was
-  read. It conflicts with the row lock any UPDATE of the release takes, the
-  go-live claim (`ContentRelease`'s `:start` or `:start_scheduled`) among them, and not with another
-  `FOR SHARE`, so concurrent adds do not wait on each other. An item write and
-  the claim serialize:
+  inside the item write's own transaction, under a row lock: `FOR SHARE` for
+  `:cancel` and `:set_action`, `FOR UPDATE` for `:add` (see below). That lock
+  is what makes the check hold until the item commits rather than only at the
+  moment it was read. Either conflicts with the row lock any UPDATE of the
+  release takes, the go-live claim (`ContentRelease`'s `:start` or
+  `:start_scheduled`) among them; `FOR SHARE` does not conflict with another
+  `FOR SHARE`, so concurrent cancels and action changes do not wait on each
+  other. An item write and the claim serialize:
 
     * an item that commits first is in the table before the claim commits, and
       the go-live worker is enqueued in the claim's own transaction, so its
