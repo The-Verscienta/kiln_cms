@@ -19,9 +19,9 @@ defmodule KilnCMS.CMS.Fragments do
 
   ## Where it runs, and where it must not
 
-  Two callers: `KilnCMS.Firing.Engine.fire/2` (so artifacts carry the resolved
-  body) and `KilnCMSWeb.ContentController` (which renders HTML live from the
-  block tree rather than from an artifact).
+  `KilnCMS.Firing.Engine.fire/2` (so artifacts carry the resolved body), the
+  content editor's Preview tab, and `KilnCMSWeb.BlockViews`, through which live
+  HTML delivery and every other preview render a document's block tree.
 
   It must run **after** `Firing.References.rebuild/4`, which reads the raw tree.
   Expansion removes the fragment block, and with it the `:reference` field the
@@ -205,7 +205,14 @@ defmodule KilnCMS.CMS.Fragments do
     end
   end
 
-  defp any_fragment?(blocks) do
+  @doc """
+  Whether a typed block list holds a fragment anywhere, nested `columns`
+  included. The check `expand/3` makes before doing anything, public so a
+  caller can skip the setup an expansion needs (a host's type and audiences)
+  on the common tree that has none.
+  """
+  @spec any_fragment?([struct()]) :: boolean()
+  def any_fragment?(blocks) do
     Enum.any?(blocks, fn
       %Fragment{} -> true
       %Columns{} = block -> block |> Columns.child_blocks_flat() |> any_fragment?()

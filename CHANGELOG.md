@@ -65,6 +65,11 @@ else.
 - **About 10 minutes after boot, a job deletes the section layouts no field carries, left by 1.9.x and 1.10.x (#3060), and logs each one at info. Nothing to do; `:section_layout_sweep_on_boot` turns it off. Rolling back is safe; what it deleted stays deleted.**
   ([long form](docs/changelog/unreleased.md#section-layout-sweep-upgrade))
 
+### Known issues
+
+- **A release preview shows a fragment's currently published body, not the version the same release will publish; open the target's own entry in the preview to review it.**
+  ([#3289](https://github.com/The-Verscienta/kiln_cms/issues/3289) · [long form](docs/changelog/unreleased.md#release-preview-fragments))
+
 ### Added
 
 - **A reference field can show a record card for each connected record: tick "Let editors edit the related record here" in the fields admin and each connected record the editor may change gets an "Edit the record" card ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
@@ -137,6 +142,9 @@ else.
 
 - **Content editor: when a co-editor saves, an idle editor shows their save in place, and one holding unsaved text or a setting they also changed gets the conflict banner at once, so its next edit no longer overwrites theirs ([#2775](https://github.com/The-Verscienta/kiln_cms/issues/2775)).**
   ([long form](docs/changelog/unreleased.md#editor-peer-save-rebuild))
+
+- **Video, audio and file blocks render their player or download link on the live page and in every preview, previews inline fragment blocks at the document's saved audience, and heading blocks render at their own level (`<h1>` to `<h6>`), all as the published page has them ([#2767](https://github.com/The-Verscienta/kiln_cms/issues/2767), [#2769](https://github.com/The-Verscienta/kiln_cms/issues/2769)).**
+  ([long form](docs/changelog/unreleased.md#public-block-render))
 
 - **Section layouts left without a field are deleted after boot, a layout can't be created as its section empties, and a field delete refused by its section's layout now says so instead of a generic error (#3060, #3061, #3062).**
   ([long form](docs/changelog/unreleased.md#section-layouts-swept))

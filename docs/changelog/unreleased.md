@@ -63,6 +63,14 @@ carries the reasoning.
   upgrade starts at 1.10.x or earlier.
   See [Remove section layouts older releases left behind](../extending-content.md#remove-section-layouts-older-releases-left-behind).
 
+## Known issues
+
+<a id="release-preview-fragments"></a>
+
+- **A release preview shows a fragment's currently published body, not the version the release will publish.**
+  Since the fix for empty fragments in previews ([public block rendering](#public-block-render)), a release preview link inlines each fragment block as its target is published now. Affects editors and reviewers using a release preview when the same release also changes or first publishes a fragment's target: the page shows the target's current body, or nothing if it isn't published yet, where the live page after go-live will show the release's version. Nothing unpublished leaks. Workaround: open the target document's own entry in the same release preview to review its new body.
+  ([#3289](https://github.com/The-Verscienta/kiln_cms/issues/3289))
+
 ## Added
 
 <a id="reference-picker-thumbnails"></a>
@@ -434,6 +442,63 @@ carries the reasoning.
   - See [When a co-editor saves while you have the document open](../working-copy.md#when-a-co-editor-saves-while-you-have-the-document-open).
   No migration, no configuration.
   ([#2775](https://github.com/The-Verscienta/kiln_cms/issues/2775))
+
+<a id="public-block-render"></a>
+
+- **Video, audio and file blocks render on the live page and in every preview, previews inline fragment blocks, and heading blocks render at their own level, all as the published artifact has them (#2767, #2769).**
+  - **Video, audio and file blocks (#2767).** On the live page and in every
+    preview (the editor's **Preview** pop-out, a shared preview link, a
+    release preview link and the in-context editor), these blocks came out as an empty paragraph. They now render
+    the block's own HTML, the same markup the published (fired) page
+    carries: the player with its poster, caption track, autoplay (always
+    muted) and loop, or the download link with its size and description.
+    Their sources are still the `/media/<id>/stream` and
+    `/media/<id>/download` routes, which check the reader's access on every
+    request, so a members-only file is still refused to anyone else, and the
+    page HTML carries no storage URL and stays shared-cacheable. The player
+    takes the full width of the text column and the download is a bordered
+    card; under the `monograph` theme a top-level video is not narrowed to
+    the reading column, as images and galleries aren't. A block with no
+    source renders an empty box, as the published page does (#3290).
+  - **Fragments in previews (#2767).** The pop-out, the shared preview link,
+    the release preview and the in-context editor showed a fragment block as
+    nothing, and every edit in the content editor or the presentation
+    console sent the open previews a tree without it again. They now inline it, at the document's **saved**
+    audience, the rule the published page and the editor's Preview tab
+    already follow ([Reusable content fragments](../extending-content.md#7-reusable-content-fragments-479)):
+    a public document shows no members-only fragment, and a members-only
+    document shows its members-only fragments, also to a guest holding its
+    preview link, because that is what the published page shows its
+    readers. A change to the audience shows in the previews once it is
+    saved. The live page still inlines at the reader's own access, as
+    before.
+  - **Release preview.** Fragments resolve as they are published now, not
+    as the release will leave them: see the known issue
+    [release-preview-fragments](#release-preview-fragments) (#3289).
+  - **Locale.** Previews now render a document in its own locale, as the
+    live page does, so a code block's labels match the document's language.
+  - **Heading levels (#2769).** On the live page and in every preview, a
+    heading block rendered as `<h2>` whatever its level, so an imported
+    Markdown outline (`#`, `###`) came out flat. It now renders at its own
+    level, `<h1>` to `<h6>`; a stored level outside 1 to 6 renders as `<h2>`,
+    as the published page and the `:json` and `:llm` outputs have it. A
+    level-1 heading block is a second `<h1>` under the page title, as in the
+    published page (#3290 tracks an advisory for it). The in-context
+    editor's editable heading is at its level too. `h4` to `h6` have their
+    own sizes, `h5` and `h6` take the theme's heading font, and under
+    `monograph` a level-1 heading block opens a section as a level-2 one
+    does.
+  - **For developers.** `KilnCMSWeb.BlockViews.document_view_blocks/3` builds
+    a document's view maps with fragments inlined (the host's audience by
+    default, or `audiences:`), and is what delivery and every preview now
+    call. `BlockComponents.view_blocks/1` still never expands a fragment. A
+    heading's view map carries `:level`, from the new
+    `KilnCMS.Blocks.Heading.level/1`, and `KilnCMS.CMS.Fragments.any_fragment?/1`
+    is now public. A hand-built heading map without `:level` still renders
+    as `<h2>`.
+  No migration, no configuration. Rolling the pin back is safe.
+  ([#2767](https://github.com/The-Verscienta/kiln_cms/issues/2767), [#2769](https://github.com/The-Verscienta/kiln_cms/issues/2769))
+
 
 <a id="section-layouts-swept"></a>
 

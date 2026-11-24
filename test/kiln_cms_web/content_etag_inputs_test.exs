@@ -449,6 +449,9 @@ defmodule KilnCMSWeb.ContentETagInputsTest do
             fragment_block(shared),
             %{"_type" => "image", "url" => "/uploads/det", "media_id" => media.id, "alt" => ""},
             %{"_type" => "form", "form_slug" => form.slug},
+            # Its view carries the block's own `:web` HTML as a safe tuple
+            # (#2767), which has to digest the same on every build.
+            %{"_type" => "video", "media_id" => media.id, "title" => "Clip"},
             # A nested child carries an id only when its writer gives one.
             %{
               "_type" => "columns",

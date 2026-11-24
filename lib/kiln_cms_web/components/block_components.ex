@@ -88,8 +88,10 @@ defmodule KilnCMSWeb.BlockComponents do
         <% @type == "heading" -> %>
           <%!-- `:anchor` is set only on public delivery
                 (`KilnCMS.HeadingAnchors.anchor_tree/1`); the LiveView
-                previews render without one. --%>
-          <h2 id={@block[:anchor]} class="text-xl font-bold">{@block.content}</h2>
+                previews render without one. The tag is the block's own level
+                (#2769), as the fired artifact has it; the size comes from the
+                `.kiln-block h1`..`h6` rules. --%>
+          <.dynamic_tag phx-no-format tag_name={heading_tag(@block)} id={@block[:anchor]}>{@block.content}</.dynamic_tag>
         <% @type == "rich_text" -> %>
           <%!-- `content` is sanitized-or-trusted at build time (the single
                 boundary is the block's own `:web` serializer, see `view/1`);
@@ -304,9 +306,13 @@ defmodule KilnCMSWeb.BlockComponents do
               </span>
             </span>
           </a>
-        <% @type == "plugin" -> %>
-          <%!-- The plugin block's own `:web` render, already safe (see `view/1`). --%>
+        <% @type in ~w(video audio file plugin) -> %>
+          <%!-- The block's own `:web` render, already safe (see `own_web_html/1`). --%>
           {@block.content}
+        <% @type == "fragment" -> %>
+          <%!-- An unexpanded fragment renders nothing, as its `:web` render does.
+                Every surface that can resolve it inlines it first
+                (`KilnCMSWeb.BlockViews.document_view_blocks/3`). --%>
         <% true -> %>
           <p>{@block.content}</p>
       <% end %>
@@ -927,7 +933,13 @@ defmodule KilnCMSWeb.BlockComponents do
   This used to go through `TypedBlocks.to_legacy/1` and then a second
   projection off the legacy `%{type, content, data}` shape (#1537). A block
   type with no clause of its own renders as an empty `custom` block, which is
-  what that path gave it too.
+  what that path gave it too. Every core block type has a clause (the block
+  view tests check each one), so only a struct that is neither core nor a
+  registered plugin's can reach that fallback.
+
+  Fragments are not expanded here: this function has no org or audience to
+  resolve one with. `KilnCMSWeb.BlockViews.document_view_blocks/3` inlines
+  them first and then calls this.
   """
   @spec view_blocks([term()] | nil) :: [map()]
   def view_blocks(blocks) do
@@ -936,7 +948,10 @@ defmodule KilnCMSWeb.BlockComponents do
     |> Enum.map(&(&1 |> view() |> Map.put(:id, Map.get(&1, :id))))
   end
 
-  defp view(%Blocks.Heading{} = b), do: %{type: "heading", content: b.text}
+  # The level rides along (#2769), clamped by the block's own rule, so a
+  # Markdown `#`/`###` outline is not flattened to `<h2>`s on the live page.
+  defp view(%Blocks.Heading{} = b),
+    do: %{type: "heading", content: b.text, level: Blocks.Heading.level(b)}
 
   # The single sanitize boundary for delivered and previewed rich text is the
   # block's own `:web` serializer: stored `legacy_html` is untrusted HTML and is
@@ -1050,6 +1065,21 @@ defmodule KilnCMSWeb.BlockComponents do
 
   defp view(%Blocks.Custom{} = b), do: %{type: "custom", content: b.content}
 
+  # Self-hosted media and file downloads (#481, #494, #2767) render their own
+  # `:web` HTML, the exact fragment the fired artifact carries, so autoplay,
+  # caption tracks, scheme filtering and the size badge cannot drift between
+  # the two. They resolve no media: every `src`/`href` is the
+  # `/media/:id/stream` or `/media/:id/download` route, which
+  # `KilnCMSWeb.MediaDownloadController` authorizes on each request. Delivery
+  # must never enrich them with a storage URL: that would hand out a gated
+  # item's bytes, and stay handed out after an item is gated post-placement.
+  defp view(%Blocks.Video{} = b), do: %{type: "video", content: own_web_html(b)}
+  defp view(%Blocks.Audio{} = b), do: %{type: "audio", content: own_web_html(b)}
+  defp view(%Blocks.File{} = b), do: %{type: "file", content: own_web_html(b)}
+
+  # An unexpanded fragment: nothing, as its own `:web` render gives.
+  defp view(%Blocks.Fragment{}), do: %{type: "fragment", content: nil}
+
   # A plugin-contributed block (D18) has no clause above, and this module cannot
   # grow one per plugin. Its own `:web` serializer is the render: the same HTML
   # the firing engine already publishes for it (`Kiln.Firing.Engine`), so live
@@ -1057,21 +1087,31 @@ defmodule KilnCMSWeb.BlockComponents do
   # an empty `<p>`. Plugin field values are stored raw (`TypedBlocks` sanitizes
   # core types only), which is why `Kiln.Block.Renderer` makes escaping the
   # plugin's job — the same trust this HTML already has when fired.
-  # Reviewed XSS.Raw: `html` is the plugin's own escaping `:web` render, the
-  # exact fragment `Kiln.Firing.Engine` publishes unmodified as the `web`
-  # surface; marking it safe here grants it no trust it doesn't already have.
-  # sobelow_skip ["XSS.Raw"]
   defp view(block) do
     if plugin_block?(block) do
-      html = block |> Blocks.render(:web) |> List.wrap() |> IO.iodata_to_binary()
-      %{type: "plugin", content: Phoenix.HTML.raw(html)}
+      %{type: "plugin", content: own_web_html(block)}
     else
       %{type: "custom", content: nil}
     end
   end
 
+  # Reviewed XSS.Raw: the block's own escaping `:web` render, the exact
+  # fragment `Kiln.Firing.Engine` publishes unmodified as the `web` surface;
+  # marking it safe here grants it no trust it doesn't already have. Only the
+  # plugin fallback and the core media blocks (whose renderers escape every
+  # field and scheme-filter pasted URLs) reach it.
+  # sobelow_skip ["XSS.Raw"]
+  defp own_web_html(block) do
+    block |> Blocks.render(:web) |> List.wrap() |> IO.iodata_to_binary() |> Phoenix.HTML.raw()
+  end
+
   defp plugin_block?(%module{}), do: module in Kiln.Plugins.blocks()
   defp plugin_block?(_block), do: false
+
+  # A hand-built or broadcast map may carry no level: it renders as the h2
+  # every heading was before levels reached this renderer.
+  defp heading_tag(%{level: level}) when level in 1..6, do: "h#{level}"
+  defp heading_tag(_block), do: "h2"
 
   # The items each renderable surface actually shows, filtered the same way the
   # block modules' own `:web` serializers filter. Two renderers over one block

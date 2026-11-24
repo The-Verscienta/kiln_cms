@@ -167,6 +167,56 @@ defmodule KilnCMSWeb.PresentationLiveTest do
     assert_receive {:preview_update, %{title: "Live post"}}, 2_000
   end
 
+  # #2767: the broadcast is what the pop-out and guest previews re-render
+  # from, so a fragment it leaves unexpanded blanks there after every save.
+  test "the save broadcast inlines the post's fragments", %{conn: conn} do
+    admin = user(:admin)
+
+    shared =
+      Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+        title: "Shared",
+        slug: "pl-shared-#{System.unique_integer([:positive])}",
+        state: :published,
+        blocks: [%{"_type" => "heading", "text" => "Shared call to action"}]
+      })
+
+    post =
+      CMS.create_post!(
+        %{
+          title: "Live post",
+          slug: "pl-#{System.unique_integer([:positive])}",
+          block_tree:
+            KilnCMS.TypedFixtures.typed_blocks([
+              %{"type" => "heading", "content" => "Original heading", "order" => 1}
+            ]) ++
+              [%{"_type" => "fragment", "ref" => %{"type" => "page", "id" => shared.id}}]
+        },
+        actor: admin
+      )
+
+    block_id = heading_block_id(post)
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/presentation/post/#{post.slug}")
+
+    render_hook(lv, "edit_field", %{
+      "type" => "post",
+      "id" => post.id,
+      "block" => block_id,
+      "field" => "text"
+    })
+
+    Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic(:post, post.id))
+    render_hook(lv, "update_block", %{"id" => block_id, "value" => "Edited via console"})
+    render_hook(lv, "save", %{})
+
+    assert_receive {:preview_update, %{blocks: blocks}}, 2_000
+
+    assert [
+             %{type: "heading", content: "Edited via console"},
+             %{type: "heading", content: "Shared call to action"}
+           ] = blocks
+  end
+
   test "clicking the document title opens a scalar editor and Save persists it", %{conn: conn} do
     admin = user(:admin)
     post = post_with_heading(admin)
