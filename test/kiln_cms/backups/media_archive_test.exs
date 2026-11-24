@@ -24,8 +24,8 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
   # -- helpers ---------------------------------------------------------------
 
   # The directory is made only when the write finds it missing: a `mkdir_p`
-  # per file stats every ancestor, and for the 1500-file trees below that was
-  # most of the test's time under load (#2625).
+  # per file stats every ancestor, and for the bounded-memory test's tree that
+  # was most of its time under load (#2625).
   defp put(media, rel, data) do
     path = Path.join(media, rel)
 
@@ -37,6 +37,10 @@ defmodule KilnCMS.Backups.MediaArchiveTest do
         File.mkdir_p!(Path.dirname(path))
         File.write!(path, data)
         path
+
+      {:error, _} ->
+        # Raises the File.Error that says why.
+        File.write!(path, data)
     end
   end
 

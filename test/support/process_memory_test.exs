@@ -97,6 +97,33 @@ defmodule KilnCMS.Test.ProcessMemoryTest do
     end
   end
 
+  test "a family process asking after the run ended gets an error, not a hang" do
+    test = self()
+
+    ProcessMemory.peak_growth(fn ->
+      spawn(fn ->
+        receive do
+          :ask -> send(test, {:asked, catch_error(ProcessMemory.sample())})
+        end
+      end)
+      |> then(&send(test, {:late, &1}))
+    end)
+
+    assert_receive {:late, late}
+    send(late, :ask)
+    assert_receive {:asked, %ArgumentError{message: message}}, 10_000
+    assert message =~ "while it runs"
+  end
+
+  test "a stream of samples still answers a periodic-sample waiter" do
+    {_, _} =
+      ProcessMemory.peak_growth(fn ->
+        waiter = Task.async(fn -> ProcessMemory.await_periodic_sample() end)
+        for _ <- 1..50, do: ProcessMemory.sample()
+        Task.await(waiter, 10_000)
+      end)
+  end
+
   test "the work's io still reaches the caller's group leader" do
     assert ExUnit.CaptureIO.capture_io(fn ->
              ProcessMemory.peak_growth(fn -> IO.write("through the forwarder") end)

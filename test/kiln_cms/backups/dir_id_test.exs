@@ -109,7 +109,8 @@ defmodule KilnCMS.Backups.DirIdTest do
   # 4 readers and 4 creators for 60 rounds (#3196). With `publish/2` cut back
   # to an exclusive create of the name (the empty-file window the hard link
   # closes), 10 trials at this size failed by round 6 on average and by round
-  # 20 at worst, so 60 rounds miss it about once in 100,000 runs. More
+  # 20 at worst (an 18-core Mac), so 60 rounds miss it about once in 100,000
+  # runs there; a host with fewer cores may need more rounds to catch it. More
   # processes catch it no sooner: 8 and 8 needed up to 144 rounds. Every one
   # of them does file io on the dirty io schedulers (10 by default) and the
   # readers spin, so a larger test starves the creators' writes and fsyncs,

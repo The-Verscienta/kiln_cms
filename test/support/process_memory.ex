@@ -125,18 +125,27 @@ defmodule KilnCMS.Test.ProcessMemory do
         raise_outside()
     end
 
+    # The forwarder dies with the run, so a family process still asking after
+    # `peak_growth/1` returned gets an error rather than a wait until the
+    # test's timeout.
+    monitor = Process.monitor(gl)
     ref = make_ref()
     send(gl, {__MODULE__, kind, self(), ref})
 
     receive do
-      {^ref, :sampled} -> :ok
+      {^ref, :sampled} ->
+        Process.demonitor(monitor, [:flush])
+        :ok
+
+      {:DOWN, ^monitor, :process, _, _} ->
+        raise_outside()
     end
   end
 
   defp raise_outside do
     raise ArgumentError,
           "ProcessMemory.sample/0 and await_periodic_sample/0 must be called " <>
-            "from inside the work given to peak_growth/1"
+            "from inside the work given to peak_growth/1, while it runs"
   end
 
   defp forward_io(target, sampler) do
@@ -158,10 +167,12 @@ defmodule KilnCMS.Test.ProcessMemory do
       :stop ->
         max(peak, footprint(gl))
 
+      # This walk also started after every waiting request, so it answers
+      # them too: a stream of these never leaves a waiter unanswered.
       {__MODULE__, :sample, from, ref} ->
         peak = max(peak, footprint(gl))
-        send(from, {ref, :sampled})
-        sample(gl, peak, waiting)
+        Enum.each([{from, ref} | waiting], fn {pid, r} -> send(pid, {r, :sampled}) end)
+        sample(gl, peak, [])
 
       {__MODULE__, :tick, from, ref} ->
         sample(gl, peak, [{from, ref} | waiting])
