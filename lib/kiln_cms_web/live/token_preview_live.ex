@@ -24,6 +24,7 @@ defmodule KilnCMSWeb.TokenPreviewLive do
   alias KilnCMS.CMS.PreviewGrant
   alias KilnCMS.CMS.WorkingCopy
   alias KilnCMSWeb.BlockComponents
+  alias KilnCMSWeb.BlockViews
   alias KilnCMSWeb.Presence
   alias KilnCMSWeb.PreviewLive
 
@@ -101,8 +102,14 @@ defmodule KilnCMSWeb.TokenPreviewLive do
   defp serving_org_id(%{id: org_id}), do: org_id
   defp serving_org_id(_org), do: nil
 
+  # Fragments are inlined at the HOST's own audience, the rule the fired
+  # artifact follows (#2767): a guest previewing a `:member` page sees the
+  # `:member` fragments it embeds, because that is what the published page
+  # shows the readers it is for; a `:public` page shows its guest no gated
+  # fragment, because its artifact carries none. The token grants a preview of
+  # this document, so it shows what this document will publish, no more.
   defp content_blocks(record) do
-    BlockComponents.view_blocks(record.blocks)
+    BlockViews.document_view_blocks(record.blocks, record)
   end
 
   # The editor saved/typed — live-update the guest's view (same payload the

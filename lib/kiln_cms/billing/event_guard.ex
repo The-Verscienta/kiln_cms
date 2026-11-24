@@ -12,8 +12,9 @@ defmodule KilnCMS.Billing.EventGuard do
   ## Subscription identity
 
     * A `:comped` row is not provider-managed: every provider event is ignored
-      (`:comped_not_provider_managed`). Comping a paying member does not cancel
-      the provider subscription (#3156).
+      (`:comped_not_provider_managed`). A comp over a row the provider may
+      still bill is refused (#3156), so this matters for rows comped before
+      that, whose provider subscription may still be live.
     * An entitling row that holds a provider subscription id ignores an event
       about a different one (`:other_subscription`). A row that does not entitle
       accepts a different subscription only when it is `:incomplete` (an
@@ -28,7 +29,14 @@ defmodule KilnCMS.Billing.EventGuard do
       cancels a subscription the row does not hold. With no stored id on a row
       that does not entitle there is nothing to cancel and no way to tell
       whether the event is stale; an entitling row with no stored id fails open
-      as above.
+      as above. A restart of a `:canceled` row (`Membership.:start`) and a
+      comp drop the stored id and keep the stamp (#3157). The old
+      subscription's events still resolve to the row by metadata; its
+      terminal ones are then ignored here and its older ones under ordering
+      below. A non-terminal one created in the same second as the stamp still
+      applies to a restarted row, which is `:incomplete`: the equal-stamp
+      rule below protects only a `:canceled` row. A restart of an
+      `:incomplete` row keeps its id, the checkout still in progress.
 
   ## Ordering
 
@@ -44,7 +52,9 @@ defmodule KilnCMS.Billing.EventGuard do
       two *different* events in the same second, in the wrong order;
     * a state retrieved live (`:live`) is exempt. It is stamped with the
       checkout event's own `created` (the provider's clock, the same one later
-      events carry), never the local clock;
+      events carry), never the local clock. A replayed checkout older than the
+      stamp leaves the stamp where it was
+      (`KilnCMS.Billing.Changes.GuardProviderEvent`, #3159);
     * an event with no usable `created` is accepted (the caller logs it).
   """
 
@@ -120,7 +130,13 @@ defmodule KilnCMS.Billing.EventGuard do
     end
   end
 
-  defp same_subscription?(%{provider_subscription_id: nil}, _event), do: true
-  defp same_subscription?(_row, %{subscription_id: nil}), do: true
-  defp same_subscription?(row, event), do: row.provider_subscription_id == event.subscription_id
+  @doc """
+  Whether the event is ordered against the row's `last_provider_event_at`: it
+  is about the stored subscription, or either side names none. A different
+  subscription starts its own ordering.
+  """
+  @spec same_subscription?(row(), event()) :: boolean()
+  def same_subscription?(%{provider_subscription_id: nil}, _event), do: true
+  def same_subscription?(_row, %{subscription_id: nil}), do: true
+  def same_subscription?(row, event), do: row.provider_subscription_id == event.subscription_id
 end

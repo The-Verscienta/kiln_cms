@@ -181,7 +181,7 @@ which the leak was live — `subject` names the user, `created_at` the mint.
 
 ## `SECRET_KEY_BASE`
 
-**What it signs and encrypts.** Three distinct things, and the third is why
+**What it signs and encrypts.** Four distinct things, and the third is why
 this section is long:
 
 1. **The session cookie.** Signed *and* encrypted, via
@@ -198,6 +198,11 @@ this section is long:
 3. **Data at rest.** `KilnCMS.Keys.Vault` derives an AES-256-GCM key from
    `secret_key_base` and encrypts database-stored key material with it. This is
    the part that can lose data if the steps below are done out of order.
+4. **Keyset pagination cursors** (#3272). Ash signs every `page[after]` /
+   `page[before]` cursor with a key derived from `secret_key_base`. A hard
+   cutover: `PREVIOUS_SECRET_KEY_BASE` does not cover it, so a client paging
+   across the rotation gets an invalid-keyset error and starts again from the
+   first page.
 
 ### Data at rest: re-encrypt before you retire the old value
 

@@ -20,6 +20,12 @@ defmodule KilnCMS.Media.AVWorker do
   is why nothing here returns an error for a missing binary, and why the
   editor can always set a poster image by hand.
 
+  Reading the original is the exception (#3066). An original that is
+  definitely missing (`KilnCMS.Storage.not_found?/1`) completes the job, as
+  there is nothing to probe. Any other failed read (a timeout, a `5xx`, a full
+  temp disk) returns `{:error, _}`, so Oban retries it up to `max_attempts` and
+  then discards the job.
+
   ## No poster for a gated item
 
   A poster is written to *public* storage (it renders as a plain `<img>`), so
@@ -79,9 +85,29 @@ defmodule KilnCMS.Media.AVWorker do
       {:error, {:site_storage, _reason} = error} ->
         {:error, error}
 
-      # Original isn't readable (e.g. removed) — nothing to do.
-      {:error, _reason} ->
-        :ok
+      {:error, reason} ->
+        unreadable(item, reason)
+    end
+  end
+
+  # Only an original that is definitely gone completes the job (#3066):
+  # there is nothing to probe. Any other failed read (a timeout, a `5xx`, a
+  # full temp disk) is retried. Completing would leave the item with no
+  # duration or poster, and an A/V item has no way to re-run this job.
+  defp unreadable(item, reason) do
+    if Storage.not_found?(reason) do
+      Logger.warning(
+        "A/V processing for media #{item.id}: original unreadable (#{inspect(reason)}); nothing to probe."
+      )
+
+      :ok
+    else
+      Logger.warning(
+        "A/V processing for media #{item.id}: could not read its original " <>
+          "(#{inspect(reason)}); will retry."
+      )
+
+      {:error, reason}
     end
   end
 

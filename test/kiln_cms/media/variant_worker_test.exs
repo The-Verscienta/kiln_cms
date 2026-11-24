@@ -210,4 +210,64 @@ defmodule KilnCMS.Media.VariantWorkerTest do
     assert :ok = perform_job(VariantWorker, job(item))
     assert CMS.get_media_item!(item.id, authorize?: false).variants == %{}
   end
+
+  # #3066: only an original that is definitely missing completes the job,
+  # whatever store holds it. A read that merely failed is retried, or the row
+  # keeps no dimensions or variants until someone regenerates the library.
+  describe "reading the original" do
+    alias KilnCMS.Test.HookedStorage
+
+    test "a transient read error from the operator's store fails the job for a retry" do
+      item = media_item(store_png(1200, 800))
+      HookedStorage.install(%{fetch: {:error, :timeout}})
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, :timeout} = perform_job(VariantWorker, job(item))
+        end)
+
+      assert log =~ "will retry"
+
+      reloaded = CMS.get_media_item!(item.id, authorize?: false)
+      assert reloaded.variants == %{}
+      assert reloaded.width == nil
+    end
+
+    # A gated image's original is private: nothing at its public key to
+    # derive from, and public variants of it would leak it. The job reads
+    # nothing, so a public read refused for the missing key (S3's 403 without
+    # ListBucket) can't make it retry.
+    test "a gated image completes without reading anything" do
+      item =
+        Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+          filename: "members.png",
+          url: "/uploads/gated.png",
+          storage_key: "gated-#{System.unique_integer([:positive])}.png",
+          audience: :member
+        })
+
+      test = self()
+      HookedStorage.install(%{fetch: fn key -> send(test, {:fetched, key}) end})
+
+      assert :ok = perform_job(VariantWorker, job(item))
+
+      refute_received {:fetched, _key}
+      assert CMS.get_media_item!(item.id, authorize?: false).variants == %{}
+    end
+
+    test "an object store's 404, or a :not_found, completes the job" do
+      for reason <- [{:http_error, 404, %{status_code: 404, body: ""}}, :not_found] do
+        item = media_item(store_png(1200, 800))
+        HookedStorage.install(%{fetch: {:error, reason}})
+
+        log =
+          ExUnit.CaptureLog.capture_log(fn ->
+            assert :ok = perform_job(VariantWorker, job(item))
+          end)
+
+        assert log =~ "nothing to derive"
+        assert CMS.get_media_item!(item.id, authorize?: false).variants == %{}
+      end
+    end
+  end
 end

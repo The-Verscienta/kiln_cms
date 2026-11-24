@@ -104,6 +104,13 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
     |> render_change(%{"form" => %{"title" => title}, "_target" => ["form", "title"]})
   end
 
+  # A Settings edit: no autosave, only the dirty flag.
+  defp edit_setting(lv, field, value) do
+    lv
+    |> form("#page-editor")
+    |> render_change(%{"form" => %{field => value}, "_target" => ["form", field]})
+  end
+
   # Fire the debounce the way the timer would.
   defp autosave(lv) do
     send(lv.pid, :autosave)
@@ -411,6 +418,24 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
       refute has_element?(lv, "#publish-conflicts")
       assert WorkingCopy.pending?(reload(page))
     end
+
+    # The panel's own Publish reaches the publish without the button's
+    # unsaved-Settings check, and the publish rebuilds the form (#2777).
+    test "its Publish asks for a Save while Settings are unsaved", %{page: page, lv: lv} do
+      lv |> element("#publish-changes") |> render_click()
+      edit_setting(lv, "seo_keywords", "not saved")
+
+      lv
+      |> element(~s(button[phx-click="conflict_choose_all"][phx-value-choice="theirs"]))
+      |> render_click()
+
+      html = lv |> element("#publish-conflicts-confirm") |> render_click()
+
+      assert html =~ "Save draft first, then publish your changes."
+      assert has_element?(lv, ~s(input[name="form[seo_keywords]"][value="not saved"]))
+      assert CMS.get_published_page_by_slug!(page.slug, page.locale).seo_title == "Theirs"
+      assert WorkingCopy.pending?(reload(page))
+    end
   end
 
   test "Publish changes asks for a Save when settings are still unsaved", %{conn: conn} do
@@ -431,6 +456,161 @@ defmodule KilnCMSWeb.ContentEditorWorkingCopyTest do
     html = lv |> element("#publish-changes") |> render_click()
     assert html =~ "Save draft first, then publish your changes."
     assert reload(page).title == "Live title"
+  end
+
+  # #2776: the text autosave rebuilds the form from the record it just wrote,
+  # which holds none of the Settings edits still waiting for Save.
+  describe "unsaved Settings edits across a text autosave" do
+    test "stay on screen, and Save then holds them", %{conn: conn} do
+      editor = authed_user(:editor)
+      admin = authed_user(:admin)
+      page = live_page(admin)
+      {:ok, lv, _html} = open(conn, editor, page)
+
+      edit_setting(lv, "seo_description", "Typed, not saved")
+      type_title(lv, "Edited")
+      html = autosave(lv)
+
+      assert reload(page).working_title == "Edited"
+      assert has_element?(lv, ~s(textarea[name="form[seo_description]"]), "Typed, not saved")
+      assert html =~ "Unsaved changes"
+
+      html = lv |> form("#page-editor") |> render_submit()
+      assert html =~ "Readers see these changes once you publish them."
+      assert WorkingCopy.view(reload(page)).seo_description == "Typed, not saved"
+
+      lv |> element("#publish-changes") |> render_click()
+      live = CMS.get_published_page_by_slug!(page.slug, page.locale)
+      assert live.title == "Edited"
+      assert live.seo_description == "Typed, not saved"
+    end
+
+    # The picked image is shown from a row resolved off the form's value; one
+    # created after the editor opened is outside its media window, so the row
+    # has to be resolved again for the form the edits went back onto.
+    test "a picked featured image stays shown", %{conn: conn} do
+      editor = authed_user(:editor)
+      page = live_page(authed_user(:admin))
+      {:ok, lv, _html} = open(conn, editor, page)
+
+      image =
+        CMS.create_media_item!(
+          %{
+            filename: "picked-later.png",
+            content_type: "image/png",
+            byte_size: 1024,
+            storage_key: "uploads/picked-later-#{System.unique_integer([:positive])}.png",
+            url: "/uploads/picked-later.png"
+          },
+          actor: editor
+        )
+
+      render_click(lv, "pick_image", %{"index" => "featured", "id" => image.id})
+      assert render(lv) =~ "picked-later.png"
+
+      type_title(lv, "Edited")
+      html = autosave(lv)
+
+      assert html =~ "picked-later.png"
+      assert html =~ "Unsaved changes"
+      assert has_element?(lv, ~s(input[name="form[featured_image_id]"][value="#{image.id}"]))
+    end
+
+    # The settings go back without `blocks`: `Form.params/1` does not carry
+    # the rich-text bodies, so re-sending them would blank the body just saved.
+    test "a body pushed by the editor hook is saved and the settings kept", %{conn: conn} do
+      editor = authed_user(:editor)
+      page = live_rich_text_page(authed_user(:admin))
+      [%Ash.Union{value: block}] = page.blocks
+      {:ok, lv, _html} = open(conn, editor, page)
+
+      edit_setting(lv, "seo_title", "Kept title")
+
+      render_hook(lv, "rich_text_body", %{
+        "id" => block.id,
+        "idx" => "0",
+        "doc" => doc([para("typed into the live page")])
+      })
+
+      html = autosave(lv)
+
+      assert has_element?(lv, ~s(input[name="form[seo_title]"][value="Kept title"]))
+      assert html =~ "Unsaved changes"
+
+      saved = reload(page)
+
+      assert [
+               %Ash.Union{
+                 value: %{body: [%{"children" => [%{"text" => "typed into the live page"}]}]}
+               }
+             ] =
+               saved.working_blocks
+
+      # A second autosave from the rebuilt form keeps the body too.
+      type_title(lv, "Edited")
+      autosave(lv)
+
+      assert [
+               %Ash.Union{
+                 value: %{body: [%{"children" => [%{"text" => "typed into the live page"}]}]}
+               }
+             ] =
+               reload(page).working_blocks
+
+      assert has_element?(lv, ~s(input[name="form[seo_title]"][value="Kept title"]))
+    end
+  end
+
+  # #2777: a write that rebuilds the form asks for a Save instead of dropping
+  # the Settings edits on the floor; Discard drops them on purpose.
+  describe "unsaved Settings edits and the workflow" do
+    test "Unpublish asks for a Save and keeps them", %{conn: conn} do
+      admin = authed_user(:admin)
+      page = live_page(admin)
+      {:ok, lv, _html} = open(conn, admin, page)
+
+      edit_setting(lv, "seo_title", "Not saved yet")
+      html = render_click(lv, "workflow", %{"action" => "unpublish"})
+
+      assert html =~ "Save your changes before changing this content&#39;s state."
+      assert reload(page).state == :published
+      assert has_element?(lv, ~s(input[name="form[seo_title]"][value="Not saved yet"]))
+      assert html =~ "Unsaved changes"
+    end
+
+    test "Unpublish without them still unpublishes", %{conn: conn} do
+      admin = authed_user(:admin)
+      page = live_page(admin)
+      {:ok, lv, _html} = open(conn, admin, page)
+
+      render_click(lv, "workflow", %{"action" => "unpublish"})
+
+      assert reload(page).state == :draft
+    end
+
+    test "Discard drops them, and Publish changes works afterwards", %{conn: conn} do
+      editor = authed_user(:editor)
+      page = live_page(authed_user(:admin))
+      {:ok, lv, _html} = open(conn, editor, page)
+
+      type_title(lv, "Thrown away")
+      autosave(lv)
+      edit_setting(lv, "seo_title", "Thrown away too")
+
+      html = render_click(lv, "workflow", %{"action" => "discard_changes"})
+
+      assert html =~ "the published text is back"
+      refute has_element?(lv, ~s(input[name="form[seo_title]"][value="Thrown away too"]))
+      refute html =~ "Unsaved changes"
+
+      type_title(lv, "Kept this time")
+      autosave(lv)
+      html = lv |> element("#publish-changes") |> render_click()
+
+      refute html =~ "Save draft first"
+      assert html =~ "Published your changes."
+      assert reload(page).title == "Kept this time"
+    end
   end
 
   test "Discard the changes puts the published settings back too", %{conn: conn} do

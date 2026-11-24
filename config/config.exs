@@ -68,6 +68,11 @@ config :kiln_cms, Oban,
     # newer recurrence engine there would recompute with the old engine and
     # complete it. One job per engine version per day, so concurrency one.
     occurrence_backfill: 1,
+    # The billing webhook sweeper's AshOban scheduler and worker jobs (#3159,
+    # `KilnCMS.Billing.WebhookEvent`). Its own queue for the reason above: a
+    # node of the previous release polls `:default`, and fetching a job for a
+    # worker module it does not have fails it.
+    billing_sweeper: 1,
     default: 10
   ],
   repo: KilnCMS.Repo,
@@ -685,6 +690,21 @@ config :kiln_cms, :totp_secret_backfill_on_boot, true
 # subscriptions are deleted). Ten minutes after boot, deduplicated for a day;
 # a redundant run writes nothing.
 config :kiln_cms, :erasure_backfill_on_boot, true
+
+# Whether booting enqueues the section layout sweep
+# (`KilnCMS.CMS.SectionLayoutSweep`, #3060): section layouts no field carries
+# any more, left by 1.9.x and 1.10.x, are deleted, so a field filed under that
+# name later does not inherit them. Ten minutes after boot, deduplicated for a
+# day; a redundant run deletes nothing.
+config :kiln_cms, :section_layout_sweep_on_boot, true
+
+# Whether booting enqueues the stranded release item sweep
+# (`KilnCMS.CMS.StrandedReleaseItemSweep`, #3072): release items left pending
+# on a release that already went live, was rolled back or archived are
+# cancelled, so their records can join another release. Each is logged at
+# info. Ten minutes after boot, deduplicated for a day; a redundant run
+# cancels nothing.
+config :kiln_cms, :stranded_release_item_sweep_on_boot, true
 
 # Enterprise SSO via OpenID Connect (#331). Compile-time gate (like
 # :registration_enabled's route conditional): `enabled: false` (default) means

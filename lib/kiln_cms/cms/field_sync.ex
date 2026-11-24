@@ -720,7 +720,10 @@ defmodule KilnCMS.CMS.FieldSync do
   # name would inherit it (#2881). The export never writes one, so the file
   # was edited by hand: refused, as an unknown key is, rather than stored or
   # silently dropped. An entry at the defaults stores nothing, so it is never
-  # a ghost.
+  # a ghost. `FieldSection`'s create would refuse a new one anyway
+  # (`Validations.SectionCarried`, #3061); checked here as well so the report
+  # names the entry before anything is written, an update of a stored row
+  # included.
   defp ghost_sections(%{sections: nil}, _carried), do: []
 
   defp ghost_sections(owner, carried) do
@@ -1091,9 +1094,13 @@ defmodule KilnCMS.CMS.FieldSync do
           into: %{},
           do: {path, existing}
 
+    # Fields before sections (#3061): a layout may only be created for a
+    # section some field is in, and a new section's first field arrives in
+    # this same import. Section writes need only the owner the `:types`
+    # phase stored; field writes never read a section.
     with {:ok, ids} <- run_phase(ops, :types, ids, opts),
-         {:ok, ids} <- run_phase(ops, :sections, ids, opts),
          {:ok, ids} <- run_phase(ops, :fields, ids, opts),
+         {:ok, ids} <- run_phase(ops, :sections, ids, opts),
          {:ok, ids} <- run_phase(ops, :rules, ids, opts),
          {:ok, ids} <- run_phase(ops, :deletes, ids, opts) do
       reconcile_section_layouts(ops, ids, opts)

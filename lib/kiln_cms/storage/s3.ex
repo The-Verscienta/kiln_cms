@@ -286,12 +286,39 @@ defmodule KilnCMS.Storage.S3 do
     case bucket
          |> ExAws.S3.get_object(key, range: range_header(first, last))
          |> request(site) do
+      # A provider that ignores `Range` answers 200 with the whole object, and
+      # an empty whole object is an empty blob (#3069).
+      {:ok, %{status_code: 200, body: ""}} when first == 0 ->
+        {:error, {:range_not_satisfiable, 0}}
+
       {:ok, %{body: body, headers: headers}} ->
         parse_content_range(headers, body, first)
+
+      # A range starting at 0 is unsatisfiable only for an empty object
+      # (RFC 9110 §14.1.1), so the total is known: 0 (#3069).
+      {:error, {:http_error, 416, _resp} = refusal} when first == 0 ->
+        confirm_empty(bucket, key, site, refusal)
 
       # S3 returns 416 for a range starting past the end of the object.
       {:error, {:http_error, 416, _resp}} ->
         {:error, :range_not_satisfiable}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # Confirmed with a HEAD rather than taken on the 416's word. Read as "empty",
+  # a 416 on an object that has bytes would make `Storage.copy_to_file/3`
+  # write an empty file and call it complete, and the A/V strip would promote
+  # that over the real upload. So anything but a size of 0 keeps the 416 as
+  # an error.
+  defp confirm_empty(bucket, key, site, refusal) do
+    case bucket |> ExAws.S3.head_object(key) |> request(site) do
+      {:ok, %{headers: headers}} ->
+        if header(headers, "content-length") == "0",
+          do: {:error, {:range_not_satisfiable, 0}},
+          else: {:error, refusal}
 
       {:error, reason} ->
         {:error, reason}

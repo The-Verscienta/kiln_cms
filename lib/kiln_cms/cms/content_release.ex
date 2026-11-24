@@ -86,6 +86,11 @@ defmodule KilnCMS.CMS.ContentRelease do
   # States an editor may still add items to or remove them from.
   @editable_states [:open, :scheduled, :failed]
 
+  # States a release never composes again from (#3072): no transition out of
+  # them reaches an editable state, so a `:pending` item still on one will
+  # never ship with it. `KilnCMS.CMS.StrandedReleaseItemSweep` frees those.
+  @closed_states [:published, :rolled_back, :archived]
+
   @doc "States in which a release's items still reserve their content records."
   @spec pending_states() :: [atom()]
   def pending_states, do: @pending_states
@@ -93,6 +98,21 @@ defmodule KilnCMS.CMS.ContentRelease do
   @doc "States in which a release's item list can still be edited."
   @spec editable_states() :: [atom()]
   def editable_states, do: @editable_states
+
+  @doc """
+  States from which a release never composes again (#3072): `:published`,
+  `:rolled_back` and `:archived`. A `:pending` item on such a release will
+  never ship with it.
+
+  The remaining states are in neither this list nor `pending_states/0` only
+  where they must not be: `:rolling_back` is a claim a worker owns, and
+  settles back into `:published` or into `:rolled_back`. `:failed` and
+  `:publishing` are pending states: a failed release is reopened and
+  retried with its pending items, and a publishing one is about to apply
+  them.
+  """
+  @spec closed_states() :: [atom()]
+  def closed_states, do: @closed_states
 
   # Read-only over JSON:API, for an editor's key (#500 + the 2026-09-19 headless
   # API review): a headless editorial tool or a status board can see what is

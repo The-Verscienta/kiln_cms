@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.ContentCacheTest do
 
   import KilnCMS.TypedFixtures
 
+  alias KilnCMS.Accounts
   alias KilnCMS.Cache
   alias KilnCMS.CMS
   alias KilnCMS.CMS.MediaItem
@@ -260,5 +261,88 @@ defmodule KilnCMSWeb.ContentCacheTest do
     # The fr alternate is still present — proving translations are cached, not
     # re-queried on every delivery hit.
     assert conn |> get(~p"/#{en.slug}") |> html_response(200) =~ ~s(hreflang="fr")
+  end
+
+  describe "an organization's URL fields (#3194)" do
+    # The canonical, hreflang and Open Graph URLs come from the org's host, and
+    # neither field is an ETag input of its own, so a new one must move the
+    # head generation or a revalidation keeps the old absolute URLs.
+    test "a new custom domain answers a revalidation with the new canonical", %{conn: conn} do
+      page = published_page("Moved")
+      assert [etag] = conn |> get(~p"/#{page.slug}") |> get_resp_header("etag")
+
+      stale = conn |> put_req_header("if-none-match", etag) |> get(~p"/#{page.slug}")
+      assert response(stale, 304) == ""
+
+      domain = "moved-#{System.unique_integer([:positive])}.example.org"
+      original = Accounts.default_org()
+
+      # The row rolls back with the sandbox, but the host cache is node-global:
+      # drop what this test resolved, or later tests would get the moved domain
+      # for the default org until the entry's TTL ran out.
+      on_exit(fn ->
+        keys = KilnCMSWeb.Tenant.host_cache_keys(original)
+        keys = keys ++ KilnCMSWeb.Tenant.host_cache_keys(%{original | custom_domain: domain})
+        Enum.each(Enum.uniq(keys), &Cachex.del(KilnCMS.Cache.Hosts.cache_name(), &1))
+      end)
+
+      # authorize?: false — an operator's org edit (`mix kiln.org_slugs` calls
+      # the same action without an actor); the policy is not what is under test.
+      org = Accounts.update_organization!(original, %{custom_domain: domain}, authorize?: false)
+
+      canonical = "#{KilnCMSWeb.Tenant.base_url(org)}/#{page.slug}"
+      assert canonical =~ domain
+
+      moved = conn |> put_req_header("if-none-match", etag) |> get(~p"/#{page.slug}")
+      assert html_response(moved, 200) =~ ~s(rel="canonical" href="#{canonical}")
+      assert [etag2] = get_resp_header(moved, "etag")
+      refute etag2 == etag
+    end
+
+    # A request that refilled the host cache with the old org just before the
+    # bust (or a node that missed it) renders the old URLs. Its tag must name
+    # them, or once the entry expires the new URLs would carry the same tag and
+    # a client holding the stale body would keep getting 304s.
+    test "a stale host entry serves old URLs under a tag the new ones don't share", %{
+      conn: conn
+    } do
+      page = published_page("Raced")
+      domain = "raced-#{System.unique_integer([:positive])}.example.org"
+      original = Accounts.default_org()
+      keys = KilnCMSWeb.Tenant.host_cache_keys(original)
+      hosts = KilnCMS.Cache.Hosts.cache_name()
+
+      on_exit(fn ->
+        moved = KilnCMSWeb.Tenant.host_cache_keys(%{original | custom_domain: domain})
+        Enum.each(Enum.uniq(keys ++ moved), &Cachex.del(hosts, &1))
+      end)
+
+      # authorize?: false — as above.
+      Accounts.update_organization!(original, %{custom_domain: domain}, authorize?: false)
+
+      # The refill that raced the bust: the old org back under its hosts.
+      Enum.each(keys, &Cachex.put(hosts, &1, original))
+      stale = get(conn, ~p"/#{page.slug}")
+      refute html_response(stale, 200) =~ domain
+      assert [stale_etag] = get_resp_header(stale, "etag")
+
+      # The entry expires; the next render has the new URLs.
+      Enum.each(keys, &Cachex.del(hosts, &1))
+
+      fresh = conn |> put_req_header("if-none-match", stale_etag) |> get(~p"/#{page.slug}")
+      assert html_response(fresh, 200) =~ domain
+    end
+
+    test "an update that leaves the slug and domain alone keeps the ETag", %{conn: conn} do
+      page = published_page("Renamed")
+      org = Accounts.default_org()
+      assert [etag] = conn |> get(~p"/#{page.slug}") |> get_resp_header("etag")
+
+      # authorize?: false — as above.
+      Accounts.update_organization!(org, %{name: org.name <> " renamed"}, authorize?: false)
+
+      same = conn |> put_req_header("if-none-match", etag) |> get(~p"/#{page.slug}")
+      assert response(same, 304) == ""
+    end
   end
 end

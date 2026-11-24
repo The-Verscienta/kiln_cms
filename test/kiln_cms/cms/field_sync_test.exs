@@ -10,6 +10,8 @@ defmodule KilnCMS.CMS.FieldSyncTest do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.FieldSync
 
+  import KilnCMS.SectionLayoutFixtures, only: [orphan_layout!: 1]
+
   defp user(role) do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
       email: "sync-#{System.unique_integer([:positive])}@example.com",
@@ -198,8 +200,8 @@ defmodule KilnCMS.CMS.FieldSyncTest do
       model!(admin)
       # Left behind by a renamed section, on a type with fields and on one
       # without any.
-      CMS.create_field_section!(%{content_type: :post, name: "Gone", display: :tab}, actor: admin)
-      CMS.create_field_section!(%{content_type: :page, name: "Lonely"}, actor: admin)
+      orphan_layout!(%{content_type: :post, name: "Gone", display: :tab})
+      orphan_layout!(%{content_type: :page, name: "Lonely", display: :fieldset})
 
       doc = export!(admin)
 
@@ -1017,9 +1019,7 @@ defmodule KilnCMS.CMS.FieldSyncTest do
       )
 
       # An orphan no write of this import makes: left as it was (S11).
-      CMS.create_field_section!(%{content_type: :post, name: "Fsync Orphan", display: :tab},
-        actor: admin
-      )
+      orphan_layout!(%{content_type: :post, name: "Fsync Orphan", display: :tab})
 
       # A's row is not in the file, and its last field moves out of it.
       doc =
@@ -1145,6 +1145,47 @@ defmodule KilnCMS.CMS.FieldSyncTest do
 
       assert {:ok, _} = apply!(doc, admin, prune?: true)
       assert [%{name: "Fsync Specs", display: :tab}] = sections(admin)
+    end
+
+    # `FieldSection`'s create refuses a section no field is in (#3061), so
+    # the import writes its fields first: a new section's first field and its
+    # layout arrive in the same file.
+    test "a new field in a new section and that section's layout import together",
+         %{admin: admin} do
+      doc =
+        post_doc(
+          [string_field("fsync_new", "Fsync Fresh")],
+          [%{"name" => "Fsync Fresh", "display" => "fieldset", "initially" => "auto"}]
+        )
+
+      assert {:ok, dry} = FieldSync.import_doc(doc, actor: admin)
+      assert dry.errors == []
+      assert %{op: :create} = Enum.find(dry.ops, &(&1.path == "post/section/Fsync Fresh"))
+      assert sections(admin) == []
+
+      assert {:ok, applied} = apply!(doc, admin)
+      assert FieldSync.digest(applied) == FieldSync.digest(dry)
+      assert [%{name: "Fsync Fresh", display: :fieldset}] = sections(admin)
+    end
+
+    test "a layout for a section the import moves its only field out of is refused",
+         %{admin: admin} do
+      field!(admin, %{name: "dose", label: "Dose", field_type: :string, section: "Fsync Was"})
+
+      doc =
+        post_doc(
+          [string_field("dose", "Fsync Now")],
+          [%{"name" => "Fsync Was", "display" => "tab"}]
+        )
+
+      for opts <- [[], [apply?: true]] do
+        assert {:error, report} = FieldSync.import_doc(doc, [actor: admin] ++ opts)
+        assert [%{path: "post/section/Fsync Was", messages: [message]}] = report.errors
+        assert message =~ "no field of post is in this section"
+      end
+
+      assert sections(admin) == []
+      assert [%{section: "Fsync Was"}] = CMS.field_definitions_for!(:post, actor: admin)
     end
 
     test "a new dynamic type's layout is tied to the type the import creates", %{admin: admin} do

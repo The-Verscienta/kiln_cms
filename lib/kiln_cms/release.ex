@@ -185,6 +185,119 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
+  Delete the section layouts no field carries any more, on every site
+  (#3060): the rows 1.9.x and 1.10.x left behind, which a field later filed
+  under the same name would inherit. The boot job
+  `KilnCMS.CMS.SectionLayoutSweep` does this ten minutes after each start;
+  this runs it now, for example after restoring an older backup.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.prune_section_layouts(dry_run: true)'
+      bin/kiln_cms rpc 'KilnCMS.Release.prune_section_layouts()'
+
+  Options: `dry_run: true` lists what it would delete and deletes nothing;
+  `org_id: "<uuid>"` limits it to one site. Prints each layout and a
+  summary, and returns the sweep's result, or `{:error, message}`.
+
+  Through `rpc`, not `eval`: each delete busts the type registry and the
+  delivery schema, which must reach the serving node's caches.
+  """
+  @spec prune_section_layouts(keyword()) ::
+          KilnCMS.CMS.SectionLayoutSweep.result() | {:error, String.t()}
+  def prune_section_layouts(opts \\ []), do: run_section_layout_prune(opts, serving?())
+
+  # `serving?` is an argument only so the test can take the `eval` branch.
+  @doc false
+  def run_section_layout_prune(opts, serving?) do
+    if serving? do
+      result = KilnCMS.CMS.SectionLayoutSweep.run(opts)
+      verb = if opts[:dry_run] == true, do: "Would delete", else: "Deleted"
+
+      for layout <- result.layouts do
+        IO.puts(
+          "#{verb} #{inspect(layout.name)} of #{inspect(layout.owner)} in org #{layout.org_id} " <>
+            "(display: #{layout.display}, initially: #{layout.initially})"
+        )
+      end
+
+      IO.puts("Section layouts: " <> KilnCMS.CMS.SectionLayoutSweep.summary(result))
+      result
+    else
+      IO.puts(@needs_running_node)
+      {:error, @needs_running_node}
+    end
+  end
+
+  @doc """
+  Cancel the release items left `:pending` on releases that already went
+  live, were rolled back or archived, on every site (#3072): items that
+  will never ship with their release, and that keep their record out of
+  every other release. The boot job `KilnCMS.CMS.StrandedReleaseItemSweep`
+  does this ten minutes after each start; this runs it now, for example
+  after a rolling deploy from 1.10.x or earlier that took longer than that,
+  or after restoring a backup from before 1.11.0.
+
+      bin/kiln_cms rpc 'KilnCMS.Release.cancel_stranded_release_items(dry_run: true)'
+      bin/kiln_cms rpc 'KilnCMS.Release.cancel_stranded_release_items()'
+
+  Options: `dry_run: true` lists what it would cancel and cancels nothing;
+  `org_id: "<uuid>"` limits it to one site. Prints each item and a
+  summary, and returns the sweep's result, or `{:error, message}` (an
+  `org_id:` that is not a UUID is one).
+
+  Through `rpc`, not `eval`, like `prune_section_layouts/1`: the boot job
+  covers a node that is not serving yet.
+  """
+  @spec cancel_stranded_release_items(keyword()) ::
+          KilnCMS.CMS.StrandedReleaseItemSweep.result() | {:error, String.t()}
+  def cancel_stranded_release_items(opts \\ []),
+    do: run_stranded_release_item_cancel(opts, serving?())
+
+  # `serving?` is an argument only so the test can take the `eval` branch.
+  @doc false
+  def run_stranded_release_item_cancel(opts, serving?) do
+    with :ok <- stranded_org_id(opts[:org_id]) do
+      cancel_stranded(opts, serving?)
+    end
+  end
+
+  # The sweep raises on an `org_id:` that is not a UUID; an operator typing
+  # one at `rpc` gets the message instead.
+  defp stranded_org_id(nil), do: :ok
+
+  defp stranded_org_id(org_id) do
+    case Ecto.UUID.cast(org_id) do
+      {:ok, _uuid} ->
+        :ok
+
+      :error ->
+        message = "org_id is not a UUID: #{inspect(org_id)}"
+        IO.puts(message)
+        {:error, message}
+    end
+  end
+
+  defp cancel_stranded(opts, serving?) do
+    if serving? do
+      result = KilnCMS.CMS.StrandedReleaseItemSweep.run(opts)
+      verb = if opts[:dry_run] == true, do: "Would cancel", else: "Cancelled"
+
+      for item <- result.items do
+        IO.puts(
+          "#{verb} item #{item.item_id} (#{item.action} #{item.content_type} " <>
+            "#{item.content_id}) of #{item.release_state} release #{item.release_id} " <>
+            "in org #{item.org_id}"
+        )
+      end
+
+      IO.puts("Stranded release items: " <> KilnCMS.CMS.StrandedReleaseItemSweep.summary(result))
+      result
+    else
+      IO.puts(@needs_running_node)
+      {:error, @needs_running_node}
+    end
+  end
+
+  @doc """
   `mix kiln.deprecations` for a release (#1538, #1543): report the accounts and
   queued jobs still holding data only a removed surface read, and optionally
   move the accounts onto a membership first.

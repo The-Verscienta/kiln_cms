@@ -38,6 +38,12 @@ once — so a release found nothing left to publish.
 - **Type.** On a live document the title and the body autosave into the
   working copy, exactly as a draft autosaves into its row. The save line reads
   *Saved to the working copy*; readers see nothing.
+- **Change a setting.** Everything else in the form (the Settings tab, the
+  category, tags, the featured image) waits for **Save draft**, and the save
+  line reads *Unsaved changes* until you click it. Typing in the body
+  meanwhile does not touch those edits: each text autosave saves the title and
+  body only, and the settings you changed stay on screen, still unsaved, for
+  the next Save to post (#2776).
 - **Publish changes** hands the whole working copy over: the text, the held
   settings, the tags and related content, at once. Same `published_at`, no
   workflow email. The subscriber mail belongs to the entry
@@ -52,7 +58,21 @@ once — so a release found nothing left to publish.
   the held settings into it too, and applies the operational ones (audience,
   passphrase, schedule, lifecycle) — those only when one of them changed.
 - **Publish changes** wants the settings saved first: with unsaved settings on
-  screen it asks for a Save rather than publishing without them.
+  screen it says *Save draft first, then publish your changes.* rather than
+  publishing without them. The **Publish** in the *Someone changed the live
+  page* panel and in the change-severity question ask the same.
+- **Unsaved settings stop anything that would reload the form** (#2777).
+  Those writes rebuild the editor from the saved record, so they used to drop
+  the edits without a word. Now they refuse, change nothing, and leave your
+  edits on screen. Click **Save draft**, then try again:
+  - **Unpublish**, the other workflow buttons and **Move to trash** say
+    *Save your changes before changing this content's state.*
+  - **Mark reviewed** and a new **Parent** (in *Organization &
+    relationships*) say *Save your changes first.*
+    Text still waiting for autosave does not stop them: it is saved first, as
+    before a workflow button.
+- **Discard the changes** discards unsaved settings too. It is the one
+  button that means to throw edits away, so it does not ask for a Save.
 - The **signed-in preview** (`/editor/preview/…`) shows the working copy with a
   strip saying so. Signed out, the site shows what was published.
 - The **content list** marks a live record whose copy has run ahead with
@@ -176,6 +196,44 @@ the draft's value over it without a word. It no longer does (#1815):
   read differently after an upgrade, the result is a reported conflict, never
   a silent overwrite.
 
+## When a co-editor saves while you have the document open
+
+Two people can have the same document open in the editor. When one of them
+saves from the editor (an autosave, **Save draft**, a workflow button,
+**Publish changes**, **Discard the changes** or a version restore), every other
+open editor of that document hears about it at once. This applies to drafts
+as much as to live documents. What your editor does depends on what you have
+on screen that is not saved yet (#2775):
+
+| You have | What you see |
+| --- | --- |
+| Nothing unsaved | Their save, in place: the title, body and settings are redrawn from it. Your next edit builds on it. |
+| An unsaved edit: on a draft, any edit still waiting for autosave or refused by validation; on a live document, the title or body in the same way; on an in-review or archived document, which does not autosave, any edit | The *Someone else saved changes to this content* banner at once. Your text stays in the form, and saving is paused. |
+| On a live document, unsaved settings, and they changed only the text | Their text, in place, with your settings still on screen and unsaved. **Save draft** then saves your settings over their text, not instead of it. |
+| On a live document, unsaved settings, and they changed a setting too | The banner at once, with your settings still on screen. |
+| Something open that was worked out from the saved document: the Markdown view, the *Publish changes* or change-severity question, an AI proposal (asked for or on screen), the internal-links or content-intelligence panel, an inline record card with unsaved edits or still saving, or a version-restore preview | Nothing yet, so what you are reading is not closed under you. Your next save meets the banner instead. |
+
+The banner reads *Someone else saved changes to this content. Saving is
+paused so you don't overwrite their work.* Copy anything you want to keep,
+then click **Reload latest**. It asks *Reload and discard your unsaved
+changes?* and loads their version.
+
+A few writes leave the version your next save is checked against alone: a
+workflow transition, a change of parent and **Mark reviewed**. After one of
+those nobody gets the banner, because nothing you save next can overwrite
+them. **Mark reviewed** and a change of parent don't tell other
+open editors at all yet.
+
+Two gaps remain. A field your cursor is in keeps showing what
+you typed when the form is redrawn around it, and a body keystroke still
+waiting in the rich-text editor's own short delay lands on the redrawn body.
+
+With the collaborative-editing prototype on (`:collab_prototype`, off in
+production builds), the rich-text editors share one live document, so text
+typed by any editor is persisted by one of them. A redraw keeps the
+rich-text editors as they are (no remount), and an editor whose text another
+editor saves for it gets no banner.
+
 ## Data model
 
 Four columns on the published row itself — no shadow row, no `draft_of`:
@@ -287,6 +345,24 @@ published text back over it.
   every save is judged against), but its loaded tags and related content are
   the copy's (`WorkingCopy.with_held_relationships/2`), so the pickers show
   what the copy holds.
+- `assign_record/2` clears `@settings_dirty?` with the form it rebuilds. A
+  caller that must not lose unsaved settings either refuses first
+  (`settle_before_workflow/1` for a transition or the trash,
+  `settle_before_edit/1` for Mark reviewed and Parent, the guard in
+  `publish_changes/2`), or puts them back on the new form
+  (`keep_settings_edits/3`: the previous form's params minus `title` and
+  `blocks`, re-validated, flag set again). The working-copy autosave and an
+  idle session's rebuild after a peer's save are the second kind.
+- A peer's save arrives as `{:record_saved, pid}` on the document's presence
+  topic and lands in `refresh_saved_record/1`, which implements the table in
+  [When a co-editor saves](#when-a-co-editor-saves-while-you-have-the-document-open).
+  `@record` is the optimistic lock's basis, so it moves only together with
+  the form built from it: a session that holds anything of its own keeps
+  both, and its next write still fails the lock. Whether a peer changed a
+  setting is a compare of the `:update` action's accepted fields (minus
+  `title` and `blocks`) on `WorkingCopy.view/1`, plus the held tags and
+  related content. A read failure there is logged at warning and leaves the
+  session as it was.
 - *Publish changes* flushes first too, so what goes live is what is on screen.
 - *Publish changes* is also where the **change severity** is asked
   ([Say how much a published change matters](#say-how-much-a-published-change-matters)): saving

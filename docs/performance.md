@@ -31,8 +31,15 @@ metric "headless API p95 under 50 ms" (#1546).
   (the fetch failed and the caller recomputed outside the per-key deduplication; a sustained
   rate here means every concurrent request is hitting the database at once).
 - **CDN offload.** Published HTML sends `Cache-Control: public, max-age=60,
-  stale-while-revalidate=300`, a content `ETag` (→ `304` on `If-None-Match`), and
-  `Vary: Accept-Language`. The URL is the whole cache key: a public page,
+  stale-while-revalidate=300`, a weak content `ETag` (`W/"…"`), and
+  `Vary: Accept-Language`. The tag is weak because it names what the page is
+  built from, not its bytes, and because Bandit does not compress a response
+  that carries a strong `ETag`: with a weak one, a page goes out gzipped (or
+  `deflate`d) to a client that sends `Accept-Encoding` (#2766).
+  `If-None-Match` is compared the weak way (RFC 9110): the tag with or without
+  its `W/` (a compressing CDN may add or keep it), the tag anywhere in a
+  comma-separated list, or `*` gets a bodyless `304`; anything else gets the
+  page. The URL is the whole cache key: a public page,
   the blog and event indexes (`/<plural>/index.json` too), the stock home and
   a form's page and embed take their language from the path prefix, or the
   site's default without one, never from the visitor's session (#2595). Kiln
@@ -74,11 +81,20 @@ metric "headless API p95 under 50 ms" (#1546).
     on. Menu trees are cached for 5 minutes, so after a linked page is
     renamed or unpublished, revalidations get a `200` once that entry
     expires.
+  - **The site's base URL**, as the request renders it
+    (`KilnCMSWeb.Tenant.base_url/1`: its custom domain if it has one, else
+    `PUBLIC_BASE_URL` for the default site, else its subdomain of
+    `TENANT_BASE_HOST`). Canonical, hreflang and Open Graph URLs are built
+    from it, so a change to the site's slug or custom domain moves every
+    page's tag (it also moves the head generation below), and a node that still renders the
+    old URLs (a host lookup it cached before the change) does so under the
+    old tag, never under the new one (#3194).
   - **The site's head generation**, a token moved on every node by a save of
     branding, code injection, feed settings or a menu; any write to a content
     type or one of its fields (feed and calendar links and the type's label
-    come from the type registry, not the page); and a save of the site's
-    locale fallback settings (they decide the language switcher). Each such
+    come from the type registry, not the page); a save of the site's
+    locale fallback settings (they decide the language switcher); and a
+    change to the site's slug or custom domain. Each such
     save costs every page on the site one `200`; they are rare. A site with
     no such save since a node started carries a token that node drew at
     random, so without sticky sessions two nodes can tag one page
@@ -131,7 +147,7 @@ the cron triggers (`config/config.exs`):
 ```elixir
 queues: [firing: 5, search: 5, mail: 3, newsletter: 3, billing: 3, media: 3, webhooks: 3,
          scheduling: 5, link_check: 3, federation: 3, push: 3, backups: 1, backup_steps: 1,
-         occurrence_backfill: 1, default: 10]
+         occurrence_backfill: 1, billing_sweeper: 1, default: 10]
 ```
 
 | Queue        | Workers                                                |
@@ -150,6 +166,7 @@ queues: [firing: 5, search: 5, mail: 3, newsletter: 3, billing: 3, media: 3, web
 | `backup_dir_<id>` | `Backups.StepWorker` and `Backups.MarkerSyncWorker`: the backup steps and last-good marker syncs that must run where one backup directory is. Not in the list above: each node's backup heartbeat starts the queue of the directory it reads at runtime, concurrency 1, on that node only ([backups.md](backups.md#which-node-runs-a-step)) |
 | `backups`    | `Backups.Worker`: only jobs enqueued before #2218, which it hands to `backup_steps`; still in 1.11, removed in a later release |
 | `occurrence_backfill` | `Events.BackfillWorker`: the boot-time recompute of events' next dates, one job per recurrence engine version per day, ten minutes after boot ([events.md](events.md#recomputing-stored-dates-at-boot)) |
+| `billing_sweeper` | The billing webhook sweeper's AshOban scheduler and worker jobs (`Billing.WebhookEvent`'s `redrive` and `give_up` triggers, every ten minutes): re-enqueue a provider event left with no job, or give up on it ([memberships.md](memberships.md#the-webhook-sweeper)) |
 | `scheduling` | Every-minute AshOban triggers (scheduled publish, scheduled unpublish/embargo) |
 | `default`    | Daily AshOban triggers (trash purge, untitled sweep), and the boot-time and cron jobs that have no queue of their own, among them `Jobs.PrivateArgsScrub` (drops private args from finished jobs, ten minutes after boot and daily) and `Accounts.ErasureBackfill` |
 
@@ -163,12 +180,13 @@ the other direction: a large newsletter blast must not starve transactional `mai
 inbound payment webhook must not queue behind one — a delayed entitlement event is a paying
 member locked out of what they just bought.
 
-The `backup_steps` and `occurrence_backfill` queues are isolated for the version they run
-under rather than for load: during a rolling deploy, a node of the previous release still
-polls `default`, and would run a newer release's job with the older code. A deployment that
-builds Oban's `queues:` list itself must carry both, or their jobs are queued and never run.
+The `backup_steps`, `occurrence_backfill` and `billing_sweeper` queues are isolated for the
+version they run under rather than for load: during a rolling deploy, a node of the previous
+release still polls `default`, and would run a newer release's job with the older code, or
+fail a job whose worker module it does not have. A deployment that builds Oban's `queues:`
+list itself must carry all three, or their jobs are queued and never run.
 
-**Pool sizing.** Total worker concurrency above is 52, plus 1 for the backup directory queue
+**Pool sizing.** Total worker concurrency above is 53, plus 1 for the backup directory queue
 each node starts at runtime, all sharing the Ecto pool with web requests. Size `POOL_SIZE` (in `config/runtime.exs`) so jobs and web requests don't starve
 each other:
 

@@ -592,11 +592,11 @@ values are the site's, the same for every page.
 API key or bearer token gets the same body as `private, no-store`, so leave
 credentials off this request. With `KILN_CDN_PURGE_URL` set, a Branding save
 that changes one of the three values purges the site's CDN key, so the new
-value is served at once. Some changes reach the response without a purge and
-show within the `max-age` plus `stale-while-revalidate` (two minutes by
-default): an operator changing `SITE_NAME` or the branding config, and a
-change to the site's custom domain or slug, which moves the host of a
-site-relative default image. A static build sees a Branding change only when
+value is served at once, and so does a change to the site's custom domain or
+slug, which moves the host of a site-relative default image (#3194). Without
+a purge, those changes show within the `max-age` plus
+`stale-while-revalidate` (two minutes by default), and so does an operator
+changing `SITE_NAME` or the branding config, which never purges. A static build sees a Branding change only when
 it next runs; a Branding save sends no webhook.
 
 What can go wrong:
@@ -997,9 +997,11 @@ What that means for a front end:
   changes whenever anything in the body does, and only then: keying on
   `updatedAt` or an id misses a re-render after a Kiln upgrade, which changes
   the body without touching either ([After a Kiln upgrade](#after-a-kiln-upgrade)).
-  A page rendered by Kiln itself has an `ETag` that also names the build
-  serving it, so it moves on every deploy that changes Kiln's code, dependencies or
-  assets.
+  A page rendered by Kiln itself has a weak `ETag` (`W/"…"`) that also names
+  the build serving it and the site's base URL, so it moves on every deploy
+  that changes Kiln's code, dependencies or assets, and when the site's
+  custom domain or slug changes. Send it back as it came, with or without the
+  `W/`: either revalidates.
 
 ## Analytics: your fetches are what get counted
 

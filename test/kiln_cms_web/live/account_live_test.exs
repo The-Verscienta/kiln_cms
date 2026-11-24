@@ -195,6 +195,35 @@ defmodule KilnCMSWeb.AccountLiveTest do
       assert html =~ "Access ends on 5 March 2027"
     end
 
+    test "a membership comped after it ended shows no date from the old subscription", %{
+      conn: conn
+    } do
+      # #3156: the comp drops the ended subscription's period end and cancel
+      # flag, which would otherwise read "Access ends on" a date long past.
+      user = authed_user()
+      t = tier(%{name: "Patron"})
+
+      membership(user, t, %{
+        status: :canceled,
+        provider_customer_id: "cus_1",
+        provider_subscription_id: "sub_old",
+        cancel_at_period_end: true,
+        current_period_end: ~U[2026-03-05 00:00:00.000000Z]
+      })
+
+      Billing.comp_membership!(%{user_id: user.id, tier_id: t.id},
+        actor: authed_user(:admin),
+        tenant: default_org_id()
+      )
+
+      conn = log_in(conn, user)
+      {:ok, _view, html} = live(conn, ~p"/account")
+
+      assert html =~ "Complimentary"
+      refute html =~ "Access ends on"
+      refute html =~ "Renews on"
+    end
+
     test "a past-due membership is shown as overdue, not hidden", %{conn: conn} do
       user = authed_user()
       membership(user, tier(), %{status: :past_due, provider_customer_id: "cus_1"})

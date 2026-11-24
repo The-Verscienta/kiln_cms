@@ -60,8 +60,21 @@ defmodule KilnCMS.Billing.Changes.GuardProviderEvent do
       changeset
     else
       fresh = lock!(changeset)
-      verdict(changeset, fresh, kind)
+      event = event(changeset, kind)
+
+      changeset
+      |> verdict(fresh, event)
+      |> keep_stamp(fresh, event)
     end
+  end
+
+  defp event(changeset, kind) do
+    %{
+      kind: kind,
+      subscription_id: Ash.Changeset.get_argument(changeset, :event_subscription_id),
+      created_at: Ash.Changeset.get_argument(changeset, :event_created_at),
+      target_status: Ash.Changeset.get_attribute(changeset, :status)
+    }
   end
 
   defp lock!(changeset) do
@@ -73,21 +86,29 @@ defmodule KilnCMS.Billing.Changes.GuardProviderEvent do
     )
   end
 
-  defp verdict(changeset, fresh, kind) do
+  defp verdict(changeset, fresh, event) do
     if Map.take(fresh, @read) == Map.take(changeset.data, @read) do
       changeset
     else
-      event = %{
-        kind: kind,
-        subscription_id: Ash.Changeset.get_argument(changeset, :event_subscription_id),
-        created_at: Ash.Changeset.get_argument(changeset, :event_created_at),
-        target_status: Ash.Changeset.get_attribute(changeset, :status)
-      }
-
       case EventGuard.check(fresh, event) do
         {:ignore, reason} -> settle(changeset, reason)
         :ok -> Ash.Changeset.add_error(changeset, stale_error())
       end
+    end
+  end
+
+  # The stored stamp is the max of the two (#3159). `fresh` is the locked row,
+  # so no concurrent event can slip a newer stamp in between.
+  defp keep_stamp(changeset, fresh, event) do
+    with true <- changeset.valid? and not ignored?(changeset),
+         {:ok, %DateTime{} = new} <-
+           Ash.Changeset.fetch_change(changeset, :last_provider_event_at),
+         %DateTime{} = stored <- fresh.last_provider_event_at,
+         true <- EventGuard.same_subscription?(fresh, event),
+         :lt <- DateTime.compare(new, stored) do
+      Ash.Changeset.clear_change(changeset, :last_provider_event_at)
+    else
+      _keep -> changeset
     end
   end
 

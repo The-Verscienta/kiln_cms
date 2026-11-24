@@ -10,6 +10,7 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
+  alias KilnCMS.Test.HookedStorage
 
   # A minimal valid 1x1 PNG.
   @png <<137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8,
@@ -72,6 +73,55 @@ defmodule KilnCMSWeb.MediaLiveTest do
     end)
 
     root
+  end
+
+  # `local_storage/1` with a private root of its own as well, for items whose
+  # original is in private storage. Returns both roots.
+  defp local_storage_with_private(prefix) do
+    n = System.unique_integer([:positive])
+    root = Path.join(System.tmp_dir!(), "#{prefix}_#{n}")
+    private_root = Path.join(System.tmp_dir!(), "#{prefix}_priv_#{n}")
+    File.mkdir_p!(root)
+    File.mkdir_p!(private_root)
+
+    Application.put_env(:kiln_cms, KilnCMS.Storage.Local,
+      root: root,
+      private_root: private_root,
+      base_url: "/uploads"
+    )
+
+    on_exit(fn ->
+      File.rm_rf!(root)
+      File.rm_rf!(private_root)
+      Application.delete_env(:kiln_cms, KilnCMS.Storage.Local)
+    end)
+
+    {root, private_root}
+  end
+
+  # Stores a few bytes in PRIVATE storage and returns the key.
+  defp store_private_file(prefix, ext) do
+    src = Path.join(System.tmp_dir!(), "#{prefix}-src-#{System.unique_integer([:positive])}")
+    File.write!(src, "private bytes")
+    key = "#{prefix}-orig-#{System.unique_integer([:positive])}#{ext}"
+    {:ok, ^key} = KilnCMS.Storage.store_private(key, src)
+    File.rm(src)
+    key
+  end
+
+  defp seed_trashable(key, filename, content_type, attrs) do
+    Ash.Seed.seed!(
+      KilnCMS.CMS.MediaItem,
+      Map.merge(
+        %{
+          filename: filename,
+          url: "/uploads/#{key}",
+          storage_key: key,
+          content_type: content_type
+        },
+        attrs
+      )
+    )
   end
 
   # Stores a small PNG through `KilnCMS.Storage` and returns its key.
@@ -1032,6 +1082,103 @@ defmodule KilnCMSWeb.MediaLiveTest do
       refute html =~ "permission to delete media"
       assert CMS.get_media_item!(item.id, actor: admin).id == item.id
       assert File.exists?(Path.join(root, key))
+    end
+
+    # #3067: a gated or quarantined item's original is in private storage,
+    # and "Delete permanently" has to remove it there too.
+    test "purge of a gated document also deletes its private original", %{conn: conn} do
+      {_root, private_root} = local_storage_with_private("kiln_ui_purge_gated")
+      key = store_private_file("purge-gated", ".pdf")
+      item = seed_trashable(key, "members.pdf", "application/pdf", %{audience: :member})
+
+      admin = authed_user(:admin)
+      :ok = CMS.destroy_media_item(item, actor: admin)
+      lv = open_trash(conn, admin)
+
+      html = click_trash_button(lv, "purge", item)
+
+      assert html =~ "Permanently deleted members.pdf."
+      assert {:error, _} = CMS.get_media_item(item.id, authorize?: false)
+      refute File.exists?(Path.join(private_root, key))
+    end
+
+    test "purge of a trashed quarantined upload also deletes its private original",
+         %{conn: conn} do
+      {_root, private_root} = local_storage_with_private("kiln_ui_purge_q")
+      key = store_private_file("purge-q", ".mp4")
+      item = seed_trashable(key, "held.mp4", "video/mp4", %{quarantined: true})
+
+      admin = authed_user(:admin)
+      :ok = CMS.destroy_media_item(item, actor: admin)
+      lv = open_trash(conn, admin)
+
+      click_trash_button(lv, "purge", item)
+
+      assert {:error, _} = CMS.get_media_item(item.id, authorize?: false)
+      refute File.exists?(Path.join(private_root, key))
+    end
+
+    test "purge of a public item deletes its public original and asks nothing of private storage",
+         %{conn: conn} do
+      {root, _private_root} = local_storage_with_private("kiln_ui_purge_public")
+      key = store_png("purge-public")
+      item = seed_trashable(key, "open.png", "image/png", %{})
+      test = self()
+      HookedStorage.install(%{delete_private: fn key -> send(test, {:delete_private, key}) end})
+
+      admin = authed_user(:admin)
+      :ok = CMS.destroy_media_item(item, actor: admin)
+      lv = open_trash(conn, admin)
+
+      click_trash_button(lv, "purge", item)
+
+      assert {:error, _} = CMS.get_media_item(item.id, authorize?: false)
+      refute File.exists?(Path.join(root, key))
+      refute_received {:delete_private, _key}
+    end
+
+    # #2531's rule holds for the private blob too: a refused purge deletes
+    # nothing.
+    test "purge of a gated document someone restored meanwhile keeps its private original",
+         %{conn: conn} do
+      {_root, private_root} = local_storage_with_private("kiln_ui_purge_gated_stale")
+      key = store_private_file("purge-gated-stale", ".pdf")
+      item = seed_trashable(key, "kept.pdf", "application/pdf", %{audience: :member})
+
+      admin = authed_user(:admin)
+      :ok = CMS.destroy_media_item(item, actor: admin)
+      lv = open_trash(conn, admin)
+
+      [held] = CMS.list_trashed_media_items!(actor: admin, query: [filter: [id: item.id]])
+      {:ok, _} = CMS.restore_media_item(held, actor: admin)
+
+      html = click_trash_button(lv, "purge", item)
+
+      assert html =~ "Someone else already restored that item."
+      assert CMS.get_media_item!(item.id, actor: admin).id == item.id
+      assert File.exists?(Path.join(private_root, key))
+    end
+
+    test "a private original that can't be deleted after the purge is logged with its key",
+         %{conn: conn} do
+      local_storage_with_private("kiln_ui_purge_gated_fail")
+      key = store_private_file("purge-gated-fail", ".pdf")
+      item = seed_trashable(key, "stuck.pdf", "application/pdf", %{audience: :member})
+      HookedStorage.install(%{delete_private: {:error, :eio}})
+
+      admin = authed_user(:admin)
+      :ok = CMS.destroy_media_item(item, actor: admin)
+      lv = open_trash(conn, admin)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          html = click_trash_button(lv, "purge", item)
+          # The row is gone, which is what the admin asked for.
+          assert html =~ "Permanently deleted stuck.pdf."
+        end)
+
+      assert log =~ "Purged media #{item.id} left its private blob #{key} behind: :eio"
+      assert {:error, _} = CMS.get_media_item(item.id, authorize?: false)
     end
 
     test "non-admins don't see the trash toggle", %{conn: conn} do

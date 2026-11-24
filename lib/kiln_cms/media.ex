@@ -35,6 +35,15 @@ defmodule KilnCMS.Media do
     end
   end
 
+  @doc """
+  Whether `item`'s original is held in **private** storage: a gated item
+  (`audience` other than `:public`) or one still quarantined. Those bytes
+  are reached through `KilnCMS.Storage.fetch_private/2` and removed with
+  `KilnCMS.Storage.delete_private/2`, never at the item's public key.
+  """
+  @spec private_original?(map()) :: boolean()
+  def private_original?(item), do: item.quarantined == true or item.audience != :public
+
   @doc false
   # Test seam (#1659): run `fun` with `system/0` answering `actor` in this
   # process. It exists so a test can take the grant away and prove that the

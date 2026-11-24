@@ -16,6 +16,7 @@ defmodule KilnCMSWeb.MediaLive do
   require Logger
 
   alias KilnCMS.CMS
+  alias KilnCMS.Media
   alias KilnCMS.Media.{Derivatives, Ingest}
   alias KilnCMS.MediaKind
   alias KilnCMS.Storage
@@ -779,6 +780,21 @@ defmodule KilnCMSWeb.MediaLive do
     end
   end
 
+  # After a purge: a failure here leaves a private blob with no row, which
+  # nothing sweeps. Logged with the key so an operator can remove it, as the
+  # strip's refusal and the quarantine reaper do.
+  defp delete_private(item, key) do
+    case Storage.delete_private(key, item) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error(
+          "Purged media #{item.id} left its private blob #{key} behind: #{inspect(reason)}"
+        )
+    end
+  end
+
   defp delete_variant_blobs(variants, item) do
     for {_label, %{"key" => key}} <- variants || %{}, do: Storage.delete(key, item)
   end
@@ -797,13 +813,19 @@ defmodule KilnCMSWeb.MediaLive do
   # purge: their rows go with the item through the foreign key, and after that
   # nothing records where the blobs are. Blobs go only on `:ok`: `:purge`
   # refuses an item someone restored meanwhile (#2531), and its files stay.
+  #
+  # A gated or quarantined item's original is in private storage, and goes
+  # too (#3067). Only for such an item: a public one has no private blob, and
+  # a store with no private bucket (or an image backend) refuses the call.
   defp purge_item(socket, item, actor) do
     derivatives = Derivatives.blobs(item)
+    private_key = if Media.private_original?(item), do: item.storage_key
 
     case CMS.purge_media_item(item, actor: actor, tenant: socket.assigns.current_org) do
       :ok ->
         # Every blob of the item is in its own store (#1559).
         if item.storage_key, do: Storage.delete(item.storage_key, item)
+        if private_key, do: delete_private(item, private_key)
         delete_variant_blobs(item.variants, item)
         Derivatives.delete_blobs(derivatives, item)
         put_flash(socket, :info, gettext("Permanently deleted %{name}.", name: item.filename))

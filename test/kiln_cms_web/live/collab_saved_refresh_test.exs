@@ -34,20 +34,22 @@ defmodule KilnCMSWeb.CollabSavedRefreshTest do
   @moduletag :capture_log
 
   import Phoenix.LiveViewTest
+  import KilnCMS.TipTapFixtures
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.WorkingCopy
 
   @password "password123456"
 
-  defp authed_user do
+  defp authed_user(role \\ :editor) do
     email = "csr-#{System.unique_integer([:positive])}@example.com"
 
     Ash.Seed.seed!(User, %{
       email: email,
       hashed_password: Bcrypt.hash_pwd_salt(@password),
       confirmed_at: DateTime.utc_now(),
-      role: :editor
+      role: role
     })
 
     strategy = AshAuthentication.Info.strategy!(User, :password)
@@ -108,6 +110,53 @@ defmodule KilnCMSWeb.CollabSavedRefreshTest do
   end
 
   defp pick(lv, id), do: render_click(lv, "toggle_compare", %{"version_id" => id})
+
+  # Production's default (`KilnCMS.Collab.CRDT.enabled?/0`): two editors are two
+  # independent writers. VM-global, so only safe while this module is
+  # `async: false` (see the note above `use`).
+  defp collab_off do
+    previous = Application.get_env(:kiln_cms, :collab_prototype)
+    Application.put_env(:kiln_cms, :collab_prototype, false)
+    on_exit(fn -> Application.put_env(:kiln_cms, :collab_prototype, previous) end)
+  end
+
+  defp two_sessions(conn, page, role \\ :editor) do
+    editor_a = authed_user(role)
+    editor_b = authed_user(role)
+
+    {:ok, lv_a, _} = conn |> log_in(editor_a) |> live(~p"/editor/content/page/#{page.id}")
+    {:ok, lv_b, _} = build_conn() |> log_in(editor_b) |> live(~p"/editor/content/page/#{page.id}")
+    await(lv_b, &(&1 =~ "2 editing"))
+
+    %{a: editor_a, lv_a: lv_a, lv_b: lv_b}
+  end
+
+  defp edit(lv, field, value) do
+    lv
+    |> form("#page-editor")
+    |> render_change(%{"form" => %{field => value}, "_target" => ["form", field]})
+  end
+
+  defp rich_text_page(actor) do
+    CMS.create_page!(
+      %{title: "Alpha", slug: slug(), blocks: [%{"_type" => "rich_text", "legacy_html" => ""}]},
+      actor: actor
+    )
+  end
+
+  defp body_text(page, actor) do
+    [%Ash.Union{value: %{body: [%{"children" => [%{"text" => text}]}]}}] =
+      CMS.get_page!(page.id, actor: actor).blocks
+
+    text
+  end
+
+  # The element id of the rich-text editor host, which carries the editor
+  # generation: a new id is a TipTap remount.
+  defp rich_host_id(lv) do
+    [id] = Regex.run(~r/id="(rt-[^"]+)"/, render(lv), capture: :all_but_first)
+    id
+  end
 
   defp versions(page, actor) do
     CMS.list_page_versions!(actor: actor)
@@ -269,5 +318,197 @@ defmodule KilnCMSWeb.CollabSavedRefreshTest do
     await(lv, &(&1 =~ "Saved"))
 
     assert render(lv) =~ "Untouched"
+  end
+
+  # #2775. An idle session adopted the peer's lock version but kept its own
+  # stale form, so its next edit posted that form whole (as the browser and
+  # `render_change/2` both do) and the autosave wrote it over the peer's save
+  # with no conflict. Now the idle session is rebuilt from the save.
+  describe "an idle session, collaboration off" do
+    setup do
+      collab_off()
+      :ok
+    end
+
+    test "takes in a peer's save, and its next edit keeps it", %{conn: conn} do
+      page = CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: authed_user())
+      %{a: a, lv_a: lv_a, lv_b: lv_b} = two_sessions(conn, page)
+
+      edit(lv_b, "title", "From B")
+      send(lv_b.pid, :autosave)
+      await(lv_a, &(&1 =~ ~s(value="From B")))
+
+      edit(lv_a, "seo_title", "From A")
+      send(lv_a.pid, :autosave)
+      await(lv_a, &(&1 =~ "Saved"))
+
+      saved = CMS.get_page!(page.id, actor: a)
+      assert saved.title == "From B"
+      assert saved.seo_title == "From A"
+    end
+
+    test "takes in a peer's rich-text body, and its next edit keeps it", %{conn: conn} do
+      page = rich_text_page(authed_user())
+      [%Ash.Union{value: block}] = page.blocks
+      %{a: a, lv_a: lv_a, lv_b: lv_b} = two_sessions(conn, page)
+      host = rich_host_id(lv_a)
+
+      render_hook(lv_b, "rich_text_body", %{
+        "id" => block.id,
+        "idx" => "0",
+        "doc" => doc([para("written by B")])
+      })
+
+      send(lv_b.pid, :autosave)
+      # Without a collaboration room TipTap only shows what it was mounted
+      # with, so the body reaches the screen through a remount.
+      await(lv_a, fn _html -> rich_host_id(lv_a) != host end)
+
+      edit(lv_a, "seo_title", "From A")
+      send(lv_a.pid, :autosave)
+      await(lv_a, &(&1 =~ "Saved"))
+
+      assert body_text(page, a) == "written by B"
+      assert CMS.get_page!(page.id, actor: a).seo_title == "From A"
+    end
+
+    # Unsaved Settings on a live page are not lost to a peer's text autosave:
+    # they go back on the rebuilt form, as after this session's own autosave,
+    # and its Save then holds them on top of the peer's text.
+    test "keeps its unsaved Settings over a peer's text autosave", %{conn: conn} do
+      admin = authed_user(:admin)
+      page = CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: admin)
+      page = CMS.publish_page!(page, %{}, actor: admin)
+      %{a: a, lv_a: lv_a, lv_b: lv_b} = two_sessions(conn, page)
+
+      edit(lv_a, "seo_title", "Typed by A")
+
+      edit(lv_b, "title", "From B")
+      send(lv_b.pid, :autosave)
+      html = await(lv_a, &(&1 =~ ~s(value="From B")))
+
+      refute html =~ ~s(id="edit-conflict")
+      assert has_element?(lv_a, ~s(input[name="form[seo_title]"][value="Typed by A"]))
+      assert html =~ "Unsaved changes"
+
+      html = lv_a |> form("#page-editor") |> render_submit()
+      assert html =~ "Readers see these changes once you publish them."
+
+      view = page.id |> CMS.get_page!(actor: a) |> WorkingCopy.view()
+      assert view.title == "From B"
+      assert view.seo_title == "Typed by A"
+    end
+  end
+
+  # Put back over a peer's settings, unsaved Settings would revert them at the
+  # next Save — the browser posts every input, not only the changed ones — so
+  # that session holds and is told instead of being rebuilt.
+  describe "unsaved Settings, collaboration off" do
+    setup do
+      collab_off()
+      :ok
+    end
+
+    test "a peer's settings Save is a conflict, not a silent revert", %{conn: conn} do
+      admin = authed_user(:admin)
+      category = CMS.create_category!(%{name: "B's pick", slug: slug()}, actor: admin)
+      page = CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: admin)
+      page = CMS.publish_page!(page, %{}, actor: admin)
+      %{a: a, lv_a: lv_a, lv_b: lv_b} = two_sessions(conn, page, :admin)
+
+      edit(lv_a, "seo_title", "Typed by A")
+
+      lv_b |> form("#page-editor") |> render_submit(%{"form" => %{"category_id" => category.id}})
+
+      await(lv_a, &(&1 =~ ~s(id="edit-conflict")))
+      assert has_element?(lv_a, ~s(input[name="form[seo_title]"][value="Typed by A"]))
+
+      # A's Save is refused by the lock rather than reverting B's category.
+      lv_a |> form("#page-editor") |> render_submit()
+
+      view = page.id |> CMS.get_page!(actor: a) |> WorkingCopy.view()
+      assert view.category_id == category.id
+      assert view.seo_title == nil
+    end
+  end
+
+  describe "a session with unsaved text, collaboration off" do
+    setup do
+      collab_off()
+      :ok
+    end
+
+    # Its next save would fail the lock anyway; the banner now comes at once,
+    # rather than after more typing that cannot be saved. In review, so that
+    # nothing autosaves: with a debounce timer running, the session's own
+    # autosave would meet the lock and raise the banner either way.
+    test "is told of a peer's save at once", %{conn: conn} do
+      admin = authed_user(:admin)
+      page = CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: admin)
+      page = CMS.submit_page_for_review!(page, %{}, actor: admin)
+      %{a: a, lv_a: lv_a, lv_b: lv_b} = two_sessions(conn, page, :admin)
+
+      edit(lv_a, "title", "From A")
+      assert render(lv_a) =~ "Unsaved changes"
+
+      edit(lv_b, "title", "From B")
+      lv_b |> form("#page-editor") |> render_submit()
+
+      await(lv_a, &(&1 =~ ~s(id="edit-conflict")))
+      assert has_element?(lv_a, ~s(input[name="form[title]"][value="From A"]))
+      assert CMS.get_page!(page.id, actor: a).title == "From B"
+    end
+  end
+
+  describe "collaboration on" do
+    # The co-editor's explicit Save of a field outside the shared document
+    # reaches the idle persister's form, without remounting its rich-text
+    # editor (bound to the shared document, which the write did not change).
+    # The bodies are the record's — what the co-editor saved — and the
+    # persister's next autosave keeps both.
+    test "the idle persister takes in a co-editor's Save", %{conn: conn} do
+      page = rich_text_page(authed_user())
+      [%Ash.Union{value: block}] = page.blocks
+      %{low: low, persister: persister, co_editor: co_editor} = both_present(conn, page)
+      host = rich_host_id(persister)
+
+      render_hook(co_editor, "rich_text_body", %{
+        "id" => block.id,
+        "idx" => "0",
+        "doc" => doc([para("saved by the co-editor")])
+      })
+
+      edit(co_editor, "seo_title", "Saved by the co-editor")
+      co_editor |> form("#page-editor") |> render_submit()
+
+      await(persister, &(&1 =~ ~s(value="Saved by the co-editor")))
+      assert rich_host_id(persister) == host
+
+      edit(persister, "title", "Beta")
+      send(persister.pid, :autosave)
+      await(persister, &(&1 =~ "Saved"))
+
+      saved = CMS.get_page!(page.id, actor: low)
+      assert saved.title == "Beta"
+      assert saved.seo_title == "Saved by the co-editor"
+      assert body_text(page, low) == "saved by the co-editor"
+    end
+
+    # The persister writes the shared text for everyone, so a session with text
+    # in flight is not stopped by a banner: the collab path is as it was.
+    test "a persister with text in flight gets no banner", %{conn: conn} do
+      page = CMS.create_page!(%{title: "Alpha", slug: slug()}, actor: authed_user())
+      %{persister: persister, co_editor: co_editor} = both_present(conn, page)
+
+      edit(persister, "title", "Beta")
+      before = version_rows(persister)
+
+      edit(co_editor, "seo_title", "Saved by the co-editor")
+      co_editor |> form("#page-editor") |> render_submit()
+
+      await(persister, fn _html -> version_rows(persister) > before end)
+      refute has_element?(persister, "#edit-conflict")
+      assert has_element?(persister, ~s(input[name="form[title]"][value="Beta"]))
+    end
   end
 end

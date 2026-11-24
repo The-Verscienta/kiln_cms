@@ -185,7 +185,9 @@ authority. Audiences no tier claims stay exactly as an admin left them. The
 consequence worth knowing: once an audience has *ever* been claimed by a tier,
 granting it by hand is transient — the next recompute drops it. **Comping is the
 supported lever** (a membership with status `comped`, no provider subscription);
-`manage_access` is the wrong tool for a tier-managed audience.
+`manage_access` is the wrong tool for a tier-managed audience. A comp is refused
+while the provider may still bill the membership: cancel the subscription first
+([Comp a member](#comp-a-member)).
 
 Retiring a tier does **not** un-manage its audience, deliberately. If it did,
 retiring a tier would freeze every existing grant of that audience permanently,
@@ -199,7 +201,7 @@ with nothing left to revoke it.
 | `active` | **yes** | paid and current |
 | `past_due` | **yes** | a payment failed and the provider is retrying. Access survives dunning — locking a member out for an expiring card would be wrong, and the provider keeps the subscription alive through its retry schedule |
 | `canceled` | no | terminal |
-| `comped` | **yes** | granted by an admin, no provider subscription |
+| `comped` | **yes** | granted by an admin, no provider subscription. Refused over a row the provider may still bill ([Comp a member](#comp-a-member)) |
 
 ### Revocation timing
 
@@ -209,6 +211,105 @@ follows the provider, which gives the right behavior for free: with
 period and sends the deletion event when it lapses. Immediate cancellation
 revokes immediately for the same reason. `current_period_end` is stored only so
 the member UI can say "renews on…".
+
+### Comp a member
+
+A comp gives a member a tier's access for free: the membership becomes
+`comped` and no longer follows the provider. A `comped` row ignores every
+provider event, so Kiln refuses to comp a membership the provider may still be
+billing. If it didn't, the provider would go on charging the member, and their
+later cancellation or failed payment would never reach the row (#3156).
+
+There is no console screen for comping yet. You call
+`KilnCMS.Billing.comp_membership/2` from a release shell
+(`bin/kiln_cms remote`), as an admin of the site; an editor, a viewer or the
+member themselves gets `Ash.Error.Forbidden`.
+
+1. Look up the member, the tier and yourself, and try the comp:
+
+   ```elixir
+   alias KilnCMS.{Accounts, Billing}
+
+   site = Accounts.default_org_id()
+   admin = Accounts.get_user_by_email!("you@example.com", authorize?: false)
+   member = Accounts.get_user_by_email!("member@example.com", authorize?: false)
+   tier = Billing.get_tier_by_slug!("supporter", actor: admin, tenant: site)
+
+   Billing.comp_membership(
+     %{user_id: member.id, tier_id: tier.id, note: "Press pass"},
+     actor: admin,
+     tenant: site
+   )
+   ```
+
+   A member with no membership of that tier, or one that is `canceled`,
+   `comped`, or `incomplete` with no subscription, is comped:
+   `{:ok, %KilnCMS.Billing.Membership{status: :comped}}`. Their access is
+   granted at once, and a subscribed webhook endpoint gets
+   `membership.activated` ([Webhook events](#webhook-events)). You are done.
+
+   A membership that is `active`, `past_due` or `incomplete` and holds a
+   provider subscription id is refused, and nothing about it changes:
+
+   ```elixir
+   {:error, %Ash.Error.Invalid{errors: [%KilnCMS.Billing.Errors.StillBilled{field: :status}]}}
+   ```
+
+   The message reads "is still billed by the payment provider; cancel the
+   subscription at the provider (immediately, not at period end) and wait for
+   the cancellation to arrive, then comp". An `incomplete` row counts because
+   a checkout in the middle of a payment challenge can still be paid.
+
+2. In the provider's dashboard, cancel the member's subscription
+   **immediately**, not at the end of the period. A cancellation at period
+   end keeps the subscription `active` until the period lapses, so the comp
+   stays refused until then.
+
+3. Wait for the cancellation to arrive. The provider sends
+   `customer.subscription.deleted`, and the membership becomes `canceled`.
+   Check it:
+
+   ```elixir
+   Billing.memberships_for_user!(member.id, actor: admin, tenant: site)
+   |> Enum.map(&{&1.tier.slug, &1.status})
+   #=> [{"supporter", :canceled}]
+   ```
+
+   From now until step 4 the member has no access to the tier's audience,
+   and a subscribed endpoint gets `membership.canceled`.
+
+4. Run the comp from step 1 again. It returns
+   `{:ok, %KilnCMS.Billing.Membership{status: :comped}}`, the member's access
+   is back, and a subscribed endpoint gets `membership.activated`.
+
+A comp clears the old subscription's id, period end and "cancel at period end"
+flag, so the account page shows no stale renewal date. It keeps the provider
+customer id: a later checkout reuses it, so the member is not duplicated at the
+provider.
+
+What can go wrong:
+
+- **The comp is still refused after you canceled.** The cancellation has not
+  reached Kiln. Look the `customer.subscription.deleted` event up in
+  `billing_webhook_events` ([Find out why a billing event was ignored](#find-out-why-a-billing-event-was-ignored)):
+  no row means the provider has not delivered it, or Kiln answered without
+  recording it (the provider's dashboard shows each delivery's response
+  code); a `received`, `failed` or `processing` row has not been applied yet
+  ([Webhook delivery and recovery](#webhook-delivery-and-recovery)). Resend
+  the event from the provider's dashboard if it is stuck.
+- **`Ash.Error.Forbidden`.** You are not an admin of the site you passed as
+  `tenant:`.
+- **`KilnCMS.Accounts.Errors.AccountErased`.** The member's account was
+  erased; there is nothing to comp.
+- **An `incomplete` membership with no subscription id is not refused**, but
+  the member may already have paid: a checkout whose
+  `checkout.session.completed` event is delayed looks the same to Kiln.
+  Before comping an `incomplete` member, check the provider's dashboard for a
+  subscription of theirs.
+- **Memberships comped before this check** (1.12.0 and earlier) may still be
+  billed. Kiln ignores their provider events
+  (`comped_not_provider_managed`), so find them in the provider's dashboard
+  and cancel the subscriptions there.
 
 ### Webhook setup
 
@@ -256,7 +357,8 @@ How the worker recovers on its own:
   redelivery in the meantime can enqueue a fresh job.
 
 A crash **after** the `200` is never redelivered by the provider. Recovery there
-is the rescue above, Oban's retry and the 10-minute takeover.
+is the rescue above, Oban's retry, the 10-minute takeover and
+[the webhook sweeper](#the-webhook-sweeper).
 
 A taken-over event is applied again from the start. If the first run had already
 committed its membership change before dying, a second `MembershipEvent` row
@@ -264,19 +366,103 @@ committed its membership change before dying, a second `MembershipEvent` row
 because entitlements are recomputed from current state. Ordering between events
 is a separate concern (#2749).
 
-Three windows are still open and wait for the sweeper in #3159: a job that uses
-all its attempts leaves the event `failed` until the provider redelivers it; a
-`processed` stamp that fails to save leaves the event `processing` (the
-10-minute takeover covers it only once something re-enqueues it); and `received`
-rows recorded before this change have no job. Upgrading needs no migration or
-config, and a rolling deploy is safe: an old node enqueues a non-unique job,
-which the claim then catches.
-
 **Diagnosing "the member paid but has no access"** starts with the recorded
 events: each one carries its status and, when it was ignored or failed, the
 reason ([Find out why a billing event was ignored](#find-out-why-a-billing-event-was-ignored)).
 Every entitlement change also appears in the governance trail with the audience
 delta and the provider event that caused it.
+
+### The webhook sweeper
+
+Some events are acknowledged and then left with no job, and the provider does
+not redeliver an event it saw acknowledged. A sweeper finds them (#3159). Every
+10 minutes it looks for an unsettled event that nothing will process:
+
+| The event is | and | Why it has no job |
+|---|---|---|
+| `received` | was recorded more than 10 minutes ago and has no job waiting or running | its job was lost, or it was recorded before enqueueing became atomic |
+| `failed` | has no job waiting or running | its job used all 8 attempts |
+| `processing` | was claimed more than 10 minutes ago and has no job waiting | its `processed` stamp did not save, or the worker died |
+
+A job counts as waiting when it is `available`, `scheduled`, `retryable` or
+`suspended`, and as running when it is `executing`. For a `processing` event a
+running job does not count: a node killed mid-run leaves its job `executing`
+until `Oban.Lifeline` rescues it, 180 minutes later.
+
+The sweeper does one of two things with each such event:
+
+- **Re-enqueue it**, if it was received less than 3 days ago (the provider's
+  own retry window) and has been re-enqueued fewer than 3 times. The count is
+  kept in the row's `redrive_count`. A `processing` event is set back to
+  `failed` first, so the new job's claim does not wait out another 10 minutes.
+  The server logs a warning,
+  `billing webhook evt_… (customer.subscription.updated) had no job to process it; re-enqueued (1 of 3)`.
+  The new job is an ordinary one: 8 attempts, and the event goes through the
+  same ordering checks as any other ([Late, repeated and foreign events](#late-repeated-and-foreign-events)).
+- **Give up on it**, once it has been re-enqueued 3 times, was received 3 or
+  more days ago, or was recorded before the sweeper existed (its
+  `redrive_count` is empty). The row's `gave_up_at` is set, a `processing`
+  event is set to `failed`, and the server logs at error:
+  `billing webhook evt_… (customer.subscription.updated) was never processed and will not be retried (re-enqueued 3 times). Fix the cause, then resend the event from the provider's dashboard.`
+  It also emits the telemetry event
+  `[:kiln_cms, :billing, :webhook_event, :gave_up]`
+  ([observability.md](observability.md#billing-webhooks)). The sweeper does
+  not pick the event up again unless a resend re-arms it (below).
+
+Old events are given up on, not replayed, because applying one now could undo
+what later events did. For example, a stale "subscription active" event would
+give a canceled member access again if the membership has no ordering stamp
+to compare it with. An event recorded before the upgrade is given up on for
+the same reason, however recent it is. After the upgrade, expect one such
+error line for each event an earlier release left unsettled with no job.
+
+The 3 days bound when the sweeper re-enqueues, not when an event can be
+applied. A job enqueued just inside the window still has its 8 attempts,
+about 15 hours of backoff, so an event can be applied up to about 3.6 days
+after it was received. And a job left `executing` by a dead node is rescued
+by `Oban.Lifeline` whatever the row's `gave_up_at`, so it can still claim and
+apply an event the sweeper has given up on.
+
+To find the events the sweeper gave up on:
+
+```sql
+SELECT provider_event_id, type, status, redrive_count, error, inserted_at, gave_up_at
+FROM billing_webhook_events
+WHERE gave_up_at IS NOT NULL
+ORDER BY gave_up_at DESC;
+```
+
+`error` holds the last attempt's error, when there was one. Fix the cause, then
+resend the event from the provider's dashboard. The resend re-enqueues the
+event, and the job's claim clears `gave_up_at`. It does not reset
+`redrive_count`: if that job fails all 8 attempts too, an event given up on
+after its 3 re-enqueues, for its age or as recorded before the upgrade is
+given up on again at the next sweep, without another redrive. Before you
+resend an old event, check in the provider's dashboard that it is still the latest one for
+that subscription. A resent event goes through the ordering checks like any
+other, and on a membership with no ordering stamp nothing stops an old one
+from undoing a later change.
+
+Not covered by the sweeper:
+
+- A membership with no ordering stamp (`last_provider_event_at`, set by every
+  event applied since 1.12) has nothing to order a redriven event against.
+  Within the 3 days, a redriven event older than a change made since can
+  still undo it.
+- A checkout completion applies the state Kiln retrieves from the provider,
+  and is not ordered. A replayed one older than the membership's stamp no
+  longer moves the stamp back, but one for a different subscription than the
+  stored one still sets the stamp to its own `created`, even an older one.
+- The console does not show recorded provider events. A given-up event shows
+  only in the SQL above, the server log and the telemetry event.
+
+Upgrading adds two columns to `billing_webhook_events` (`redrive_count` and
+`gave_up_at`, both nullable) and a partial index, in two additive migrations,
+and a new Oban queue, `billing_sweeper`
+([deploy.md](deploy.md#upgrading-a-deployment)). A rolling deploy is safe: an old node enqueues a non-unique job, which the claim
+then catches, and an event an old node records has no `redrive_count`, so if
+its job fails for good the sweeper gives up on it rather than replaying it.
+Rolling back is safe; the previous release reads neither column.
 
 ### Organizations
 
@@ -323,7 +509,7 @@ is `ignored` with the reason in its `error` column:
 |---|---|---|
 | `other_subscription` | The membership is entitling (`active` or `past_due`) and holds a subscription id, and the event is about a different subscription. Also a row that does not entitle, in the cases under the list below, and a cancellation (`customer.subscription.deleted`) for a subscription other than the stored one, on any row. | Logged at warning. It can mean the provider is still billing a subscription this membership no longer holds: check the provider's dashboard. A cancellation for a different subscription never overwrites the stored subscription id. |
 | `out_of_order` | The event is older than the last one applied to the **same** subscription. | Compared with the provider's `created` stamp, kept on the row. |
-| `comped_not_provider_managed` | The membership is `comped`. | Every provider event for a comped row is ignored. Comping a paying member does **not** cancel their provider subscription (#3156): cancel it in the provider's dashboard, or the person stays billed. |
+| `comped_not_provider_managed` | The membership is `comped`. | Every provider event for a comped row is ignored. A comp is therefore refused while the provider may still bill the row ([Comp a member](#comp-a-member)), but a membership comped before that check (1.12.0 and earlier) may still hold a live subscription: cancel it in the provider's dashboard, or the person stays billed. |
 
 Details worth knowing:
 
@@ -338,6 +524,18 @@ Details worth knowing:
 - An event with no subscription id, or an entitling row with no stored
   subscription id, is applied: there is nothing to compare, so the check fails
   open.
+- A member who rejoins after a cancellation restarts the same row
+  ([Choosing a tier you already hold](#choosing-a-tier-you-already-hold)),
+  which drops the old subscription's id and keeps the stamp. The old
+  subscription's late events still resolve to the row, by the membership id in
+  their metadata, but a cancellation for it is ignored (`other_subscription`)
+  and an event older than the stamp is `out_of_order`, so neither can cancel
+  or revive the new checkout. Two gaps remain. A non-cancelling event for the
+  old subscription created in the same second as the stamp is applied: the
+  restarted row is `incomplete`, and the equal-stamp rule below protects only a
+  `canceled` row. A row with no stamp, one that has had no provider event since
+  1.12.0 (canceled only by an uncomp, say), applies any non-cancelling event
+  for its old subscription after a restart.
 - Events with an equal `created` stamp are applied, except that an event that
   would not cancel never revives a `canceled` row at the same stamp. The
   provider's stamp has one-second resolution, so two *different* events in the
@@ -345,7 +543,10 @@ Details worth knowing:
 - Checkout completion applies the state Kiln just retrieved from the provider,
   which is newer than any event: it is exempt from the ordering check, and the
   row is stamped with the checkout event's own `created` (the provider's clock,
-  the same one later events carry), not the server's clock.
+  the same one later events carry), not the server's clock. A replayed checkout
+  older than the stored stamp, for the same subscription, still applies but
+  leaves the stamp where it was (#3159), so an event the stamp already outranks
+  stays out of order.
 - `invoice.payment_failed` carries its subscription id at
   `parent.subscription_details.subscription` on the newer Stripe API shape, and
   at `subscription` on the older one. Both are read.
@@ -409,8 +610,10 @@ failed, the reason in `error`. You need read access to the database.
 5. For a `failed` row, `error` holds the last attempt's error and the server
    log has a matching line, `billing webhook evt_… failed: …` (or `… raised: …`
    for an exception). Oban retries it (8 attempts, with backoff) and the row
-   becomes `processed` when one succeeds. Once the attempts run out it stays
-   `failed` until the provider redelivers the event.
+   becomes `processed` when one succeeds. Once the attempts run out, the
+   sweeper re-enqueues it, up to 3 times within 3 days of receipt, and then
+   gives up on it and sets `gave_up_at`
+   ([The webhook sweeper](#the-webhook-sweeper)).
 
 What you can run into:
 
@@ -420,10 +623,13 @@ What you can run into:
   nothing recorded). The provider's dashboard shows the response code for each
   delivery.
 - **A row stuck at `received`, `failed` or `processing`.** Its job has not
-  run, ran out of attempts, or the worker died. Resending the event from the
-  provider's dashboard re-enqueues a `received` or `failed` row, and a
-  `processing` one once its claim is more than 10 minutes old
-  ([Webhook delivery and recovery](#webhook-delivery-and-recovery)).
+  run, ran out of attempts, or the worker died. The sweeper re-enqueues such a
+  row at the first 10-minute sweep after it qualifies ([The webhook sweeper](#the-webhook-sweeper)
+  has the thresholds), up to 3 times while the event is less than 3 days old. If `gave_up_at` is set, the sweeper has stopped: the server log
+  has a `… was never processed and will not be retried …` line for it. Fix
+  the cause, then resend the event from the provider's dashboard, which
+  re-enqueues a `received` or `failed` row, and a `processing` one once its
+  claim is more than 10 minutes old.
 - **Old rows are all still there.** Nothing purges recorded events yet,
   `processed` and `ignored` ones included, and each row keeps the event's
   payload, which carries the customer's email and amounts.
@@ -544,7 +750,16 @@ membership." The account page has the **Manage billing** button, which opens
 the provider's billing portal for a billed member.
 
 Only an `incomplete` or `canceled` membership restarts: its status goes back to
-`incomplete` and the member gets a fresh checkout. Before this guard, a second
+`incomplete` and the member gets a fresh checkout. Restarting a `canceled`
+membership drops the old subscription's id, its period end and its "cancel at
+period end" flag, which describe a subscription that is over, so the old
+subscription's late events can no longer act on the new checkout
+([Late, repeated and foreign events](#late-repeated-and-foreign-events)).
+Restarting an `incomplete` one keeps them: that subscription is the checkout
+still in progress (a payment challenge, say), and it can still be paid. Either
+way the provider customer id stays, and the new checkout reuses it, so the
+member is not duplicated at the provider and **Manage billing** keeps
+working. Before this guard, a second
 click on a live membership reset it to `incomplete`, which dropped the audience
 until the webhook restored it (#2747). The guard is part of the `:start` action
 itself (an `upsert_condition` on the row's status), so a second browser tab

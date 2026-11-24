@@ -1,6 +1,6 @@
 defmodule KilnCMSWeb.ArtifactCompressionTest do
   @moduledoc """
-  Fired artifacts are gzipped by Kiln itself.
+  Fired artifacts and public HTML pages are gzipped by Kiln itself.
 
   Bandit compresses a response only when it carries no *strong* `ETag` (a
   strong validator promises byte-identical bodies, and the compressed body is
@@ -83,5 +83,32 @@ defmodule KilnCMSWeb.ArtifactCompressionTest do
     end
 
     assert fetch(url, [{"if-none-match", ~s("nope")}]).status == 200
+  end
+
+  # #2766: the delivered page used to carry a strong ETag, so Bandit sent it
+  # uncompressed, and its exact-match comparison missed every weak, listed or
+  # `*` validator a CDN or browser sent back.
+  test "a public HTML page is gzipped, weakly tagged and revalidates to a 304", %{base: base} do
+    url = "#{base}/#{published_page()}"
+
+    served = fetch(url, [{"accept-encoding", "gzip"}])
+
+    assert served.status == 200
+    assert Req.Response.get_header(served, "content-encoding") == ["gzip"]
+    assert served.body |> :zlib.gunzip() =~ "Kiln fires."
+
+    assert [etag] = Req.Response.get_header(served, "etag")
+    assert etag =~ ~r/^W\/".+"$/
+
+    opaque = String.replace_prefix(etag, "W/", "")
+
+    for presented <- [etag, opaque, ~s("nope", #{etag}), "*"] do
+      revalidated = fetch(url, [{"accept-encoding", "gzip"}, {"if-none-match", presented}])
+      assert revalidated.status == 304, "expected 304 for If-None-Match: #{presented}"
+      assert revalidated.body == ""
+    end
+
+    assert fetch(url, [{"if-none-match", ~s("nope")}]).status == 200
+    assert fetch(url, [{"if-none-match", ~s(W/"nope")}]).status == 200
   end
 end

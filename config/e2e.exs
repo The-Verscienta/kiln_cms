@@ -92,6 +92,8 @@ config :kiln_cms, :legacy_audiences_migration_on_boot, false
 config :kiln_cms, :sync_exposure_backfill_on_boot, false
 config :kiln_cms, :totp_secret_backfill_on_boot, false
 config :kiln_cms, :erasure_backfill_on_boot, false
+config :kiln_cms, :section_layout_sweep_on_boot, false
+config :kiln_cms, :stranded_release_item_sweep_on_boot, false
 config :kiln_cms, :private_args_scrub_on_boot, false
 
 config :kiln_cms, token_signing_secret: "e2eTokenSigningSecretForBrowserTests0"
@@ -157,3 +159,8 @@ config :kiln_cms, :collab_prototype, false
 # The breached-password check (#2240) calls a third party on every password
 # set; the browser suite must never depend on it.
 config :kiln_cms, KilnCMS.Accounts.BreachedPassword, enabled: false
+
+# Signs keyset pagination cursors (#3272). Without a secret Ash 3.38 encodes
+# cursors as JSON, which the untyped key of a reference or media field sort
+# (`CustomFieldQuery.Relations.sort_key/2`) cannot be. Production derives its own from SECRET_KEY_BASE (runtime/prod/web.exs).
+config :ash, keyset_signing_secret: "jYej/ofZdIEHVOvfnGVSthLTDsuKYDVWMrdqTUh3Fmc"
