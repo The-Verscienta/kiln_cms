@@ -103,6 +103,81 @@ defmodule KilnCMSWeb.FieldConditionsAdminTest do
     assert definition.required_when == nil
   end
 
+  test "the text tests are offered for a text or choice field, not a number", ctx do
+    field!(ctx.admin, %{name: "fca_count", label: "Count", field_type: :integer})
+    lv = reopen(ctx)
+
+    lv |> form("#new-field-form", field_definition: %{scopes: ["post"]}) |> render_change()
+    lv |> element("#new-field-conditions-visible_when-add") |> render_click()
+
+    op = "#new-field-conditions-visible_when-row-0-op option"
+
+    lv
+    |> form("#new-field-form",
+      field_definition: %{
+        scopes: ["post"],
+        conditions: %{visible_when: %{rows: rule_row(0, "fca_count", "eq", "")}}
+      }
+    )
+    |> render_change()
+
+    refute has_element?(lv, "#{op}[value=contains]")
+
+    # A forged text test on the number field falls back to "is".
+    lv
+    |> element("#new-field-form")
+    |> render_change(%{
+      field_definition: %{
+        scopes: ["post"],
+        conditions: %{visible_when: %{rows: rule_row(0, "fca_count", "contains", "1")}}
+      }
+    })
+
+    assert has_element?(lv, "#{op}[value=eq][selected]")
+
+    lv
+    |> form("#new-field-form",
+      field_definition: %{
+        scopes: ["post"],
+        conditions: %{visible_when: %{rows: rule_row(0, "fca_kind", "eq", "")}}
+      }
+    )
+    |> render_change()
+
+    for value <- ~w(contains not_contains starts_with ends_with),
+        do: assert(has_element?(lv, "#{op}[value=#{value}]"))
+
+    lv
+    |> form("#new-field-form",
+      field_definition: %{
+        scopes: ["post"],
+        conditions: %{visible_when: %{rows: rule_row(0, "fca_kind", "starts_with", "")}}
+      }
+    )
+    |> render_change()
+
+    # A text test on a choice field takes free text, not the option list.
+    assert has_element?(lv, "input#new-field-conditions-visible_when-row-0-value")
+
+    lv
+    |> form("#new-field-form",
+      field_definition: %{
+        scopes: ["post"],
+        name: "oth_note",
+        label: "Other note",
+        field_type: "string",
+        conditions: %{visible_when: %{rows: rule_row(0, "fca_kind", "starts_with", "oth")}}
+      }
+    )
+    |> render_submit()
+
+    definition =
+      Enum.find(CMS.field_definitions_for!(:post, authorize?: false), &(&1.name == "oth_note"))
+
+    assert definition.visible_when ==
+             %{"field" => "fca_kind", "op" => "starts_with", "value" => "oth"}
+  end
+
   test "several rows join with all or any", ctx do
     ctx.lv |> form("#new-field-form", field_definition: %{scopes: ["post"]}) |> render_change()
     ctx.lv |> element("#new-field-conditions-required_when-add") |> render_click()

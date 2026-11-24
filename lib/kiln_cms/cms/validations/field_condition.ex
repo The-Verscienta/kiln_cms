@@ -12,6 +12,8 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
       scalar type (`FieldDefinition.link_field_types/0`);
     * `gt` / `lt` only test a number or a date, and never a list of them
       (`multiple`) — a list has no single value to order;
+    * the text tests (`contains`, `not_contains`, `starts_with`,
+      `ends_with`) only test a text, URL or choice field;
     * the rules form no cycle through this field.
 
   The other direction is guarded too. **Destroying** a field other rules read
@@ -36,6 +38,7 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
 
   @rules [:visible_when, :required_when]
   @ordered_types [:integer, :float, :date, :datetime]
+  @text_types [:string, :text, :url, :select]
 
   @impl true
   def validate(%{action_type: :destroy} = changeset, _opts, _context) do
@@ -152,6 +155,14 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
           type: target.field_type
         )
 
+      true ->
+        op_problem(target, ops)
+    end
+  end
+
+  # What is wrong with the operators `ops` on a scalar `target`, if anything.
+  defp op_problem(target, ops) do
+    cond do
       Enum.any?(ops, &(&1 in Conditions.ordering_ops())) and
           target.field_type not in @ordered_types ->
         gettext("can't compare %{field} with greater/less than: it is not a number or a date",
@@ -160,6 +171,11 @@ defmodule KilnCMS.CMS.Validations.FieldCondition do
 
       Enum.any?(ops, &(&1 in Conditions.ordering_ops())) and Map.get(target, :multiple) == true ->
         gettext("can't compare %{field} with greater/less than: it holds a list",
+          field: target.name
+        )
+
+      Enum.any?(ops, &(&1 in Conditions.text_ops())) and target.field_type not in @text_types ->
+        gettext("can't match text in %{field}: it is not a text, URL or choice field",
           field: target.name
         )
 

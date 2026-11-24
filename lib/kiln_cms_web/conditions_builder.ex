@@ -18,6 +18,7 @@ defmodule KilnCMSWeb.ConditionsBuilder do
 
   @rules ~w(visible_when required_when)
   @ordered_types [:integer, :float, :date, :datetime]
+  @text_types [:string, :text, :url, :select]
 
   @type row :: %{String.t() => String.t()}
   @type rule_state :: %{
@@ -33,6 +34,9 @@ defmodule KilnCMSWeb.ConditionsBuilder do
 
   @doc "The field types `gt` / `lt` apply to."
   def ordered_types, do: @ordered_types
+
+  @doc "The field types the text tests (`contains`, `starts_with`, …) apply to."
+  def text_types, do: @text_types
 
   @doc "A state from a definition's stored rules (or empty for a new field)."
   @spec new(map() | nil) :: t()
@@ -168,16 +172,19 @@ defmodule KilnCMSWeb.ConditionsBuilder do
   defp posted_row(row, siblings) do
     field = to_string(row["field"] || "")
     type = type_of(siblings, field)
-    op = to_string(row["op"] || "eq")
-
-    op =
-      cond do
-        op not in Conditions.ops() -> "eq"
-        op in Conditions.ordering_ops() and type not in @ordered_types -> "eq"
-        true -> op
-      end
+    op = allowed_op(to_string(row["op"] || "eq"), type)
 
     %{"field" => field, "op" => op, "value" => to_string(row["value"] || "")}
+  end
+
+  # An operator the field's type can't take falls back to "eq".
+  defp allowed_op(op, type) do
+    cond do
+      op not in Conditions.ops() -> "eq"
+      op in Conditions.ordering_ops() and type not in @ordered_types -> "eq"
+      op in Conditions.text_ops() and type not in @text_types -> "eq"
+      true -> op
+    end
   end
 
   @doc "The field type of the sibling called `name`, or nil."
@@ -216,6 +223,9 @@ defmodule KilnCMSWeb.ConditionsBuilder do
     case op do
       op when op in ["empty", "not_empty"] ->
         %{"field" => field, "op" => op}
+
+      op when op in ["contains", "not_contains", "starts_with", "ends_with"] ->
+        %{"field" => field, "op" => op, "value" => to_string(value)}
 
       "in" ->
         values =

@@ -22,7 +22,13 @@ defmodule KilnCMS.CMS.Conditions do
       overlaps it);
     * `empty` / `not_empty` — no `value`;
     * `gt` / `lt` — numeric, or ISO-8601 date / datetime, comparison. False
-      when either side cannot be read as one.
+      when either side cannot be read as one;
+    * `contains` / `not_contains` / `starts_with` / `ends_with` — text
+      matching, ignoring case: `value` is a non-blank string, and the field's
+      value is a string holding it (anywhere, at the start, at the end). Both
+      sides are trimmed, as for `eq`. A value that is not a string (a number,
+      a map) holds nothing, and a list matches when any member does, so
+      `not_contains` holds only when no member contains `value`.
 
   ## Emptiness
 
@@ -38,7 +44,8 @@ defmodule KilnCMS.CMS.Conditions do
   combinators), and an `in` list at most 50 values.
   """
 
-  @ops ~w(eq neq in empty not_empty gt lt)
+  @text_ops ~w(contains not_contains starts_with ends_with)
+  @ops ~w(eq neq in empty not_empty gt lt) ++ @text_ops
   @value_ops ~w(eq neq gt lt)
   @max_depth 3
   @max_nodes 10
@@ -54,6 +61,10 @@ defmodule KilnCMS.CMS.Conditions do
   @doc "The operators that compare magnitude, valid on numeric and date fields only."
   @spec ordering_ops() :: [String.t()]
   def ordering_ops, do: ~w(gt lt)
+
+  @doc "The operators that match text, valid on text, URL and choice fields only."
+  @spec text_ops() :: [String.t()]
+  def text_ops, do: @text_ops
 
   @doc """
   A rule with string keys and string operators throughout, or `nil` for no
@@ -152,6 +163,12 @@ defmodule KilnCMS.CMS.Conditions do
        else: {:error, "needs a list of 1 to #{@max_in} values for in"}
   end
 
+  defp leaf_value(op, value) when op in @text_ops do
+    if is_binary(value) and String.trim(value) != "",
+      do: {:ok, 1},
+      else: {:error, "needs some text for #{op}"}
+  end
+
   defp leaf_value(op, nil) when op in ["empty", "not_empty"], do: {:ok, 1}
   defp leaf_value(op, _value), do: {:error, "takes no value for #{op}"}
 
@@ -229,6 +246,14 @@ defmodule KilnCMS.CMS.Conditions do
   defp test("in", actual, expected), do: Enum.any?(expected, &matches?(actual, &1))
   defp test("gt", actual, expected), do: compare(actual, expected) == :gt
   defp test("lt", actual, expected), do: compare(actual, expected) == :lt
+  defp test("contains", actual, expected), do: text_match?(actual, expected, &String.contains?/2)
+  defp test("not_contains", actual, expected), do: not test("contains", actual, expected)
+
+  defp test("starts_with", actual, expected),
+    do: text_match?(actual, expected, &String.starts_with?/2)
+
+  defp test("ends_with", actual, expected),
+    do: text_match?(actual, expected, &String.ends_with?/2)
 
   @doc "Whether `value` is empty by the module's definition."
   @spec empty?(term()) :: boolean()
@@ -251,6 +276,18 @@ defmodule KilnCMS.CMS.Conditions do
       true -> text(actual) != nil and text(actual) == text(expected)
     end
   end
+
+  # Text matching ignores case. `:greek` lowercases a word-final sigma to ς,
+  # as JavaScript's `toLowerCase` does, so the editor's evaluator agrees.
+  defp text_match?(actual, expected, match) when is_list(actual),
+    do: Enum.any?(actual, &text_match?(&1, expected, match))
+
+  defp text_match?(actual, expected, match) when is_binary(actual),
+    do: match.(fold(actual), fold(expected))
+
+  defp text_match?(_actual, _expected, _match), do: false
+
+  defp fold(value), do: value |> String.trim() |> String.downcase(:greek)
 
   # Only scalars have a text; a map (a media snapshot) equals nothing.
   defp text(value) when is_binary(value), do: String.trim(value)

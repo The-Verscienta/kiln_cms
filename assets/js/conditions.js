@@ -6,7 +6,8 @@
 // A rule is plain JSON: a leaf {field, op, value}, or {all: [..]} / {any: [..]}.
 // Pure: no DOM, no imports, so `node --test` loads it as it is.
 
-const OPS = ["eq", "neq", "in", "empty", "not_empty", "gt", "lt"]
+const TEXT_OPS = ["contains", "not_contains", "starts_with", "ends_with"]
+const OPS = ["eq", "neq", "in", "empty", "not_empty", "gt", "lt", ...TEXT_OPS]
 const VALUE_OPS = ["eq", "neq", "gt", "lt"]
 const MAX_DEPTH = 3
 const MAX_NODES = 10
@@ -49,6 +50,10 @@ function leaf(rule) {
   const value = rule.value === undefined ? null : rule.value
 
   if (VALUE_OPS.includes(rule.op)) return isScalar(value) ? 1 : null
+
+  if (TEXT_OPS.includes(rule.op)) {
+    return typeof value === "string" && value.trim() !== "" ? 1 : null
+  }
 
   if (rule.op === "in") {
     return Array.isArray(value) && value.length > 0 && value.length <= MAX_IN &&
@@ -124,6 +129,16 @@ function matches(actual, expected) {
   return t !== null && t === text(expected)
 }
 
+// Text matching ignores case; a value that is not a string holds no text,
+// and a list matches when any member does.
+const fold = (s) => s.trim().toLowerCase()
+
+function textMatch(actual, expected, match) {
+  if (Array.isArray(actual)) return actual.some((a) => textMatch(a, expected, match))
+  if (typeof actual !== "string") return false
+  return match(fold(actual), fold(expected))
+}
+
 // A date compares as days, a datetime as microseconds; the two never mix.
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 const DATETIME = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:[.,](\d+))?(Z|[+-]\d{2}(?::?\d{2})?)?$/
@@ -196,6 +211,10 @@ function test(op, actual, expected) {
     case "in": return expected.some((e) => matches(actual, e))
     case "gt": return compare(actual, expected) === "gt"
     case "lt": return compare(actual, expected) === "lt"
+    case "contains": return textMatch(actual, expected, (a, e) => a.includes(e))
+    case "not_contains": return !textMatch(actual, expected, (a, e) => a.includes(e))
+    case "starts_with": return textMatch(actual, expected, (a, e) => a.startsWith(e))
+    case "ends_with": return textMatch(actual, expected, (a, e) => a.endsWith(e))
     default: return false
   }
 }
