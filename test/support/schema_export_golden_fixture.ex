@@ -11,8 +11,9 @@ defmodule KilnCMS.SchemaExport.GoldenFixture do
     * `post` gets a custom field of each core kind (a `:string` list, typed
       lists of dates, integers and emails, both `:text` formats with
       `deliver_plain`, single and multiple `:select`/`:media`/`:reference`, a
-      single and a repeating `:group`), two of them in a tab section at less
-      than full width;
+      single and a repeating `:group`, and a `:flexible` field whose item types
+      include a nested one), two of them in a tab section at less than full
+      width;
     * `review`, a `KilnCMS.CMS.TypeDefinition`, gets the dependency plugin's
       `stars` field type, which declares its own
       `c:Kiln.FieldType.json_schema/1`, and a core `:string` field.
@@ -138,6 +139,8 @@ defmodule KilnCMS.SchemaExport.GoldenFixture do
     for {name, type} <- [{"title", :string}, {"no_index", :boolean}],
         do: define.(%{name: name, label: name, field_type: type, group_of_id: seo.id})
 
+    define_sections!(define)
+
     # The editor layout annotations (#2280): `x-kiln-width` and
     # `x-kiln-section-display` on the two "Overview" fields.
     CMS.create_field_section!(%{content_type: :post, name: "Overview", display: :tab},
@@ -170,6 +173,62 @@ defmodule KilnCMS.SchemaExport.GoldenFixture do
     end
 
     :ok
+  end
+
+  # A flexible field (#2282) with every shape the typed export must carry:
+  # per-type bounds, a media and a reference sub-field, a setting, and a nested
+  # flexible field. The `hero_cols` item type is there on purpose: its def name
+  # (`flex_post_sections_hero_cols`) is the one the nested `cols` union of
+  # `hero` is built from too, so the export has to tell them apart.
+  defp define_sections!(define) do
+    sections =
+      define.(%{
+        content_type: :post,
+        name: "sections",
+        label: "Sections",
+        field_type: :flexible,
+        min_items: 1,
+        max_items: 12
+      })
+
+    item = fn parent, name, extra ->
+      define.(
+        Map.merge(
+          %{name: name, label: name, field_type: :group, flex_of_id: parent.id},
+          extra
+        )
+      )
+    end
+
+    sub = fn parent, name, type, extra ->
+      define.(
+        Map.merge(%{name: name, label: name, field_type: type, group_of_id: parent.id}, extra)
+      )
+    end
+
+    hero = item.(sections, "hero", %{position: 0})
+    hero_cols = item.(sections, "hero_cols", %{position: 1})
+    quote_type = item.(sections, "quote", %{position: 2, max_items: 2})
+
+    sub.(hero, "headline", :string, %{position: 0})
+    sub.(hero, "image", :media, %{position: 1})
+    sub.(hero, "link", :reference, %{position: 2, target_type: "post"})
+
+    sub.(hero, "background", :select, %{
+      position: 3,
+      options: ["light", "dark"],
+      item_setting: true
+    })
+
+    cols = sub.(hero, "cols", :flexible, %{position: 4})
+
+    text = item.(cols, "text", %{position: 0})
+    sub.(text, "body", :string, %{})
+
+    sub.(hero_cols, "count", :integer, %{})
+
+    sub.(quote_type, "text", :text, %{position: 0, format: :plain})
+    sub.(quote_type, "cite", :string, %{position: 1})
   end
 
   @doc "The export the goldens hold: plain, or with the GraphQL annotations (#2290)."

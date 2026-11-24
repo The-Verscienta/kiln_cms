@@ -100,10 +100,10 @@ defmodule KilnCMS.CMS.FlexibleFieldsTest do
       assert FieldTypes.get(:flexible) == nil
     end
 
-    test "FieldKind serves a flexible field as a list of generic JSON items", %{
+    test "FieldKind serves a flexible field as a list of flexible items", %{
       flexible: flexible
     } do
-      assert FieldKind.item_kind_for(%{field_type: :flexible, multiple: true}) == :json
+      assert FieldKind.item_kind_for(%{field_type: :flexible, multiple: true}) == :flexible_item
       assert FieldKind.kind_for(flexible) == :list
     end
 
@@ -228,20 +228,28 @@ defmodule KilnCMS.CMS.FlexibleFieldsTest do
       end
     end
 
-    test "the schema export types a flexible field as an array of objects and skips item types",
+    test "the schema export types a flexible field as an array of its item union and skips item types",
          %{admin: admin, flexible: flexible} do
       CMS.update_field_definition!(flexible, %{max_items: 8}, actor: admin)
 
+      document = SchemaExport.json_schema()
+
       properties =
-        SchemaExport.json_schema()["$defs"][SchemaExport.content_def_name(:post)]["properties"][
-          "custom_fields"
-        ]["properties"]
+        document["$defs"][SchemaExport.content_def_name(:post)]["properties"]["custom_fields"][
+          "properties"
+        ]
 
       assert %{
                "type" => ["array", "null"],
-               "items" => %{"type" => "object"},
+               "items" => %{"$ref" => "#/$defs/" <> union},
                "x-kiln-max-items" => 8
              } = properties[flexible.name]
+
+      assert %{"oneOf" => [%{"$ref" => _}, %{"$ref" => _}], "x-kiln-flexible" => annotation} =
+               document["$defs"][union]
+
+      assert %{"content_type" => "post", "field" => field, "path" => [field]} = annotation
+      assert field == flexible.name
 
       refute Map.has_key?(properties, "hero")
       refute Map.has_key?(properties, "headline")

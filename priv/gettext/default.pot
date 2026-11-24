@@ -1386,6 +1386,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/field_selection.ex
 #, elixir-autogen, elixir-format
+msgid "%{sentence} Editors can't add new records from here."
+msgstr ""
+
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
 msgid "%{sentence} Typing a new name offers to create a draft %{type}."
 msgstr ""
 
@@ -3370,6 +3375,11 @@ msgstr ""
 msgid "Added to the working copy — publish changes to make it live"
 msgstr ""
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Adding new records"
+msgstr ""
+
 #: lib/kiln_cms/cms/field_types/link.ex
 #, elixir-autogen, elixir-format
 msgid "Address"
@@ -3745,6 +3755,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Also restrict sign-in"
 msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Also saved %{count} related record."
+msgid_plural "Also saved %{count} related records."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
@@ -7366,6 +7383,11 @@ msgstr ""
 msgid "Couldn't rotate that signing secret."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save a related record, so this record was not saved. Fix it below, then save again."
+msgstr ""
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't save that item."
@@ -7395,6 +7417,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/structure_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't save the new order."
+msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save the related record “%{title}”, so this record was not saved. Fix it below, then save again."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -13369,6 +13396,11 @@ msgstr ""
 msgid "Let this server prune these backups — only if that server is retired or this installation moved here."
 msgstr ""
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Lets an editor create a new draft and connect it in one step, here and from the other side of the relationship. Turn it off to have editors connect only records that already exist."
+msgstr ""
+
 #: lib/kiln_cms_web/live/site_search_live.ex
 #, elixir-autogen, elixir-format
 msgid "Letters, digits, hyphens and underscores."
@@ -16231,6 +16263,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "Offer this provider on the sign-in page"
+msgstr ""
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Offer “Add new” in the picker"
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/offline_controller.ex
@@ -20282,6 +20319,11 @@ msgstr ""
 msgid "Save or discard the changes to this record before closing it."
 msgstr ""
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Save or discard the changes to this record before removing it."
+msgstr ""
+
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save platform alerts"
@@ -20338,6 +20380,20 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Saved"
 msgstr ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved %{count} related record, but couldn't save another, so this record was not saved. Fix it below, then save again."
+msgid_plural "Saved %{count} related records, but couldn't save another, so this record was not saved. Fix it below, then save again."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Saved %{count} related record, but couldn't save “%{title}”, so this record was not saved. Fix it below, then save again."
+msgid_plural "Saved %{count} related records, but couldn't save “%{title}”, so this record was not saved. Fix it below, then save again."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format

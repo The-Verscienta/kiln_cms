@@ -537,6 +537,10 @@ package. What it contains:
   switching on `type`. Each has an `.unknown(type: String)` case: a block kind
   added by an upgrade or a plugin decodes to that case and the rest of the
   document still decodes.
+- Each flexible custom field is its own `enum` over its item types (named from
+  its `flex_*` def, for example `FlexPostSections`), switching on `_type`,
+  with an `.unknown` case for an item type added after you generated; the GraphQL
+  formats add a `.flexibleItem` case to `KilnCustomFieldValue`.
 - A string `enum` in the schema becomes a `String`-backed enum with an
   `unknown(String)` case, so a new option never breaks decoding.
   `:select` custom fields are plain `String`s (or `[String]` for a multiple
@@ -621,7 +625,10 @@ What it contains:
   doesn't know decodes to `Block.Unknown(type, raw)` while the rest of the
   document still decodes. `raw` is the block's `JsonObject`, and encoding an
   `Unknown` writes it back unchanged. `Document` and `DocumentSerializer` do
-  the same for content types, switching on `type`. The serializers name each
+  the same for content types, switching on `type`. A flexible custom field is
+  a sealed interface of its own with a `<Name>Serializer`, and an item type
+  the app doesn't know decodes to its `Unknown` class; the GraphQL formats add
+  a `FlexibleItemValue` class to `KilnCustomFieldValue`. The serializers name each
   class's serializer directly, so there is no reflection lookup and nothing
   for R8 to strip.
 - A string `enum` in the schema becomes a `@JvmInline value class` over

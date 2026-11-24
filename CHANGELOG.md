@@ -67,10 +67,16 @@ else.
   ([long form](docs/changelog/unreleased.md#edit-inline-option))
 - **The record card now edits the record: its title and plain fields are inputs with their own Save, Discard and status chip; a published record's edits go to its working copy, and the parent's Save does not save the card ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
   ([long form](docs/changelog/unreleased.md#edit-inline-card-save))
+- **The editor now warns before leaving with unsaved record-card edits, the parent's Save and workflow steps save those cards first and stop at the first failure, an "Add new" record opens its card, and a row with unsaved card edits cannot be removed or replaced ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283)).**
+  ([long form](docs/changelog/unreleased.md#edit-inline-dirty-guard))
 
 - **An item of a Flexible content field can hold a single image or a link to one record: pick them inside the card, saved as snapshots rebuilt from the record, masked when the reader can't see the record.**
   Re-saving such a record on the previous release fails validation; reads work.
   ([long form](docs/changelog/unreleased.md#flexible-media-reference))
+
+- **A reference field can turn off the picker's "Add new": untick "Offer “Add new” in the picker" in the fields admin (stored as `"add_new": false` in the field's `selection`) and editors connect only records that already exist, from both sides of the relationship ([#3222](https://github.com/The-Verscienta/kiln_cms/issues/3222)).**
+  No migration.
+  ([long form](docs/changelog/unreleased.md#reference-add-new-off))
 
 - **A role can be granted single item types of a Flexible content field (`custom_fields.<field>.<item type>`): its editors may edit, add and remove items of that type and no others ([#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282)).**
   Reordering needs the whole-field grant; the console shows a partly granted field read-only. No migration.
@@ -79,6 +85,10 @@ else.
 - **The reference picker shows each record's featured image as a small thumbnail in search results, picked rows and reverse-field rows ([#3265](https://github.com/The-Verscienta/kiln_cms/pull/3265)).**
   Always on; the generated `thumb` variant, a video's poster, or an original already that small, never a large original. No migration.
   ([long form](docs/changelog/unreleased.md#reference-picker-thumbnails))
+
+- **A Flexible content field is now typed in the GraphQL API and in the generated clients: a `FlexibleItemValue` per item, and a `oneOf` union per field in JSON Schema, OpenAPI, TypeScript, Swift, Kotlin and `kiln-types`. `?include=field_definitions.item_types` works on type definitions.**
+  Validating consumers: a flexible field's `items` was `{"type": "object"}` and is now a `$ref` to a union of closed item definitions.
+  ([long form](docs/changelog/unreleased.md#flexible-typed-export))
 
 ## [1.12.0] - 2026-11-21
 

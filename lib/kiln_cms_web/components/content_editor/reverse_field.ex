@@ -41,6 +41,7 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
+  alias KilnCMS.CMS.ReferenceSelection
   alias KilnCMS.CMS.ReverseFields
   alias KilnCMSWeb.ContentEditor.ReferencePicker
 
@@ -249,7 +250,7 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
 
           type ->
             [record.id] ==
-              CMS.ReferenceSelection.accepted_ids(selection, type, [record.id],
+              ReferenceSelection.accepted_ids(selection, type, [record.id],
                 actor: actor,
                 tenant: tenant
               )
@@ -462,7 +463,9 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
   end
 
   # The add control searches the source type as if it were a list field of
-  # this record: one type, any number, nothing to show of its own.
+  # this record: one type, any number, nothing to show of its own. A field
+  # whose selection turns "Add new" off (`"add_new" => false`) turns it off
+  # here too, so the relationship makes no new records from either side.
   defp picker_definition(reverse) do
     %FieldDefinition{
       name: "reverse-#{reverse.source_type}-#{reverse.field}",
@@ -471,8 +474,15 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
       target_type: reverse.source_type,
       target_types: [],
       multiple: true,
-      link_fields: []
+      link_fields: [],
+      selection: reverse_selection(reverse.definition)
     }
+  end
+
+  defp reverse_selection(definition) do
+    if ReferenceSelection.add_new?(Map.get(definition, :selection)),
+      do: nil,
+      else: %{"add_new" => false}
   end
 
   attr :row, :map, required: true

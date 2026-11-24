@@ -2031,8 +2031,12 @@ field and every write path apply it (#2285). You need the admin role.
    empty to not filter on that field. Only plain, non-private fields are
    listed; a value on a number or yes/no field is saved as a number or a
    boolean.
-6. Optionally, under **Let editors create what they type**, choose **Yes,
-   create a new *Type***. See
+6. Under **Adding new records**, **Offer “Add new” in the picker** is ticked
+   by default. Untick it to have editors connect only records that already
+   exist: the picker, and the reverse field on each target, then offer no
+   **Add new**. It is stored as `"add_new": false` and filters nothing.
+   With it ticked, optionally choose **Yes, create a new *Type*** under
+   **Let editors create what they type**. See
    [Let editors create what they type](#let-editors-create-what-they-type).
 7. Read the sentence at the end of the step, which restates the setting, for
    example *Editors are offered: Published Page records, tagged vegan, newest
@@ -2080,7 +2084,9 @@ relationship back to a plain value clears the selection.
    name to a value, `{"in": [...]}` or `{"not_eq": value}` (only non-private
    fields with a plain value, see the errors table below; not `text`, media,
    reference, group, geolocation or link). `create` is `{"type": "<one of the
-   target types>"}`. Conditions AND together.
+   target types>"}`. `add_new` is `false` to turn off the picker's **Add
+   new** on both sides (it may not stand beside `create`), and is left out
+   otherwise; it is not a condition. Conditions AND together.
 2. Write a reference as usual (editor, reverse field, JSON:API, GraphQL, MCP,
    import). A target the filter rejects fails the save on that field, for
    example `“Only a draft” isn't one of the records this field accepts.`
@@ -2274,6 +2280,9 @@ writes only that related record. The plan, with what is still to come, is
 7. Choose **Hide the record** (or press Escape) to close the card. A card with
    unsaved changes does not close: save or discard first.
 
+A record you make from the field with **Add new** opens its card straight
+away, so you can fill in its other fields without leaving the page.
+
 From code, it is one attribute on the field definition:
 
 ```elixir
@@ -2287,13 +2296,18 @@ What to know before relying on it:
 
 - **A related record is saved on its own.** The card has its own Save and its
   own status: the related record is never written through the parent form,
-  and there is no one transaction for both. **The parent's Save does not save
-  the card**, and the card's Save does not save the parent. They are separate
-  writes (as with "Add new"), so a failure on one leaves the other as it was.
-- **Unsaved card edits are lost when you leave the page.** Closing a card
-  with unsaved edits is refused, but navigating away, reloading or switching
-  version does not warn yet; that guard is the next part of the plan. Save
-  each card before leaving.
+  and there is no one transaction for both. **Saving the parent saves the cards
+  with unsaved edits first**, one at a time, each as its own write; the first
+  one that fails stops the run and the parent is not saved (it keeps what you
+  typed, and the cards already saved stay saved). Fix the card, then save
+  again. A card's own Save never saves the parent.
+- **Unsaved card edits are guarded like the parent's own.** A card with
+  unsaved changes turns on the editor's leave-page warning (closing the tab,
+  reloading, following a link), and it stays on until every such card is saved
+  or discarded. The parent's save indicator does not change, and nothing is
+  autosaved for the parent. A row with unsaved card edits cannot be removed or
+  replaced until you save or discard them. Restoring another version of the
+  parent is not guarded by this: save or discard the cards first.
 - **Draft or working copy.** A draft is updated in place. A published record
   gets `save_working_copy` with the title as `working_title`; its live text
   does not change until that record's own **Publish changes**.
@@ -2536,11 +2550,24 @@ What the definition rows are:
    every save so the item keeps its identity.
 
 3. Over JSON:API, a content write takes the same `custom_fields` shape. The
-   type-definitions endpoint doesn't include a flexible field's `item_types`
-   (`?include=field_definitions.item_types` is refused); read them with the
-   MCP `read_field_definitions` tool or from a `mix kiln.fields.export` file
-   (`flex_of_id` names the owning field; `item_setting` marks a setting on a
-   sub-field).
+   type-definitions endpoint includes a flexible field's item types:
+   `?include=field_definitions.item_types` (add `.group_fields` for their
+   sub-fields), down to the three flexible levels a definition may nest. They
+   are also in the MCP `read_field_definitions` tool and in a
+   `mix kiln.fields.export` file (`flex_of_id` names the owning field;
+   `item_setting` marks a setting on a sub-field).
+4. Over GraphQL, a flexible field is a `ListValue` whose `items` are
+   `FlexibleItemValue`s: `id`, `type` (the item type's name), `settings` (the
+   `item_setting` sub-fields) and `fields` (the rest), each a
+   `CustomFieldValue`. An item whose `_type` the site no longer defines is
+   left out. Read it with `fields(names: ["sections"])`; see
+   [the GraphQL guide](headless-graphql-api.md#read-custom-fields-typed-by-kind).
+5. In the typed export (`GET /api/schema`, `mix kiln.export.schema`, the
+   `kiln-types` CLI) each flexible field is a union over its item types, told
+   apart by `_type`: switch on it and keep a default branch for an item type
+   added after you generated. See
+   [api.md](api.md#schema-discovery-typed-clients) and
+   [native-apps.md](native-apps.md).
 
 Things to know:
 
