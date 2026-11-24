@@ -554,3 +554,8 @@ config :kiln_cms, KilnCMS.Backups.Retry, base_ms: 1, cap_ms: 4, margin_ms: 1_000
 # the caller, so a test sees it once the sweep returns. The tests of the
 # hand-off itself switch it back to `KilnCMS.Backups.Interrupts`' task.
 config :kiln_cms, KilnCMS.Backups, interrupts: :inline
+
+# Signs keyset pagination cursors (#3272). Without a secret Ash 3.38 encodes
+# cursors as JSON, which the untyped key of a reference or media field sort
+# (`CustomFieldQuery.Relations.sort_key/2`) cannot be. Production derives its own from SECRET_KEY_BASE (runtime/prod/web.exs).
+config :ash, keyset_signing_secret: "06muyXbZ82dU1MsRnKdDa4cI6pIq4YZFSyG2etImfJY"

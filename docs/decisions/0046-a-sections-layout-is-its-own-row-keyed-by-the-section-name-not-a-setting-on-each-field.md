@@ -25,9 +25,9 @@
   ([Fixed](../changelog/v1.11.0.md#section-layouts-kept-in-step) and
   [Breaking](../changelog/v1.11.0.md#field-sync-section-entries-stricter));
   the 2026-11-24 amendment in the Unreleased section
-  ([Upgrade notes](../changelog/unreleased.md#section-layout-sweep-upgrade),
-  [Changed](../changelog/unreleased.md#field-section-create-needs-a-carrier)
-  and [Fixed](../changelog/unreleased.md#section-layouts-swept)).
+  ([Upgrade notes](../changelog/v1.12.1.md#section-layout-sweep-upgrade),
+  [Changed](../changelog/v1.12.1.md#field-section-create-needs-a-carrier)
+  and [Fixed](../changelog/v1.12.1.md#section-layouts-swept)).
 
 ## The problem
 

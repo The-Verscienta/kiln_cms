@@ -59,7 +59,17 @@ defmodule KilnCMS.Search.QueryBudgetTest do
     # the config above from being put back.
     SearchHold.release_on_exit()
 
-    put_search_env(semantic: true, embedder: SlowEmbedder)
+    # Sections run one at a time unless a test sets 2 itself (#3149, #1348).
+    # This module is `async: false`, so the sandbox is shared and every
+    # section task reaches the test's one connection through its ownership
+    # proxy. At 2, two section tasks wait on that connection at once, and on
+    # a loaded host the proxy drops a waiter queued past `queue_target * 2`:
+    # a `DBConnection.ConnectionError` ("dropped from queue"), not a budget
+    # failure. At 1 the sections run in the test's process, so there is no
+    # second waiter, and `Budget.within_slots` still holds the reranker to
+    # its budget. The `for concurrency <- [1, 2]` loops below set 2 where
+    # fan-out is part of what they test.
+    put_search_env(semantic: true, embedder: SlowEmbedder, section_concurrency: 1)
     admin = admin()
 
     page = CMS.create_page!(%{title: "budgeted alpha", slug: "qb-page"}, actor: admin)
@@ -87,6 +97,12 @@ defmodule KilnCMS.Search.QueryBudgetTest do
     # embedding. The 6 s bound below leaves room for budget and grace.
     sections = [:pages, :posts, :entries]
 
+    # The pass at 2 keeps the queue-drop exposure the setup avoids (#3149):
+    # its section tasks share the test's connection, so a loaded host can
+    # still fail it with a `DBConnection.ConnectionError`. It stays because
+    # nothing else shows a fanned-out sweep fitting the half of the budget a
+    # missed embedding leaves: `BudgetDbTest` and `SearchApiPoolTest` run
+    # sections at 2, but not through `global_report/2` with an embedding miss.
     for concurrency <- [1, 2] do
       put_search_env(section_concurrency: concurrency, query_budget: 3_000)
 
