@@ -239,6 +239,12 @@ fields), correct the name, or remove the entry. A stored field the file does
 not list counts as a carrier, unless `--prune` would delete it. An entry at
 the default layout is never refused: it stores nothing.
 
+The import writes each owner's fields before its sections, so a file that
+adds a section's first field and that section's layout together imports in
+one run. A layout is only ever created for a section some field is in: the
+same rule refuses a `KilnCMS.CMS.create_field_section/2` call from code for
+a section with no field.
+
 Releases up to 1.10.1 accepted such a file and stored the layout.
 
 ### Moving a file to an older build
