@@ -317,6 +317,7 @@ defmodule KilnCMS.Application do
       enqueue_erasure_backfill()
       enqueue_private_args_scrub()
       enqueue_section_layout_sweep()
+      enqueue_stranded_release_item_sweep()
       {:ok, pid}
     end
   end
@@ -402,6 +403,16 @@ defmodule KilnCMS.Application do
   defp enqueue_section_layout_sweep do
     if Application.get_env(:kiln_cms, :section_layout_sweep_on_boot, true) do
       KilnCMS.CMS.SectionLayoutSweep.enqueue()
+    end
+  end
+
+  # Release items left `:pending` on releases that already went live, were
+  # rolled back or archived (#3072) are cancelled: see
+  # `KilnCMS.CMS.StrandedReleaseItemSweep`. Off in `:test` and `:e2e` for the
+  # committed-`oban_jobs` reason above.
+  defp enqueue_stranded_release_item_sweep do
+    if Application.get_env(:kiln_cms, :stranded_release_item_sweep_on_boot, true) do
+      KilnCMS.CMS.StrandedReleaseItemSweep.enqueue()
     end
   end
 

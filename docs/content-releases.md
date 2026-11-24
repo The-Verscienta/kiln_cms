@@ -143,9 +143,15 @@ config :kiln_cms, KilnCMS.CMS.Releases,
   transaction_timeout_ms: 120_000
 ```
 
-It is a guardrail rather than an invariant: the check is a count, so two
-simultaneous adds at the cap can overshoot by one. Nothing downstream depends on
-the exact number.
+The cap is exact, even for two editors adding at once or a bulk **Add to
+release** running beside a single add
+([#3073](https://github.com/The-Verscienta/kiln_cms/issues/3073)). Each add
+locks the release row `FOR UPDATE` inside its own transaction and counts the
+release's items under that lock, so adds to one release take turns and each
+sees every earlier add committed. The add that would go over is refused with
+*release is full (500 items); ship or split it*. Adds to different releases
+don't wait on each other. (Before this, two adds at one below the cap could
+both pass and leave the release one over.)
 
 ### One record, one open release
 
@@ -156,6 +162,80 @@ page to two different releases at the same moment is precisely the race a
 check-then-insert loses.
 
 Removing the item, or archiving the release, frees the record again.
+
+### Free content held by a release that already went live
+
+Before 1.11.0, an item added just as its release started going live could be
+left `pending` on the published release
+([#2740](https://github.com/The-Verscienta/kiln_cms/issues/2740)). Such an
+item never ships, and it keeps its record out of every other release: adding
+the record elsewhere is refused, and the release page offers no way to remove
+it, because a published release takes no more edits. Archiving the release
+would free it, but also ends its group rollback.
+
+You don't need to do anything about it. About ten minutes after each start, a
+job (`KilnCMS.CMS.StrandedReleaseItemSweep`) cancels every `pending` item on a
+**Published**, **Rolled back** or **Archived** release, on every site
+([#3072](https://github.com/The-Verscienta/kiln_cms/issues/3072)). The boot
+job runs at most once a day however often the node restarts, and a second
+run, by hand or otherwise, finds nothing to cancel. **Failed** releases
+are left alone: reopening one retries its pending items. So are releases a
+go-live or rollback is working on right now; the next run takes anything they
+leave behind. Each cancelled item is logged at info, with its site, release
+and that release's state, the record's type and id, and its action:
+
+```text
+stranded release item sweep cancelled item 9b2e… (publish page 4f1c…) of published release 7a0d… in org 0c5f…: it never shipped with that release; add the record to a release again if it should still go live
+```
+
+The record itself is unchanged. If it should still go live, add it to a
+release again. No webhook, audit entry or notification announces the cancel;
+the log line is the only record of it.
+
+To run it now, for example after a rolling deploy from 1.10.x or earlier that
+took longer than ten minutes, or after restoring a backup taken before 1.11.0,
+you need shell access to the running release:
+
+1. List what it would cancel:
+
+   ```bash
+   bin/kiln_cms rpc 'KilnCMS.Release.cancel_stranded_release_items(dry_run: true)'
+   ```
+
+   You see one line per item, then a summary:
+
+   ```text
+   Would cancel item 9b2e… (publish page 4f1c…) of published release 7a0d… in org 0c5f…
+   Stranded release items: would cancel 1, 0 failed
+   ```
+
+   Add `org_id: "<uuid>"` to look at one site only.
+2. Cancel them:
+
+   ```bash
+   bin/kiln_cms rpc 'KilnCMS.Release.cancel_stranded_release_items()'
+   ```
+
+   The lines now start with `Cancelled item`, and the summary reads
+   `Stranded release items: 1 cancelled, 0 failed`. The record can now join
+   another release.
+
+What can go wrong:
+
+- **`org_id is not a UUID: "acme"`.** The `org_id:` you passed is not a site
+  id. Nothing was read or cancelled.
+- **This needs the running application (its job queue, media fetching and
+  caches), and this node has not started it.** You used `bin/kiln_cms eval`.
+  Run the same call with `bin/kiln_cms rpc` against the running node.
+- **A summary with `1 failed`.** A release's items could not be read, or one
+  of them could not be cancelled. The log has a warning naming the release
+  and site (`stranded release item sweep could not cancel the items of
+  release ...`). What was cancelled before the failure stays cancelled, and
+  the other releases are still swept. The boot job retries a failed run up to
+  three times.
+
+To turn the boot job off, set `config :kiln_cms,
+:stranded_release_item_sweep_on_boot, false`. The test and e2e builds do.
 
 ### When the page is out of date
 
@@ -386,6 +466,7 @@ event the first sign is somebody noticing the campaign never went out.
 | `KilnCMS.CMS.Releases` | go-live and rollback — the transaction |
 | `KilnCMS.CMS.Workers.ReleaseWorker` | runs one go-live or rollback off-request |
 | `KilnCMS.CMS.ReleasePreview` | the overlay and its signed share token |
+| `KilnCMS.CMS.StrandedReleaseItemSweep` | the boot job that cancels `pending` items left on published, rolled-back or archived releases |
 
 States: `open ⇄ scheduled → publishing → published | failed`, with
 `failed → open` (reopen), `published → rolling_back → rolled_back`,
@@ -425,13 +506,23 @@ as `:trigger_no_longer_applies`. No policy admits a person to
 `AshObanInteraction` bypass.
 
 Item writes (`ReleaseItem`'s `add`, `set_action` and `cancel`) check the release
-inside their own transaction, reading it `FOR SHARE`
-([#2740](https://github.com/The-Verscienta/kiln_cms/issues/2740)). That lock
-conflicts with the row lock a claim's `UPDATE` takes, and not with another
-`FOR SHARE`, so concurrent adds don't wait on each other, but an add and a
+inside their own transaction, under a row lock
+([#2740](https://github.com/The-Verscienta/kiln_cms/issues/2740)): `set_action`
+and `cancel` read it `FOR SHARE`, and `add` reads it `FOR UPDATE`
+([#3073](https://github.com/The-Verscienta/kiln_cms/issues/3073)). Both
+conflict with the row lock a claim's `UPDATE` takes, so an item write and a
 claim serialize: an item that commits first is seen by the worker (its job is
-enqueued in the claim's transaction), and an add checked after the claim reads
-`publishing` and is refused. `mark_applied` and `mark_skipped` land only on a
+enqueued in the claim's transaction), and a write checked after the claim reads
+`publishing` and is refused. `FOR SHARE` does not conflict with itself, so
+concurrent cancels and action changes don't wait on each other. `FOR UPDATE`
+does, and that is the point: adds to one release take turns, and the size cap,
+counted after the lock in the same transaction, is exact. The cost is that
+adds to one release wait for each other (each holds the row for one count and
+one insert, typically milliseconds), and while an add is in flight a cancel,
+an action change, a rename, a schedule change, an archive or a go-live claim
+on the same release waits for it. The lock order that keeps this free of
+deadlocks is in `KilnCMS.CMS.Validations.ReleaseOpenForEdit`'s moduledoc.
+`mark_applied`, `mark_skipped` and `mark_cancelled` land only on a
 still-`pending` item. Inside the go-live transaction, `Releases` re-lists the
 `pending` items before marking the release published and rolls back with the
 failure reason above if any remain.

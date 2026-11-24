@@ -63,6 +63,56 @@ carries the reasoning.
   upgrade starts at 1.10.x or earlier.
   See [Remove section layouts older releases left behind](../extending-content.md#remove-section-layouts-older-releases-left-behind).
 
+<a id="stranded-release-item-sweep-upgrade"></a>
+
+- **About 10 minutes after boot, a job cancels the release items left `pending` on a published, rolled-back or archived release, and logs each one at info (#3072). Nothing to do, unless you upgrade from 1.10.x or earlier with a rolling deploy that runs longer than that: then run the sweep by hand once the deploy finishes. Rolling back is safe; what it cancelled stays cancelled.**
+  An item added to a release just as it went live could, before 1.11.0
+  (#2740), stay `pending` on the published release. It never ships, and it
+  keeps its record out of every other release. `KilnCMS.CMS.StrandedReleaseItemSweep`
+  frees those:
+  - **When.** Each boot queues it on the `default` queue, 10 minutes out,
+    deduplicated for a day. It is idempotent: a second run finds nothing.
+  - **What.** On every site, each `pending` item of a release in
+    `published`, `rolled_back` or `archived`. A `failed` release keeps its
+    items (reopening it retries them), and a release in `publishing` or
+    `rolling_back` belongs to its worker; the next run takes what it leaves.
+    The record itself is not touched.
+  - **Logged.** Each cancelled item is logged at info with its site,
+    release, the release's state, the record's type and id, and its action;
+    a run that cancelled something logs a summary,
+    `stranded release item sweep: 2 cancelled, 0 failed`. Nothing else
+    announces it: no webhook, audit entry or notification. A logged record
+    never shipped with its release; add it to a release again if it should
+    still go live.
+  - **Failures.** A release whose items can't be read, or one of whose items
+    can't be cancelled, is logged at warning and counted under `failed`; the
+    sweep goes on to the next release, and the job ends in error so Oban
+    retries it, up to 3 attempts.
+  - **A long rolling deploy from 1.10.x or earlier.** An old node still
+    serving after the new nodes' sweep ran can strand an item again, and the
+    job won't run a second time that day. Once every node is upgraded, run
+    it by hand. A deploy from 1.11.0 or later has no such window: those
+    releases already refuse an add that races a go-live.
+  - **By hand,** also after restoring a backup taken before 1.11.0. On the
+    running node, list first, then cancel; `org_id: "<uuid>"` limits it to
+    one site:
+
+    ```bash
+    bin/kiln_cms rpc 'KilnCMS.Release.cancel_stranded_release_items(dry_run: true)'
+    bin/kiln_cms rpc 'KilnCMS.Release.cancel_stranded_release_items()'
+    ```
+
+    Each item is printed (`Would cancel item … (publish page …) of published release … in org …`),
+    then `Stranded release items: would cancel 1, 0 failed`. Use `rpc`, not
+    `eval`; under `eval` the call refuses.
+  - **Turn it off** with `config :kiln_cms, :stranded_release_item_sweep_on_boot, false`.
+  - **Rolling back** is safe: `cancelled` is a status every supported
+    release knows, the one archiving already writes. Cancelled items are not
+    restored to `pending`.
+  The job can be removed in the next major release, once no supported
+  upgrade starts at 1.10.x or earlier.
+  See [Free content held by a release that already went live](../content-releases.md#free-content-held-by-a-release-that-already-went-live).
+
 ## Known issues
 
 <a id="release-preview-fragments"></a>
@@ -668,6 +718,53 @@ carries the reasoning.
     (`c:KilnCMS.Storage.fetch_range/3`).
   No migration, no configuration. Rolling the pin back is safe.
   ([#3069](https://github.com/The-Verscienta/kiln_cms/issues/3069))
+
+
+
+<a id="stranded-release-items-freed"></a>
+
+- **Content held by a release that already went live can join another release again: items left `pending` on a published, rolled-back or archived release are cancelled after each boot (#3072).**
+  Before 1.11.0 (#2740) an item could be stranded `pending` on a published
+  release, and through the "one record, one open release" index it kept its
+  record out of every other release, with no button to remove it. The only
+  way out was archiving the release, which also ended its group rollback. A
+  boot job now cancels such items; see the
+  [upgrade note](#stranded-release-item-sweep-upgrade).
+  - **For developers.** `ReleaseItem`'s `:mark_cancelled` is now a
+    compare-and-swap on `status == :pending`, like `:mark_applied`: an item
+    already applied, rolled back or cancelled is never rewritten, and the
+    miss is a stale-record error (`KilnCMS.CMS.Releases.stale?/1`). Archiving
+    a release (`Changes.CancelPendingReleaseItems`) takes that miss as
+    "already free" and still archives; any other error still aborts the
+    archive. `KilnCMS.CMS.ContentRelease.closed_states/0` names the states a
+    release never composes from again. `KilnCMS.Release.cancel_stranded_release_items/1`
+    runs the sweep from `rpc`.
+  No migration. One configuration key, `:stranded_release_item_sweep_on_boot`
+  (default `true`).
+
+<a id="release-cap-exact"></a>
+
+- **A release's item cap holds when adds run at once: two adds at one below the cap, or a bulk "Add to release" beside another add, no longer leave the release one item over (#3073).**
+  The cap was counted when the add was built, outside its transaction, and
+  adds read the release `FOR SHARE`, which doesn't make them wait for each
+  other. An add now locks the release row `FOR UPDATE` inside its
+  transaction and counts the items under that lock, so adds to one release
+  take turns and the one that would go over is refused with
+  *release is full (500 items); ship or split it* (the number is your
+  `max_items`).
+  - **The cost.** Adds to one release wait for each other, each holding the
+    row for one count and one insert. While an add is in flight, removing
+    an item, changing an item's action, renaming, scheduling, archiving or
+    claiming the same release waits for it. Adds to different releases
+    don't wait.
+  - **For developers.** `KilnCMS.CMS.Validations.ReleaseOpenForEdit` takes a
+    `lock:` option, `:share` (the default, for `:cancel` and `:set_action`)
+    or `:update` (for `:add`); its moduledoc has the lock order. An outer
+    transaction that wraps item writes must not lock two release rows, or
+    take `FOR SHARE` and then `FOR UPDATE` on the same release.
+  No migration, no configuration. Rolling the pin back is safe; the older
+  release counts outside the transaction again.
+
 
 <a id="comp-refused-while-billed"></a>
 

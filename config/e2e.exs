@@ -93,6 +93,7 @@ config :kiln_cms, :sync_exposure_backfill_on_boot, false
 config :kiln_cms, :totp_secret_backfill_on_boot, false
 config :kiln_cms, :erasure_backfill_on_boot, false
 config :kiln_cms, :section_layout_sweep_on_boot, false
+config :kiln_cms, :stranded_release_item_sweep_on_boot, false
 config :kiln_cms, :private_args_scrub_on_boot, false
 
 config :kiln_cms, token_signing_secret: "e2eTokenSigningSecretForBrowserTests0"
