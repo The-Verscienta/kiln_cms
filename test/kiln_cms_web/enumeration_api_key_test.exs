@@ -4,8 +4,9 @@ defmodule KilnCMSWeb.EnumerationApiKeyTest do
 
   A key is a random secret, not an address, so there is no account to find by
   guessing; what is guarded is the state of a key that *was* real. A key that
-  never existed, one that has expired and one that was revoked are refused with
-  the same status, challenge header and envelope, compared whole by
+  never existed, one that has expired, one that was revoked and one whose scope
+  this release does not know (#2604) are refused with the same status,
+  challenge header and envelope, compared whole by
   `KilnCMS.EnumerationAssertions`. None of them says whose key it was.
   """
   use KilnCMSWeb.ConnCase, async: true
@@ -59,5 +60,21 @@ defmodule KilnCMSWeb.EnumerationApiKeyTest do
         if(String.ends_with?(plaintext, "A"), do: "B", else: "A")
 
     assert_indistinguishable(fn -> request(plaintext) end, fn -> request(ghost) end, [])
+  end
+
+  # A scope a newer release minted (#2604): refused by the same filter, so it
+  # says no more than any other dead key.
+  test "a key whose scope this release does not know and a key that never existed are refused alike" do
+    {key, plaintext} = mint(future())
+    KilnCMS.NewerReleaseRows.api_key_scope!(key.id)
+
+    ghost =
+      String.slice(plaintext, 0..-2//1) <>
+        if(String.ends_with?(plaintext, "A"), do: "B", else: "A")
+
+    seen =
+      assert_indistinguishable(fn -> request(plaintext) end, fn -> request(ghost) end, [])
+
+    assert seen.status == 401
   end
 end

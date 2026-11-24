@@ -237,6 +237,92 @@ defmodule KilnCMSWeb.ApiKeyLiveTest do
     end
   end
 
+  # A key a newer release minted with a scope this one does not know (#2604).
+  describe "a scope this release does not know" do
+    alias KilnCMS.NewerReleaseRows
+
+    test "lists with its stored name and Not accepted, and can be revoked", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      key =
+        KilnCMS.Accounts.mint_api_key!(
+          admin.id,
+          "from-newer",
+          DateTime.add(DateTime.utc_now(), 30, :day),
+          actor: admin
+        )
+
+      NewerReleaseRows.api_key_scope!(key.id)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/api-keys")
+
+      row = lv |> element("#api-key-#{key.id}") |> render()
+      assert row =~ "Unrecognized scope (#{NewerReleaseRows.unknown()})"
+      assert row =~ "Not accepted"
+      assert row =~ "does not sign in here"
+      refute row =~ "Read-only"
+      refute row =~ "Expired"
+
+      html =
+        lv
+        |> element("#api-key-#{key.id} button", "Revoke")
+        |> render_click()
+
+      assert html =~ "Key revoked."
+      assert lv |> element("#api-key-#{key.id}") |> render() =~ "Revoked"
+      assert NewerReleaseRows.stored_row("api_keys", key.id)["revoked_at"]
+    end
+
+    test "an expired one reads Expired", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      key =
+        KilnCMS.Accounts.mint_api_key!(
+          admin.id,
+          "from-newer",
+          DateTime.add(DateTime.utc_now(), -1, :minute),
+          actor: admin
+        )
+
+      NewerReleaseRows.api_key_scope!(key.id)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/api-keys")
+
+      row = lv |> element("#api-key-#{key.id}") |> render()
+      assert row =~ "Expired"
+      refute row =~ "Not accepted"
+    end
+
+    # An erased owner's key signs in on no release, so the "a release that
+    # knows the scope will accept it again" hint would be false. The backfill
+    # revokes such keys; until it runs, the row reads like any other key
+    # refused for its owner.
+    test "an erased owner's key is not offered as one a newer release accepts", %{conn: conn} do
+      admin = authed_user(:admin)
+      owner = authed_user(:editor)
+
+      key =
+        KilnCMS.Accounts.mint_api_key!(
+          owner.id,
+          "erased-owner",
+          DateTime.add(DateTime.utc_now(), 30, :day),
+          actor: admin
+        )
+
+      NewerReleaseRows.api_key_scope!(key.id)
+
+      KilnCMS.Repo.query!("UPDATE users SET anonymized_at = now() WHERE id = $1", [
+        Ecto.UUID.dump!(owner.id)
+      ])
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/api-keys")
+
+      row = lv |> element("#api-key-#{key.id}") |> render()
+      refute row =~ "Not accepted"
+      refute row =~ "will accept it again"
+    end
+  end
+
   describe "audit log (#2241)" do
     test "minting and revoking from the console records both, in this site's log", %{conn: conn} do
       admin = authed_user(:admin)

@@ -2,11 +2,11 @@ defmodule KilnCMS.NewerReleaseRows do
   @moduledoc """
   Rows a newer release wrote, for testing how this one reads them (#2509).
 
-  A security event, a notification, a custom field definition (#2605) or a
-  section layout (#3060) whose type this release does not know cannot be
-  made through the resource (input stays strict), so it is inserted as raw
-  SQL, the way the newer release's code would have stored it. The stored
-  name is a string no code in this VM names as an atom.
+  A security event, a notification, a custom field definition (#2605), a
+  section layout (#3060) or an API key scope (#2604) this release does not
+  know cannot be made through the resource (input stays strict), so it is
+  inserted or set as raw SQL, the way the newer release's code would have
+  stored it. The stored name is a string no code in this VM names as an atom.
   """
 
   @unknown "zz_from_a_newer_release_2509"
@@ -162,11 +162,25 @@ defmodule KilnCMS.NewerReleaseRows do
   end
 
   @doc """
+  Set the stored `access` of API key `key_id` to `scope` (default
+  `unknown/0`), as a newer release that added a scope would have minted it
+  (#2604). The key is otherwise untouched: its secret still verifies. Returns
+  `key_id`.
+  """
+  @spec api_key_scope!(Ecto.UUID.t(), String.t()) :: Ecto.UUID.t()
+  def api_key_scope!(key_id, scope \\ @unknown) do
+    %{num_rows: 1} =
+      KilnCMS.Repo.query!("UPDATE api_keys SET access = $1 WHERE id = $2", [scope, dump(key_id)])
+
+    key_id
+  end
+
+  @doc """
   A row as stored, read past every Ash type: a map of column name to raw
   value (uuids as 16-byte binaries).
   """
   @spec stored_row(String.t(), Ecto.UUID.t()) :: %{String.t() => term()}
-  def stored_row(table, id) when table in ~w(security_events notifications) do
+  def stored_row(table, id) when table in ~w(security_events notifications api_keys) do
     %{columns: columns, rows: [row]} =
       KilnCMS.Repo.query!("SELECT * FROM #{table} WHERE id = $1", [dump(id)])
 

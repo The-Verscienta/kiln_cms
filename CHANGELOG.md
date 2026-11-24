@@ -62,6 +62,12 @@ else.
   No migration.
   ([long form](docs/changelog/unreleased.md#condition-text-ops))
 
+### Fixed
+
+- **An API key minted by a newer release with a scope this one doesn't know no longer breaks key lookups, the API keys page, revoke or erasure; it is refused at sign-in like a revoked key, and the security posture warns about it (#2604).**
+  No migration; rolling the pin back is safe. The posture JSON's `core.api_keys` check gains the fact `unrecognized_scope_keys`.
+  ([long form](docs/changelog/unreleased.md#api-key-unknown-scope))
+
 ## [1.12.1] - 2026-11-23
 
 Long form: [docs/changelog/v1.12.1.md](docs/changelog/v1.12.1.md) —
