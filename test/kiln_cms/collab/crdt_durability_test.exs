@@ -18,8 +18,14 @@ defmodule KilnCMS.Collab.CrdtDurabilityTest do
   @corrupt <<0xFF, 0xFF, 0xFF, 0xFF, 0x0F, 1, 2, 3>>
 
   setup do
-    Application.put_env(:kiln_cms, KilnCMS.Collab.Crdt, persist?: true)
-    on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Collab.Crdt, persist?: false) end)
+    # Both keys, so materialize stays off here and goes back to the test
+    # config's value after (config/test.exs); a one-key put_env drops the other.
+    Application.put_env(:kiln_cms, KilnCMS.Collab.Crdt, persist?: true, materialize?: false)
+
+    on_exit(fn ->
+      Application.put_env(:kiln_cms, KilnCMS.Collab.Crdt, persist?: false, materialize?: false)
+    end)
+
     :ok
   end
 
@@ -92,7 +98,7 @@ defmodule KilnCMS.Collab.CrdtDurabilityTest do
   end
 
   test "persistence off means no rows and no restore (test-suite default)" do
-    Application.put_env(:kiln_cms, KilnCMS.Collab.Crdt, persist?: false)
+    Application.put_env(:kiln_cms, KilnCMS.Collab.Crdt, persist?: false, materialize?: false)
 
     key = doc_key()
     {:ok, server} = Crdt.ensure_server(key, org_id())

@@ -276,8 +276,12 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
         outcome = quarantine(doc_key, stored)
         log_unrestorable(doc_key, stored, reason, outcome)
 
-        case {outcome, retries > 0 && current_state(doc_key)} do
-          {:gone, replaced} when is_binary(replaced) and replaced != stored ->
+        # Whatever the quarantine did, a row now under the real key that is
+        # not the bytes read was written by another server for the same key
+        # (in between, or right after the move): restore it, rather than
+        # start empty and let this room's next checkpoint overwrite it.
+        case retries > 0 && current_state(doc_key) do
+          replaced when is_binary(replaced) and replaced != stored ->
             restore_doc(doc_key, replaced, retries - 1)
 
           _ ->
