@@ -79,6 +79,9 @@ else.
 - **A large WordPress, Ghost or envelope import no longer loses its media after two minutes: each image download has its own 60-second deadline, a slow image is listed by URL, and an unresponsive host is skipped after three timeouts in a row (#2720).**
   WordPress and Ghost imports now print `media:` and `records:` progress. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#import-media-per-asset-deadline))
+- **A blank, space-padded or unparseable `PORT`, `POOL_SIZE`, `SMTP_PORT` or `S3_ENDPOINT_PORT` no longer crashes boot: it keeps the default and warns like every other numeric variable (#2728).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#runtime-integer-env-vars))
 
 ## [1.12.1] - 2026-11-23
 

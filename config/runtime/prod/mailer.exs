@@ -93,10 +93,18 @@ case mail_mode do
         [verify: :verify_none]
       end
 
+    # A blank, padded or unparseable SMTP_PORT keeps 587 and warns rather
+    # than crashing boot (#2728).
+    smtp_port =
+      case Env.integer_in("SMTP_PORT", 1, 65_535) do
+        {:ok, port} -> port
+        _unset_or_unrecognized -> 587
+      end
+
     config :kiln_cms, KilnCMS.Mailer,
       adapter: Swoosh.Adapters.SMTP,
       relay: smtp_host,
-      port: String.to_integer(System.get_env("SMTP_PORT") || "587"),
+      port: smtp_port,
       username: System.get_env("SMTP_USERNAME"),
       password: System.get_env("SMTP_PASSWORD"),
       tls: if(Env.flag("SMTP_TLS", true), do: :always, else: :never),

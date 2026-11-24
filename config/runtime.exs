@@ -68,8 +68,17 @@ if Env.truthy?("PHX_SERVER") do
   config :kiln_cms, KilnCMSWeb.Endpoint, server: true
 end
 
-config :kiln_cms, KilnCMSWeb.Endpoint,
-  http: [port: String.to_integer(System.get_env("PORT", "4000"))]
+# A blank, padded or unparseable PORT keeps 4000 and warns rather than
+# crashing boot with an ArgumentError (#2728): `PORT=` is what compose passes
+# through for a variable the host never set. Bounded to the TCP port range, so
+# a digit slip is refused by name instead of failing inside the listener.
+http_port =
+  case Env.integer_in("PORT", 1, 65_535) do
+    {:ok, port} -> port
+    _unset_or_unrecognized -> 4000
+  end
+
+config :kiln_cms, KilnCMSWeb.Endpoint, http: [port: http_port]
 
 # ## How this file is organized (#1322)
 #

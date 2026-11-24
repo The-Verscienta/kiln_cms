@@ -58,3 +58,10 @@ carries the reasoning.
   - **For library callers.** `KilnCMS.Media.Ingest.store_url/2` takes a new `:fetch_timeout` option (milliseconds, default no bound), and `KilnCMS.Portability.Import.run/2` takes `:media_fetch_timeout` (default `60_000`; anything but a positive integer means the default). A `:fetch_timeout` that is not `nil` or a positive integer raises `ArgumentError`. There is no CLI flag for either.
   - **Not fixed here.** An envelope import still does not sideload body images that resolve through the envelope's media manifest; they keep hotlinking the source. That is [#3326](https://github.com/The-Verscienta/kiln_cms/issues/3326).
   - **No migration; rolling the pin back is safe.** An older release goes back to the shared 120-second timeout.
+
+<a id="runtime-integer-env-vars"></a>
+
+- **Four numeric variables no longer crash boot on a value they cannot read (#2728).** `PORT`, `POOL_SIZE`, `SMTP_PORT` and `S3_ENDPOINT_PORT` were read with a bare `String.to_integer`, so `PORT=` (what compose passes through for a variable the host never set), `POOL_SIZE=" 20"` or `SMTP_PORT=587/tcp` stopped the release with an `ArgumentError` before anything else ran. They now go through `KilnCMS.Config.Env`, the reader every other numeric variable uses.
+  - **What each value does now.** Surrounding whitespace is trimmed, so `" 4000 "` is 4000. Blank is the same as unset and keeps the default silently: 4000, 10, 587 and 443. Anything else keeps the default and warns on stderr, and the warning is replayed through `Logger` and Sentry once the system is up.
+  - **Ports are bounded.** The three ports accept 1 to 65535; a value outside that range, such as `PORT=80800`, keeps the default and warns rather than failing inside the listener. `POOL_SIZE` accepts any positive integer up to 2147483647; `0` keeps 10 and warns.
+  - **No migration; rolling the pin back is safe.** An older release crashes on the same values again.
