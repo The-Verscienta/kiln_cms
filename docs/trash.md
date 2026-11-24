@@ -42,9 +42,12 @@ There are three places to do it. All three run the same soft delete.
    save fails, nothing is trashed and you stay in the editor (see below).
 
 The editor only saves what autosave would have saved. On a published
-document, Settings-tab changes wait for the **Save** button, and those are not
-saved first, the same as for Publish changes, Unpublish and the other workflow
-buttons. Save them before trashing if you want them back on restore.
+document, changes to anything but the title and body (the Settings tab, the
+category, tags, the featured image) wait for **Save draft**. While any of them
+is unsaved, **Move to trash** is refused with *Save your changes before
+changing this content's state.*, nothing is trashed, and your changes stay on
+screen. Click **Save draft**, then **Move to trash** again, and the trashed
+copy keeps them for a restore (#2336).
 
 ### Several at once
 
@@ -122,9 +125,11 @@ trash. Either way, a refused click says what happened (see
   (editor) An edit waiting for autosave failed validation, so the trash did not
   run. Fix the field it points to, or undo the edit, and try again.
 - *Save your changes before changing this content's state.* (editor) The
-  document has edits that autosave doesn't cover: it is in review or archived,
-  which don't autosave, or the editor is showing a save conflict. Save the
-  edits (or reload after a conflict) and try again.
+  document has edits that autosave doesn't cover: unsaved changes outside the
+  title and body of a published document, any edit to a document in review or
+  archived (neither autosaves), or the editor is showing a save conflict. Save
+  the edits with **Save draft** (or reload after a conflict) and try again.
+  Nothing was trashed.
 - *Someone else already moved this to the trash or deleted it.* (editor) You
   clicked **Move to trash** on a document another admin had already trashed
   or deleted since you opened it. Nothing more was done, and the editor takes

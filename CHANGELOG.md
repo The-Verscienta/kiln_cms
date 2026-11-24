@@ -127,6 +127,12 @@ else.
   Every page's `ETag` changes once on upgrade: one `200` per revalidating client.
   ([long form](docs/changelog/unreleased.md#public-page-weak-etag))
 
+- **Content editor: unsaved Settings on a live page survive the text autosave, and Unpublish, the other workflow buttons, Move to trash, Mark reviewed and Parent refuse until you save them instead of dropping them ([#2776](https://github.com/The-Verscienta/kiln_cms/issues/2776), [#2777](https://github.com/The-Verscienta/kiln_cms/issues/2777)).**
+  ([long form](docs/changelog/unreleased.md#editor-unsaved-settings-kept))
+
+- **Content editor: when a co-editor saves, an idle editor shows their save in place, and one holding unsaved text or a setting they also changed gets the conflict banner at once, so its next edit no longer overwrites theirs ([#2775](https://github.com/The-Verscienta/kiln_cms/issues/2775)).**
+  ([long form](docs/changelog/unreleased.md#editor-peer-save-rebuild))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —

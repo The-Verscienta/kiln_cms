@@ -275,3 +275,84 @@ carries the reasoning.
   - **For developers.** `KilnCMSWeb.Tenant.host_cache_keys/1` lists the host-cache keys an org can be cached under, and `KilnCMS.Accounts.Changes.BustSiteUrls` runs on `Organization :update`.
   No migration, no configuration.
   ([#2766](https://github.com/The-Verscienta/kiln_cms/issues/2766), [#3194](https://github.com/The-Verscienta/kiln_cms/issues/3194))
+
+
+
+<a id="editor-unsaved-settings-kept"></a>
+
+- **Content editor: unsaved Settings edits on a live page are no longer thrown away by the text autosave or by a button that reloads the form (#2776, #2777).**
+  - **Who is affected.** Editors of a published page, post or entry. Its
+    title and body autosave into the working copy, but every other field
+    (the Settings tab, the category, tags, the featured image) waits for
+    **Save draft**, and the save line reads *Unsaved changes* meanwhile.
+  - **The text autosave (#2776).** Each autosave rebuilt the form from the
+    saved record, so two seconds after you typed in the body, the settings
+    you had changed reverted on screen while the editor still said they were
+    unsaved, and a later **Save draft** posted the reverted values. Now the
+    settings you changed are put back on the rebuilt form, stay on screen
+    and unsaved, and **Save draft** saves them.
+  - **Buttons that reload the form (#2777).** With unsaved settings,
+    **Unpublish** and the other workflow buttons, **Move to trash**, **Mark
+    reviewed** and choosing a new **Parent** rebuilt the form and dropped
+    them without a word. Now they refuse, change nothing, and leave the
+    edits on screen. Workflow buttons and the trash say *Save your changes
+    before changing this content's state.*; Mark reviewed and Parent,
+    which don't change the state, say the new *Save your changes first.*
+    Mark reviewed and Parent now also save text still waiting for
+    autosave first, as the workflow buttons already did, and are refused by
+    what refuses those: unsaved edits on an in-review or archived document,
+    or a save conflict. **Publish changes** already refused with
+    *Save draft first, then publish your changes.*; the **Publish** in the
+    lost-update panel and the change-severity question now refuse too.
+    **Discard the changes** still discards, and now clears the unsaved
+    marker with the edits, so a later **Publish changes** is no longer
+    refused for edits that are gone.
+  - The trash half of [#2336](https://github.com/The-Verscienta/kiln_cms/issues/2336) is
+    this refusal; its link from the Trash section to the Trash page is still open.
+  - See [The working copy](../working-copy.md#using-it), [Trash and
+    restore](../trash.md#from-the-editor) and [Take content
+    down](../take-content-down.md#unpublish-a-page-from-its-editor).
+  No migration, no configuration. One new message, *Save your changes first.*,
+  translated in `es` and `fr`.
+  ([#2776](https://github.com/The-Verscienta/kiln_cms/issues/2776), [#2777](https://github.com/The-Verscienta/kiln_cms/issues/2777))
+
+<a id="editor-peer-save-rebuild"></a>
+
+- **Content editor: a co-editor's save is shown to an idle editor in place, and raised as a conflict at once for one with unsaved edits, instead of being overwritten later (#2775).**
+  - **What went wrong.** With the collaboration prototype off (the
+    default), two people with a document open are two independent writers,
+    held apart by the optimistic lock. When one saved, the other's idle
+    editor took the new lock version but kept its old form. Its next edit
+    posted that whole old form, passed the lock, and wrote over the first
+    person's title, body and settings, with no conflict shown.
+  - **Now**, what an editor does with a co-editor's save depends on what it
+    holds that is not saved:
+    - nothing: the form, body and settings are rebuilt from the save, so
+      you see it in place and your next edit builds on it;
+    - unsaved text (or any edit on an in-review or archived document): the
+      *Someone else saved changes to this content* banner at once, rather
+      than at your next save;
+    - unsaved settings over a co-editor's text-only save: their text is
+      shown and your settings are kept, still unsaved; if they changed a
+      setting too, the banner instead, so your next Save can't revert it;
+    - something open that was worked out from the saved document (the
+      Markdown view, the Publish-changes or severity question, an AI
+      proposal, the internal-links or content-intelligence panel, an inline
+      record card being edited or saved, a version-restore preview):
+      nothing, so it is not closed under you, and your next save meets the
+      lock as before.
+    A write that does not move the lock (a transition, a parent move, Mark
+    reviewed) raises no banner. Under the collaboration prototype, an editor
+    whose text another editor persists gets no banner, and a rebuild does
+    not remount the rich-text editors.
+  - **Known limits.** A field the cursor is in keeps its on-screen value
+    across a rebuild (LiveView does not overwrite a focused input), and a
+    body keystroke still in the rich-text editor's short delay lands on the
+    rebuilt body. Mark reviewed and a parent move still don't tell other
+    open editors.
+  - **For operators.** A rebuild that fails to read the record logs a
+    warning, `Editor could not take in a peer's save of <kind> <id>: …`, and
+    leaves that editor as it was.
+  - See [When a co-editor saves while you have the document open](../working-copy.md#when-a-co-editor-saves-while-you-have-the-document-open).
+  No migration, no configuration.
+  ([#2775](https://github.com/The-Verscienta/kiln_cms/issues/2775))

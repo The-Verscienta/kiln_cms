@@ -108,6 +108,51 @@ defmodule KilnCMSWeb.ContentEditorTreeTest do
     refute has_element?(lv, "#parent-field option[value='#{mid.id}']")
   end
 
+  # #2777: the move rebuilds the form, so unsaved Settings on a live page stop
+  # it rather than vanishing.
+  test "a move asks for a Save while a live page's Settings are unsaved", %{conn: conn} do
+    admin = authed_user(:admin)
+    parent = page(admin, "Section")
+    child = CMS.publish_page!(page(admin, "Leaf"), %{}, actor: admin)
+
+    {:ok, lv, _html} = open(conn, admin, child)
+
+    lv
+    |> form("#page-editor")
+    |> render_change(%{
+      "form" => %{"seo_title" => "Not saved yet"},
+      "_target" => ["form", "seo_title"]
+    })
+
+    html =
+      lv
+      |> element("#parent-field select")
+      |> render_change(%{"parent_id" => parent.id})
+
+    assert html =~ "Save your changes first."
+    assert is_nil(reload(child).parent_id)
+    assert has_element?(lv, ~s(input[name="form[seo_title]"][value="Not saved yet"]))
+  end
+
+  test "a draft's title waiting for the autosave is saved before the move", %{conn: conn} do
+    admin = authed_user(:admin)
+    parent = page(admin, "Section")
+    child = page(admin, "Leaf")
+
+    {:ok, lv, _html} = open(conn, admin, child)
+
+    lv |> form("#page-editor") |> render_change(%{"form" => %{"title" => "Renamed leaf"}})
+
+    lv
+    |> element("#parent-field select")
+    |> render_change(%{"parent_id" => parent.id})
+
+    moved = reload(child)
+    assert moved.parent_id == parent.id
+    assert moved.title == "Renamed leaf"
+    assert has_element?(lv, ~s(input[name="form[title]"][value="Renamed leaf"]))
+  end
+
   test "a refused move surfaces its reason rather than a generic failure", %{conn: conn} do
     admin = authed_user(:admin)
     deepest = List.last(chain(admin, ContentTree.max_depth()))

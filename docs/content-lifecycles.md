@@ -380,6 +380,18 @@ It is a button of its own rather than something that rides on Save, for the same
 reason `last_reviewed_at` is not in `default_accept`: an editor who saves a typo
 fix has not re-read the piece.
 
+Clicking it reloads the form from the saved record, so it deals with your
+unsaved edits first, the way a workflow button does (#2777). Text still waiting
+for autosave is saved, and then the review is recorded. Edits Kiln can't save
+for you stop it instead: changes outside the title and body of a published
+page (they wait for **Save draft**), any edit to a page in review or archived
+(neither autosaves), or a save conflict. The flash reads *Save your changes
+first.*, the review is not recorded, and your edits stay on screen. Save them
+(after a conflict, choose **Reload latest**), then click **Mark reviewed**
+again. If the pending text fails validation, the
+flash reads *Couldn't save your latest changes — fix the errors below, then try
+again.*
+
 ## Reading it
 
 Health is a normal field on the existing reads — there is no lifecycle

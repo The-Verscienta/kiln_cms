@@ -322,6 +322,28 @@ defmodule KilnCMSWeb.MoveToTrashTest do
       assert trashed.title == "After"
     end
 
+    # A live document's Settings do not autosave, and the trash would leave
+    # them unsaved for good (#2777, #2336): it asks for a Save instead.
+    test "unsaved Settings on a live document stop the trash", %{conn: conn} do
+      admin = authed_user(:admin)
+      page = published_page!(admin, "Live doc")
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/content/page/#{page.id}")
+
+      lv
+      |> form("#page-editor")
+      |> render_change(%{
+        "form" => %{"seo_title" => "Not saved yet"},
+        "_target" => ["form", "seo_title"]
+      })
+
+      html = lv |> element("#inspector-move-to-trash") |> render_click()
+
+      assert html =~ "Save your changes before changing this content&#39;s state."
+      refute trashed?(page, admin)
+      assert has_element?(lv, ~s(input[name="form[seo_title]"][value="Not saved yet"]))
+    end
+
     test "an edit that cannot be saved stops the trash", %{conn: conn} do
       admin = authed_user(:admin)
       page = page!(admin, "Keep me")
