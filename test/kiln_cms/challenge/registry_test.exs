@@ -8,6 +8,11 @@ defmodule KilnCMS.Challenge.RegistryTest do
 
   `async: false`: `KilnCMS.ChallengeFixtures.enable!/1` writes application env
   and an OS variable, both node-wide, and the descriptor is memoised node-wide.
+
+  The account axis's window is pinned (`pin_windows!/1`, #2649): a test that
+  spends it and then expects the provider to be asked would otherwise see the
+  gate's charge land in a fresh, free window whenever a quarter hour fell in
+  between, and never reach the provider.
   """
   use KilnCMS.DataCase, async: false
 
@@ -42,6 +47,10 @@ defmodule KilnCMS.Challenge.RegistryTest do
       Challenge,
       Keyword.merge(Application.get_env(:kiln_cms, Challenge, []), opts)
     )
+  end
+
+  setup do
+    pin_windows!([:account])
   end
 
   defp clear_unusable_log,
@@ -338,6 +347,7 @@ defmodule KilnCMS.Challenge.RegistryTest do
 
         address = email()
         spend_account(address)
+        refute Challenge.outage?()
         assert Gate.sign_in(context(client_ip()), address, token) == {:refuse, :failed}
         assert Gate.registration(context(client_ip()), token) == {:refuse, :failed}
         assert Gate.form(%{challenge: :always}, token) == {:refuse, :failed}

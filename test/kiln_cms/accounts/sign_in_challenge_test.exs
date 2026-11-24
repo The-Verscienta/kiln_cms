@@ -10,6 +10,10 @@ defmodule KilnCMS.Accounts.SignInChallengeTest do
   failure counter behind the address axis counts credential failures only.
 
   `async: false`: `KilnCMS.ChallengeFixtures.enable!/1` writes node-wide config.
+
+  The account and address windows are pinned (`pin_windows!/1`, #2649): these
+  tests spend an axis and then expect a challenge, and a window boundary in
+  between would make the next attempt free.
   """
   use KilnCMS.DataCase, async: false
 
@@ -83,6 +87,7 @@ defmodule KilnCMS.Accounts.SignInChallengeTest do
   end
 
   setup do
+    pin_windows!([:account, :ip])
     enable!()
     :ok
   end

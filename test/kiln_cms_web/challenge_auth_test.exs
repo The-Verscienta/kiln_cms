@@ -10,6 +10,10 @@ defmodule KilnCMSWeb.ChallengeAuthTest do
   look like.
 
   `async: false`: `KilnCMS.ChallengeFixtures.enable!/1` writes node-wide config.
+
+  The account and address windows are pinned (`pin_windows!/1`, #2649): these
+  tests spend an axis and then expect a challenge, and a window boundary in
+  between would make the next attempt free.
   """
   use KilnCMSWeb.ConnCase, async: false
 
@@ -70,6 +74,7 @@ defmodule KilnCMSWeb.ChallengeAuthTest do
   defp widget?(html), do: html =~ ~s(phx-hook="Challenge")
 
   setup do
+    pin_windows!([:account, :ip])
     enable!()
     :ok
   end
