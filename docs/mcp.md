@@ -209,6 +209,12 @@ written.
 > that edit is recorded `notable`. Per call — there is no batch tool. See
 > [json-api.md](json-api.md#change-severity-how-much-an-edit-matters).
 
+> **Change note: `change_note`.** The same update tools accept an optional
+> `change_note`, a short plain-text reason stored on the edit's version and
+> shown in the editor's History. Never required over MCP, even on a type whose
+> editor asks for one. See
+> [json-api.md](json-api.md#change-note-why-an-edit-was-made).
+
 > **Body: `body_markdown`.** The create/update tools take the body either as
 > `block_tree` (typed block maps) or as `body_markdown` — plain Markdown, the
 > shape a model usually has already, converted server-side into the same

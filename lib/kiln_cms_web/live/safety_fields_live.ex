@@ -13,6 +13,11 @@ defmodule KilnCMSWeb.SafetyFieldsLive do
 
   ## What the page offers
 
+  Per type, also **Ask why on every change**: the site's
+  `change_note_types` (`KilnCMS.CMS.ChangeNotes`, stored on
+  `KilnCMS.CMS.SiteEditorialSettings`). Saved by the same Save, through
+  `KilnCMS.CMS.EditorialSettings.save/2`, which keeps that row's other answers.
+
   Per type: an "every field" switch (stored as `"*"`), otherwise a checkbox per
   editorial attribute and per custom field. Computed custom fields are not
   offered: the daily refresh rewrites them, and a listed one would record a
@@ -26,6 +31,7 @@ defmodule KilnCMSWeb.SafetyFieldsLive do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.ContentTypes
+  alias KilnCMS.CMS.EditorialSettings
   alias KilnCMS.CMS.Severity
   alias KilnCMS.CMS.VersionFields
 
@@ -47,17 +53,22 @@ defmodule KilnCMSWeb.SafetyFieldsLive do
     org = socket.assigns.current_org
 
     if CMS.can_save_site_safety_fields?(actor, %{fields: %{}}, tenant: org) do
-      case CMS.save_site_safety_fields(%{fields: build_fields(socket, params)},
-             actor: actor,
-             tenant: org,
-             context: socket.assigns.security_context
-           ) do
-        {:ok, _row} ->
-          {:noreply,
-           socket
-           |> put_flash(:info, gettext("Safety fields saved."))
-           |> load_settings()}
-
+      with {:ok, _row} <-
+             CMS.save_site_safety_fields(%{fields: build_fields(socket, params)},
+               actor: actor,
+               tenant: org,
+               context: socket.assigns.security_context
+             ),
+           {:ok, _settings} <-
+             EditorialSettings.save(%{change_note_types: build_note_types(socket, params)},
+               actor: actor,
+               tenant: org
+             ) do
+        {:noreply,
+         socket
+         |> put_flash(:info, gettext("Safety fields saved."))
+         |> load_settings()}
+      else
         {:error, error} ->
           {:noreply, put_flash(socket, :error, error_message(error))}
       end
@@ -96,6 +107,15 @@ defmodule KilnCMSWeb.SafetyFieldsLive do
     carried = carried(socket.assigns.row, offered)
 
     Map.merge(carried, chosen)
+  end
+
+  # The types that ask why: the offered ones ticked, plus any the row lists
+  # that the page did not offer (an archived dynamic type), kept as they were.
+  defp build_note_types(socket, params) do
+    offered = MapSet.new(socket.assigns.types, & &1.name)
+    ticked = params |> checked("note") |> Enum.filter(&MapSet.member?(offered, &1))
+    kept = Enum.reject(socket.assigns.note_types, &MapSet.member?(offered, &1))
+    Enum.uniq(kept ++ ticked)
   end
 
   defp chosen(offered, all, named) do
@@ -140,6 +160,7 @@ defmodule KilnCMSWeb.SafetyFieldsLive do
     |> assign(:row, row)
     |> assign(:types, types)
     |> assign(:selected, (row && row.fields) || %{})
+    |> assign(:note_types, EditorialSettings.change_note_types(org))
     |> assign(:severities, Severity.severities())
     |> assign(:form, to_form(%{}, as: :safety))
   end
@@ -262,6 +283,21 @@ defmodule KilnCMSWeb.SafetyFieldsLive do
             <span class="font-mono text-xs text-base-content/50">{type.name}</span>
             <span class="text-xs text-base-content/60">{source_label(type)}</span>
           </div>
+
+          <label class="mt-3 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              id={"safety-note-#{type.name}"}
+              name="safety[note][]"
+              value={type.name}
+              checked={type.name in @note_types}
+              class="size-4 rounded border border-base-content/30 accent-primary"
+            />
+            {gettext("Ask why on every change")}
+            <span class="text-xs text-base-content/70">
+              {gettext("on a draft's Save and on Publish changes, kept in History")}
+            </span>
+          </label>
 
           <label class="mt-3 flex items-center gap-2 text-sm">
             <input

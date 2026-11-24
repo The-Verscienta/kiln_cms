@@ -2370,6 +2370,14 @@ defmodule KilnCMS.CMS.Content do
           constraints: [one_of: [:critical, :notable, :routine]],
           allow_nil?: true
 
+        # Why the edit was made (`KilnCMS.CMS.ChangeNotes`): stored on the
+        # version row of the edit itself, filled from
+        # `changeset.context[:paper_trail_metadata]` by `Changes.RecordChangeNote`.
+        # Nullable: `nil` is an edit nobody explained.
+        metadata :change_note, :string,
+          constraints: [max_length: KilnCMS.CMS.ChangeNotes.max_length()],
+          allow_nil?: true
+
         mixin({KilnCMS.CMS.VersionPolicies, :policies, []})
         version_extensions(authorizers: [Ash.Policy.Authorizer])
       end
@@ -2896,6 +2904,11 @@ defmodule KilnCMS.CMS.Content do
           # the edit's version row. Optional: omitted, a safety edit is recorded
           # `:notable`. Ignored when no safety field changed.
           argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
+          # Why this edit was made (`KilnCMS.CMS.ChangeNotes`), stored on the
+          # edit's version row. Optional, unless the editor asks for it.
+          argument :change_note, :string,
+            constraints: [max_length: KilnCMS.CMS.ChangeNotes.max_length()]
+
           # `If-Match` / `expected_lock_version` (docs/json-api.md, "Concurrency"):
           # refused with a 412 unless the row is still the version the client
           # read. A no-op without either.
@@ -3177,6 +3190,11 @@ defmodule KilnCMS.CMS.Content do
           # the edit's version row. Optional: omitted, a safety edit is recorded
           # `:notable`. Ignored when no safety field changed.
           argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
+          # Why this edit was made (`KilnCMS.CMS.ChangeNotes`), stored on the
+          # edit's version row. Optional, unless the editor asks for it.
+          argument :change_note, :string,
+            constraints: [max_length: KilnCMS.CMS.ChangeNotes.max_length()]
+
           # The lost-update guard's decisions (#1815): `%{"seo_title" =>
           # "mine" | "theirs", ...}` or `%{"*" => ...}` for a key the live page
           # changed after the draft was saved. See `Changes.PromoteWorkingCopy`.
@@ -3304,6 +3322,11 @@ defmodule KilnCMS.CMS.Content do
           # the edit's version row. Optional: omitted, a safety edit is recorded
           # `:notable`. Ignored when no safety field changed.
           argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
+          # Why this edit was made (`KilnCMS.CMS.ChangeNotes`), stored on the
+          # edit's version row. Optional, unless the editor asks for it.
+          argument :change_note, :string,
+            constraints: [max_length: KilnCMS.CMS.ChangeNotes.max_length()]
+
           # FIRST, so its `before_action` hook registers before the two
           # block-reading validations below defer themselves to the same phase:
           # an open collab session's prose rides in on this write or is lost
@@ -3450,6 +3473,11 @@ defmodule KilnCMS.CMS.Content do
           # the edit's version row. Optional: omitted, a safety edit is recorded
           # `:notable`. Ignored when no safety field changed.
           argument :change_severity, :atom, constraints: [one_of: [:critical, :notable, :routine]]
+          # Why this edit was made (`KilnCMS.CMS.ChangeNotes`), stored on the
+          # edit's version row. Optional, unless the editor asks for it.
+          argument :change_note, :string,
+            constraints: [max_length: KilnCMS.CMS.ChangeNotes.max_length()]
+
           argument :version_id, :uuid, allow_nil?: false
           # The row must still be the struct the caller holds (#2532), checked
           # FIRST. `RestoreVersion` writes from a `before_action` and judges
@@ -4217,6 +4245,11 @@ defmodule KilnCMS.CMS.Content do
         # (`KilnCMS.CMS.Severity`). LAST among the changes, so it sees what the
         # others wrote — `PromoteWorkingCopy`'s promoted values included — and
         # decides in a `before_action` hook, after `RestoreVersion`'s fold.
+        # Why the edit was made (`KilnCMS.CMS.ChangeNotes`), onto the same
+        # version row. BEFORE `RecordChangeSeverity`, whose hook merges into
+        # the paper-trail metadata this writes.
+        change KilnCMS.CMS.Changes.RecordChangeNote, on: [:update]
+
         change KilnCMS.CMS.Changes.RecordChangeSeverity, on: [:update]
 
         # What a read restriction hides from an editor (#2281) is left out of

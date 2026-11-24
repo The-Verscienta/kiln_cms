@@ -1614,6 +1614,26 @@ kind, and are `null` for a document that is not published or has none. A first
 publish counts as an edit when a listed field is non-empty. Webhooks and the
 change feed do not carry the severity yet.
 
+### Change note: why an edit was made
+
+`PATCH` (`update`) and the `publish` route accept an optional `change_note`
+attribute, a short reason in plain text (up to 2000 characters; surrounding
+spaces are trimmed and a blank note is none). So do the GraphQL `update*` /
+`publish*` mutations and MCP's `update_page` / `update_post` / `update_entry`.
+It is stored on the version that write creates and shown in the editor's
+History as *Why: …*. Like the severity, it belongs to that one edit and is
+never a field of the record.
+
+```json
+{"data": {"type": "post", "id": "…",
+          "attributes": {"title": "…", "change_note": "dose corrected per the cited source"}}}
+```
+
+A site can make the editor ask for one on chosen content types (**Ask why on
+every change** on `/editor/safety-fields`): the editor then refuses a draft's
+Save and a **Publish changes** without a note. The API never refuses a write
+for leaving the note out; send one when your integration knows why.
+
 ### Retrying a write safely
 
 Send an `Idempotency-Key` header and a retry of the same `POST` or `PATCH`

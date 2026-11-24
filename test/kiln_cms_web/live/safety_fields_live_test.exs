@@ -74,6 +74,20 @@ defmodule KilnCMSWeb.SafetyFieldsLiveTest do
       assert KilnCMS.CMS.Severity.safety_fields_for(org_id, "page") == ["*"]
     end
 
+    test "Ask why on every change stores the type, and unticking clears it",
+         %{conn: conn, org_id: org_id} do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/safety-fields")
+      refute has_element?(lv, "#safety-note-page[checked]")
+
+      lv |> form("#safety-fields-form", %{"safety" => %{"note" => ["page"]}}) |> render_submit()
+
+      assert KilnCMS.CMS.EditorialSettings.change_note_types(org_id) == ["page"]
+      assert has_element?(lv, "#safety-note-page[checked]")
+
+      render_submit(lv, "save", %{})
+      assert KilnCMS.CMS.EditorialSettings.change_note_types(org_id) == []
+    end
+
     test "an empty selection clears a type", %{conn: conn, org_id: org_id} do
       admin = authed_user(:admin)
 

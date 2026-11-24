@@ -68,6 +68,36 @@ defmodule KilnCMS.CMS.EditorialSettings do
   end
 
   @doc """
+  The content type names whose editor asks why on Save and Publish changes
+  (`KilnCMS.CMS.ChangeNotes`). `[]` when the site chose none, has no row, or
+  the read fails: this axis only ever *asks* for something, so failing open
+  costs a missing note on one write, never a refused one.
+  """
+  @spec change_note_types(Ash.UUID.t() | struct() | nil) :: [String.t()]
+  def change_note_types(nil), do: []
+
+  def change_note_types(org) do
+    SiteEditorialSettings
+    |> Ash.Query.limit(1)
+    |> Ash.read_one(system_opts(org))
+    |> case do
+      {:ok, %SiteEditorialSettings{change_note_types: types}} ->
+        types || []
+
+      {:ok, nil} ->
+        []
+
+      {:error, reason} ->
+        Logger.warning(
+          "editorial settings: could not read change_note_types for " <>
+            "#{inspect(org_id(org))}, asking for no change notes: #{inspect(reason)}"
+        )
+
+        []
+    end
+  end
+
+  @doc """
   Whether anyone has ever answered for `org` — i.e. a settings row exists.
 
   A separate question from `editors_can_publish?/1`, which folds "no row" into
@@ -114,7 +144,8 @@ defmodule KilnCMS.CMS.EditorialSettings do
 
     current = %{
       auto_complete_tasks_on_publish: TaskSettings.site_default(org),
-      editors_can_publish: editors_can_publish?(org)
+      editors_can_publish: editors_can_publish?(org),
+      change_note_types: change_note_types(org)
     }
 
     CMS.save_site_editorial_settings(Map.merge(current, changes), opts)

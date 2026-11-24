@@ -7,11 +7,25 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="change-note-upgrade"></a>
+
+- **Run `mix ash.migrate` for change notes (#3255).** The migration adds a nullable text column, `change_note`, to `posts_versions`, `entries_versions` and `pages_versions`, and `change_note_types` (a text array, default empty) to `site_editorial_settings`. No backfill: every existing version reads as an edit nobody explained. **Overlays** with their own content types run `MIX_ENV=dev mix ash.codegen` after the bump, which adds the column to each of their `*_versions` tables, as `change_severity` needed in 1.9.
+
 <a id="edit-inline-option-upgrade"></a>
 
 - **Run `mix ash.migrate` for the `edit_inline` column (#2283).** The migration adds one nullable boolean, `field_definitions.edit_inline`, with no default and no backfill. Nothing in an older release reads it, so the column can stay after a rollback.
 
 ## Added
+
+<a id="reference-picker-thumbnails"></a>
+
+- **The reference picker shows each record's featured image as a thumbnail (#3223).** Every search result, every picked row and every row of a reverse field now shows a small (32 px) thumbnail of the record's **Featured image**, so records with similar titles are easy to tell apart. It is always on; there is no setting per field.
+  - **Which image.** The image's generated `thumb` variant, or a video's poster frame. An image 400 px wide or narrower has no `thumb` (variants never upscale), so the picker shows the original, which is already that small. It never loads a larger original, so a record shows no thumbnail when a wider featured image has no `thumb` variant (uploaded or processed without variants). An admin's **Regenerate variants** on `/media` writes the missing ones. A featured image in the trash shows none.
+  - **Layout.** When some rows of a list have a thumbnail, the rows without one keep an empty square of the same size so the titles line up. A list where no row has one, as on a site that uses no featured images, looks as it did before.
+  - **Accessibility.** The thumbnail is decorative (`alt=""`, `aria-hidden`): the options' and rows' accessible names, roles and keyboard behavior are unchanged.
+  - **Cost.** The featured image is loaded with the read that lists the records, as the editor: one more query per type the picker reads, not one per record.
+  - **For developers.** The media library's thumbnail rule is now public as `KilnCMSWeb.MediaComponents.thumb_src/2` (pass `fallback: false` to skip the fallback to an original wider than the `thumb` variant; `KilnCMS.ImageProcessor.thumb_width/0` is that width), and `KilnCMS.CMS.ReverseFields.rows/3` takes a `:load` option, loaded on each source record as the caller. No migration, no configuration, nothing to do to upgrade.
+  - Guide: **Thumbnails in the picker** under the reference field in [Extending content](../extending-content.md).
 
 <a id="edit-inline-option"></a>
 
@@ -58,6 +72,14 @@ carries the reasoning.
   - **What is left out.** When every linked type pins a category, there is no category select; when every linked type lists tags, only those tags are offered. Past 500 categories or tags, that select is not shown (*Too many tags to list — search by title instead.*), and the fields admin warns when the box is ticked. Create-on-type is not offered while a filter is set; **Add new** is. The dropdown widget has no filters.
   - **Stored as** `"filters": ["category", "tag"]` (either or both) in the field's `selection` (#2285). It is a picker setting like `sort`, not a condition: it never refuses a write. A bad value is refused with *filters is empty*, *lists a filter twice* or *filters must be a list among category, tag*. `GET /api/schema` reports it in `x-kiln-selection`. Field sync does not carry it, as it carries no part of `selection`. No migration.
   - See [Narrow a reference search by type, category or tag](../extending-content.md#narrow-a-reference-search-by-type-category-or-tag).
+
+<a id="change-note"></a>
+
+- **An edit can say why, and the editor can ask (#3255).** Versions recorded what changed and who changed it; now they can record why.
+  - **Everywhere a note can be given.** `:update`, `:publish`, `:publish_changes` and `:restore_version` take an optional `change_note` (plain text, up to 2000 characters, trimmed; blank is none): over JSON:API (`change_note` attribute on `PATCH` and the publish route), GraphQL (`update*` / `publish*` mutations), MCP (`update_page` / `update_post` / `update_entry`) and in code. It lands on that edit's version row (`change_note`), and the editor's History shows *Why: …* under the version.
+  - **Asking for one.** The Safety fields page (`/editor/safety-fields`) has an **Ask why on every change** checkbox per content type (stored as `change_note_types` on the site's editorial settings). For a listed type the editor shows **Why this change?** under the action bar; a draft's **Save** and **Publish changes** are refused until it is filled in (*Say why you made this change, then save again.*), and the note is cleared once the write lands. A published record's working-copy saves (and autosaves) take no note: the change readers see is Publish changes, which does.
+  - **Only the editor asks.** The API, MCP, the reverse field, inline record cards, scheduled publishes and internal jobs are never refused for leaving a note out, the same posture change severity takes: a surface that cannot ask must not fail for it.
+  - **In code.** `KilnCMS.CMS.ChangeNotes` (`required?/2`, `normalize/1`), `Changes.RecordChangeNote` (into `paper_trail_metadata`, before `RecordChangeSeverity`), and the `require_change_note` context marker for a caller that does ask.
 
 <a id="flexible-media-reference"></a>
 

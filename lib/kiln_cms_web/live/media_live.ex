@@ -11,6 +11,7 @@ defmodule KilnCMSWeb.MediaLive do
   use KilnCMSWeb, :live_view
 
   import Ash.Expr, only: [expr: 1]
+  import KilnCMSWeb.MediaComponents, only: [thumb_src: 1, poster_url: 1]
 
   require Logger
 
@@ -881,30 +882,6 @@ defmodule KilnCMSWeb.MediaLive do
       query: [sort: [updated_at: :desc], limit: @max_trashed]
     )
   end
-
-  # The thumbnail to show in the grid — the small variant when available,
-  # else the original — or `nil` for a document (no `width`, so nothing was
-  # ever generated to preview) or a gated item (no public `url` — #481), so
-  # the caller falls back to a file badge instead of a broken/blank `<img>`.
-  #
-  # Dispatching on kind FIRST matters for A/V (#494): a video ffprobe measured
-  # has a `width` exactly like an image does, so the image rules below would
-  # otherwise put an `.mp4` in an `<img src>`. Its generated poster frame,
-  # when it has one, is the only image a video has.
-  defp thumb_src(item) do
-    case MediaKind.of(item.content_type) do
-      :image -> image_thumb_url(item)
-      :video -> poster_url(item)
-      _kind -> nil
-    end
-  end
-
-  defp poster_url(%{variants: %{"poster" => %{"url" => url}}}), do: url
-  defp poster_url(_item), do: nil
-
-  defp image_thumb_url(%{variants: %{"thumb" => %{"url" => url}}}), do: url
-  defp image_thumb_url(%{width: nil}), do: nil
-  defp image_thumb_url(item), do: item.url
 
   defp save_meta(socket, params) do
     actor = socket.assigns.actor

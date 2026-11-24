@@ -24,6 +24,14 @@ the original — **cropped variants are excluded** (a different aspect ratio in
 an `srcset` would let the browser pick the wrong framing); consumers ask for
 crops by label from the `variants` map (JSON:API/GraphQL expose it).
 
+The `thumb` variant is also the preview in the editor: the media library's
+grid, and the reference picker's rows, which show each record's featured
+image (#3223). The grid falls back to the original when an image has no
+`thumb`; the picker does so only for an image no wider than 400 px (which
+never gets a `thumb`, since variants never upscale) and otherwise shows
+nothing. `KilnCMSWeb.MediaComponents.thumb_src/2` holds the
+rule for both.
+
 ## Modern formats (#473)
 
 Every variant is written **once per output format**: the source's own format,
