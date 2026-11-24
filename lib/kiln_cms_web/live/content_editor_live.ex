@@ -2144,14 +2144,28 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> broadcast_saved()
     |> mark_saved()
     |> assign(:settings_dirty?, false)
-    |> put_flash(:info, saved_message(reloaded))
+    |> put_flash(:info, saved_message(reloaded, socket.assigns[:cascade_saved] || 0))
   end
 
   # A live document's Save holds its changes back (#1815) — say where they went.
-  defp saved_message(record) do
-    if WorkingCopy.pending?(record),
-      do: gettext("Saved. Readers see these changes once you publish them."),
-      else: gettext("Saved.")
+  # After a cascade (#2283) it also says how many related records went first.
+  defp saved_message(record, related) do
+    base =
+      if WorkingCopy.pending?(record),
+        do: gettext("Saved. Readers see these changes once you publish them."),
+        else: gettext("Saved.")
+
+    if related > 0 do
+      base <>
+        " " <>
+        ngettext(
+          "Also saved %{count} related record.",
+          "Also saved %{count} related records.",
+          related
+        )
+    else
+      base
+    end
   end
 
   # Write whatever text is waiting for the debounce into the working copy now,
@@ -5795,13 +5809,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
     assign(socket, :cascade, %{cascade | queue: rest, step: step})
   end
 
-  defp advance_cascade(socket, %{then: continuation}) do
+  defp advance_cascade(socket, %{then: continuation} = cascade) do
     socket = assign(socket, :cascade, nil)
 
     case continuation do
       {:save, params} ->
-        {:noreply, saved} = save_params(socket, params)
-        saved
+        {:noreply, saved} = save_params(assign(socket, :cascade_saved, cascade.saved), params)
+        assign(saved, :cascade_saved, 0)
 
       {:workflow, action} ->
         run_workflow(socket, action)

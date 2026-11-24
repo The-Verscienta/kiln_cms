@@ -3746,6 +3746,13 @@ msgstr "También incluye"
 msgid "Also restrict sign-in"
 msgstr "Restringir también el inicio de sesión"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Also saved %{count} related record."
+msgid_plural "Also saved %{count} related records."
+msgstr[0] "También se guardó %{count} registro relacionado."
+msgstr[1] "También se guardaron %{count} registros relacionados."
+
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "Also search for"
