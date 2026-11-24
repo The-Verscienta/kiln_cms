@@ -98,6 +98,45 @@ defmodule KilnCMSWeb.ContentEditorHealthTest do
     refute html =~ "Mark reviewed"
   end
 
+  # #2777: the form is rebuilt from the re-fetched record, so unsaved Settings
+  # on a live page stop the attestation rather than vanishing with the form.
+  test "Mark reviewed asks for a Save while Settings are unsaved", %{conn: conn} do
+    admin = authed_user(:admin)
+    page = published_page(admin, %{review_after_days: 5}) |> backdate!(40)
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/content/page/#{page.id}")
+
+    lv
+    |> form("#page-editor")
+    |> render_change(%{
+      "form" => %{"seo_title" => "Not saved yet"},
+      "_target" => ["form", "seo_title"]
+    })
+
+    html = lv |> element("button[phx-click='mark_reviewed']") |> render_click()
+
+    assert html =~ "Save your changes first."
+    assert is_nil(CMS.get_page!(page.id, actor: admin).last_reviewed_at)
+    assert has_element?(lv, ~s(input[name="form[seo_title]"][value="Not saved yet"]))
+  end
+
+  # A draft's edit still waiting for the autosave debounce is saved first,
+  # as a transition saves it, instead of being wiped by the rebuild.
+  test "Mark reviewed saves a draft's pending edit first", %{conn: conn} do
+    admin = authed_user(:admin)
+    page = CMS.create_page!(%{title: "Before", slug: slug()}, actor: admin)
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/content/page/#{page.id}")
+
+    lv |> form("#page-editor") |> render_change(%{"form" => %{"title" => "After"}})
+    render_click(lv, "mark_reviewed", %{})
+
+    reviewed = CMS.get_page!(page.id, actor: admin)
+    assert reviewed.title == "After"
+    assert reviewed.last_reviewed_at
+    assert has_element?(lv, ~s(input[name="form[title]"][value="After"]))
+  end
+
   test "an expired flagged record reads expired, not overdue", %{conn: conn} do
     admin = authed_user(:admin)
 

@@ -20446,6 +20446,11 @@ msgstr "Guardar vista"
 msgid "Save your changes before changing this content's state."
 msgstr "Guarde sus cambios antes de cambiar el estado de este contenido."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Save your changes first."
+msgstr "Guarda primero tus cambios."
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
