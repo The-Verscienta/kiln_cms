@@ -1445,10 +1445,13 @@ defmodule KilnCMSWeb.ContentController do
     # Rendered in the record's locale, not the request's (#2164): the payload
     # cache builds this in another process, which has no request locale, and
     # the renderers write reader-facing labels (a code block's) into the HTML.
+    # `BlockViews.document_view_blocks/3` does both, as it does for every
+    # preview.
     tree =
-      KilnCMS.CodeBlocks.with_content_locale(record.locale, fn ->
-        record |> expand_fragments(org_id, audiences) |> KilnCMSWeb.BlockComponents.view_blocks()
-      end)
+      KilnCMSWeb.BlockViews.document_view_blocks(record.blocks, record,
+        audiences: audiences,
+        org_id: org_id
+      )
 
     flat = flatten_block_tree(tree)
 
@@ -1461,17 +1464,6 @@ defmodule KilnCMSWeb.ContentController do
     tree
     |> Enum.map(&enrich_block(&1, media, forms))
     |> KilnCMS.HeadingAnchors.anchor_tree()
-  end
-
-  defp expand_fragments(record, org_id, audiences) do
-    record.blocks
-    |> KilnCMS.CMS.TypedBlocks.to_typed()
-    |> KilnCMS.CMS.Fragments.expand(org_id,
-      audiences: audiences,
-      # Seeded with the record itself: a page embedding *itself* would otherwise
-      # inline its own body once before the cycle guard caught it a level down.
-      ancestry: [{KilnCMS.Firing.Engine.public_type(record), record.id}]
-    )
   end
 
   # Depth-first block list, so the media/form preloads see nested blocks too.

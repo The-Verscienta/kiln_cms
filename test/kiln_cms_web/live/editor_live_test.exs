@@ -2080,6 +2080,37 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert Enum.any?(blocks, &(&1.type == "rich_text" and &1.content =~ "Pop-out RichText"))
     end
 
+    # #2767: the pop-out payload is rebuilt on every change, so a fragment it
+    # does not inline re-blanks in every open pop-out and guest preview.
+    test "broadcast payload inlines fragments and carries the video player", %{conn: conn} do
+      shared =
+        Ash.Seed.seed!(Page, %{
+          title: "Shared",
+          slug: "ed-shared-#{System.unique_integer([:positive])}",
+          state: :published,
+          blocks: [%{"_type" => "heading", "text" => "Shared call to action"}]
+        })
+
+      page =
+        draft_page(%{
+          blocks: [
+            %{"_type" => "video", "media_id" => Ash.UUID.generate()},
+            %{"_type" => "fragment", "ref" => %{"type" => "page", "id" => shared.id}}
+          ]
+        })
+
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, PreviewLive.topic("page", page.id))
+      KilnCMSWeb.Presence.track_preview(self(), "page", page.id)
+
+      {:ok, lv, _html} =
+        conn |> log_in(authed_user(:editor)) |> live(~p"/editor/content/page/#{page.id}")
+
+      lv |> form("#page-editor", form: %{title: "Edited"}) |> render_change()
+
+      assert_receive {:preview_update, %{blocks: blocks}}, 2_000
+      assert [%{type: "video"}, %{type: "heading", content: "Shared call to action"}] = blocks
+    end
+
     test "renders with public-site fidelity (public shell + prose article)", %{conn: conn} do
       page = draft_page()
 

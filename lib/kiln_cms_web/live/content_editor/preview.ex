@@ -305,7 +305,7 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
     payload = %{
       title: AshPhoenix.Form.value(form, :title) || "",
       excerpt: socket.assigns.has_excerpt && AshPhoenix.Form.value(form, :excerpt),
-      blocks: preview_blocks(form)
+      blocks: preview_blocks(form, socket.assigns.record)
     }
 
     Phoenix.PubSub.broadcast(
@@ -328,10 +328,16 @@ defmodule KilnCMSWeb.ContentEditor.Preview do
   # the same builder `PreviewLive.content_blocks/1` and delivery use, so rich
   # text surfaces as the block's rendered prose rather than a primary-field
   # lookup's empty `body` (#134).
-  defp preview_blocks(form) do
+  #
+  # Fragments are inlined as the Preview tab inlines them (`expand_fragments/2`
+  # above), or every keystroke re-blanks them in the pop-out and guest previews
+  # (#2767). Both use the SAVED audience (`host_audiences(record)`), not an
+  # unsaved change to it in the form: what an audience change will expose is
+  # shown once it is saved.
+  defp preview_blocks(form, record) do
     form
     |> preview_block_maps()
-    |> KilnCMSWeb.BlockComponents.view_blocks()
+    |> KilnCMSWeb.BlockViews.document_view_blocks(record)
   end
 
   # Inline preview rendered through the **same typed serializers that firing

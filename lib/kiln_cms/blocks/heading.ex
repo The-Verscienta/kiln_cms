@@ -21,9 +21,19 @@ defmodule KilnCMS.Blocks.Heading do
   @doc false
   def upcast_v1_to_v2(map), do: Map.put_new(map, "level", @default_level)
 
+  @doc """
+  The level this heading renders at: its stored `level` when that is an
+  integer from 1 to 6, else 2. Every surface uses it (the fired `:web`,
+  `:json` and `:llm` outputs, and the live page and previews through
+  `KilnCMSWeb.BlockComponents`), so none can disagree about a heading's rank.
+  An out-of-range level becomes 2, not the nearest bound.
+  """
+  @spec level(struct()) :: 1..6
+  def level(block), do: clamp(block.level)
+
   @impl Kiln.Block.Renderer
   def render(block, :web) do
-    level = clamp(block.level)
+    level = level(block)
 
     [
       "<h",
@@ -37,7 +47,7 @@ defmodule KilnCMS.Blocks.Heading do
   end
 
   def render(block, :json),
-    do: %{"_type" => "heading", "text" => block.text, "level" => clamp(block.level)}
+    do: %{"_type" => "heading", "text" => block.text, "level" => level(block)}
 
   # Headings have no standalone schema.org type — they contribute to the document
   # graph (Phase D/J), not a node of their own.
@@ -67,7 +77,7 @@ defmodule KilnCMS.Blocks.Heading do
   # The :llm surface (#357): a real Markdown heading at this block's level —
   # one clamp rule shared with the :web render.
   def to_markdown(block),
-    do: String.duplicate("#", clamp(block.level)) <> " " <> (block.text || "")
+    do: String.duplicate("#", level(block)) <> " " <> (block.text || "")
 
   # `is_integer` is load-bearing: `level in @min_level..@max_level` implied it,
   # a bare comparison does not. Without it a stored `2.5` passes both bounds and
