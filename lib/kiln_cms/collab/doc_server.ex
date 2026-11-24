@@ -17,10 +17,18 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
   path persists converged HTML independently. Rows unused for 30 days are
   pruned opportunistically. Persistence is config-gated
   (`config :kiln_cms, KilnCMS.Collab.Crdt, persist?: false` — off in tests).
+
+  A stored state that will not decode is not applied and not overwritten: the
+  row is moved aside under `corrupt:<key>:<unix_ms>:<random>` (pruned with
+  the rest after 30 days) and logged at error, and the room starts empty. The
+  record's blocks are untouched — an empty fragment never materializes — and
+  the first client to join seeds the room from the record (#2756).
   """
   use GenServer, restart: :transient
 
   alias KilnCMS.Repo
+
+  require Logger
 
   # How long an abandoned doc lingers before shutdown (covers reloads).
   @idle_shutdown :timer.minutes(10)
@@ -166,14 +174,22 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
   defp persist?,
     do: :kiln_cms |> Application.get_env(KilnCMS.Collab.Crdt, []) |> Keyword.get(:persist?, true)
 
+  # Every update is pending for both the database checkpoint and the record
+  # write-back; the two flags are cleared by different events, so each is set
+  # on its own. Folding them together let a rejoin inside the checkpoint
+  # window skip the write-back (#2756).
+  defp mark_dirty(state), do: state |> mark_materialize_dirty() |> mark_persist_dirty()
+
+  defp mark_materialize_dirty(state) do
+    if materialize?(), do: %{state | materialize_dirty?: true}, else: state
+  end
+
   # Schedule one flush per dirty transition; further updates before the flush
   # ride along with it. With persistence off nothing is ever dirty, so neither
   # checkpoints nor the terminate flush touch the database.
-  defp mark_dirty(%{dirty?: true} = state), do: state
+  defp mark_persist_dirty(%{dirty?: true} = state), do: state
 
-  defp mark_dirty(state) do
-    state = if materialize?(), do: %{state | materialize_dirty?: true}, else: state
-
+  defp mark_persist_dirty(state) do
     if persist?() do
       Process.send_after(self(), :checkpoint, @checkpoint_after)
       %{state | dirty?: true}
@@ -220,11 +236,119 @@ defmodule KilnCMS.Collab.Crdt.DocServer do
       "DELETE FROM collab_doc_states WHERE updated_at < now() - interval '#{@prune_after_days} days'"
     )
 
-    case Repo.query!("SELECT state FROM collab_doc_states WHERE doc_key = $1", [state.doc_key]) do
-      %{rows: [[stored]]} -> :ok = Yex.apply_update(state.doc, stored)
-      %{rows: []} -> :ok
-    end
+    state =
+      case Repo.query!("SELECT state FROM collab_doc_states WHERE doc_key = $1", [state.doc_key]) do
+        %{rows: [[stored]]} -> restore(state, stored)
+        %{rows: []} -> state
+      end
 
     %{state | restored?: true}
+  end
+
+  # Applied to a fresh doc and swapped in only on success, so a half-applied
+  # update can never become the room. A failure leaves the (still empty) doc in
+  # place and moves the bytes aside, so the next persist cannot overwrite them.
+  #
+  # When the quarantine finds the row already changed (`:gone`), another server
+  # for the same key wrote it in between, most likely a valid checkpoint. That
+  # row is read and restored once more, rather than starting this room empty
+  # and letting its next checkpoint overwrite the other server's state.
+  defp restore(state, stored) do
+    case restore_doc(state.doc_key, stored) do
+      {:ok, doc} -> %{state | doc: doc}
+      :empty -> state
+    end
+  end
+
+  @doc false
+  # The doc `stored` decodes to, or `:empty` (after quarantining it) when it
+  # won't decode. Public for the race test: the read and the quarantine can't
+  # be interleaved with another server's write from outside.
+  @spec restore_doc(String.t(), binary(), non_neg_integer()) :: {:ok, term()} | :empty
+  def restore_doc(doc_key, stored, retries \\ 1) do
+    doc = Yex.Doc.new()
+
+    case safe_apply(doc, stored) do
+      :ok ->
+        {:ok, doc}
+
+      {:error, reason} ->
+        outcome = quarantine(doc_key, stored)
+        log_unrestorable(doc_key, stored, reason, outcome)
+
+        # Whatever the quarantine did, a row now under the real key that is
+        # not the bytes read was written by another server for the same key
+        # (in between, or right after the move): restore it, rather than
+        # start empty and let this room's next checkpoint overwrite it.
+        case retries > 0 && current_state(doc_key) do
+          replaced when is_binary(replaced) and replaced != stored ->
+            restore_doc(doc_key, replaced, retries - 1)
+
+          _ ->
+            :empty
+        end
+    end
+  end
+
+  defp current_state(doc_key) do
+    case Repo.query!("SELECT state FROM collab_doc_states WHERE doc_key = $1", [doc_key]) do
+      %{rows: [[stored]]} -> stored
+      %{rows: []} -> nil
+    end
+  end
+
+  # The NIF reports a bad encoding as `{:error, _}`, but a panic raises; either
+  # way the room must come up rather than crash on every attach (the server is
+  # `:transient`, so repeated crashes would take the supervisor down with it).
+  defp safe_apply(doc, bytes) do
+    case Yex.apply_update(doc, bytes) do
+      :ok -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  rescue
+    exception -> {:error, exception}
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
+  end
+
+  @doc false
+  # Moves the stored row aside under a key nothing resolves as a document.
+  # Matching on the bytes that were read means a row another server already
+  # replaced (a valid checkpoint) or quarantined is left alone: `:gone`. A
+  # database failure raises, as every other query here does.
+  @spec quarantine(String.t(), binary()) :: {:quarantined, String.t()} | :gone
+  def quarantine(doc_key, stored) do
+    suffix = Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
+    quarantine_key = "corrupt:#{doc_key}:#{System.system_time(:millisecond)}:#{suffix}"
+
+    case Repo.query!(
+           """
+           UPDATE collab_doc_states SET doc_key = $2, updated_at = now()
+           WHERE doc_key = $1 AND state = $3
+           """,
+           [doc_key, quarantine_key, stored]
+         ) do
+      %{num_rows: 1} -> {:quarantined, quarantine_key}
+      %{num_rows: 0} -> :gone
+    end
+  end
+
+  defp log_unrestorable(doc_key, stored, reason, {:quarantined, quarantine_key}) do
+    Logger.error(
+      "Collab doc state for #{doc_key} is corrupt and was not restored " <>
+        "(#{byte_size(stored)} bytes: #{inspect(reason)}). The bytes were moved to " <>
+        "#{quarantine_key}. The room starts empty, the record's blocks are untouched, " <>
+        "and the first client to join seeds the room from the record."
+    )
+  end
+
+  defp log_unrestorable(doc_key, stored, reason, :gone) do
+    Logger.warning(
+      "Collab doc state for #{doc_key} is corrupt and was not restored " <>
+        "(#{byte_size(stored)} bytes: #{inspect(reason)}); another server already " <>
+        "replaced or quarantined the row, so the row as it is now is restored instead, " <>
+        "if there is one. Otherwise the room starts empty, the record's blocks are " <>
+        "untouched, and the first client to join seeds the room from the record."
+    )
   end
 end

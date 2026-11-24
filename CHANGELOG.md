@@ -120,6 +120,9 @@ else.
 - **A saved view that lost a field, locale, type or sort since it was saved is marked current, with its "no longer applies" message and its Rename / Delete bar, only when you open it, not on the plain list or a list filtered to what it has left; the field-filter builder no longer drops a second condition on one field and operator (#2785, #2741).**
   ([long form](docs/changelog/unreleased.md#content-list-saved-view-matching))
 
+- **Collaborative editing (the `:collab_prototype` flag, off in production builds): prose typed after a quick rejoin now reaches the record, and a stored room state that won't decode is moved aside to a `corrupt:` row instead of failing every join to that document ([#2756](https://github.com/The-Verscienta/kiln_cms/issues/2756)).**
+  ([long form](docs/changelog/unreleased.md#collab-writeback-corrupt-state))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —
