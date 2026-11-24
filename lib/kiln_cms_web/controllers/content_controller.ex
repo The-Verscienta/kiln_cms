@@ -47,6 +47,7 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMSWeb.EventIndex
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.Plugs.ChallengeCsp
+  alias KilnCMSWeb.Plugs.PublicCache
   alias KilnCMSWeb.Plugs.PublicJsBundle
   alias KilnCMSWeb.Plugs.UrlLocale
   alias KilnCMSWeb.SharedCache
@@ -1710,7 +1711,6 @@ defmodule KilnCMSWeb.ContentController do
   # autodiscovery, branding, code injection and calendar links live in `<head>`
   # but are not columns on the content row, so a settings save must move the
   # ETag or a revalidating client keeps a 304 body whose links are already wrong.
-  #
   # `validators.forms` (#2249, `forms_digest/2`) is appended only when the page
   # renders a form. It stays apart from the payload digest because it also
   # names the human-verification config, which is runtime, not payload.
@@ -1729,6 +1729,10 @@ defmodule KilnCMSWeb.ContentController do
   # The chrome's locale is named too (#2595): `/fr/x` and `/x` can be answered
   # by the same record, around it French chrome at one and English at the
   # other, and a validator from one must never 304 a request for the other.
+  #
+  # The tag is weak (#2766): it names the inputs, not the bytes, and the page is
+  # the same whatever its encoding. Bandit will not compress a response that
+  # carries a strong ETag, so a strong one sent every page out uncompressed.
   defp etag(record, org_id, validators, chrome_locale) do
     raw =
       "#{record.id}:#{record.locale}:#{record.updated_at}:#{record.published_version_id}" <>
@@ -1741,14 +1745,14 @@ defmodule KilnCMSWeb.ContentController do
         ":" <> KilnCMSWeb.BuildFingerprint.fingerprint()
 
     digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)
-    ~s("#{digest}")
+    ~s(W/"#{digest}")
   end
 
+  # Weak comparison (RFC 9110 §13.1.2), as `If-None-Match` requires: the
+  # validator may come back with or without `W/` (a compressing CDN adds it),
+  # inside a list, or as `*`.
   defp delivery_fresh?(conn, record, validators) do
-    case get_req_header(conn, "if-none-match") do
-      [] -> false
-      tags -> etag(record, current_org_id(conn), validators, locale(conn)) in tags
-    end
+    PublicCache.fresh?(conn, etag(record, current_org_id(conn), validators, locale(conn)))
   end
 
   # The header and footer menus as `Layouts.public/1` renders them (#2765):
