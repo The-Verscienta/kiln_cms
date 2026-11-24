@@ -117,6 +117,9 @@ else.
   A legacy-invalid field (a dropdown with no options) now blocks the reorder and refuses the whole duplicate instead of being dropped from the copy.
   ([long form](docs/changelog/unreleased.md#form-reorder-duplicate-all-or-nothing))
 
+- **A saved view that lost a field, locale, type or sort since it was saved is marked current, with its "no longer applies" message and its Rename / Delete bar, only when you open it, not on the plain list or a list filtered to what it has left; the field-filter builder no longer drops a second condition on one field and operator (#2785, #2741).**
+  ([long form](docs/changelog/unreleased.md#content-list-saved-view-matching))
+
 ## [1.12.0] - 2026-11-21
 
 Long form: [docs/changelog/v1.12.0.md](docs/changelog/v1.12.0.md) —

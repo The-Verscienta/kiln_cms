@@ -929,6 +929,26 @@ no longer applies.*) and opening it says *The view "…" named a field that no
 longer applies, so that condition was left out.* The remaining conditions still
 apply.
 
+That message shows only when you open that view from its pill, not on other
+lists that happen to show the same rows. The same goes for any view that lost
+something it named: a field condition or field sort as above, a locale no
+longer configured, a content type that is gone, or a sort the list no longer
+offers. Such a view's link keeps what it was saved with, and the list applies
+what still exists, so:
+
+- It is marked as the current view (and, if you may change it, its
+  **Rename** / **Delete view** bar appears) only when you opened it by its
+  own link, even if another view, or
+  the plain list, would match what is left of it. While it is current, **Save
+  view** is hidden, as for any current view.
+- Opening the plain list, or filtering by hand to the conditions it still
+  has, does not show its message or its bar.
+- Only a lost field condition or field sort shows the message; a view that
+  lost a locale, type or sort opens without one.
+
+To tidy up, open the view and use **Delete view**. A deleted category or tag is not a loss: the view keeps
+its id and still matches as before.
+
 **What can go wrong.** When you click a download in the list, a refusal sends you back
 to the list (with the same filters, except what the refusal was about) and shows the
 message at the top. A script, or anything that does not ask for HTML, gets the status
