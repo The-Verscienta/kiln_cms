@@ -65,6 +65,7 @@ defmodule KilnCMSWeb.ScalarListFieldEditorTest do
       field_type: :integer,
       multiple: true,
       max_items: 3,
+      validation: %{"max" => 10},
       position: 0
     })
 
@@ -256,6 +257,18 @@ defmodule KilnCMSWeb.ScalarListFieldEditorTest do
 
       assert item_value(ctx.lv, "slfe_event_dates", 2) == "someday"
       assert html =~ "item 3 must be a date"
+    end
+
+    # #2683: a value rule names the item from 1, as the coercion error above
+    # does, in the field's own error block.
+    test "an item over the field's max is named by its position from 1", ctx do
+      add(ctx.lv, "scores", "11")
+
+      assert item_value(ctx.lv, "scores", 1) == "11"
+
+      errors = ctx.lv |> element("#custom-field-scores-errors") |> render()
+      assert errors =~ "Scores (scores) item 2 must be at most 10"
+      refute errors =~ "scores["
     end
 
     test "saves the list JSON-native, in screen order", ctx do

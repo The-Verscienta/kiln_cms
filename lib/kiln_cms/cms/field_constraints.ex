@@ -26,8 +26,15 @@ defmodule KilnCMS.CMS.FieldConstraints do
 
   Only non-blank values are checked: a blank optional field is simply empty,
   and `required` is the coercion's concern. A scalar list (`multiple`
-  string, integer, url, …) is checked per item (`tags[1]`); a `:group` per row and sub-field
-  (`dosages[2].unit`), with the sub-field's own `validation`.
+  string, integer, url, …) is checked per item (`check_item/4`); a `:group`
+  per row and sub-field (`dosages[2].unit`), with the sub-field's own
+  `validation`.
+
+  A list item's problem has the path `tags[1]`, counting from 0 as group
+  and flexible rows do, but its text names the item the way a coercion
+  error does: `Tags (tags) item 2 …`, its position in the list as stored,
+  counting from 1 (blanks and repeats are already gone, one item per line).
+  So one list never reports the same item as both 2 and `[1]` (#2683).
 
   ## Safety
 
@@ -39,7 +46,8 @@ defmodule KilnCMS.CMS.FieldConstraints do
   ## Errors
 
   `check/3` returns `{path, label, {:full, text}}` problems: `text` is a
-  complete, translated sentence naming `Label (path)`, which
+  complete, translated sentence naming `Label (path)` (a list item
+  `Label (name) item N`), which
   `Changes.ApplyCustomFields` reports as is rather than prefixing again.
   """
   use Gettext, backend: KilnCMSWeb.Gettext
@@ -171,10 +179,36 @@ defmodule KilnCMS.CMS.FieldConstraints do
         []
 
       is_list(value) ->
-        value |> Enum.with_index() |> Enum.flat_map(&item(def, validation, path, &1))
+        value
+        |> Enum.with_index()
+        |> Enum.flat_map(fn {item, index} -> check_item(def, item, index, path) end)
 
       true ->
-        scalar(def, validation, path, value)
+        scalar(def, validation, path, field(def, path), value)
+    end
+  end
+
+  @doc """
+  The problems with one item of a scalar list, the item at `index` (from 0)
+  of the list as stored. The path is `base[index]` (`base` defaults to the
+  field's name); the text names the item by its position from 1:
+  `Scores (scores) item 2 must be at most 10`, as a coercion error would.
+  """
+  @spec check_item(map(), term(), non_neg_integer(), String.t() | nil) :: [problem()]
+  def check_item(def, item, index, base \\ nil) do
+    base = base || def.name
+    validation = normalize(Map.get(def, :validation))
+
+    if validation == %{} or blank?(item) do
+      []
+    else
+      field =
+        dgettext("errors", "%{field} item %{position}",
+          field: field(def, base),
+          position: index + 1
+        )
+
+      scalar(def, validation, "#{base}[#{index}]", field, item)
     end
   end
 
@@ -225,25 +259,19 @@ defmodule KilnCMS.CMS.FieldConstraints do
 
   # --- checks ------------------------------------------------------------
 
-  # One item of a scalar list (`multiple` string, integer, url, …).
-  defp item(def, validation, path, {value, index}) do
-    if blank?(value), do: [], else: scalar(def, validation, "#{path}[#{index}]", value)
-  end
-
-  defp scalar(%{field_type: type} = def, validation, path, value)
+  # One value against the constraints; `field` is how the text names it
+  # (`Label (path)`, or `Label (name) item N` for a list item).
+  defp scalar(%{field_type: type} = def, validation, path, field, value)
        when type in [:integer, :float] and is_number(value) do
-    field = field(def, path)
-
     problem(def, path, bound(validation["min"], value, :min, field)) ++
       problem(def, path, bound(validation["max"], value, :max, field))
   end
 
-  defp scalar(%{field_type: type} = def, validation, path, value)
+  defp scalar(%{field_type: type} = def, validation, path, field, value)
        when is_binary(value) and type in [:string, :url, :text] do
     if type == :text and Map.get(def, :format, :rich) != :plain do
       []
     else
-      field = field(def, path)
       length = String.length(value)
 
       problem(def, path, min_length(validation["min_length"], length, field)) ++
@@ -252,7 +280,7 @@ defmodule KilnCMS.CMS.FieldConstraints do
     end
   end
 
-  defp scalar(%{field_type: :color} = def, %{"palette" => palette}, path, value)
+  defp scalar(%{field_type: :color} = def, %{"palette" => palette}, path, field, value)
        when is_list(palette) and is_binary(value) do
     allowed = KilnCMS.CMS.FieldTypes.Color.palette(%{validation: %{"palette" => palette}})
 
@@ -262,12 +290,12 @@ defmodule KilnCMS.CMS.FieldConstraints do
       problem(
         def,
         path,
-        dgettext("errors", "%{field} must be one of the palette colors", field: field(def, path))
+        dgettext("errors", "%{field} must be one of the palette colors", field: field)
       )
     end
   end
 
-  defp scalar(_def, _validation, _path, _value), do: []
+  defp scalar(_def, _validation, _path, _field, _value), do: []
 
   defp problem(_def, _path, nil), do: []
   defp problem(def, path, text), do: [{path, def.label, {:full, text}}]

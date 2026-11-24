@@ -671,6 +671,16 @@ defmodule KilnCMS.CMS.FieldConversionTest do
       assert reload(post).custom_fields[ctx.group] in [nil, []]
     end
 
+    # #2683: the position is the item's place in the list as stored, so a
+    # repeat the list drops before the bad item is not counted.
+    test "a repeat before the bad item is not counted in its position", ctx do
+      post!(ctx, ~s(["2026-03-01","2026-03-01","not a date"]))
+
+      assert %{problems: [%{kind: :invalid, messages: messages}]} = convert(ctx, dry_run?: true)
+
+      assert messages == ["Event dates (#{ctx.group}) item 2 must be a date (YYYY-MM-DD)"]
+    end
+
     test "an integer list keeps the numbers JSON-native, repeats included", ctx do
       scores =
         field!(ctx.admin, %{

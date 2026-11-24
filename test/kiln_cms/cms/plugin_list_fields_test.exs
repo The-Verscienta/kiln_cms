@@ -173,6 +173,17 @@ defmodule KilnCMS.CMS.PluginListFieldsTest do
       assert message =~ "item 2 must be a whole number from 1 to 5"
     end
 
+    # #2683: the position is the one the item would have as stored, so a
+    # repeat a unique_items? type drops (equal only after cast) is not counted.
+    test "an item the type refuses after a repeat it drops is named as stored" do
+      admin = admin()
+      tags = list!(:tag, admin)
+
+      message = error!(page(%{tags.name => ["One", "one ", String.duplicate("x", 41)]}, admin))
+      assert message =~ "item 2 must be at most 40 characters"
+      refute message =~ "item 3"
+    end
+
     test "a map or a list item, and a JSON-encoded list, are refused" do
       admin = admin()
       tags = list!(:tag, admin)

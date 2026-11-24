@@ -774,9 +774,14 @@ How a list behaves:
   them leaves stored lists alone until the field is next written.
 - **Value rules apply per item.** A `min`, `max`, length or `pattern` rule
   ([Constrain the values of a field](#constrain-the-values-of-a-field))
-  checks each item and names it by its index from 0, `scores[1]` for the
-  second. Items the record already stored are not checked again. `unique`
-  cannot be set on a list.
+  checks each item. Items the record already stored are not checked again.
+  `unique` cannot be set on a list.
+- **How an error names an item.** `Scores (scores) item 2 …` is the second
+  item counted as the list is stored: from 1, one item per line, with blank
+  items and dropped repeats left out. A type error and a value rule count the
+  same way: `[3, 3, 11]` on a number list, which keeps repeats, reports
+  `item 3 must be at most 10`; on a list that drops repeats, the second `3`
+  is not counted.
 - **Turning a list on or off.** Choosing **A list** for a field that already
   has values wraps each one in a one-item list. Going back to **One value**
   keeps the first item of each list; the form warns before you save.
@@ -836,12 +841,12 @@ What can go wrong when saving (the field's label and name come first, as
 
 | Message | Meaning |
 |---|---|
-| `item 2 must be a date (YYYY-MM-DD)` | The second item, counting from 1, is not a value of the field's type. The rest of the message is the single field's own. |
+| `item 2 must be a date (YYYY-MM-DD)` | The second item, counted as the list is stored (from 1, blanks and dropped repeats left out), is not a value of the field's type. The rest of the message is the single field's own. |
 | `item 2 must be one value: the field type returned …` | A plugin type's `cast/2` turned the second item into something other than one string or number. The plugin's bug; nothing is stored until it is fixed. |
 | `must be a list of values (got …)` | An item is an object, a boolean or another list. |
 | `holds a JSON-encoded list — send the items as a list instead` | A string such as `"[1, 2]"` was sent; send `[1, 2]`. |
 | `needs at least 2 items (has 1)` / `can have at most 10 items (has 11)` | Outside **Minimum** / **Maximum**. |
-| `(scores[1]) must be at most 10` | A value rule failed for the item at index 1 (the second). |
+| `item 2 must be at most 10` | A value rule (here `max`) failed for the second item, counted the same way. |
 | `can't compare … with greater/less than: it holds a list` | In the fields admin: a **Show when** / **Required when** rule orders on a list field, or the field is being made a list while one does. |
 
 ### Filter and sort the content list by custom fields
@@ -1200,11 +1205,14 @@ How the rules behave:
 
 - **Blank values are not checked.** A blank optional field is simply empty;
   `required` is what makes it mandatory.
-- **A list is checked per item**, reported by its index from 0 as `tags[1]`
-  (a list of strings, numbers, dates, links, …; see
+- **A list is checked per item**, and the message names the item by its
+  position as the list is stored, counting from 1 (one item per line, blanks
+  and dropped repeats left out): `Tags (tags) item 2 must be at most 20
+  characters long` (a list of strings, numbers, dates, links, …; see
   [Make a field hold a list of values](#make-a-field-hold-a-list-of-values)). A
-  `:group` field checks each row's sub-fields against their own `validation`
-  (`dosages[2].unit`).
+  `:group` field checks each row's sub-fields against their own `validation`;
+  a row is still named by its index from 0, `dosages[2].unit` for the third
+  row's unit, as is a flexible field's block (`sections[2]._type`).
 - **A pattern must match the whole value.** `[0-9]+` accepts `123`, not
   `a123`; you do not write `^…$`. A pattern is at most 200 characters (so is
   its message), is unicode-aware, and runs with match limits: a value over
@@ -3454,7 +3462,7 @@ update that asks for `multiple: true` on one is cleared.
 |---|---|
 | No **Holds** choice for the type in the fields admin | The build doesn't have the change, or the type isn't list-capable. Run `mix kiln.plugins.doctor`, then rebuild. A link field or a group sub-field never takes a list. |
 | `item 2 must be one value: the field type returned %{…}` | Your `cast/2` returned a map or a list for the second item. Return one string or number per item. |
-| `item 2 must be at most 40 characters` | Your `cast/2` refused the second item, counting from 1; the rest of the message is yours. |
+| `item 2 must be at most 40 characters` | Your `cast/2` refused the second item, counted as the list is stored: from 1, blanks left out, and repeats too when `unique_items?/0` is `true`. The rest of the message is yours. |
 | `must be a list of values (got …)` | An item sent was an object, a boolean or a list. |
 | `custom field "tags" (a list) is not sortable` | A `custom_sort` named a list field. |
 | `custom field "scores": customWhere does not support a list of json values; use customFilter` | The type has no `graphql_kind/1`. Filter the list with `customFilter`. |

@@ -62,6 +62,12 @@ else.
   No migration.
   ([long form](docs/changelog/unreleased.md#condition-text-ops))
 
+### Changed
+
+- **A list field's errors count items one way: a value rule now says `Scores (scores) item 2 must be at most 10` (from 1) instead of `Scores (scores[1]) …`, and a type error, field conversion reports included, no longer counts a dropped repeat (#2683).**
+  Only the human text changes; JSON:API `code`/`source.pointer` and GraphQL `code`/`fields` are as before. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#list-item-error-position))
+
 ### Fixed
 
 - **An API key minted by a newer release with a scope this one doesn't know no longer breaks key lookups, the API keys page, revoke or erasure; it is refused at sign-in like a revoked key, and the security posture warns about it (#2604).**

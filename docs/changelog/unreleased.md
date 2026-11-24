@@ -14,6 +14,18 @@ carries the reasoning.
   - **Lists and non-text values.** On a multiple field a test holds when any item matches, so **does not contain** holds only when no item contains the text. An empty value contains nothing. A number, yes/no or date field cannot use these tests: the definition is refused, and so is retyping a field to a non-text type while a text test reads it.
   - **Additive.** No migration. An older release reading a rule with one of these operators treats it as a rule it cannot read: the field is shown and not required, and the definition cannot be saved until the rule is changed.
 
+## Changed
+
+<a id="list-item-error-position"></a>
+
+- **A list field's errors name an item one way, by its position as the list is stored, counting from 1 (#2683).** On a list custom field (a list of numbers, dates, links, …), a type error counted items from 1 (`item 2 must be a date (YYYY-MM-DD)`) while a value rule (`min`, `max`, a length, `pattern`, a color palette) named the item by its index from 0 inside the field's name (`Scores (scores[1]) must be at most 10`). One save could report the same item as 2 and as `[1]`.
+  - **What a message says now.** Both kinds name the item as `Label (name) item N`: `Scores (scores) item 2 must be at most 10`. N is the item's position in the list as stored, counting from 1: one item per line, with blank items and dropped repeats left out. It is the same N whether the save, the editor's field error, the JSON:API `detail` or the GraphQL `message` shows it.
+  - **Type errors can name a lower N.** A list that drops repeats (every core list type but numbers, and a plugin type whose `unique_items?/0` is `true`) used to count a repeat before the bad item; it no longer does. `["2026-03-01", "2026-03-01", "soon"]` on a date list now reports `item 2`, not `item 3`. This holds for `mix kiln.fields.convert` reports too, which coerce each item as a save would. What is stored is unchanged: the first occurrence of a repeat stays, as before.
+  - **Groups and flexible fields still count from 0.** A group row's sub-field (`dosages[2].unit`) and a flexible field's block (`sections[2]._type`) keep their 0-based paths in the message.
+  - **API clients.** Only the human-readable text changed, and error text is not among the surfaces `docs/api.md` lists as stable ("Versioning & stability"). JSON:API still answers `code` `invalid_attribute` with `source.pointer` `/data/attributes/custom_fields` and no `meta`; GraphQL still answers `code` `invalid_attribute` with `fields` `["custom_fields"]`. A client that parsed `name[i]` out of the text should read `item N` instead, and subtract 1 for an index.
+  - **French and Spanish.** The value-rule message is translated (`élément 2`, `elemento 2`), but type errors are not yet translated, so one list can show both `item` and `élément` (or `elemento`). Translating type errors is [#3324](https://github.com/The-Verscienta/kiln_cms/issues/3324).
+  - **No migration; rolling the pin back is safe.** An older release writes the old messages again.
+
 ## Fixed
 
 <a id="api-key-unknown-scope"></a>

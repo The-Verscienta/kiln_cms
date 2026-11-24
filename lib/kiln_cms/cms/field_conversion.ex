@@ -28,7 +28,8 @@ defmodule KilnCMS.CMS.FieldConversion do
   vocabulary to check. A typed list takes a JSON array of its items
   (`["2026-03-01","2026-03-08"]`, `[3, 5]`), each coerced as the field's own
   save would coerce it, so an item that does not fit is reported with its
-  position (`item 2 …`). With `lines?: true` (`--lines`), for any of these
+  position (`item 2 …`), counted as the list is stored: from 1, one item per
+  line, blanks and repeats left out. With `lines?: true` (`--lines`), for any of these
   lists, a source that is not JSON is read as **one item per line** instead
   of being refused — the
   convention some importers used for a list kept in a text field

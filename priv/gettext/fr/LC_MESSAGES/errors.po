@@ -38,6 +38,11 @@ msgstr "%{field} est modifié par une autre sauvegarde en même temps. Réessaye
 
 #: lib/kiln_cms/cms/field_constraints.ex
 #, elixir-autogen, elixir-format
+msgid "%{field} item %{position}"
+msgstr "%{field} élément %{position}"
+
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
 msgid "%{field} must be at least %{count} character long"
 msgid_plural "%{field} must be at least %{count} characters long"
 msgstr[0] "%{field} doit contenir au moins %{count} caractère"

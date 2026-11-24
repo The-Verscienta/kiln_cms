@@ -351,6 +351,20 @@ defmodule KilnCMS.CMS.SelectAndTextFieldsTest do
       assert Exception.message(error) =~ "at most 1 items"
     end
 
+    # #2683: a value rule names an item by its position from 1 in the list as
+    # stored — blanks and repeats left out, a two-line item counted as two.
+    test "a value rule names an item by its position as stored" do
+      admin = admin()
+      field = list_field!(admin, %{validation: %{"max_length" => 8}})
+
+      assert {:error, error} =
+               page(%{field.name => ["", "fatigue\nchills", "fatigue", "night sweats"]}, admin)
+
+      message = Exception.message(error)
+      assert message =~ "Symptoms (#{field.name}) item 3 must be at most 8 characters long"
+      refute message =~ "["
+    end
+
     test "filters by containment, and flipping reshapes like a select" do
       admin = admin()
       field = list_field!(admin)
