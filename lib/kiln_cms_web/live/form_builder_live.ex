@@ -17,6 +17,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
   alias KilnCMS.CMS.FormField
   alias KilnCMS.Forms.Autoresponder
   alias KilnCMS.Forms.EmbedPolicy
+  alias KilnCMS.Forms.FieldOrder
 
   import KilnCMSWeb.BlockComponents, only: [public_form_field: 1, field_width_class: 1]
 
@@ -69,6 +70,10 @@ defmodule KilnCMSWeb.FormBuilderLive do
          # The Embed tab's origins box as last typed, kept only while a save is
          # being refused (#648); nil means "render what is stored".
          |> assign(:embed_origins_draft, nil)
+         # Bumped when a reorder is refused (#2717): the canvas is keyed on it,
+         # so the dragged, unsaved order the browser already shows is replaced
+         # by the saved one. See `refuse_order/2`.
+         |> assign(:canvas_rev, 0)
          |> assign(
            :challenge_available,
            KilnCMS.Challenge.forms_available?(KilnCMS.Challenge.config())
@@ -484,6 +489,8 @@ defmodule KilnCMSWeb.FormBuilderLive do
         # Slot the copy right after its original, then renumber everything.
         order = fields |> Enum.map(& &1.id) |> insert_after(field.id, copy.id)
 
+        # The copy is its own, already-saved write: a refused reorder keeps
+        # it (sharing its original's position) and says which field to fix.
         {:noreply, socket |> apply_order(order) |> reload_fields() |> select_field(copy.id)}
 
       {:error, error} ->
@@ -516,20 +523,45 @@ defmodule KilnCMSWeb.FormBuilderLive do
     assign(socket, :submissions, submissions)
   end
 
-  # Persist a full id ordering as 0-based positions, skipping no-op updates.
+  # Persist a full id ordering as 0-based positions, all or nothing (#2717):
+  # a refused write used to be discarded, leaving half the order saved and no
+  # message.
   defp apply_order(socket, order) do
-    fields_by_id = Map.new(socket.assigns.fields, &{&1.id, &1})
+    case FieldOrder.reorder(socket.assigns.fields, order, actor_opts(socket)) do
+      :ok -> socket
+      {:error, error} -> refuse_order(socket, error)
+    end
+  end
 
-    order
-    |> Enum.with_index()
-    |> Enum.each(fn {id, index} ->
-      with %FormField{} = field <- fields_by_id[id],
-           true <- field.position != index do
-        CMS.update_form_field(field, %{position: index}, actor_opts(socket))
-      end
-    end)
-
+  # Sortable has already moved the cards in the browser. The rolled-back
+  # field list equals the one already assigned, so LiveView would send no
+  # diff and the canvas would keep showing the unsaved order; a new canvas id
+  # replaces the node (and remounts the hook) with the saved one.
+  defp refuse_order(socket, {:field, field, error}) do
     socket
+    |> update(:canvas_rev, &(&1 + 1))
+    |> put_flash(
+      :error,
+      gettext(
+        "Couldn't save the new order, so nothing was moved. Fix the field “%{name}” and try again: %{reason}",
+        name: field.name,
+        reason:
+          ash_error_message(error,
+            forbidden: gettext("You don't have permission to edit form fields.")
+          )
+      )
+    )
+  end
+
+  defp refuse_order(socket, error) do
+    socket
+    |> update(:canvas_rev, &(&1 + 1))
+    |> put_flash(
+      :error,
+      gettext("Couldn't save the new order, so nothing was moved: %{reason}",
+        reason: ash_error_message(error)
+      )
+    )
   end
 
   defp next_position([]), do: 0
@@ -973,7 +1005,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
               </p>
 
               <div
-                id="builder-canvas"
+                id={"builder-canvas-#{@canvas_rev}"}
                 phx-hook="Sortable"
                 class="grid grid-cols-1 gap-3 sm:grid-cols-6"
               >
