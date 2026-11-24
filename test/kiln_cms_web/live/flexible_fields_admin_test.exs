@@ -666,6 +666,68 @@ defmodule KilnCMSWeb.FlexibleFieldsAdminTest do
       assert is_nil(raw_sections(post))
     end
 
+    test "a flexible field its section's layout refuses to leave says so, and stays", %{
+      conn: conn,
+      admin: admin,
+      sections: sections,
+      post: post
+    } do
+      sections = CMS.update_field_definition!(sections, %{section: "Ffa Page"}, actor: admin)
+
+      layout =
+        CMS.create_field_section!(%{content_type: :post, name: "Ffa Page", display: :tab},
+          actor: admin
+        )
+
+      {lv, _html} = open(conn, admin)
+      lv |> element("#field-#{sections.id}-delete") |> render_click()
+
+      # A row this release cannot load (#3062): the delete can't remove it.
+      KilnCMS.Repo.query!("UPDATE field_sections SET display = $1 WHERE id = $2", [
+        "zz_display_from_a_newer_release_3062",
+        Ecto.UUID.dump!(layout.id)
+      ])
+
+      html = lv |> element("#item-delete-#{sections.id}-confirm") |> render_click()
+
+      assert html =~
+               "Couldn&#39;t delete that field: its section&#39;s layout could not be removed with it."
+
+      refute html =~ "Check the count"
+      # The dialog is closed: asking again would fail the same way.
+      refute has_element?(lv, "#item-delete-#{sections.id}")
+      assert CMS.get_field_definition!(sections.id, actor: admin)
+      assert length(raw_sections(post)) == 3
+    end
+
+    test "a flexible field another admin deleted meanwhile is not blamed on its layout", %{
+      conn: conn,
+      admin: admin
+    } do
+      unused =
+        def!(admin, %{
+          content_type: :post,
+          name: "ffa_unused",
+          field_type: :flexible,
+          section: "Ffa Unused"
+        })
+
+      CMS.create_field_section!(%{content_type: :post, name: "Ffa Unused", display: :tab},
+        actor: admin
+      )
+
+      {lv, _html} = open(conn, admin)
+      lv |> element("#field-#{unused.id}-delete") |> render_click()
+      assert has_element?(lv, "#item-delete-#{unused.id}-count", "No stored items")
+
+      :ok = CMS.destroy_field_definition!(unused, actor: admin)
+
+      html = lv |> element("#item-delete-#{unused.id}-confirm") |> render_click()
+
+      refute html =~ "its section&#39;s layout"
+      assert html =~ "Couldn&#39;t delete that. Check the count and try again."
+    end
+
     test "a nested flexible sub-field is deleted the same way", %{
       conn: conn,
       admin: admin,

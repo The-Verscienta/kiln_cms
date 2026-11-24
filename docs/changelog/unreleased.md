@@ -15,6 +15,54 @@ carries the reasoning.
 
 - **Run `mix ash.migrate` for the `edit_inline` column (#2283).** The migration adds one nullable boolean, `field_definitions.edit_inline`, with no default and no backfill. Nothing in an older release reads it, so the column can stay after a rollback.
 
+<a id="section-layout-sweep-upgrade"></a>
+
+- **About 10 minutes after boot, a job deletes the section layouts no field carries, the rows 1.9.x and 1.10.x left behind (#3060). Nothing to do; rolling back is safe, and what it deleted stays deleted.**
+  A section's layout (its tab, fieldset or accordion setting, a
+  `KilnCMS.CMS.FieldSection` row) is meant to go with the section's last
+  field, and since 1.11.0 every field write deletes it. Rows an older
+  release left behind stayed, and a field later filed under the same section
+  name took the old layout on. `KilnCMS.CMS.SectionLayoutSweep` deletes them:
+  - **When.** Each boot queues it on the `default` queue, 10 minutes out,
+    deduplicated for a day. It is idempotent: a second run finds nothing.
+  - **What.** On every site, each layout whose section name no top-level
+    field of its type is filed under. A field of a type this release does not
+    register (a removed plugin's) still counts as carrying its section, and
+    the layouts of a compiled type this release does not register are left
+    alone and counted as `skipped`.
+  - **Logged.** Each deleted layout is logged at info, with its site, type,
+    name, `display` and `initially`, so you can recreate one in the fields
+    admin's **Sections of** panel. A run that deleted something logs a
+    summary line, `section layout sweep: 2 pruned, 0 skipped (unknown type), 0 failed`.
+  - **Safe against a concurrent edit.** Each layout is checked again for a
+    field, under a lock, just before it is deleted, so a field an admin files
+    under that section meanwhile keeps its layout. A layout someone else
+    deleted first is not a failure.
+  - **Failures.** A type whose fields or layouts can't be read, or one of
+    whose layouts can't be deleted, is logged at warning and counted under
+    `failed`; the sweep goes on to the next type, and the job ends in error so
+    Oban retries it, up to 3 attempts. A layout row this release cannot load
+    (one a newer release wrote, after a rollback) fails its type on every
+    run, by design: the sweep can't tell what it would delete.
+  - **By hand,** for example after restoring an older backup. On the running
+    node, list first, then delete; `org_id: "<uuid>"` limits it to one site:
+
+    ```bash
+    bin/kiln_cms rpc 'KilnCMS.Release.prune_section_layouts(dry_run: true)'
+    bin/kiln_cms rpc 'KilnCMS.Release.prune_section_layouts()'
+    ```
+
+    Each layout is printed (`Would delete "Clinical" of {:compiled, :post} in org … (display: tab, initially: auto)`),
+    then `Section layouts: 1 pruned, 0 skipped (unknown type), 0 failed`.
+    Use `rpc`, not `eval`: each delete clears the type registry and delivery
+    schema caches of the serving node, and under `eval` the call refuses.
+  - **Turn it off** with `config :kiln_cms, :section_layout_sweep_on_boot, false`.
+  - **Rolling back** is safe: the job only deletes rows nothing used. They
+    are not restored.
+  The job can be removed in the next major release, once no supported
+  upgrade starts at 1.10.x or earlier.
+  See [Remove section layouts older releases left behind](../extending-content.md#remove-section-layouts-older-releases-left-behind).
+
 ## Known issues
 
 <a id="release-preview-fragments"></a>
@@ -180,6 +228,36 @@ carries the reasoning.
   - **Form duplicate.** The copy of such a field is named `locale_2` (or the next free name), the copy's `[field:locale]` autoresponder tokens follow, and the message says why. The original is not changed.
   - **Headless clients and the SDKs are unchanged.** A body `locale` still means the submission's language, so `submitForm` / `submit_form`'s `locale` option keeps working. `FormField` has no JSON:API, GraphQL or MCP write surface; only code that calls `KilnCMS.CMS.create_form_field` / `update_form_field` with that name (a seed, an overlay, Ash Admin in development) sees the new refusal.
   - **For developers.** `KilnCMS.Forms.reserved_field_names/0` now returns `["website", "locale"]`, and the new `KilnCMS.Forms.reserved_field_reason/1` says which reason applies (`:honeypot`, `:locale` or `nil`). No migration.
+
+<a id="field-section-create-needs-a-carrier"></a>
+
+- **A section layout can only be created for a section some top-level field of its type is in (#3061).**
+  - **What changed.** `KilnCMS.CMS.FieldSection`'s `:create` (the
+    `KilnCMS.CMS.create_field_section/2` code interface) now refuses a
+    `name` no top-level field of the same content type or type definition,
+    in the same site, is filed under. A link field, a group sub-field or a
+    flexible item type's field does not count; a field of a type this
+    release does not register does. The check runs after the action's
+    policy, inside its transaction, so a caller the policy refuses still gets
+    `Ash.Error.Forbidden` and reads nothing.
+  - **Why.** A layout with no field is not harmless: the next field filed
+    under that name inherits it. Every field write already deletes the
+    layouts it leaves empty; this closes the other way in.
+  - **Who sees it.** Only code that calls `create_field_section` directly (a
+    seed, an overlay, iex, Ash Admin in development). The fields admin only
+    offers sections that fields carry, and `FieldSection` has no JSON:API,
+    GraphQL or MCP surface. Create the field first, then its section's
+    layout. The refusal is `{:error, %Ash.Error.Invalid{}}` holding an
+    `Ash.Error.Changes.InvalidAttribute` on `:name`: *is not a section any
+    top-level field of this type is in*, or *could not be checked against
+    the type's fields* when the field read failed. `:update` still accepts
+    only `display` and `initially`, so an existing row's name and type can't
+    be changed.
+  - **Field sync.** An import now writes an owner's fields before its
+    sections, so a file that adds a section's first field and its layout
+    together still imports. An entry for a section no field carries was
+    already refused at plan time.
+  No migration, no configuration.
 
 ## Fixed
 
@@ -420,6 +498,46 @@ carries the reasoning.
     as `<h2>`.
   No migration, no configuration. Rolling the pin back is safe.
   ([#2767](https://github.com/The-Verscienta/kiln_cms/issues/2767), [#2769](https://github.com/The-Verscienta/kiln_cms/issues/2769))
+
+
+<a id="section-layouts-swept"></a>
+
+- **Section layouts left without a field are deleted, a new layout can't be created for an empty section, and a field delete refused because of its section's layout now says so (#3060, #3061, #3062).**
+  - **Old rows (#3060).** Since 1.11.0 a section's layout goes with its last
+    field, but a layout 1.9.x or 1.10.x left behind stayed, and a field later
+    filed under that name took the old tab or fieldset. When no field of the
+    type had a section any more, the **Sections of** panel (whose save
+    deletes such rows) was not shown, so nothing in the console removed them.
+    A job now deletes them after each boot; see the
+    [upgrade note](#section-layout-sweep-upgrade).
+  - **A layout created as its section empties (#3061).** The new check on
+    `FieldSection`'s create (see [Changed](#field-section-create-needs-a-carrier))
+    reads the carrying field `FOR SHARE` and holds it until the create
+    commits. A field save that moves that field out of the section waits for
+    it, then deletes the new layout with the section, instead of running its
+    cleanup before the layout existed and leaving it behind.
+  - **The fields admin names the layout when a delete fails on it (#3062).**
+    When the layout row could not be loaded (one a newer release wrote,
+    after a rollback), the failure aborted the field write untagged, so a
+    field **Delete** said only *Couldn't delete that field.*, and a flexible
+    field's delete dialog said *Couldn't delete that. Check the count and try
+    again.* and asked for the count again, which failed the same way. Such a
+    failure is now a `KilnCMS.CMS.Errors.SectionLayoutNotKept`, like a
+    refused layout write: the delete says *Couldn't delete that field: its
+    section's layout could not be removed with it.*, the flexible field's
+    dialog closes with the same message, and a field **Save** says
+    *Couldn't save the section layout.* A field another admin deleted since
+    the page loaded is not reported as a layout failure.
+  - **For developers.** `KilnCMS.CMS.Changes.KeepSectionLayouts` keeps the
+    layouts inside a nested transaction, so a layout read the database
+    fails is returned as `SectionLayoutNotKept` and the field write rolls
+    back with it; a field gone since it was loaded fails with
+    `Ash.Error.Query.NotFound`, untagged. `KilnCMS.CMS.SectionLayouts` adds
+    `carrier?/3`, `uncarried/2`, `prune_uncarried/2` and
+    `prune_if_uncarried/3`.
+  No migration. One configuration key, `:section_layout_sweep_on_boot`
+  (default `true`).
+
 
 <a id="media-job-read-retry"></a>
 

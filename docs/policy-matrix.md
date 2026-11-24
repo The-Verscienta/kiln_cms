@@ -673,7 +673,12 @@ It follows `FieldDefinition`: laying out a type's fields is admin-only (the
 read the layout as themselves so the content editor can render tabs and
 fieldsets. The schema export reads it as the system actor, `:schema_export`
 only, to report `x-kiln-section-display`. Scoped by `org_id` like a field
-definition; there is no JSON:API, GraphQL or MCP route.
+definition; there is no JSON:API, GraphQL or MCP route. The create refuses a
+section no top-level field of the type is in (#3061), after the policy, so an
+editor still gets `Forbidden`. The boot sweep that deletes layouts older
+releases left without a field (`KilnCMS.CMS.SectionLayoutSweep`, #3060) runs
+with `authorize?: false`: an operator job with no actor, scoped to one owner
+and site per read and delete.
 
 ## Analytics — `ContentView`, `ContentViewDay`, `SearchQuery`
 

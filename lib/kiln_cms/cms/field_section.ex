@@ -21,7 +21,11 @@ defmodule KilnCMS.CMS.FieldSection do
   update and destroy that takes a field out of a section prunes that
   section's row in the same transaction (`KilnCMS.CMS.Changes.KeepSectionLayouts`,
   through `KilnCMS.CMS.SectionLayouts`). The fields admin's rename of a
-  section's last field carries the layout to the new name first.
+  section's last field carries the layout to the new name first. The create
+  itself refuses a name no top-level field carries
+  (`KilnCMS.CMS.Validations.SectionCarried`, #3061), so a row is laid out for
+  a section that exists, and a field sync import writes its fields before
+  its sections.
 
   A row at the defaults (`default?/1`) renders exactly as no row does, so
   neither the fields admin nor a field sync import stores one, and the export
@@ -145,6 +149,11 @@ defmodule KilnCMS.CMS.FieldSection do
     end
 
     validate KilnCMS.CMS.Validations.KnownContentType
+
+    # A layout for a section no field is in would be inherited by the next
+    # field filed there (#3061). Inside the transaction and after the
+    # policies, so it can lock the carrier and a refused caller reads nothing.
+    validate KilnCMS.CMS.Validations.SectionCarried, on: [:create], before_action?: true
   end
 
   # Multi-tenancy (epic #336), as `FieldDefinition`: a layout belongs to the

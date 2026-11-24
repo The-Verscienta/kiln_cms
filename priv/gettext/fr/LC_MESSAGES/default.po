@@ -7143,6 +7143,11 @@ msgstr "Impossible de créer le brouillon. Réessayez."
 msgid "Couldn't delete that field."
 msgstr "Suppression de ce champ impossible."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't delete that field: its section's layout could not be removed with it."
+msgstr "Impossible de supprimer ce champ : la mise en page de sa section n’a pas pu être supprimée avec lui."
+
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't delete that form."
@@ -29748,6 +29753,11 @@ msgstr "contrôle"
 msgid "could not be checked against the schema"
 msgstr "n'a pas pu être vérifié selon le schéma"
 
+#: lib/kiln_cms/cms/validations/section_carried.ex
+#, elixir-autogen, elixir-format
+msgid "could not be checked against the type's fields"
+msgstr "n’a pas pu être vérifiée par rapport aux champs du type"
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -30284,6 +30294,11 @@ msgstr "n'est pas %{value}"
 #, elixir-autogen, elixir-format
 msgid "is not a backup directory id"
 msgstr "n'est pas un identifiant de répertoire de sauvegarde"
+
+#: lib/kiln_cms/cms/validations/section_carried.ex
+#, elixir-autogen, elixir-format
+msgid "is not a section any top-level field of this type is in"
+msgstr "n’est une section d’aucun champ de premier niveau de ce type"
 
 #: lib/kiln_cms/cms/field_schema.ex
 #, elixir-autogen, elixir-format

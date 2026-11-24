@@ -31,11 +31,21 @@ defmodule KilnCMS.CMS.Changes.KeepSectionLayouts do
   write and the rows commit or roll back together. It runs as the field write's own actor (and with its
   `authorize?`) in the record's org; a refused read or write fails the field
   write with `KilnCMS.CMS.Errors.SectionLayoutNotKept`, so the change fails
-  closed rather than leaving an orphaned row. A read the database itself
-  fails (a row it cannot load) aborts the transaction at once, so it fails
-  the field write with that error instead, untagged. An update that sets
-  none of the columns placing the field (its section and owner) reads
-  nothing, and neither does a deferred one.
+  closed rather than leaving an orphaned row. That includes a layout read
+  that fails outright (a row this release cannot load): Ash rolls a
+  transaction back at once on such a read, so the layouts are kept inside a
+  nested transaction, where that rollback ends and its error is tagged; the
+  field write then rolls back with it (#3062). The fields admin names the
+  cause from the tag. An update that sets none of the columns placing the
+  field (its section and owner) reads nothing, and neither does a deferred
+  one.
+
+  A field another write deleted since the struct was loaded is not a layout
+  failure: the locked re-read's `Ash.Error.Query.NotFound` fails the write
+  as it is, untagged, so a concurrent delete is not reported as a layout
+  that could not be removed. Safe to pass through: that read runs with
+  `authorize_with: :error`, so a row the actor may not see is `Forbidden`,
+  never `NotFound`, and is still tagged.
 
   The nested layout writes bust the type registry from their own
   `after_transaction` hooks, which run before this transaction commits;
@@ -100,11 +110,23 @@ defmodule KilnCMS.CMS.Changes.KeepSectionLayouts do
         Ash.Changeset.put_context(changeset, :section_layouts_before, placement(field))
 
       {:error, error} ->
-        Ash.Changeset.add_error(
-          changeset,
-          SectionLayoutNotKept.exception(section: changeset.data.section, reason: error)
-        )
+        if not_found?(error) do
+          Ash.Changeset.add_error(changeset, error)
+        else
+          Ash.Changeset.add_error(
+            changeset,
+            SectionLayoutNotKept.exception(section: changeset.data.section, reason: error)
+          )
+        end
     end
+  end
+
+  # Gone since the struct was loaded: see the moduledoc.
+  defp not_found?(error) do
+    error
+    |> Ash.Error.to_error_class()
+    |> Map.get(:errors, [])
+    |> Enum.any?(&match?(%Ash.Error.Query.NotFound{}, &1))
   end
 
   defp read_opts(changeset, context, query) do
@@ -159,13 +181,36 @@ defmodule KilnCMS.CMS.Changes.KeepSectionLayouts do
       Ash.Changeset.get_argument(changeset, :carry_section_layout?) == true and
         new_owner == owner and is_binary(new_section)
 
-    with :ok <-
-           if(carry?, do: SectionLayouts.carry(owner, old_section, new_section, opts), else: :ok),
-         :ok <- SectionLayouts.prune(owner, [only: [old_section]] ++ opts) do
-      {:ok, result}
-    else
+    kept =
+      contained(fn ->
+        with :ok <- maybe_carry(carry?, owner, old_section, new_section, opts) do
+          SectionLayouts.prune(owner, [only: [old_section]] ++ opts)
+        end
+      end)
+
+    case kept do
+      :ok ->
+        {:ok, result}
+
       {:error, reason} ->
         {:error, SectionLayoutNotKept.exception(section: old_section, reason: reason)}
+    end
+  end
+
+  defp maybe_carry(false, _owner, _from, _to, _opts), do: :ok
+  defp maybe_carry(true, owner, from, to, opts), do: SectionLayouts.carry(owner, from, to, opts)
+
+  # A read that fails outright rolls the transaction back at once, past this
+  # change: inside a nested transaction the rollback ends here instead, as
+  # its error, so it can be tagged. The enclosing transaction is lost either
+  # way; the tagged error rolls the field write back. `Repo.transaction/1`,
+  # not `Ash.DataLayer.transaction/2`, which runs the function bare when a
+  # transaction is already open.
+  defp contained(fun) do
+    case KilnCMS.Repo.transaction(fun) do
+      {:ok, kept} -> kept
+      {:error, %{errors: errors}} -> {:error, Ash.Error.to_error_class(errors)}
+      {:error, reason} -> {:error, reason}
     end
   end
 end
