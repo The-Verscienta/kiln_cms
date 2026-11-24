@@ -249,11 +249,22 @@ defmodule KilnCMSWeb.ConditionsBuilderComponents do
       {gettext("is not empty"), "not_empty"}
     ]
 
-    if type in ConditionsBuilder.ordered_types() do
-      base ++ [{gettext("is greater than"), "gt"}, {gettext("is less than"), "lt"}]
-    else
-      base
-    end
+    ordering =
+      if type in ConditionsBuilder.ordered_types(),
+        do: [{gettext("is greater than"), "gt"}, {gettext("is less than"), "lt"}],
+        else: []
+
+    text =
+      if type in ConditionsBuilder.text_types(),
+        do: [
+          {gettext("contains"), "contains"},
+          {gettext("does not contain"), "not_contains"},
+          {gettext("starts with"), "starts_with"},
+          {gettext("ends with"), "ends_with"}
+        ],
+        else: []
+
+    base ++ ordering ++ text
   end
 
   attr :id, :string, required: true

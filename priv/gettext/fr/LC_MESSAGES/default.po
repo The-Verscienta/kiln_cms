@@ -29622,6 +29622,11 @@ msgstr "impossible de laisser les éditeurs créer des enregistrements %{type} :
 msgid "can't let editors create %{type} records: the field's owner condition cannot be met by a new record"
 msgstr "impossible de laisser les éditeurs créer des enregistrements %{type} : la condition de propriétaire du champ ne peut pas être remplie par un nouvel enregistrement"
 
+#: lib/kiln_cms/cms/validations/field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "can't match text in %{field}: it is not a text, URL or choice field"
+msgstr "impossible de chercher du texte dans %{field} : ce n'est pas un champ texte, URL ou à choix"
+
 #: lib/kiln_cms/cms/titles.ex
 #, elixir-autogen, elixir-format
 msgid "can't read %{refs}: the title is built from this template and the slug from the title"
@@ -29703,6 +29708,7 @@ msgid "confirmed"
 msgstr "confirmé"
 
 #: lib/kiln_cms/cms/computed/recipes.ex
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "contains"
@@ -29900,6 +29906,11 @@ msgstr "désactivée (identité conservée)"
 msgid "disabled — every federation route 404s until the operator sets KILN_FEDERATION_ENABLED"
 msgstr "désactivée — toutes les routes de fédération répondent 404 tant que l'opérateur n'a pas défini KILN_FEDERATION_ENABLED"
 
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "does not contain"
+msgstr "ne contient pas"
+
 #: lib/kiln_cms/cms/field_schema.ex
 #, elixir-autogen, elixir-format
 msgid "doesn't match the schema"
@@ -30018,6 +30029,11 @@ msgstr "envoyé par e-mail à %{to}"
 #, elixir-autogen, elixir-format
 msgid "enabled"
 msgstr "activée"
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "ends with"
+msgstr "se termine par"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -31285,6 +31301,11 @@ msgstr "ignoré"
 #, elixir-autogen, elixir-format
 msgid "source format only"
 msgstr "format d'origine uniquement"
+
+#: lib/kiln_cms_web/components/conditions_builder_components.ex
+#, elixir-autogen, elixir-format
+msgid "starts with"
+msgstr "commence par"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format

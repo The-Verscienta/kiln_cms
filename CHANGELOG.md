@@ -54,6 +54,14 @@ else.
   entries to three lines and fails on an entry with nowhere to link.
 -->
 
+## [Unreleased]
+
+### Added
+
+- **Conditional fields have four text tests: "contains", "does not contain", "starts with" and "ends with", ignoring case, for text, URL and choice fields ([#3270](https://github.com/The-Verscienta/kiln_cms/pull/3270)).**
+  No migration.
+  ([long form](docs/changelog/unreleased.md#condition-text-ops))
+
 ## [1.12.1] - 2026-11-23
 
 Long form: [docs/changelog/v1.12.1.md](docs/changelog/v1.12.1.md) —
