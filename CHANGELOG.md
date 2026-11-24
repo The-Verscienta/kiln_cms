@@ -70,6 +70,9 @@ What's new in the 1.12 line, with examples and migration steps: [docs/whats-new/
 - **Run `mix ash.migrate`: one additive migration (`edit_inline`, a nullable boolean on `field_definitions`). Older releases never read the column, so rolling the pin back is safe.**
   ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283) · [long form](docs/changelog/v1.12.1.md#edit-inline-option-upgrade))
 
+- **Keyset cursors are now signed with a key derived from `SECRET_KEY_BASE`: a cursor issued before the upgrade, or by a node with a different `SECRET_KEY_BASE`, is refused as an invalid keyset, and the client starts its pagination over. Nothing to configure.**
+  ([#3272](https://github.com/The-Verscienta/kiln_cms/pull/3272) · [long form](docs/changelog/v1.12.1.md#keyset-signing-upgrade))
+
 ### Known issues
 
 - **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check; check those on hex.pm by hand.**
@@ -129,6 +132,11 @@ What's new in the 1.12 line, with examples and migration steps: [docs/whats-new/
 
 - **A form's thank-you, not-found and refused (422) pages and the `/newsletter` sign-up and unsubscribe pages follow the visitor's light or dark theme, and with browser storage blocked the console still loads and the theme still applies, just isn't remembered (#2715, #2773).**
   ([long form](docs/changelog/v1.12.1.md#theme-script-everywhere))
+
+### Security
+
+- **Ash 3.38.0: a forged keyset pagination cursor (`page[after]`/`page[before]`) could run code or inject SQL through a keyset-paginated read, without signing in (EEF-CVE-2026-124283, GHSA-m5v6-3qwf-6w9r).**
+  ([#3272](https://github.com/The-Verscienta/kiln_cms/pull/3272) · [long form](docs/changelog/v1.12.1.md#ash-keyset-cursor-cve))
 
 ## [1.12.0] - 2026-11-21
 

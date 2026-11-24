@@ -62,7 +62,7 @@ three starts and serves.
 |----------|---------|-----------------|
 | `DATABASE_URL` | Postgres connection string, e.g. `ecto://USER:PASS@HOST/DATABASE`. Raises if missing. The in-app backup, the demo reset and `scripts/backup.sh` give it to `pg_dump` as `postgres://`, with the password in `PGPASSWORD`, `ssl=false` as `sslmode=disable` and Ecto's `pool_size`, `timeout` and `idle_interval` left out; a `key=value` string with a password, or a URL with `sslpassword` (a client key's passphrase, which libpq can only read from the command line), is refused there ([backups.md](backups.md#which-database-url-the-backup-tools-accept-2719)). | [`config/runtime/prod/database.exs:11`](../config/runtime/prod/database.exs#L11) |
 | `SECRET_KEY_BASE` | Signs/encrypts session cookies and other secrets. Generate with `mix phx.gen.secret`. Raises if missing. | [`config/runtime/prod/web.exs:16`](../config/runtime/prod/web.exs#L16) |
-| `TOKEN_SIGNING_SECRET` | Signs authentication tokens (AshAuthentication). Raises if missing. | [`config/runtime/prod/web.exs:247`](../config/runtime/prod/web.exs#L247) |
+| `TOKEN_SIGNING_SECRET` | Signs authentication tokens (AshAuthentication). Raises if missing. | [`config/runtime/prod/web.exs:256`](../config/runtime/prod/web.exs#L256) |
 
 Those three are derived from the code rather than maintained by hand: they are
 the only raises a `:prod` evaluation of the runtime config reaches with nothing
