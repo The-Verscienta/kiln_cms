@@ -64,6 +64,8 @@ else.
   ([#2283](https://github.com/The-Verscienta/kiln_cms/issues/2283) · [long form](docs/changelog/unreleased.md#edit-inline-option-upgrade))
 - **About 10 minutes after boot, a job deletes the section layouts no field carries, left by 1.9.x and 1.10.x (#3060), and logs each one at info. Nothing to do; `:section_layout_sweep_on_boot` turns it off. Rolling back is safe; what it deleted stays deleted.**
   ([long form](docs/changelog/unreleased.md#section-layout-sweep-upgrade))
+- **About 10 minutes after boot, a job cancels release items left `pending` on published, rolled-back or archived releases (#3072), logging each at info. Upgrading from 1.10.x or earlier with a rolling deploy longer than that: run `KilnCMS.Release.cancel_stranded_release_items()` over `rpc` once it finishes. Rolling back is safe.**
+  ([long form](docs/changelog/unreleased.md#stranded-release-item-sweep-upgrade))
 
 ### Known issues
 
@@ -162,6 +164,12 @@ else.
 
 - **An empty file on S3 copies as an empty file, and a ranged request at 0 gets `416` with `Content-Range: bytes */0`; Kiln confirms the object is empty with one `HEAD` first ([#3069](https://github.com/The-Verscienta/kiln_cms/issues/3069)).**
   ([long form](docs/changelog/unreleased.md#s3-empty-object-range))
+
+- **Content stuck in a release that already went live can join another release again: a boot job cancels items left `pending` on published, rolled-back or archived releases ([#3072](https://github.com/The-Verscienta/kiln_cms/issues/3072)).**
+  ([long form](docs/changelog/unreleased.md#stranded-release-items-freed))
+
+- **A release's item cap is exact: two adds at once at one below the cap no longer leave it one over. Adds to one release now take turns ([#3073](https://github.com/The-Verscienta/kiln_cms/issues/3073)).**
+  ([long form](docs/changelog/unreleased.md#release-cap-exact))
 
 ## [1.12.0] - 2026-11-21
 

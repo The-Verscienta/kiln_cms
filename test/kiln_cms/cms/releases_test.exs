@@ -228,6 +228,52 @@ defmodule KilnCMS.CMS.ReleasesTest do
       assert {:ok, _} = add(fresh, page(), admin)
     end
 
+    test "the count runs inside the add's transaction, after any add that committed (#3073)" do
+      # The SQL sandbox runs this test on one connection inside one
+      # transaction, so it shows that the count happens inside the add's own
+      # transaction, after an add that committed in between. It cannot show a
+      # second add WAITING on the release lock: nothing ever waits on a single
+      # connection. `KilnCMS.CMS.ReleaseCapRaceTest` shows that, outside the
+      # sandbox.
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+      late = page()
+
+      # Fires once, after the outer add was built and before its transaction:
+      # a count at build time saw 1 of 2 and let it through.
+      on_action_start(:create, KilnCMS.CMS.ReleaseItem, :add, fn ->
+        {:ok, _} = add(rel, page(), admin)
+      end)
+
+      assert {:error, %Ash.Error.Invalid{} = error} = add(rel, late, admin)
+      assert Exception.message(error) =~ "full"
+      assert length(pending_on(rel)) == 2
+    end
+
+    test "an add locks its release FOR UPDATE before it counts; a cancel locks FOR SHARE" do
+      admin = user(:admin)
+      rel = release(admin)
+
+      {{:ok, item}, add_sql} = sql_of(fn -> add(rel, page(), admin) end)
+
+      lock_at = Enum.find_index(add_sql, &release_lock?(&1, "FOR UPDATE OF"))
+      count_at = Enum.find_index(add_sql, &pending_count?/1)
+
+      assert lock_at,
+             "no content_releases SELECT ... FOR UPDATE OF in:\n#{Enum.join(add_sql, "\n")}"
+
+      assert count_at, "no release_items count in:\n#{Enum.join(add_sql, "\n")}"
+      assert lock_at < count_at
+      refute Enum.any?(add_sql, &release_lock?(&1, "FOR SHARE"))
+
+      {{:ok, _}, cancel_sql} =
+        sql_of(fn -> CMS.cancel_release_item(item, %{}, actor: admin) end)
+
+      assert Enum.any?(cancel_sql, &release_lock?(&1, "FOR SHARE"))
+      refute Enum.any?(cancel_sql, &release_lock?(&1, "FOR UPDATE"))
+    end
+
     test "the cap and the transaction timeout are configurable" do
       assert Releases.max_items() == 2
 
@@ -936,6 +982,44 @@ defmodule KilnCMS.CMS.ReleasesTest do
   defp pending_on(release),
     do: CMS.list_release_items_with_status!(release.id, :pending, authorize?: false)
 
+  # Every SQL statement `fun` issued in this process, in order, with its result.
+  defp sql_of(fun) do
+    test = self()
+    handler = "release-sql-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:kiln_cms, :repo, :query],
+      fn _event, _measurements, meta, _config ->
+        if self() == test, do: send(test, {:release_sql, meta[:query]})
+      end,
+      nil
+    )
+
+    result =
+      try do
+        fun.()
+      after
+        :telemetry.detach(handler)
+      end
+
+    {result, collect_sql([])}
+  end
+
+  defp collect_sql(acc) do
+    receive do
+      {:release_sql, sql} -> collect_sql([sql | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  defp release_lock?(sql, mode),
+    do: sql =~ ~s(FROM "content_releases") and sql =~ mode
+
+  defp pending_count?(sql),
+    do: sql =~ ~s(FROM "release_items") and sql =~ "status" and sql =~ "release_id"
+
   describe "the minute cron claims only a release that is still due (#2745)" do
     # The GoLive worker reads the release, then claims it with no transaction
     # around the two. `:start` also serves "Publish now", so it accepts an
@@ -1129,13 +1213,90 @@ defmodule KilnCMS.CMS.ReleasesTest do
       assert CMS.get_release_item!(item.id, authorize?: false).status == :cancelled
     end
 
-    test "a viewer's add is still Forbidden" do
+    test "a viewer's add is still refused, and writes nothing" do
       admin = user(:admin)
       viewer = user(:viewer)
       rel = release(admin)
 
-      assert {:error, %Ash.Error.Forbidden{}} = add(rel, page(), viewer)
+      # Refused at build time, by the type scope: a viewer edits no type. It
+      # used to come back Forbidden only because the size cap's count, then
+      # also at build time, was refused to a viewer; both release lookups now
+      # run inside the transaction (#2740, #3073), which a refused changeset
+      # never opens.
+      assert {:error, %Ash.Error.Invalid{} = error} = add(rel, page(), viewer)
+      assert Exception.message(error) =~ "outside your content-type scope"
       assert pending_on(rel) == []
+    end
+  end
+
+  describe "items stranded on a closed release (#3072)" do
+    # A `:pending` item on a release that already went live: what a pre-1.12
+    # add racing the claim left behind.
+    defp stranded(admin) do
+      rel = release(admin)
+      {:ok, _} = add(rel, page(), admin)
+      {:ok, published} = go_live(rel, admin)
+      p = page()
+
+      item =
+        Ash.Seed.seed!(KilnCMS.CMS.ReleaseItem, %{
+          release_id: rel.id,
+          org_id: rel.org_id,
+          content_type: "page",
+          content_id: p.id,
+          action: :publish,
+          status: :pending
+        })
+
+      {published, item, p}
+    end
+
+    test "every release state is pending, closed, or the rollback claim" do
+      # A new state must be placed explicitly: the stranded-item sweep
+      # cancels items on closed releases only.
+      all = AshStateMachine.Info.state_machine_all_states(KilnCMS.CMS.ContentRelease)
+
+      placed =
+        KilnCMS.CMS.ContentRelease.pending_states() ++
+          KilnCMS.CMS.ContentRelease.closed_states() ++ [:rolling_back]
+
+      assert Enum.sort(placed) == Enum.sort(Enum.uniq(all))
+      assert length(placed) == length(Enum.uniq(placed))
+    end
+
+    test "mark_cancelled refuses an item that is no longer pending" do
+      admin = user(:admin)
+      rel = release(admin)
+      {:ok, item} = add(rel, page(), admin)
+      {:ok, _} = go_live(rel, admin)
+      assert CMS.get_release_item!(item.id, authorize?: false).status == :applied
+
+      assert stale?(
+               CMS.mark_release_item_cancelled(item, %{},
+                 actor: KilnCMS.CMS.Bookkeeping.system(),
+                 tenant: rel.org_id
+               )
+             )
+
+      assert CMS.get_release_item!(item.id, authorize?: false).status == :applied
+    end
+
+    test "an archive goes on when the sweep frees its item mid-archive" do
+      admin = user(:admin)
+      {published, item, p} = stranded(admin)
+
+      # Between the archive's read of its pending items and its own cancel,
+      # the sweep cancels the item first: the archive's write misses.
+      on_action_start(:update, KilnCMS.CMS.ReleaseItem, :mark_cancelled, fn ->
+        send(self(), {:swept, KilnCMS.CMS.StrandedReleaseItemSweep.run(org_id: published.org_id)})
+      end)
+
+      assert {:ok, %{state: :archived}} = CMS.archive_release(published, %{}, actor: admin)
+      assert_received {:swept, %{cancelled: 1, failed: 0}}
+
+      assert reload(published).state == :archived
+      assert CMS.get_release_item!(item.id, authorize?: false).status == :cancelled
+      assert {:ok, _} = add(release(admin, %{name: "Next"}), p, admin)
     end
   end
 
