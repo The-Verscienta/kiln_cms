@@ -1012,6 +1012,192 @@ public indirect enum Block: Codable, Hashable, Sendable {
 }
 
 
+// MARK: - Flexible items
+
+/// An item of the `hero` type.
+public struct FlexPostSectionsHero: Codable, Hashable, Sendable {
+    public let id: String
+    /// The item's settings, apart from its content.
+    public let settings: Settings?
+    public let type: String
+    /// Items of mixed types, in the order the editor arranged them. Each item names its type in `_type`.
+    public let cols: [FlexPostSectionsHeroCols]?
+    public let headline: String?
+    /// Snapshot of the picked media item.
+    public let image: MediaSnapshot?
+    /// Write-time snapshot of a referenced record.
+    ///
+    /// Links to: `post`.
+    public let link: [String: JSONValue]?
+
+    public init(id: String, settings: Settings? = nil, type: String, cols: [FlexPostSectionsHeroCols]? = nil, headline: String? = nil, image: MediaSnapshot? = nil, link: [String: JSONValue]? = nil) {
+        self.id = id
+        self.settings = settings
+        self.type = type
+        self.cols = cols
+        self.headline = headline
+        self.image = image
+        self.link = link
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id = "_id"
+        case settings = "_settings"
+        case type = "_type"
+        case cols
+        case headline
+        case image
+        case link
+    }
+
+    public struct Settings: Codable, Hashable, Sendable {
+        public let background: String?
+
+        public init(background: String? = nil) {
+            self.background = background
+        }
+    }
+}
+
+/// An item of the `hero_cols` type.
+public struct FlexPostSectionsHeroCols2: Codable, Hashable, Sendable {
+    public let id: String
+    public let type: String
+    public let count: Int?
+
+    public init(id: String, type: String, count: Int? = nil) {
+        self.id = id
+        self.type = type
+        self.count = count
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id = "_id"
+        case type = "_type"
+        case count
+    }
+}
+
+/// An item of the `text` type.
+public struct FlexPostSectionsHeroColsText: Codable, Hashable, Sendable {
+    public let id: String
+    public let type: String
+    public let body: String?
+
+    public init(id: String, type: String, body: String? = nil) {
+        self.id = id
+        self.type = type
+        self.body = body
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id = "_id"
+        case type = "_type"
+        case body
+    }
+}
+
+/// An item of the `quote` type.
+public struct FlexPostSectionsQuote: Codable, Hashable, Sendable {
+    public let id: String
+    public let type: String
+    public let cite: String?
+    public let text: String?
+
+    public init(id: String, type: String, cite: String? = nil, text: String? = nil) {
+        self.id = id
+        self.type = type
+        self.cite = cite
+        self.text = text
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id = "_id"
+        case type = "_type"
+        case cite
+        case text
+    }
+}
+
+/// One item of the flexible field `sections`, told apart by `_type`.
+public indirect enum FlexPostSections: Codable, Hashable, Sendable {
+    case hero(FlexPostSectionsHero)
+    case heroCols(FlexPostSectionsHeroCols2)
+    case quote(FlexPostSectionsQuote)
+    /// An item type this build does not know — one added after it was generated.
+    case unknown(type: String)
+
+    private enum TagKey: String, CodingKey {
+        case tag = "_type"
+    }
+
+    public var type: String {
+        switch self {
+        case .hero: return "hero"
+        case .heroCols: return "hero_cols"
+        case .quote: return "quote"
+        case .unknown(let type): return type
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let type = try decoder.container(keyedBy: TagKey.self).decode(String.self, forKey: .tag)
+        switch type {
+        case "hero": self = .hero(try FlexPostSectionsHero(from: decoder))
+        case "hero_cols": self = .heroCols(try FlexPostSectionsHeroCols2(from: decoder))
+        case "quote": self = .quote(try FlexPostSectionsQuote(from: decoder))
+        default: self = .unknown(type: type)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        switch self {
+        case .hero(let value): try value.encode(to: encoder)
+        case .heroCols(let value): try value.encode(to: encoder)
+        case .quote(let value): try value.encode(to: encoder)
+        case .unknown(let type):
+            var container = encoder.container(keyedBy: TagKey.self)
+            try container.encode(type, forKey: .tag)
+        }
+    }
+}
+
+/// One item of the flexible field `cols`, told apart by `_type`.
+public indirect enum FlexPostSectionsHeroCols: Codable, Hashable, Sendable {
+    case text(FlexPostSectionsHeroColsText)
+    /// An item type this build does not know — one added after it was generated.
+    case unknown(type: String)
+
+    private enum TagKey: String, CodingKey {
+        case tag = "_type"
+    }
+
+    public var type: String {
+        switch self {
+        case .text: return "text"
+        case .unknown(let type): return type
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let type = try decoder.container(keyedBy: TagKey.self).decode(String.self, forKey: .tag)
+        switch type {
+        case "text": self = .text(try FlexPostSectionsHeroColsText(from: decoder))
+        default: self = .unknown(type: type)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        switch self {
+        case .text(let value): try value.encode(to: encoder)
+        case .unknown(let type):
+            var container = encoder.container(keyedBy: TagKey.self)
+            try container.encode(type, forKey: .tag)
+        }
+    }
+}
+
+
 // MARK: - Documents
 
 /// A published `Page` as fired to the `:json` surface.
@@ -1169,6 +1355,8 @@ public struct PostDocument: Codable, Hashable, Sendable {
         public let related: [RelatedItem]?
         /// The items, in the order the editor arranged them.
         public let scores: [Int]?
+        /// Items of mixed types, in the order the editor arranged them. Each item names its type in `_type`.
+        public let sections: [FlexPostSections]?
         public let seo: Seo?
         public let source: Source?
         public let specs: [SpecsItem]?
@@ -1179,7 +1367,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
         public let tier: String?
         public let `where`: Where?
 
-        public init(accent: String? = nil, codeSample: String? = nil, contactEmail: String? = nil, contacts: [String]? = nil, dosages: [DosagesItem]? = nil, eventDates: [String]? = nil, extra: JSONValue? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, handle: String? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, office: Office? = nil, opensAt: String? = nil, parent: [String: JSONValue]? = nil, phone: String? = nil, priceBand: PriceBand? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, scores: [Int]? = nil, seo: Seo? = nil, source: Source? = nil, specs: [SpecsItem]? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
+        public init(accent: String? = nil, codeSample: String? = nil, contactEmail: String? = nil, contacts: [String]? = nil, dosages: [DosagesItem]? = nil, eventDates: [String]? = nil, extra: JSONValue? = nil, featured: Bool? = nil, gallery: [MediaSnapshot]? = nil, handle: String? = nil, hero: MediaSnapshot? = nil, homepage: String? = nil, launchDate: String? = nil, office: Office? = nil, opensAt: String? = nil, parent: [String: JSONValue]? = nil, phone: String? = nil, priceBand: PriceBand? = nil, properties: [String]? = nil, publishedAt: String? = nil, rating: Double? = nil, readTime: Int? = nil, related: [RelatedItem]? = nil, scores: [Int]? = nil, sections: [FlexPostSections]? = nil, seo: Seo? = nil, source: Source? = nil, specs: [SpecsItem]? = nil, subtitle: String? = nil, summary: String? = nil, synonyms: [String]? = nil, tier: String? = nil, `where`: Where? = nil) {
             self.accent = accent
             self.codeSample = codeSample
             self.contactEmail = contactEmail
@@ -1204,6 +1392,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
             self.readTime = readTime
             self.related = related
             self.scores = scores
+            self.sections = sections
             self.seo = seo
             self.source = source
             self.specs = specs
@@ -1239,6 +1428,7 @@ public struct PostDocument: Codable, Hashable, Sendable {
             case readTime = "read_time"
             case related
             case scores
+            case sections
             case seo
             case source
             case specs
@@ -1617,7 +1807,9 @@ public indirect enum JSONValue: Codable, Hashable, Sendable {
 // `fields(names: [...])`, which returns `KilnCustomFieldValue`s. Values
 // arrive under per-kind aliases (`asString`, `asInt`, ...) because GraphQL
 // forbids one response key with several types. The fragment goes one level
-// into lists and groups.
+// into lists and groups, and into a flexible field's items
+// (`.flexibleItem`: `id`, `type`, `settings` and `fields`) without following
+// a nested flexible field or group.
 //
 // A field that is unknown, deleted, private to the reader or of another
 // kind than the accessor is `null` (or absent from `fields`), so the server
@@ -1640,6 +1832,7 @@ public enum KilnCustomFieldValue: Codable, Hashable, Sendable {
     case media(name: String, value: KilnMediaValue)
     case list(name: String, items: [KilnCustomFieldValue])
     case group(name: String, fields: [KilnCustomFieldValue])
+    case flexibleItem(name: String, id: String?, type: String, settings: [KilnCustomFieldValue], fields: [KilnCustomFieldValue])
     /// A value kind this schema does not know — one added since it was generated.
     case unknown(typename: String, name: String)
 
@@ -1650,14 +1843,14 @@ public enum KilnCustomFieldValue: Codable, Hashable, Sendable {
              .boolean(let name, _), .date(let name, _), .dateTime(let name, _),
              .geolocation(let name, _), .json(let name, _), .reference(let name, _),
              .media(let name, _), .list(let name, _), .group(let name, _),
-             .unknown(_, let name):
+             .flexibleItem(let name, _, _, _, _), .unknown(_, let name):
             return name
         }
     }
 
     private enum CodingKeys: String, CodingKey {
         case typename = "__typename"
-        case name, asString, asInt, asFloat, asBoolean, asDate, asDateTime, asJson, ids, items, fields
+        case name, asString, asInt, asFloat, asBoolean, asDate, asDateTime, asJson, ids, items, fields, id, type, settings
     }
 
     public init(from decoder: Decoder) throws {
@@ -1677,6 +1870,7 @@ public enum KilnCustomFieldValue: Codable, Hashable, Sendable {
         case "MediaValue": self = .media(name: name, value: try KilnMediaValue(from: decoder))
         case "ListValue": self = .list(name: name, items: try container.decode([KilnCustomFieldValue].self, forKey: .items))
         case "GroupValue": self = .group(name: name, fields: try container.decode([KilnCustomFieldValue].self, forKey: .fields))
+        case "FlexibleItemValue": self = .flexibleItem(name: name, id: try container.decodeIfPresent(String.self, forKey: .id), type: try container.decode(String.self, forKey: .type), settings: try container.decode([KilnCustomFieldValue].self, forKey: .settings), fields: try container.decode([KilnCustomFieldValue].self, forKey: .fields))
         default: self = .unknown(typename: typename, name: name)
         }
     }
@@ -1720,6 +1914,12 @@ public enum KilnCustomFieldValue: Codable, Hashable, Sendable {
             try container.encode(items, forKey: .items)
         case .group(_, let fields):
             try container.encode("GroupValue", forKey: .typename)
+            try container.encode(fields, forKey: .fields)
+        case .flexibleItem(_, let id, let type, let settings, let fields):
+            try container.encode("FlexibleItemValue", forKey: .typename)
+            try container.encodeIfPresent(id, forKey: .id)
+            try container.encode(type, forKey: .type)
+            try container.encode(settings, forKey: .settings)
             try container.encode(fields, forKey: .fields)
         case .unknown(let typename, _):
             try container.encode(typename, forKey: .typename)
@@ -1851,7 +2051,7 @@ public struct PostCustomFields: Codable, Hashable, Sendable {
           subtitle: customString(name: "subtitle")
           summary: customString(name: "summary")
           tier: customString(name: "tier")
-          fields(names: ["contacts", "dosages", "event_dates", "extra", "gallery", "office", "parent", "price_band", "properties", "related", "scores", "seo", "source", "specs", "synonyms", "where"]) {
+          fields(names: ["contacts", "dosages", "event_dates", "extra", "gallery", "office", "parent", "price_band", "properties", "related", "scores", "sections", "seo", "source", "specs", "synonyms", "where"]) {
             __typename
             name
             ... on StringValue { asString: value }
@@ -1879,6 +2079,7 @@ public struct PostCustomFields: Codable, Hashable, Sendable {
                 ... on ReferenceValue { ids }
                 ... on MediaValue { id url alt width height mimeType focal { x y } variants { label width height format url bytes cropped } }
                 ... on GroupValue { fields { __typename name ... on StringValue { asString: value } ... on IntValue { asInt: value } ... on FloatValue { asFloat: value } ... on BooleanValue { asBoolean: value } ... on DateValue { asDate: value } ... on DateTimeValue { asDateTime: value } ... on GeolocationValue { lat lng label zoom } ... on JsonValue { asJson: value } } }
+                ... on FlexibleItemValue { id type settings { __typename name ... on StringValue { asString: value } ... on IntValue { asInt: value } ... on FloatValue { asFloat: value } ... on BooleanValue { asBoolean: value } ... on DateValue { asDate: value } ... on DateTimeValue { asDateTime: value } ... on GeolocationValue { lat lng label zoom } ... on JsonValue { asJson: value } } fields { __typename name ... on StringValue { asString: value } ... on IntValue { asInt: value } ... on FloatValue { asFloat: value } ... on BooleanValue { asBoolean: value } ... on DateValue { asDate: value } ... on DateTimeValue { asDateTime: value } ... on GeolocationValue { lat lng label zoom } ... on JsonValue { asJson: value } } }
               }
             }
             ... on GroupValue {

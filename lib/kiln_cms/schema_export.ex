@@ -147,10 +147,10 @@ defmodule KilnCMS.SchemaExport do
   def json_schema(opts \\ []) do
     model = model(opts)
 
-    content_defs =
-      Map.new(model.content_types, fn ct ->
-        {content_def_name(ct.type), content_schema(ct, opts)}
-      end)
+    {content_defs, flexible_defs} =
+      model.content_types
+      |> Enum.map(&{&1, content_schema(&1, opts)})
+      |> hoist_flexible()
 
     root_refs =
       Enum.map(model.content_types, &%{"$ref" => "#/$defs/#{content_def_name(&1.type)}"})
@@ -174,11 +174,145 @@ defmodule KilnCMS.SchemaExport do
         "blocks" => Enum.map(model.block_modules, &to_string(Kiln.Block.Info.name(&1)))
       },
       "$defs" =>
-        model.block_modules |> JsonSchema.defs() |> Map.merge(content_defs) |> hoist_media()
+        model.block_modules
+        |> JsonSchema.defs()
+        |> Map.merge(content_defs)
+        |> Map.merge(flexible_defs)
+        |> hoist_media()
     }
     |> put_id(Keyword.get(opts, :base_url))
     |> put_root(root_refs)
   end
+
+  # -- Flexible fields (#2282) -------------------------------------------------
+  #
+  # A flexible field's items are one of its item types, told apart by `_type`.
+  # `base_custom_field_schema/2` writes them inline (a marked `oneOf` under the
+  # field's `items`); this pass lifts each such union, and each of its members,
+  # into `$defs` and leaves a `$ref` behind, so a generated client gets one
+  # named type per union and per item type instead of a copy per use.
+  #
+  # Def names are built from the path (`flex_<type>_<field>` for the union,
+  # `…_<item type>` for a member, `…_<item type>_<sub-field>` for a nested
+  # union) and are not injective: `a_b` beside `a` + `b_…` collide. A taken
+  # name gets `_2`, `_3`, … in traversal order, which is deterministic (types in
+  # order, fields by name, members in editor order). So a name is a label, not
+  # an address: the union def carries `x-kiln-flexible` (`content_type`, `field`,
+  # `path`) and no emitter parses a name. The `flex_` prefix is reserved for
+  # these (`KilnCMS.SchemaExport.Walk`).
+  @flex_union_marker "x-kiln-flexible-union"
+
+  defp hoist_flexible(described) do
+    {content, state} =
+      Enum.map_reduce(described, %{defs: %{}, taken: MapSet.new()}, fn {ct, schema}, state ->
+        type = to_string(ct.type)
+
+        {schema, state} =
+          case get_in(schema, ["properties", "custom_fields", "properties"]) do
+            %{} = properties ->
+              {properties, state} = hoist_properties(properties, type, [], state)
+              {put_in(schema, ["properties", "custom_fields", "properties"], properties), state}
+
+            _none ->
+              {schema, state}
+          end
+
+        {{content_def_name(ct.type), schema}, state}
+      end)
+
+    {Map.new(content), state.defs}
+  end
+
+  # Sorted by key so the names do not depend on map order.
+  defp hoist_properties(properties, type, path, state) do
+    properties
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.map_reduce(state, fn {key, schema}, state ->
+      {schema, state} = hoist_field(schema, type, path ++ [key], state)
+      {{key, schema}, state}
+    end)
+    |> then(fn {pairs, state} -> {Map.new(pairs), state} end)
+  end
+
+  defp hoist_field(
+         %{"items" => %{@flex_union_marker => true} = union} = schema,
+         type,
+         path,
+         state
+       ) do
+    {name, state} = flex_name(type, path, state)
+    members = Map.fetch!(union, "oneOf")
+
+    {refs, state} =
+      Enum.map_reduce(members, state, fn member, state ->
+        tag = get_in(member, ["properties", "_type", "const"])
+        member_path = path ++ [tag]
+        {member_name, state} = flex_name(type, member_path, state)
+
+        {member, state} = hoist_member(member, type, member_path, state)
+        {%{"$ref" => "#/$defs/" <> member_name}, put_def(state, member_name, member)}
+      end)
+
+    def = %{
+      "description" =>
+        "One item of the flexible field `#{List.last(path)}` of `#{type}`, told apart by " <>
+          "`_type`. An item whose type has since been removed can still appear in an older " <>
+          "revision or a point-in-time read (`?as_of=`): treat an unrecognized `_type` as " <>
+          "an unknown item.",
+      "oneOf" => refs,
+      "discriminator" => %{"propertyName" => "_type"},
+      "x-kiln-flexible" => %{
+        "content_type" => type,
+        "field" => hd(path),
+        "path" => path
+      }
+    }
+
+    {Map.put(schema, "items", %{"$ref" => "#/$defs/" <> name}), put_def(state, name, def)}
+  end
+
+  defp hoist_field(schema, _type, _path, state), do: {schema, state}
+
+  # A member's sub-fields (and its settings') may be flexible fields of their
+  # own: their unions are hoisted under the member's path.
+  defp hoist_member(member, type, path, state) do
+    {properties, state} =
+      member
+      |> Map.fetch!("properties")
+      |> Map.delete("_settings")
+      |> hoist_properties(type, path, state)
+
+    {settings, state} =
+      case get_in(member, ["properties", "_settings"]) do
+        %{"properties" => settings} = holder ->
+          {settings, state} = hoist_properties(settings, type, path, state)
+          {Map.put(holder, "properties", settings), state}
+
+        _none ->
+          {nil, state}
+      end
+
+    properties = if settings, do: Map.put(properties, "_settings", settings), else: properties
+    {Map.put(member, "properties", properties), state}
+  end
+
+  defp flex_name(type, path, state) do
+    base =
+      "flex_" <> Enum.map_join([type | path], "_", &String.replace(&1, ~r/[^A-Za-z0-9_]/, "_"))
+
+    name =
+      if base in state.taken do
+        Stream.iterate(2, &(&1 + 1))
+        |> Stream.map(&"#{base}_#{&1}")
+        |> Enum.find(&(&1 not in state.taken))
+      else
+        base
+      end
+
+    {name, %{state | taken: MapSet.put(state.taken, name)}}
+  end
+
+  defp put_def(state, name, schema), do: %{state | defs: Map.put(state.defs, name, schema)}
 
   @media_def "media_snapshot"
 
@@ -406,8 +540,12 @@ defmodule KilnCMS.SchemaExport do
     schema
     |> update_in(["properties", "custom_fields", "properties"], fn properties ->
       Map.new(properties, fn {name, property} ->
+        definition = Map.fetch!(kinds, name)
+
         {name,
-         Map.put(property, "x-kiln-graphql-kind", kinds |> Map.fetch!(name) |> graphql_kind())}
+         property
+         |> Map.put("x-kiln-graphql-kind", graphql_kind(definition))
+         |> put_graphql_item_kind(definition)}
       end)
     end)
     |> Map.put("x-kiln-graphql", graphql_target(ct))
@@ -415,6 +553,15 @@ defmodule KilnCMS.SchemaExport do
 
   defp graphql_kind(definition),
     do: definition |> KilnCMS.CMS.FieldKind.kind_for() |> Atom.to_string()
+
+  # A flexible field is a `list` like any `multiple` one; its items have a
+  # kind of their own, which is what the typed GraphQL selection keys on.
+  defp put_graphql_item_kind(property, definition) do
+    case KilnCMS.CMS.FieldKind.item_kind_for(definition) do
+      :flexible_item -> Map.put(property, "x-kiln-graphql-item-kind", "flexible_item")
+      _other -> property
+    end
+  end
 
   defp graphql_target(%{source: :dynamic} = ct),
     do: %{"type" => "Entry", "type_name" => to_string(ct.type)}
@@ -962,13 +1109,20 @@ defmodule KilnCMS.SchemaExport do
   end
 
   # A flexible field (#2282): a list of items, each an object carrying its
-  # `_id` and `_type` beside the keys of its item type. Typed as generic JSON
-  # objects until the typed export (`oneOf` over the item types) lands; the
-  # item types are rows of their own and are not listed as fields.
+  # `_id` and `_type` beside the keys of its item type. With item types the
+  # items are an inline, marked `oneOf` that `hoist_flexible/1` lifts into
+  # `$defs`; without any (a field not yet set up) they are generic objects.
+  # The item types are rows of their own and are not listed as fields.
   defp base_custom_field_schema(:flexible, d) do
+    items =
+      case item_types_of(d) do
+        [] -> %{"type" => "object"}
+        types -> flex_union_schema(types)
+      end
+
     %{
       "type" => ["array", "null"],
-      "items" => %{"type" => "object"},
+      "items" => items,
       "description" =>
         "Items of mixed types, in the order the editor arranged them. Each item names " <>
           "its type in `_type`."
@@ -1005,6 +1159,61 @@ defmodule KilnCMS.SchemaExport do
       nil -> %{}
       module -> field_type_schema(module, definition)
     end
+  end
+
+  defp item_types_of(definition) do
+    case Map.get(definition, :item_types) do
+      types when is_list(types) -> types
+      _not_loaded -> []
+    end
+  end
+
+  # The inline union `hoist_flexible/1` lifts. A member is **closed**, for the
+  # reason a group row is: a write refuses any key the item type does not
+  # declare. Only `_id` and `_type` are required (a sub-field added later has
+  # no value in older items), `_settings` is optional and exists only when the
+  # item type has setting sub-fields. A per-type `max_items` is an annotation
+  # on the member, never a `$ref` sibling.
+  defp flex_union_schema(types) do
+    %{
+      @flex_union_marker => true,
+      "oneOf" => Enum.map(types, &flex_member_schema/1),
+      "discriminator" => %{"propertyName" => "_type"}
+    }
+  end
+
+  defp flex_member_schema(type) do
+    {settings, content} = Enum.split_with(FieldDefinition.group_fields(type), & &1.item_setting)
+
+    properties =
+      %{
+        "_id" => %{"type" => "string", "format" => "uuid"},
+        "_type" => %{"const" => type.name}
+      }
+      |> Map.merge(Map.new(content, &{&1.name, custom_field_schema(&1)}))
+      |> then(fn properties ->
+        if settings == [],
+          do: properties,
+          else: Map.put(properties, "_settings", flex_settings_schema(settings))
+      end)
+
+    %{
+      "type" => "object",
+      "description" => "An item of the `#{type.name}` type.",
+      "properties" => properties,
+      "required" => ["_id", "_type"],
+      "additionalProperties" => false
+    }
+    |> put_bound("x-kiln-max-items", Map.get(type, :max_items))
+  end
+
+  defp flex_settings_schema(settings) do
+    %{
+      "type" => "object",
+      "description" => "The item's settings, apart from its content.",
+      "properties" => Map.new(settings, &{&1.name, custom_field_schema(&1)}),
+      "additionalProperties" => false
+    }
   end
 
   defp group_row_schema(definition) do

@@ -56,6 +56,39 @@ export type KilnBlock =
   | CallToActionBlock;
 
 
+// -- Flexible items ----------------------------------------------
+
+/** An item of the `hero` type. */
+export interface FlexPostSectionsHero {
+  _id: string;
+  _settings?: { background?: string | null };
+  _type: "hero";
+  cols?: Array<FlexPostSectionsHeroCols> | null;
+  headline?: string | null;
+}
+
+/** Named for a collision with the nested union above. */
+export interface FlexPostSectionsHeroCols2 {
+  _id: string;
+  _type: "hero_cols";
+}
+
+export interface FlexPostSectionsHeroColsText {
+  _id: string;
+  _type: "text";
+  body?: string | null;
+}
+
+/** One item of a flexible field, told apart by `_type`. Watch the *\/ escape. */
+export type FlexPostSections =
+  | FlexPostSectionsHero
+  | FlexPostSectionsHeroCols2;
+
+/** A nested flexible field's items. */
+export type FlexPostSectionsHeroCols =
+  | FlexPostSectionsHeroColsText;
+
+
 // -- Documents ---------------------------------------------------
 
 export interface LandingPageDocument {
@@ -67,7 +100,7 @@ export interface LandingPageDocument {
 /** A published post's fired `:json` artifact. */
 export interface PostDocument {
   blocks: Array<KilnBlock>;
-  custom_fields?: { author?: /* links to: "person" | "team*\/" */ Record<string, unknown> | null; badge?: "say \"hi\"" | "C:\\reports" | "line\nbreak\tand tab"; rating?: number | null; "weird key!"?: string };
+  custom_fields?: { author?: /* links to: "person" | "team*\/" */ Record<string, unknown> | null; badge?: "say \"hi\"" | "C:\\reports" | "line\nbreak\tand tab"; rating?: number | null; sections?: Array<FlexPostSections> | null; "weird key!"?: string };
   featured?: boolean;
   location?: GeoPoint;
   slug: string;

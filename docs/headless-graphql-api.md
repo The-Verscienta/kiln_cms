@@ -389,7 +389,8 @@ generated types [below](#generate-types-and-fragments-for-your-site).
 - `fields(names:)` returns the `CustomFieldValue` interface (`name: String!`).
   Narrow with `... on FloatValue { value }`. The members are `StringValue`,
   `IntValue`, `FloatValue`, `BooleanValue`, `DateValue`, `DateTimeValue`,
-  `ListValue { items }`, `GroupValue { fields }`, `ReferenceValue { ids }`,
+  `ListValue { items }`, `GroupValue { fields }`,
+  `FlexibleItemValue { id type settings fields }`, `ReferenceValue { ids }`,
   `MediaValue` (the shape every surface serves a media item: `id`, `url`,
   `alt`, `width`, `height`, `mimeType`, `focal`, `variants`),
   `GeolocationValue { lat lng label zoom }` and `JsonValue { value }`.
@@ -410,9 +411,11 @@ generated types [below](#generate-types-and-fragments-for-your-site).
   `datetime_range` and `recurrence` fields, and a plugin type that does not
   name a GraphQL kind, are `JsonValue`. An address's `value` is its object
   (`{"country": "GB", "postal_code": "SW1A 1AA", …}`).
-- A `flexible` field is a `ListValue` of `JsonValue`s, one per item in the
-  editor's order, each `value` the item's object with its `_id`, `_type` and
-  optional `_settings`. A typed item value is not in the schema yet.
+- A `flexible` field is a `ListValue` of `FlexibleItemValue`s, one per item in
+  the editor's order: `id`, `type` (the item type's name), `settings` (the item
+  type's setting sub-fields) and `fields` (its other sub-fields), each a
+  `CustomFieldValue`. An item whose type the site no longer defines is left
+  out.
 - **A reference field returns ids only** (`ReferenceValue { ids }`; a
   `multiple` one is a `ListValue` of `ReferenceValue`s, one id each). For the
   records, use [`references(field:)`](#relationships-references-and-referencedby).
@@ -504,7 +507,16 @@ reads with GraphQL:
 
 For a dynamic type the fragment is on `Entry`; use it with
 `publishedEntries(filter: {typeName: {eq: "recipe"}})`. The comment above each
-generated type says which. The fragment goes one level into lists and groups.
+generated type says which. The fragment goes one level into lists and groups,
+and into a flexible field's items (`... on FlexibleItemValue { id type
+settings { … } fields { … } }`), not through a flexible field or group nested
+inside an item, and it selects scalar parts only: an image or reference inside
+an item is not fetched by it. The typed formats give a flexible field the
+GraphQL `FlexibleItemValue` case, and the `json` artifact types it as a union
+over its item types ([api.md](api.md#schema-discovery-typed-clients)). The
+selection is costly: `fields(names:)` prices each name at the whole selection,
+so a generated fragment can be over the default complexity cap of 200 (see
+[Query cost](#query-cost)) and needs a raised `max_complexity`.
 Private custom fields are not in the export. An editor whose role hides a
 private field from them
 ([granular-rbac.md](granular-rbac.md#per-custom-field-grants-and-read-restrictions))

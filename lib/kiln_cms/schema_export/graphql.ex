@@ -13,7 +13,9 @@ defmodule KilnCMS.SchemaExport.GraphQL do
       alias of its scalar accessor (`price: customFloat(name: "price")`) and
       typed per language;
     * every other kind is read, together, through `fields(names: [...])`, which
-      returns `CustomFieldValue`s narrowed on `__typename`.
+      returns `CustomFieldValue`s narrowed on `__typename`. A flexible field
+  (`x-kiln-graphql-item-kind: "flexible_item"`) is one of these, and its items
+  are selected one level deep.
 
   This module owns the part that is the same in every language: which types get
   a section, the alias each scalar field is read under (and the collision
@@ -139,13 +141,19 @@ defmodule KilnCMS.SchemaExport.GraphQL do
   defp fields_selection(others) do
     names = Enum.map_join(others, ", ", &inspect(&1.key))
 
-    ["  fields(names: [#{names}]) {", value_selection(2), "  }"]
+    flexible? = Enum.any?(others, &(&1.graphql_item_kind == "flexible_item"))
+
+    ["  fields(names: [#{names}]) {", value_selection(2, flexible?), "  }"]
   end
 
   # The selection under `fields(names:)`, as lines already indented. One level
   # into lists and groups; a row of a repeating group is a `GroupValue` item.
-  defp value_selection(indent) do
-    items = ["... on ListValue {", "  items {"] ++ indent_lines(value_parts() ++ [group_row()], 4)
+  # A flexible field's item (#2282) is a `FlexibleItemValue`: its `id`, `type`
+  # and, one level down, its settings and fields. Only when the section reads a
+  # flexible field, so the selection of every other fragment is unchanged.
+  defp value_selection(indent, flexible?) do
+    row_parts = if flexible?, do: [group_row(), flexible_item()], else: [group_row()]
+    items = ["... on ListValue {", "  items {"] ++ indent_lines(value_parts() ++ row_parts, 4)
     group = ["... on GroupValue {", "  fields {"] ++ indent_lines(value_parts(), 4)
 
     (value_parts() ++ items ++ ["  }", "}"] ++ group ++ ["  }", "}"])
@@ -176,6 +184,13 @@ defmodule KilnCMS.SchemaExport.GraphQL do
     do:
       "... on MediaValue { id url alt width height mimeType focal { x y } " <>
         "variants { label width height format url bytes cropped } }"
+
+  defp flexible_item do
+    parts = Enum.join(scalar_parts(), " ")
+
+    "... on FlexibleItemValue { id type " <>
+      "settings { __typename name #{parts} } fields { __typename name #{parts} } }"
+  end
 
   defp group_row,
     do: "... on GroupValue { fields { __typename name #{Enum.join(scalar_parts(), " ")} } }"

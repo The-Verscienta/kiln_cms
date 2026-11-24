@@ -1,6 +1,7 @@
 # 0065. A flexible field keeps its mixed items inline, and its item types are field definitions
 
-- **Status** — accepted (2026-11-16).
+- **Status** — accepted (2026-11-16). PR 5 of 7 (the API and typed export) is done;
+  PRs 4 to 7 of the plan are tracked in `docs/flexible-content-plan.md`.
 - **References** — [#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282)
   (PR 1 of `docs/flexible-content-plan.md`, section 9: the model and the
   write path, API level only) and the maintainer's decisions of 2026-11-10
@@ -143,8 +144,8 @@ added in those two functions and nowhere else.
 | `Validations.FieldCondition` | A `:flexible` field carries no condition of its own (as a group); item sub-fields' conditions see the item's own fields, content and settings together. |
 | `Preparations.CustomFieldQuery`, `IndexedCustomFields`, `ListFields` | `:flexible` is not a filter leaf, an index, or a list column. |
 | `Media.Resnapshot` | The query for top-level media fields also requires `group_of_id` and `flex_of_id` to be null. |
-| `Graphql.CustomFields` | The top-level map uses `top_level?/1`; the field is served as generic JSON per item until the typed `FlexibleValue`. |
-| `SchemaExport` | The field is `["array", "null"]` of generic objects, with the item bounds; item types are not listed as fields. |
+| `Graphql.CustomFields` | The top-level map uses `top_level?/1`; a flexible field is a `ListValue` of `FlexibleItemValue`s (`FieldKind` `:flexible_item`). |
+| `SchemaExport` | The field is `["array", "null"]` of a `$ref` to a hoisted `oneOf` union over closed item definitions, with the item bounds; item types are not listed as fields. |
 | `ScopePickers` | Grant and hide pickers list top-level fields only. |
 | `FieldSync` | `flex_of_id` is an owner key; item types travel as an `"item_types"` child list and `item_setting` as an attribute; see "Export and import" below. |
 | `FieldDefinitionLive` | The new-field picker offers `:flexible`; an existing flexible field's type select is disabled. Item types and their sub-fields are edited in the field's own panels, not listed as top-level rows. |
@@ -280,9 +281,8 @@ The admin form disables the type select on a flexible field.
 
 ### What is not done yet
 
-No per-item-type grants, no search of items, no per-item diff, no typed GraphQL
-or client export (PR 4 to PR 7 of the plan). The values are served as generic
-JSON objects until then.
+No search of items, no per-item diff and no `:llm` / `:json_ld` projection (PR 6
+and PR 7 of the plan). The typed GraphQL and client export landed in PR 5 (below).
 
 ## Media and reference inside items (PR 3, #2282)
 
@@ -374,6 +374,59 @@ validation** at that sub-field. Reads work: the stored snapshots are returned
 as stored, and the fired artifacts keep what was fired. The definitions of
 those sub-fields load (`field_type` is a known atom there). Roll forward, or
 delete the sub-field first (which purges its values).
+
+## The typed export (PR 5, #2282)
+
+A flexible field is typed in GraphQL and in every generated client. The
+decisions, and the reason beside each:
+
+- **GraphQL: one `FlexibleItemValue` per item, in a `ListValue`.** A flexible
+  field is `multiple`-forced, so it stays a list; each element is one
+  `FlexibleItemValue { name id type settings fields }` implementing
+  `CustomFieldValue`, as a `GroupValue` is one row. `FieldKind` gains the item
+  kind `:flexible_item`. `settings` are the item type's `item_setting`
+  sub-fields and `fields` the rest. An item naming a type the site no longer
+  defines is `nil`, so it drops out, as any value that does not fit does. The
+  nesting cap is `FieldDefinition.max_flexible_depth/0`, not the group cap.
+  Both `settings` and `fields` carry `GraphqlLimits.list_complexity/3`.
+- **Schema export: the union is a def, the field carries a `$ref`.** Each
+  field's items become `flex_<type>_<field>` (a `oneOf` over `flex_*` member
+  defs, one per item type, discriminated by `_type`), not an inline union per
+  use, so a client gets one named type per union and per item type. Names are
+  built from the path and are not injective, so a taken name gets `_2`, `_3`;
+  the union carries `x-kiln-flexible` (`content_type`, `field`, `path`) and no
+  emitter parses a name. `flex_` is reserved beside `block_` and `content_`.
+- **Members are closed.** `additionalProperties: false`, required `_id` and
+  `_type` only (a sub-field added later has no value in older items),
+  `_settings` optional and present only when the type has settings. There is
+  no catch-all member: an item whose type was removed can still be in an older
+  revision or an `?as_of=` read, and the union's description says to treat an
+  unrecognized `_type` as unknown. A per-type `max_items` is the annotation
+  `x-kiln-max-items` on the member, never a `$ref` sibling.
+- **Emitters resolve unions through `Walk`.** `Walk.model/2` gains `:unions`
+  and `:flex_items`; the Swift and Kotlin emitters name each union through
+  their existing collision logic instead of hard-coding `Block`, and keep an
+  `.unknown` / `Unknown` fallback. `clients/js` mirrors it.
+- **The generated GraphQL fragment goes one level into a flexible item.** A
+  field's `x-kiln-graphql-kind` stays `list`; `x-kiln-graphql-item-kind:
+  "flexible_item"` tells the emitters to select
+  `... on FlexibleItemValue { id type settings { … } fields { … } }`, scalar
+  parts only, never a nested flexible field or group, so an image or
+  reference inside an item is not fetched by it.
+- **JSON:API.** `TypeDefinition` includes `field_definitions.item_types` and
+  the repeating `group_fields` / `item_types` path down to the flexible
+  depth cap, written out because the DSL must not call another resource at
+  compile time.
+
+**Consumer impact.** A flexible field's `items` was `{"type": "object"}` and is
+now a `$ref` to the union: a validating consumer is stricter (closed members,
+`_type` required). There is no migration.
+
+**Left open.** `fields(names:)` prices every name at the whole selection, so the
+generated fragment is over the default `max_complexity` of 200 with or without
+flexible items (one `multiple` string field: 631; with a flexible field: 1241).
+That predates this PR and is a follow-up, so no test asserts the fragment's
+complexity.
 
 ## What was rejected
 

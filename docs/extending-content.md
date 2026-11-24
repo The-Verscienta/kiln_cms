@@ -2505,11 +2505,24 @@ What the definition rows are:
    every save so the item keeps its identity.
 
 3. Over JSON:API, a content write takes the same `custom_fields` shape. The
-   type-definitions endpoint doesn't include a flexible field's `item_types`
-   (`?include=field_definitions.item_types` is refused); read them with the
-   MCP `read_field_definitions` tool or from a `mix kiln.fields.export` file
-   (`flex_of_id` names the owning field; `item_setting` marks a setting on a
-   sub-field).
+   type-definitions endpoint includes a flexible field's item types:
+   `?include=field_definitions.item_types` (add `.group_fields` for their
+   sub-fields), down to the three flexible levels a definition may nest. They
+   are also in the MCP `read_field_definitions` tool and in a
+   `mix kiln.fields.export` file (`flex_of_id` names the owning field;
+   `item_setting` marks a setting on a sub-field).
+4. Over GraphQL, a flexible field is a `ListValue` whose `items` are
+   `FlexibleItemValue`s: `id`, `type` (the item type's name), `settings` (the
+   `item_setting` sub-fields) and `fields` (the rest), each a
+   `CustomFieldValue`. An item whose `_type` the site no longer defines is
+   left out. Read it with `fields(names: ["sections"])`; see
+   [the GraphQL guide](headless-graphql-api.md#read-custom-fields-typed-by-kind).
+5. In the typed export (`GET /api/schema`, `mix kiln.export.schema`, the
+   `kiln-types` CLI) each flexible field is a union over its item types, told
+   apart by `_type`: switch on it and keep a default branch for an item type
+   added after you generated. See
+   [api.md](api.md#schema-discovery-typed-clients) and
+   [native-apps.md](native-apps.md).
 
 Things to know:
 

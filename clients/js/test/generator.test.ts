@@ -185,6 +185,49 @@ describe("emitTypes", () => {
     expect(out).toContain("other?: { max?: number | string; min?: number | string } | null;");
   });
 
+  it("emits a flexible field's items as closed interfaces under a union alias (#2282)", () => {
+    const doc: SchemaDocument = {
+      "x-kiln": { artifact_format_version: 3 },
+      $defs: {
+        flex_post_sections: {
+          oneOf: [{ $ref: "#/$defs/flex_post_sections_hero" }],
+          discriminator: { propertyName: "_type" },
+        },
+        flex_post_sections_hero: {
+          type: "object",
+          properties: {
+            _id: { type: "string" },
+            _type: { const: "hero" },
+            headline: { type: ["string", "null"] },
+          },
+          required: ["_id", "_type"],
+          additionalProperties: false,
+        },
+        content_post: {
+          type: "object",
+          properties: {
+            sections: {
+              type: ["array", "null"],
+              items: { $ref: "#/$defs/flex_post_sections" },
+            },
+          },
+        },
+      },
+    };
+
+    const out = emitTypes(doc);
+
+    expect(out).toContain("// -- Flexible items");
+    expect(out).toContain(
+      'export interface FlexPostSectionsHero {\n  _id: string;\n  _type: "hero";',
+    );
+    expect(out).not.toMatch(/interface FlexPostSectionsHero \{[^}]*\[k: string\]/);
+    expect(out).toContain("export type FlexPostSections =\n  | FlexPostSectionsHero;");
+    expect(out).toContain("sections?: Array<FlexPostSections> | null");
+    // A flex def never lands in the shared section.
+    expect(out).not.toContain("// -- Shared");
+  });
+
   it("emits nothing but the header for an empty document", () => {
     const empty = emitTypes({});
     expect(empty).toContain("Artifact format version: unknown");

@@ -80,6 +80,70 @@
       "additionalProperties": false
     },
     "opaque_marker": { "const": "fixed" },
+    "flex_post_sections": {
+      "description": "One item of a flexible field, told apart by `_type`. Watch the */ escape.",
+      "discriminator": { "propertyName": "_type" },
+      "oneOf": [
+        { "$ref": "#/$defs/flex_post_sections_hero" },
+        { "$ref": "#/$defs/flex_post_sections_hero_cols_2" }
+      ],
+      "x-kiln-flexible": {
+        "content_type": "post",
+        "field": "sections",
+        "path": ["sections"]
+      }
+    },
+    "flex_post_sections_hero": {
+      "type": "object",
+      "description": "An item of the `hero` type.",
+      "properties": {
+        "_id": { "type": "string", "format": "uuid" },
+        "_type": { "const": "hero" },
+        "_settings": {
+          "type": "object",
+          "properties": { "background": { "type": ["string", "null"] } },
+          "additionalProperties": false
+        },
+        "cols": {
+          "type": ["array", "null"],
+          "items": { "$ref": "#/$defs/flex_post_sections_hero_cols" }
+        },
+        "headline": { "type": ["string", "null"] }
+      },
+      "required": ["_id", "_type"],
+      "additionalProperties": false,
+      "x-kiln-max-items": 2
+    },
+    "flex_post_sections_hero_cols": {
+      "description": "A nested flexible field's items.",
+      "discriminator": { "propertyName": "_type" },
+      "oneOf": [{ "$ref": "#/$defs/flex_post_sections_hero_cols_text" }],
+      "x-kiln-flexible": {
+        "content_type": "post",
+        "field": "sections",
+        "path": ["sections", "hero", "cols"]
+      }
+    },
+    "flex_post_sections_hero_cols_text": {
+      "type": "object",
+      "properties": {
+        "_id": { "type": "string", "format": "uuid" },
+        "_type": { "const": "text" },
+        "body": { "type": ["string", "null"] }
+      },
+      "required": ["_id", "_type"],
+      "additionalProperties": false
+    },
+    "flex_post_sections_hero_cols_2": {
+      "type": "object",
+      "description": "Named for a collision with the nested union above.",
+      "properties": {
+        "_id": { "type": "string", "format": "uuid" },
+        "_type": { "const": "hero_cols" }
+      },
+      "required": ["_id", "_type"],
+      "additionalProperties": false
+    },
     "content_post": {
       "type": "object",
       "description": "A published post's fired `:json` artifact.",
@@ -102,6 +166,10 @@
             "weird key!": { "type": "string" },
             "badge": { "enum": ["say \"hi\"", "C:\\reports", "line\nbreak\tand tab"] },
             "rating": { "type": ["number", "null"] },
+            "sections": {
+              "type": ["array", "null"],
+              "items": { "$ref": "#/$defs/flex_post_sections" }
+            },
             "author": {
               "type": ["object", "null"],
               "x-kiln-target-types": ["person", "team*/"]
