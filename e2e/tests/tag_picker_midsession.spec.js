@@ -32,11 +32,12 @@
 //      plays that other session: it creates two tags, attaches one to the
 //      same draft, and saves.
 //
-//      That leaves the first session's own `@form` — built once, at mount —
-//      pointing at a `lock_version` the editor's write just moved past. Its
-//      own next save is therefore rejected by the optimistic lock
-//      (`stale_conflict?/1`) rather than succeeding quietly: `flag_conflict/1`
-//      pauses saving and surfaces "Reload latest". Clicking that runs
+//      The first session still holds its unsaved title, so since #2775 the
+//      editor's save reaches it as a peer save over unsaved text:
+//      `refresh_saved_record/1` keeps its record and calls `flag_conflict/1`
+//      at once, which pauses saving and surfaces "Reload latest" (before
+//      #2775 this only happened on the session's own next Save, rejected by
+//      the optimistic lock). Clicking "Reload latest" runs
 //      `reload_conflict`, which re-fetches the record and calls
 //      `assign_record/2` — the same function every *successful* save also
 //      runs, and the one that rebuilds `@tag_index` (`refresh_tag_index/1`).
@@ -147,10 +148,10 @@ test.describe("tag picker mid-session growth", () => {
       // no reload (see the "Driving the transition" comment at the top).
       const indicator = page.locator('span[aria-live="polite"]');
 
-      // This session's `@form` is still built from the pre-attach record, so
-      // submitting it now is guaranteed to lose the optimistic-lock race the
-      // editor's save already won — that's the point, see above.
-      await page.getByRole("button", { name: /^save draft$/i }).click();
+      // This session still holds its unsaved title, so the editor's save
+      // reaches it as a peer save over unsaved text: since #2775 the conflict
+      // banner shows at once, with no Save click needed to meet the
+      // optimistic lock first (see above).
       const conflictBanner = page.locator("#edit-conflict");
       await expect(conflictBanner).toBeVisible();
 
