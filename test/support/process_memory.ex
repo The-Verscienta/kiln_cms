@@ -18,16 +18,32 @@ defmodule KilnCMS.Test.ProcessMemory do
   handle (`:file.open/2` with `:raw`) reads into the worker itself.
   """
 
+  @marker :"$kiln_process_memory_forwarder"
+
   @doc """
   Runs `fun` and returns `{result, peak_bytes}`: its result and the largest
   footprint its process family had, sampled every 10 ms and once more at the
   end. A raise, throw or exit in `fun` is re-raised in the caller with its
   stacktrace.
+
+  One sample walks every process on the node, so under a loaded suite it can
+  take longer than the work holds its memory. Tests that must see a sample
+  while something is held call `sample/0` or `await_periodic_sample/0` from
+  inside the work instead of sleeping (#3196).
   """
   @spec peak_growth((-> result)) :: {result, non_neg_integer()} when result: term()
   def peak_growth(fun) when is_function(fun, 0) do
     caller_gl = Process.group_leader()
-    gl = spawn_link(fn -> forward_io(caller_gl) end)
+
+    gl =
+      spawn_link(fn ->
+        Process.put(@marker, true)
+
+        receive do
+          {__MODULE__, :sampler, sampler} -> forward_io(caller_gl, sampler)
+        end
+      end)
+
     parent = self()
     ref = make_ref()
 
@@ -56,7 +72,8 @@ defmodule KilnCMS.Test.ProcessMemory do
       {^ref, :ready} -> :ok
     end
 
-    sampler = Task.async(fn -> sample(gl, 0) end)
+    sampler = Task.async(fn -> sample(gl, 0, []) end)
+    send(gl, {__MODULE__, :sampler, sampler.pid})
     send(worker, {ref, :go})
 
     result =
@@ -65,7 +82,9 @@ defmodule KilnCMS.Test.ProcessMemory do
       end
 
     send(sampler.pid, :stop)
-    peak = Task.await(sampler, 5_000)
+    # Unbounded: one walk of every process can take seconds under load, and
+    # the test's own timeout bounds the whole run.
+    peak = Task.await(sampler, :infinity)
     Process.unlink(gl)
     Process.exit(gl, :kill)
 
@@ -76,19 +95,92 @@ defmodule KilnCMS.Test.ProcessMemory do
     end
   end
 
-  defp forward_io(target) do
+  @doc """
+  Takes a sample now and waits for it. Call it from inside the work given to
+  `peak_growth/1` (any process it spawned, transitively) while the memory to
+  be measured is held. Raises outside `peak_growth/1`.
+  """
+  @spec sample() :: :ok
+  def sample, do: request(:sample)
+
+  @doc """
+  Waits until the periodic sampler has finished a sample that started after
+  this call: what proves the 10 ms sampling itself catches a peak in the
+  middle of the work, not only `sample/0` and the last sample. Raises outside
+  `peak_growth/1`.
+  """
+  @spec await_periodic_sample() :: :ok
+  def await_periodic_sample, do: request(:tick)
+
+  defp request(kind) do
+    gl = Process.group_leader()
+
+    # Checked without a message, so a busy forwarder is never mistaken for a
+    # missing one, and a real group leader is never sent one it doesn't know.
+    case Process.info(gl, :dictionary) do
+      {:dictionary, dict} when is_list(dict) ->
+        unless Keyword.get(dict, @marker), do: raise_outside()
+
+      _ ->
+        raise_outside()
+    end
+
+    # The forwarder dies with the run, so a family process still asking after
+    # `peak_growth/1` returned gets an error rather than a wait until the
+    # test's timeout.
+    monitor = Process.monitor(gl)
+    ref = make_ref()
+    send(gl, {__MODULE__, kind, self(), ref})
+
     receive do
-      msg ->
-        send(target, msg)
-        forward_io(target)
+      {^ref, :sampled} ->
+        Process.demonitor(monitor, [:flush])
+        :ok
+
+      {:DOWN, ^monitor, :process, _, _} ->
+        raise_outside()
     end
   end
 
-  defp sample(gl, peak) do
+  defp raise_outside do
+    raise ArgumentError,
+          "ProcessMemory.sample/0 and await_periodic_sample/0 must be called " <>
+            "from inside the work given to peak_growth/1, while it runs"
+  end
+
+  defp forward_io(target, sampler) do
     receive do
-      :stop -> max(peak, footprint(gl))
+      {__MODULE__, _kind, _from, _ref} = request ->
+        send(sampler, request)
+        forward_io(target, sampler)
+
+      msg ->
+        send(target, msg)
+        forward_io(target, sampler)
+    end
+  end
+
+  # `waiting` holds `await_periodic_sample/0` callers: answered after the next
+  # periodic sample, whose walk starts after their request arrived.
+  defp sample(gl, peak, waiting) do
+    receive do
+      :stop ->
+        max(peak, footprint(gl))
+
+      # This walk also started after every waiting request, so it answers
+      # them too: a stream of these never leaves a waiter unanswered.
+      {__MODULE__, :sample, from, ref} ->
+        peak = max(peak, footprint(gl))
+        Enum.each([{from, ref} | waiting], fn {pid, r} -> send(pid, {r, :sampled}) end)
+        sample(gl, peak, [])
+
+      {__MODULE__, :tick, from, ref} ->
+        sample(gl, peak, [{from, ref} | waiting])
     after
-      10 -> sample(gl, max(peak, footprint(gl)))
+      10 ->
+        peak = max(peak, footprint(gl))
+        Enum.each(waiting, fn {from, ref} -> send(from, {ref, :sampled}) end)
+        sample(gl, peak, [])
     end
   end
 
