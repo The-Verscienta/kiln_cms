@@ -76,6 +76,9 @@ else.
 - **A seat `mix kiln.beta.round` creates now records its `role_granted` in the default site's security log (raised from viewer), and an admin seat raises the platform `new_admin` alert (#2641).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#beta-round-seat-audited))
+- **`scripts/staging.sh down` and `up` now refuse a database whose name doesn't look ephemeral (unless `KILN_STAGING_FORCE` is on) and drop or create it on the server in `STAGING_DATABASE_URL`, not libpq's default one; that variable must now be a URL naming the database in its path (#2722).**
+  No migration; rolling the pin back is safe. A `down` that relied on dropping on the default server now acts on the URL's.
+  ([long form](docs/changelog/unreleased.md#staging-script-guards-drop))
 
 ## [1.12.1] - 2026-11-23
 

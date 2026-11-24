@@ -453,6 +453,92 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
       refute File.exists?(ctx.log)
     end
 
+    # libpq reads a host in brackets up to the `]`, whatever is inside: a
+    # socket directory's `/` there does not start the path.
+    test "down reads the database after a bracketed host, as libpq does", ctx do
+      for url <- [
+            "postgres://[/tmp]/kiln_prod",
+            "postgres://stage@[/tmp]:5432/kiln_prod?sslmode=disable",
+            "postgres://stage@h1,[/tmp]/kiln_prod",
+            "postgres://stage@[/tmp/kiln_staging]/kiln_prod"
+          ] do
+        assert {out, status} = down(ctx, url)
+
+        assert status != 0, url
+
+        assert out =~
+                 "STAGING_DATABASE_URL names kiln_prod, which does not look like a throwaway clone",
+               url
+
+        refute File.exists?(ctx.log), "dropdb ran for #{url}"
+      end
+
+      assert {_out, 0} = down(ctx, "postgres://stage@[::1]:5432/kiln_staging")
+      assert {_out, 0} = down(ctx, "postgres://stage@h1,[/tmp]/kiln_staging?sslmode=disable")
+
+      assert [
+               ["dropdb", _, "--if-exists", first, "--", "kiln_staging"],
+               ["dropdb", _, "--if-exists", second, "--", "kiln_staging"]
+             ] = calls(ctx)
+
+      assert first == "--maintenance-db=postgres://stage@[::1]:5432/kiln_staging?dbname=postgres"
+
+      assert second ==
+               "--maintenance-db=postgres://stage@h1,[/tmp]/kiln_staging?sslmode=disable&dbname=postgres"
+    end
+
+    test "down refuses a bracketed host libpq cannot read", ctx do
+      for url <- [
+            "postgres://stage@[/tmp/kiln_staging",
+            "postgres://stage@[]/kiln_staging",
+            "postgres://stage@[::1]x/kiln_staging",
+            "postgres://[/tmp]@stage-db/kiln_staging"
+          ] do
+        assert {out, status} = down(ctx, url)
+
+        assert status != 0, url
+        assert out =~ "STAGING_DATABASE_URL has a host in [ ] that libpq cannot read", url
+        assert out =~ "Nothing was dropped", url
+        refute File.exists?(ctx.log), "dropdb ran for #{url}"
+      end
+    end
+
+    # libpq takes `kiln_prod#staging` as the name; Ecto's URI.parse takes
+    # `kiln_prod` and drops `#staging` as a fragment.
+    test "down refuses a # after the host", ctx do
+      for url <- [
+            "postgres://stage@stage-db/kiln_prod#staging",
+            "postgres://stage@stage-db/kiln_staging?application_name=a#b",
+            "postgres://stage@[/tmp]/kiln_prod#staging"
+          ] do
+        assert {out, status} = down(ctx, url)
+
+        assert status != 0, url
+        assert out =~ "STAGING_DATABASE_URL has a # after its host", url
+        refute File.exists?(ctx.log), "dropdb ran for #{url}"
+      end
+    end
+
+    test "the maintenance database is added without an empty query parameter", ctx do
+      for url <- [
+            "postgres://stage@stage-db/kiln_staging?sslmode=require&",
+            "postgres://stage@stage-db/kiln_staging?",
+            "postgres://stage@stage-db/kiln_staging"
+          ] do
+        assert {_out, 0} = down(ctx, url)
+      end
+
+      assert [
+               ["dropdb", _, _, "--maintenance-db=" <> first, "--", "kiln_staging"],
+               ["dropdb", _, _, "--maintenance-db=" <> second, "--", "kiln_staging"],
+               ["dropdb", _, _, "--maintenance-db=" <> third, "--", "kiln_staging"]
+             ] = calls(ctx)
+
+      assert first == "postgres://stage@stage-db/kiln_staging?sslmode=require&dbname=postgres"
+      assert second == "postgres://stage@stage-db/kiln_staging?dbname=postgres"
+      assert third == "postgres://stage@stage-db/kiln_staging?dbname=postgres"
+    end
+
     test "KILN_STAGING_FORCE, spelled as Kiln reads a flag, lets down drop any name", ctx do
       for value <- ["yes", "TRUE", " on ", "1"] do
         File.rm(ctx.log)
@@ -467,12 +553,18 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
       end
 
       for value <- ["", "no", "false", "please"] do
-        assert {_out, status} =
+        assert {out, status} =
                  down(ctx, "postgres://stage@stage-db/kiln_prod2",
                    env: [{"KILN_STAGING_FORCE", value}]
                  )
 
         assert status != 0, "KILN_STAGING_FORCE=#{inspect(value)} forced the drop"
+
+        assert out =~
+                 "STAGING_DATABASE_URL names kiln_prod2, which does not look like a throwaway clone",
+               "KILN_STAGING_FORCE=#{inspect(value)}"
+
+        refute out =~ "KILN_STAGING_FORCE is on"
         refute Enum.any?(calls(ctx), &("kiln_prod2" in &1))
       end
     end
@@ -503,6 +595,38 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
       assert out =~ "Nothing was created or copied"
       refute out =~ "Cloning production"
       refute File.exists?(ctx.log), "a tool ran"
+    end
+
+    test "up refuses a production name after a bracketed host, and a # after the host",
+         ctx do
+      for {staging, message} <- [
+            {"postgres://stage@[/tmp]/kiln_prod",
+             "STAGING_DATABASE_URL names kiln_prod, which does not look like a throwaway clone"},
+            {"postgres://stage@h1,[/tmp]/kiln_prod",
+             "STAGING_DATABASE_URL names kiln_prod, which does not look like a throwaway clone"},
+            {"postgres://stage@[/tmp/kiln_staging", "STAGING_DATABASE_URL has a host in [ ]"},
+            {"postgres://stage@stage-db/kiln_prod#staging",
+             "STAGING_DATABASE_URL has a # after its host"}
+          ] do
+        assert {out, status} =
+                 up(ctx, prod: "postgres://prod@prod-db/kiln_prod", staging: staging)
+
+        assert status != 0, staging
+        assert out =~ message, staging
+        assert out =~ "Nothing was created or copied", staging
+        refute File.exists?(ctx.log), "a tool ran for #{staging}"
+      end
+    end
+
+    test "up creates the database after a bracketed host", ctx do
+      assert {_out, 0} =
+               up(ctx,
+                 prod: "postgres://prod@prod-db/kiln_prod",
+                 staging: "postgres://stage@[::1]:5432/kiln_staging"
+               )
+
+      assert [["createdb", _, maint, "--", "kiln_staging"] | _] = calls(ctx)
+      assert maint == "--maintenance-db=postgres://stage@[::1]:5432/kiln_staging?dbname=postgres"
     end
 
     test "up creates the database on the URL's server, with the password in PGPASSWORD only",

@@ -286,31 +286,69 @@ STAGING_EPHEMERAL_MARKERS="staging preview ephemeral tmp scratch"
 
 # $1 = a URL as pg_conn_split leaves it. Sets PG_URI_PATH (the database part,
 # still percent-encoded; empty without one), PG_URI_HAS_QUERY and
-# PG_URI_QUERY, splitting where libpq does (fe-connect.c): the userinfo ends
-# at the first `@` before the first `/`, the hosts at the first `/` or `?`
-# after it, and the path at the first `?`.
+# PG_URI_QUERY, splitting where libpq does (conninfo_uri_parse_options in
+# fe-connect.c): the userinfo ends at the first `@` before the first `/`
+# (brackets or not), then each comma-separated host runs to the first `:`,
+# `/`, `?` or `,`, or, when it starts with `[`, to the closing `]` whatever
+# lies between (`[/tmp]` is a socket directory, and its `/` is not the
+# path's); a `:port` after it runs to the first `/`, `?` or `,`; and the path
+# runs to the first `?`. Sets PG_URI_ERROR, and leaves the path and query
+# empty, on a `[` host libpq refuses: no closing `]`, nothing inside, or
+# anything after it but `:`, `/`, `?`, `,` or the end.
 pg_uri_parts() {
-  local rest="${1#*://}" userinfo hosts after
+  local rest="${1#*://}" userinfo host
+  PG_URI_PATH=""
+  PG_URI_HAS_QUERY=0
+  PG_URI_QUERY=""
+  PG_URI_ERROR=""
   userinfo="${rest%%[@/]*}"
   if [ "${rest:${#userinfo}:1}" = "@" ]; then
     rest="${rest:$((${#userinfo} + 1))}"
   fi
-  hosts="${rest%%[/?]*}"
-  after="${rest:${#hosts}}"
-  PG_URI_PATH=""
-  PG_URI_HAS_QUERY=0
-  PG_URI_QUERY=""
-  case "$after" in
+  while :; do
+    case "$rest" in
+      \[*)
+        host="${rest%%]*}"
+        if [ "$host" = "$rest" ] || [ "$host" = "[" ]; then
+          PG_URI_ERROR=1
+          return 0
+        fi
+        rest="${rest:$((${#host} + 1))}"
+        case "$rest" in
+          "" | [/?,:]*) ;;
+          *)
+            PG_URI_ERROR=1
+            return 0
+            ;;
+        esac
+        ;;
+      *)
+        host="${rest%%[/?,:]*}"
+        rest="${rest:${#host}}"
+        ;;
+    esac
+    case "$rest" in
+      :*)
+        host="${rest%%[/?,]*}"
+        rest="${rest:${#host}}"
+        ;;
+    esac
+    case "$rest" in
+      ,*) rest="${rest:1}" ;;
+      *) break ;;
+    esac
+  done
+  case "$rest" in
     /*)
-      after="${after:1}"
-      PG_URI_PATH="${after%%\?*}"
-      after="${after:${#PG_URI_PATH}}"
+      rest="${rest:1}"
+      PG_URI_PATH="${rest%%\?*}"
+      rest="${rest:${#PG_URI_PATH}}"
       ;;
   esac
-  case "$after" in
+  case "$rest" in
     \?*)
       PG_URI_HAS_QUERY=1
-      PG_URI_QUERY="${after:1}"
+      PG_URI_QUERY="${rest:1}"
       ;;
   esac
 }
@@ -318,15 +356,17 @@ pg_uri_parts() {
 # $1 = a URL as pg_conn_split leaves it, $2 = a database. Prints the URL with
 # `dbname=$2` appended to its query: libpq takes the last dbname it is given,
 # so createdb and dropdb connect to $2 on the URL's server, as its user, with
-# its TLS settings.
+# its TLS settings. No `&` goes before it when the query is empty or already
+# ends with one: libpq refuses the empty parameter `&&` would make.
 maintenance_url() {
   pg_uri_parts "$1"
   if [ "$PG_URI_HAS_QUERY" = 0 ]; then
     printf '%s' "$1?dbname=$2"
-  elif [ -z "$PG_URI_QUERY" ]; then
-    printf '%s' "$1dbname=$2"
   else
-    printf '%s' "$1&dbname=$2"
+    case "$PG_URI_QUERY" in
+      "" | *"&") printf '%s' "$1dbname=$2" ;;
+      *) printf '%s' "$1&dbname=$2" ;;
+    esac
   fi
 }
 
@@ -347,7 +387,10 @@ staging_forced() {
 # ("dropped", "created or copied"). Sets STAGING_NAME to the database libpq
 # connects to, percent-decoded, or dies: on a string that is not a URL (its
 # database could not be checked), a URL with no database in its path or with
-# a `dbname` in its query (which overrides the path), and a name with none of
+# a `dbname` in its query (which overrides the path), a `[` host libpq
+# cannot read (the path is then unknown), a `#` after the hosts (libpq reads
+# it as part of the name or query, Ecto as a fragment it drops, so migrate
+# and the scrub would act on another database), and a name with none of
 # STAGING_EPHEMERAL_MARKERS unless KILN_STAGING_FORCE is on.
 require_ephemeral_name() {
   local url="$1" nothing="$2" q seg lower marker
@@ -358,6 +401,13 @@ require_ephemeral_name() {
       ;;
   esac
   pg_uri_parts "$url"
+  [ -z "$PG_URI_ERROR" ] ||
+    die "STAGING_DATABASE_URL has a host in [ ] that libpq cannot read (no closing ], nothing inside, or something other than :port, /, ? or , after it), so the database it names cannot be checked: write an IPv6 address as [::1] or [::1]:5432. Nothing was ${nothing}"
+  case "${PG_URI_PATH}${PG_URI_QUERY}" in
+    *"#"*)
+      die "STAGING_DATABASE_URL has a # after its host, which libpq reads as part of the database name or query and Ecto as the start of a fragment it drops, so the copy and the migration would act on different databases: use a database name without #. Nothing was ${nothing}"
+      ;;
+  esac
   if [ "$PG_URI_HAS_QUERY" = 1 ]; then
     q="$PG_URI_QUERY"
     while :; do
