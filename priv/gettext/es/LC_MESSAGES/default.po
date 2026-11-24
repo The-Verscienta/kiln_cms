@@ -2252,11 +2252,6 @@ msgstr "Un punto de recuperación (kiln-<stamp>.keep) protege de la retención t
 msgid "A regular expression the whole value must match."
 msgstr "Una expresión regular con la que debe coincidir todo el valor."
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
-#, elixir-autogen, elixir-format
-msgid "A related record did not answer, so this record was not saved. Try again."
-msgstr "Un registro relacionado no respondió, así que este registro no se guardó. Inténtalo de nuevo."
-
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A relationship"
@@ -7380,8 +7375,8 @@ msgstr "No se pudo rotar ese secreto de firma."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Couldn't save %{name}, so this record was not saved. Fix it below and try again."
-msgstr "No se pudo guardar %{name}, así que este registro no se guardó. Corrígelo abajo e inténtalo de nuevo."
+msgid "Couldn't save a related record, so this record was not saved. Fix it below, then save again."
+msgstr "No se pudo guardar un registro relacionado, así que este registro no se guardó. Corríjalo abajo y vuelva a guardar."
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -7413,6 +7408,11 @@ msgstr "No se pudo guardar el nuevo orden de los tipos de elemento."
 #, elixir-autogen, elixir-format
 msgid "Couldn't save the new order."
 msgstr "No se pudo guardar el nuevo orden."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save the related record “%{title}”, so this record was not saved. Fix it below, then save again."
+msgstr "No se pudo guardar el registro relacionado «%{title}», así que este registro no se guardó. Corríjalo abajo y vuelva a guardar."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -20363,17 +20363,17 @@ msgstr "Guardado"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Saved %{count} related record, but another did not answer, so this record was not saved. Try again."
-msgid_plural "Saved %{count} related records, but another did not answer, so this record was not saved. Try again."
-msgstr[0] "Se guardó %{count} registro relacionado, pero otro no respondió, así que este registro no se guardó. Inténtalo de nuevo."
-msgstr[1] "Se guardaron %{count} registros relacionados, pero otro no respondió, así que este registro no se guardó. Inténtalo de nuevo."
+msgid "Saved %{count} related record, but couldn't save another, so this record was not saved. Fix it below, then save again."
+msgid_plural "Saved %{count} related records, but couldn't save another, so this record was not saved. Fix it below, then save again."
+msgstr[0] "Se guardó %{count} registro relacionado, pero no se pudo guardar otro, así que este registro no se guardó. Corríjalo abajo y vuelva a guardar."
+msgstr[1] "Se guardaron %{count} registros relacionados, pero no se pudo guardar otro, así que este registro no se guardó. Corríjalo abajo y vuelva a guardar."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Saved %{count} related record, but couldn't save %{name}, so this record was not saved. Fix it below and try again."
-msgid_plural "Saved %{count} related records, but couldn't save %{name}, so this record was not saved. Fix it below and try again."
-msgstr[0] "Se guardó %{count} registro relacionado, pero no se pudo guardar %{name}, así que este registro no se guardó. Corrígelo abajo e inténtalo de nuevo."
-msgstr[1] "Se guardaron %{count} registros relacionados, pero no se pudo guardar %{name}, así que este registro no se guardó. Corrígelo abajo e inténtalo de nuevo."
+msgid "Saved %{count} related record, but couldn't save “%{title}”, so this record was not saved. Fix it below, then save again."
+msgid_plural "Saved %{count} related records, but couldn't save “%{title}”, so this record was not saved. Fix it below, then save again."
+msgstr[0] "Se guardó %{count} registro relacionado, pero no se pudo guardar «%{title}», así que este registro no se guardó. Corríjalo abajo y vuelva a guardar."
+msgstr[1] "Se guardaron %{count} registros relacionados, pero no se pudo guardar «%{title}», así que este registro no se guardó. Corríjalo abajo y vuelva a guardar."
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
@@ -22576,11 +22576,6 @@ msgstr "Los pasos se cuentan de forma independiente — esto no es una tasa de c
 #, elixir-autogen, elixir-format
 msgid "Still in grace"
 msgstr "Aún en periodo de gracia"
-
-#: lib/kiln_cms_web/live/content_editor_live.ex
-#, elixir-autogen, elixir-format
-msgid "Still saving the related records. One moment."
-msgstr "Aún se están guardando los registros relacionados. Un momento."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -29106,11 +29101,6 @@ msgstr "un campo de botones de opción debe tener al menos una opción"
 #, elixir-autogen, elixir-format
 msgid "a rating only has a star count"
 msgstr "una valoración solo tiene un número de estrellas"
-
-#: lib/kiln_cms_web/live/content_editor_live.ex
-#, elixir-autogen, elixir-format
-msgid "a related record"
-msgstr "un registro relacionado"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format

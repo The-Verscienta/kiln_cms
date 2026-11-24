@@ -1,6 +1,6 @@
 # Inline editing of related records: plan
 
-Status: PR 1 built (the `edit_inline` option, fields-admin checkbox, schema export and a read-only card); PR 2a built (Card Save, mock in [inline-reference-card-mock.html](inline-reference-card-mock.html)); PR 2b built (dirty tracking, expand-on-create); PR 3 built (the cascade), the last in the plan. Tracking issue: #2283. Written 2026-11-16 against
+Status: PR 1 built (the `edit_inline` option, fields-admin checkbox, schema export and a read-only card); PR 2a built (Card Save, mock in [inline-reference-card-mock.html](inline-reference-card-mock.html)); PR 2b built (dirty tracking, expand-on-create, and the cascade on Save and workflow steps, pulled forward from PR 3); the rest of PR 3 is not built. Tracking issue: #2283. Written 2026-11-16 against
 `main` after #2285 (reference selection and create-on-type, all four PRs) and
 the #2282 plan ([flexible-content-plan.md](../flexible-content-plan.md)). Nothing
 here is a decision until the PR that carries it merges; the questions for the
@@ -475,8 +475,18 @@ from is [inline-reference-card-mock.html](inline-reference-card-mock.html).
 
 PR 2b (dirty tracking and expand-on-create) differs from the plan in these places:
 
-1. **The cascade is not in 2b.** The plan puts it in PR 3 (I3), and it stays
-   there: in 2b the parent's Save does not save cards.
+1. **The cascade (I3) is in 2b**, pulled forward from PR 3 at the
+   maintainer's request. The parent's Save and the `workflow` event ask each
+   dirty card, in field then row order, to run its own save, one at a time
+   (`{ReferenceInline, {:cascade, ref, ...}}` answers); the first failure stops
+   it, the parent is not written, and its edits stay in the form. A card that
+   does not answer within 20 s counts as a failure. The parent write
+   uses the params of the click: typing during the cascade (usually well
+   under a second) is not in that write. Not covered: autosave (it writes the parent
+   only), *Move to trash*, and the publish paths that do not go through the
+   `workflow` event; the lost-update panel and `flag_conflict` handling are
+   unchanged and not re-pinned with cards. The flash names how many cards
+   saved; there is no per-card result list beyond each card's own chip.
 2. **The parent assign is `inline_dirty`, a map of field name to the sorted
    row keys with a dirty card.** The picker sends the whole set, only when it
    changed (`{ReferencePicker, {:inline_dirty, field, keys}}`); the editor
@@ -498,29 +508,3 @@ PR 2b (dirty tracking and expand-on-create) differs from the plan in these place
 6. **The cap of 10 is still per picker.** Counting across fields needs the
    parent to know each picker's open cards; only dirty state was lifted, so
    this stays a deviation.
-
-PR 3 (the cascade) differs from the plan in these places:
-
-1. **The editor drives it by message, not by a call.** A card's state lives in
-   its live component, so the parent cannot read it. `with_settled_cards/2`
-   queues the dirty cards (`inline_dirty`, now in row order) and
-   `send_update`s the first one `cascade: ref`; the card runs its own Save and
-   sends `{ReferenceInline, {:cascaded, ref, field, key, outcome, title}}`; the
-   editor asks the next card, or on the last runs what was going to happen.
-   The first `:failed` clears the cascade and flashes; nothing else runs.
-2. **A timeout (15 s) ends a cascade whose card never answered** (it
-   unmounted), and a Save while one is running is ignored, so a click cannot
-   leave Save dead or double-run it.
-3. **Every settle path cascades**, not only `settle_before_workflow`: the
-   Save button (draft and published), the workflow transitions, the publish
-   asked after the severity question, **Publish changes** and **Move to
-   trash**. (The severity question's re-run of Publish changes does not repeat
-   it: the click that asked already settled the cards.)
-4. **The success flash names the count** only for a Save (*Also saved N
-   related records.*); a workflow transition keeps its own message.
-5. **No change to the reload/conflict path was needed:** the cards are
-   components with their own ids, so a parent conflict reload leaves them
-   *Saved* as they were. The parent's stale-conflict banner and a card's
-   *Changed by someone else* notice stay separate.
-6. **PR 3 does not close #2283.** This is the last PR in the plan; the
-   maintainer closes the issue.

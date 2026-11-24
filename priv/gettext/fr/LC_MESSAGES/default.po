@@ -2252,11 +2252,6 @@ msgstr "Un point de restauration (kiln-<stamp>.keep) protège tous les fichiers 
 msgid "A regular expression the whole value must match."
 msgstr "Une expression régulière à laquelle la valeur entière doit correspondre."
 
-#: lib/kiln_cms_web/live/content_editor_live.ex
-#, elixir-autogen, elixir-format
-msgid "A related record did not answer, so this record was not saved. Try again."
-msgstr "Un enregistrement lié n’a pas répondu ; cet enregistrement n’a donc pas été enregistré. Réessayez."
-
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A relationship"
@@ -7380,8 +7375,8 @@ msgstr "Impossible de renouveler ce secret de signature."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Couldn't save %{name}, so this record was not saved. Fix it below and try again."
-msgstr "Impossible d’enregistrer %{name} ; cet enregistrement n’a donc pas été enregistré. Corrigez-le ci-dessous et réessayez."
+msgid "Couldn't save a related record, so this record was not saved. Fix it below, then save again."
+msgstr "Un enregistrement lié n’a pas pu être enregistré, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
@@ -7413,6 +7408,11 @@ msgstr "Impossible d'enregistrer le nouvel ordre des types d'élément."
 #, elixir-autogen, elixir-format
 msgid "Couldn't save the new order."
 msgstr "Impossible d'enregistrer le nouvel ordre."
+
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save the related record “%{title}”, so this record was not saved. Fix it below, then save again."
+msgstr "L’enregistrement lié « %{title} » n’a pas pu être enregistré, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -20363,17 +20363,17 @@ msgstr "Enregistré"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Saved %{count} related record, but another did not answer, so this record was not saved. Try again."
-msgid_plural "Saved %{count} related records, but another did not answer, so this record was not saved. Try again."
-msgstr[0] "%{count} enregistrement lié a été enregistré, mais un autre n’a pas répondu ; cet enregistrement n’a donc pas été enregistré. Réessayez."
-msgstr[1] "%{count} enregistrements liés ont été enregistrés, mais un autre n’a pas répondu ; cet enregistrement n’a donc pas été enregistré. Réessayez."
+msgid "Saved %{count} related record, but couldn't save another, so this record was not saved. Fix it below, then save again."
+msgid_plural "Saved %{count} related records, but couldn't save another, so this record was not saved. Fix it below, then save again."
+msgstr[0] "%{count} enregistrement lié a été enregistré, mais un autre n’a pas pu l’être, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
+msgstr[1] "%{count} enregistrements liés ont été enregistrés, mais un autre n’a pas pu l’être, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
-msgid "Saved %{count} related record, but couldn't save %{name}, so this record was not saved. Fix it below and try again."
-msgid_plural "Saved %{count} related records, but couldn't save %{name}, so this record was not saved. Fix it below and try again."
-msgstr[0] "%{count} enregistrement lié a été enregistré, mais %{name} n’a pas pu l’être ; cet enregistrement n’a donc pas été enregistré. Corrigez-le ci-dessous et réessayez."
-msgstr[1] "%{count} enregistrements liés ont été enregistrés, mais %{name} n’a pas pu l’être ; cet enregistrement n’a donc pas été enregistré. Corrigez-le ci-dessous et réessayez."
+msgid "Saved %{count} related record, but couldn't save “%{title}”, so this record was not saved. Fix it below, then save again."
+msgid_plural "Saved %{count} related records, but couldn't save “%{title}”, so this record was not saved. Fix it below, then save again."
+msgstr[0] "%{count} enregistrement lié a été enregistré, mais « %{title} » n’a pas pu l’être, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
+msgstr[1] "%{count} enregistrements liés ont été enregistrés, mais « %{title} » n’a pas pu l’être, donc cet enregistrement n’a pas été enregistré. Corrigez-le ci-dessous, puis enregistrez à nouveau."
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
@@ -22576,11 +22576,6 @@ msgstr "Les étapes sont comptées indépendamment — il ne s'agit pas d'un tau
 #, elixir-autogen, elixir-format
 msgid "Still in grace"
 msgstr "Encore dans le délai"
-
-#: lib/kiln_cms_web/live/content_editor_live.ex
-#, elixir-autogen, elixir-format
-msgid "Still saving the related records. One moment."
-msgstr "Les enregistrements liés sont encore en cours d’enregistrement. Un instant."
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -29106,11 +29101,6 @@ msgstr "un champ de boutons radio doit lister au moins une option"
 #, elixir-autogen, elixir-format
 msgid "a rating only has a star count"
 msgstr "une note n'a qu'un nombre d'étoiles"
-
-#: lib/kiln_cms_web/live/content_editor_live.ex
-#, elixir-autogen, elixir-format
-msgid "a related record"
-msgstr "un enregistrement lié"
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format

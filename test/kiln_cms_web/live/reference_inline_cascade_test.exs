@@ -187,7 +187,10 @@ defmodule KilnCMSWeb.ReferenceInlineCascadeTest do
       assert html =~ "Give it a title."
 
       # The cards left dirty stay dirty; nothing was written for the parent.
-      assert assigns(lv).inline_dirty == %{"ric_stop" => [b.id, c.id]}
+      assert assigns(lv).inline_dirty == %{
+               "ric_stop" => {"reference-picker-ric_stop", [b.id, c.id]}
+             }
+
       assert assigns(lv).cascade == nil
     end
 
@@ -301,17 +304,18 @@ defmodule KilnCMSWeb.ReferenceInlineCascadeTest do
       :sys.replace_state(lv.pid, fn state ->
         put_in(state.socket.assigns.cascade, %{
           ref: ref,
-          queue: [{"ric_dead", a.id}],
-          then: & &1,
-          saved: 0
+          queue: [],
+          then: {:workflow, "none"},
+          saved: 0,
+          step: 1
         })
       end)
 
       render_submit(form(lv, "#post-editor", form: %{title: "Ignored"}))
       assert CMS.get_post!(post.id, actor: ctx.admin).title == "Host"
 
-      send(lv.pid, {:cascade_timeout, ref})
-      assert render(lv) =~ "did not answer"
+      send(lv.pid, {:cascade_timeout, ref, 1})
+      assert render(lv) =~ "Couldn&#39;t save a related record"
       assert assigns(lv).cascade == nil
     end
   end

@@ -8,9 +8,10 @@ defmodule KilnCMSWeb.ContentEditor.ReferenceInline do
   Nothing here touches the parent: the card's *Save* runs the child's `:update`
   (a draft) or `:save_working_copy` (a published record, whose live text does
   not move until its own *Publish changes*), as the actor, in the parent's
-  tenant, and then re-reads the record. The parent's Save does not save the
-  card (the plan's third step adds that cascade) and the card never connects,
-  disconnects or reorders anything.
+  tenant, and then re-reads the record. The parent's Save saves a card
+  with unsaved edits *first*, by asking it to run its own save (the cascade,
+  I3: `update/2` with `cascade:`), and the card never connects, disconnects or
+  reorders anything.
 
   The rules the card keeps:
 
@@ -136,51 +137,32 @@ defmodule KilnCMSWeb.ContentEditor.ReferenceInline do
   def mount(socket), do: {:ok, socket |> assign(:loaded?, false) |> assign(:dirty?, false)}
 
   @impl true
+  # The parent's Save asking this card to save first (#2283, I3). The card
+  # runs its own save and answers with how it went; it never reports twice
+  # for one request.
+  def update(%{cascade: ref}, socket) do
+    # A card the field no longer allows to edit (not connected, locked,
+    # refused) is not written on the parent's behalf either.
+    socket =
+      if socket.assigns.status == :dirty and editing?(socket), do: save(socket), else: socket
+
+    status = socket.assigns.status
+    outcome = if status in [:clean, :saved, :saved_copy], do: :ok, else: :error
+
+    send(
+      self(),
+      {__MODULE__, {:cascade, ref, socket.assigns.key, outcome, socket.assigns.values["title"]}}
+    )
+
+    {:ok, socket}
+  end
+
   def update(assigns, socket) do
-    {cascade, assigns} = Map.pop(assigns, :cascade)
     socket = assign(socket, assigns)
 
     # Opened once; the picker's later renders only refresh the row's facts.
     socket = if socket.assigns.loaded?, do: socket, else: open(socket)
-    {:ok, if(cascade, do: cascade_save(socket, cascade), else: socket)}
-  end
-
-  @doc """
-  The id of the card component for row `key` of reference field `field`: what
-  the editor addresses (`send_update/2`) when its Save cascades (I3).
-  """
-  def card_id(field, key), do: "reference-picker-#{field}-inline-#{key}"
-
-  # The parent's Save asks this card to save first (I3). The card runs the
-  # same save its own button does and reports back to the editor, which
-  # owns the order and decides whether the parent is written. A card with
-  # nothing to save, or already saved, is a success; anything else (an error
-  # on the card, someone else's change, a refusal) stops the cascade.
-  defp cascade_save(socket, ref) do
-    dirty? = socket.assigns.status == :dirty and editing?(socket)
-    socket = if dirty?, do: save(socket), else: socket
-
-    outcome =
-      case socket.assigns.status do
-        status when status in [:saved, :saved_copy] and dirty? -> :saved
-        status when status in [:clean, :saved, :saved_copy] -> :unchanged
-        _failed -> :failed
-      end
-
-    send(
-      self(),
-      {__MODULE__,
-       {:cascaded, ref, socket.assigns.field, socket.assigns.key, outcome, card_title(socket)}}
-    )
-
-    socket
-  end
-
-  defp card_title(socket) do
-    case get_in(socket.assigns, [:values, "title"]) do
-      title when is_binary(title) and title != "" -> title
-      _blank -> nil
-    end
+    {:ok, socket}
   end
 
   defp open(socket) do
