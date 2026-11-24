@@ -156,6 +156,16 @@ defmodule KilnCMSWeb.FormLiveTest do
       copy
     end
 
+    defp copies_of(form),
+      do: CMS.list_forms!(authorize?: false, query: [filter: [slug: "#{form.slug}-copy"]])
+
+    # A failed duplicate is logged (`KilnCMS.Forms.Duplicate`); keep it out of
+    # the test output.
+    defp capture_log_and(fun) do
+      {result, _log} = ExUnit.CaptureLog.with_log(fun)
+      result
+    end
+
     defp field_names(form),
       do: form.id |> CMS.form_fields_for!(authorize?: false) |> Enum.map(& &1.name)
 
@@ -228,7 +238,9 @@ defmodule KilnCMSWeb.FormLiveTest do
 
       html = duplicate(conn, admin, form)
 
-      assert html =~ "was renamed “website_2” in the copy"
+      assert html =~
+               "The field “website” was renamed “website_2” in the copy: that name is reserved for spam protection."
+
       refute html =~ "couldn"
 
       copy = copy_of(form)
@@ -245,7 +257,56 @@ defmodule KilnCMSWeb.FormLiveTest do
                "Hi [field:website]"
     end
 
-    test "a field that can't be copied is named, not dropped silently", %{conn: conn} do
+    test "a field named locale is renamed locale_2 in the copy, saying why", %{conn: conn} do
+      admin = authed_user(:admin)
+      slug = "fl-loc-#{System.unique_integer([:positive])}"
+      form = CMS.create_form!(%{name: "Contact", slug: slug}, actor: admin)
+
+      CMS.create_form_field!(
+        %{form_id: form.id, name: "email", label: "Email", field_type: :email},
+        actor: admin
+      )
+
+      # From before the name was reserved (#2716): the action refuses it now.
+      Ash.Seed.seed!(KilnCMS.CMS.FormField, %{
+        form_id: form.id,
+        name: "locale",
+        label: "Language",
+        field_type: :string,
+        position: 1
+      })
+
+      form =
+        CMS.update_form!(
+          form,
+          %{
+            autoresponder_enabled: true,
+            autoresponder_subject: "Hi [field:locale]",
+            autoresponder_body: "Sent to [field:email]."
+          },
+          actor: admin
+        )
+
+      html = duplicate(conn, admin, form)
+
+      assert html =~ "Form duplicated (inactive until you activate it)."
+
+      assert html =~
+               "The field “locale” was renamed “locale_2” in the copy: that name is reserved for the submission&#39;s language."
+
+      refute html =~ "spam protection"
+      refute html =~ "couldn"
+
+      copy = copy_of(form)
+      assert field_names(copy) == ["email", "locale_2"]
+      assert copy.autoresponder_enabled
+      assert copy.autoresponder_subject == "Hi [field:locale_2]"
+      assert field_names(form) == ["email", "locale"]
+    end
+
+    # One transaction (#2717): the copy used to commit without the field, and
+    # with its autoresponder off, while the flash reported both.
+    test "a field that can't be copied refuses the whole duplicate, naming it", %{conn: conn} do
       admin = authed_user(:admin)
       slug = "fl-bad-#{System.unique_integer([:positive])}"
       form = CMS.create_form!(%{name: "Contact", slug: slug}, actor: admin)
@@ -266,30 +327,20 @@ defmodule KilnCMSWeb.FormLiveTest do
         position: 1
       })
 
-      form =
-        CMS.update_form!(
-          form,
-          %{
-            autoresponder_enabled: true,
-            autoresponder_subject: "About [field:topic]",
-            autoresponder_body: "Thanks."
-          },
-          actor: admin
-        )
+      html = capture_log_and(fn -> duplicate(conn, admin, form) end)
 
-      html = duplicate(conn, admin, form)
+      assert html =~
+               "Couldn&#39;t duplicate “Contact”, so nothing was created. " <>
+                 "Fix the field “topic” in this form and try again: " <>
+                 "Invalid value provided for options: a select field must list at least one option."
 
-      assert html =~ "Form duplicated, but a field couldn&#39;t be copied: topic."
-      # Its template names the missing field, so the copy's stays off.
-      assert html =~ "The copy&#39;s autoresponder stays off:"
-
-      copy = copy_of(form)
-      assert field_names(copy) == ["email"]
-      refute copy.autoresponder_enabled
-      assert copy.autoresponder_subject == "About [field:topic]"
+      refute html =~ "Bread Crumbs"
+      refute html =~ "Form duplicated"
+      assert copies_of(form) == []
     end
 
-    test "a refused autoresponder switch keeps the copy's renamed tokens", %{conn: conn} do
+    test "a template naming a field the copy lacks leaves its autoresponder off, tokens renamed",
+         %{conn: conn} do
       admin = authed_user(:admin)
       form = CMS.create_form!(%{name: "Both", slug: "fl-dup-both"}, actor: admin)
 
@@ -301,33 +352,64 @@ defmodule KilnCMSWeb.FormLiveTest do
         position: 0
       })
 
-      Ash.Seed.seed!(KilnCMS.CMS.FormField, %{
-        form_id: form.id,
-        name: "topic",
-        label: "Topic",
-        field_type: :select,
-        options: [],
-        position: 1
-      })
+      gone =
+        CMS.create_form_field!(
+          %{form_id: form.id, name: "gone", label: "Gone", field_type: :string, position: 1},
+          actor: admin
+        )
 
       form =
         CMS.update_form!(
           form,
           %{
             autoresponder_enabled: true,
-            autoresponder_subject: "[field:website] about [field:topic]",
+            autoresponder_subject: "[field:website] about [field:gone]",
             autoresponder_body: "Thanks."
           },
           actor: admin
         )
 
+      # A stale token: the field it names moved away underneath the actions,
+      # which refuse that while the template uses it (#2343).
+      other = CMS.create_form!(%{name: "Other", slug: "fl-dup-other"}, actor: admin)
+      Ash.Seed.update!(gone, %{form_id: other.id})
+
       html = duplicate(conn, admin, form)
-      assert html =~ "The copy&#39;s autoresponder stays off:"
+
+      assert html =~ "Form duplicated (inactive until you activate it)."
+
+      assert html =~
+               "The copy&#39;s autoresponder stays off: its template names a field the copy doesn&#39;t have ([field:gone])."
+
+      refute html =~ "autoresponder_body"
+      refute html =~ "autoresponder_subject"
 
       copy = copy_of(form)
       assert field_names(copy) == ["website_2"]
       refute copy.autoresponder_enabled
-      assert copy.autoresponder_subject == "[field:website_2] about [field:topic]"
+      assert copy.autoresponder_subject == "[field:website_2] about [field:gone]"
+    end
+
+    # The flash renders through `Exception.message/1`, which interpolates an
+    # error's `vars`; reading `.message` handed the admin `%{value}` (#2717).
+    test "a refused copy's flash names the offending value", %{conn: conn} do
+      admin = authed_user(:admin)
+      slug = "fl-csp-#{System.unique_integer([:positive])}"
+
+      # From before `CspOrigins` refused a plain-http origin.
+      form =
+        Ash.Seed.seed!(KilnCMS.CMS.Form, %{
+          name: "Embedded",
+          slug: slug,
+          embed_origins: ["http://insecure.test"]
+        })
+
+      html = capture_log_and(fn -> duplicate(conn, admin, form) end)
+
+      assert html =~ "&quot;http://insecure.test&quot; is not an allowed CSP source."
+      refute html =~ "%{value}"
+      refute html =~ "Form duplicated"
+      assert copies_of(form) == []
     end
   end
 
@@ -432,6 +514,12 @@ defmodule KilnCMSWeb.FormLiveTest do
              lv,
              ~s(button[phx-click="duplicate_form"][phx-value-id="#{form.id}"][aria-label="Duplicate Feedback"])
            )
+
+    # The tooltip says what a copy leaves behind (#2717).
+    assert lv
+           |> element(~s(button[phx-click="duplicate_form"][phx-value-id="#{form.id}"]))
+           |> render() =~
+             ~s(title="Duplicate Feedback: copies its settings and fields; its entries stay with the original.")
 
     assert has_element?(
              lv,

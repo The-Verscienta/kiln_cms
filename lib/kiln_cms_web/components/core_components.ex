@@ -1340,12 +1340,18 @@ defmodule KilnCMSWeb.CoreComponents do
     error
     |> Ash.Error.to_error_class()
     |> Map.get(:errors, [])
-    |> Enum.map_join(" ", &Exception.message/1)
+    |> Enum.map_join(" ", &(&1 |> without_bread_crumbs() |> Exception.message()))
     |> case do
       "" -> Keyword.get_lazy(opts, :fallback, fn -> gettext("The change could not be saved.") end)
       message -> message
     end
   end
+
+  # Splode prefixes a message with its bread crumbs ("Error returned from:
+  # KilnCMS.CMS.FormField.create"), which name the call path, not anything an
+  # admin can act on (#2717: a create's refusal reached the flash with them).
+  defp without_bread_crumbs(%{bread_crumbs: [_ | _]} = error), do: %{error | bread_crumbs: []}
+  defp without_bread_crumbs(error), do: error
 
   @docs_base "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/"
 
