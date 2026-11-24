@@ -47,8 +47,8 @@ defmodule KilnCMS.Backups.Heartbeat do
   the others, and its step requeued elsewhere. So it stops its own steps
   first: once its last successful beat is 90 s old, it kills every process
   registered in `KilnCMS.Backups.StepRegistry` (a step job registers itself),
-  and `KilnCMS.ExternalCommand`'s watchers kill the `pg_dump`, `tar` or
-  `rclone` each started. Two nodes must never write the same backup's files
+  and `KilnCMS.ExternalCommand` kills the `pg_dump`, `tar` or `rclone` each
+  started when its port closes with it. Two nodes must never write the same backup's files
   at once.
 
   The kill is done by `KilnCMS.Backups.Fence`, a watchdog process that does no
@@ -116,8 +116,8 @@ defmodule KilnCMS.Backups.Heartbeat do
   database misses, and a partition that heals before the self-fence fires
   never fences. So after every successful beat this node looks up the Oban
   job of each step registered here (a step registers `{step, job_id}`) and
-  kills each one whose job is `cancelled`, `completed` or `discarded`; the
-  watchers stop its external command as above. A live step's job is
+  kills each one whose job is `cancelled`, `completed` or `discarded`;
+  `KilnCMS.ExternalCommand` stops its external command as above. A live step's job is
   `executing` until its own ack, and the step unregisters before it returns,
   so a step in its normal tail, or a new chain's, is never stopped.
 

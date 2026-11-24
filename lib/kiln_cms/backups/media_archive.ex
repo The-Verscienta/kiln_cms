@@ -871,10 +871,10 @@ defmodule KilnCMS.Backups.MediaArchive do
   # Runs `tar` with stdout and stderr merged, keeping only the tail of its
   # output (a listing of millions of files must not accumulate in the VM).
   #
-  # Closing a port does not stop its OS process, so a caller killed mid-run (an
+  # Closing a plain port does not stop its OS process, so a caller killed mid-run (an
   # Oban timeout or cancel) would leave `tar -czf` writing `<part>.partial` that
-  # a Resume then collides with. `ExternalCommand` kills the OS process when
-  # the caller dies before tar exits.
+  # a Resume then collides with. `ExternalCommand` kills tar's process group
+  # when the caller dies before tar exits.
   defp run_tar(tar, args) do
     case ExternalCommand.run(tar, args, :infinity, tail: @tail) do
       {_output, 0} -> :ok

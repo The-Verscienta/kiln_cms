@@ -1,8 +1,8 @@
 defmodule KilnCMS.Backups.Command do
   @moduledoc """
   The external commands a backup runs (`pg_dump`, `pg_restore`, `rclone`), run
-  the one way they are run: an argv list exec'd directly, killed with the
-  process that started it, its output scrubbed through
+  the one way they are run: an argv list with no shell interpolation, killed
+  with the process that started it, its output scrubbed through
   `KilnCMS.Backups.Redact` before anything keeps it.
 
   `KilnCMS.Backups.Steps` and the backup destinations
@@ -22,8 +22,9 @@ defmodule KilnCMS.Backups.Command do
           {String.t(), :enoent}
           | {:exit_status, String.t(), non_neg_integer() | :timeout, String.t()}
 
-  # An argv list exec'd directly — no shell, so nothing here can be injected
-  # into even though the database URL carries a password.
+  # An argv list with no shell interpolation (`ExternalCommand` passes it to
+  # its fixed wrapper positionally, as `"$@"`), so nothing here can be
+  # injected into even though the database URL carries a password.
   #
   # `ExternalCommand`, not `System.cmd/3`: a job killed mid-run (timeout,
   # cancel, a fenced node) must take `pg_dump`/`rclone` down with it rather
