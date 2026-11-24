@@ -240,6 +240,35 @@ defmodule KilnCMSWeb.BillingControllerTest do
       assert m.status == :incomplete
     end
 
+    test "a restart reuses the provider customer and drops the old subscription", %{conn: conn} do
+      # #3157: the old subscription's id goes, the customer stays so the
+      # member is not duplicated at the provider.
+      configure_billing!()
+      t = tier()
+      user = authed_user()
+
+      row =
+        seed_membership(user, t, :canceled, %{
+          provider_customer_id: "cus_1",
+          provider_subscription_id: "sub_old"
+        })
+
+      KilnCMS.StubBillingProvider.spy_on(:checkout_session, self())
+
+      post(log_in(conn, user), ~p"/billing/checkout", %{"tier" => t.slug})
+
+      assert_received {:stub_billing, :checkout_session, params}
+      assert params.customer == "cus_1"
+      refute params.customer_email
+
+      assert [m] =
+               Billing.memberships_for_user!(user.id, authorize?: false, tenant: default_org_id())
+
+      assert m.id == row.id
+      assert m.status == :incomplete
+      assert m.provider_subscription_id == nil
+    end
+
     test "clicking join twice reuses the same membership row", %{conn: conn} do
       configure_billing!()
       t = tier()

@@ -44,9 +44,10 @@ defmodule KilnCMS.Billing.Subscriptions do
   applied to the same subscription (`:out_of_order`), one about a different
   subscription than a paying row holds (`:other_subscription`, logged at
   warning), a different subscription taking over a dead row without being
-  newer, and any event for a `:comped` row (logged at warning: an operator who
-  comped a member who was paying cancels the provider subscription in the
-  provider's dashboard, #3156). The row stores the provider's
+  newer, and any event for a `:comped` row (logged at warning: a comp over a
+  row the provider may still bill is refused, #3156, but a row comped before
+  that may still be billed, and its operator cancels the provider subscription
+  in the provider's dashboard). The row stores the provider's
   `created` stamp (`last_provider_event_at`); a state retrieved at checkout is
   newer than any event and is stamped with the checkout event's own `created` instead. The
   action repeats the check under the row lock
@@ -262,9 +263,9 @@ defmodule KilnCMS.Billing.Subscriptions do
         {:ignored, reason}
 
       {:ignore, :comped_not_provider_managed = reason} ->
-        # The provider may still be billing this member. Comping a paying member
-        # does not cancel their subscription (#3156): the operator cancels it in
-        # the provider's dashboard.
+        # The provider may still be billing this member: a comp over a billed
+        # row is refused now (#3156), but a row comped before that keeps its
+        # subscription. The operator cancels it in the provider's dashboard.
         Logger.warning(
           "billing: ignoring #{inspect(event["type"])} #{inspect(event["id"])} for " <>
             "subscription #{inspect(target.subscription_id)}: membership #{membership.id} " <>
