@@ -11,6 +11,9 @@ defmodule KilnCMSWeb.FieldSelection do
   A field condition is an operator (equals, is one of, is not) and one text
   input; "is one of" takes values separated by commas. Values are cast to the field's type (numbers
   and booleans) so a stored `5` reads back as `5` and is saved as `5`.
+
+  The editor filters (#3224) are checkboxes posting `sel[filters][]`; they are
+  stored in `ReferenceSelection.filter_names/0` order.
   """
 
   use Gettext, backend: KilnCMSWeb.Gettext
@@ -34,6 +37,7 @@ defmodule KilnCMSWeb.FieldSelection do
       |> put("states", states(sel["states"]))
       |> put("owner", if(sel["owner"] == "self", do: "self"))
       |> put("sort", if(sel["sort"] == "title", do: "title"))
+      |> put("filters", filters(sel["filters"]))
       |> put("by_type", by_type(sel["by_type"], targets, catalog))
       |> put("create", create(sel["create"], targets))
       |> put_add_new(sel["add_new"])
@@ -71,6 +75,16 @@ defmodule KilnCMSWeb.FieldSelection do
     do: states |> Enum.reject(&(&1 in [nil, ""])) |> Enum.uniq()
 
   defp states(_none), do: []
+
+  # Known names in the fixed order; anything else is passed on so the
+  # resource refuses it rather than this module dropping it.
+  defp filters(filters) when is_list(filters) do
+    posted = filters |> Enum.reject(&(&1 in [nil, ""])) |> Enum.uniq()
+    known = ReferenceSelection.filter_names()
+    Enum.filter(known, &(&1 in posted)) ++ (posted -- known)
+  end
+
+  defp filters(_none), do: []
 
   defp by_type(%{} = by_type, targets, catalog) do
     for {type, entry} <- by_type, type in targets, is_map(entry), into: %{} do
@@ -141,7 +155,7 @@ defmodule KilnCMSWeb.FieldSelection do
 
   @doc """
   What the inputs show for a stored or posted selection: `states`, `owner?`,
-  `sort`, and per type `tags`, `category` and `fields` (name to
+  `sort`, `filters`, and per type `tags`, `category` and `fields` (name to
   `{operator, text}`).
   """
   @spec view(term()) :: map()
@@ -154,6 +168,7 @@ defmodule KilnCMSWeb.FieldSelection do
       create: get_in(map, ["create", "type"]),
       add_new?: Map.get(map, "add_new") != false,
       sort: Map.get(map, "sort", "recent"),
+      filters: List.wrap(Map.get(map, "filters", [])),
       by_type:
         Map.new(Map.get(map, "by_type", %{}), fn {type, entry} ->
           {type,
@@ -217,7 +232,9 @@ defmodule KilnCMSWeb.FieldSelection do
 
     base = Enum.join([noun | parts ++ owner] ++ [sort], ", ") <> "."
 
-    closing(base, map, lookup)
+    base
+    |> closing(map, lookup)
+    |> with_filters(ReferenceSelection.filters(map))
   end
 
   # What the picker may create, after the conditions: create-on-type, or that
@@ -237,6 +254,19 @@ defmodule KilnCMSWeb.FieldSelection do
         base
     end
   end
+
+  # Said apart from the conditions: the filters narrow what an editor sees
+  # while picking, they do not limit what the field accepts.
+  defp with_filters(base, ["category", "tag"]),
+    do: gettext("%{sentence} Editors can narrow the search by category and tag.", sentence: base)
+
+  defp with_filters(base, ["category"]),
+    do: gettext("%{sentence} Editors can narrow the search by category.", sentence: base)
+
+  defp with_filters(base, ["tag"]),
+    do: gettext("%{sentence} Editors can narrow the search by tag.", sentence: base)
+
+  defp with_filters(base, _none), do: base
 
   defp upcase_first(<<first::utf8, rest::binary>>), do: String.upcase(<<first::utf8>>) <> rest
   defp upcase_first(other), do: other

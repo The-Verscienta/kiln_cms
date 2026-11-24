@@ -1790,11 +1790,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     {tag_ids, category_ids} = named_taxonomy(owned)
     extra = fn ids -> [actor: actor, tenant: org, query: [filter: [id: [in: ids]]]] end
 
-    tags =
-      CMS.list_tags!(opts) ++ if(tag_ids == [], do: [], else: CMS.list_tags!(extra.(tag_ids)))
+    first_tags = CMS.list_tags!(opts)
+    first_categories = CMS.list_categories!(opts)
+
+    tags = first_tags ++ if(tag_ids == [], do: [], else: CMS.list_tags!(extra.(tag_ids)))
 
     categories =
-      CMS.list_categories!(opts) ++
+      first_categories ++
         if(category_ids == [], do: [], else: CMS.list_categories!(extra.(category_ids)))
 
     assign(socket, :selection_catalog, %{
@@ -1802,8 +1804,25 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       categories: categories |> Enum.uniq_by(& &1.id) |> Enum.map(&{&1.id, &1.name}),
       types: Map.new(types),
       fields: fields,
-      limit: @selection_limit
+      limit: @selection_limit,
+      too_many: %{
+        "category" => more_than_cap?(first_categories, &CMS.list_categories!/1, actor, org),
+        "tag" => more_than_cap?(first_tags, &CMS.list_tags!/1, actor, org)
+      }
     })
+  end
+
+  # Whether the site has more tags (or categories) than the picker's filter
+  # select lists (#3224). Only a full first page can be past the cap, so a
+  # small site pays no extra read.
+  defp more_than_cap?(first_page, _list, _actor, _org)
+       when length(first_page) < @selection_limit,
+       do: false
+
+  defp more_than_cap?(_first_page, list, actor, org) do
+    cap = KilnCMS.CMS.ReferenceSelection.filter_option_cap()
+
+    length(list.(actor: actor, tenant: org, query: [select: [:id], limit: cap + 1])) > cap
   end
 
   # Where a field of an unknown type (#2605) sits: its type, or for a link

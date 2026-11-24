@@ -103,6 +103,10 @@ What's new in the 1.12 line, with examples and migration steps: [docs/whats-new/
   No migration.
   ([long form](docs/changelog/v1.12.1.md#reference-add-new-off))
 
+- **Editors can narrow a reference field's search while picking: a Type select on any field with several linked types, and Category and Tag selects where the admin ticks "Let editors narrow the search by" (stored as `"filters"` in the field's `selection`); a filter only narrows ([#3224](https://github.com/The-Verscienta/kiln_cms/issues/3224)).**
+  No migration.
+  ([long form](docs/changelog/unreleased.md#reference-picker-filters))
+
 - **Edits can say why: a `change_note` on update, publish and Publish changes is kept on the version and shown in History; a site can make the editor ask for one per content type ("Ask why on every change" on the Safety fields page) ([#3255](https://github.com/The-Verscienta/kiln_cms/issues/3255)).**
   ([long form](docs/changelog/v1.12.1.md#change-note))
 
@@ -120,6 +124,11 @@ What's new in the 1.12 line, with examples and migration steps: [docs/whats-new/
 - **A Flexible content field is now typed in the GraphQL API and in the generated clients: a `FlexibleItemValue` per item, and a `oneOf` union per field in JSON Schema, OpenAPI, TypeScript, Swift, Kotlin and `kiln-types`. `?include=field_definitions.item_types` works on type definitions.**
   Validating consumers: a flexible field's `items` was `{"type": "object"}` and is now a `$ref` to a union of closed item definitions.
   ([long form](docs/changelog/v1.12.1.md#flexible-typed-export))
+
+### Fixed
+
+- **A form's thank-you, not-found and refused (422) pages and the `/newsletter` sign-up and unsubscribe pages follow the visitor's light or dark theme, and with browser storage blocked the console still loads and the theme still applies, just isn't remembered (#2715, #2773).**
+  ([long form](docs/changelog/unreleased.md#theme-script-everywhere))
 
 ## [1.12.0] - 2026-11-21
 
