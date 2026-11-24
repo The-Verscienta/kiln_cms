@@ -161,6 +161,18 @@ carries the reasoning.
   Record: [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md#the-typed-export-pr-5-2282);
   guides: [GraphQL: generate types and fragments](../headless-graphql-api.md#generate-types-and-fragments-for-your-site), [api.md: schema discovery](../api.md#schema-discovery-typed-clients).
 
+
+## Changed
+
+<a id="form-field-locale-reserved"></a>
+
+- **A form field can no longer be named `locale`: it is the param a submission's language is recorded from, so a visitor's answer to such a field was also recorded as the submission's language (#2716).**
+  - **What changed.** `locale` joins the honeypot's `website` as a reserved machine name, refused on every field type when a field is added, renamed or has its type changed, with *is reserved for the submission's language* on `name`. A duplicated field never takes it either (`email_2`-style naming skips reserved names).
+  - **A field that already has the name keeps working.** The form renders it, the answer is stored with the entry, and `GET /api/forms/<slug>` lists it; until the field is renamed, the answer is also recorded as the submission's `locale`, as before. Label, order, **Required** and other edits still save, but the builder shows **Reserved name** under the field on the preview and a note under **Machine name**, and its **Type** can't be changed until it is renamed. **Admins:** open each form in the builder and rename any flagged field ([Fix a field named locale](../forms.md#fix-a-field-named-locale)).
+  - **Form duplicate.** The copy of such a field is named `locale_2` (or the next free name), the copy's `[field:locale]` autoresponder tokens follow, and the message says why. The original is not changed.
+  - **Headless clients and the SDKs are unchanged.** A body `locale` still means the submission's language, so `submitForm` / `submit_form`'s `locale` option keeps working. `FormField` has no JSON:API, GraphQL or MCP write surface; only code that calls `KilnCMS.CMS.create_form_field` / `update_form_field` with that name (a seed, an overlay, Ash Admin in development) sees the new refusal.
+  - **For developers.** `KilnCMS.Forms.reserved_field_names/0` now returns `["website", "locale"]`, and the new `KilnCMS.Forms.reserved_field_reason/1` says which reason applies (`:honeypot`, `:locale` or `nil`). No migration.
+
 ## Fixed
 
 <a id="theme-script-everywhere"></a>
@@ -193,3 +205,14 @@ carries the reasoning.
     those choices is remembered on the next page load.
   No migration, no configuration.
   ([#2715](https://github.com/The-Verscienta/kiln_cms/issues/2715), [#2773](https://github.com/The-Verscienta/kiln_cms/issues/2773))
+
+<a id="form-reorder-duplicate-all-or-nothing"></a>
+
+- **Reordering a form's fields in the builder, and duplicating a form, are now all-or-nothing: a refused write rolls everything back, and the message names the field to fix (#2717).**
+  - **Reorder.** Dragging a field wrote one position per moved field and threw the results away, so a refused write left half the new order saved, the preview showing an order that wasn't, and no message. Now every position is saved in one transaction. If one is refused, none is: the preview goes back to the saved order, and the message reads *Couldn't save the new order, so nothing was moved. Fix the field “topic” and try again: …* with the field's error.
+  - **Duplicate.** The copy and each of its fields were separate saves, so a field that failed was dropped from a copy that was kept, with its autoresponder sometimes left off. Now the copy, its fields, its renamed tokens and its autoresponder switch are one transaction: a refused field leaves no copy at all, and the message reads *Couldn't duplicate “Contact”, so nothing was created. Fix the field “topic” in this form and try again: …*.
+  - **Behavior change.** A field an older release let through with a setting Kiln now refuses (a dropdown saved with no options, say) now blocks every reorder that moves it, and refuses the whole duplicate where it used to be left out of the copy. Fix the named field in the original's builder and try again ([Reorder fields and copy a field](../forms.md#reorder-fields-and-copy-a-field), [Duplicate a form](../forms.md#duplicate-a-form)).
+  - **The copy's autoresponder.** It still follows the original's. When the original's is on but its template names a field the original no longer has, the copy is made with its autoresponder off and the message lists the unknown tokens; when the subject or body is blank, the message says to fill both in.
+  - **Clearer messages.** The Forms page's flashes no longer show a raw `%{value}` placeholder, `field message` pairs such as `autoresponder_body …`, or Splode's "Bread Crumbs" call path. The bread-crumb fix is in the console's shared error formatting (`ash_error_message/2`), so it applies wherever the console shows an Ash error. The **Duplicate** tooltip now adds *copies its settings and fields; its entries stay with the original.*
+  - **Duplicating a field in the builder** now gives the copy its own place right after its original; it used to share the original's position.
+  - **For developers.** The logic moved out of the LiveViews into `KilnCMS.Forms.Duplicate.run/2` and `KilnCMS.Forms.FieldOrder.reorder/3`, which run as the acting user (admin-only, as before) and return `{:error, {:field, name_or_field, error}}` for a refused field. `KilnCMS.CMS.Changes.BustFormCache` now busts through `KilnCMS.AfterCommit.run/1`, so a form write inside an outer transaction busts the delivery cache only once it commits. No migration.

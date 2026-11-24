@@ -102,10 +102,20 @@ else.
   Validating consumers: a flexible field's `items` was `{"type": "object"}` and is now a `$ref` to a union of closed item definitions.
   ([long form](docs/changelog/unreleased.md#flexible-typed-export))
 
+### Changed
+
+- **A form field can no longer be named `locale`, the param a submission's language is recorded from; an existing one keeps working but is flagged in the builder until renamed, and a duplicate names it `locale_2` ([#2716](https://github.com/The-Verscienta/kiln_cms/issues/2716)).**
+  Admins: rename flagged fields. Body `locale` and the SDKs are unchanged. No migration.
+  ([long form](docs/changelog/unreleased.md#form-field-locale-reserved))
+
 ### Fixed
 
 - **A form's thank-you, not-found and refused (422) pages and the `/newsletter` sign-up and unsubscribe pages follow the visitor's light or dark theme, and with browser storage blocked the console still loads and the theme still applies, just isn't remembered (#2715, #2773).**
   ([long form](docs/changelog/unreleased.md#theme-script-everywhere))
+
+- **Reordering a form's fields and duplicating a form are all-or-nothing: a refused write rolls everything back and the message names the field to fix ([#2717](https://github.com/The-Verscienta/kiln_cms/issues/2717)).**
+  A legacy-invalid field (a dropdown with no options) now blocks the reorder and refuses the whole duplicate instead of being dropped from the copy.
+  ([long form](docs/changelog/unreleased.md#form-reorder-duplicate-all-or-nothing))
 
 ## [1.12.0] - 2026-11-21
 
