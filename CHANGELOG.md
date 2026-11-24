@@ -79,6 +79,9 @@ else.
 - **A large WordPress, Ghost or envelope import no longer loses its media after two minutes: each image download has its own 60-second deadline, a slow image is listed by URL, and an unresponsive host is skipped after three timeouts in a row (#2720).**
   WordPress and Ghost imports now print `media:` and `records:` progress. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#import-media-per-asset-deadline))
+- **`mix kiln.gen.content Story --plural stories`, and `--from` a dynamic type whose URL segment isn't `<name>s`, now write `plural:` into the generated resource, so it serves at `/stories` and matches its `list_stories` interfaces instead of registering `storys` (#2731).**
+  Types generated before this keep `storys` until you add `plural:` by hand. No migration.
+  ([long form](docs/changelog/unreleased.md#gen-content-plural))
 
 ## [1.12.1] - 2026-11-23
 
