@@ -160,8 +160,11 @@ defmodule KilnCMS.Beta.Round do
   # as raised from "viewer") and an admin seat raises the platform `new_admin`
   # alert (#2245). A seed with the role written in did neither (#2641).
   #
-  # Both steps share one transaction: a failed grant leaves no account behind
-  # whose generated password was never handed out.
+  # Both steps share one transaction, per seat: a failed grant leaves no
+  # account behind for that seat. Seats provisioned earlier in the same run are
+  # already committed, and since `provision_seats/1` raises before the handout
+  # their passwords are not shown; a re-run adopts them without one, as it
+  # always has after a mid-round failure.
   #
   # An *existing* account is a different problem. `--tester` takes real
   # addresses, so it can land on somebody who already has an account here, and
@@ -211,8 +214,8 @@ defmodule KilnCMS.Beta.Round do
       end)
 
     # A failed `:manage_access` inside a transaction it did not open rolls the
-    # whole transaction back with its changeset rather than raising, so the
-    # error is raised here, as the bang call would have outside one.
+    # whole transaction back with its error rather than raising, so the error
+    # is raised here, as the bang call would have outside one.
     case result do
       {:ok, user} -> user
       {:error, error} -> raise Ash.Error.to_error_class(error)

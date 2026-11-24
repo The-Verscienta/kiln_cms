@@ -5,8 +5,9 @@ defmodule KilnCMS.Beta.RoundAtomicityTest do
   account is left behind whose generated password nobody was ever handed.
 
   The grant is made to fail by a trigger on `security_events` that refuses its
-  `role_granted` row, the audit event `:manage_access` writes in its own
-  transaction. Nothing in the round can be told to fail otherwise.
+  `role_granted` row, the audit event `:manage_access` writes inside the
+  caller's transaction (here the seat's), so refusing it rolls the seed back
+  too. Nothing in the round can be told to fail otherwise.
 
   Tagged `:table_lock` and **excluded from the normal run**: `CREATE TRIGGER`
   locks `security_events` until the sandbox transaction rolls back, and every
