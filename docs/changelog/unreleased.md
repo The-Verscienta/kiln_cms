@@ -589,6 +589,138 @@ carries the reasoning.
   (default `true`).
 
 
+<a id="media-job-read-retry"></a>
+
+- **Image variant and A/V probe jobs retry a failed read of the original, and complete only when the store says the file is gone (#3066).**
+  - **What was wrong.** `KilnCMS.Media.VariantWorker` (image variants and
+    dimensions) and `KilnCMS.Media.AVWorker` (duration, intrinsic size,
+    poster frame) read the original back from storage after upload. On the
+    operator's store or a site's bucket, any failed read (an S3 timeout or
+    `5xx`, a full temp disk) completed the job as if the file were gone, with
+    nothing logged. The item kept no dimensions and no variants, or no
+    duration and no poster, and nothing queued the job again. (An image
+    backend's failed read already retried.)
+  - **Now.** Only a definite miss completes the job: the Local adapter's
+    `:enoent`, an S3 `404`, or a `:not_found` (`KilnCMS.Storage.not_found?/1`,
+    the test the A/V strip already used, now shared). The job logs "Variant
+    processing for media (id): original unreadable (…); nothing to derive."
+    or "A/V processing for media (id): original unreadable (…); nothing to
+    probe." Any other failure logs "… could not read its original (…); will
+    retry." and fails the job, so Oban retries it: 3 attempts, spread over
+    about a minute by Oban's default backoff, after which the job is
+    discarded. An S3 `403` (a missing key read with credentials that lack
+    `s3:ListBucket`) is in this group, the safe direction.
+  - **Error tracking.** Each failed attempt is an Oban job error, so Sentry,
+    which captures Oban errors, now reports media read failures that used to
+    pass silently. Expect them during a storage outage.
+  - **After a discarded job.** For an image, run
+    `mix kiln.media.regenerate_variants` (or **Regenerate variants** on
+    `/media`) once storage is back; an image with no variants and no width
+    counts as missing. An A/V item has no such command: pick a poster by hand
+    on the block, or upload the file again.
+  - **Gated items.** `VariantWorker` now completes without reading anything
+    for an item whose audience is not `:public`: its original is private, so
+    there is nothing at its public key, and a public variant would publish
+    what the gate withholds.
+  - See [When a media job cannot read the original](../media-pipeline.md#when-a-media-job-cannot-read-the-original).
+  No migration, no configuration. Rolling the pin back is safe.
+  ([#3066](https://github.com/The-Verscienta/kiln_cms/issues/3066))
+
+<a id="media-purge-private-original"></a>
+
+- **Delete permanently in the media trash also removes a gated or quarantined item's private original (#3067).**
+  - **What was wrong.** **Delete permanently** (Media, then Trash; admins
+    only) deleted the item's public key, its variants and its cached
+    transforms. A gated item (audience other than public) and a quarantined
+    upload keep their original in **private** storage, so that file stayed
+    behind with no row pointing at it.
+  - **Now.** When the purge succeeds, the private original is deleted too.
+    Whether the item has one is decided before the purge
+    (`KilnCMS.Media.private_original?/1`: quarantined, or an audience other
+    than `:public`), and a public item's purge makes no private-storage call,
+    so a store without a private bucket, or an image backend, is never asked.
+    A refused purge (someone restored the item meanwhile, #2531) still
+    deletes nothing. If the private delete fails after the row is gone, the
+    flash still says the file was deleted, and the error log reads "Purged
+    media (id) left its private blob (key) behind: …".
+  - **A trashed quarantined upload.** The strip job and the quarantine
+    reaper read only rows outside the trash, so neither touches one. This
+    purge is the only thing that removes its private upload.
+  - **No sweep, by design.** An orphaned private blob, from a delete that
+    failed or from an earlier release, is not found and removed later. A
+    sweep would have to list the private bucket and delete what no row
+    names; Kiln never lists storage, keys carry no Kiln or tenant prefix, a
+    staging clone pointed at production's `S3_*` would delete production's
+    gated documents, and the set of keys in use is wide and growing. The
+    reasons, the operator's remedy (search the log for the key and delete it
+    from the item's private store) and the record-based design that would be
+    safe are in
+    [Orphaned private blobs: no sweep, by design](../media-pipeline.md#orphaned-private-blobs-no-sweep-by-design).
+  - **For overlay code** that purges media itself: delete a private
+    original with `KilnCMS.Storage.delete_private/2` after the purge returns
+    `:ok`, for an item `private_original?/1` says has one
+    ([Trash and restore](../trash.md#for-developers)).
+  No migration, no configuration. Rolling the pin back is safe.
+  ([#3067](https://github.com/The-Verscienta/kiln_cms/issues/3067))
+
+<a id="av-strip-purge-withdraw"></a>
+
+- **A quarantined upload purged while its metadata strip runs no longer leaves its public copy behind (#3068).**
+  - **What was wrong.** With `KILN_AV_STRIP_MODE=deferred`, the strip job
+    stores the cleaned copy at the item's public key and then releases the
+    quarantine. If the hourly reaper (or a purge from the media trash)
+    removed the row between those two steps, the release failed and the
+    copy stayed public, at a URL no row recorded and nothing would delete.
+  - **The reaper waits.** It skips an item whose strip job is executing now
+    and started within the last 30 minutes, logging "Not reaping quarantined
+    media (id): its metadata strip is running now."; a later sweep takes it
+    if it is still quarantined. A job that is only queued, scheduled or
+    waiting for a retry does not hold it off, nor does one stuck in
+    `executing` for longer (the strip's own timeout is 10 minutes), so a
+    paused queue or a dead node can't keep a row for ever.
+  - **The strip withdraws.** If the release comes back stale and no row
+    with the item's id is left, trashed rows included, the job deletes its
+    public copy and the private upload, logs "Media (id) was purged while
+    its strip ran; withdrew the copy at its public key (key).", and
+    completes. A row that still exists, live or trashed, keeps both blobs.
+  - **What to watch for.** Nothing retries a withdraw (the key is never put
+    in a job's arguments, which would make the job a delete primitive), so a
+    failure is logged with the key: "… could not be deleted (…). It stays
+    public until it is deleted by hand.", "… Its public copy (key) will not
+    be cleaned up automatically; …" when the row check itself failed, and
+    "Purged media (id) left its private blob (key) behind: …". See step 5 of
+    [The deferred strip, behind a quarantine](../media-pipeline.md#the-deferred-strip-behind-a-quarantine-1122).
+  No migration, no configuration. Rolling the pin back is safe.
+  ([#3068](https://github.com/The-Verscienta/kiln_cms/issues/3068))
+
+<a id="s3-empty-object-range"></a>
+
+- **An empty file on S3 copies as an empty file, and a ranged request for it gets a `416` that states its length (#3069).**
+  - **What was wrong.** S3 refuses a ranged read of an empty object with a
+    `416` that Kiln read as "unsatisfiable, length unknown".
+    `Storage.copy_to_file/3`, which the A/V strip, the A/V probe, cached
+    transforms, gating moves and direct-upload completion use, failed on it,
+    and `/media/:id/stream` answered a `Range` request with a `416` and no
+    `Content-Range`.
+  - **Now.** A `416` for a range starting at 0 is checked with one `HEAD`:
+    a size of 0 makes it an empty blob (`{:error, {:range_not_satisfiable,
+    0}}`), which copies as an empty file and streams as `416` with
+    `Content-Range: bytes */0`, or `200` with an empty body without `Range`.
+    Any other `HEAD` answer keeps the `416` as an error, so a spurious
+    refusal can never make an empty copy of a file that has bytes, which
+    the A/V strip would store over the upload. A provider that ignores
+    `Range` and answers `200` with an empty body is read as empty too. The
+    cost is one extra `HEAD`, only on a `416` at offset 0.
+  - **For storage adapter authors.** Answer `fetch_range/3` for an empty
+    blob with `{:error, {:range_not_satisfiable, 0}}`, and only once you
+    know it is empty. A bare `{:error, :range_not_satisfiable}` is an error
+    at every offset, as before; the callback's documentation now says so
+    (`c:KilnCMS.Storage.fetch_range/3`).
+  No migration, no configuration. Rolling the pin back is safe.
+  ([#3069](https://github.com/The-Verscienta/kiln_cms/issues/3069))
+
+
+
 <a id="stranded-release-items-freed"></a>
 
 - **Content held by a release that already went live can join another release again: items left `pending` on a published, rolled-back or archived release are cancelled after each boot (#3072).**

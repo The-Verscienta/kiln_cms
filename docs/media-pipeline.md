@@ -32,6 +32,43 @@ never gets a `thumb`, since variants never upscale) and otherwise shows
 nothing. `KilnCMSWeb.MediaComponents.thumb_src/2` holds the
 rule for both.
 
+### When a media job cannot read the original
+
+Variants are made by `KilnCMS.Media.VariantWorker`, and a video's or audio
+file's duration and poster by `KilnCMS.Media.AVWorker` (see "Duration and
+poster frames" under [Video and audio](#video-and-audio-494)). Both run on
+the `:media` Oban queue after upload and read the original back from
+storage. What they do when that read fails depends on why (#3066):
+
+- **The original is definitely gone** (`KilnCMS.Storage.not_found?/1`: the
+  Local adapter's `:enoent`, an S3 `404`, a `:not_found` from an image backend
+  or plugin store). There is nothing to derive from, so the job completes and
+  logs a warning: "Variant processing for media (id): original unreadable
+  (…); nothing to derive." or "A/V processing for media (id): original
+  unreadable (…); nothing to probe."
+- **Any other failure** (an object-store timeout or `5xx`, an S3 `403`, a
+  full temp disk). The job logs "… could not read its original (…); will
+  retry." and fails, so Oban retries it. Both workers allow 3 attempts,
+  spread over about a minute by Oban's default backoff; after the third, Oban
+  discards the job. Each failed attempt is an Oban job error, so error
+  tracking (Sentry, when configured) records it.
+
+Until this release, a failed read from the operator's or a site's store
+completed the job silently, and the item was left with no dimensions and no variants, or
+no duration and no poster.
+
+A discarded job is not re-run automatically. For an image, run
+`mix kiln.media.regenerate_variants` (or **Regenerate variants** on `/media`)
+once storage is healthy: an image with no variants and no recorded width
+counts as missing, so the default run picks it up. An A/V item has no such
+command; its probe runs again only when it is un-gated (see "Gating A/V"
+under [Video and audio](#video-and-audio-494)), so pick a poster by hand on
+the block or upload the file again.
+
+`VariantWorker` reads nothing for an item whose audience is not `:public`: its
+original is in private storage, so there is nothing at its public key, and a
+public variant would publish what the gate withholds. The job completes.
+
 ## Modern formats (#473)
 
 Every variant is written **once per output format**: the source's own format,
@@ -648,7 +685,9 @@ of that happens on the request:
      before. (An S3 bucket that answers `403` for a missing key, because the
      credentials lack `s3:ListBucket`, ends that way too.) Before 1.11 any read
      error completed the job, so an upload already reaped after a passing
-     fault can't be recovered: upload the file again.
+     fault can't be recovered: upload the file again. The derivation job the
+     release enqueues reads by the same rule
+     ([When a media job cannot read the original](#when-a-media-job-cannot-read-the-original)).
    - **The strip fails for a passing reason** (`insufficient_space`,
      `timeout`): retried the same way.
    - **The strip fails for a standing reason** (no ffmpeg, a container that
@@ -667,11 +706,38 @@ of that happens on the request:
    the item after the reaper listed it) leaves the blob alone, and the item
    is not counted as reaped.
 
-If a private blob delete fails *after* a successful purge, in either path,
-the blob has no row and nothing sweeps it. The error log names its key:
-"Reaped media <id> left its private blob <key> behind: …" from the reaper,
-"Purged media <id> left its private blob <key> behind: …" from a refusal.
-Delete that key from the private store by hand.
+   The reaper also leaves alone an item whose strip job is **executing right
+   now and started within the last 30 minutes** (#3068), logging "Not
+   reaping quarantined media (id): its metadata strip is running now." A
+   later sweep takes it if it is still quarantined then. A strip that is only
+   queued, scheduled or waiting for a retry does not hold the reaper off, nor
+   does one left `executing` for longer than 30 minutes (the strip's own
+   timeout is 10), so a paused queue or a dead node can't keep a row for
+   ever.
+
+   If the row is purged anyway while the strip runs (by a sweep that checked
+   just before the strip started, or from the media trash), the strip has
+   already stored its copy at the public key, and its release comes back
+   stale. It then checks whether
+   any row with the item's id is left, trashed included. If none is, it
+   deletes the public copy and the private upload, and logs "Media (id) was
+   purged while its strip ran; withdrew the copy at its public key (key)."
+   Before this, that copy stayed public at a URL nothing recorded. A row
+   that still exists keeps both blobs. Nothing retries a withdraw, so a
+   failure is logged with the key for you to act on:
+   - "Media (id) was purged while its strip ran, and the copy at its public
+     key (key) could not be deleted (…). It stays public until it is deleted
+     by hand." Delete that key from the item's **public** store.
+   - "Media (id)'s release was stale, and whether its row still exists could
+     not be checked (…). Its public copy (key) will not be cleaned up
+     automatically; …" Check whether the item is still in the media library
+     or its trash; if it isn't, delete that key from its public store.
+   - "Purged media (id) left its private blob (key) behind: …" See below.
+
+If a private blob delete fails *after* a successful purge, the blob has no
+row and nothing deletes it later: see
+[Orphaned private blobs: no sweep, by design](#orphaned-private-blobs-no-sweep-by-design)
+for why, and for how to find and remove one.
 
 Both purges, the worker's refusal in step 4 and the reaper's, go through
 `CMS.purge_quarantined_media_item` (`:purge_quarantined`), not the trash's
@@ -812,6 +878,80 @@ An **image** can never be gated (its responsive-variant pipeline —
 `Media.VariantWorker` — assumes public storage throughout). Documents and
 A/V both can; gating an existing item requires private storage to be
 configured first, same as a fresh upload.
+
+**Delete permanently** in the media trash (admins only) removes a gated
+item's private original along with its row (#3067), and likewise the private
+upload of a quarantined item someone moved to the trash. Until this release
+it deleted only the public key, where a gated item has nothing, and left the
+original in private storage with no row pointing at it. A public item's
+purge makes no private-storage call. If the private delete fails after the
+row is gone, the item is still reported as deleted, and the error log names
+the key: see
+[Orphaned private blobs: no sweep, by design](#orphaned-private-blobs-no-sweep-by-design).
+
+### Orphaned private blobs: no sweep, by design
+
+A private blob whose row is gone is an orphan: it is never served (private
+storage has no URL), but it takes space and holds a file someone deleted.
+Kiln deletes a private blob when the row that recorded it goes, on three
+paths, and each logs the key when that delete fails:
+
+| Log line (`:error`) | Written by |
+| --- | --- |
+| "Reaped media (id) left its private blob (key) behind: …" | the quarantine reaper (step 5 of the deferred strip) |
+| "Purged media (id) left its private blob (key) behind: …" | the strip's refusal (step 4), **Delete permanently** in the media trash, and a strip that withdrew its copy (step 5) |
+
+A quarantined item that is moved to the trash is hidden from both the strip
+job and the reaper, which read only rows outside the trash. **Delete
+permanently** is then the only thing that removes its private upload, so
+empty the media trash of such items rather than leaving them there.
+
+Nothing goes back later for an orphan that slipped through. That is a
+decision, not a missing feature; a periodic sweep that lists the private
+bucket and deletes every key no row names was considered and refused:
+
+- **Kiln deletes only keys it recorded, and never lists storage.** That is
+  what makes a bucket safe to share: the demo reset follows the same rule,
+  and the direct-upload cleanup refuses any key outside its staging prefix
+  for the same reason. Storage keys are bare `UUID.ext` names at the root
+  of the bucket, with no Kiln or tenant prefix, so a listing can't tell
+  Kiln's objects, or one site's, from anyone else's.
+- **A shared bucket turns a sweep into data loss.** A staging clone started
+  with production's `S3_*` (which the staging docs forbid, but which the
+  scrub does not prevent: it removes only each site's own credentials) would
+  compare the clone's database with production's bucket and delete every
+  gated document uploaded to production after the clone was taken. Private
+  buckets are usually unversioned, so that cannot be undone.
+- **The set of keys that are in use is wide and keeps growing.** A sweep
+  would have to know every one, across every site and including trashed
+  rows: each item's `storage_key`, private transform derivatives, the
+  `direct-uploads/` prefix, and uploads written before their row exists (a
+  quarantined upload, a gating copy) behind an age grace. Every future
+  private writer would have to join that list or have its files deleted.
+- **Site buckets belong to site admins** ([Per-site buckets](#per-site-buckets-1559)),
+  under their own credentials, including old buckets still holding older
+  items. Listing and deleting there is outside what Kiln is trusted to do.
+- **A sweep is only as right as the database it reads.** Run against a
+  lagging replica, or after a point-in-time restore, it would delete blobs
+  that rows about to reappear still need.
+
+The leak this accepts is small and is not an exposure: the remaining causes
+are a delete that fails right after a purge (logged, as above), blobs left by
+releases before these paths deleted them, and the copy a gating change
+leaves when its transaction rolls back. Nothing logs the last two.
+
+**To remove an orphan**, search the error log for the two lines above, take
+the key, and delete it from that item's private store: `priv/private_uploads`
+on the Local adapter, the `S3_PRIVATE_BUCKET` bucket, or, for an item kept in
+a site's bucket, that site's private bucket. The line names the key but not
+the store, so on a deployment with per-site buckets check each in turn. The
+key is a fresh UUID and its row is gone, so nothing else uses it.
+
+If a need is ever measured, the safer design is record-based: when a delete
+fails, record the key in a table, and let a job retry it after checking that
+no row in any site names the key. It deletes only what Kiln wrote down, but
+it needs a migration and a new cross-site read, which this leak does not
+justify today.
 
 ### Public media URLs are capability URLs
 
@@ -955,6 +1095,23 @@ differs from it on three points:
   otherwise be a one-header way to ask for a 500 MB allocation.
 * **No download counter** — one scrub is dozens of ranged requests;
   `download_count` stays a download-only measure.
+
+**An empty file** has no satisfiable range: a ranged request answers `416`
+with `Content-Range: bytes */0`, and an unranged one `200` with an empty
+body. On S3 a range starting at 0 is refused only for an empty object, but
+Kiln does not take the refusal on trust: it asks for the object's size with
+one `HEAD`, and only a size of 0 counts as empty (#3069). Any other answer
+stays an error, because an empty copy of a file that has bytes would be
+stored over the original by the A/V strip. A provider that ignores `Range`
+and answers `200` with an empty body is read as empty too. Before this, an
+empty S3 object answered a ranged request at 0 with a `416` that had no
+`Content-Range`, and `Storage.copy_to_file/3` failed on it.
+
+A storage adapter of your own answers `fetch_range/3` for an empty blob with
+`{:error, {:range_not_satisfiable, 0}}`, and only once it knows the blob is
+empty (see `c:KilnCMS.Storage.fetch_range/3`). A bare
+`{:error, :range_not_satisfiable}` is an error at every offset: the copy
+fails rather than produce an empty file.
 
 ### Gating A/V
 

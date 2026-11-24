@@ -151,6 +151,20 @@ else.
 - **Section layouts left without a field are deleted after boot, a layout can't be created as its section empties, and a field delete refused by its section's layout now says so instead of a generic error (#3060, #3061, #3062).**
   ([long form](docs/changelog/unreleased.md#section-layouts-swept))
 
+- **Image variant and A/V probe jobs retry a failed read of the original (3 attempts, about a minute) and complete only when the store says it is gone; a variant job reads nothing for a gated item ([#3066](https://github.com/The-Verscienta/kiln_cms/issues/3066)).**
+  Each failed attempt now reaches error tracking; before, a failed read from the operator's or a site's store completed the job, leaving no dimensions, variants, duration or poster.
+  ([long form](docs/changelog/unreleased.md#media-job-read-retry))
+
+- **Delete permanently in the media trash also removes a gated or quarantined item's private original, which stayed in private storage with no row ([#3067](https://github.com/The-Verscienta/kiln_cms/issues/3067)).**
+  Orphans left by a failed delete are not swept, by design; the long form says why and how to remove one.
+  ([long form](docs/changelog/unreleased.md#media-purge-private-original))
+
+- **A quarantined upload purged while its metadata strip runs no longer leaves its public copy behind: the strip withdraws it, and the reaper skips an item whose strip is executing ([#3068](https://github.com/The-Verscienta/kiln_cms/issues/3068)).**
+  ([long form](docs/changelog/unreleased.md#av-strip-purge-withdraw))
+
+- **An empty file on S3 copies as an empty file, and a ranged request at 0 gets `416` with `Content-Range: bytes */0`; Kiln confirms the object is empty with one `HEAD` first ([#3069](https://github.com/The-Verscienta/kiln_cms/issues/3069)).**
+  ([long form](docs/changelog/unreleased.md#s3-empty-object-range))
+
 - **Content stuck in a release that already went live can join another release again: a boot job cancels items left `pending` on published, rolled-back or archived releases ([#3072](https://github.com/The-Verscienta/kiln_cms/issues/3072)).**
   ([long form](docs/changelog/unreleased.md#stranded-release-items-freed))
 
