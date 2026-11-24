@@ -7,9 +7,18 @@
 #   ./scripts/staging.sh scrub   # (re)run only the scrub against STAGING_DATABASE_URL
 #   ./scripts/staging.sh down    # DROP the staging database
 #
+# `up` and `down` create and drop the database STAGING_DATABASE_URL names, on
+# the server it names (not libpq's default one), and refuse first unless that
+# name contains staging, preview, ephemeral, tmp or scratch (any case; the
+# same list as KilnCMS.Staging). createdb and dropdb connect through the URL's
+# own server with dbname=postgres, then template1 if that fails.
+#
 # Environment:
 #   PROD_DATABASE_URL       source to pg_dump (read-only; required for `up`)
-#   STAGING_DATABASE_URL    throwaway target (required; name must look ephemeral)
+#   STAGING_DATABASE_URL    throwaway target (required). For `up` and `down` a
+#                           postgres://, postgresql:// or ecto:// URL whose
+#                           path names the database (no `dbname` in its query);
+#                           a key=value string or a bare name is refused.
 #                           Both: postgres://, postgresql:// or ecto://; each
 #                           password reaches pg_dump/psql through PGPASSWORD
 #                           only, never their argv (see pg_conn_split). A
@@ -17,6 +26,10 @@
 #                           `sslmode=require` (or verify-full) in a URL to
 #                           require TLS for pg_dump/psql: DATABASE_SSL does
 #                           not reach them
+#   KILN_STAGING_FORCE      true/1/yes/on: `up` and `down` accept a database
+#                           whose name has none of the markers above (the
+#                           scrub reads it too). For a deliberately named clone
+#                           only
 #   DATABASE_SSL            reaches migrate and scrub, which boot the prod
 #                           config: it uses TLS unless DATABASE_SSL=false. Set
 #                           that for a local Postgres without TLS
@@ -46,13 +59,6 @@ die() {
 
 require() {
   [ -n "${!1:-}" ] || die "$1 is required"
-}
-
-# Extract the database name from a postgres:// URL (strip path + query).
-db_name() {
-  local path="${1#*://}"
-  path="${path#*/}"
-  echo "${path%%\?*}"
 }
 
 # Keep the database password out of pg_dump/pg_restore/psql's argv (#2726) and
@@ -272,6 +278,142 @@ pg_conn_split() {
 
 KILN_BIN="${KILN_BIN:-mix}"
 
+# A throwaway database's name contains one of these (any case), so `down`
+# cannot drop, and `up` cannot overwrite, a production database by accident.
+# Keep it the same as KilnCMS.Staging's @ephemeral_markers (a test compares
+# them): the scrub refuses the same names.
+STAGING_EPHEMERAL_MARKERS="staging preview ephemeral tmp scratch"
+
+# $1 = a URL as pg_conn_split leaves it. Sets PG_URI_PATH (the database part,
+# still percent-encoded; empty without one), PG_URI_HAS_QUERY and
+# PG_URI_QUERY, splitting where libpq does (fe-connect.c): the userinfo ends
+# at the first `@` before the first `/`, the hosts at the first `/` or `?`
+# after it, and the path at the first `?`.
+pg_uri_parts() {
+  local rest="${1#*://}" userinfo hosts after
+  userinfo="${rest%%[@/]*}"
+  if [ "${rest:${#userinfo}:1}" = "@" ]; then
+    rest="${rest:$((${#userinfo} + 1))}"
+  fi
+  hosts="${rest%%[/?]*}"
+  after="${rest:${#hosts}}"
+  PG_URI_PATH=""
+  PG_URI_HAS_QUERY=0
+  PG_URI_QUERY=""
+  case "$after" in
+    /*)
+      after="${after:1}"
+      PG_URI_PATH="${after%%\?*}"
+      after="${after:${#PG_URI_PATH}}"
+      ;;
+  esac
+  case "$after" in
+    \?*)
+      PG_URI_HAS_QUERY=1
+      PG_URI_QUERY="${after:1}"
+      ;;
+  esac
+}
+
+# $1 = a URL as pg_conn_split leaves it, $2 = a database. Prints the URL with
+# `dbname=$2` appended to its query: libpq takes the last dbname it is given,
+# so createdb and dropdb connect to $2 on the URL's server, as its user, with
+# its TLS settings.
+maintenance_url() {
+  pg_uri_parts "$1"
+  if [ "$PG_URI_HAS_QUERY" = 0 ]; then
+    printf '%s' "$1?dbname=$2"
+  elif [ -z "$PG_URI_QUERY" ]; then
+    printf '%s' "$1dbname=$2"
+  else
+    printf '%s' "$1&dbname=$2"
+  fi
+}
+
+# Whether KILN_STAGING_FORCE is on, read as KilnCMS.Config.Env reads a flag:
+# true, 1, yes or on, in any case, around whitespace.
+staging_forced() {
+  local v
+  v="$(printf '%s' "${KILN_STAGING_FORCE:-}" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+  v="${v#"${v%%[![:space:]]*}"}"
+  v="${v%"${v##*[![:space:]]}"}"
+  case "$v" in
+    true | 1 | yes | on) return 0 ;;
+  esac
+  return 1
+}
+
+# $1 = STAGING_DATABASE_URL as pg_conn_split leaves it, $2 = what is refused
+# ("dropped", "created or copied"). Sets STAGING_NAME to the database libpq
+# connects to, percent-decoded, or dies: on a string that is not a URL (its
+# database could not be checked), a URL with no database in its path or with
+# a `dbname` in its query (which overrides the path), and a name with none of
+# STAGING_EPHEMERAL_MARKERS unless KILN_STAGING_FORCE is on.
+require_ephemeral_name() {
+  local url="$1" nothing="$2" q seg lower marker
+  case "$url" in
+    postgres://* | postgresql://*) ;;
+    *)
+      die "STAGING_DATABASE_URL must be a postgres://, postgresql:// or ecto:// URL whose path names the database (postgres://user@host/kiln_staging): up and down check the name of the database they act on, and that of a key=value string or a bare name cannot be checked. Nothing was ${nothing}"
+      ;;
+  esac
+  pg_uri_parts "$url"
+  if [ "$PG_URI_HAS_QUERY" = 1 ]; then
+    q="$PG_URI_QUERY"
+    while :; do
+      seg="${q%%&*}"
+      pg_conn_decode "${seg%%=*}"
+      case "$PG_CONN_DECODED" in
+        [Dd][Bb][Nn][Aa][Mm][Ee])
+          die "STAGING_DATABASE_URL sets dbname in its query, which overrides the database in its path: name the database in the path only (postgres://user@host/kiln_staging). Nothing was ${nothing}"
+          ;;
+      esac
+      [ "$seg" = "$q" ] && break
+      q="${q#*&}"
+    done
+  fi
+  pg_conn_decode "$PG_URI_PATH"
+  STAGING_NAME="$PG_CONN_DECODED"
+  [ -n "$STAGING_NAME" ] ||
+    die "STAGING_DATABASE_URL names no database: put it in the path (postgres://user@host/kiln_staging). Nothing was ${nothing}"
+
+  lower="$(printf '%s' "$STAGING_NAME" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+  for marker in $STAGING_EPHEMERAL_MARKERS; do
+    case "$lower" in
+      *"$marker"*) return 0 ;;
+    esac
+  done
+  if staging_forced; then
+    echo "==> KILN_STAGING_FORCE is on: accepting ${STAGING_NAME}, whose name does not look like a throwaway clone"
+    return 0
+  fi
+  die "STAGING_DATABASE_URL names ${STAGING_NAME}, which does not look like a throwaway clone: a staging database's name contains one of: ${STAGING_EPHEMERAL_MARKERS// /, }. If ${STAGING_NAME} really is one, re-run with KILN_STAGING_FORCE=true. Nothing was ${nothing}"
+}
+
+# $1 = createdb or dropdb, $2 = the URL as pg_conn_split leaves it, $3 = 1
+# when $4 is its password, $5 = the database, then the tool's options.
+# Runs the tool against the URL's server through its postgres database, then
+# template1 if that fails (dropdb's own fallback, which an explicit
+# --maintenance-db turns off). The password reaches it through PGPASSWORD
+# only. Fails with the errors of both attempts in PG_ADMIN_ERROR.
+pg_admin() {
+  local tool="$1" url="$2" has_pw="$3" pw="$4" name="$5" db err=""
+  shift 5
+  PG_ADMIN_ERROR=""
+  for db in postgres template1; do
+    # shellcheck disable=SC2030,SC2031 # PGPASSWORD is meant for this subshell only
+    if err="$(
+      if [ "$has_pw" = 1 ]; then export PGPASSWORD="$pw"; fi
+      "$tool" ${1+"$@"} --maintenance-db="$(maintenance_url "$url" "$db")" -- "$name" 2>&1 >/dev/null
+    )"; then
+      return 0
+    fi
+    PG_ADMIN_ERROR+="${PG_ADMIN_ERROR:+
+}    through ${db}: ${err:-${tool} failed}"
+  done
+  return 1
+}
+
 # Only config/runtime/prod reads DATABASE_URL (#2977). Under MIX_ENV=dev, Mix
 # migrates and scrubs the database config/dev.exs names (kiln_cms_dev), not
 # the clone: migrate changes the developer's database, and the scrub then
@@ -313,7 +455,8 @@ preflight_mix() {
 
 # `up` copied production into the clone and could not finish: what is there is
 # production's personal data and secrets, unscrubbed. Dropped, so nobody
-# serves or shares it by mistake. $1 = database name, $2 = the step.
+# serves or shares it by mistake. $1 = database name, $2 = the step, $3 = the
+# staging URL as pg_conn_split leaves it, $4 = 1 when $5 is its password.
 unscrubbed_clone() {
   cat >&2 <<EOF
 
@@ -321,10 +464,13 @@ unscrubbed_clone() {
 !!! ${1} holds UNSCRUBBED production data (accounts, personal data, secrets).
 !!! Dropping it now. Do not serve or share it.
 EOF
-  if dropdb --if-exists "$1"; then
+  if pg_admin dropdb "$3" "$4" "$5" "$1" --if-exists; then
     echo "!!! Dropped ${1}. Fix the error above and run \`up\` again." >&2
   else
-    echo "!!! Could not drop ${1}: drop it yourself NOW (STAGING_DATABASE_URL=… ./scripts/staging.sh down, or dropdb ${1})." >&2
+    echo "!!! Could not drop ${1}:" >&2
+    echo "$PG_ADMIN_ERROR" >&2
+    # $3 never holds the password: pg_conn_split moved it out.
+    echo "!!! Drop it yourself NOW (STAGING_DATABASE_URL=… ./scripts/staging.sh down, or dropdb --if-exists --maintenance-db='$(maintenance_url "$3" postgres)' -- '${1}'$([ "$4" = 1 ] && printf ' with its password in PGPASSWORD'))." >&2
   fi
   exit 1
 }
@@ -370,15 +516,20 @@ cmd_up() {
   staging_url="$PG_CONN_URL" staging_pw="$PG_CONN_PASSWORD" staging_has="$PG_CONN_HAS_PASSWORD"
   staging_shown="$PG_CONN_DISPLAY_URL"
 
+  local name
+  require_ephemeral_name "$staging_url" "created or copied"
+  name="$STAGING_NAME"
+
   preflight_mix
 
-  local name
-  name="$(db_name "$STAGING_DATABASE_URL")"
   echo "==> Cloning production into throwaway database: ${name}"
 
   # createdb is best-effort: the target may already exist, or the URL user may
   # lack CREATEDB (then the operator pre-creates it). Restore still validates.
-  createdb "$name" 2>/dev/null || echo "    (createdb skipped — assuming ${name} exists)"
+  if ! pg_admin createdb "$staging_url" "$staging_has" "$staging_pw" "$name"; then
+    echo "    (createdb skipped — assuming ${name} exists)"
+    echo "$PG_ADMIN_ERROR"
+  fi
 
   echo "==> pg_dump PROD → psql STAGING"
   # Checked explicitly: bash 3.2 (Linux builds) does not apply `set -e` to a
@@ -401,10 +552,10 @@ cmd_up() {
   fi
 
   echo "==> Migrating staging to the current schema"
-  run_migrate || unscrubbed_clone "$name" "migrate"
+  run_migrate || unscrubbed_clone "$name" "migrate" "$staging_url" "$staging_has" "$staging_pw"
 
   echo "==> Scrubbing staging (PII + outbound secrets)"
-  run_scrub || unscrubbed_clone "$name" "the scrub"
+  run_scrub || unscrubbed_clone "$name" "the scrub" "$staging_url" "$staging_has" "$staging_pw"
 
   cat <<EOF
 
@@ -443,10 +594,15 @@ EOF
 
 cmd_down() {
   require STAGING_DATABASE_URL
-  local name
-  name="$(db_name "$STAGING_DATABASE_URL")"
+  pg_conn_split "$STAGING_DATABASE_URL"
+  [ -z "$PG_CONN_ERROR" ] || die "STAGING_DATABASE_URL $PG_CONN_ERROR"
+  local url="$PG_CONN_URL" pw="$PG_CONN_PASSWORD" has="$PG_CONN_HAS_PASSWORD" name
+  require_ephemeral_name "$url" "dropped"
+  name="$STAGING_NAME"
   echo "==> Dropping throwaway database: ${name}"
-  dropdb --if-exists "$name"
+  pg_admin dropdb "$url" "$has" "$pw" "$name" --if-exists ||
+    die "could not drop ${name} on the server in STAGING_DATABASE_URL:
+${PG_ADMIN_ERROR}"
   echo "    done."
 }
 

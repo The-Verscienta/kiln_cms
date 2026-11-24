@@ -7,9 +7,13 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
   URL's password as `PGPASSWORD`. The two may differ, and neither may reach the
   other process.
 
-  `createdb`, `pg_dump`, `psql` and `KILN_BIN` are stubs on `PATH` that log
-  their argv and whether `PGPASSWORD` reached them. Skipped where bash is
-  missing.
+  `up` and `down` create and drop only a database whose name looks like a
+  throwaway clone, and do it on the server `STAGING_DATABASE_URL` names, not
+  libpq's default one (#2722).
+
+  `createdb`, `dropdb`, `pg_dump`, `psql` and `KILN_BIN` are stubs on `PATH`
+  that log their argv and whether `PGPASSWORD` reached them. Skipped where
+  bash is missing.
 
   `async: false`: it spawns processes and rewrites `PATH` for the child only,
   but shares the tmp namespace with the other script tests.
@@ -291,7 +295,16 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
       assert out =~ "migrate failed after production was copied into kiln_staging"
       assert out =~ "kiln_staging holds UNSCRUBBED production data"
       assert out =~ "Dropped kiln_staging"
-      assert ["dropdb", _pw, "--if-exists", "kiln_staging"] = List.last(calls(ctx))
+
+      assert [
+               "dropdb",
+               "-",
+               "--if-exists",
+               "--maintenance-db=postgres://stage@stage-db/kiln_staging?dbname=postgres",
+               "--",
+               "kiln_staging"
+             ] = List.last(calls(ctx))
+
       refute Enum.any?(mix_calls(ctx), &("kiln.staging.scrub" in &1))
     end
 
@@ -304,8 +317,27 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
 
       assert status != 0
       assert out =~ "the scrub failed after production was copied into kiln_staging"
-      assert out =~ "Could not drop kiln_staging: drop it yourself NOW"
+      assert out =~ "Could not drop kiln_staging"
+      assert out =~ "Drop it yourself NOW"
+
+      # The hint names the clone's own server, as dropdb reads it.
+      assert out =~
+               "dropdb --if-exists --maintenance-db='postgres://stage@stage-db/kiln_staging?dbname=postgres' -- 'kiln_staging'"
+
       refute out =~ "Staging is ready"
+    end
+
+    test "a non-ephemeral staging name is refused before the prod config is checked", ctx do
+      urls = Keyword.put(@urls, :staging, "postgres://stage@stage-db/kiln_prod")
+
+      assert {out, status} = up(ctx, urls ++ [env: [{"MIX_ENV", nil} | @prod_boot]])
+
+      assert status != 0
+
+      assert out =~
+               "STAGING_DATABASE_URL names kiln_prod, which does not look like a throwaway clone"
+
+      refute File.exists?(ctx.log), "a tool ran"
     end
 
     test "a failed re-scrub says the clone may hold unscrubbed data, and keeps it", ctx do
@@ -327,6 +359,195 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
     end
   end
 
+  # #2722: the database `up` and `down` act on is the one libpq reads from the
+  # URL, on the URL's server, and its name must look like a throwaway clone.
+  describe "the staging database name and server" do
+    @maint "--maintenance-db=postgres://stage@stage-db:6432/kiln_staging?sslmode=require&dbname="
+
+    test "the script's markers are KilnCMS.Staging's" do
+      [_, markers] =
+        Regex.run(~r/^STAGING_EPHEMERAL_MARKERS="([^"]*)"$/m, File.read!(@script))
+
+      assert String.split(markers) == KilnCMS.Staging.ephemeral_markers()
+    end
+
+    test "down drops the database on the URL's server, with the password in PGPASSWORD only",
+         ctx do
+      assert {out, 0} =
+               down(
+                 ctx,
+                 "ecto://stage:stage%40pw@stage-db:6432/kiln_staging?sslmode=require&pool_size=5"
+               )
+
+      assert out =~ "Dropping throwaway database: kiln_staging"
+
+      assert [["dropdb", "stage@pw", "--if-exists", maint, "--", "kiln_staging"]] = calls(ctx)
+      assert maint == @maint <> "postgres"
+    end
+
+    test "down retries through template1 when the postgres database fails", ctx do
+      fail_through!(ctx, "dbname=postgres")
+
+      assert {_out, 0} =
+               down(ctx, "postgres://stage:pw@stage-db:6432/kiln_staging?sslmode=require")
+
+      assert [
+               ["dropdb", "pw", "--if-exists", first, "--", "kiln_staging"],
+               ["dropdb", "pw", "--if-exists", second, "--", "kiln_staging"]
+             ] = calls(ctx)
+
+      assert first == @maint <> "postgres"
+      assert second == @maint <> "template1"
+    end
+
+    test "down fails, naming both attempts' errors, when neither works", ctx do
+      fail_through!(ctx, "dbname=")
+
+      assert {out, status} = down(ctx, "postgres://stage@stage-db/kiln_staging")
+
+      assert status != 0
+      assert out =~ "could not drop kiln_staging on the server in STAGING_DATABASE_URL"
+      assert out =~ "through postgres: dropdb: connection refused"
+      assert out =~ "through template1: dropdb: connection refused"
+      refute out =~ "done."
+    end
+
+    test "down refuses a production-looking name, and drops nothing", ctx do
+      assert {out, status} = down(ctx, "postgres://prod@prod-db/kiln_prod")
+
+      assert status != 0
+
+      assert out =~
+               "STAGING_DATABASE_URL names kiln_prod, which does not look like a throwaway clone"
+
+      assert out =~ "staging, preview, ephemeral, tmp, scratch"
+      assert out =~ "Nothing was dropped"
+      refute File.exists?(ctx.log), "dropdb ran"
+    end
+
+    test "down refuses a URL whose database it cannot check", ctx do
+      for {url, message} <- [
+            {"postgres://stage@stage-db/kiln_staging?dbname=kiln_prod",
+             "sets dbname in its query"},
+            {"postgres://stage@stage-db/kiln_staging?sslmode=require&db%6Eame=kiln_prod",
+             "sets dbname in its query"},
+            {"postgres://stage@stage-db", "names no database"},
+            {"postgres://stage@stage-db/?sslmode=require", "names no database"},
+            {"host=stage-db dbname=kiln_staging", "must be a postgres://"},
+            {"kiln_staging", "must be a postgres://"}
+          ] do
+        assert {out, status} = down(ctx, url)
+
+        assert status != 0, url
+        assert out =~ "STAGING_DATABASE_URL #{message}", url
+        refute File.exists?(ctx.log), "dropdb ran for #{url}"
+      end
+    end
+
+    test "down refuses a key=value string with a password before anything runs", ctx do
+      assert {out, status} = down(ctx, "host=stage-db password=stage-pw dbname=kiln_staging")
+
+      assert status != 0
+      assert out =~ "STAGING_DATABASE_URL is not a postgres:// URL"
+      refute out =~ "stage-pw"
+      refute File.exists?(ctx.log)
+    end
+
+    test "KILN_STAGING_FORCE, spelled as Kiln reads a flag, lets down drop any name", ctx do
+      for value <- ["yes", "TRUE", " on ", "1"] do
+        File.rm(ctx.log)
+
+        assert {out, 0} =
+                 down(ctx, "postgres://stage@stage-db/kiln_prod",
+                   env: [{"KILN_STAGING_FORCE", value}]
+                 )
+
+        assert out =~ "KILN_STAGING_FORCE is on: accepting kiln_prod"
+        assert [["dropdb", _, "--if-exists", _, "--", "kiln_prod"]] = calls(ctx)
+      end
+
+      for value <- ["", "no", "false", "please"] do
+        assert {_out, status} =
+                 down(ctx, "postgres://stage@stage-db/kiln_prod2",
+                   env: [{"KILN_STAGING_FORCE", value}]
+                 )
+
+        assert status != 0, "KILN_STAGING_FORCE=#{inspect(value)} forced the drop"
+        refute Enum.any?(calls(ctx), &("kiln_prod2" in &1))
+      end
+    end
+
+    test "a marker matches in any case, and the name is percent-decoded as libpq reads it",
+         ctx do
+      assert {_out, 0} = down(ctx, "postgres://stage@stage-db/KILN_STAGING")
+      assert {_out, 0} = down(ctx, "postgres://stage@stage-db/kiln%5Fpreview")
+
+      assert [
+               ["dropdb", _, _, _, "--", "KILN_STAGING"],
+               ["dropdb", _, _, _, "--", "kiln_preview"]
+             ] = calls(ctx)
+    end
+
+    test "up refuses a production-looking name before anything is created or copied", ctx do
+      assert {out, status} =
+               up(ctx,
+                 prod: "postgres://prod@prod-db/kiln_prod",
+                 staging: "postgres://stage@stage-db/kiln_prod"
+               )
+
+      assert status != 0
+
+      assert out =~
+               "STAGING_DATABASE_URL names kiln_prod, which does not look like a throwaway clone"
+
+      assert out =~ "Nothing was created or copied"
+      refute out =~ "Cloning production"
+      refute File.exists?(ctx.log), "a tool ran"
+    end
+
+    test "up creates the database on the URL's server, with the password in PGPASSWORD only",
+         ctx do
+      assert {_out, 0} =
+               up(ctx,
+                 prod: "postgres://prod@prod-db/kiln_prod",
+                 staging: "postgres://stage:stage-pw@stage-db:6432/kiln_staging?sslmode=require"
+               )
+
+      assert [["createdb", "stage-pw", maint, "--", "kiln_staging"] | _] = calls(ctx)
+      assert maint == @maint <> "postgres"
+    end
+
+    test "up goes on when createdb fails both ways, and says why", ctx do
+      fail_through!(ctx, "dbname=", "createdb")
+
+      assert {out, 0} =
+               up(ctx,
+                 prod: "postgres://prod@prod-db/kiln_prod",
+                 staging: "postgres://stage@stage-db/kiln_staging"
+               )
+
+      assert out =~ "createdb skipped — assuming kiln_staging exists"
+      assert out =~ "through template1: createdb: connection refused"
+      assert Enum.any?(calls(ctx), &(hd(&1) == "psql"))
+    end
+  end
+
+  # Replaces the `tool` stub with one that logs its call, then fails (saying
+  # so on stderr) when any argument contains `match`.
+  defp fail_through!(ctx, match, tool \\ "dropdb") do
+    stub!(ctx.bin, tool, """
+    #!/bin/sh
+    line="$(printf '%s|%s' "#{tool}" "${PGPASSWORD--}"; printf '|%s' "$@")"
+    printf '%s\\n' "$line" >> "#{ctx.log}"
+    case "$*" in
+      *#{match}*) echo "#{tool}: connection refused" >&2; exit 1 ;;
+    esac
+    """)
+  end
+
+  defp down(ctx, staging, opts \\ []),
+    do: run(ctx, "down", Keyword.merge(opts, staging: staging))
+
   defp calls(ctx) do
     ctx.log
     |> File.read!()
@@ -343,6 +564,7 @@ defmodule KilnCMS.Scripts.StagingScriptTest do
         {"STAGING_DATABASE_URL", opts[:staging]},
         {"KILN_BIN", Path.join(ctx.bin, "kiln")},
         {"PGPASSWORD", nil},
+        {"KILN_STAGING_FORCE", nil},
         {"PATH", ctx.bin <> ":" <> System.get_env("PATH")}
       ]
 

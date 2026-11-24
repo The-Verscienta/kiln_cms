@@ -27,6 +27,11 @@ defmodule KilnCMS.Staging do
   # deliberately-named clone with `force?: true`.
   @ephemeral_markers ~w(staging preview ephemeral tmp scratch)
 
+  @doc false
+  # scripts/staging.sh carries a copy of the list; its test compares them.
+  @spec ephemeral_markers() :: [String.t()]
+  def ephemeral_markers, do: @ephemeral_markers
+
   @doc """
   Scrub the currently-connected database into a safe staging environment.
 
