@@ -180,8 +180,10 @@ tidied exactly as the field's own save would, so a list of colors stores
 `#FFF` as `#ffffff`, repeats drop out except in a number list (or a plugin
 type's list that keeps them), and
 `min_items` / `max_items` apply. An item that does not fit makes the record
-invalid, and the report names it by its position from 1: `item 2 must be a
-date (YYYY-MM-DD)`.
+invalid, and the report names it by its position counted as the list is
+stored: from 1, one item per line, with blank items and dropped repeats left
+out, so `["2026-03-01","2026-03-01","soon"]` reports `item 2 must be a date
+(YYYY-MM-DD)`.
 
 There is no vocabulary to check, so the report lists no terms, and `--map`
 does not apply: items have no keys. The target must already be a list: a

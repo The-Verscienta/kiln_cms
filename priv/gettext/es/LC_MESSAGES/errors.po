@@ -38,6 +38,11 @@ msgstr "%{field} está siendo modificado por otro guardado al mismo tiempo. Int�
 
 #: lib/kiln_cms/cms/field_constraints.ex
 #, elixir-autogen, elixir-format
+msgid "%{field} item %{position}"
+msgstr "%{field} elemento %{position}"
+
+#: lib/kiln_cms/cms/field_constraints.ex
+#, elixir-autogen, elixir-format
 msgid "%{field} must be at least %{count} character long"
 msgid_plural "%{field} must be at least %{count} characters long"
 msgstr[0] "%{field} debe tener al menos %{count} carácter"
