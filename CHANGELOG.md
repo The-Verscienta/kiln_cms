@@ -66,6 +66,9 @@ else.
   ([long form](docs/changelog/unreleased.md#section-layout-sweep-upgrade))
 - **About 10 minutes after boot, a job cancels release items left `pending` on published, rolled-back or archived releases (#3072), logging each at info. Upgrading from 1.10.x or earlier with a rolling deploy longer than that: run `KilnCMS.Release.cancel_stranded_release_items()` over `rpc` once it finishes. Rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#stranded-release-item-sweep-upgrade))
+- **Run `mix ash.migrate`: two additive migrations on `billing_webhook_events` (two nullable columns, then a partial index built `CONCURRENTLY`), and the webhook sweeper's new Oban queue, `billing_sweeper`; a hand-built `queues:` must add `billing_sweeper: 1`. Rolling back is safe ([#3159](https://github.com/The-Verscienta/kiln_cms/issues/3159)).**
+  Unsettled events recorded before the upgrade, and any older than 3 days, are given up on and logged at error, not replayed.
+  ([long form](docs/changelog/unreleased.md#billing-webhook-sweeper-upgrade))
 
 ### Known issues
 
@@ -170,6 +173,10 @@ else.
 
 - **A release's item cap is exact: two adds at once at one below the cap no longer leave it one over. Adds to one release now take turns ([#3073](https://github.com/The-Verscienta/kiln_cms/issues/3073)).**
   ([long form](docs/changelog/unreleased.md#release-cap-exact))
+
+- **Billing webhook events acknowledged but never processed (no job, failed after 8 attempts, stuck `processing`) are re-enqueued every 10 minutes, up to 3 times within 3 days, then given up on with an error log and `[:kiln_cms, :billing, :webhook_event, :gave_up]` ([#3159](https://github.com/The-Verscienta/kiln_cms/issues/3159)).**
+  A replayed checkout no longer moves a membership's ordering stamp back.
+  ([long form](docs/changelog/unreleased.md#billing-webhook-sweeper))
 
 ## [1.12.0] - 2026-11-21
 
