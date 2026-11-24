@@ -283,8 +283,13 @@ defmodule KilnCMS.Security.Posture.Checks.CoreSecurityNoticesTest do
       stub()
 
       run()
+      # The request itself, then the cache, then the warmer gone (#2918,
+      # #3000): `wait_for_warmers/0` alone passes at once if the warmer has
+      # not registered yet, and under a loaded suite it sometimes hasn't.
+      assert_receive {:request, "kilncms.dev", _path}, 2000
+      eventually(fn -> SecurityNotices.cached() != nil end)
       wait_for_warmers()
-      assert notice_requests() == 1
+      assert notice_requests() == 0
       assert %{status: :pass} = run()
     end
 
