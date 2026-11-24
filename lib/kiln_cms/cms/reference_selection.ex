@@ -8,6 +8,7 @@ defmodule KilnCMS.CMS.ReferenceSelection do
         "states" => ["published"],
         "owner" => "self",
         "sort" => "title",
+        "filters" => ["category", "tag"],
         "by_type" => %{
           "ingredient" => %{
             "tags_any" => ["<tag id>"],
@@ -47,6 +48,11 @@ defmodule KilnCMS.CMS.ReferenceSelection do
     * `fields` go through the `custom_filter` read argument, whose grammar and
       privacy rules are `KilnCMS.CMS.Preparations.CustomFieldQuery`'s.
 
+  `sort` and `filters` are picker settings, not conditions: `filters` names
+  the narrowing selects the picker shows the editor (#3224), and `narrow/2`
+  turns the editor's choice into terms AND-ed onto the plan, so an editor
+  filter can only narrow further.
+
   ## Drift is inert, never an error
 
   A condition that names something that no longer exists is **dropped**, not
@@ -73,7 +79,7 @@ defmodule KilnCMS.CMS.ReferenceSelection do
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.FieldDefinition
 
-  @top_keys ~w(states owner sort by_type create add_new)
+  @top_keys ~w(states owner sort filters by_type create add_new)
   @type_keys ~w(tags_any category fields)
   @states ~w(draft in_review published archived)
   @state_atoms %{
@@ -83,6 +89,11 @@ defmodule KilnCMS.CMS.ReferenceSelection do
     "archived" => :archived
   }
   @sorts ~w(recent title)
+  @filters ~w(category tag)
+
+  # The most categories or tags the picker lists in a filter select (#3224);
+  # past it the select is not shown, and the fields admin warns.
+  @filter_option_cap 500
 
   # The custom field types a `fields` condition may name: the scalars whose
   # `custom_filter` equality means what an admin expects. Not media, reference,
@@ -103,6 +114,14 @@ defmodule KilnCMS.CMS.ReferenceSelection do
   @doc "The sort orders `sort` may name."
   @spec sorts() :: [String.t()]
   def sorts, do: @sorts
+
+  @doc "The editor filters `filters` may name, in the order they are stored and shown."
+  @spec filter_names() :: [String.t()]
+  def filter_names, do: @filters
+
+  @doc "The most options a category or tag filter select lists (#3224)."
+  @spec filter_option_cap() :: pos_integer()
+  def filter_option_cap, do: @filter_option_cap
 
   @doc "The condition keys a `by_type` entry may carry."
   @spec type_keys() :: [String.t()]
@@ -161,6 +180,7 @@ defmodule KilnCMS.CMS.ReferenceSelection do
          :ok <- states_shape(Map.get(map, "states")),
          :ok <- owner_shape(Map.get(map, "owner")),
          :ok <- sort_shape(Map.get(map, "sort")),
+         :ok <- filters_shape(Map.get(map, "filters")),
          :ok <- create_shape(Map.get(map, "create")),
          :ok <- add_new_shape(Map.get(map, "add_new"), Map.get(map, "create")) do
       by_type_shape(Map.get(map, "by_type"))
@@ -210,6 +230,21 @@ defmodule KilnCMS.CMS.ReferenceSelection do
   defp sort_shape(nil), do: :ok
   defp sort_shape(sort) when sort in @sorts, do: :ok
   defp sort_shape(_other), do: {:error, "sort must be one of #{Enum.join(@sorts, ", ")}"}
+
+  defp filters_shape(nil), do: :ok
+  defp filters_shape([]), do: {:error, "filters is empty"}
+
+  defp filters_shape(filters) when is_list(filters) do
+    cond do
+      not Enum.all?(filters, &(&1 in @filters)) -> bad_filters()
+      filters != Enum.uniq(filters) -> {:error, "lists a filter twice"}
+      true -> :ok
+    end
+  end
+
+  defp filters_shape(_other), do: bad_filters()
+
+  defp bad_filters, do: {:error, "filters must be a list among #{Enum.join(@filters, ", ")}"}
 
   defp by_type_shape(nil), do: :ok
 
@@ -437,6 +472,65 @@ defmodule KilnCMS.CMS.ReferenceSelection do
     end
   end
 
+  @doc """
+  The filters the picker shows the editor for this field (#3224), among
+  `filter_names/0` and in that order; `[]` when none. A name outside the
+  vocabulary is ignored.
+  """
+  @spec filters(term()) :: [String.t()]
+  def filters(selection) do
+    case normalize(selection) do
+      %{"filters" => filters} when is_list(filters) -> Enum.filter(@filters, &(&1 in filters))
+      _other -> []
+    end
+  end
+
+  @doc """
+  The editor's filter choice (#3224), `%{category: id | nil, tag: id | nil}`,
+  AND-ed onto `plan` — what `query_for/5` returned for one target type. Pure:
+  it reads nothing, so the caller checks the ids against the options it
+  offered first.
+
+    * `category` adds `category_id == id`, `tag` adds "has the tag `id`";
+    * `:unfiltered` with a choice becomes `[filter: terms, arguments: %{}]`;
+      with no choice, `plan` comes back unchanged;
+    * the terms are appended, never replacing one of `plan`'s, so the result
+      never offers more than `plan` did;
+    * a chosen id is never dropped: one that does not exist matches nothing,
+      and one that is not a uuid becomes a term that is always false.
+
+  Merge the result into read options with `read_opts/2`.
+  """
+  @spec narrow(:unfiltered | plan(), %{optional(:category) => term(), optional(:tag) => term()}) ::
+          :unfiltered | plan()
+  def narrow(plan, editor) do
+    terms =
+      editor_term(:category, Map.get(editor, :category)) ++
+        editor_term(:tag, Map.get(editor, :tag))
+
+    case {plan, terms} do
+      {plan, []} ->
+        plan
+
+      {:unfiltered, terms} ->
+        [filter: terms, arguments: %{}]
+
+      {[filter: filters, arguments: arguments], terms} ->
+        [filter: filters ++ terms, arguments: arguments]
+    end
+  end
+
+  defp editor_term(_kind, nil), do: []
+  defp editor_term(_kind, ""), do: []
+
+  defp editor_term(kind, id) do
+    cond do
+      not uuid?(id) -> [expr(false)]
+      kind == :category -> [[category_id: id]]
+      kind == :tag -> [expr(exists(tags, id == ^id))]
+    end
+  end
+
   @doc "The picker's order for a blank search: `recent` (default) or `title`."
   @spec sort(term()) :: String.t()
   def sort(selection) do
@@ -659,7 +753,7 @@ defmodule KilnCMS.CMS.ReferenceSelection do
     case normalize(selection) do
       %{} = map ->
         map
-        |> Map.take(~w(states owner sort by_type create add_new))
+        |> Map.take(@top_keys)
         |> live_add_new()
         |> live_create(targets)
         |> live_by_type(targets, org_id)

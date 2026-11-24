@@ -30,11 +30,12 @@ defmodule KilnCMSWeb.SiteController do
   stock defaults (`KilnCMS.Branding.fetch_for_org/1`): a CDN would otherwise
   show a branded site's previews under Kiln's name for a minute.
 
-  Only a branding save purges. A change that alters the answer without one —
-  the operator's `SITE_NAME` or `:branding` config on a deploy, or a site's
-  domain or slug (which moves an absolutized `social_image_url`) — shows once
-  the cached copy expires: at most `max-age` plus `stale-while-revalidate`,
-  about two minutes.
+  A branding save purges, and so does a change to a site's domain or slug,
+  which moves an absolutized `social_image_url`
+  (`KilnCMS.Accounts.Changes.BustSiteUrls`, #3194). A change that alters the
+  answer without either — the operator's `SITE_NAME` or `:branding` config on
+  a deploy — shows once the cached copy expires: at most `max-age` plus
+  `stale-while-revalidate`, about two minutes.
   """
   use KilnCMSWeb, :controller
 

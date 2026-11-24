@@ -1065,6 +1065,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
       may_write_fields?(record, socket.assigns.actor, socket.assigns.current_org, ["blocks"])
     )
     |> assign(:form, build_form(view, socket.assigns.actor))
+    # A form built fresh from the record holds no unsaved settings, so the
+    # flag goes with the form it described. A caller that must not lose them
+    # either refuses first (`settle_before_workflow/1`, `publish_changes/2`)
+    # or puts them back on the new form (`keep_settings_edits/3`).
+    |> assign(:settings_dirty?, false)
     |> refresh_featured_media()
     |> refresh_tag_index()
     |> seed_block_children(view)
@@ -3085,24 +3090,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # the body, where it would be handed to the action. `KilnCMSWeb.MalformedEvent`
   # makes the unmatched event a no-op. `""` is a binary and means "make it a
   # root", so the guard admits it.
+  #
+  # Settled first, as Mark reviewed is (#2777): the move rebuilds the form.
   def handle_event("move_parent", %{"parent_id" => parent_id}, socket)
       when is_binary(parent_id) do
-    record = socket.assigns.record
-
-    attrs = %{parent_id: if(parent_id == "", do: nil, else: parent_id)}
-
-    case ContentTypes.move(socket.assigns.kind, record, attrs,
-           actor: socket.assigns.actor,
-           tenant: socket.assigns.current_org
-         ) do
-      {:ok, moved} ->
-        {:noreply,
-         socket
-         |> assign_record(moved)
-         |> put_flash(:info, gettext("Moved."))}
-
-      {:error, error} ->
-        {:noreply, put_flash(socket, :error, move_error(error))}
+    case settle_before_edit(socket) do
+      {:ok, socket} -> {:noreply, move_parent(socket, parent_id)}
+      {:error, socket} -> {:noreply, socket}
     end
   end
 
@@ -3987,29 +3981,17 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Its own event rather than a `workflow` action, because it is not one: `state`
   # does not move, and `run_workflow`'s flash ("Updated to published") would be
   # a lie about what just happened.
+  #
+  # The form is rebuilt from the record afterwards, so it settles first, the
+  # way a transition does (#2777): pending text is saved, and unsaved
+  # Settings stop it rather than vanishing.
   def handle_event("mark_reviewed", _params, socket) do
-    %{kind: kind, record: record, actor: actor} = socket.assigns
-
-    if socket.assigns.may_write? do
-      case ContentTypes.transition(kind, "mark_reviewed", record,
-             actor: actor,
-             tenant: record.org_id
-           ) do
-        {:ok, _updated} ->
-          # Re-fetched rather than assigning the action's own result: `health`
-          # and `due_at` are calculations, so the returned record carries them
-          # as `%Ash.NotLoaded{}` — which is truthy, so the pill would render
-          # from a value that is not there.
-          {:noreply,
-           socket
-           |> assign_record(fetch!(kind, record.id, actor, record.org_id))
-           |> put_flash(:info, gettext("Marked reviewed — the freshness clock is reset."))}
-
-        {:error, error} ->
-          {:noreply, mark_reviewed_refused(socket, error)}
-      end
+    with true <- socket.assigns.may_write?,
+         {:ok, socket} <- settle_before_edit(socket) do
+      {:noreply, mark_reviewed(socket)}
     else
-      {:noreply, socket}
+      false -> {:noreply, socket}
+      {:error, socket} -> {:noreply, socket}
     end
   end
 
@@ -5067,6 +5049,28 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
+  # A write that rebuilt the form from the record (`assign_record/2`) while a
+  # live document's Settings edits were still unsaved (#2776): the edits go
+  # back onto the new form and the flag stays set, so they stay on screen and
+  # the next Save posts them. `title` and `blocks` are left out — they are the
+  # text side (`dirty_scope/1`), the rebuilt form already holds them as saved,
+  # and `Form.params/1` does not carry the rich-text bodies, so re-sending
+  # `blocks` would blank them. The params were normalized by the `validate`
+  # that put them on the old form, so they go straight back in.
+  defp keep_settings_edits(socket, _previous_form, false), do: socket
+
+  defp keep_settings_edits(socket, previous_form, true) do
+    params = previous_form |> AshPhoenix.Form.params() |> Map.drop(["title", "blocks"])
+
+    socket
+    |> assign(:form, AshPhoenix.Form.validate(socket.assigns.form, params))
+    |> assign(:settings_dirty?, true)
+    # The picked featured image's row is resolved from the form's value, which
+    # the rebuild had reset to the record's.
+    |> refresh_featured_media()
+    |> refresh_preview()
+  end
+
   defp put_custom_field_param(socket, name, value) do
     params = AshPhoenix.Form.params(socket.assigns.form)
 
@@ -5149,6 +5153,24 @@ defmodule KilnCMSWeb.ContentEditorLive do
     %{id: item.id, url: item.url, alt: item.alt, caption: item.caption, filename: item.filename}
   end
 
+  defp move_parent(socket, parent_id) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+    attrs = %{parent_id: if(parent_id == "", do: nil, else: parent_id)}
+
+    case ContentTypes.move(kind, record, attrs, actor: actor, tenant: socket.assigns.current_org) do
+      # Re-fetched, as Mark reviewed is: the action's result has no `health`
+      # or `due_at`, and on a live document with a working copy it carries
+      # the row's tags and related content rather than the held ones.
+      {:ok, moved} ->
+        socket
+        |> assign_record(fetch!(kind, moved.id, actor, record.org_id))
+        |> put_flash(:info, gettext("Moved."))
+
+      {:error, error} ->
+        put_flash(socket, :error, move_error(error))
+    end
+  end
+
   # A refused move is worth its reason: "would nest deeper than 5 levels" and
   # "can't be one of this document's own children" are both things the editor
   # can act on, and both mean the tree moved under them since the options were
@@ -5185,9 +5207,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Bump the editor generation (remounts rich-text hooks) and drop everything
   # derived from the content the author is walking away from.
   #
-  # AI suggestions must go with it: both callers — a conflict reload and a
-  # version restore — replace the form wholesale, and `reload_conflict` also
-  # clears `:conflict`, which is what `accept_suggestion/2` guards on. Left in
+  # AI suggestions must go with it: every caller — a conflict reload, a
+  # version restore, a publish or discard of the working copy, a peer's save
+  # adopted by an idle session — replaces the form wholesale, and
+  # `reload_conflict` also clears `:conflict`, which is what
+  # `accept_suggestion/2` guards on. Left in
   # place, a proposal generated from the *discarded* content stays clickable
   # and would overwrite the record that was just reloaded.
   defp reset_editors(socket) do
@@ -5591,8 +5615,8 @@ defmodule KilnCMSWeb.ContentEditorLive do
   end
 
   # "Discard the changes": the published text is back, and every rich-text
-  # block remounts onto it — `reset_editors/1`, as a version restore does,
-  # since TipTap keeps whatever it was showing across a form replacement.
+  # block remounts onto it (`live_transition/3`). Unsaved Settings go with the
+  # rest: discarding is deliberate, and the rebuilt form clears the flag.
   defp run_workflow(socket, "discard_changes") do
     socket
     |> cancel_autosave_timer()
@@ -5600,7 +5624,6 @@ defmodule KilnCMSWeb.ContentEditorLive do
       "discard_changes",
       gettext("Discarded the changes — the published text is back.")
     )
-    |> reset_editors()
   end
 
   defp run_workflow(socket, _action), do: socket
@@ -5623,6 +5646,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # "Publish changes" with the lost-update guard's decisions (#1815). Through
   # a form on the row, the way Save writes, because the decisions are an
   # argument the shared `transition/4` dispatch does not carry.
+  #
+  # The unsaved-Settings refusal is repeated here, not only at the button
+  # (`run_workflow/2`): the lost-update panel's Publish (`conflict_publish`)
+  # and the severity question's answer (`publish_asked/2`) reach this too, and
+  # the publish rebuilds the form, so the edits would go without a word.
+  defp publish_changes(%{assigns: %{settings_dirty?: true}} = socket, _resolve),
+    do: put_flash(socket, :error, gettext("Save draft first, then publish your changes."))
+
   defp publish_changes(socket, resolve) do
     %{kind: kind, record: record, actor: actor} = socket.assigns
 
@@ -5859,6 +5890,27 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # moved to the trash or purged by someone else since this session loaded it.
   defp gone_after_stale?(socket, error), do: stale_conflict?(error) and gone?(socket)
 
+  defp mark_reviewed(socket) do
+    %{kind: kind, record: record, actor: actor} = socket.assigns
+
+    case ContentTypes.transition(kind, "mark_reviewed", record,
+           actor: actor,
+           tenant: record.org_id
+         ) do
+      {:ok, _updated} ->
+        # Re-fetched rather than assigning the action's own result: `health`
+        # and `due_at` are calculations, so the returned record carries them
+        # as `%Ash.NotLoaded{}` — which is truthy, so the pill would render
+        # from a value that is not there.
+        socket
+        |> assign_record(fetch!(kind, record.id, actor, record.org_id))
+        |> put_flash(:info, gettext("Marked reviewed — the freshness clock is reset."))
+
+      {:error, error} ->
+        mark_reviewed_refused(socket, error)
+    end
+  end
+
   defp mark_reviewed_refused(socket, error) do
     if gone_after_stale?(socket, error),
       do: flag_gone(socket),
@@ -5972,7 +6024,23 @@ defmodule KilnCMSWeb.ContentEditorLive do
     )
   end
 
-  defp settle_before_workflow(%{assigns: %{save_state: state}} = socket)
+  # Before a write that rebuilds the form from the record: text still waiting
+  # for the debounce is saved first, and anything the person has to save by
+  # hand stops the write instead of being thrown away with the old form — an
+  # unsaved edit on content that cannot autosave, or a live document's
+  # unsaved Settings (#2777). Those are refused BEFORE any autosave, so a
+  # refusal changes nothing. `settle_before_edit/1` is the same rule for a
+  # write that leaves the state alone (Mark reviewed, Parent), whose refusal
+  # must not talk about changing it.
+  defp settle_before_workflow(socket),
+    do: settle(socket, gettext("Save your changes before changing this content's state."))
+
+  defp settle_before_edit(socket), do: settle(socket, gettext("Save your changes first."))
+
+  defp settle(%{assigns: %{settings_dirty?: true}} = socket, refusal),
+    do: {:error, put_flash(socket, :error, refusal)}
+
+  defp settle(%{assigns: %{save_state: state}} = socket, _refusal)
        when state in [:pending, :error] do
     socket = socket |> cancel_autosave_timer() |> do_autosave()
 
@@ -5990,12 +6058,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  defp settle_before_workflow(%{assigns: %{save_state: :unsaved}} = socket) do
-    {:error,
-     put_flash(socket, :error, gettext("Save your changes before changing this content's state."))}
-  end
+  defp settle(%{assigns: %{save_state: :unsaved}} = socket, refusal),
+    do: {:error, put_flash(socket, :error, refusal)}
 
-  defp settle_before_workflow(socket), do: {:ok, socket}
+  defp settle(socket, _refusal), do: {:ok, socket}
 
   defp transition(socket, action) do
     # `publish` gets its own event; the rest share `:workflow` (tagged by action)
@@ -6065,9 +6131,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
       end)
 
     case result do
+      # `reset_editors/1` — as a version restore does, since TipTap keeps
+      # whatever it was showing across a form replacement — only once the
+      # write landed: a refused one leaves the editor as it was.
       {:ok, updated} ->
         socket
         |> assign_record(fetch!(kind, updated.id, actor, record.org_id))
+        |> reset_editors()
         |> broadcast_saved()
         |> mark_saved()
         |> put_flash(:info, flash)
@@ -6279,7 +6349,13 @@ defmodule KilnCMSWeb.ContentEditorLive do
         reloaded =
           fetch!(socket.assigns.kind, saved.id, socket.assigns.actor, socket.assigns.current_org)
 
-        socket |> assign_record(reloaded) |> broadcast_saved() |> assign(:save_state, :saved)
+        # Only the text was written; Settings edits still waiting for Save
+        # survive the rebuild (#2776).
+        socket
+        |> assign_record(reloaded)
+        |> keep_settings_edits(socket.assigns.form, socket.assigns.settings_dirty?)
+        |> broadcast_saved()
+        |> assign(:save_state, :saved)
 
       {:error, form} ->
         handle_autosave_error(socket, form)
@@ -6413,24 +6489,50 @@ defmodule KilnCMSWeb.ContentEditorLive do
     end
   end
 
-  # Re-read the persisted record and everything derived from it. See the
-  # `{:record_saved, _}` handler for what is deliberately left alone.
+  # Another session persisted a write to this record (`Session`'s
+  # `{:record_saved, _}`, #694). What this session does with it depends on
+  # what it holds of its own (#2775), checked in this order:
   #
-  # ## `@record` is the optimistic lock's basis, so it only moves when it is free
+  # | This session | `@record` and the form | How it learns of the save |
+  # |---|---|---|
+  # | `:synced` (the persister saves its text) or already in conflict | kept | as before |
+  # | Unsaved text: `:pending`, `:error` or `:unsaved` | kept | the conflict banner, now |
+  # | Busy: a view or question computed against the record is open | kept | its next write meets the lock |
+  # | Unsaved Settings, and the peer changed a setting | kept | the conflict banner, now |
+  # | Idle, or unsaved Settings over a peer's text | rebuilt from the save | it sees the save in place |
   #
-  # `:autosave` carries `change optimistic_lock(:lock_version)`, and
-  # `do_autosave/1` builds its changeset from `socket.assigns.record`. Advancing
-  # that assign while `@form` still holds this session's older data hands the
-  # lock a version it will accept and then writes the stale form over the peer's
-  # save — silently, with no conflict flash. That is worse than the staleness
-  # this function exists to fix, and it bites hardest with the collaboration
-  # prototype OFF (the default), where two editors really are two independent
-  # writers.
+  # The version list refreshes in every row: it is read-only, and it drags an
+  # open comparison along with it.
   #
-  # So the version list — which is read-only, and drags an open comparison with
-  # it — refreshes unconditionally, and `@record` moves only for a session that
-  # has nothing of its own in flight. A session that does keeps its old record,
-  # so its next save still hits `StaleRecord` and still surfaces the conflict.
+  # ## `@record` is the optimistic lock's basis, so it only moves with the form
+  #
+  # Every write builds its changeset from `socket.assigns.record` and carries
+  # `optimistic_lock(:lock_version)`. Advancing that assign while the form
+  # still holds this session's older data hands the lock a version it accepts,
+  # and the stale form — the browser posts every input on each change — then
+  # writes straight over the peer's save, with no conflict shown. That bites
+  # hardest with the collaboration prototype OFF (the default), where two
+  # editors really are two independent writers.
+  #
+  # So `@record` moves only together with everything built from it
+  # (`assign_record/2`), and only for a session that has nothing of its own
+  # the rebuild would throw away — except unsaved Settings over a peer's
+  # text, which are put back on the rebuilt form exactly as after this
+  # session's own text autosave (`keep_settings_edits/3`). Over a peer's
+  # settings they would revert those at the next Save, so that session holds
+  # and is told, as unsaved text is (`settings_moved?/2`). A session holding unsaved text keeps
+  # its old record, so its next save fails the lock; the banner is raised at
+  # once instead of at that save, unless the write did not take the lock (a
+  # transition, a move, Mark reviewed) or another editor persists this
+  # session's text through the shared document (`Session.collab_active?/1`).
+  # A busy session is left alone without a banner: tearing down an open
+  # Markdown view or question over someone else's save would be hostile, and
+  # its next write meets the lock all the same.
+  #
+  # Known gaps: LiveView never overwrites the input that has focus, so a
+  # field the caret sits in keeps its old value on screen; and a rich-text
+  # push still in the hook's debounce lands after the remount, onto the
+  # rebuilt body.
   @doc false
   def refresh_saved_record(socket) do
     reloaded =
@@ -6441,18 +6543,19 @@ defmodule KilnCMSWeb.ContentEditorLive do
         socket.assigns.current_org
       )
 
-    # `@record` first, `load_versions/1` second — the latter recomputes an open
-    # comparison, and the "Current draft" side of that comparison is built from
-    # `@record`. Reversed, the modal recomputes against the record it is about to
-    # replace and goes on reporting the state it just stopped holding.
-    socket
-    |> adopt_saved(reloaded)
-    |> load_versions()
+    adopt_saved(socket, reloaded)
   rescue
     # The record went away, or this session may no longer read it. Keeping the
     # last known state is the same thing every other read failure here does, and
-    # far better than crashing an editor over someone else's save.
-    _error -> socket
+    # far better than crashing an editor over someone else's save. Logged, so a
+    # failing rebuild is not silent.
+    error ->
+      Logger.warning(
+        "Editor could not take in a peer's save of #{socket.assigns.kind} " <>
+          "#{socket.assigns.record.id}: #{Exception.message(error)}"
+      )
+
+      socket
   catch
     # A pool or GenServer timeout inside Ash arrives as an exit, which `rescue`
     # does not catch — and a bystander's editor must not die because of the
@@ -6460,39 +6563,116 @@ defmodule KilnCMSWeb.ContentEditorLive do
     :exit, _reason -> socket
   end
 
-  # Adopt the persisted record, unless this session has something of its own that
-  # adopting it would put at risk: a pending autosave (`:saving`), an edit that
-  # failed validation (`:error`), an un-persisted change (`:unsaved`), or edits
-  # suppressed because another editor is the elected persister (`:synced`).
-  #
-  # A session holding any of those keeps its old record deliberately, so its next
-  # save still fails the optimistic lock and still surfaces the conflict. Its
-  # version panel refreshes either way — that is read-only and cannot lose
-  # anything.
-  defp adopt_saved(%{assigns: %{save_state: :saved}} = socket, record) do
-    socket
-    |> assign(:record, record)
-    |> assign(:saved_at, record.updated_at)
-    |> assign(:page_title, record.title)
-    |> assign(:may_write?, may_write?(record, socket.assigns.actor, socket.assigns.current_org))
-    |> assign_restore_refusal()
-    |> assign(
-      :may_suggest_seo?,
-      may_write_fields?(
-        record,
-        socket.assigns.actor,
-        socket.assigns.current_org,
-        seo_suggestion_fields()
-      )
-    )
-    |> assign(
-      :may_assist_blocks?,
-      may_write_fields?(record, socket.assigns.actor, socket.assigns.current_org, ["blocks"])
-    )
-    |> assign(:slug_customized?, slug_customized?(socket))
+  # The decision table above `refresh_saved_record/1`. Holding keeps `@record`
+  # and only reloads the version list — read-only, so it cannot lose anything.
+  defp adopt_saved(socket, record) do
+    cond do
+      socket.assigns.save_state == :synced or socket.assigns.conflict ->
+        load_versions(socket)
+
+      unsaved_text?(socket) ->
+        socket |> load_versions() |> conflict_if_locked_out(record)
+
+      busy?(socket) ->
+        load_versions(socket)
+
+      socket.assigns.settings_dirty? and settings_moved?(socket.assigns.record, record) ->
+        socket |> load_versions() |> conflict_if_locked_out(record)
+
+      true ->
+        rebuild_from_saved(socket, record)
+    end
   end
 
-  defp adopt_saved(socket, _record), do: socket
+  # Whether a peer's write changed anything on the Settings side — every field
+  # the editor's `:update` form takes besides `title` and `blocks`, read off
+  # the working view (so a held setting counts), plus the held tags and
+  # related content. Unsaved Settings can be put back over a peer's TEXT, but
+  # put back over the peer's settings they would revert them at the next Save
+  # without a word (the browser posts every input, not only the changed ones),
+  # so that case is a conflict instead.
+  defp settings_moved?(before, after_save),
+    do: settings_side(before) != settings_side(after_save)
+
+  defp settings_side(record) do
+    resource = record.__struct__
+    view = WorkingCopy.view(record)
+    fields = Ash.Resource.Info.action(resource, :update).accept -- [:title, :blocks]
+
+    links =
+      Map.new(WorkingCopy.held_relationships(resource), fn {_argument, relationship} ->
+        {relationship, linked_ids(Map.get(record, relationship))}
+      end)
+
+    {Map.take(view, fields), links}
+  end
+
+  defp linked_ids(loaded) when is_list(loaded),
+    do: loaded |> Enum.map(&to_string(&1.id)) |> Enum.sort()
+
+  defp linked_ids(_not_loaded), do: :not_loaded
+
+  # Text this session has not persisted: waiting for the debounce, refused by
+  # validation, or on content that does not autosave.
+  defp unsaved_text?(socket), do: socket.assigns.save_state in [:pending, :error, :unsaved]
+
+  @busy_while_open [
+    :markdown_mode,
+    :publish_conflicts,
+    :severity_ask,
+    :cascade,
+    :seo_drafts,
+    :assist_block,
+    :restore_preview,
+    :seo_links,
+    :intel_tags,
+    :intel_duplicates
+  ]
+  @busy_while_running [:seo_drafting?, :seo_links_loading?, :intel_loading?]
+
+  # Something open on screen that was computed against the record and that a
+  # rebuild would close or invalidate: the Markdown view, the Publish-changes
+  # or severity question, a Save cascade, the inline record cards, an AI
+  # proposal (asked for or on screen), a version-restore preview, the
+  # internal-link or content-intelligence panel (loading or open).
+  defp busy?(%{assigns: assigns}) do
+    assigns.inline_dirty != %{} or
+      Enum.any?(@busy_while_open, &(Map.fetch!(assigns, &1) != nil)) or
+      Enum.any?(@busy_while_running, &Map.fetch!(assigns, &1))
+  end
+
+  # The peer's write took the lock this session's next save would need, so say
+  # so now. Not under active collaboration, where the persister writes this
+  # session's text for it and a banner would stop a session that loses
+  # nothing; and not for a write that leaves `lock_version` alone, which this
+  # session's next save does not conflict with.
+  defp conflict_if_locked_out(socket, record) do
+    if not collab_active?(socket) and record.lock_version != socket.assigns.record.lock_version,
+      do: flag_conflict(socket),
+      else: socket
+  end
+
+  # The idle row: everything is rebuilt from the save, as a conflict reload
+  # does (`reload_latest/1`), and the save line takes the record's stamp.
+  defp rebuild_from_saved(socket, record) do
+    previous = socket.assigns
+
+    socket
+    |> assign_record(record)
+    |> assign(:saved_at, record.updated_at)
+    |> carry_rich_text(previous)
+    |> keep_settings_edits(previous.form, previous.settings_dirty?)
+  end
+
+  # Without a collaboration room, TipTap shows what it was mounted with
+  # (`phx-update="ignore"`), so it remounts onto the rebuilt form
+  # (`reset_editors/1`). With one, every tab's TipTap is bound to the shared
+  # document, which a record write does not change: a remount would only cost
+  # the caret and a channel rejoin. The bodies are the record's either way —
+  # an idle session's own equal what it last saved, and keeping them instead
+  # could undo a peer's Discard or version restore.
+  defp carry_rich_text(socket, %{collab_token: nil}), do: reset_editors(socket)
+  defp carry_rich_text(socket, _previous), do: socket
 
   # Rewrite the picker's ticks into the merge verbs (#638).
   #

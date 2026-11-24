@@ -343,6 +343,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             )
           )
 
+        {:error, error} ->
+          put_flash(socket, :error, delete_failed_message(error))
+
         _ ->
           put_flash(socket, :error, gettext("Couldn't delete that field."))
       end
@@ -793,12 +796,31 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       |> AshPhoenix.Form.raw_errors(for_path: :all)
       |> Map.values()
       |> List.flatten()
-      |> Enum.any?(&match?(%SectionLayoutNotKept{}, &1))
+      |> layout_not_kept?()
 
     if not_kept?,
       do: put_flash(socket, :error, gettext("Couldn't save the section layout.")),
       else: socket
   end
+
+  # Whether a refused field write was refused because its section's layout
+  # could not be kept in step: a list of errors, or an Ash error of any class.
+  defp layout_not_kept?(errors) when is_list(errors),
+    do: Enum.any?(errors, &match?(%SectionLayoutNotKept{}, &1))
+
+  defp layout_not_kept?(error),
+    do: error |> Ash.Error.to_error_class() |> Map.get(:errors, []) |> layout_not_kept?()
+
+  # A field delete refused (#3062): name the section layout when that was the
+  # cause, as a save does.
+  defp delete_failed_message(error) do
+    if layout_not_kept?(error),
+      do: layout_not_removed_message(),
+      else: gettext("Couldn't delete that field.")
+  end
+
+  defp layout_not_removed_message,
+    do: gettext("Couldn't delete that field: its section's layout could not be removed with it.")
 
   defp written?(:ok), do: true
   defp written?({:ok, _}), do: true
@@ -1520,16 +1542,29 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           )
         )
 
-      {:error, _error} ->
-        # Most likely an item saved since the count: show the number again.
-        socket
-        |> assign(:delete_confirm, %{
-          id: definition.id,
-          counted: count_stored(socket.assigns, definition),
-          changed?: true
-        })
-        |> put_flash(:error, gettext("Couldn't delete that. Check the count and try again."))
+      # The section layout, not the count, refused it (#3062): say so, and
+      # close the dialog, since asking again would fail the same way. Only a
+      # flexible field has a section; an item type's delete never gets here.
+      {:error, error} ->
+        if layout_not_kept?(error) do
+          socket
+          |> assign(:delete_confirm, nil)
+          |> put_flash(:error, layout_not_removed_message())
+        else
+          ask_again(socket, definition)
+        end
     end
+  end
+
+  # Most likely an item saved since the count: show the number again.
+  defp ask_again(socket, definition) do
+    socket
+    |> assign(:delete_confirm, %{
+      id: definition.id,
+      counted: count_stored(socket.assigns, definition),
+      changed?: true
+    })
+    |> put_flash(:error, gettext("Couldn't delete that. Check the count and try again."))
   end
 
   # --- order helpers ---------------------------------------------------------
@@ -1790,11 +1825,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     {tag_ids, category_ids} = named_taxonomy(owned)
     extra = fn ids -> [actor: actor, tenant: org, query: [filter: [id: [in: ids]]]] end
 
-    tags =
-      CMS.list_tags!(opts) ++ if(tag_ids == [], do: [], else: CMS.list_tags!(extra.(tag_ids)))
+    first_tags = CMS.list_tags!(opts)
+    first_categories = CMS.list_categories!(opts)
+
+    tags = first_tags ++ if(tag_ids == [], do: [], else: CMS.list_tags!(extra.(tag_ids)))
 
     categories =
-      CMS.list_categories!(opts) ++
+      first_categories ++
         if(category_ids == [], do: [], else: CMS.list_categories!(extra.(category_ids)))
 
     assign(socket, :selection_catalog, %{
@@ -1802,8 +1839,25 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       categories: categories |> Enum.uniq_by(& &1.id) |> Enum.map(&{&1.id, &1.name}),
       types: Map.new(types),
       fields: fields,
-      limit: @selection_limit
+      limit: @selection_limit,
+      too_many: %{
+        "category" => more_than_cap?(first_categories, &CMS.list_categories!/1, actor, org),
+        "tag" => more_than_cap?(first_tags, &CMS.list_tags!/1, actor, org)
+      }
     })
+  end
+
+  # Whether the site has more tags (or categories) than the picker's filter
+  # select lists (#3224). Only a full first page can be past the cap, so a
+  # small site pays no extra read.
+  defp more_than_cap?(first_page, _list, _actor, _org)
+       when length(first_page) < @selection_limit,
+       do: false
+
+  defp more_than_cap?(_first_page, list, actor, org) do
+    cap = KilnCMS.CMS.ReferenceSelection.filter_option_cap()
+
+    length(list.(actor: actor, tenant: org, query: [select: [:id], limit: cap + 1])) > cap
   end
 
   # Where a field of an unknown type (#2605) sits: its type, or for a link

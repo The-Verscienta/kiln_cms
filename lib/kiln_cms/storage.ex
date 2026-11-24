@@ -102,6 +102,13 @@ defmodule KilnCMS.Storage do
   end and the adapter knows the total, `{:error, :range_not_satisfiable}` when
   it doesn't — a 416 has to state the resource's real length, and only the
   adapter can supply it.
+
+  An empty blob has no satisfiable range at all, and its total is known: an
+  adapter must answer `{:error, {:range_not_satisfiable, 0}}` for it, and
+  only once it knows the blob is empty (#3069). `copy_to_file/3` copies that
+  as an empty file and treats a bare `:range_not_satisfiable` as an error at
+  any offset: taken on trust, a spurious 416 would make an empty copy of a
+  blob that has bytes, and the A/V strip would store it over the upload.
   """
   @callback fetch_range(
               key :: String.t(),
@@ -407,6 +414,27 @@ defmodule KilnCMS.Storage do
         &S3.fetch_private_range(key, first, last, &1),
         &private_unsupported/1
       )
+
+  @doc """
+  Whether a read's `{:error, reason}` means the blob is definitely not there,
+  as opposed to a read that merely failed and may succeed on a retry.
+
+  True for the adapters' "missing" shapes: the Local adapter's `:enoent`, an
+  S3 `404`, and the `:not_found` an image backend or plugin store answers.
+  Everything else is `false`: a timeout, a `5xx`, `{:site_storage, _}`,
+  `{:image_backend, _}`, `:invalid_key`, `:private_storage_not_configured`.
+
+  Two near misses, both accepted. S3 answers `403`, not `404`, for a missing
+  key when the credentials lack `s3:ListBucket`; that is `false`, the safe
+  direction for a caller that retries. And `File.open/2` on a temp file
+  answers `:enoent` when the temp directory itself is gone, which reads as a
+  missing blob; a host whose temp directory vanished has bigger problems.
+  """
+  @spec not_found?(term()) :: boolean()
+  def not_found?(:enoent), do: true
+  def not_found?(:not_found), do: true
+  def not_found?({:http_error, 404, _response}), do: true
+  def not_found?(_reason), do: false
 
   # Resolve `at` once, then run the operator's, the site's or the backend's half.
   defp run(at, operator, site, backend) do

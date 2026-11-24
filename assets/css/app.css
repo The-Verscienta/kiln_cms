@@ -1614,6 +1614,24 @@
   font-weight: 600;
   margin-top: 1.5rem;
 }
+/* A heading block renders at its own level (#2769), so the deeper ones need
+   a rank of their own too. */
+.kiln-block h4 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin-top: 1.25rem;
+}
+.kiln-block h5 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-top: 1.25rem;
+}
+.kiln-block h6 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin-top: 1.25rem;
+}
 .kiln-block ul {
   list-style: disc;
   padding-left: 1.5rem;
@@ -1784,6 +1802,54 @@ pre.highlight .gs {
   border: none;
   border-top: 1px solid var(--color-base-300);
   margin: 1.5rem 0;
+}
+
+/* Self-hosted video and audio, and file downloads (#481, #494, #2767). The
+   markup is the blocks' own `:web` render, the same HTML the fired artifact
+   carries, so these rules style both. Native controls: no script. */
+.kiln-video,
+.kiln-audio {
+  margin: 0;
+}
+.kiln-video video,
+.kiln-audio audio {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  width: 100%;
+}
+.kiln-video video {
+  background: var(--color-base-200);
+  border-radius: 0.3rem;
+}
+.kiln-video-title,
+.kiln-audio-title {
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+.kiln-video figcaption,
+.kiln-audio figcaption {
+  color: color-mix(in oklch, var(--color-base-content) 80%, transparent);
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+}
+.kiln-file {
+  align-items: baseline;
+  border: 1px solid var(--color-base-300);
+  border-radius: 0.3rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  padding: 0.75rem 1rem;
+}
+.kiln-file-size {
+  color: color-mix(in oklch, var(--color-base-content) 80%, transparent);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+.kiln-file-description {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 /* Nested-layout columns (#335). The container carries an inline `display:grid`
@@ -2059,7 +2125,7 @@ pre.highlight .gs {
 /* Headings across the shell — the chrome's own and the fired content's
    (`.kiln-block` sets size/weight per level; the preset supplies family and
    tracking, and its weight only where the block styles don't). */
-.public-shell :is(h1, h2, h3, h4) {
+.public-shell :is(h1, h2, h3, h4, h5, h6) {
   font-family: var(--public-heading-font);
   letter-spacing: var(--public-heading-tracking);
 }
@@ -2077,7 +2143,7 @@ pre.highlight .gs {
    theme. */
 
 /* Display type: condensed, uppercase, tight leading. */
-[data-public-theme="monograph"] :is(h1, h2, h3, h4) {
+[data-public-theme="monograph"] :is(h1, h2, h3, h4, h5, h6) {
   font-stretch: condensed;
   font-weight: var(--public-heading-weight);
   line-height: 0.92;
@@ -2085,7 +2151,7 @@ pre.highlight .gs {
   text-transform: uppercase;
   text-wrap: balance;
 }
-[data-public-theme="monograph"] .kiln-block h2 {
+[data-public-theme="monograph"] .kiln-block :is(h1, h2) {
   font-size: clamp(1.75rem, 3vw, 2.5rem);
 }
 [data-public-theme="monograph"] .kiln-block h3 {
@@ -2158,19 +2224,22 @@ pre.highlight .gs {
 @media (min-width: 64rem) {
   [data-public-theme="monograph"]
     .public-body
-    > .kiln-block:not(:has(> picture, > h2, > blockquote, > .kiln-gallery, > .kiln-columns)) {
+    > .kiln-block:not(
+      :has(> picture, > h1, > h2, > blockquote, > .kiln-gallery, > .kiln-columns, > .kiln-video)
+    ) {
     justify-self: end;
     width: min(100%, var(--monograph-text));
   }
 }
 
 /* A heading block opens a section: a hairline, then the heading at display
-   size. */
-[data-public-theme="monograph"] .public-body > .kiln-block:has(> h2) {
+   size. A level-1 heading block does too, so it never renders smaller than a
+   level 2 (#2769); h3 to h6 stay sub-heads in the reading column. */
+[data-public-theme="monograph"] .public-body > .kiln-block:has(> :is(h1, h2)) {
   border-top: 1px solid var(--monograph-rule);
   padding-top: 1rem;
 }
-[data-public-theme="monograph"] .public-body > .kiln-block > h2 {
+[data-public-theme="monograph"] .public-body > .kiln-block > :is(h1, h2) {
   font-size: clamp(2.25rem, 5.5vw, 4.5rem);
 }
 

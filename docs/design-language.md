@@ -436,7 +436,10 @@ The authoring app frame (`lib/kiln_cms_web/components/layouts.ex`):
   flipped by `app.js` — LiveView never patches `<html>`, so it survives every
   live navigation. Labels go visually hidden (links keep their accessible
   names) and `app.js` shows the hovered or focused item's `data-side-tip` as
-  a tooltip.
+  a tooltip. When the browser blocks storage, the rail, the section collapse
+  and the theme switch still work for the page view and simply aren't
+  remembered: the theme script guards each storage call, and `app.js` writes
+  through `safe_storage.js`, which falls back to memory (#2773).
 - **Mobile drawer** (below `lg`): the same panel, slid in over the page by a
   CSS checkbox — no JS, no socket. The hamburger is a `<label>` carrying
   `role="button"`, `aria-controls` and `aria-expanded`, and the checkbox itself

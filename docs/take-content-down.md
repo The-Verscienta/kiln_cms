@@ -20,8 +20,11 @@ it ([Trash and restore](trash.md)).
 ## Unpublish a page from its editor
 
 1. Open the page from **Content**.
-2. Save any changes you made in **Settings** first. Unpublishing does not keep
-   unsaved Settings changes.
+2. If you changed anything in **Settings** (or the category, tags or
+   featured image), click **Save draft** first. While those changes are
+   unsaved, **Unpublish** is refused with *Save your changes before changing
+   this content's state.*, the page stays live and your changes stay on
+   screen.
 3. Choose **Unpublish**. On a **Live · draft** page it is under
    **More actions**, the menu next to **Publish changes**.
 4. If other records link to the page, Kiln asks you to confirm, because

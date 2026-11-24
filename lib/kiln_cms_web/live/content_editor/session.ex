@@ -28,7 +28,8 @@ defmodule KilnCMSWeb.ContentEditor.Session do
   own in flight reloads the record so the flushed text is what it edits.
 
   The record lifecycle stays in the LiveView: actually persisting an autosave
-  and adopting a peer's save re-enter it through
+  and taking in a peer's save — a rebuild for an idle session, a hold (and a
+  conflict, for unsaved text) otherwise — re-enter it through
   `ContentEditorLive.do_autosave/1` and
   `ContentEditorLive.refresh_saved_record/1`.
 
@@ -214,14 +215,12 @@ defmodule KilnCMSWeb.ContentEditor.Session do
   # otherwise. That is exactly the wrong-document diff the compare path refuses
   # to show everywhere else.
   #
-  # Only the read-only views derived from the SAVED record are refreshed —
-  # `@record`, the title, and the version list (which drags an open comparison
-  # along with it through `refresh_compare/2`). Not the form, the block children
-  # or the rich-text bodies: those are this session's own in-flight edits, and in
-  # a collab session the text among them lives in the shared Y.Doc rather than in
-  # the record that was just written. Rebuilding the form here would throw away
-  # whatever the person was typing, which is a worse bug than the one being
-  # fixed.
+  # The version list always follows (it drags an open comparison along with it
+  # through `refresh_compare/2`). The record itself moves only together with
+  # the form built from it: an idle session is rebuilt from the save, and a
+  # session with edits of its own keeps both, so nothing it is typing is
+  # thrown away and its next save still meets the optimistic lock (#2775).
+  # The full rule is `ContentEditorLive.refresh_saved_record/1`'s.
   defp info({:record_saved, from}, socket) do
     if from == self() do
       # Our own echo; `assign_record/2` already ran. Keyed on the PID, not the
@@ -380,8 +379,11 @@ defmodule KilnCMSWeb.ContentEditor.Session do
   end
 
   # More than one editor present with the CRDT prototype on — text edits flow
-  # through the shared Y.Doc rather than each session's form.
-  defp collab_active?(socket),
+  # through the shared Y.Doc rather than each session's form. Public for
+  # `ContentEditorLive.refresh_saved_record/1`, which must not raise a conflict
+  # on a session whose text another editor persists for it.
+  @doc false
+  def collab_active?(socket),
     do: socket.assigns.collab_token != nil and length(socket.assigns.editors) > 1
 
   # The designated persisting editor: lowest user id among those present — the

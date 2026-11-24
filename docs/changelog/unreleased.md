@@ -15,6 +15,112 @@ carries the reasoning.
 
 - **Run `mix ash.migrate` for the `edit_inline` column (#2283).** The migration adds one nullable boolean, `field_definitions.edit_inline`, with no default and no backfill. Nothing in an older release reads it, so the column can stay after a rollback.
 
+<a id="section-layout-sweep-upgrade"></a>
+
+- **About 10 minutes after boot, a job deletes the section layouts no field carries, the rows 1.9.x and 1.10.x left behind (#3060). Nothing to do; rolling back is safe, and what it deleted stays deleted.**
+  A section's layout (its tab, fieldset or accordion setting, a
+  `KilnCMS.CMS.FieldSection` row) is meant to go with the section's last
+  field, and since 1.11.0 every field write deletes it. Rows an older
+  release left behind stayed, and a field later filed under the same section
+  name took the old layout on. `KilnCMS.CMS.SectionLayoutSweep` deletes them:
+  - **When.** Each boot queues it on the `default` queue, 10 minutes out,
+    deduplicated for a day. It is idempotent: a second run finds nothing.
+  - **What.** On every site, each layout whose section name no top-level
+    field of its type is filed under. A field of a type this release does not
+    register (a removed plugin's) still counts as carrying its section, and
+    the layouts of a compiled type this release does not register are left
+    alone and counted as `skipped`.
+  - **Logged.** Each deleted layout is logged at info, with its site, type,
+    name, `display` and `initially`, so you can recreate one in the fields
+    admin's **Sections of** panel. A run that deleted something logs a
+    summary line, `section layout sweep: 2 pruned, 0 skipped (unknown type), 0 failed`.
+  - **Safe against a concurrent edit.** Each layout is checked again for a
+    field, under a lock, just before it is deleted, so a field an admin files
+    under that section meanwhile keeps its layout. A layout someone else
+    deleted first is not a failure.
+  - **Failures.** A type whose fields or layouts can't be read, or one of
+    whose layouts can't be deleted, is logged at warning and counted under
+    `failed`; the sweep goes on to the next type, and the job ends in error so
+    Oban retries it, up to 3 attempts. A layout row this release cannot load
+    (one a newer release wrote, after a rollback) fails its type on every
+    run, by design: the sweep can't tell what it would delete.
+  - **By hand,** for example after restoring an older backup. On the running
+    node, list first, then delete; `org_id: "<uuid>"` limits it to one site:
+
+    ```bash
+    bin/kiln_cms rpc 'KilnCMS.Release.prune_section_layouts(dry_run: true)'
+    bin/kiln_cms rpc 'KilnCMS.Release.prune_section_layouts()'
+    ```
+
+    Each layout is printed (`Would delete "Clinical" of {:compiled, :post} in org … (display: tab, initially: auto)`),
+    then `Section layouts: 1 pruned, 0 skipped (unknown type), 0 failed`.
+    Use `rpc`, not `eval`: each delete clears the type registry and delivery
+    schema caches of the serving node, and under `eval` the call refuses.
+  - **Turn it off** with `config :kiln_cms, :section_layout_sweep_on_boot, false`.
+  - **Rolling back** is safe: the job only deletes rows nothing used. They
+    are not restored.
+  The job can be removed in the next major release, once no supported
+  upgrade starts at 1.10.x or earlier.
+  See [Remove section layouts older releases left behind](../extending-content.md#remove-section-layouts-older-releases-left-behind).
+
+<a id="stranded-release-item-sweep-upgrade"></a>
+
+- **About 10 minutes after boot, a job cancels the release items left `pending` on a published, rolled-back or archived release, and logs each one at info (#3072). Nothing to do, unless you upgrade from 1.10.x or earlier with a rolling deploy that runs longer than that: then run the sweep by hand once the deploy finishes. Rolling back is safe; what it cancelled stays cancelled.**
+  An item added to a release just as it went live could, before 1.11.0
+  (#2740), stay `pending` on the published release. It never ships, and it
+  keeps its record out of every other release. `KilnCMS.CMS.StrandedReleaseItemSweep`
+  frees those:
+  - **When.** Each boot queues it on the `default` queue, 10 minutes out,
+    deduplicated for a day. It is idempotent: a second run finds nothing.
+  - **What.** On every site, each `pending` item of a release in
+    `published`, `rolled_back` or `archived`. A `failed` release keeps its
+    items (reopening it retries them), and a release in `publishing` or
+    `rolling_back` belongs to its worker; the next run takes what it leaves.
+    The record itself is not touched.
+  - **Logged.** Each cancelled item is logged at info with its site,
+    release, the release's state, the record's type and id, and its action;
+    a run that cancelled something logs a summary,
+    `stranded release item sweep: 2 cancelled, 0 failed`. Nothing else
+    announces it: no webhook, audit entry or notification. A logged record
+    never shipped with its release; add it to a release again if it should
+    still go live.
+  - **Failures.** A release whose items can't be read, or one of whose items
+    can't be cancelled, is logged at warning and counted under `failed`; the
+    sweep goes on to the next release, and the job ends in error so Oban
+    retries it, up to 3 attempts.
+  - **A long rolling deploy from 1.10.x or earlier.** An old node still
+    serving after the new nodes' sweep ran can strand an item again, and the
+    job won't run a second time that day. Once every node is upgraded, run
+    it by hand. A deploy from 1.11.0 or later has no such window: those
+    releases already refuse an add that races a go-live.
+  - **By hand,** also after restoring a backup taken before 1.11.0. On the
+    running node, list first, then cancel; `org_id: "<uuid>"` limits it to
+    one site:
+
+    ```bash
+    bin/kiln_cms rpc 'KilnCMS.Release.cancel_stranded_release_items(dry_run: true)'
+    bin/kiln_cms rpc 'KilnCMS.Release.cancel_stranded_release_items()'
+    ```
+
+    Each item is printed (`Would cancel item … (publish page …) of published release … in org …`),
+    then `Stranded release items: would cancel 1, 0 failed`. Use `rpc`, not
+    `eval`; under `eval` the call refuses.
+  - **Turn it off** with `config :kiln_cms, :stranded_release_item_sweep_on_boot, false`.
+  - **Rolling back** is safe: `cancelled` is a status every supported
+    release knows, the one archiving already writes. Cancelled items are not
+    restored to `pending`.
+  The job can be removed in the next major release, once no supported
+  upgrade starts at 1.10.x or earlier.
+  See [Free content held by a release that already went live](../content-releases.md#free-content-held-by-a-release-that-already-went-live).
+
+## Known issues
+
+<a id="release-preview-fragments"></a>
+
+- **A release preview shows a fragment's currently published body, not the version the release will publish.**
+  Since the fix for empty fragments in previews ([public block rendering](#public-block-render)), a release preview link inlines each fragment block as its target is published now. Affects editors and reviewers using a release preview when the same release also changes or first publishes a fragment's target: the page shows the target's current body, or nothing if it isn't published yet, where the live page after go-live will show the release's version. Nothing unpublished leaks. Workaround: open the target document's own entry in the same release preview to review its new body.
+  ([#3289](https://github.com/The-Verscienta/kiln_cms/issues/3289))
+
 ## Added
 
 <a id="reference-picker-thumbnails"></a>
@@ -44,7 +150,7 @@ carries the reasoning.
   - **Someone else changed it.** If the record was changed, published, unpublished or trashed after the card read it, the save writes nothing, the chip says **Changed by someone else**, and **Reload this record** discards the card's edits and reads the record again.
   - **Keyboard.** Enter in a card input saves the card (it does not submit the parent's form); Escape closes the card.
   - **Closing and leaving.** A card with unsaved edits cannot be closed (*Save or discard the changes to this record before closing it.*). Navigating away is guarded, and the parent's Save saves the card first (see the next entry).
-  - **What the card shows.** The title is read-only for a type with a title template. A field the editor's grant does not allow is read-only, a private field their read grant hides is not shown, and a field a condition hides is not shown. If the parent field itself is read-only (a read-only grant, a held list or a localization lock), the card still opens but its inputs and Save are disabled. The record being edited never gets a card on its own field. Creating a record and opening its card on create is not part of this release.
+  - **What the card shows.** The title is read-only for a type with a title template. A field the editor's grant does not allow is read-only, a private field their read grant hides is not shown, and a field a condition hides is not shown. If the parent field itself is read-only (a read-only grant, a held list or a localization lock), the card still opens but its inputs and Save are disabled. The record being edited never gets a card on its own field.
   - See [Edit related records in place](../extending-content.md#edit-related-records-in-place) and [ADR 0081](../decisions/0081-an-inline-edited-related-record-is-saved-on-its-own-and-the-option-is-its-own-column-with-no-write-api.md).
 
 
@@ -65,6 +171,14 @@ carries the reasoning.
   - **Not a filter, not access control.** It narrows no read: the search lists what it did before. An editor who may create the type can still create the record from its own screen. The server checks it too, so a forged create event from the picker creates nothing.
   - **Outside the editor.** `GET /api/schema` reports it in `x-kiln-selection` when off; field sync carries it with the rest of `selection`. No migration.
 
+<a id="reference-picker-filters"></a>
+
+- **Editors can narrow a reference field's search by type, category or tag while picking (#3224).** A row of selects now sits above the picker's search box. **Type** (*All types*, then each linked type) shows on its own on any field that links to more than one content type. **Category** (*Any category*) and **Tag** (*Any tag*, grouped by tag group) show on a field whose admin turns them on: in the fields admin, step 6 (**Which records can be picked**) has a new **Let editors narrow the search by** with **Category** and **Tag** checkboxes, and the step's closing sentence adds *Editors can narrow the search by category and tag.* A screen reader announces a filtered count as *N results (filtered)*, and an empty list says *No matches with these filters.* with a **Clear filters** button.
+  - **A filter only narrows.** The choice is AND-ed onto the field's own selection and the search still runs as the editor, so it never offers a record the field would refuse or the editor can't read. A posted value the picker did not offer (another site's category, a type the field doesn't link to) is ignored. Changing a select does not mark the document as changed.
+  - **What is left out.** When every linked type pins a category, there is no category select; when every linked type lists tags, only those tags are offered. Past 500 categories or tags, that select is not shown (*Too many tags to list — search by title instead.*), and the fields admin warns when the box is ticked. Create-on-type is not offered while a filter is set; **Add new** is. The dropdown widget has no filters.
+  - **Stored as** `"filters": ["category", "tag"]` (either or both) in the field's `selection` (#2285). It is a picker setting like `sort`, not a condition: it never refuses a write. A bad value is refused with *filters is empty*, *lists a filter twice* or *filters must be a list among category, tag*. `GET /api/schema` reports it in `x-kiln-selection`. Field sync does not carry it, as it carries no part of `selection`. No migration.
+  - See [Narrow a reference search by type, category or tag](../extending-content.md#narrow-a-reference-search-by-type-category-or-tag).
+
 <a id="change-note"></a>
 
 - **An edit can say why, and the editor can ask (#3255).** Versions recorded what changed and who changed it; now they can record why.
@@ -72,6 +186,14 @@ carries the reasoning.
   - **Asking for one.** The Safety fields page (`/editor/safety-fields`) has an **Ask why on every change** checkbox per content type (stored as `change_note_types` on the site's editorial settings). For a listed type the editor shows **Why this change?** under the action bar; a draft's **Save** and **Publish changes** are refused until it is filled in (*Say why you made this change, then save again.*), and the note is cleared once the write lands. A published record's working-copy saves (and autosaves) take no note: the change readers see is Publish changes, which does.
   - **Only the editor asks.** The API, MCP, the reverse field, inline record cards, scheduled publishes and internal jobs are never refused for leaving a note out, the same posture change severity takes: a surface that cannot ask must not fail for it.
   - **In code.** `KilnCMS.CMS.ChangeNotes` (`required?/2`, `normalize/1`), `Changes.RecordChangeNote` (into `paper_trail_metadata`, before `RecordChangeSeverity`), and the `require_change_note` context marker for a caller that does ask.
+
+<a id="reverse-link-edit"></a>
+
+- **A connection's link fields can be edited from the reverse field (#3243).** On a record's reverse field (R4, "Recipes using this ingredient") whose reference has link fields (R3), each row the editor may change offers **Edit details**. It opens the connection's link-field inputs under the row, filled from the source's working copy, so a pending change is what the edit starts from, with **Save details** and **Cancel**. One row edits at a time.
+  - **An edit of the source.** Save is the same write as connecting or disconnecting from this side (R4b, D23): the source's own update as the editor, or a save of its working copy when it is published (the row then says *Saved to the working copy of “Source”*). Its policies, validations, history and optimistic lock apply, and a failure stays on that row.
+  - **What is written.** Only the reference's own link fields. A value left out keeps what the connection stored; an emptied input clears it. Nothing is written when nothing changed. If the source no longer connects to this record, the save is refused (*“Source” no longer connects to this record.*).
+  - **Who.** A row whose source the editor may not change shows its lock and no **Edit details**; the server checks again, so a forged event writes nothing.
+  - **In code.** `KilnCMS.CMS.ReverseFields.set_link/5` and `link_values/3`. The inputs are named under `_kiln_reverse_link`, outside the editor form's params, so typing in them never changes the record being edited. No migration.
 
 <a id="flexible-media-reference"></a>
 
@@ -145,6 +267,48 @@ carries the reasoning.
   Record: [ADR 0065](../decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md#the-typed-export-pr-5-2282);
   guides: [GraphQL: generate types and fragments](../headless-graphql-api.md#generate-types-and-fragments-for-your-site), [api.md: schema discovery](../api.md#schema-discovery-typed-clients).
 
+
+## Changed
+
+<a id="form-field-locale-reserved"></a>
+
+- **A form field can no longer be named `locale`: it is the param a submission's language is recorded from, so a visitor's answer to such a field was also recorded as the submission's language (#2716).**
+  - **What changed.** `locale` joins the honeypot's `website` as a reserved machine name, refused on every field type when a field is added, renamed or has its type changed, with *is reserved for the submission's language* on `name`. A duplicated field never takes it either (`email_2`-style naming skips reserved names).
+  - **A field that already has the name keeps working.** The form renders it, the answer is stored with the entry, and `GET /api/forms/<slug>` lists it; until the field is renamed, the answer is also recorded as the submission's `locale`, as before. Label, order, **Required** and other edits still save, but the builder shows **Reserved name** under the field on the preview and a note under **Machine name**, and its **Type** can't be changed until it is renamed. **Admins:** open each form in the builder and rename any flagged field ([Fix a field named locale](../forms.md#fix-a-field-named-locale)).
+  - **Form duplicate.** The copy of such a field is named `locale_2` (or the next free name), the copy's `[field:locale]` autoresponder tokens follow, and the message says why. The original is not changed.
+  - **Headless clients and the SDKs are unchanged.** A body `locale` still means the submission's language, so `submitForm` / `submit_form`'s `locale` option keeps working. `FormField` has no JSON:API, GraphQL or MCP write surface; only code that calls `KilnCMS.CMS.create_form_field` / `update_form_field` with that name (a seed, an overlay, Ash Admin in development) sees the new refusal.
+  - **For developers.** `KilnCMS.Forms.reserved_field_names/0` now returns `["website", "locale"]`, and the new `KilnCMS.Forms.reserved_field_reason/1` says which reason applies (`:honeypot`, `:locale` or `nil`). No migration.
+
+<a id="field-section-create-needs-a-carrier"></a>
+
+- **A section layout can only be created for a section some top-level field of its type is in (#3061).**
+  - **What changed.** `KilnCMS.CMS.FieldSection`'s `:create` (the
+    `KilnCMS.CMS.create_field_section/2` code interface) now refuses a
+    `name` no top-level field of the same content type or type definition,
+    in the same site, is filed under. A link field, a group sub-field or a
+    flexible item type's field does not count; a field of a type this
+    release does not register does. The check runs after the action's
+    policy, inside its transaction, so a caller the policy refuses still gets
+    `Ash.Error.Forbidden` and reads nothing.
+  - **Why.** A layout with no field is not harmless: the next field filed
+    under that name inherits it. Every field write already deletes the
+    layouts it leaves empty; this closes the other way in.
+  - **Who sees it.** Only code that calls `create_field_section` directly (a
+    seed, an overlay, iex, Ash Admin in development). The fields admin only
+    offers sections that fields carry, and `FieldSection` has no JSON:API,
+    GraphQL or MCP surface. Create the field first, then its section's
+    layout. The refusal is `{:error, %Ash.Error.Invalid{}}` holding an
+    `Ash.Error.Changes.InvalidAttribute` on `:name`: *is not a section any
+    top-level field of this type is in*, or *could not be checked against
+    the type's fields* when the field read failed. `:update` still accepts
+    only `display` and `initially`, so an existing row's name and type can't
+    be changed.
+  - **Field sync.** An import now writes an owner's fields before its
+    sections, so a file that adds a section's first field and its layout
+    together still imports. An entry for a section no field carries was
+    already refused at plan time.
+  No migration, no configuration.
+
 ## Fixed
 
 <a id="floor-reads-hits-chunks-exactly"></a>
@@ -154,3 +318,527 @@ carries the reasoning.
   - **The fix.** The hits are already known, so the floor now reads every embedded block and chunk of those documents by id (new `:for_documents` reads on `BlockEmbedding` and `DocumentChunkEmbedding`) and takes the nearest itself. With no ordering on the vector, the HNSW index cannot serve the read, so nothing is lost to an approximate walk. The cost is bounded by the hits being judged (at most the legs' candidate count) times their blocks and chunks.
   - **Who is affected.** Only sites that add `:keyword_any` or `:fuzzy` to `SEARCH_SEMANTIC_FLOOR_LEGS`. The default legs judge only semantic hits, which carry their distances already and never ran this lookup.
   - **Tests.** A new test, run in the `:table_lock` pass (`mix test --only table_lock`), drops the chunk table's btree indexes inside its sandbox and lowers `hnsw.max_scan_tuples`, so a nearest-first read has only the HNSW path. It fails on the old lookup and passes on the new one.
+
+<a id="theme-script-everywhere"></a>
+
+- **The light/dark theme now applies on form answers and newsletter pages, and survives blocked browser storage (#2715, #2773).**
+  - **Form and newsletter pages (#2715).** The on-site answers to a form
+    submission (the thank-you page, the 404 for an unknown or inactive form,
+    and the 422 re-render of a refused submission) and the `/newsletter`
+    sign-up answer and unsubscribe pages render the site's layout, whose
+    inline script sets the theme before first paint. Their pipeline,
+    `:public_form`, sent a static Content-Security-Policy with no nonce, so
+    the browser refused that script and these pages always rendered light,
+    whatever the visitor's system setting or chosen theme. The pipeline now
+    sends the same per-request nonce policy as the rest of the site
+    (`script-src 'self' 'nonce-…'`). A form that shows a human-verification
+    widget still widens `script-src` with the provider on the re-render, and
+    keeps the nonce. An embedded form's iframe still gets its own embed
+    policy, and `POST /api/forms/:slug` still answers JSON; only its CSP
+    header value changes. None of these pages is cached by a shared cache,
+    so a nonce is never replayed. The newsletter confirm page already ran
+    under the browser pipeline and was not affected.
+  - **Blocked storage (#2773).** With site data blocked (Chrome's
+    `localStorage` getter throws), storage turned off (Firefox's is `null`),
+    or a full store, the layout's theme script stopped part-way and LiveView
+    never started, because its constructor reads both stores: the console
+    did not load. Every storage call in the theme script is now guarded, and
+    `app.js` hands LiveView a store that falls back to memory for the page
+    view (`assets/js/safe_storage.js`). The page takes the system theme, the
+    theme switch and the sidebar and nav-section toggles work, and none of
+    those choices is remembered on the next page load.
+  No migration, no configuration.
+  ([#2715](https://github.com/The-Verscienta/kiln_cms/issues/2715), [#2773](https://github.com/The-Verscienta/kiln_cms/issues/2773))
+
+<a id="form-reorder-duplicate-all-or-nothing"></a>
+
+- **Reordering a form's fields in the builder, and duplicating a form, are now all-or-nothing: a refused write rolls everything back, and the message names the field to fix (#2717).**
+  - **Reorder.** Dragging a field wrote one position per moved field and threw the results away, so a refused write left half the new order saved, the preview showing an order that wasn't, and no message. Now every position is saved in one transaction. If one is refused, none is: the preview goes back to the saved order, and the message reads *Couldn't save the new order, so nothing was moved. Fix the field “topic” and try again: …* with the field's error.
+  - **Duplicate.** The copy and each of its fields were separate saves, so a field that failed was dropped from a copy that was kept, with its autoresponder sometimes left off. Now the copy, its fields, its renamed tokens and its autoresponder switch are one transaction: a refused field leaves no copy at all, and the message reads *Couldn't duplicate “Contact”, so nothing was created. Fix the field “topic” in this form and try again: …*.
+  - **Behavior change.** A field an older release let through with a setting Kiln now refuses (a dropdown saved with no options, say) now blocks every reorder that moves it, and refuses the whole duplicate where it used to be left out of the copy. Fix the named field in the original's builder and try again ([Reorder fields and copy a field](../forms.md#reorder-fields-and-copy-a-field), [Duplicate a form](../forms.md#duplicate-a-form)).
+  - **The copy's autoresponder.** It still follows the original's. When the original's is on but its template names a field the original no longer has, the copy is made with its autoresponder off and the message lists the unknown tokens; when the subject or body is blank, the message says to fill both in.
+  - **Clearer messages.** The Forms page's flashes no longer show a raw `%{value}` placeholder, `field message` pairs such as `autoresponder_body …`, or Splode's "Bread Crumbs" call path. The bread-crumb fix is in the console's shared error formatting (`ash_error_message/2`), so it applies wherever the console shows an Ash error. The **Duplicate** tooltip now adds *copies its settings and fields; its entries stay with the original.*
+  - **Duplicating a field in the builder** now gives the copy its own place right after its original; it used to share the original's position.
+  - **For developers.** The logic moved out of the LiveViews into `KilnCMS.Forms.Duplicate.run/2` and `KilnCMS.Forms.FieldOrder.reorder/3`, which run as the acting user (admin-only, as before) and return `{:error, {:field, name_or_field, error}}` for a refused field. `KilnCMS.CMS.Changes.BustFormCache` now busts through `KilnCMS.AfterCommit.run/1`, so a form write inside an outer transaction busts the delivery cache only once it commits. No migration.
+
+
+<a id="content-list-saved-view-matching"></a>
+
+- **A saved view that lost something it named is current only when you open it, so its message and its Rename / Delete bar no longer follow you to other lists, and the field-filter builder never drops a repeated condition (#2785, #2741).**
+  - **Saved views (#2785).** A view is re-read under today's fields, types,
+    locales and sorts. When that re-read dropped something (a field condition
+    or field sort on a field since deleted, made private or retyped, a locale
+    no longer configured, a content type that is gone, or a built-in sort or
+    consent kind no longer offered), what was left could equal another list:
+    the plain list for a view whose only condition was lost, or the list any
+    editor filtered by hand to the conditions it still had. Every load of that
+    list then showed *The view "…" named a field that no longer applies, so
+    that condition was left out.*, marked the view as current and showed its
+    Rename / Delete bar. A shared view did this for every editor on the site.
+    Such a view now links to the params it was saved with (cleaned the way a
+    saved view's params are), and is the view on screen only when the URL
+    carries exactly those; the list still applies only what exists. Opened
+    that way it is current even when a built-in view or another saved view
+    would match what is left, so its bar shows and **Save view** stays
+    hidden. The message still shows only for a lost field condition or field
+    sort. A view that lost nothing matches as before, by what it applies, and
+    a deleted category or tag is not a loss (the view keeps its id). Stored
+    views are not rewritten.
+  - **Field-filter builder (#2741).** `KilnCMS.CMS.ListFieldQuery.arguments/3`
+    put two conditions with the same field and API operator in one map key,
+    so the second silently replaced the first. The content list never sends
+    two: it keeps one condition per field and condition (adding the same
+    field and condition again replaces the earlier one, and a hand-edited
+    `cf` keeps the first), so nothing changes on screen. The builder now
+    keeps the first in the field's map and puts each later one in a
+    top-level `_and` group, so every condition it is given applies whoever
+    calls it; an exact repeat is dropped. Whether the list itself should AND
+    two values of one field and condition is an open question (#3277).
+  No migration, no configuration.
+  ([#2785](https://github.com/The-Verscienta/kiln_cms/issues/2785), [#2741](https://github.com/The-Verscienta/kiln_cms/issues/2741))
+
+
+<a id="collab-writeback-corrupt-state"></a>
+
+- **Collaborative editing: prose typed after a quick rejoin now reaches the record, and a stored room state that won't decode no longer breaks the document (#2756).**
+  - **Who is affected.** Only deployments that turned the `:collab_prototype` flag on. A production build pins it off (`config/prod.exs`), so a default install is not affected.
+  - **The write-back.** When the last editor leaves a room, or the server shuts down, the room writes its converged prose back into the draft's rich-text blocks. Whether that write was pending was decided by the same check that schedules the 15-second checkpoint to `collab_doc_states`, so a client who rejoined before the previous checkpoint had run, typed, and then left (or was still attached at a deploy) left that prose in `collab_doc_states` and never in the record's blocks. Every update now marks the write-back pending on its own. While editors are present, the elected client persister still saves as before.
+  - **A corrupt stored state.** A `collab_doc_states` row that won't decode made every attach to that document fail: the editor got `unavailable`, and the room's next checkpoint would have overwritten bytes that may hold prose no record has. Now the row is applied to a fresh document and, if that fails, renamed to `corrupt:<key>:<unix_ms>:<random>` instead of being applied or overwritten. The rename only takes the bytes that were read, and if another server has written a row under the real key in the meantime, that row is restored instead. Otherwise the room starts empty, the record's blocks are untouched, and the first editor to join seeds the room from the record.
+  - **For operators.** Each quarantine is logged at error: `Collab doc state for <key> is corrupt and was not restored (<n> bytes: <reason>). The bytes were moved to corrupt:…`. When another server got there first, a warning says so. Quarantined rows stay for 30 days from the quarantine and are then removed by the existing prune. To list them: `SELECT doc_key, octet_length(state), updated_at FROM collab_doc_states WHERE doc_key LIKE 'corrupt:%'` (see [the collaborative editing spike](../collaborative-editing-spike.md), finding 7).
+  No migration, no configuration. Rolling back is safe: an older release never reads the `corrupt:` rows, and its prune removes them after 30 days.
+  ([#2756](https://github.com/The-Verscienta/kiln_cms/issues/2756))
+
+
+<a id="public-page-weak-etag"></a>
+
+- **Public pages carry a weak `ETag`, so they leave Kiln compressed and revalidate however a CDN or browser sends the tag back; a change to a site's slug or custom domain now moves its pages' `ETag`s and drops what was cached under its old URLs (#2766, #3194).**
+  - **Compression (#2766).** A published page sent a strong `ETag` (`"…"`), and Bandit does not compress a response with a strong validator, so every shared-cacheable page went out uncompressed whatever the client's `Accept-Encoding`. The tag is now weak (`W/"…"`), which is also what it always was in fact: a digest of what the page is built from, not of its bytes. Pages are now gzipped (or `deflate`d) like the rest of the site's responses. Private responses (an experiment variant, a passphrase lock) still carry no `ETag`, and image variants keep their strong one.
+  - **Revalidation (#2766).** `If-None-Match` was matched against the exact header value, so a tag sent back with a `W/` a compressing CDN had added, a tag inside a comma-separated list, or `*` never got a `304`. It now uses the weak comparison RFC 9110 requires, as the JSON APIs and fired artifacts already did: each of those forms gets a bodyless `304`, and any other tag gets the page.
+  - **Slug or custom domain (#3194).** Canonical, hreflang and Open Graph URLs are built from the site's base URL, which was not part of the page's `ETag`, so after a site's custom domain or slug changed, a browser or CDN revalidating a page kept getting `304`s for the copy that named the old host. The `ETag` now names the base URL the page was rendered with. When an org's `slug` or `custom_domain` changes, Kiln also, once the save commits, drops the org's cached host lookups and its sitemaps and `llms.txt` on every node, moves its head generation, drops its feeds, and purges its CDN key when `KILN_CDN_PURGE_URL` is set. A save that changes neither field does none of this. Fired artifacts are not re-fired: a byline linking to another record keeps the old host until the document is next fired ([Change the slug or custom domain](../multi-tenancy.md#change-the-slug-or-custom-domain)).
+  - **On upgrade.** Every page's `ETag` changes once, so each client or CDN holding a page gets one `200` in place of a `304` on its next revalidation. Nothing to do, and rolling the pin back costs the same one round of `200`s.
+  - **For developers.** `KilnCMSWeb.Tenant.host_cache_keys/1` lists the host-cache keys an org can be cached under, and `KilnCMS.Accounts.Changes.BustSiteUrls` runs on `Organization :update`.
+  No migration, no configuration.
+  ([#2766](https://github.com/The-Verscienta/kiln_cms/issues/2766), [#3194](https://github.com/The-Verscienta/kiln_cms/issues/3194))
+
+
+
+<a id="editor-unsaved-settings-kept"></a>
+
+- **Content editor: unsaved Settings edits on a live page are no longer thrown away by the text autosave or by a button that reloads the form (#2776, #2777).**
+  - **Who is affected.** Editors of a published page, post or entry. Its
+    title and body autosave into the working copy, but every other field
+    (the Settings tab, the category, tags, the featured image) waits for
+    **Save draft**, and the save line reads *Unsaved changes* meanwhile.
+  - **The text autosave (#2776).** Each autosave rebuilt the form from the
+    saved record, so two seconds after you typed in the body, the settings
+    you had changed reverted on screen while the editor still said they were
+    unsaved, and a later **Save draft** posted the reverted values. Now the
+    settings you changed are put back on the rebuilt form, stay on screen
+    and unsaved, and **Save draft** saves them.
+  - **Buttons that reload the form (#2777).** With unsaved settings,
+    **Unpublish** and the other workflow buttons, **Move to trash**, **Mark
+    reviewed** and choosing a new **Parent** rebuilt the form and dropped
+    them without a word. Now they refuse, change nothing, and leave the
+    edits on screen. Workflow buttons and the trash say *Save your changes
+    before changing this content's state.*; Mark reviewed and Parent,
+    which don't change the state, say the new *Save your changes first.*
+    Mark reviewed and Parent now also save text still waiting for
+    autosave first, as the workflow buttons already did, and are refused by
+    what refuses those: unsaved edits on an in-review or archived document,
+    or a save conflict. **Publish changes** already refused with
+    *Save draft first, then publish your changes.*; the **Publish** in the
+    lost-update panel and the change-severity question now refuse too.
+    **Discard the changes** still discards, and now clears the unsaved
+    marker with the edits, so a later **Publish changes** is no longer
+    refused for edits that are gone.
+  - The trash half of [#2336](https://github.com/The-Verscienta/kiln_cms/issues/2336) is
+    this refusal; its link from the Trash section to the Trash page is still open.
+  - See [The working copy](../working-copy.md#using-it), [Trash and
+    restore](../trash.md#from-the-editor) and [Take content
+    down](../take-content-down.md#unpublish-a-page-from-its-editor).
+  No migration, no configuration. One new message, *Save your changes first.*,
+  translated in `es` and `fr`.
+  ([#2776](https://github.com/The-Verscienta/kiln_cms/issues/2776), [#2777](https://github.com/The-Verscienta/kiln_cms/issues/2777))
+
+<a id="editor-peer-save-rebuild"></a>
+
+- **Content editor: a co-editor's save is shown to an idle editor in place, and raised as a conflict at once for one with unsaved edits, instead of being overwritten later (#2775).**
+  - **What went wrong.** With the collaboration prototype off (the
+    default), two people with a document open are two independent writers,
+    held apart by the optimistic lock. When one saved, the other's idle
+    editor took the new lock version but kept its old form. Its next edit
+    posted that whole old form, passed the lock, and wrote over the first
+    person's title, body and settings, with no conflict shown.
+  - **Now**, what an editor does with a co-editor's save depends on what it
+    holds that is not saved:
+    - nothing: the form, body and settings are rebuilt from the save, so
+      you see it in place and your next edit builds on it;
+    - unsaved text (or any edit on an in-review or archived document): the
+      *Someone else saved changes to this content* banner at once, rather
+      than at your next save;
+    - unsaved settings over a co-editor's text-only save: their text is
+      shown and your settings are kept, still unsaved; if they changed a
+      setting too, the banner instead, so your next Save can't revert it;
+    - something open that was worked out from the saved document (the
+      Markdown view, the Publish-changes or severity question, an AI
+      proposal, the internal-links or content-intelligence panel, an inline
+      record card being edited or saved, a version-restore preview):
+      nothing, so it is not closed under you, and your next save meets the
+      lock as before.
+    A write that does not move the lock (a transition, a parent move, Mark
+    reviewed) raises no banner. Under the collaboration prototype, an editor
+    whose text another editor persists gets no banner, and a rebuild does
+    not remount the rich-text editors.
+  - **Known limits.** A field the cursor is in keeps its on-screen value
+    across a rebuild (LiveView does not overwrite a focused input), and a
+    body keystroke still in the rich-text editor's short delay lands on the
+    rebuilt body. Mark reviewed and a parent move still don't tell other
+    open editors.
+  - **For operators.** A rebuild that fails to read the record logs a
+    warning, `Editor could not take in a peer's save of <kind> <id>: …`, and
+    leaves that editor as it was.
+  - See [When a co-editor saves while you have the document open](../working-copy.md#when-a-co-editor-saves-while-you-have-the-document-open).
+  No migration, no configuration.
+  ([#2775](https://github.com/The-Verscienta/kiln_cms/issues/2775))
+
+<a id="public-block-render"></a>
+
+- **Video, audio and file blocks render on the live page and in every preview, previews inline fragment blocks, and heading blocks render at their own level, all as the published artifact has them (#2767, #2769).**
+  - **Video, audio and file blocks (#2767).** On the live page and in every
+    preview (the editor's **Preview** pop-out, a shared preview link, a
+    release preview link and the in-context editor), these blocks came out as an empty paragraph. They now render
+    the block's own HTML, the same markup the published (fired) page
+    carries: the player with its poster, caption track, autoplay (always
+    muted) and loop, or the download link with its size and description.
+    Their sources are still the `/media/<id>/stream` and
+    `/media/<id>/download` routes, which check the reader's access on every
+    request, so a members-only file is still refused to anyone else, and the
+    page HTML carries no storage URL and stays shared-cacheable. The player
+    takes the full width of the text column and the download is a bordered
+    card; under the `monograph` theme a top-level video is not narrowed to
+    the reading column, as images and galleries aren't. A block with no
+    source renders an empty box, as the published page does (#3290).
+  - **Fragments in previews (#2767).** The pop-out, the shared preview link,
+    the release preview and the in-context editor showed a fragment block as
+    nothing, and every edit in the content editor or the presentation
+    console sent the open previews a tree without it again. They now inline it, at the document's **saved**
+    audience, the rule the published page and the editor's Preview tab
+    already follow ([Reusable content fragments](../extending-content.md#7-reusable-content-fragments-479)):
+    a public document shows no members-only fragment, and a members-only
+    document shows its members-only fragments, also to a guest holding its
+    preview link, because that is what the published page shows its
+    readers. A change to the audience shows in the previews once it is
+    saved. The live page still inlines at the reader's own access, as
+    before.
+  - **Release preview.** Fragments resolve as they are published now, not
+    as the release will leave them: see the known issue
+    [release-preview-fragments](#release-preview-fragments) (#3289).
+  - **Locale.** Previews now render a document in its own locale, as the
+    live page does, so a code block's labels match the document's language.
+  - **Heading levels (#2769).** On the live page and in every preview, a
+    heading block rendered as `<h2>` whatever its level, so an imported
+    Markdown outline (`#`, `###`) came out flat. It now renders at its own
+    level, `<h1>` to `<h6>`; a stored level outside 1 to 6 renders as `<h2>`,
+    as the published page and the `:json` and `:llm` outputs have it. A
+    level-1 heading block is a second `<h1>` under the page title, as in the
+    published page (#3290 tracks an advisory for it). The in-context
+    editor's editable heading is at its level too. `h4` to `h6` have their
+    own sizes, `h5` and `h6` take the theme's heading font, and under
+    `monograph` a level-1 heading block opens a section as a level-2 one
+    does.
+  - **For developers.** `KilnCMSWeb.BlockViews.document_view_blocks/3` builds
+    a document's view maps with fragments inlined (the host's audience by
+    default, or `audiences:`), and is what delivery and every preview now
+    call. `BlockComponents.view_blocks/1` still never expands a fragment. A
+    heading's view map carries `:level`, from the new
+    `KilnCMS.Blocks.Heading.level/1`, and `KilnCMS.CMS.Fragments.any_fragment?/1`
+    is now public. A hand-built heading map without `:level` still renders
+    as `<h2>`.
+  No migration, no configuration. Rolling the pin back is safe.
+  ([#2767](https://github.com/The-Verscienta/kiln_cms/issues/2767), [#2769](https://github.com/The-Verscienta/kiln_cms/issues/2769))
+
+
+<a id="section-layouts-swept"></a>
+
+- **Section layouts left without a field are deleted, a new layout can't be created for an empty section, and a field delete refused because of its section's layout now says so (#3060, #3061, #3062).**
+  - **Old rows (#3060).** Since 1.11.0 a section's layout goes with its last
+    field, but a layout 1.9.x or 1.10.x left behind stayed, and a field later
+    filed under that name took the old tab or fieldset. When no field of the
+    type had a section any more, the **Sections of** panel (whose save
+    deletes such rows) was not shown, so nothing in the console removed them.
+    A job now deletes them after each boot; see the
+    [upgrade note](#section-layout-sweep-upgrade).
+  - **A layout created as its section empties (#3061).** The new check on
+    `FieldSection`'s create (see [Changed](#field-section-create-needs-a-carrier))
+    reads the carrying field `FOR SHARE` and holds it until the create
+    commits. A field save that moves that field out of the section waits for
+    it, then deletes the new layout with the section, instead of running its
+    cleanup before the layout existed and leaving it behind.
+  - **The fields admin names the layout when a delete fails on it (#3062).**
+    When the layout row could not be loaded (one a newer release wrote,
+    after a rollback), the failure aborted the field write untagged, so a
+    field **Delete** said only *Couldn't delete that field.*, and a flexible
+    field's delete dialog said *Couldn't delete that. Check the count and try
+    again.* and asked for the count again, which failed the same way. Such a
+    failure is now a `KilnCMS.CMS.Errors.SectionLayoutNotKept`, like a
+    refused layout write: the delete says *Couldn't delete that field: its
+    section's layout could not be removed with it.*, the flexible field's
+    dialog closes with the same message, and a field **Save** says
+    *Couldn't save the section layout.* A field another admin deleted since
+    the page loaded is not reported as a layout failure.
+  - **For developers.** `KilnCMS.CMS.Changes.KeepSectionLayouts` keeps the
+    layouts inside a nested transaction, so a layout read the database
+    fails is returned as `SectionLayoutNotKept` and the field write rolls
+    back with it; a field gone since it was loaded fails with
+    `Ash.Error.Query.NotFound`, untagged. `KilnCMS.CMS.SectionLayouts` adds
+    `carrier?/3`, `uncarried/2`, `prune_uncarried/2` and
+    `prune_if_uncarried/3`.
+  No migration. One configuration key, `:section_layout_sweep_on_boot`
+  (default `true`).
+
+
+<a id="media-job-read-retry"></a>
+
+- **Image variant and A/V probe jobs retry a failed read of the original, and complete only when the store says the file is gone (#3066).**
+  - **What was wrong.** `KilnCMS.Media.VariantWorker` (image variants and
+    dimensions) and `KilnCMS.Media.AVWorker` (duration, intrinsic size,
+    poster frame) read the original back from storage after upload. On the
+    operator's store or a site's bucket, any failed read (an S3 timeout or
+    `5xx`, a full temp disk) completed the job as if the file were gone, with
+    nothing logged. The item kept no dimensions and no variants, or no
+    duration and no poster, and nothing queued the job again. (An image
+    backend's failed read already retried.)
+  - **Now.** Only a definite miss completes the job: the Local adapter's
+    `:enoent`, an S3 `404`, or a `:not_found` (`KilnCMS.Storage.not_found?/1`,
+    the test the A/V strip already used, now shared). The job logs "Variant
+    processing for media (id): original unreadable (…); nothing to derive."
+    or "A/V processing for media (id): original unreadable (…); nothing to
+    probe." Any other failure logs "… could not read its original (…); will
+    retry." and fails the job, so Oban retries it: 3 attempts, spread over
+    about a minute by Oban's default backoff, after which the job is
+    discarded. An S3 `403` (a missing key read with credentials that lack
+    `s3:ListBucket`) is in this group, the safe direction.
+  - **Error tracking.** Each failed attempt is an Oban job error, so Sentry,
+    which captures Oban errors, now reports media read failures that used to
+    pass silently. Expect them during a storage outage.
+  - **After a discarded job.** For an image, run
+    `mix kiln.media.regenerate_variants` (or **Regenerate variants** on
+    `/media`) once storage is back; an image with no variants and no width
+    counts as missing. An A/V item has no such command: pick a poster by hand
+    on the block, or upload the file again.
+  - **Gated items.** `VariantWorker` now completes without reading anything
+    for an item whose audience is not `:public`: its original is private, so
+    there is nothing at its public key, and a public variant would publish
+    what the gate withholds.
+  - See [When a media job cannot read the original](../media-pipeline.md#when-a-media-job-cannot-read-the-original).
+  No migration, no configuration. Rolling the pin back is safe.
+  ([#3066](https://github.com/The-Verscienta/kiln_cms/issues/3066))
+
+<a id="media-purge-private-original"></a>
+
+- **Delete permanently in the media trash also removes a gated or quarantined item's private original (#3067).**
+  - **What was wrong.** **Delete permanently** (Media, then Trash; admins
+    only) deleted the item's public key, its variants and its cached
+    transforms. A gated item (audience other than public) and a quarantined
+    upload keep their original in **private** storage, so that file stayed
+    behind with no row pointing at it.
+  - **Now.** When the purge succeeds, the private original is deleted too.
+    Whether the item has one is decided before the purge
+    (`KilnCMS.Media.private_original?/1`: quarantined, or an audience other
+    than `:public`), and a public item's purge makes no private-storage call,
+    so a store without a private bucket, or an image backend, is never asked.
+    A refused purge (someone restored the item meanwhile, #2531) still
+    deletes nothing. If the private delete fails after the row is gone, the
+    flash still says the file was deleted, and the error log reads "Purged
+    media (id) left its private blob (key) behind: …".
+  - **A trashed quarantined upload.** The strip job and the quarantine
+    reaper read only rows outside the trash, so neither touches one. This
+    purge is the only thing that removes its private upload.
+  - **No sweep, by design.** An orphaned private blob, from a delete that
+    failed or from an earlier release, is not found and removed later. A
+    sweep would have to list the private bucket and delete what no row
+    names; Kiln never lists storage, keys carry no Kiln or tenant prefix, a
+    staging clone pointed at production's `S3_*` would delete production's
+    gated documents, and the set of keys in use is wide and growing. The
+    reasons, the operator's remedy (search the log for the key and delete it
+    from the item's private store) and the record-based design that would be
+    safe are in
+    [Orphaned private blobs: no sweep, by design](../media-pipeline.md#orphaned-private-blobs-no-sweep-by-design).
+  - **For overlay code** that purges media itself: delete a private
+    original with `KilnCMS.Storage.delete_private/2` after the purge returns
+    `:ok`, for an item `private_original?/1` says has one
+    ([Trash and restore](../trash.md#for-developers)).
+  No migration, no configuration. Rolling the pin back is safe.
+  ([#3067](https://github.com/The-Verscienta/kiln_cms/issues/3067))
+
+<a id="av-strip-purge-withdraw"></a>
+
+- **A quarantined upload purged while its metadata strip runs no longer leaves its public copy behind (#3068).**
+  - **What was wrong.** With `KILN_AV_STRIP_MODE=deferred`, the strip job
+    stores the cleaned copy at the item's public key and then releases the
+    quarantine. If the hourly reaper (or a purge from the media trash)
+    removed the row between those two steps, the release failed and the
+    copy stayed public, at a URL no row recorded and nothing would delete.
+  - **The reaper waits.** It skips an item whose strip job is executing now
+    and started within the last 30 minutes, logging "Not reaping quarantined
+    media (id): its metadata strip is running now."; a later sweep takes it
+    if it is still quarantined. A job that is only queued, scheduled or
+    waiting for a retry does not hold it off, nor does one stuck in
+    `executing` for longer (the strip's own timeout is 10 minutes), so a
+    paused queue or a dead node can't keep a row for ever.
+  - **The strip withdraws.** If the release comes back stale and no row
+    with the item's id is left, trashed rows included, the job deletes its
+    public copy and the private upload, logs "Media (id) was purged while
+    its strip ran; withdrew the copy at its public key (key).", and
+    completes. A row that still exists, live or trashed, keeps both blobs.
+  - **What to watch for.** Nothing retries a withdraw (the key is never put
+    in a job's arguments, which would make the job a delete primitive), so a
+    failure is logged with the key: "… could not be deleted (…). It stays
+    public until it is deleted by hand.", "… Its public copy (key) will not
+    be cleaned up automatically; …" when the row check itself failed, and
+    "Purged media (id) left its private blob (key) behind: …". See step 5 of
+    [The deferred strip, behind a quarantine](../media-pipeline.md#the-deferred-strip-behind-a-quarantine-1122).
+  No migration, no configuration. Rolling the pin back is safe.
+  ([#3068](https://github.com/The-Verscienta/kiln_cms/issues/3068))
+
+<a id="s3-empty-object-range"></a>
+
+- **An empty file on S3 copies as an empty file, and a ranged request for it gets a `416` that states its length (#3069).**
+  - **What was wrong.** S3 refuses a ranged read of an empty object with a
+    `416` that Kiln read as "unsatisfiable, length unknown".
+    `Storage.copy_to_file/3`, which the A/V strip, the A/V probe, cached
+    transforms, gating moves and direct-upload completion use, failed on it,
+    and `/media/:id/stream` answered a `Range` request with a `416` and no
+    `Content-Range`.
+  - **Now.** A `416` for a range starting at 0 is checked with one `HEAD`:
+    a size of 0 makes it an empty blob (`{:error, {:range_not_satisfiable,
+    0}}`), which copies as an empty file and streams as `416` with
+    `Content-Range: bytes */0`, or `200` with an empty body without `Range`.
+    Any other `HEAD` answer keeps the `416` as an error, so a spurious
+    refusal can never make an empty copy of a file that has bytes, which
+    the A/V strip would store over the upload. A provider that ignores
+    `Range` and answers `200` with an empty body is read as empty too. The
+    cost is one extra `HEAD`, only on a `416` at offset 0.
+  - **For storage adapter authors.** Answer `fetch_range/3` for an empty
+    blob with `{:error, {:range_not_satisfiable, 0}}`, and only once you
+    know it is empty. A bare `{:error, :range_not_satisfiable}` is an error
+    at every offset, as before; the callback's documentation now says so
+    (`c:KilnCMS.Storage.fetch_range/3`).
+  No migration, no configuration. Rolling the pin back is safe.
+  ([#3069](https://github.com/The-Verscienta/kiln_cms/issues/3069))
+
+
+
+<a id="stranded-release-items-freed"></a>
+
+- **Content held by a release that already went live can join another release again: items left `pending` on a published, rolled-back or archived release are cancelled after each boot (#3072).**
+  Before 1.11.0 (#2740) an item could be stranded `pending` on a published
+  release, and through the "one record, one open release" index it kept its
+  record out of every other release, with no button to remove it. The only
+  way out was archiving the release, which also ended its group rollback. A
+  boot job now cancels such items; see the
+  [upgrade note](#stranded-release-item-sweep-upgrade).
+  - **For developers.** `ReleaseItem`'s `:mark_cancelled` is now a
+    compare-and-swap on `status == :pending`, like `:mark_applied`: an item
+    already applied, rolled back or cancelled is never rewritten, and the
+    miss is a stale-record error (`KilnCMS.CMS.Releases.stale?/1`). Archiving
+    a release (`Changes.CancelPendingReleaseItems`) takes that miss as
+    "already free" and still archives; any other error still aborts the
+    archive. `KilnCMS.CMS.ContentRelease.closed_states/0` names the states a
+    release never composes from again. `KilnCMS.Release.cancel_stranded_release_items/1`
+    runs the sweep from `rpc`.
+  No migration. One configuration key, `:stranded_release_item_sweep_on_boot`
+  (default `true`).
+
+<a id="release-cap-exact"></a>
+
+- **A release's item cap holds when adds run at once: two adds at one below the cap, or a bulk "Add to release" beside another add, no longer leave the release one item over (#3073).**
+  The cap was counted when the add was built, outside its transaction, and
+  adds read the release `FOR SHARE`, which doesn't make them wait for each
+  other. An add now locks the release row `FOR UPDATE` inside its
+  transaction and counts the items under that lock, so adds to one release
+  take turns and the one that would go over is refused with
+  *release is full (500 items); ship or split it* (the number is your
+  `max_items`).
+  - **The cost.** Adds to one release wait for each other, each holding the
+    row for one count and one insert. While an add is in flight, removing
+    an item, changing an item's action, renaming, scheduling, archiving or
+    claiming the same release waits for it. Adds to different releases
+    don't wait.
+  - **For developers.** `KilnCMS.CMS.Validations.ReleaseOpenForEdit` takes a
+    `lock:` option, `:share` (the default, for `:cancel` and `:set_action`)
+    or `:update` (for `:add`); its moduledoc has the lock order. An outer
+    transaction that wraps item writes must not lock two release rows, or
+    take `FOR SHARE` and then `FOR UPDATE` on the same release.
+  No migration, no configuration. Rolling the pin back is safe; the older
+  release counts outside the transaction again.
+
+
+<a id="comp-refused-while-billed"></a>
+
+- **Comping a membership the provider may still bill is refused (#3156). This fixes the 1.12.0 known issue "Comping a member whose provider subscription is still active doesn't cancel it."**
+  - **What was wrong.** `Billing.comp_membership/2` set an `active` or
+    `past_due` membership to `comped` and left its provider subscription
+    running. Since 1.12.0 a `comped` row ignores every provider event
+    (`comped_not_provider_managed`), so the provider went on charging the
+    member, and their later cancellation or failed payment never reached the
+    row.
+  - **Now.** A comp over a membership that is `active`, `past_due` or
+    `incomplete` and holds a provider subscription id returns
+    `{:error, %Ash.Error.Invalid{}}` carrying
+    `KilnCMS.Billing.Errors.StillBilled` (on `:status`), and changes nothing:
+    no audit row, no recompute, no `membership.activated`. An `incomplete`
+    row counts because a checkout in the middle of a payment challenge can
+    still be paid. The check is part of the upsert itself (its
+    `ON CONFLICT … WHERE`), so it holds against a provider event committing at
+    the same moment. A comp that goes through also clears the old
+    subscription's id, period end and "cancel at period end" flag, so the
+    account page shows no stale renewal date; the provider customer id stays.
+  - **What to do.** To comp a paying member, cancel the subscription in the
+    provider's dashboard **immediately** (a cancellation at period end keeps it
+    `active` until then), wait for the membership to turn `canceled`, then
+    comp. The member has no access between the two, and a subscribed webhook
+    endpoint gets `membership.canceled` and then `membership.activated`. A
+    comp that stays refused means the cancellation has not arrived: look its
+    event up in `billing_webhook_events`. See
+    [Comp a member](../memberships.md#comp-a-member).
+  - **Not covered.** An `incomplete` membership with no subscription id is
+    comped, though the member may already have paid while the checkout's
+    `checkout.session.completed` is still on its way; Kiln cannot tell. Check
+    the provider's dashboard before comping an `incomplete` member.
+    Memberships comped on 1.12.0 or earlier keep ignoring provider events and
+    may still be billed: cancel those subscriptions in the provider's
+    dashboard.
+  - No UI calls `comp_membership` yet; the refusal's message is not translated.
+  No migration, no configuration. Rolling the pin back is safe, and brings the
+  old behavior back.
+  ([#3156](https://github.com/The-Verscienta/kiln_cms/issues/3156))
+
+<a id="restart-drops-old-subscription"></a>
+
+- **A member who rejoins after a cancellation no longer carries the old subscription into the new checkout (#3157).**
+  - **What was wrong.** Choosing a tier again restarts the same membership
+    row, and the restart reset only its status. The row kept the ended
+    subscription's id, period end and "cancel at period end" flag, so a late
+    cancellation of the old subscription could cancel the new checkout, and on
+    a row with no ordering stamp a retried update of the old subscription
+    could revive it on a dead subscription.
+  - **Now.** Restarting a `canceled` membership clears those three fields.
+    The old subscription's events still resolve to the row by the membership id
+    in their metadata, but a cancellation for it is ignored
+    (`other_subscription`) and one older than the last applied event is
+    `out_of_order`. Restarting an `incomplete` membership keeps them: that
+    subscription is the checkout still in progress, and keeping its id is what
+    makes a comp over it refused (above). The provider customer id is kept in
+    both cases, though #3157 suggested clearing it: checkout reuses it so the
+    member is not duplicated at the provider, and **Manage billing** needs it.
+    The ordering stamp is kept too.
+  - **Remaining gaps.** A non-cancelling event for the old subscription
+    created in the same second as the stamp still applies to the restarted
+    (`incomplete`) row. A row with no stamp, one with no provider event since
+    1.12.0 (canceled only by an uncomp, for example), applies any
+    non-cancelling event for its old subscription after a restart. See
+    [Late, repeated and foreign events](../memberships.md#late-repeated-and-foreign-events).
+  No migration, no configuration. Rolling the pin back is safe; rows
+  restarted meanwhile stay cleared.
+  ([#3157](https://github.com/The-Verscienta/kiln_cms/issues/3157))

@@ -349,7 +349,11 @@ UI" workflow, scoped to fields.
   published, so the source's permissions, validations, history and lock all
   apply. A held change is marked "goes live when *Source* is published", a
   source the editor may not change shows a lock, and a source someone else
-  saved in the meantime fails on its own row.
+  saved in the meantime fails on its own row. When the reference has link
+  fields, **Edit details** on a row opens that connection's link values
+  (starting from the source's working copy) with **Save details**, the same
+  edit of the source (`ReverseFields.set_link/5`): a quantity or role can be
+  changed from either side.
 - **Item bounds**: on any list (`multiple: true`), optional
   `min_items` / `max_items` bound how many items a value holds once it holds
   any — an empty optional field is still allowed; `required` asks for at
@@ -924,6 +928,26 @@ its sort field is gone), the view shows a warning icon (*This view names a field
 no longer applies.*) and opening it says *The view "…" named a field that no
 longer applies, so that condition was left out.* The remaining conditions still
 apply.
+
+That message shows only when you open that view from its pill, not on other
+lists that happen to show the same rows. The same goes for any view that lost
+something it named: a field condition or field sort as above, a locale no
+longer configured, a content type that is gone, or a sort the list no longer
+offers. Such a view's link keeps what it was saved with, and the list applies
+what still exists, so:
+
+- It is marked as the current view (and, if you may change it, its
+  **Rename** / **Delete view** bar appears) only when you opened it by its
+  own link, even if another view, or
+  the plain list, would match what is left of it. While it is current, **Save
+  view** is hidden, as for any current view.
+- Opening the plain list, or filtering by hand to the conditions it still
+  has, does not show its message or its bar.
+- Only a lost field condition or field sort shows the message; a view that
+  lost a locale, type or sort opens without one.
+
+To tidy up, open the view and use **Delete view**. A deleted category or tag is not a loss: the view keeps
+its id and still matches as before.
 
 **What can go wrong.** When you click a download in the list, a refusal sends you back
 to the list (with the same filters, except what the refusal was about) and shows the
@@ -1761,6 +1785,14 @@ CMS.create_field_section!(
 accordion. A section with no `FieldSection` row is an `:auto` accordion, and
 the fields admin deletes a row you set back to that default.
 
+File a field under the section before you create its layout:
+`create_field_section` refuses a `name` no top-level field of that type is in
+(a link field, a group sub-field or a flexible item type's field does not
+count), with `{:error, %Ash.Error.Invalid{}}` holding an
+`Ash.Error.Changes.InvalidAttribute` on `:name`, *is not a section any
+top-level field of this type is in*. A layout with no field would otherwise
+be inherited by the next field filed under that name.
+
 `GET /api/schema` (and `mix kiln.export.schema`) reports the layout on each
 field, for a client that builds its own form from the schema. Defaults are
 left out: `x-kiln-section-display` appears only for a `fieldset` or `tab`
@@ -1808,9 +1840,9 @@ What to know before relying on it:
   field, clearing its **Section**, or moving it to another section deletes
   the section's layout in the same save, by any route: this page, a field
   sync import, or code. If a field is later filed under that name, the
-  section starts as a default accordion. A layout left behind by a release
-  before this change stays until you next change a layout in the
-  **Sections of** panel (shown while some field of the type has a section).
+  section starts as a default accordion. Layouts left behind by 1.9.x and
+  1.10.x are deleted by a job about ten minutes after the server starts;
+  see [Remove section layouts older releases left behind](#remove-section-layouts-older-releases-left-behind).
 - **Width is per section.** A narrow field shares a row only with the
   fields of its own section, and with neighbours in `position` order. A
   conditional field that is hidden leaves no gap.
@@ -1822,7 +1854,9 @@ What to know before relying on it:
   so a section another admin has just added keeps its layout. A field
   **Save** or **Delete** reads the field's current section the same way, so
   a page loaded before another admin moved fields still keeps the right
-  layouts.
+  layouts. The boot job that removes old layouts checks each one again just
+  before deleting it, so a field you file under such a section while it runs
+  keeps the layout.
 
 Why a layout is its own row, keyed by the section name: [ADR 0046](decisions/0046-a-sections-layout-is-its-own-row-keyed-by-the-section-name-not-a-setting-on-each-field.md).
 
@@ -1832,11 +1866,69 @@ If something does not save, the page shows one of these:
 |---|---|
 | `You can't change custom fields.` | You are no longer an admin of this site (the role was changed after the page loaded). Nothing was written. |
 | `Couldn't save the section layout.` | In the **Sections of** panel: the layout write failed, typically because another admin saved the same section's layout at the same moment. Reload the page and set it again. After a field **Save**: the section's layout could not be moved or deleted with the field's new section, so the field was **not** saved either and the form stays open. Reload the page and try again. |
-| `Couldn't delete that field.` | The field was not deleted. Among other causes, the layout of the section it was the last field of could not be deleted with it. Reload the page and try again. |
+| `Couldn't delete that field: its section's layout could not be removed with it.` | The field was the last of its section, and that section's layout could not be deleted with it, so the field was **not** deleted either. The usual cause is a layout row this release cannot read, one a newer release wrote before the site was rolled back. Delete the field on the release that wrote the layout. |
+| `Couldn't delete that field.` | The field was not deleted: the delete was refused, or another admin deleted the field since the page loaded. Reload the page and try again. |
 
 The page lists the sections as they were when it loaded. A layout you set for
 a section another admin has since emptied (by renaming or deleting its last
 field) is not kept; reload to see the current list.
+
+### Remove section layouts older releases left behind
+
+Releases 1.9.x and 1.10.x could leave a section's layout behind after its
+last field had gone, and a field filed under that name later took the old
+tab or fieldset on. You don't need to do anything: about ten minutes after
+each start, a job (`KilnCMS.CMS.SectionLayoutSweep`) deletes every layout no
+top-level field of its type is in, on every site, and logs each one at info
+with its site, type, name, `display` and `initially`. To run it now, for
+example after restoring an older backup, you need shell access to the
+running release:
+
+1. List what it would delete:
+
+   ```bash
+   bin/kiln_cms rpc 'KilnCMS.Release.prune_section_layouts(dry_run: true)'
+   ```
+
+   You see one line per layout, then a summary:
+
+   ```text
+   Would delete "Clinical" of {:compiled, :post} in org 0c5f2a3e-7d1b-4c9e-9a6f-2b8d4e1f7a90 (display: tab, initially: auto)
+   Section layouts: 1 pruned, 0 skipped (unknown type), 0 failed
+   ```
+
+   Add `org_id: "<uuid>"` to look at one site only.
+2. Delete them:
+
+   ```bash
+   bin/kiln_cms rpc 'KilnCMS.Release.prune_section_layouts()'
+   ```
+
+   The lines now read `Deleted …`. Running it again finds nothing more to
+   delete (`0 pruned`).
+3. To keep a layout it deleted, file a field under that section again and
+   set the layout in the **Sections of** panel, using the `display` and
+   `initially` from the line.
+
+What the counts mean, and what can go wrong:
+
+- **skipped (unknown type)** — layouts of a content type this release does
+  not register (a removed plugin's). They are kept: the type's fields are
+  still stored, and it may come back. A field of such a type also still
+  counts as carrying its section.
+- **failed** — a type whose fields or layouts could not be read or deleted;
+  the log has a warning, `section layout sweep could not prune …`, with the
+  error. The other types are still swept. A layout row this release cannot
+  load (written by a newer release before a rollback) fails its type on
+  every run, since the sweep can't tell what it would delete. The boot job
+  ends in error on any failure, and Oban retries it, up to 3 attempts.
+- **`This needs the running application …`** — you used `bin/kiln_cms eval`.
+  Use `rpc`: each delete clears the serving node's caches of the type.
+
+A layout someone deletes while the sweep runs is not a failure, and a field
+filed under a section while the sweep runs keeps that section's layout. To
+turn the boot job off, set `config :kiln_cms, :section_layout_sweep_on_boot,
+false`.
 
 ### Choose how editors fill in a field
 
@@ -2024,23 +2116,31 @@ field and every write path apply it (#2285). You need the admin role.
 3. Optionally tick **Only records the editor created**.
 4. Under **Order a blank search**, choose **Newest first** (the default) or
    **By title**. This orders the list an editor sees before typing.
-5. For each linked type, under **Only *Type* records that match**, optionally
+5. Optionally, under **Let editors narrow the search by**, tick **Category**,
+   **Tag**, or both. This adds a select beside the picker's search box so an
+   editor can look through one category or tag while picking (see
+   [Narrow a reference search by type, category or tag](#narrow-a-reference-search-by-type-category-or-tag)).
+   It filters nothing: what the field accepts stays as the conditions below
+   say. If the site has more than 500 categories (or tags), a warning under
+   the box says the picker will not show that select.
+6. For each linked type, under **Only *Type* records that match**, optionally
    choose tags in **Tagged with any of**, a category in **In category**, and a
    condition per custom field: **equals**, **is one of** or **is not**, then a
    value. For **is one of**, separate the values with commas. Leave a value
    empty to not filter on that field. Only plain, non-private fields are
    listed; a value on a number or yes/no field is saved as a number or a
    boolean.
-6. Under **Adding new records**, **Offer “Add new” in the picker** is ticked
+7. Under **Adding new records**, **Offer “Add new” in the picker** is ticked
    by default. Untick it to have editors connect only records that already
    exist: the picker, and the reverse field on each target, then offer no
    **Add new**. It is stored as `"add_new": false` and filters nothing.
    With it ticked, optionally choose **Yes, create a new *Type*** under
    **Let editors create what they type**. See
    [Let editors create what they type](#let-editors-create-what-they-type).
-7. Read the sentence at the end of the step, which restates the setting, for
+8. Read the sentence at the end of the step, which restates the setting, for
    example *Editors are offered: Published Page records, tagged vegan, newest
-   first.* Then save the field (**Save**, or **Add field** for a new one).
+   first.* With editor filters ticked it ends *Editors can narrow the search
+   by category and tag.* (or *by category.*, *by tag.*). Then save the field (**Save**, or **Add field** for a new one).
 
 If the server refuses a condition, the reason shows under the step and
 nothing is saved. A condition naming a tag or category deleted since it was
@@ -2064,6 +2164,7 @@ relationship back to a plain value clears the selection.
          "states" => ["published"],
          "owner" => "self",
          "sort" => "title",
+         "filters" => ["category", "tag"],
          "by_type" => %{
            "page" => %{
              "tags_any" => [tag_id],
@@ -2078,7 +2179,10 @@ relationship back to a plain value clears the selection.
    ```
 
    `states` is a subset of `draft`, `in_review`, `published`, `archived`;
-   `owner` can only be `"self"`; `sort` is `recent` or `title`. Under
+   `owner` can only be `"self"`; `sort` is `recent` or `title`; `filters`
+   is a non-empty list of `"category"` and `"tag"` with no repeats. `sort`
+   and `filters` are picker settings, not conditions: they change what the
+   editor sees, never what a write accepts. Under
    `by_type`, each key must be one of the field's target types. `tags_any`
    takes tag ids, `category` one category id, and `fields` maps a custom field
    name to a value, `{"in": [...]}` or `{"not_eq": value}` (only non-private
@@ -2111,6 +2215,7 @@ relationship back to a plain value clears the selection.
      "states": ["published"],
      "owner": "self",
      "sort": "title",
+     "filters": ["category", "tag"],
      "by_type": {"page": {"tags_any": ["<tag id>"], "category": "<category id>"}}
    }
    ```
@@ -2119,7 +2224,10 @@ relationship back to a plain value clears the selection.
    category or field is left out, and so is one on a private field, since
    the endpoint is anonymous. A field with no live condition left has no
    `x-kiln-selection`. Create-on-type is reported too, as
-   `"create": {"type": "page"}`.
+   `"create": {"type": "page"}`. The picker-only keys `sort` and `filters`
+   are reported as stored (a field whose selection is only `filters` still
+   has an `x-kiln-selection`); they describe the editor's picker and narrow
+   nothing a client writes.
 
 What to know before relying on it:
 
@@ -2153,7 +2261,10 @@ under the step; from code they are errors on `selection`:
 | Message | Meaning |
 |---|---|
 | `is only for a reference field` | The field is not a top-level reference: another type, or a link or group sub-field. |
-| `is not valid: it …` | The shape is wrong: an unknown key, a state outside the four, an `owner` other than `"self"`, a `sort` other than `recent` or `title`, more than 50 tag ids, more than 10 field conditions, or more than 50 values in an `in`. The rest of the message names which. |
+| `is not valid: it …` | The shape is wrong: an unknown key, a state outside the four, an `owner` other than `"self"`, a `sort` other than `recent` or `title`, a bad `filters`, more than 50 tag ids, more than 10 field conditions, or more than 50 values in an `in`. The rest of the message names which. For `filters` it is one of the three below. |
+| `… filters is empty` | `filters` is `[]`. Leave the key out (in the admin, untick both boxes) to show no editor filters. |
+| `… lists a filter twice` | `filters` names `category` or `tag` more than once. |
+| `… filters must be a list among category, tag` | `filters` is not a list, or names something else (`"tags"`, `"type"`). The type select needs no setting. |
 | `names <type>, which is not one of this field's target types` | A `by_type` key is a type the field does not link to. Narrowing the field's targets while a condition names a type that leaves them is refused the same way. |
 | `names <type> to create, which is not one of this field's target types` | `create.type` is a type the field does not link to. |
 | `names a tag for <type> that does not exist on this site` | A `tags_any` id is not one of this site's tags (`category` says "a category"). |
@@ -2169,6 +2280,62 @@ that field with `is used by the selection of <fields>; remove it from there
 first`. A selection that can no longer be evaluated (a stored value its field
 can't cast) fails a save of the record with `could not be checked against
 which records it accepts — an admin should review the field's selection`.
+
+### Narrow a reference search by type, category or tag
+
+Starting point: you are editing a record with a relationship field, and the
+search finds too many records to scan. A row of selects above the field's
+search box narrows the results while you pick. Any editor who can use the
+field's search gets them; there is no permission of its own.
+
+- **Type** appears on its own whenever the field links to more than one
+  content type. There is nothing to turn on.
+- **Category** and **Tag** appear only on a field whose admin ticked them
+  under **Let editors narrow the search by** (step 5 of
+  [Limit what can be picked](#limit-what-can-be-picked)).
+
+1. On a field with several linked types, the **All types** select is
+   already above the search box. Click into the search box: the list opens,
+   and the **Any category** and **Any tag** selects join it, as the field
+   allows. Their options are loaded the first time you open the list.
+2. Choose a type, a category or a tag. The results start over from the
+   first page, limited to that choice; a screen reader announces the count
+   as, for example, *3 results (filtered)*. Tags are grouped under their tag group,
+   with the ungrouped ones last.
+3. Type in the search box as usual. The search applies on top of the
+   selects.
+4. Pick a record. To go back to everything, set each select to **All
+   types**, **Any category** or **Any tag**.
+
+Changing a select does not change the record: the document is not marked as
+having unsaved changes, and nothing is saved.
+
+What to know:
+
+- **A filter only narrows.** Your choice is added to the field's own
+  selection, and the search still runs with your permissions, so it never
+  finds a record the field would refuse or that you can't read.
+- **Some options are left out.** When every linked type's selection pins a
+  category, there is no category select (there is nothing to narrow). When
+  every linked type's selection lists tags, the tag select offers only
+  those tags.
+- **Create-on-type pauses while a filter is set.** The *Create “name” as a
+  new Type* row is not offered while any select is set, because it could
+  only check the filtered results for an existing record with that title.
+  **Add new *Type*** is unaffected.
+- **The dropdown widget has no filters.** A field shown as a dropdown gets
+  them only when it falls back to the search.
+- **No filters on a field you can't add to.** A locked or full field, or a
+  single reference that already holds a record, shows no search and so no
+  selects.
+
+What you might see:
+
+| Message | Meaning |
+|---|---|
+| *No matches with these filters.* with a **Clear filters** button | Nothing matches the selects and your search. **Clear filters** resets every select and searches again. |
+| *Too many categories to list — search by title instead.* | The site has more than 500 categories, so the category select is not shown. Tags say the same. The fields admin warns about this when the filter is ticked. |
+| No **Category** or **Tag** select at all | The field does not turn it on, the site has no categories or tags, or every linked type already pins the category. |
 
 ### Let editors create what they type
 
@@ -2311,10 +2478,10 @@ What to know before relying on it:
 - **Draft or working copy.** A draft is updated in place. A published record
   gets `save_working_copy` with the title as `working_title`; its live text
   does not change until that record's own **Publish changes**.
-- **Not in the card yet.** Creating a new record and opening its card on
-  create, saving every card with the parent, and fields other than the plain
-  types above. The title is read-only for a type with a title template, and
-  the record you are editing never gets a card on its own field.
+- **Not in the card yet.** Fields other than the plain types above, and a
+  relationship field inside the card (the card is one level deep). The title
+  is read-only for a type with a title template, and the record you are
+  editing never gets a card on its own field.
 - **The related record's own permissions decide.** A card is offered only for a
   connected record the editor may change, checked per record (a published
   record's working copy counts). A record the editor cannot read stays
@@ -2460,6 +2627,7 @@ imports.
 | "is already an item type of this field" | The machine name is taken within this flexible field. |
 | "A flexible field can't be changed to another type, or the other way round. Add a new field and delete this one." | The hint beside the disabled **Field type** select when you edit a flexible field. |
 | "Couldn't delete that. Check the count and try again." | The delete was refused or failed, most likely because an item was saved after the count; the dialog shows the number again, so confirm again. |
+| "Couldn't delete that field: its section's layout could not be removed with it." | The flexible field was the last of its section, and that section's layout could not be deleted with it; nothing was deleted, and the dialog closes. See [Lay out custom fields as tabs, fieldsets or columns](#lay-out-custom-fields-as-tabs-fieldsets-or-columns). |
 | "Couldn't save the new order of item types." | The reorder was not saved; try again. |
 
 ### Define a flexible field from code
@@ -2681,6 +2849,7 @@ first: deleting a field can't be undone, and a field export
 | You see | Meaning |
 |---|---|
 | *… reads this field in a condition: remove that condition first.* | Another field's condition (**Show when** or **Required when**) reads this field; the message names that field. Edit it, choose **Remove condition**, and delete again. If the field named is listed under **Fields of an unknown type**, it can't be edited: delete it first (or bring its type back), then delete this one. A field-definition destroy from code says the same: `is used in the conditions of …; remove those conditions first`. |
+| *Couldn't delete that field: its section's layout could not be removed with it.* | The field was the last of its section, and that section's layout could not be deleted with it; nothing was deleted. See [Lay out custom fields as tabs, fieldsets or columns](#lay-out-custom-fields-as-tabs-fieldsets-or-columns). |
 | *Couldn't delete that field.* | The delete was refused for another reason, or the field is already gone. Reload the page. |
 | *That field can't be edited.* | The field was deleted, or its type became unknown, since the page loaded. The list reloads. |
 | `is not a field type this release knows, so the field can't be changed: delete it, or upgrade Kiln or reinstall the plugin that provides it` | An update of the field from code. Only a destroy is allowed. |
@@ -3352,15 +3521,24 @@ decision A3 ("resolve/embed at fire time") taken literally. That is why one
 small module buys the whole feature: all four fired surfaces (`:web`, `:json`,
 `:llm`, `:json_ld`) see one flat tree and need no knowledge of fragments at all.
 
-Two callers: `Firing.Engine.fire/2` (so artifacts carry the resolved body) and
-`KilnCMSWeb.ContentController` (HTML delivery renders live from the block tree,
-not from an artifact).
+It runs in three places: `Firing.Engine.fire/2` (so artifacts carry the
+resolved body), the content editor's Preview tab, and
+[`KilnCMSWeb.BlockViews.document_view_blocks/3`](../lib/kiln_cms_web/block_views.ex),
+which every surface that renders a document's block tree live goes through:
+HTML delivery (`KilnCMSWeb.ContentController`, which renders from the block
+tree rather than from an artifact), the pop-out preview, a shared preview
+link, a release preview link, the in-context editor's read-only blocks, and the
+updates the content editor and the presentation console push to open
+previews. `KilnCMSWeb.BlockComponents.view_blocks/1` never expands a fragment
+(it has no org or audience to resolve one with) and renders an unexpanded one
+as nothing, so a new surface that skips `document_view_blocks/3` shows every
+fragment as a gap (#2767).
 
-**Not** reached yet: write-time derivations (the `search_text` column, block
-embeddings, `word_count`, `reading_time_minutes`) and the editor's own preview
-/ SEO / a11y panels all run over the raw tree, so fragment text is invisible to
-search and doesn't count towards reading time. Tracked in #910 — expanding
-there means making a write depend on a read.
+The editor's SEO and readability panel scores the expanded tree too, and each
+fire recomputes the `search_text` column from it (#910). **Not** reached yet:
+the other write-time derivations (block embeddings, `word_count`,
+`reading_time_minutes`) run over the raw tree, so fragment text doesn't count
+towards reading time — expanding there means making a write depend on a read.
 
 ### The re-fire wave already existed
 
@@ -3390,6 +3568,20 @@ feeds, static export, the newsletter — resolves the host through a
 carrying content stricter than its host would hand a gated body to anonymous
 callers on all four. The rule is: an artifact is never more permissive than the
 document carrying it.
+
+Previews follow the artifact's rule, not the viewer's: the editor's Preview tab
+and pop-out, a shared preview link, a release preview and the in-context editor
+all expand at the document's **saved** audience (`Engine.host_audiences/1`, the
+default of `document_view_blocks/3`), so no preview shows text the published
+page won't have. A guest holding a preview link to a `:member` page sees its
+`:member` fragments, because the published page shows them to its readers; a
+`:public` page shows the guest none. An audience changed in the editor but not
+yet saved does not count until it is saved. Live delivery passes the
+**reader's** audiences instead (`audiences:`), as it did before.
+
+A release preview resolves each fragment as its target is published now, not
+as the release will leave it, so a target the same release changes or first
+publishes previews with its current body, or none (#3289).
 
 Because an HTML payload can now embed another document's body, the re-fire wave
 also busts each referrer's **delivery** cache, not just its artifact — that

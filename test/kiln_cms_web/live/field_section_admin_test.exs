@@ -19,6 +19,7 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
 
   import Phoenix.LiveViewTest
   import KilnCMS.OrgFixtures, only: [org: 1]
+  import KilnCMS.SectionLayoutFixtures, only: [orphan_layout!: 1]
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.User
@@ -76,6 +77,23 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
     lv
     |> form("#sections-type-page-#{index}-form", %{"section" => section})
     |> render_change()
+  end
+
+  # A display a newer release wrote: this one cannot load the row.
+  defp unloadable!(layout) do
+    KilnCMS.Repo.query!("UPDATE field_sections SET display = $1 WHERE id = $2", [
+      "zz_display_from_a_newer_release_3062",
+      Ecto.UUID.dump!(layout.id)
+    ])
+  end
+
+  defp stored?(layout) do
+    %{num_rows: rows} =
+      KilnCMS.Repo.query!("SELECT 1 FROM field_sections WHERE id = $1", [
+        Ecto.UUID.dump!(layout.id)
+      ])
+
+    rows == 1
   end
 
   describe "the Sections panel" do
@@ -175,13 +193,9 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       admin = authed_user(:admin)
       field!(admin, "fsa_latin", 0, "Fsa Identity")
 
-      CMS.create_field_section!(%{content_type: :page, name: "Fsa Gone", display: :tab},
-        actor: admin
-      )
-
-      CMS.create_field_section!(%{content_type: :post, name: "Fsa Gone", display: :tab},
-        actor: admin
-      )
+      # Rows an older release left with no field in them.
+      orphan_layout!(%{content_type: :page, name: "Fsa Gone", display: :tab})
+      orphan_layout!(%{content_type: :post, name: "Fsa Gone", display: :tab})
 
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
@@ -191,6 +205,22 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       refute Map.has_key?(layouts(), "Fsa Gone")
       # Another type's rows are that type's to prune.
       assert [%{name: "Fsa Gone"}] = CMS.field_sections_for!(:post, authorize?: false)
+    end
+
+    test "a layout saved on a page loaded before its section's last field moved stores nothing",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      latin = field!(admin, "fsa_latin", 0, "Fsa Identity")
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      # Another admin moves the section's only field out of it (#3061).
+      CMS.update_field_definition!(latin, %{section: "Fsa Elsewhere"}, actor: admin)
+
+      html = lay_out(lv, 0, %{"display" => "tab"})
+
+      assert html =~ "Couldn&#39;t save the section layout."
+      assert layouts() == %{}
     end
 
     test "a save on a page loaded earlier keeps a section added since", %{conn: conn} do
@@ -234,6 +264,49 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       refute Map.has_key?(layouts(), "Fsa Identity")
     end
 
+    test "a delete its section's layout refuses names the layout, and deletes nothing",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      latin = field!(admin, "fsa_latin", 0, "Fsa Identity")
+
+      layout =
+        CMS.create_field_section!(%{content_type: :page, name: "Fsa Identity", display: :tab},
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      # A row this release cannot load (#3062): the delete can't remove it.
+      unloadable!(layout)
+
+      html = render_click(lv, "delete", %{"id" => latin.id})
+
+      assert html =~
+               "Couldn&#39;t delete that field: its section&#39;s layout could not be removed with it."
+
+      assert {:ok, _still_there} = CMS.get_field_definition(latin.id, actor: admin)
+      assert stored?(layout)
+    end
+
+    test "a delete that fails for another reason keeps the generic message", %{conn: conn} do
+      admin = authed_user(:admin)
+      latin = field!(admin, "fsa_latin", 0, "Fsa Identity")
+
+      CMS.create_field_section!(%{content_type: :page, name: "Fsa Identity", display: :tab},
+        actor: admin
+      )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      # Another admin deleted it first.
+      :ok = CMS.destroy_field_definition!(latin, actor: admin)
+
+      html = render_click(lv, "delete", %{"id" => latin.id})
+
+      assert html =~ "Couldn&#39;t delete that field."
+      refute html =~ "its section&#39;s layout"
+    end
+
     test "a rename onto a section with a layout of its own keeps that layout",
          %{conn: conn} do
       admin = authed_user(:admin)
@@ -245,7 +318,10 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
 
       {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
 
-      # Behind the page's back, the new name gets a layout of its own.
+      # Behind the page's back, another admin files a field under the new
+      # name and lays that section out.
+      field!(admin, "fsa_pinyin", 1, "Names")
+
       CMS.create_field_section!(%{content_type: :page, name: "Names", display: :fieldset},
         actor: admin
       )

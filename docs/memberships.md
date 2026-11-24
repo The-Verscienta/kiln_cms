@@ -185,7 +185,9 @@ authority. Audiences no tier claims stay exactly as an admin left them. The
 consequence worth knowing: once an audience has *ever* been claimed by a tier,
 granting it by hand is transient — the next recompute drops it. **Comping is the
 supported lever** (a membership with status `comped`, no provider subscription);
-`manage_access` is the wrong tool for a tier-managed audience.
+`manage_access` is the wrong tool for a tier-managed audience. A comp is refused
+while the provider may still bill the membership: cancel the subscription first
+([Comp a member](#comp-a-member)).
 
 Retiring a tier does **not** un-manage its audience, deliberately. If it did,
 retiring a tier would freeze every existing grant of that audience permanently,
@@ -199,7 +201,7 @@ with nothing left to revoke it.
 | `active` | **yes** | paid and current |
 | `past_due` | **yes** | a payment failed and the provider is retrying. Access survives dunning — locking a member out for an expiring card would be wrong, and the provider keeps the subscription alive through its retry schedule |
 | `canceled` | no | terminal |
-| `comped` | **yes** | granted by an admin, no provider subscription |
+| `comped` | **yes** | granted by an admin, no provider subscription. Refused over a row the provider may still bill ([Comp a member](#comp-a-member)) |
 
 ### Revocation timing
 
@@ -209,6 +211,105 @@ follows the provider, which gives the right behavior for free: with
 period and sends the deletion event when it lapses. Immediate cancellation
 revokes immediately for the same reason. `current_period_end` is stored only so
 the member UI can say "renews on…".
+
+### Comp a member
+
+A comp gives a member a tier's access for free: the membership becomes
+`comped` and no longer follows the provider. A `comped` row ignores every
+provider event, so Kiln refuses to comp a membership the provider may still be
+billing. If it didn't, the provider would go on charging the member, and their
+later cancellation or failed payment would never reach the row (#3156).
+
+There is no console screen for comping yet. You call
+`KilnCMS.Billing.comp_membership/2` from a release shell
+(`bin/kiln_cms remote`), as an admin of the site; an editor, a viewer or the
+member themselves gets `Ash.Error.Forbidden`.
+
+1. Look up the member, the tier and yourself, and try the comp:
+
+   ```elixir
+   alias KilnCMS.{Accounts, Billing}
+
+   site = Accounts.default_org_id()
+   admin = Accounts.get_user_by_email!("you@example.com", authorize?: false)
+   member = Accounts.get_user_by_email!("member@example.com", authorize?: false)
+   tier = Billing.get_tier_by_slug!("supporter", actor: admin, tenant: site)
+
+   Billing.comp_membership(
+     %{user_id: member.id, tier_id: tier.id, note: "Press pass"},
+     actor: admin,
+     tenant: site
+   )
+   ```
+
+   A member with no membership of that tier, or one that is `canceled`,
+   `comped`, or `incomplete` with no subscription, is comped:
+   `{:ok, %KilnCMS.Billing.Membership{status: :comped}}`. Their access is
+   granted at once, and a subscribed webhook endpoint gets
+   `membership.activated` ([Webhook events](#webhook-events)). You are done.
+
+   A membership that is `active`, `past_due` or `incomplete` and holds a
+   provider subscription id is refused, and nothing about it changes:
+
+   ```elixir
+   {:error, %Ash.Error.Invalid{errors: [%KilnCMS.Billing.Errors.StillBilled{field: :status}]}}
+   ```
+
+   The message reads "is still billed by the payment provider; cancel the
+   subscription at the provider (immediately, not at period end) and wait for
+   the cancellation to arrive, then comp". An `incomplete` row counts because
+   a checkout in the middle of a payment challenge can still be paid.
+
+2. In the provider's dashboard, cancel the member's subscription
+   **immediately**, not at the end of the period. A cancellation at period
+   end keeps the subscription `active` until the period lapses, so the comp
+   stays refused until then.
+
+3. Wait for the cancellation to arrive. The provider sends
+   `customer.subscription.deleted`, and the membership becomes `canceled`.
+   Check it:
+
+   ```elixir
+   Billing.memberships_for_user!(member.id, actor: admin, tenant: site)
+   |> Enum.map(&{&1.tier.slug, &1.status})
+   #=> [{"supporter", :canceled}]
+   ```
+
+   From now until step 4 the member has no access to the tier's audience,
+   and a subscribed endpoint gets `membership.canceled`.
+
+4. Run the comp from step 1 again. It returns
+   `{:ok, %KilnCMS.Billing.Membership{status: :comped}}`, the member's access
+   is back, and a subscribed endpoint gets `membership.activated`.
+
+A comp clears the old subscription's id, period end and "cancel at period end"
+flag, so the account page shows no stale renewal date. It keeps the provider
+customer id: a later checkout reuses it, so the member is not duplicated at the
+provider.
+
+What can go wrong:
+
+- **The comp is still refused after you canceled.** The cancellation has not
+  reached Kiln. Look the `customer.subscription.deleted` event up in
+  `billing_webhook_events` ([Find out why a billing event was ignored](#find-out-why-a-billing-event-was-ignored)):
+  no row means the provider has not delivered it, or Kiln answered without
+  recording it (the provider's dashboard shows each delivery's response
+  code); a `received`, `failed` or `processing` row has not been applied yet
+  ([Webhook delivery and recovery](#webhook-delivery-and-recovery)). Resend
+  the event from the provider's dashboard if it is stuck.
+- **`Ash.Error.Forbidden`.** You are not an admin of the site you passed as
+  `tenant:`.
+- **`KilnCMS.Accounts.Errors.AccountErased`.** The member's account was
+  erased; there is nothing to comp.
+- **An `incomplete` membership with no subscription id is not refused**, but
+  the member may already have paid: a checkout whose
+  `checkout.session.completed` event is delayed looks the same to Kiln.
+  Before comping an `incomplete` member, check the provider's dashboard for a
+  subscription of theirs.
+- **Memberships comped before this check** (1.12.0 and earlier) may still be
+  billed. Kiln ignores their provider events
+  (`comped_not_provider_managed`), so find them in the provider's dashboard
+  and cancel the subscriptions there.
 
 ### Webhook setup
 
@@ -323,7 +424,7 @@ is `ignored` with the reason in its `error` column:
 |---|---|---|
 | `other_subscription` | The membership is entitling (`active` or `past_due`) and holds a subscription id, and the event is about a different subscription. Also a row that does not entitle, in the cases under the list below, and a cancellation (`customer.subscription.deleted`) for a subscription other than the stored one, on any row. | Logged at warning. It can mean the provider is still billing a subscription this membership no longer holds: check the provider's dashboard. A cancellation for a different subscription never overwrites the stored subscription id. |
 | `out_of_order` | The event is older than the last one applied to the **same** subscription. | Compared with the provider's `created` stamp, kept on the row. |
-| `comped_not_provider_managed` | The membership is `comped`. | Every provider event for a comped row is ignored. Comping a paying member does **not** cancel their provider subscription (#3156): cancel it in the provider's dashboard, or the person stays billed. |
+| `comped_not_provider_managed` | The membership is `comped`. | Every provider event for a comped row is ignored. A comp is therefore refused while the provider may still bill the row ([Comp a member](#comp-a-member)), but a membership comped before that check (1.12.0 and earlier) may still hold a live subscription: cancel it in the provider's dashboard, or the person stays billed. |
 
 Details worth knowing:
 
@@ -338,6 +439,18 @@ Details worth knowing:
 - An event with no subscription id, or an entitling row with no stored
   subscription id, is applied: there is nothing to compare, so the check fails
   open.
+- A member who rejoins after a cancellation restarts the same row
+  ([Choosing a tier you already hold](#choosing-a-tier-you-already-hold)),
+  which drops the old subscription's id and keeps the stamp. The old
+  subscription's late events still resolve to the row, by the membership id in
+  their metadata, but a cancellation for it is ignored (`other_subscription`)
+  and an event older than the stamp is `out_of_order`, so neither can cancel
+  or revive the new checkout. Two gaps remain. A non-cancelling event for the
+  old subscription created in the same second as the stamp is applied: the
+  restarted row is `incomplete`, and the equal-stamp rule below protects only a
+  `canceled` row. A row with no stamp, one that has had no provider event since
+  1.12.0 (canceled only by an uncomp, say), applies any non-cancelling event
+  for its old subscription after a restart.
 - Events with an equal `created` stamp are applied, except that an event that
   would not cancel never revives a `canceled` row at the same stamp. The
   provider's stamp has one-second resolution, so two *different* events in the
@@ -544,7 +657,16 @@ membership." The account page has the **Manage billing** button, which opens
 the provider's billing portal for a billed member.
 
 Only an `incomplete` or `canceled` membership restarts: its status goes back to
-`incomplete` and the member gets a fresh checkout. Before this guard, a second
+`incomplete` and the member gets a fresh checkout. Restarting a `canceled`
+membership drops the old subscription's id, its period end and its "cancel at
+period end" flag, which describe a subscription that is over, so the old
+subscription's late events can no longer act on the new checkout
+([Late, repeated and foreign events](#late-repeated-and-foreign-events)).
+Restarting an `incomplete` one keeps them: that subscription is the checkout
+still in progress (a payment challenge, say), and it can still be paid. Either
+way the provider customer id stays, and the new checkout reuses it, so the
+member is not duplicated at the provider and **Manage billing** keeps
+working. Before this guard, a second
 click on a live membership reset it to `incomplete`, which dropped the audience
 until the webhook restored it (#2747). The guard is part of the `:start` action
 itself (an `upsert_condition` on the row's status), so a second browser tab

@@ -347,8 +347,13 @@ defmodule KilnCMSWeb.PresentationLive do
       title: socket.assigns.record.title,
       excerpt: Map.get(socket.assigns.record, :excerpt),
       # The view shape the previews render (`BlockComponents.render_block/1`),
-      # as the structured editor broadcasts it — not the save inputs.
-      blocks: KilnCMSWeb.BlockComponents.view_blocks(socket.assigns.record.blocks)
+      # as the structured editor broadcasts it — not the save inputs — with
+      # fragments inlined, or every edit re-blanks them in the previews (#2767).
+      blocks:
+        KilnCMSWeb.BlockViews.document_view_blocks(
+          socket.assigns.record.blocks,
+          socket.assigns.record
+        )
     }
 
     Phoenix.PubSub.broadcast(

@@ -34,7 +34,10 @@ defmodule KilnCMS.Billing.Membership do
   Provider state is applied **only** by the webhook worker and the reconcile
   sweep; `:apply_provider_state` is `forbid_if always()` so no human — admin
   included — can hand-edit it into disagreement with the provider. Comping is the
-  sanctioned admin lever.
+  sanctioned admin lever, and it is refused over a row the provider may still
+  bill (`KilnCMS.Billing.Errors.StillBilled`, #3156): a comped row ignores every
+  provider event, so the operator cancels the subscription at the provider
+  first and comps once the cancellation has arrived.
   """
   use Ash.Resource,
     domain: KilnCMS.Billing,
@@ -78,13 +81,36 @@ defmodule KilnCMS.Billing.Membership do
 
     # Created before redirecting to checkout so the provider session metadata can
     # carry a stable membership id. Upserts, so re-clicking "join" reuses an
-    # abandoned row rather than violating the identity — and `upsert_fields` is
-    # narrow so a retry can never clobber provider ids we already hold.
+    # abandoned or ended row rather than violating the identity.
+    #
+    # A restart over a `:canceled` row drops the old subscription (#3157):
+    # its id, period end and cancel flag describe a subscription that is over.
+    # The old subscription's late events still resolve to the row (by the
+    # membership id in their metadata); what changes is
+    # `KilnCMS.Billing.EventGuard`'s verdict on them. With no stored id it
+    # ignores a terminal one as `:other_subscription` and an older one as
+    # `:out_of_order` (the stamp is kept). A non-terminal one created in the
+    # same second as the stamp still applies: the guard's equal-stamp rule
+    # protects only a `:canceled` row, and the row is now `:incomplete`.
+    #
+    # A restart over an `:incomplete` row keeps them: that subscription is
+    # the checkout still in progress (say, mid payment challenge), and
+    # dropping its id would let a comp through `:comp`'s guard while it can
+    # still be paid (#3156). A new checkout replaces it under the guard's
+    # rules for an `:incomplete` row. The provider customer is kept either
+    # way: checkout reuses it so the member is not duplicated at the
+    # provider, and the billing portal needs it.
     create :start do
       accept [:user_id, :tier_id]
       upsert? true
       upsert_identity :one_per_user_and_tier
-      upsert_fields [:status]
+
+      upsert_fields [
+        :status,
+        :provider_subscription_id,
+        :current_period_end,
+        :cancel_at_period_end
+      ]
 
       # Only an abandoned or ended row restarts. A re-click on a live one
       # (`:active`, `:past_due`, `:comped`) must not demote it to `:incomplete`:
@@ -102,7 +128,29 @@ defmodule KilnCMS.Billing.Membership do
       # registration wait for this row, or this row for it.
       change KilnCMS.Accounts.Changes.LockAccount
 
+      # A fresh row starts with no subscription. On conflict the three fields
+      # are computed from the existing row (an atomic in an upsert evaluates
+      # against it, not against the inserted values): cleared on a
+      # `:canceled` row, kept on an `:incomplete` one (see above).
       change set_attribute(:status, :incomplete)
+      change set_attribute(:provider_subscription_id, nil)
+      change set_attribute(:current_period_end, nil)
+      change set_attribute(:cancel_at_period_end, false)
+
+      change atomic_update(
+               :provider_subscription_id,
+               expr(if status == :canceled, do: nil, else: provider_subscription_id)
+             )
+
+      change atomic_update(
+               :current_period_end,
+               expr(if status == :canceled, do: nil, else: current_period_end)
+             )
+
+      change atomic_update(
+               :cancel_at_period_end,
+               expr(if status == :canceled, do: false, else: cancel_at_period_end)
+             )
 
       # Nothing to sell to an account whose registration here awaits approval
       # or was rejected (#2251): its membership row grants nothing.
@@ -163,12 +211,45 @@ defmodule KilnCMS.Billing.Membership do
       accept [:user_id, :tier_id, :note]
       upsert? true
       upsert_identity :one_per_user_and_tier
-      upsert_fields [:status, :note]
+
+      # Like `:start`, the old subscription's id, period end and cancel flag
+      # go (a comped row would otherwise show a stale "Renews on" date); the
+      # provider customer stays.
+      upsert_fields [
+        :status,
+        :note,
+        :provider_subscription_id,
+        :current_period_end,
+        :cancel_at_period_end
+      ]
+
+      # Never over a row the provider may still bill (#3156): a comped row
+      # ignores every provider event, so the provider would go on charging a
+      # member whose cancellation or failed payment never reached the row.
+      # `:incomplete` with a subscription id counts, since a checkout in the
+      # middle of a payment challenge can still be paid. The condition is in
+      # the `ON CONFLICT ... DO UPDATE ... WHERE`, so it holds against a
+      # provider event committing at the same moment; a refused upsert hands
+      # the row back flagged `upsert_skipped`, which `RefuseBilledComp` turns
+      # into `Errors.StillBilled`.
+      upsert_condition expr(
+                         not (status in [:active, :past_due, :incomplete] and
+                                not is_nil(provider_subscription_id))
+                       )
+
+      return_skipped_upsert? true
 
       # As `:start`: the account's row first, refusing an erased one (#2514).
       change KilnCMS.Accounts.Changes.LockAccount
 
       change set_attribute(:status, :comped)
+      change set_attribute(:provider_subscription_id, nil)
+      change set_attribute(:current_period_end, nil)
+      change set_attribute(:cancel_at_period_end, false)
+
+      # Before `RecordTransition`, so a refusal appends no trail row,
+      # recomputes nothing and announces nothing.
+      change KilnCMS.Billing.Changes.RefuseBilledComp
       change KilnCMS.Billing.Changes.RecordTransition
     end
 

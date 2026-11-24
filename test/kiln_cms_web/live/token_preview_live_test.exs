@@ -155,6 +155,83 @@ defmodule KilnCMSWeb.TokenPreviewLiveTest do
     refute html =~ "Published body"
   end
 
+  describe "media and fragments (#2767)" do
+    defp shared_page(audience, text) do
+      Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+        title: "Shared #{text}",
+        slug: "tp-shared-#{System.unique_integer([:positive])}",
+        state: :published,
+        audience: audience,
+        blocks: [%{"_type" => "heading", "text" => text}]
+      })
+    end
+
+    defp guest_draft(audience, blocks) do
+      Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+        title: "Guest Draft",
+        slug: "tp-#{System.unique_integer([:positive])}",
+        state: :draft,
+        audience: audience,
+        blocks: blocks
+      })
+    end
+
+    defp fragment(target),
+      do: %{"_type" => "fragment", "ref" => %{"type" => "page", "id" => target.id}}
+
+    test "the guest sees the video player and the inlined fragment", %{conn: conn} do
+      clip = Ash.UUID.generate()
+      shared = shared_page(:public, "Shared call to action")
+
+      draft =
+        guest_draft(:public, [%{"_type" => "video", "media_id" => clip}, fragment(shared)])
+
+      {:ok, _lv, html} = live(conn, "/preview/#{PreviewToken.sign(draft)}/live")
+
+      assert html =~ ~s(<figure class="kiln-video">)
+      assert html =~ ~s(src="/media/#{clip}/stream")
+      assert html =~ "Shared call to action"
+    end
+
+    # The fired artifact of a `:public` page carries no gated fragment, so its
+    # preview shows none either, whoever holds the link.
+    test "a public draft shows its guest no member fragment", %{conn: conn} do
+      gated = shared_page(:member, "Members only text")
+      draft = guest_draft(:public, [fragment(gated)])
+
+      {:ok, _lv, html} = live(conn, "/preview/#{PreviewToken.sign(draft)}/live")
+
+      refute html =~ "Members only text"
+    end
+
+    # A deliberate choice: the preview shows what this document will publish.
+    # A `:member` page's artifact inlines its `:member` fragments, so the guest
+    # previewing that page sees them, as the members it is for will.
+    test "a member draft shows its guest the member fragment it will publish", %{conn: conn} do
+      gated = shared_page(:member, "Members only text")
+      draft = guest_draft(:member, [fragment(gated)])
+
+      {:ok, _lv, html} = live(conn, "/preview/#{PreviewToken.sign(draft)}/live")
+
+      assert html =~ "Members only text"
+    end
+  end
+
+  # #2769: the guest preview rendered every heading block as an h2.
+  test "the guest preview renders a heading at its own level", %{conn: conn} do
+    draft =
+      Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+        title: "Guest Draft",
+        slug: "tp-#{System.unique_integer([:positive])}",
+        state: :draft,
+        blocks: [%{"_type" => "heading", "text" => "Subsection", "level" => 3}]
+      })
+
+    {:ok, _lv, html} = live(conn, "/preview/#{PreviewToken.sign(draft)}/live")
+
+    assert html =~ "<h3>Subsection</h3>"
+  end
+
   test "an invalid token shows a dead-link notice, never content", %{conn: conn} do
     {:ok, _lv, html} = live(conn, "/preview/garbage-token/live")
 

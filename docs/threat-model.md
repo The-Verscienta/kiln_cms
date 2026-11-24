@@ -241,9 +241,10 @@ build if a resource is ever registered without that authorizer.
   it — still notifies nobody (#757); different news, because the person there
   holds a session rather than a first factor.
 - **CSP & secure headers** — `put_secure_browser_headers` plus a per-request
-  nonce-based Content-Security-Policy on browser pipelines; a narrower static
-  policy for preview/forms/embeds and a relaxed one scoped to the Swagger
-  explorer. Sobelow checks CSP placeholders in CI.
+  nonce-based Content-Security-Policy on browser pipelines, public form
+  submissions and the `/newsletter` pages included (#2715); a narrower static
+  policy for the token preview endpoint and form embeds (which swap in their
+  own embed policy) and a relaxed one scoped to the Swagger explorer. Sobelow checks CSP placeholders in CI.
 - **CSRF** — `protect_from_forgery` on browser and LiveView pipelines. Token
   APIs are cookieless (bearer only) and so are not CSRF-exposed. Public form
   submission and RFC 8058 one-click unsubscribe are deliberately CSRF-free;

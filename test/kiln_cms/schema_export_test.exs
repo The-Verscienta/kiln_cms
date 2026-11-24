@@ -662,9 +662,18 @@ defmodule KilnCMS.SchemaExportTest do
         tenant: org
       )
 
+      # The other site lays out a section of its own field by the same name.
+      other = org("sx-other")
+
+      CMS.create_field_definition!(
+        %{content_type: :page, name: "dose", label: "Dose", section: "Clinical"},
+        actor: actor,
+        tenant: other
+      )
+
       CMS.create_field_section!(%{content_type: :page, name: "Clinical", display: :tab},
         actor: actor,
-        tenant: org("sx-other")
+        tenant: other
       )
 
       def_name = SchemaExport.content_def_name(name)

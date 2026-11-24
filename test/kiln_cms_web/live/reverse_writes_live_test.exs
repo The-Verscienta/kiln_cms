@@ -226,6 +226,116 @@ defmodule KilnCMSWeb.ReverseWritesLiveTest do
     refute has_element?(lv, "#{picker(ctx)}-search")
   end
 
+  describe "editing a connection's details from this side" do
+    setup ctx do
+      definition = CMS.get_field_definition!(field_id(ctx.field), authorize?: false)
+
+      for {name, type} <- [{"quantity", :float}, {"unit", :string}] do
+        CMS.create_field_definition!(
+          %{
+            link_of_id: definition.id,
+            name: name,
+            label: String.capitalize(name),
+            field_type: type
+          },
+          actor: ctx.admin
+        )
+      end
+
+      :ok
+    end
+
+    defp link(post, field, target_id) do
+      CMS.get_post!(post.id, authorize?: false).custom_fields
+      |> Map.get(field)
+      |> Enum.find(&(&1["id"] == target_id))
+      |> Map.get("link")
+    end
+
+    defp edit_details(lv, ctx, source, values) do
+      lv |> element("#{row(ctx, source)}-edit-link") |> render_click()
+
+      lv
+      |> element("#{row(ctx, source)}-link-quantity")
+      |> render_change(%{"_kiln_reverse_link" => %{"reverse-field-post-#{ctx.field}" => values}})
+
+      lv |> element("#{row(ctx, source)}-link-save") |> render_click()
+    end
+
+    test "saves the link values as an edit of the source, keeping the others", ctx do
+      item = %{"id" => ctx.target.id, "link" => %{"quantity" => 9, "unit" => "g"}}
+      source = post!(ctx.admin, "Bread", %{ctx.field => [item, ctx.other.id]})
+      lv = open(ctx.admin, ctx.target)
+
+      assert has_element?(lv, "#{row(ctx, source)}-details", "Quantity:")
+      edit_details(lv, ctx, source, %{"quantity" => "12"})
+
+      assert link(source, ctx.field, ctx.target.id) == %{"quantity" => 12.0, "unit" => "g"}
+      assert ids(source, ctx.field) == [ctx.target.id, ctx.other.id]
+      assert has_element?(lv, "#{root(ctx)}-notice", "Saved the details in “Bread”")
+      refute has_element?(lv, "#{row(ctx, source)}-link-form")
+      assert has_element?(lv, "#{row(ctx, source)}-details", "12")
+    end
+
+    test "on a published source the change waits in its working copy", ctx do
+      item = %{"id" => ctx.target.id, "link" => %{"quantity" => 9}}
+      source = post!(ctx.admin, "Bread", %{ctx.field => [item]}, publish: true)
+      lv = open(ctx.admin, ctx.target)
+
+      edit_details(lv, ctx, source, %{"quantity" => "15"})
+
+      assert link(source, ctx.field, ctx.target.id) == %{"quantity" => 9.0}
+      assert has_element?(lv, "#{root(ctx)}-notice", "Saved to the working copy of “Bread”")
+
+      # The next edit starts from the working copy, not the live value.
+      lv |> element("#{row(ctx, source)}-edit-link") |> render_click()
+      assert has_element?(lv, "#{row(ctx, source)}-link-quantity[value='15.0']")
+    end
+
+    test "cancel writes nothing", ctx do
+      item = %{"id" => ctx.target.id, "link" => %{"quantity" => 9}}
+      source = post!(ctx.admin, "Bread", %{ctx.field => [item]})
+      lv = open(ctx.admin, ctx.target)
+
+      lv |> element("#{row(ctx, source)}-edit-link") |> render_click()
+
+      lv
+      |> element("#{row(ctx, source)}-link-quantity")
+      |> render_change(%{
+        "_kiln_reverse_link" => %{"reverse-field-post-#{ctx.field}" => %{"quantity" => "1"}}
+      })
+
+      lv |> element("#{row(ctx, source)}-link-cancel") |> render_click()
+      assert link(source, ctx.field, ctx.target.id) == %{"quantity" => 9.0}
+      refute has_element?(lv, "#{row(ctx, source)}-link-form")
+    end
+
+    test "a source the editor may not write offers no Edit details, and a forged event writes nothing",
+         ctx do
+      item = %{"id" => ctx.target.id, "link" => %{"quantity" => 9}}
+      source = post!(ctx.admin, "Cake", %{ctx.field => [item]})
+      editor = authed_user(:editor, %{readable_types: ["page", "post"], editable_types: ["page"]})
+      lv = open(editor, ctx.target)
+
+      refute has_element?(lv, "#{row(ctx, source)}-edit-link")
+
+      lv
+      |> with_target(root(ctx))
+      |> render_hook("reverse_link_edit", %{"id" => source.id})
+
+      refute has_element?(lv, "#{row(ctx, source)}-link-form")
+      assert link(source, ctx.field, ctx.target.id) == %{"quantity" => 9.0}
+    end
+  end
+
+  test "a field without link fields offers no Edit details", ctx do
+    source = post!(ctx.admin, "Cake", %{ctx.field => [ctx.target.id]})
+    lv = open(ctx.admin, ctx.target)
+
+    assert has_element?(lv, row(ctx, source))
+    refute has_element?(lv, "#{row(ctx, source)}-edit-link")
+  end
+
   defp field_id(name) do
     :post
     |> CMS.field_definitions_for!(authorize?: false)

@@ -518,6 +518,13 @@ GET /api/json/posts?custom_filter[_not][color]=red
 GET /api/json/posts?custom_filter[_or][0][price][lt]=10&custom_filter[_or][1][_native][title]=Sale
 ```
 
+Two conditions on one field with the same operator need `_and`, because a
+query string cannot repeat a key: in
+`custom_filter[sku][contains]=AB&custom_filter[sku][contains]=12` the
+query-string decoder (Plug) keeps only the last value before Kiln sees it.
+Send `custom_filter[_and][0][sku][contains]=AB&custom_filter[_and][1][sku][contains]=12`
+to apply both.
+
 `_or` / `_and` hold a list of conditions (a map keyed `0`, `1`, … in a query
 string); `_not` holds one condition. A condition is a map of custom field names
 to the operators above, may itself hold `_or` / `_and` / `_not`, and may hold
@@ -1059,6 +1066,8 @@ validation error on the field, in the same shape as an unresolvable target:
 records read `… aren't among the records this field accepts.`). A record the
 field already holds is never re-judged, and removing or reordering is never
 refused. The schema export reports the live selection as `x-kiln-selection`.
+Its `sort` and `filters` keys only configure the editor's picker; they never
+refuse a write.
 A field set to let editors create what they type
 ([extending-content.md](extending-content.md#let-editors-create-what-they-type))
 reports `"create"` there too, but that is an editor shortcut only: the API

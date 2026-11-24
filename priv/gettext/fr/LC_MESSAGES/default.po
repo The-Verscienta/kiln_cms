@@ -1386,6 +1386,21 @@ msgstr "%{sentence} Chaque %{type} les liste sous « %{label} »."
 
 #: lib/kiln_cms_web/field_selection.ex
 #, elixir-autogen, elixir-format
+msgid "%{sentence} Editors can narrow the search by category and tag."
+msgstr "%{sentence} Les éditeurs peuvent affiner la recherche par catégorie et par étiquette."
+
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "%{sentence} Editors can narrow the search by category."
+msgstr "%{sentence} Les éditeurs peuvent affiner la recherche par catégorie."
+
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
+msgid "%{sentence} Editors can narrow the search by tag."
+msgstr "%{sentence} Les éditeurs peuvent affiner la recherche par étiquette."
+
+#: lib/kiln_cms_web/field_selection.ex
+#, elixir-autogen, elixir-format
 msgid "%{sentence} Editors can't add new records from here."
 msgstr "%{sentence} Les éditeurs ne peuvent pas ajouter de nouveaux enregistrements ici."
 
@@ -1452,6 +1467,11 @@ msgstr "Enregistrements %{type} %{states}"
 #, elixir-autogen, elixir-format
 msgid "%{states} records"
 msgstr "Enregistrements %{states}"
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "%{status} (filtered)"
+msgstr "%{status} (filtré)"
 
 #: lib/kiln_cms_web/components/block_discussion_components.ex
 #, elixir-autogen, elixir-format
@@ -3420,6 +3440,11 @@ msgstr "Adresse supprimée — elle peut de nouveau recevoir des e-mails."
 msgid "Address removed. This site can mail it again."
 msgstr "Adresse supprimée. Ce site peut de nouveau lui écrire."
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Adds a select beside the picker's search box, so an editor can look through one category or tag while picking. It does not change what the field accepts. A field shown as a dropdown uses it only when it falls back to search."
+msgstr "Ajoute une liste à côté du champ de recherche du sélecteur, pour qu’un éditeur puisse parcourir une seule catégorie ou étiquette pendant le choix. Cela ne change pas ce que le champ accepte. Un champ affiché en liste déroulante ne l’utilise que lorsqu’il repasse à la recherche."
+
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #, elixir-autogen, elixir-format
 msgid "Adds detail drawn from this block and the rest of the page."
@@ -3669,6 +3694,7 @@ msgstr "Tous les raccourcis pour écrire du texte"
 msgid "All time"
 msgstr "Depuis toujours"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/calendar_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/organize_live.ex
@@ -4059,6 +4085,7 @@ msgstr "Réponses sur /api/ask"
 msgid "Any"
 msgstr "Tous"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/components/field_selection_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -4115,6 +4142,7 @@ msgstr "Tout état"
 msgid "Any status"
 msgstr "Tous les statuts"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -5372,6 +5400,7 @@ msgstr "Vérification impossible"
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/accounts_live.ex
 #: lib/kiln_cms_web/live/automation_live.ex
@@ -5506,6 +5535,8 @@ msgid "Categories"
 msgstr "Catégories"
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#: lib/kiln_cms_web/components/field_selection_components.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/search_palette_live.ex
@@ -6095,6 +6126,7 @@ msgstr "Effacer %{field}"
 msgid "Clear %{group} events"
 msgstr "Effacer les événements %{group}"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -7111,6 +7143,11 @@ msgstr "Impossible de créer le brouillon. Réessayez."
 msgid "Couldn't delete that field."
 msgstr "Suppression de ce champ impossible."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't delete that field: its section's layout could not be removed with it."
+msgstr "Impossible de supprimer ce champ : la mise en page de sa section n’a pas pu être supprimée avec lui."
+
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't delete that form."
@@ -7180,6 +7217,11 @@ msgstr "Impossible de dupliquer ce contenu."
 #, elixir-autogen, elixir-format
 msgid "Couldn't duplicate that form."
 msgstr "Duplication de ce formulaire impossible."
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't duplicate “%{form}”, so nothing was created. Fix the field “%{field}” in this form and try again: %{reason}"
+msgstr "Impossible de dupliquer « %{form} », rien n’a donc été créé. Corrigez le champ « %{field} » de ce formulaire, puis réessayez : %{reason}"
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -7417,6 +7459,16 @@ msgstr "Impossible d'enregistrer le nouvel ordre des champs."
 #, elixir-autogen, elixir-format
 msgid "Couldn't save the new order of item types."
 msgstr "Impossible d'enregistrer le nouvel ordre des types d'élément."
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save the new order, so nothing was moved. Fix the field “%{name}” and try again: %{reason}"
+msgstr "Impossible d’enregistrer le nouvel ordre, rien n’a donc été déplacé. Corrigez le champ « %{name} », puis réessayez : %{reason}"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't save the new order, so nothing was moved: %{reason}"
+msgstr "Impossible d’enregistrer le nouvel ordre, rien n’a donc été déplacé : %{reason}"
 
 #: lib/kiln_cms_web/live/menu_live.ex
 #: lib/kiln_cms_web/live/structure_live.ex
@@ -9049,6 +9101,11 @@ msgstr "Dupliquer"
 msgid "Duplicate %{name}"
 msgstr "Dupliquer %{name}"
 
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "Duplicate %{name}: copies its settings and fields; its entries stay with the original."
+msgstr "Dupliquer %{name} : copie ses réglages et ses champs ; ses réponses restent avec l’original."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Duplicate block"
@@ -9225,6 +9282,11 @@ msgstr "Modifier le bloc %{n} sur la page"
 #, elixir-autogen, elixir-format
 msgid "Edit destination: %{kind}"
 msgstr "Modifier la destination : %{kind}"
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Edit details"
+msgstr "Modifier les détails"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -10998,18 +11060,6 @@ msgstr "Formulaire supprimé."
 #, elixir-autogen, elixir-format
 msgid "Form duplicated (inactive until you activate it)."
 msgstr "Formulaire dupliqué (inactif jusqu'à ce que vous l'activiez)."
-
-#: lib/kiln_cms_web/live/form_live.ex
-#, elixir-autogen, elixir-format
-msgid "Form duplicated (inactive until you activate it). The field “%{old}” was renamed “%{new}” in the copy: that name is reserved for spam protection."
-msgstr "Formulaire dupliqué (inactif jusqu’à ce que vous l’activiez). Le champ « %{old} » a été renommé « %{new} » dans la copie : ce nom est réservé à la protection anti-spam."
-
-#: lib/kiln_cms_web/live/form_live.ex
-#, elixir-autogen, elixir-format
-msgid "Form duplicated, but a field couldn't be copied: %{names}."
-msgid_plural "Form duplicated, but %{count} fields couldn't be copied: %{names}."
-msgstr[0] "Formulaire dupliqué, mais un champ n’a pas pu être copié : %{names}."
-msgstr[1] "Formulaire dupliqué, mais %{count} champs n’ont pas pu être copiés : %{names}."
 
 #: lib/kiln_cms_web/controllers/form_html.ex
 #, elixir-autogen, elixir-format
@@ -13391,6 +13441,11 @@ msgstr "Laisser les éditeurs créer ce qu'ils saisissent"
 msgid "Let editors edit the related record here"
 msgstr "Permettre aux éditeurs de modifier ici l'enregistrement associé"
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "Let editors narrow the search by"
+msgstr "Permettre aux éditeurs d’affiner la recherche par"
+
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "Let editors publish"
@@ -14505,6 +14560,11 @@ msgstr "Nomme la fiche (la recherche la trouve par cette valeur)"
 msgid "Narrow fields of the same section sit side by side in the editor; on a small screen each takes the full row."
 msgstr "Les champs étroits d’une même section se placent côte à côte dans l’éditeur ; sur un petit écran, chacun occupe la ligne entière."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Narrow the results"
+msgstr "Affiner les résultats"
+
 #: lib/kiln_cms_web/components/field_selection_components.ex
 #, elixir-autogen, elixir-format
 msgid "Narrow what editors are offered and what a save may add. It never shows a record someone cannot already read, and it binds admins too. Leave everything empty to allow any record."
@@ -15247,6 +15307,11 @@ msgstr "N'est plus disponible — il a peut-être été supprimé."
 #, elixir-autogen, elixir-format
 msgid "No matches for “%{query}”."
 msgstr "Aucun résultat pour « %{query} »."
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "No matches with these filters."
+msgstr "Aucun résultat avec ces filtres."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -20287,6 +20352,7 @@ msgstr "Enregistrer la destination"
 msgid "Save detail"
 msgstr "Enregistrer le détail"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Save details"
@@ -20385,6 +20451,11 @@ msgstr "Enregistrer la vue"
 msgid "Save your changes before changing this content's state."
 msgstr "Enregistrez vos modifications avant de changer l'état de ce contenu."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Save your changes first."
+msgstr "Enregistrez d’abord vos modifications."
+
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
 #, elixir-autogen, elixir-format
@@ -20420,6 +20491,11 @@ msgstr "Détails enregistrés."
 msgid "Saved on its own"
 msgstr "Enregistré séparément"
 
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Saved the details in “%{title}”."
+msgstr "Détails enregistrés dans « %{title} »."
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Saved the view “%{name}”."
@@ -20430,6 +20506,11 @@ msgstr "Vue « %{name} » enregistrée."
 #, elixir-autogen, elixir-format
 msgid "Saved to the working copy"
 msgstr "Enregistré dans la copie de travail"
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "Saved to the working copy of “%{title}”."
+msgstr "Enregistré dans la copie de travail de « %{title} »."
 
 #: lib/kiln_cms_web/components/content_editor/reverse_field.ex
 #, elixir-autogen, elixir-format
@@ -22386,7 +22467,6 @@ msgstr "Une erreur s'est produite !"
 #: lib/kiln_cms_web/live/experiments_live.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
-#: lib/kiln_cms_web/live/form_live.ex
 #: lib/kiln_cms_web/live/form_settings_live.ex
 #: lib/kiln_cms_web/live/funnel_builder_live.ex
 #: lib/kiln_cms_web/live/funnel_live.ex
@@ -22977,6 +23057,8 @@ msgstr "Valeur TXT"
 msgid "Tab: one tab of the type's tab set"
 msgstr "Onglet : un onglet du jeu d’onglets du type"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#: lib/kiln_cms_web/components/field_selection_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/search_palette_live.ex
 #, elixir-autogen, elixir-format
@@ -24042,8 +24124,13 @@ msgstr "Le contrôle a gagné — le document se lit déjà ainsi ; rien à prom
 
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
-msgid "The copy's autoresponder stays off: %{reason}"
-msgstr "La réponse automatique de la copie reste désactivée : %{reason}"
+msgid "The copy's autoresponder stays off: its subject or body is blank. Fill both in the copy's settings to turn it on."
+msgstr "La réponse automatique de la copie reste désactivée : son objet ou son corps est vide. Remplissez les deux dans les réglages de la copie pour l’activer."
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "The copy's autoresponder stays off: its template names a field the copy doesn't have (%{tokens})."
+msgstr "La réponse automatique de la copie reste désactivée : son modèle cite un champ que la copie n’a pas (%{tokens})."
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -24194,6 +24281,16 @@ msgstr "Le champ est masqué dans l'éditeur tant que ceci est faux. Un champ ma
 #, elixir-autogen, elixir-format
 msgid "The field must be filled in while this is true."
 msgstr "Le champ doit être renseigné tant que ceci est vrai."
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "The field “%{old}” was renamed “%{new}” in the copy: that name is reserved for spam protection."
+msgstr "Le champ « %{old} » a été renommé « %{new} » dans la copie : ce nom est réservé à la protection contre le spam."
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "The field “%{old}” was renamed “%{new}” in the copy: that name is reserved for the submission's language."
+msgstr "Le champ « %{old} » a été renommé « %{new} » dans la copie : ce nom est réservé à la langue de l’envoi."
 
 #: lib/kiln_cms_web/live/content_editor/markdown_import.ex
 #, elixir-autogen, elixir-format
@@ -25877,6 +25974,16 @@ msgstr "Ce site n'utilise pas Meilisearch. La recherche utilise la recherche int
 msgid "This site follows the operator defaults again."
 msgstr "Ce site suit à nouveau les valeurs de l'opérateur."
 
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "This site has more than %{count} categories, so the picker will not show the category select."
+msgstr "Ce site compte plus de %{count} catégories : le sélecteur n’affichera donc pas la liste des catégories."
+
+#: lib/kiln_cms_web/components/field_selection_components.ex
+#, elixir-autogen, elixir-format
+msgid "This site has more than %{count} tags, so the picker will not show the tag select."
+msgstr "Ce site compte plus de %{count} étiquettes : le sélecteur n’affichera donc pas la liste des étiquettes."
+
 #: lib/kiln_cms/security/posture/checks/second_factor.ex
 #, elixir-autogen, elixir-format
 msgid "This site has no administrators or editors of its own."
@@ -26329,6 +26436,11 @@ msgstr "Trop de tentatives — réessayez dans %{seconds} secondes."
 msgid "Too many attempts. Wait a few minutes and try again."
 msgstr "Trop de tentatives. Patientez quelques minutes et réessayez."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Too many categories to list — search by title instead."
+msgstr "Trop de catégories à lister — recherchez plutôt par titre."
+
 #: lib/kiln_cms_web/plugs/rate_limit.ex
 #, elixir-autogen, elixir-format
 msgid "Too many requests"
@@ -26343,6 +26455,11 @@ msgstr "Trop de requêtes. Réessayez dans %{seconds} s."
 #, elixir-autogen, elixir-format
 msgid "Too many suggestions requested. Try again in %{seconds}s."
 msgstr "Trop de suggestions demandées. Réessayez dans %{seconds} s."
+
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
+#, elixir-autogen, elixir-format
+msgid "Too many tags to list — search by title instead."
+msgstr "Trop d’étiquettes à lister — recherchez plutôt par titre."
 
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #, elixir-autogen, elixir-format
@@ -26645,6 +26762,7 @@ msgstr "Exigence de connexion en deux étapes modifiée"
 msgid "Two-step sign-in settings saved."
 msgstr "Réglages de la connexion en deux étapes enregistrés."
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/analytics_live.ex
 #: lib/kiln_cms_web/live/calendar_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -26787,6 +26905,7 @@ msgstr "Peu organisé"
 msgid "Undo"
 msgstr "Annuler"
 
+#: lib/kiln_cms_web/components/content_editor/reference_picker.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
@@ -28638,6 +28757,11 @@ msgstr "Vous n'avez pas l'autorisation de modifier la connexion en deux étapes 
 msgid "You don't have permission to change this."
 msgstr "Vous n'avez pas la permission de modifier ceci."
 
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to create forms."
+msgstr "Vous n’avez pas l’autorisation de créer des formulaires."
+
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to decide registrations on this site."
@@ -28658,6 +28782,16 @@ msgstr "Vous n'avez pas la permission de supprimer cela."
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to do that."
 msgstr "Vous n'avez pas la permission de faire cela."
+
+#: lib/kiln_cms_web/live/form_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to duplicate forms."
+msgstr "Vous n’avez pas l’autorisation de dupliquer des formulaires."
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to edit form fields."
+msgstr "Vous n’avez pas l’autorisation de modifier les champs de formulaire."
 
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -29619,6 +29753,11 @@ msgstr "contrôle"
 msgid "could not be checked against the schema"
 msgstr "n'a pas pu être vérifié selon le schéma"
 
+#: lib/kiln_cms/cms/validations/section_carried.ex
+#, elixir-autogen, elixir-format
+msgid "could not be checked against the type's fields"
+msgstr "n’a pas pu être vérifiée par rapport aux champs du type"
+
 #: lib/kiln_cms_web/live/branding_live.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
@@ -30156,6 +30295,11 @@ msgstr "n'est pas %{value}"
 msgid "is not a backup directory id"
 msgstr "n'est pas un identifiant de répertoire de sauvegarde"
 
+#: lib/kiln_cms/cms/validations/section_carried.ex
+#, elixir-autogen, elixir-format
+msgid "is not a section any top-level field of this type is in"
+msgstr "n’est une section d’aucun champ de premier niveau de ce type"
+
 #: lib/kiln_cms/cms/field_schema.ex
 #, elixir-autogen, elixir-format
 msgid "is not a valid JSON Schema"
@@ -30226,6 +30370,11 @@ msgstr "est publié"
 #, elixir-autogen, elixir-format
 msgid "is reserved for spam protection"
 msgstr "est réservé à la protection anti-spam"
+
+#: lib/kiln_cms/cms/validations/reserved_field_name.ex
+#, elixir-autogen, elixir-format
+msgid "is reserved for the submission's language"
+msgstr "est réservé à la langue de l’envoi"
 
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
@@ -31573,6 +31722,11 @@ msgstr "« %{name} » contient %{count} étiquette(s). Supprimer le groupe quand
 msgid "“%{name}” is reserved for spam protection: a visitor who fills this field has their submission discarded. Give it another machine name."
 msgstr "« %{name} » est réservé à la protection anti-spam : l’envoi d’un visiteur qui remplit ce champ est rejeté. Donnez-lui un autre nom machine."
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "“%{name}” is reserved for the submission's language: a visitor's answer to this field is also recorded as the language the submission was sent in. Give it another machine name."
+msgstr "« %{name} » est réservé à la langue de l’envoi : la réponse d’un visiteur à ce champ est aussi enregistrée comme la langue de l’envoi. Donnez-lui un autre nom machine."
+
 #: lib/kiln_cms_web/live/taxonomy_live.ex
 #, elixir-autogen, elixir-format
 msgid "“%{name}” is used by %{count} item(s). Delete it anyway? The links will be removed."
@@ -31589,6 +31743,11 @@ msgid "“%{title}” can't be deleted for good: 1 record still links to it thro
 msgid_plural "“%{title}” can't be deleted for good: %{count} records still link to it through “%{field}”, which doesn't allow that. Remove the links first, or change the field's setting under Fields."
 msgstr[0] "« %{title} » ne peut pas être supprimé définitivement : %{count} enregistrement y est encore lié par « %{field} », qui ne l’autorise pas. Retirez d’abord le lien, ou changez le réglage du champ dans Champs."
 msgstr[1] "« %{title} » ne peut pas être supprimé définitivement : %{count} enregistrements y sont encore liés par « %{field} », qui ne l’autorise pas. Retirez d’abord les liens, ou changez le réglage du champ dans Champs."
+
+#: lib/kiln_cms_web/components/content_editor/reverse_field.ex
+#, elixir-autogen, elixir-format
+msgid "“%{title}” no longer connects to this record."
+msgstr "« %{title} » n’est plus connecté à cet enregistrement."
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format

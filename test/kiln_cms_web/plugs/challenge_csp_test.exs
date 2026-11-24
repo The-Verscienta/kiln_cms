@@ -176,6 +176,22 @@ defmodule KilnCMSWeb.Plugs.ChallengeCspTest do
       enable!()
       assert policy(ChallengeCsp.widen_for_forms(build_conn(), Challenge.config())) == nil
     end
+
+    # #2715: the `:public_form` pipeline now sends a nonce policy, and the
+    # refused re-render of a form that draws a widget widens it. Both have to
+    # survive: the nonce for the layout's theme script, the provider for the
+    # widget.
+    test "an on-site re-render keeps the nonce and adds the provider", %{conn: conn} do
+      enable!()
+      form = KilnCMS.FormFixtures.form!(%{challenge: :always})
+
+      conn = conn |> unique_ip() |> post("/forms/#{form.slug}", %{"email" => "nope"})
+
+      assert_inline_scripts_run(conn, 422)
+      script_src = conn |> policy() |> directive("script-src")
+      assert script_src =~ ~r/^script-src 'self' 'nonce-[^']+' #{Regex.escape(@origin)}$/
+      assert directive(policy(conn), "frame-src") =~ @origin
+    end
   end
 
   test "forms being available does not widen the auth pages", %{conn: conn} do
