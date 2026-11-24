@@ -51,7 +51,8 @@ else.
 
   which moves the long form to docs/changelog/ and leaves the summary here.
   `mix kiln.changelog --check` runs in precommit and CI; it holds Unreleased
-  entries to three lines and fails on an entry with nowhere to link.
+  entries to three lines and fails on an entry with nowhere to link, or on
+  text in a section that is not part of a `- ` entry.
 -->
 
 ## [Unreleased]
@@ -79,6 +80,8 @@ else.
 - **A large WordPress, Ghost or envelope import no longer loses its media after two minutes: each image download has its own 60-second deadline, a slow image is listed by URL, and an unresponsive host is skipped after three timeouts in a row (#2720).**
   WordPress and Ghost imports now print `media:` and `records:` progress. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#import-media-per-asset-deadline))
+- **`mix kiln.changelog --check` fails on text in a bullet section that is not part of a `- ` entry, naming its line, and `--condense` refuses to run rather than delete it (#2732).**
+  ([long form](docs/changelog/unreleased.md#changelog-stray-lines))
 
 ## [1.12.1] - 2026-11-23
 
