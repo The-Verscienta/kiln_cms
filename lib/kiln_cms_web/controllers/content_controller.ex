@@ -47,6 +47,7 @@ defmodule KilnCMSWeb.ContentController do
   alias KilnCMSWeb.EventIndex
   alias KilnCMSWeb.Params
   alias KilnCMSWeb.Plugs.ChallengeCsp
+  alias KilnCMSWeb.Plugs.PublicCache
   alias KilnCMSWeb.Plugs.PublicJsBundle
   alias KilnCMSWeb.Plugs.UrlLocale
   alias KilnCMSWeb.SharedCache
@@ -1678,7 +1679,7 @@ defmodule KilnCMSWeb.ContentController do
     conn
     |> SharedCache.put_public()
     |> put_resp_header("vary", "Accept-Language")
-    |> put_resp_header("etag", etag(record, current_org_id(conn), validators, locale(conn)))
+    |> put_resp_header("etag", etag(record, conn, validators))
   end
 
   # `Content-Language` names the reader's language, the URL's: the chrome and
@@ -1710,6 +1711,10 @@ defmodule KilnCMSWeb.ContentController do
   # autodiscovery, branding, code injection and calendar links live in `<head>`
   # but are not columns on the content row, so a settings save must move the
   # ETag or a revalidating client keeps a 304 body whose links are already wrong.
+  # The site's base URL is named outright (#3194), not left to a head-generation
+  # bump: a host-cache refill can race a bump, and a node that misses the
+  # broadcast keeps its old token, either of which would pin old URLs behind a
+  # 304. `BustSiteUrls` still drops the aggregates built from it.
   #
   # `validators.forms` (#2249, `forms_digest/2`) is appended only when the page
   # renders a form. It stays apart from the payload digest because it also
@@ -1729,9 +1734,22 @@ defmodule KilnCMSWeb.ContentController do
   # The chrome's locale is named too (#2595): `/fr/x` and `/x` can be answered
   # by the same record, around it French chrome at one and English at the
   # other, and a validator from one must never 304 a request for the other.
-  defp etag(record, org_id, validators, chrome_locale) do
+  #
+  # The tag is weak (#2766): it names the inputs, not the bytes, and the page is
+  # the same whatever its encoding. Bandit will not compress a response that
+  # carries a strong ETag, so a strong one sent every page out uncompressed.
+  defp etag(record, conn, validators) do
+    org_id = current_org_id(conn)
+    chrome_locale = locale(conn)
+
+    # The site's own base URL as this request renders it (#3194): canonical,
+    # hreflang and Open Graph URLs are built from it, so the tag names exactly
+    # the URLs in the body, whatever a host cache or a missed bust left behind.
+    base_url = KilnCMSWeb.Tenant.base_url(KilnCMSWeb.Tenant.current_org(conn))
+
     raw =
       "#{record.id}:#{record.locale}:#{record.updated_at}:#{record.published_version_id}" <>
+        ":#{base_url}" <>
         ":#{record.seo_title}:#{record.seo_description}" <>
         ":#{KilnCMSWeb.Robots.directive(record)}" <>
         ":#{KilnCMS.Cache.head_generation(org_id)}" <>
@@ -1741,14 +1759,14 @@ defmodule KilnCMSWeb.ContentController do
         ":" <> KilnCMSWeb.BuildFingerprint.fingerprint()
 
     digest = :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower) |> binary_part(0, 16)
-    ~s("#{digest}")
+    ~s(W/"#{digest}")
   end
 
+  # Weak comparison (RFC 9110 §13.1.2), as `If-None-Match` requires: the
+  # validator may come back with or without `W/` (a compressing CDN adds it),
+  # inside a list, or as `*`.
   defp delivery_fresh?(conn, record, validators) do
-    case get_req_header(conn, "if-none-match") do
-      [] -> false
-      tags -> etag(record, current_org_id(conn), validators, locale(conn)) in tags
-    end
+    PublicCache.fresh?(conn, etag(record, conn, validators))
   end
 
   # The header and footer menus as `Layouts.public/1` renders them (#2765):

@@ -123,6 +123,10 @@ else.
 - **Collaborative editing (the `:collab_prototype` flag, off in production builds): prose typed after a quick rejoin now reaches the record, and a stored room state that won't decode is moved aside to a `corrupt:` row instead of failing every join to that document ([#2756](https://github.com/The-Verscienta/kiln_cms/issues/2756)).**
   ([long form](docs/changelog/unreleased.md#collab-writeback-corrupt-state))
 
+- **Public pages carry a weak `ETag`, so they leave Kiln compressed and a `W/`, listed or `*` `If-None-Match` gets a `304`; a site's slug or custom-domain change moves its pages' `ETag`s and drops its cached sitemaps, feeds and `llms.txt` (#2766, #3194).**
+  Every page's `ETag` changes once on upgrade: one `200` per revalidating client.
+  ([long form](docs/changelog/unreleased.md#public-page-weak-etag))
+
 - **Content editor: unsaved Settings on a live page survive the text autosave, and Unpublish, the other workflow buttons, Move to trash, Mark reviewed and Parent refuse until you save them instead of dropping them ([#2776](https://github.com/The-Verscienta/kiln_cms/issues/2776), [#2777](https://github.com/The-Verscienta/kiln_cms/issues/2777)).**
   ([long form](docs/changelog/unreleased.md#editor-unsaved-settings-kept))
 

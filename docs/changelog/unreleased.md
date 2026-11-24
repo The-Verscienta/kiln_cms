@@ -265,6 +265,19 @@ carries the reasoning.
   ([#2756](https://github.com/The-Verscienta/kiln_cms/issues/2756))
 
 
+<a id="public-page-weak-etag"></a>
+
+- **Public pages carry a weak `ETag`, so they leave Kiln compressed and revalidate however a CDN or browser sends the tag back; a change to a site's slug or custom domain now moves its pages' `ETag`s and drops what was cached under its old URLs (#2766, #3194).**
+  - **Compression (#2766).** A published page sent a strong `ETag` (`"…"`), and Bandit does not compress a response with a strong validator, so every shared-cacheable page went out uncompressed whatever the client's `Accept-Encoding`. The tag is now weak (`W/"…"`), which is also what it always was in fact: a digest of what the page is built from, not of its bytes. Pages are now gzipped (or `deflate`d) like the rest of the site's responses. Private responses (an experiment variant, a passphrase lock) still carry no `ETag`, and image variants keep their strong one.
+  - **Revalidation (#2766).** `If-None-Match` was matched against the exact header value, so a tag sent back with a `W/` a compressing CDN had added, a tag inside a comma-separated list, or `*` never got a `304`. It now uses the weak comparison RFC 9110 requires, as the JSON APIs and fired artifacts already did: each of those forms gets a bodyless `304`, and any other tag gets the page.
+  - **Slug or custom domain (#3194).** Canonical, hreflang and Open Graph URLs are built from the site's base URL, which was not part of the page's `ETag`, so after a site's custom domain or slug changed, a browser or CDN revalidating a page kept getting `304`s for the copy that named the old host. The `ETag` now names the base URL the page was rendered with. When an org's `slug` or `custom_domain` changes, Kiln also, once the save commits, drops the org's cached host lookups and its sitemaps and `llms.txt` on every node, moves its head generation, drops its feeds, and purges its CDN key when `KILN_CDN_PURGE_URL` is set. A save that changes neither field does none of this. Fired artifacts are not re-fired: a byline linking to another record keeps the old host until the document is next fired ([Change the slug or custom domain](../multi-tenancy.md#change-the-slug-or-custom-domain)).
+  - **On upgrade.** Every page's `ETag` changes once, so each client or CDN holding a page gets one `200` in place of a `304` on its next revalidation. Nothing to do, and rolling the pin back costs the same one round of `200`s.
+  - **For developers.** `KilnCMSWeb.Tenant.host_cache_keys/1` lists the host-cache keys an org can be cached under, and `KilnCMS.Accounts.Changes.BustSiteUrls` runs on `Organization :update`.
+  No migration, no configuration.
+  ([#2766](https://github.com/The-Verscienta/kiln_cms/issues/2766), [#3194](https://github.com/The-Verscienta/kiln_cms/issues/3194))
+
+
+
 <a id="editor-unsaved-settings-kept"></a>
 
 - **Content editor: unsaved Settings edits on a live page are no longer thrown away by the text autosave or by a button that reloads the form (#2776, #2777).**
