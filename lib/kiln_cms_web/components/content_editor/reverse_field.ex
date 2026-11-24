@@ -214,7 +214,8 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
         actor: actor,
         tenant: tenant,
         offset: offset,
-        limit: @page_size
+        limit: @page_size,
+        load: ReferencePicker.thumb_load()
       )
 
     # A page past the end (rows removed since) falls back to the last page.
@@ -285,11 +286,9 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
   @impl true
   def render(assigns) do
     assigns =
-      assign(
-        assigns,
-        :root,
-        "reverse-field-#{assigns.reverse.source_type}-#{assigns.reverse.field}"
-      )
+      assigns
+      |> assign(:root, "reverse-field-#{assigns.reverse.source_type}-#{assigns.reverse.field}")
+      |> assign(:thumbs?, Enum.any?(assigns.rows, &ReferencePicker.thumb(&1.source)))
 
     ~H"""
     <div
@@ -340,6 +339,7 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
           id={"#{@root}-#{row.source.id}"}
           item={item(row, @reverse)}
           readonly
+          thumb_slot={@thumbs?}
         >
           <:extra>
             <.connection_details
@@ -584,7 +584,8 @@ defmodule KilnCMSWeb.ContentEditor.ReverseField do
       title: source.title,
       state: source.state,
       type_label: reverse.source_label,
-      href: ~p"/editor/content/#{reverse.source_type}/#{source.id}"
+      href: ~p"/editor/content/#{reverse.source_type}/#{source.id}",
+      thumb: ReferencePicker.thumb(source)
     }
   end
 

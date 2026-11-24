@@ -224,6 +224,28 @@ UI" workflow, scoped to fields.
   field is next written, when an item of a type no longer allowed is refused
   by name. The schema export reports the allowed types of every reference
   field as `x-kiln-target-types`.
+- **Thumbnails in the picker (#3223)**: each search result, each picked row
+  and each row of a reverse field shows a small thumbnail of its record's
+  **Featured image**, so records with similar titles are easy to tell apart.
+  There is nothing to turn on, and no setting per field. The thumbnail is the
+  image's generated `thumb` variant, or a video's poster frame. An image
+  400 px wide or narrower gets no `thumb` (variants never upscale), so the
+  picker shows its original, which is already that small; it never loads a
+  larger original. A record shows no thumbnail when it has no featured
+  image, when the image is in the trash, or when a wider image has no
+  `thumb` variant because its variants were never generated or failed. A video
+  without a poster frame, an audio file or a document shows none either. For
+  an image whose variants are missing, an admin's **Regenerate variants** on
+  `/media` (or
+  `mix kiln.media.regenerate_variants --all`, see
+  [Bulk regeneration](media-pipeline.md#bulk-regeneration)) writes the
+  missing ones. When some rows of a list have a thumbnail, the others keep an
+  empty square of the same size so the titles line up; a list where no row
+  has one looks as it did before. The thumbnail is decorative (`alt=""`): a
+  screen reader hears the same option and row names as before. The native
+  editor input **Dropdown list** can't show images, but the row it fills in
+  does. The featured image is read with the list, as the editor, in one
+  query per type searched, not one per record.
 - **Bylines (`schema_org_property`)**: a `:reference` field may say what its
   targets are to the page in schema.org terms, `:author` or `:contributor`.
   The fired `:json_ld` main node then carries one `Person` per readable
