@@ -108,6 +108,13 @@ defmodule KilnCMSWeb.ContentEditor.InspectorHistoryComponent do
                   >
                     {gettext("Live published")}
                   </span>
+                  <span
+                    :if={Map.get(version, :change_note)}
+                    id={"version-note-#{version.id}"}
+                    class="block text-xs italic text-base-content/70"
+                  >
+                    {gettext("Why: %{note}", note: version.change_note)}
+                  </span>
                 </span>
               </span>
               <button

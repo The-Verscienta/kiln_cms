@@ -7,6 +7,10 @@ carries the reasoning.
 
 ## Upgrade notes
 
+<a id="change-note-upgrade"></a>
+
+- **Run `mix ash.migrate` for change notes (#3255).** The migration adds a nullable text column, `change_note`, to `posts_versions`, `entries_versions` and `pages_versions`, and `change_note_types` (a text array, default empty) to `site_editorial_settings`. No backfill: every existing version reads as an edit nobody explained. **Overlays** with their own content types run `MIX_ENV=dev mix ash.codegen` after the bump, which adds the column to each of their `*_versions` tables, as `change_severity` needed in 1.9.
+
 <a id="edit-inline-option-upgrade"></a>
 
 - **Run `mix ash.migrate` for the `edit_inline` column (#2283).** The migration adds one nullable boolean, `field_definitions.edit_inline`, with no default and no backfill. Nothing in an older release reads it, so the column can stay after a rollback.
@@ -60,6 +64,14 @@ carries the reasoning.
   - **Stored as** `"add_new": false` in the field's `selection` (#2285); only the off value is stored, so a field that never changes it keeps the selection it had. `"add_new"` must be `true` or `false`, and `false` beside `"create"` is refused (*create needs add_new*); unticking the box in the admin clears create-on-type for you.
   - **Not a filter, not access control.** It narrows no read: the search lists what it did before. An editor who may create the type can still create the record from its own screen. The server checks it too, so a forged create event from the picker creates nothing.
   - **Outside the editor.** `GET /api/schema` reports it in `x-kiln-selection` when off; field sync carries it with the rest of `selection`. No migration.
+
+<a id="change-note"></a>
+
+- **An edit can say why, and the editor can ask (#3255).** Versions recorded what changed and who changed it; now they can record why.
+  - **Everywhere a note can be given.** `:update`, `:publish`, `:publish_changes` and `:restore_version` take an optional `change_note` (plain text, up to 2000 characters, trimmed; blank is none): over JSON:API (`change_note` attribute on `PATCH` and the publish route), GraphQL (`update*` / `publish*` mutations), MCP (`update_page` / `update_post` / `update_entry`) and in code. It lands on that edit's version row (`change_note`), and the editor's History shows *Why: …* under the version.
+  - **Asking for one.** The Safety fields page (`/editor/safety-fields`) has an **Ask why on every change** checkbox per content type (stored as `change_note_types` on the site's editorial settings). For a listed type the editor shows **Why this change?** under the action bar; a draft's **Save** and **Publish changes** are refused until it is filled in (*Say why you made this change, then save again.*), and the note is cleared once the write lands. A published record's working-copy saves (and autosaves) take no note: the change readers see is Publish changes, which does.
+  - **Only the editor asks.** The API, MCP, the reverse field, inline record cards, scheduled publishes and internal jobs are never refused for leaving a note out, the same posture change severity takes: a surface that cannot ask must not fail for it.
+  - **In code.** `KilnCMS.CMS.ChangeNotes` (`required?/2`, `normalize/1`), `Changes.RecordChangeNote` (into `paper_trail_metadata`, before `RecordChangeSeverity`), and the `require_change_note` context marker for a caller that does ask.
 
 <a id="flexible-media-reference"></a>
 
