@@ -2289,10 +2289,10 @@ What to know before relying on it:
 - **Draft or working copy.** A draft is updated in place. A published record
   gets `save_working_copy` with the title as `working_title`; its live text
   does not change until that record's own **Publish changes**.
-- **Not in the card yet.** Creating a new record and opening its card on
-  create, saving every card with the parent, and fields other than the plain
-  types above. The title is read-only for a type with a title template, and
-  the record you are editing never gets a card on its own field.
+- **Not in the card yet.** Fields other than the plain types above, and a
+  relationship field inside the card (the card is one level deep). The title
+  is read-only for a type with a title template, and the record you are
+  editing never gets a card on its own field.
 - **The related record's own permissions decide.** A card is offered only for a
   connected record the editor may change, checked per record (a published
   record's working copy counts). A record the editor cannot read stays
