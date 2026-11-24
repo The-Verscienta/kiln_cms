@@ -134,8 +134,11 @@ defmodule KilnCMS.OrgSettingsSystemActorTest do
           end)
         end)
 
-      assert log =~ "registration approval lookup failed"
-      refute log =~ "admin allowlist lookup failed"
+      # The `== :off` above is the check that the allowlist read was not
+      # refused: a fresh org has no last-known value, so a refused read would
+      # answer `:unavailable`. (The allowlist's own degrade line is rate
+      # limited suite-wide, so its absence from the log proves nothing.)
+      assert log =~ ~r/registration approval lookup failed.*Forbidden/
     end
   end
 

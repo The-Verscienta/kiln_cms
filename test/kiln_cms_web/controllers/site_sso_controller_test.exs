@@ -189,10 +189,12 @@ defmodule KilnCMSWeb.SiteSsoControllerTest do
     {conn, query} = start(conn, org, key)
 
     # Only the registration read is refused (#2535). The unscoped
-    # `OrgSettings.with_actor/2` would refuse every settings read the callback
-    # makes, the sign-in allowlist's among them, and a provider read that
-    # failed under load would answer the same flash; the log line names the
-    # refusal this test means.
+    # `OrgSettings.with_actor/2` would refuse every uncached settings read the
+    # callback makes, and a provider read that failed under load would answer
+    # the same flash. The two log lines name the refusal this test means: the
+    # site's refusal line, and the registration read's degrade carrying the
+    # policy's Forbidden (a pool failure on that same read would carry a
+    # connection error instead).
     {conn, log} =
       with_log(fn ->
         KilnCMS.OrgSettings.with_actor(:registrations, nil, fn ->
@@ -206,6 +208,8 @@ defmodule KilnCMSWeb.SiteSsoControllerTest do
 
     assert log =~
              "Site single sign-on refused on #{org.id}: the site's registration settings could not be read"
+
+    assert log =~ ~r/registration approval lookup failed.*Forbidden/
 
     assert get_session(conn, "user_token") == nil
 
