@@ -311,6 +311,14 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="floor-reads-hits-chunks-exactly"></a>
+
+- **The relevance floor finds a keyword hit's own chunks and blocks however many other rows sit nearer the query (#2814, #2873).** With `:keyword_any` (or `:fuzzy`) in `semantic_floor_legs`, a hit only that leg returned is judged by the nearest of its document's distance and its blocks' and chunks' distances. A long document whose only match is a late passage relies on its chunk, because its head vector never saw that passage.
+  - **What went wrong.** The floor looked those blocks and chunks up with the block leg's nearest-first read, filtered to the hits' ids. Postgres could serve that read from the HNSW index, and a filtered HNSW walk gives up after `hnsw.max_scan_tuples` rows (20 000 by default). When more rows than that sat nearer the query than the hit's own chunk, the chunk never came back, the hit was judged by its head vector alone, and the floor dropped a real match. Whether it happened depended on the query planner's choice, so it came and went. In CI it surfaced as the intermittent `DocumentChunksTest` failure tracked in #2814 and #2873.
+  - **The fix.** The hits are already known, so the floor now reads every embedded block and chunk of those documents by id (new `:for_documents` reads on `BlockEmbedding` and `DocumentChunkEmbedding`) and takes the nearest itself. With no ordering on the vector, the HNSW index cannot serve the read, so nothing is lost to an approximate walk. The cost is bounded by the hits being judged (at most the legs' candidate count) times their blocks and chunks.
+  - **Who is affected.** Only sites that add `:keyword_any` or `:fuzzy` to `SEARCH_SEMANTIC_FLOOR_LEGS`. The default legs judge only semantic hits, which carry their distances already and never ran this lookup.
+  - **Tests.** A new test, run in the `:table_lock` pass (`mix test --only table_lock`), drops the chunk table's btree indexes inside its sandbox and lowers `hnsw.max_scan_tuples`, so a nearest-first read has only the HNSW path. It fails on the old lookup and passes on the new one.
+
 <a id="theme-script-everywhere"></a>
 
 - **The light/dark theme now applies on form answers and newsletter pages, and survives blocked browser storage (#2715, #2773).**

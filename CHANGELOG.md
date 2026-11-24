@@ -122,6 +122,10 @@ else.
 
 ### Fixed
 
+- **With `:keyword_any` among the floor legs, a long document whose only match is a late passage is no longer dropped by the relevance floor on a large site: the floor now finds the document's own chunk however many other rows sit nearer the query (#2814, #2873).**
+  Only deployments that list `:keyword_any` (or `:fuzzy`) in `SEARCH_SEMANTIC_FLOOR_LEGS` are affected. No migration.
+  ([long form](docs/changelog/unreleased.md#floor-reads-hits-chunks-exactly))
+
 - **A form's thank-you, not-found and refused (422) pages and the `/newsletter` sign-up and unsubscribe pages follow the visitor's light or dark theme, and with browser storage blocked the console still loads and the theme still applies, just isn't remembered (#2715, #2773).**
   ([long form](docs/changelog/unreleased.md#theme-script-everywhere))
 
