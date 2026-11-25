@@ -46,7 +46,7 @@ defmodule KilnCMS.Media.StagedUploadClaim do
 
   ## Oban's stager
 
-  The stager (`Oban.Engines.Basic.stage_jobs/3`) is one
+  The stager (Oban.Engines.Basic's `stage_jobs/3`) is one
   `UPDATE … FROM (SELECT id … WHERE scheduled_at <= now LIMIT n)` that takes
   no row lock in its subquery. A claim or renewal that commits between that
   subquery and the stager's update does not stop the job being staged: the
