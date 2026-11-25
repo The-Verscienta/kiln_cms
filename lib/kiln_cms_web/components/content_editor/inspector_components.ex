@@ -1832,7 +1832,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
     do: ngettext("%{count} row", "%{count} rows", length(rows))
 
   defp bare_custom_field_input(assigns) do
-    case field_type_parts(assigns.definition) do
+    case field_type_parts(assigns.definition, assigns[:value]) do
       [] -> scalar_custom_field_input(assigns)
       parts -> composite_custom_field_input(assign(assigns, :parts, parts))
     end
@@ -1886,11 +1886,17 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   # only carries the atom. Without it, the first editor render after boot
   # silently degrades a composite field to a single text input, and submitting
   # that input wipes the stored value.
-  defp field_type_parts(definition) do
+  #
+  # A type that also exports `input_parts/2` (a built-in extension, not part of
+  # the plugin contract: `:address` follows its country) is handed the value
+  # in the form, so its parts can change as the editor edits it.
+  defp field_type_parts(definition, value) do
     with module when not is_nil(module) <- KilnCMS.CMS.FieldTypes.get(definition.field_type),
          true <- Code.ensure_loaded?(module),
          true <- function_exported?(module, :input_parts, 1) do
-      module.input_parts(definition)
+      if function_exported?(module, :input_parts, 2),
+        do: module.input_parts(definition, value),
+        else: module.input_parts(definition)
     else
       _no_parts -> []
     end
