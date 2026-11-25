@@ -789,7 +789,13 @@ The cases that come up:
 `mix kiln.migrations.check` runs on every pull request (the `build` job in
 `ci.yml`). It reads each migration the PR **adds**, under
 `priv/repo/migrations` and every overlay's `projects/*/priv/repo/migrations`,
-and only its forward direction (`up`/`change`). It fails on:
+and only its forward direction (`up`/`change`). The forward direction
+includes every function of the migration module that `up`/`change` reaches,
+whether called directly, through another function or through a capture
+(`execute(&add_fkey/0)`), so a `drop table` moved into a `defp` is judged
+and reported at the `defp`. SQL passed to `repo().query!` or
+`Ecto.Adapters.SQL.query!` is read like `execute`'s, inside an `execute`
+closure too. It fails on:
 
 | Flagged | Why |
 |---|---|
@@ -801,6 +807,14 @@ and only its forward direction (`up`/`change`). It fails on:
 | removing, renaming or retyping a column a `kiln_reporting_v1` view reads, without dropping both views of the pair first | Postgres refuses it while the views exist (see below). A `kiln:contract-ok` marker does not excuse it. |
 | a non-concurrent index on a table listed in `Mix.Tasks.Kiln.Migrations.Check.large_tables/0` | the build blocks writes |
 | `concurrently: true` without `@disable_ddl_transaction true` | the migration would fail at boot |
+| forward code the check cannot read: SQL built at run time (`execute(sql)`, `"ALTER ..." <> x`, `execute_file`), a call into another module (an app module, `Oban.Migration`, `Code.eval_string`), `apply`, a function held in a variable, or `use`/`import` of a module other than `Ecto.Migration` | it could do any of the above unseen, so the check fails closed (#2736). Standard-library modules that never reach the database (`Enum`, `String`, `IO`, `Ecto.Query`, …) and the repo's data functions (`repo().update_all`) are fine. Interpolated SQL is read as before: the literal parts are judged, and the interpolated values are taken to be names. A module attribute (`execute(@backfill)`) or a function of the module that returns a literal is read through. |
+
+To make a flagged statement readable, write it out: literal SQL, or the
+migration DSL in `up`/`change` or a function of the migration module. When
+it has to stay opaque (a backfill module, a library's own migration), excuse
+it with a `kiln:contract-ok` marker as below, whose reason says what the
+code changes. The marker also vouches that it touches no column the
+reporting views read, which the check cannot see either.
 
 The history is exempt. Only the diff against the base is judged, so
 `mix kiln.migrations.check --all` over today's history reports what the
@@ -853,8 +867,10 @@ kiln_reporting_v1.<table>` **and** `kiln_reporting_v1.<table>_field_values`
 (both views of the pair), then re-create the views after it. For a
 definition-table column that means every viewed table's pair. A drop in `up`
 does nothing for `down`, which runs on its own. The check applies to `up`,
-`down` and `change`, to the `alter table` DSL and to raw `ALTER TABLE ...
-DROP COLUMN / RENAME COLUMN / ALTER COLUMN ... TYPE` in an `execute`. The
+`down` and `change` and the module's functions each one calls (a drop in a
+function called before the change counts), to the `alter table` DSL and to
+raw `ALTER TABLE ... DROP COLUMN / RENAME COLUMN / ALTER COLUMN ... TYPE` in
+an `execute` or a `repo().query!`. The
 change is still a contract change, so it also needs the usual
 `kiln:contract-ok` marker, but the marker alone does not satisfy this rule;
 only dropping the views does. Re-creating the views with changed columns is

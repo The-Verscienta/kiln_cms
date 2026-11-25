@@ -598,6 +598,235 @@ defmodule Mix.Tasks.Kiln.Migrations.CheckTest do
     end
   end
 
+  describe "code outside the lexical up/change (#2736)" do
+    # Each shape here used to pass as "none breaks the running release".
+
+    defp line_of(source, line), do: source |> String.split("\n") |> Enum.at(line - 1)
+
+    test "a statement in a helper `up` calls is judged, and reported at the helper" do
+      source =
+        migration(
+          "drop_legacy()",
+          "  defp drop_legacy, do: drop(table(:posts))\n"
+        )
+
+      assert [%{rule: :drop_table, line: line}] = Check.check_source(source, version: @version)
+      assert line_of(source, line) =~ "defp drop_legacy"
+    end
+
+    test "`def up, do: helper()`, and a helper with an `alter` block" do
+      source = """
+      defmodule M do
+        use Ecto.Migration
+        def up, do: tidy_posts()
+
+        defp tidy_posts do
+          alter table(:posts) do
+            remove :legacy
+          end
+        end
+      end
+      """
+
+      assert [:remove_column] == rules(source)
+    end
+
+    test "helpers are followed transitively, through a capture, and in `change`" do
+      source = """
+      defmodule M do
+        use Ecto.Migration
+        def change do
+          Enum.each([:posts, :pages], &drop_one/1)
+        end
+
+        defp drop_one(t), do: step(t)
+        defp step(t) do
+          alter table(t) do
+            modify :views, :bigint, from: :integer
+          end
+        end
+      end
+      """
+
+      assert [:type_change] == rules(source)
+    end
+
+    test "`__MODULE__.helper()` is a local call" do
+      assert [:drop_table] ==
+               rules(
+                 migration(
+                   "__MODULE__.drop_legacy()",
+                   "  def drop_legacy, do: drop(table(:posts))\n"
+                 )
+               )
+    end
+
+    test "every clause of a helper is judged" do
+      helpers = """
+        defp step(:a), do: :ok
+        defp step(:b), do: drop(table(:posts))
+      """
+
+      assert [:drop_table] == rules(migration("step(:a)\nstep(:b)", helpers))
+    end
+
+    test "recursion and cycles end, and a helper reached twice reports once" do
+      helpers = """
+        defp a(n) when n > 0 do
+          b(n)
+          a(n - 1)
+          drop table(:posts)
+        end
+
+        defp a(_), do: :ok
+        defp b(n), do: a(n)
+      """
+
+      assert [:drop_table] == rules(migration("a(3)\nb(2)\na(1)", helpers))
+    end
+
+    test "a helper `up` calls with only additive operations passes" do
+      helpers = """
+        defp expand do
+          alter table(:posts) do
+            add :subtitle, :text
+          end
+
+          create index(:menus, [:org_id])
+          execute("UPDATE posts SET subtitle = title")
+        end
+      """
+
+      assert [] == rules(migration("expand()", helpers))
+    end
+
+    test "a helper only `down` calls is not the forward direction" do
+      source = """
+      defmodule M do
+        use Ecto.Migration
+        def up, do: :ok
+        def down, do: undo()
+        defp undo, do: drop(table(:posts))
+      end
+      """
+
+      assert [] == rules(source)
+    end
+
+    test "a marker in the helper, above the statement, excuses it" do
+      helpers = """
+        defp drop_legacy do
+          # kiln:contract-ok since v0.11.0 — nothing reads posts after 0.11
+          drop table(:posts)
+        end
+      """
+
+      assert [] == rules(migration("drop_legacy()", helpers))
+    end
+
+    test "SQL a closure runs through repo().query! is judged" do
+      up = ~S|execute(fn -> repo().query!("ALTER TABLE posts DROP COLUMN slug") end)|
+      assert [:raw_sql] == rules(migration(up))
+    end
+
+    test "SQL a captured helper runs is judged; only the forward half of execute/2" do
+      helpers = """
+        defp destructive, do: repo().query!("DROP TABLE posts")
+        defp harmless, do: repo().query!("SELECT 1")
+      """
+
+      assert [:raw_sql] == rules(migration("execute(&destructive/0, &harmless/0)", helpers))
+      assert [] == rules(migration("execute(&harmless/0, &destructive/0)", helpers))
+    end
+
+    test "Ecto.Adapters.SQL.query! reads its second argument" do
+      up = ~S|Ecto.Adapters.SQL.query!(repo(), "ALTER TABLE posts RENAME COLUMN a TO b", [])|
+      assert [:raw_sql] == rules(migration(up))
+    end
+
+    test "SQL concatenated with <>: literal parts are read, a run-time part fails closed" do
+      assert [:raw_sql] ==
+               rules(migration(~S|execute("ALTER TABLE posts " <> "DROP COLUMN slug")|))
+
+      assert [:unanalyzable] ==
+               rules(migration(~S|execute("ALTER TABLE posts " <> action)|))
+    end
+
+    test "SQL from a module attribute or a helper returning a literal is read" do
+      attr = ~s|  @drop "ALTER TABLE posts DROP COLUMN slug"\n  @add "SELECT 1"\n|
+      assert [:raw_sql] == rules(migration("execute(@drop)", attr))
+      assert [] == rules(migration("execute(@add)", attr))
+
+      helper = ~s|  defp sql, do: "DROP TABLE posts"\n|
+      assert [:raw_sql] == rules(migration("execute(sql())", helper))
+      assert [:raw_sql] == rules(migration(~S|repo().query!(sql(), [])|, helper))
+    end
+
+    for {up, why} <- [
+          {"execute(sql)", "execute of a variable"},
+          {"execute(@missing)", "execute of an undefined attribute"},
+          {"execute(build_sql(:posts))", "execute of a function this file does not define"},
+          {~S|repo().query!(sql)|, "repo().query! of a variable"},
+          {~S|execute(&Other.sql/0)|, "execute of a remote capture"},
+          {~S|execute_file("priv/sql/drop.sql")|, "execute_file"},
+          {"KilnCMS.Legacy.drop_posts()", "a call into another module"},
+          {"Oban.Migration.up()", "a library's migration"},
+          {~S|Code.eval_string("drop table(:posts)")|, "Code.eval_string"},
+          {"apply(__MODULE__, :drop_legacy, [])", "apply"},
+          {"Kernel.apply(__MODULE__, :drop_legacy, [])", "Kernel.apply"},
+          {"fun.()", "an anonymous function"},
+          {"mod.drop()", "a module held in a variable"}
+        ] do
+      test "fails closed: #{why}" do
+        assert [:unanalyzable] == rules(migration(unquote(up)))
+      end
+    end
+
+    test "fails closed on `use` or `import` of a module whose code is elsewhere" do
+      assert [:unanalyzable] == rules(migration(":ok", "  import KilnCMS.Migrations\n"))
+      assert [:unanalyzable] == rules(migration(":ok", "  use KilnCMS.Migration\n"))
+      assert [] == rules(migration(":ok", "  import Ecto.Query\n"))
+    end
+
+    test "stdlib calls, the repo's data functions and field access are not flagged" do
+      up = ~S"""
+      for row <- repo().all(from(p in "posts", select: %{id: p.id})) do
+        IO.puts(String.trim(to_string(row.id)))
+      end
+
+      repo().update_all("posts", set: [kind: "article"])
+      Enum.each(~w(a b), &IO.puts/1)
+      execute("UPDATE posts SET slug = '#{Kernel.to_string(:x)}'")
+      """
+
+      assert [] == rules(migration(up))
+    end
+
+    test "a contract marker excuses an unanalyzable statement, and only that one" do
+      up = """
+      # kiln:contract-ok since v0.11.0 — the scrub only rewrites job args
+      KilnCMS.Mail.Scrub.run(repo())
+      KilnCMS.Other.run()
+      """
+
+      assert [%{rule: :unanalyzable, line: line}] =
+               Check.check_source(migration(up), version: @version)
+
+      assert line_of(migration(up), line) =~ "KilnCMS.Other.run()"
+    end
+
+    test "a migration from the history that uses closures, captures and attributes reads" do
+      path = "priv/repo/migrations/20260802202045_add_anchor_sequence.exs"
+
+      # Its backfill-then-tighten predates the policy and was always reported;
+      # the closure's SQL, the captures and `@backfill` add nothing.
+      assert [:set_not_null] ==
+               path
+               |> File.read!()
+               |> rules(file: path, columns: Check.columns_before_file(path))
+    end
+  end
+
   describe "reporting view pin (#2295)" do
     @viewed [viewed_tables: ["posts"]]
     @both [viewed_tables: ["posts", "pages"]]
@@ -736,6 +965,63 @@ defmodule Mix.Tasks.Kiln.Migrations.CheckTest do
 
       assert [:reporting_view_pin] ==
                pin_rules("    :ok", @viewed, ~s|execute("ALTER TABLE posts DROP COLUMN title")|)
+    end
+
+    # A fixture whose `up` calls helpers (#2736).
+    defp pin_helpers_rules(up, helpers) do
+      """
+      defmodule KilnCMS.Repo.Migrations.PinHelperFixture do
+        use Ecto.Migration
+
+        def up do
+      #{up}
+        end
+
+        def down, do: :ok
+      #{helpers}
+      end
+      """
+      |> rules(@viewed)
+      |> Enum.filter(&(&1 == :reporting_view_pin))
+    end
+
+    @helpers """
+      defp drop_views do
+        execute("DROP VIEW IF EXISTS kiln_reporting_v1.posts_field_values")
+        execute("DROP VIEW IF EXISTS kiln_reporting_v1.posts")
+      end
+
+      defp change_posts do
+        alter table(:posts) do
+          remove :title
+        end
+      end
+
+      defp raw_change do
+        execute(fn -> repo().query!("ALTER TABLE posts DROP COLUMN title") end)
+      end
+    """
+
+    test "a viewed column changed in a helper is flagged, in the DSL and in a closure" do
+      assert [:reporting_view_pin] == pin_helpers_rules("change_posts()", @helpers)
+      assert [:reporting_view_pin] == pin_helpers_rules("raw_change()", @helpers)
+    end
+
+    test "views dropped by a helper count in the order the helpers are called" do
+      assert [] == pin_helpers_rules("drop_views()\nchange_posts()", @helpers)
+      assert [] == pin_helpers_rules("drop_views()\nraw_change()", @helpers)
+      assert [:reporting_view_pin] == pin_helpers_rules("change_posts()\ndrop_views()", @helpers)
+    end
+
+    test "a helper `down` calls is checked too" do
+      source = pin_migration("    :ok", "    undo()") |> String.replace(~r/end\s*\z/, "")
+
+      source =
+        source <>
+          "  defp undo do\n    alter table(:posts) do\n      remove :title\n    end\n  end\nend\n"
+
+      assert [:reporting_view_pin] ==
+               source |> rules(@viewed) |> Enum.filter(&(&1 == :reporting_view_pin))
     end
 
     test "the field_definitions and type_definitions columns the views read are pinned" do
