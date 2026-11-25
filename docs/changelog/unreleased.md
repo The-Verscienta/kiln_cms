@@ -107,6 +107,16 @@ carries the reasoning.
   - **Types you generated already.** A resource generated with an irregular `--plural` before this release still registers `"<type>s"`. Add `plural: "stories"` to its `use` line to make it match its interfaces; that moves its JSON:API base route and public URLs from `/storys` to `/stories`, so redirect the old paths if anything links to them. No migration.
 
 
+<a id="migrations-check-follows-helpers"></a>
+
+- **`mix kiln.migrations.check` reads the code `up` and `change` reach, not only the code written inside them (#2736).** The expand/contract gate judged the statements lexically inside `def up`/`def change` and nothing else, and read an `execute` argument only when it was a string literal. A `drop table` moved into a `defp` that `up` calls, `execute(fn -> repo().query!("ALTER TABLE posts DROP COLUMN slug") end)` and `execute("ALTER ..." <> x)` all passed as "none breaks the running release", and the reporting-view pin rule missed them too.
+  - **What is followed now.** Every function of the migration module that `up`/`change` reaches, called directly, through other functions, through `__MODULE__.f()` or through a capture (`&drop_one/1`, `execute(&add_fkey/0)`), is judged as part of the forward direction. Each is read once, so recursion and cycles end. A finding points at the line in the helper, and a marker goes above the statement there. Only the forward half of `execute/2` is followed. The reporting-view rule follows `down`'s calls the same way, and a view dropped by a function called before the change counts.
+  - **More SQL is read.** `repo().query!` and `Ecto.Adapters.SQL.query!` are judged like `execute`, inside an `execute` closure too. `execute(@backfill)` reads the attribute, `<>` of literals reads as one string, and a module function that returns a literal is read through. Interpolated SQL is read as before.
+  - **What fails closed.** Forward code the check cannot read is a new `unanalyzable` finding: SQL built at run time (`execute(sql)`, `"ALTER ..." <> x`, `execute_file`), a call into another module (an app module, `Oban.Migration`, `Code.eval_string`), `apply`, a function held in a variable, and `use`/`import` of a module other than `Ecto.Migration`. Standard-library modules that never reach the database and the repo's data functions (`repo().update_all`) pass. Write the statement out, or excuse it with a `kiln:contract-ok` marker whose reason says what the code changes; see `docs/releasing.md`, "The check".
+  - **Existing migrations.** Only added migrations are judged, so nothing already merged is affected. Over the whole history, `--all` reports five more findings than before, all opaque calls: `Oban.Migration.up`, three app-module backfills and one overlay `import`. No earlier finding went away.
+
+
+
 
 
 
