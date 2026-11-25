@@ -59,6 +59,14 @@ carries the reasoning.
   - **Not fixed here.** An envelope import still does not sideload body images that resolve through the envelope's media manifest; they keep hotlinking the source. That is [#3326](https://github.com/The-Verscienta/kiln_cms/issues/3326).
   - **No migration; rolling the pin back is safe.** An older release goes back to the shared 120-second timeout.
 
+<a id="changelog-stray-lines"></a>
+
+- **`mix kiln.changelog` no longer deletes a changelog entry that is not written as a `- ` bullet (#2732).** Every section but Upgrade notes, Breaking and Known issues is read as `- ` bullets with two-space-indented continuation lines, and anything else was skipped without a word. An entry written as a paragraph, with `* ` bullets, or with a continuation line that was not indented counted as no entry at all, so `--check` passed it (no line cap, no link needed), and `--condense` then rewrote `CHANGELOG.md` without that text and archived none of it.
+  - **What `--check` says now.** It fails on any non-blank line in such a section that belongs to no entry, naming the release, the section and each line by its line number in `CHANGELOG.md`, with the fix: start the entry with `- ` and indent its continuation lines by two spaces. This covers released sections too, since `--condense` rewrites those as well.
+  - **What `--condense` does now.** It prints the same report and stops before writing anything.
+  - **Unchanged.** Upgrade notes, Breaking, Known issues and a release's opening paragraphs are prose and keep every line, as before. The real `CHANGELOG.md` already passes.
+
+
 <a id="gen-content-plural"></a>
 
 - **`mix kiln.gen.content` writes an irregular plural into the resource it generates (#2731).** `--plural` (and the plural `--from` takes from a dynamic type's `path_segment`) named the domain's code interfaces and the printed notices, but the generated `use KilnCMS.CMS.Content, type: :story` line had no `plural:`, so the macro fell back to `"<type>s"`. `mix kiln.gen.content Story --plural stories` gave the domain `list_stories` and `search_stories` and promised `/stories/<slug>`, while the resource registered `storys`: its JSON:API routes and public pages lived under `/storys`, and anything dispatching by the registered plural looked for a `list_storys` that was never generated.
