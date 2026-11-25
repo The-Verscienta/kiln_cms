@@ -564,6 +564,7 @@ defmodule KilnCMS.Storage.S3Test do
     end
 
     defp reply_part(conn, _n, {:status, status}), do: Plug.Conn.send_resp(conn, status, "")
+    defp reply_part(_conn, n, :raise), do: raise("part #{n} blew up")
 
     defp part_attempts(n) do
       receive do
@@ -679,6 +680,26 @@ defmodule KilnCMS.Storage.S3Test do
       end)
 
       assert part_attempts(4) == 3
+      refute_received {:mp, :complete, _body}
+      assert_received {:mp, :abort, "up-1"}
+    end
+
+    test "a part whose request crashes fails the store and still aborts the upload" do
+      # The attempt runs unlinked, so a raise in ExAws or Req is the part's
+      # error rather than an exit that takes the caller, and the abort, down.
+      with_part_limits(part_retry_backoff_ms: 1)
+
+      stub_parts(fn
+        2, _attempt -> :raise
+        _n, _attempt -> :ok
+      end)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, {:part_crashed, {%RuntimeError{message: "part 2 blew up"}, _stack}}} =
+                 S3.store("big.mp4", big_source())
+      end)
+
+      assert part_attempts(2) == 1
       refute_received {:mp, :complete, _body}
       assert_received {:mp, :abort, "up-1"}
     end

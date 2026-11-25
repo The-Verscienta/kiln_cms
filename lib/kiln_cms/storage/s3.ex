@@ -545,13 +545,23 @@ defmodule KilnCMS.Storage.S3 do
   # sent once the next attempt, or the abort, goes out. (Bytes the kernel had
   # already buffered can still drain; a part that completes that way after the
   # abort is what the bucket's lifecycle rule is the backstop for.)
+  #
+  # Not linked: a linked attempt that raises or exits (an ExAws or Req crash)
+  # would take the part's stream worker and the caller down with it, and the
+  # upload would never be aborted. Unlinked, a crash is the part's error, and
+  # `multipart_put/5` aborts as for any other.
   defp within(fun, timeout_ms) do
-    task = Task.async(fun)
+    task = Task.Supervisor.async_nolink(KilnCMS.TaskSupervisor, fun)
 
     case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
       {:ok, result} -> result
+      {:exit, reason} -> {:error, {:part_crashed, reason}}
       nil -> {:error, :timeout}
     end
+  rescue
+    # The supervisor is at its `max_children`; the part fails, and the upload
+    # is aborted, rather than the store raising.
+    error in RuntimeError -> {:error, {:part_not_started, Exception.message(error)}}
   end
 
   # What ExAws itself retries, and has retried already by the time it answers:
