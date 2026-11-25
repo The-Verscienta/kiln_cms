@@ -96,6 +96,10 @@ else.
   `POST /api/media/uploads` answers `502 storage_failed` if that job can't be queued. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#direct-upload-cleanup-claim))
 
+- **`mix kiln.gen.content Story --plural stories`, and `--from` a dynamic type whose URL segment isn't `<name>s`, now write `plural:` into the generated resource, so it serves at `/stories` and matches its `list_stories` interfaces instead of registering `storys` (#2731).**
+  Types generated before this keep `storys` until you add `plural:` by hand. No migration.
+  ([long form](docs/changelog/unreleased.md#gen-content-plural))
+
 - **`scripts/staging.sh down` and `up` now refuse a database whose name doesn't look ephemeral (unless `KILN_STAGING_FORCE` is on) and drop or create it on the server in `STAGING_DATABASE_URL`, not libpq's default one; that variable must now be a URL naming the database in its path (#2722).**
   No migration; rolling the pin back is safe. A `down` that relied on dropping on the default server now acts on the URL's.
   ([long form](docs/changelog/unreleased.md#staging-script-guards-drop))

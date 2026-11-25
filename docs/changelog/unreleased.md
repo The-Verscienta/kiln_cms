@@ -97,6 +97,19 @@ carries the reasoning.
 
 
 
+<a id="gen-content-plural"></a>
+
+- **`mix kiln.gen.content` writes an irregular plural into the resource it generates (#2731).** `--plural` (and the plural `--from` takes from a dynamic type's `path_segment`) named the domain's code interfaces and the printed notices, but the generated `use KilnCMS.CMS.Content, type: :story` line had no `plural:`, so the macro fell back to `"<type>s"`. `mix kiln.gen.content Story --plural stories` gave the domain `list_stories` and `search_stories` and promised `/stories/<slug>`, while the resource registered `storys`: its JSON:API routes and public pages lived under `/storys`, and anything dispatching by the registered plural looked for a `list_storys` that was never generated.
+  - **What the generator writes now.** When the plural differs from `"<type>s"`, the `use` line carries it: `use KilnCMS.CMS.Content, type: :story, plural: "stories"`. A regular plural (`Product`, or `--plural products`) is left implicit, so the line is unchanged for those.
+  - **Promoting a dynamic type.** `--from` a type whose `path_segment` is `stories` now generates a resource that serves at `/stories`, so its public URLs stay where they were. A segment that can't name functions (one with a hyphen) still falls back to `"<type>s"`, and the promotion notice still says the URLs move.
+  - **The notice's Tag hint names the right aggregate.** It suggested `count :storie_count` for `stories`, by trimming an `s`; it now says `count :story_count`, after the type, as `Tag` names its own counts.
+  - **Not changed: the table.** The table name still defaults to `"<type>s"` (`storys`); `--plural` never set it, and the notice's `search_vector` migration still names that table. Pass `table:` by hand before the first migration if you want another name.
+  - **Types you generated already.** A resource generated with an irregular `--plural` before this release still registers `"<type>s"`. Add `plural: "stories"` to its `use` line to make it match its interfaces; that moves its JSON:API base route and public URLs from `/storys` to `/stories`, so redirect the old paths if anything links to them. No migration.
+
+
+
+
+
 
 <a id="staging-script-guards-drop"></a>
 
