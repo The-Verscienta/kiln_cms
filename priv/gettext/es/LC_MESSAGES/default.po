@@ -24420,6 +24420,11 @@ msgid_plural "The file converts to %{count} blocks."
 msgstr[0] "El archivo se convierte en %{count} bloque."
 msgstr[1] "El archivo se convierte en %{count} bloques."
 
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "The filter changed during the run, so its proposals were set aside. Propose again for this selection."
+msgstr "El filtro cambió durante la ejecución, así que sus propuestas se dejaron de lado. Vuelve a proponer para esta selección."
+
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
 msgid "The focus keyphrase doesn't appear in any subheading."

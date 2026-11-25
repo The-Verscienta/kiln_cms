@@ -158,6 +158,9 @@ else.
 - **After a Save in the Presentation console, the open text block shows the saved text; it showed the text from before the save, so the next keystroke and Save wrote that old text back over the edit (#2759).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#presentation-edit-after-save))
+- **Organize's tag review sets aside a run that finishes after the filter changed, instead of showing its proposals for the new selection, and a filter change no longer lets a second run start beside the first (#2762).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#organize-stale-run))
 
 ## [1.12.1] - 2026-11-23
 
