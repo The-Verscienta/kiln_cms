@@ -857,4 +857,84 @@ defmodule KilnCMSWeb.InContextEditLiveTest do
       assert block_value(en.id, heading_id, :text) == "EN heading"
     end
   end
+
+  # #2758: both in-product links into this editor left the locale out, so the
+  # `fr` variant's "Visual" button opened, and wrote to, the `en` record that
+  # shares its slug.
+  describe "links from a translation's editor (#2758)" do
+    setup do
+      admin = authed_user(:admin)
+      shared = "incontext-link-#{System.unique_integer([:positive])}"
+      heading_id = Ash.UUID.generate()
+
+      en =
+        CMS.create_page!(
+          %{
+            title: "English linked",
+            slug: shared,
+            locale: "en",
+            blocks: [%{"_type" => "heading", "text" => "EN heading", "id" => heading_id}]
+          },
+          actor: admin
+        )
+
+      fr = KilnCMS.CMS.Translations.create_translation!(:page, en, "fr", actor: admin)
+      fr = CMS.update_page!(fr, %{title: "French linked"}, actor: admin)
+
+      %{admin: admin, en: en, fr: fr, heading_id: heading_id}
+    end
+
+    test "the Visual link opens and edits the fr record, not the en one", %{conn: conn} = ctx do
+      conn = log_in(conn, ctx.admin)
+      {:ok, editor, _html} = live(conn, ~p"/editor/content/page/#{ctx.fr.id}")
+
+      href = link_href(editor, "a[title='Edit on the rendered page']")
+      assert URI.decode_query(URI.parse(href).query) == %{"locale" => "fr"}
+
+      {:ok, lv, html} = live(conn, href)
+      assert html =~ "French linked"
+      refute html =~ "English linked"
+
+      render_hook(lv, "update_block", %{"id" => ctx.heading_id, "value" => "FR via Visual"})
+      lv |> element("#in-context-edit-bar button", "Save") |> render_click()
+
+      assert block_value(ctx.fr.id, ctx.heading_id, :text) == "FR via Visual"
+      assert block_value(ctx.en.id, ctx.heading_id, :text) == "EN heading"
+    end
+
+    test "a preview block's Edit link carries the fr locale", %{conn: conn} = ctx do
+      {:ok, editor, _html} =
+        conn |> log_in(ctx.admin) |> live(~p"/editor/content/page/#{ctx.fr.id}")
+
+      href = link_href(editor, "a[title='Edit this block on the page']")
+
+      assert URI.decode_query(URI.parse(href).query) == %{
+               "locale" => "fr",
+               "focus" => ctx.heading_id
+             }
+    end
+
+    test "without a locale, a slug shared by two variants is refused, not guessed",
+         %{conn: conn} = ctx do
+      assert {:error, {:live_redirect, %{to: "/editor", flash: flash}}} =
+               conn |> log_in(ctx.admin) |> live(~p"/editor/site/page/#{ctx.en.slug}")
+
+      assert flash["error"] =~ "more than one language"
+    end
+
+    test "without a locale, a slug with only a default-locale variant still opens it",
+         %{conn: conn} = ctx do
+      page =
+        CMS.create_page!(%{title: "English only", slug: slug(), locale: "en"}, actor: ctx.admin)
+
+      {:ok, _lv, html} = conn |> log_in(ctx.admin) |> live(~p"/editor/site/page/#{page.slug}")
+
+      assert html =~ "English only"
+    end
+  end
+
+  defp link_href(lv, selector) do
+    [_, href] = Regex.run(~r/href="([^"]+)"/, lv |> element(selector) |> render())
+    String.replace(href, "&amp;", "&")
+  end
 end

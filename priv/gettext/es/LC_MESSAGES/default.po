@@ -25502,6 +25502,11 @@ msgstr "Este contenido cambió en otro lugar. Recargue antes de guardar."
 msgid "This content changed elsewhere. Reload to get the latest before saving."
 msgstr "Este contenido cambió en otro lugar. Recargue para obtener la última versión antes de guardar."
 
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "This content exists in more than one language. Open it from its editor and choose Visual there."
+msgstr "Este contenido existe en más de un idioma. Ábrelo desde su editor y elige Visual allí."
+
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format
 msgid "This content no longer exists — the release will not publish as it stands."
