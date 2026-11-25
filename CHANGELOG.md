@@ -95,6 +95,9 @@ else.
 
 ### Fixed
 
+- **The Experiments form's goal select takes effect, so a funnel-completion experiment can be set up from `/editor/experiments` (#2779).**
+  Picking a goal now shows its target picker (funnel, form or page), and typing a name no longer reloads the document list.
+  ([long form](docs/changelog/unreleased.md#experiment-goal-select))
 - **The Redirects form shows a refused path as an error on its field instead of crashing the page (#2763).**
   An over-long path or locale, the root path, the target's own URL, a missing target and a write the policy refuses no longer lose the form.
   ([long form](docs/changelog/unreleased.md#redirects-refused-path))

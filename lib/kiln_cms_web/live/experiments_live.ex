@@ -31,6 +31,8 @@ defmodule KilnCMSWeb.ExperimentsLive do
   alias KilnCMSWeb.ExperimentPhrases
 
   @max_content_options 500
+  # The goal select's option values; anything else in a change is ignored.
+  @goals ~w(form_submission content_view funnel_completion)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -51,19 +53,17 @@ defmodule KilnCMSWeb.ExperimentsLive do
      |> load_experiments()}
   end
 
+  # A browser posts the whole form on every change, so one event carries the
+  # content type AND the goal (#2779). Both are read from the same payload; a
+  # clause per key would let the first one shadow the other. The document list
+  # is reloaded only when the type actually changed, not on every keystroke
+  # in Name.
   @impl true
-  def handle_event("pick_type", %{"experiment" => %{"content_type" => type}}, socket)
-      when is_binary(type) do
+  def handle_event("pick_type", %{"experiment" => params}, socket) when is_map(params) do
     {:noreply,
      socket
-     |> assign(:new_type, type)
-     |> assign(:new_content_options, content_options(type, socket))
-     |> assign(:new_goal, socket.assigns.new_goal)}
-  end
-
-  def handle_event("pick_type", %{"experiment" => %{"goal" => goal}}, socket)
-      when is_binary(goal) do
-    {:noreply, assign(socket, :new_goal, goal)}
+     |> maybe_pick_type(params["content_type"])
+     |> maybe_pick_goal(params["goal"])}
   end
 
   def handle_event("pick_type", _params, socket), do: {:noreply, socket}
@@ -101,6 +101,19 @@ defmodule KilnCMSWeb.ExperimentsLive do
 
   def handle_event("create", _params, socket),
     do: {:noreply, put_flash(socket, :error, gettext("Something went wrong."))}
+
+  defp maybe_pick_type(%{assigns: %{new_type: type}} = socket, type), do: socket
+
+  defp maybe_pick_type(socket, type) when is_binary(type) do
+    socket
+    |> assign(:new_type, type)
+    |> assign(:new_content_options, content_options(type, socket))
+  end
+
+  defp maybe_pick_type(socket, _type), do: socket
+
+  defp maybe_pick_goal(socket, goal) when goal in @goals, do: assign(socket, :new_goal, goal)
+  defp maybe_pick_goal(socket, _goal), do: socket
 
   # `goal`-specific ids only travel for the goal picked; the others are cleared
   # so a form that was toggled between goals does not save a stale target.
