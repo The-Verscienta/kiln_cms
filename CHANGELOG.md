@@ -124,6 +124,9 @@ else.
 - **A webhook endpoint is no longer auto-disabled by a failure counted against a stale copy: an exhausted delivery now adds one to the failure count in the database, so a success in between resets the run, concurrent failures all count, and the "switched off" alert fires once (#2737).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#webhook-failure-atomic))
+- **A second edit to a federated document is announced even when it lands while the previous `Update` is still fanning out; it was dropped as a duplicate, so followers kept the older content (#2757).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#announce-unique-executing))
 
 - **The daily health sweep now raises a `health_overdue` or `health_expired` event for every stale record, not the same 500 per content type each day (#2738).**
   Its telemetry counts every record too. No migration; rolling the pin back is safe.

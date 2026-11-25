@@ -10,6 +10,8 @@ defmodule KilnCMS.Federation.AnnounceTest do
   use KilnCMS.DataCase, async: false
   use Oban.Testing, repo: KilnCMS.Repo
 
+  import Ecto.Query, only: [where: 3]
+
   alias KilnCMS.CMS
   alias KilnCMS.Federation
   alias KilnCMS.Federation.Announcer
@@ -261,6 +263,60 @@ defmodule KilnCMS.Federation.AnnounceTest do
       CMS.submit_post_for_review!(post, actor: actor)
 
       refute_enqueued(worker: AnnounceWorker)
+    end
+  end
+
+  # #2757: the job reads the live row when it runs, so a duplicate of one that
+  # has not started loses nothing, but a duplicate of one that already read the
+  # row is a newer edit that followers would never see.
+  describe "uniqueness" do
+    defp enqueue_update(org_id, document_id) do
+      %{"org_id" => org_id, "type" => "post", "verb" => "Update", "document_id" => document_id}
+      |> AnnounceWorker.new()
+      |> Oban.insert()
+    end
+
+    defp move_to(%Oban.Job{id: id}, state) do
+      {1, _} =
+        Oban.Job
+        |> where([j], j.id == ^id)
+        |> KilnCMS.Repo.update_all(set: [state: state])
+    end
+
+    test "an Update enqueued while the previous one executes is queued, not dropped",
+         %{org_id: org_id} do
+      document_id = Ecto.UUID.generate()
+
+      assert {:ok, %{conflict?: false} = running} = enqueue_update(org_id, document_id)
+      move_to(running, "executing")
+
+      assert {:ok, %{conflict?: false} = queued} = enqueue_update(org_id, document_id)
+      assert queued.id != running.id
+      assert queued.state == "available"
+    end
+
+    test "an Update enqueued after the previous one completed is queued", %{org_id: org_id} do
+      document_id = Ecto.UUID.generate()
+
+      assert {:ok, done} = enqueue_update(org_id, document_id)
+      move_to(done, "completed")
+
+      assert {:ok, %{conflict?: false} = queued} = enqueue_update(org_id, document_id)
+      assert queued.id != done.id
+    end
+
+    test "a duplicate of a job that has not started is still collapsed", %{org_id: org_id} do
+      document_id = Ecto.UUID.generate()
+
+      assert {:ok, %{conflict?: false} = waiting} = enqueue_update(org_id, document_id)
+      assert {:ok, %{conflict?: true} = duplicate} = enqueue_update(org_id, document_id)
+      assert duplicate.id == waiting.id
+
+      move_to(waiting, "retryable")
+      assert {:ok, %{conflict?: true}} = enqueue_update(org_id, document_id)
+
+      # A different document is a different key.
+      assert {:ok, %{conflict?: false}} = enqueue_update(org_id, Ecto.UUID.generate())
     end
   end
 
