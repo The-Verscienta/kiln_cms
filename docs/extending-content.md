@@ -52,7 +52,7 @@ UI" workflow, scoped to fields.
   cannot be probed, and the schema export does not describe it. Only the
   plain top-level types can be private (`KilnCMS.CMS.PrivateFields.types/0`),
   and a private field cannot also be `searchable`, `names_record`,
-  `deliver_plain`, `deliver_portable` or `:fallback`-localized: each of those copies the value
+  `deliver_plain`, `deliver_portable`, `deliver_llm` or `:fallback`-localized: each of those copies the value
   somewhere public, so the combination is refused. Flipping it re-fires the
   type's published documents. A role or member's `field_read_grants` can hide
   a private field from some editors too (admins always see it); see
@@ -195,6 +195,16 @@ UI" workflow, scoped to fields.
   `portable_text_block`. `deliver_portable` is cleared on a `:plain` field,
   on any other type, and on a link or group sub-field. See
   [native-apps.md](native-apps.md#rich-text-without-a-web-view).
+- **AI-readable outputs (`deliver_llm`)**: on a top-level `:string`, `:text`,
+  `:group` or `:flexible` field, `deliver_llm` (**Include in AI-readable
+  outputs** in the admin) puts the field's text in the fired `:llm` Markdown
+  and in `hasPart` on the fired `:json_ld` main node. Off by default, so no
+  existing artifact changes. It is cleared on any other type and on every
+  sub-field, refused on a private field, and flipping it re-fires the type's
+  published documents. A flagged group or flexible field contributes **every**
+  text sub-field, which then goes public. See
+  [Put custom field text in the AI-readable outputs](#put-custom-field-text-in-the-ai-readable-outputs)
+  and [ADR 0082](decisions/0082-a-fields-text-reaches-the-llm-and-json-ld-artifacts-only-when-its-container-opts-in-with-deliver-llm.md).
 - **One reference or a list**: a `:reference` field holds one record by
   default (an `%{"id", "type", "slug", "title"}` snapshot). With
   `multiple: true` it holds a **list of references**: an ordered list of
@@ -2717,6 +2727,87 @@ and `changed_keys` (the keys that differ; `_settings` keys read
 | No **Searchable** box on a flexible field's form | The box is on the form for adding a field. For an existing field, set `searchable` from code. |
 | "a flexible field can't be a name of the record" | `names_record` is not allowed on a flexible field. |
 | A record is not found by its items' text | It has not been re-indexed: save the record, or run the sweep above. Text in a **Media** or **Reference** sub-field, and in `_settings`, is never indexed. |
+
+### Put custom field text in the AI-readable outputs
+
+Answer engines read two fired artifacts, the `:llm` Markdown and the `:json_ld`
+node (see [geo.md](geo.md)). Neither carries a custom field unless you opt it
+in. This works for a plain `:string` or `:text` field, a `:group` and a
+`:flexible` field alike, so an FAQ built from flexible items can reach an
+answer engine. You need the admin role. The design is in
+[ADR 0082](decisions/0082-a-fields-text-reaches-the-llm-and-json-ld-artifacts-only-when-its-container-opts-in-with-deliver-llm.md).
+
+1. Open `/editor/fields` and find the field under **Defined fields** (or add
+   it). The option is only offered on a top-level text, group or flexible
+   field; an item type's own sub-fields have none, because the flag lives on
+   the container.
+2. Click **Edit** on the field and tick **Include in AI-readable outputs**. The
+   help text under it reads "Adds this field's text to the Markdown and
+   structured data that answer engines read. For a group or flexible field,
+   every text sub-field is included, and is public." Save. The row now shows
+   an **AI-readable** badge.
+3. Saving re-fires the type's published documents, so the artifacts update
+   without a re-fire sweep. Open
+   `/api/content/post/<slug>?surface=llm` and
+   `/api/content/post/<slug>?surface=json_ld` to see the result.
+
+For a post with an `FAQ` flexible field (one `Question and answer` item type
+with `Question` and `Answer` text sub-fields) and an `Editor note` text field,
+both flagged, the `:llm` artifact ends with:
+
+```markdown
+## FAQ
+
+### Question and answer
+
+**Question:** Why?
+
+**Answer:** Because.
+
+## Editor note
+
+Read me
+```
+
+and the `:json_ld` main node gains:
+
+```json
+"hasPart": [
+  {"@type": "WebPageElement", "name": "Question and answer", "text": "Why?\n\nBecause."},
+  {"@type": "WebPageElement", "name": "Editor note", "text": "Read me"}
+]
+```
+
+What is and is not included:
+
+- **Only text.** `:string` and `:text` values count (rich text becomes plain
+  paragraphs). Numbers, media, references and choices do not.
+- **A container sends all its text.** Every text sub-field of a flagged group
+  or flexible field is included, nested items too, except a sub-field marked
+  **Setting** (presentation, not content). To keep one back, do not flag the
+  container; there is no per-sub-field switch.
+- **Order and shape.** Sections and elements follow the fields' order. In
+  `:llm` a group is one `**Label:** text` line per sub-field and each flexible
+  item gets a `###` heading (deeper for a nested item, `######` at most). In
+  `:json_ld` a text or group field is one `WebPageElement` named by its label
+  and a flexible field is one per top-level item, named by its item type, with
+  nested items' text joined into it.
+- **Caps.** At most 50 `hasPart` elements, and 5,000 characters per element or
+  `:llm` section; longer text is cut at a word boundary and ends in `…`.
+- **Left out.** Empty values, an item whose type was deleted, a private
+  field, and an unpublished reference's snapshot. An Event-family type carries
+  no `hasPart`, as it carries no `articleBody`.
+- **Kiln's own pages do not change.** The inline JSON-LD on a served page is
+  unchanged; the fired artifact is where these elements live.
+
+**What can go wrong**
+
+| You see | Meaning |
+|---|---|
+| No **Include in AI-readable outputs** checkbox | The field is not a top-level `:string`, `:text`, `:group` or `:flexible` field. Sub-fields and item types never have it. |
+| "can't be included in AI-readable outputs" on save | The field is **Private**. Untick one of the two: private values are never copied into a public artifact. |
+| The tick is saved but the artifact lacks the text | The field is empty on that document, or all its text sits in sub-fields marked **Setting**. A document published before you ticked it updates once the re-fire finishes. |
+| Fields sync import: `unknown key(s) deliver_llm` | The importing release predates the option. See [field-sync.md](field-sync.md#what-an-older-build-refuses-in-a-new-export). |
 
 ### Define a flexible field from code
 

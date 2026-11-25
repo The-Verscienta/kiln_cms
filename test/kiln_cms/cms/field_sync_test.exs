@@ -170,7 +170,7 @@ defmodule KilnCMS.CMS.FieldSyncTest do
 
       # `item_setting` (#2282) is left out of the file while it is false.
       assert Enum.sort(Map.keys(note)) ==
-               FieldSync.field_keys() -- ["edit_inline", "item_setting"]
+               FieldSync.field_keys() -- ["deliver_llm", "edit_inline", "item_setting"]
 
       assert note["visible_when"] == %{"field" => "kind", "op" => "eq", "value" => "a"}
       assert note["deliver_plain"] and note["plain_breaks"]
@@ -302,6 +302,28 @@ defmodule KilnCMS.CMS.FieldSyncTest do
       assert {:ok, again} = apply!(doc, admin)
       assert Map.keys(again.counts) == [:unchanged]
       assert export!(admin) == doc
+    end
+
+    test "deliver_llm (#2282) is written only when on, and survives the round trip", %{
+      admin: admin
+    } do
+      field!(admin, %{name: "ai_note", label: "AI note", field_type: :string, deliver_llm: true})
+      field!(admin, %{name: "plain_note", label: "Plain note", field_type: :string})
+
+      doc = export!(admin)
+      post = Enum.find(doc["owners"], &(&1["kind"] == "compiled" and &1["type"] == "post"))
+      flagged = Enum.find(post["fields"], &(&1["name"] == "ai_note"))
+      unflagged = Enum.find(post["fields"], &(&1["name"] == "plain_note"))
+
+      assert flagged["deliver_llm"] == true
+      refute Map.has_key?(unflagged, "deliver_llm")
+
+      wipe!(admin)
+      assert {:ok, %{applied?: true}} = apply!(doc, admin)
+      assert export!(admin) == doc
+
+      assert {:ok, again} = apply!(doc, admin)
+      assert Map.keys(again.counts) == [:unchanged]
     end
 
     test "a dry run writes nothing but plans the diff", %{admin: admin} do

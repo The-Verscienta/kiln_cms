@@ -4170,6 +4170,42 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   attr :form, :any, required: true
   attr :id, :string, required: true
+
+  # Whether the fired `:llm` and `:json_ld` artifacts carry the field's text
+  # (`deliver_llm`, #2282). Shown for the types that have text to carry; on any
+  # other type nothing is submitted and `Changes.ClearDeliverLlm` drops a
+  # stored `true`. The help text says plainly that a container's text
+  # sub-fields all go public.
+  defp deliver_llm_field(assigns) do
+    ~H"""
+    <label
+      :if={to_string(@form[:field_type].value) in ["string", "text", "flexible", "group"]}
+      for={@id}
+      class="flex items-start gap-2 self-end text-sm"
+    >
+      <input type="hidden" name={@form[:deliver_llm].name} value="false" />
+      <input
+        type="checkbox"
+        id={@id}
+        name={@form[:deliver_llm].name}
+        value="true"
+        checked={@form[:deliver_llm].value in [true, "true"]}
+        class="mt-0.5 size-4 rounded border border-base-content/30 accent-primary"
+      />
+      <span>
+        {gettext("Include in AI-readable outputs")}
+        <span class="block text-xs text-base-content/60">
+          {gettext(
+            "Adds this field's text to the Markdown and structured data that answer engines read. For a group or flexible field, every text sub-field is included, and is public."
+          )}
+        </span>
+      </span>
+    </label>
+    """
+  end
+
+  attr :form, :any, required: true
+  attr :id, :string, required: true
   attr :nested?, :boolean, default: false
 
   # The value constraints of a field (#2276), as a fieldset of the inputs its
@@ -4815,6 +4851,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             <.widget_field form={@form} id="new-field-widget" />
             <.deliver_plain_field form={@form} id="new-field-deliver-plain" />
             <.deliver_portable_field form={@form} id="new-field-deliver-portable" />
+            <.deliver_llm_field form={@form} id="new-field-deliver-llm" />
             <.validation_field form={@form} id="new-field-validation" />
             <.private_field form={@form} id="new-field-private" />
             <label class="flex items-center gap-2 self-end text-sm">
@@ -5001,6 +5038,18 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                         class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
                       >
                         {gettext("portable")}
+                      </span>
+                      <span
+                        :if={definition.deliver_llm}
+                        id={"field-#{definition.id}-deliver-llm"}
+                        title={
+                          gettext(
+                            "Included in the AI-readable outputs (Markdown and structured data)"
+                          )
+                        }
+                        class="rounded bg-base-200 px-1.5 py-0.5 text-xs text-base-content/70"
+                      >
+                        {gettext("AI-readable")}
                       </span>
                       <span
                         :if={definition.section}
@@ -5279,6 +5328,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                     form={@edit.form}
                     id={"edit-field-deliver-portable-#{@edit.id}"}
                   />
+                  <.deliver_llm_field form={@edit.form} id={"edit-field-deliver-llm-#{@edit.id}"} />
                   <.validation_field
                     form={@edit.form}
                     id={"edit-field-validation-#{@edit.id}"}

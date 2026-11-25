@@ -4052,6 +4052,10 @@
                 ],
                 "description": "Field included by default."
               },
+              "deliver_llm": {
+                "description": "Field included by default.",
+                "type": "boolean"
+              },
               "deliver_plain": {
                 "description": "Field included by default.",
                 "type": "boolean"
@@ -4436,7 +4440,8 @@
               "searchable",
               "deliver_plain",
               "plain_breaks",
-              "deliver_portable"
+              "deliver_portable",
+              "deliver_llm"
             ],
             "type": "object"
           },
@@ -4683,6 +4688,9 @@
           },
           "default_source": {
             "$ref": "#/components/schemas/field_definition-filter-default_source"
+          },
+          "deliver_llm": {
+            "$ref": "#/components/schemas/field_definition-filter-deliver_llm"
           },
           "deliver_plain": {
             "$ref": "#/components/schemas/field_definition-filter-deliver_plain"
@@ -5155,6 +5163,45 @@
               "copy_of"
             ],
             "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "field_definition-filter-deliver_llm": {
+        "additionalProperties": false,
+        "properties": {
+          "eq": {
+            "type": "boolean"
+          },
+          "greater_than": {
+            "type": "boolean"
+          },
+          "greater_than_or_equal": {
+            "type": "boolean"
+          },
+          "in": {
+            "items": {
+              "type": "boolean"
+            },
+            "type": "array"
+          },
+          "is_distinct_from": {
+            "type": "boolean"
+          },
+          "is_nil": {
+            "type": "boolean"
+          },
+          "is_not_distinct_from": {
+            "type": "boolean"
+          },
+          "less_than": {
+            "type": "boolean"
+          },
+          "less_than_or_equal": {
+            "type": "boolean"
+          },
+          "not_eq": {
+            "type": "boolean"
           }
         },
         "type": "object"

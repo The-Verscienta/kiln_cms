@@ -529,6 +529,7 @@ defmodule KilnCMS.CMS.FieldDefinition do
       :deliver_plain,
       :plain_breaks,
       :deliver_portable,
+      :deliver_llm,
       :localization,
       :inverse_label,
       :inverse_name,
@@ -707,6 +708,11 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # `deliver_portable` converts a rich `:text` field's HTML, so it drops on
     # any other type, on a `:plain` one, and on a link or group sub-field.
     change KilnCMS.CMS.Changes.ClearDeliverPortable
+
+    # `deliver_llm` (#2282) puts a top-level `:string`, `:text`, `:flexible`
+    # or `:group` field's text in the fired `:llm` and `:json_ld` artifacts, so
+    # it drops on any other type and on every nested row.
+    change KilnCMS.CMS.Changes.ClearDeliverLlm
 
     # The editor input (#2284) is picked from what the field's settings offer
     # (`KilnCMS.CMS.FieldWidgets`), so one those settings no longer offer —
@@ -1188,6 +1194,16 @@ defmodule KilnCMS.CMS.FieldDefinition do
     # `:text` only (`Changes.ClearDeliverPortable`). Flipping it re-fires the
     # type's published documents (`Changes.BustTypeRegistry`).
     attribute :deliver_portable, :boolean, allow_nil?: false, default: false, public?: true
+
+    # Whether the fired `:llm` (Markdown) and `:json_ld` artifacts carry this
+    # field's text (#2282, ADR 0082): the value of a `:string` or `:text`
+    # field, or every text sub-field of a `:group` row or `:flexible` item
+    # (nested ones too), via `KilnCMS.Firing.AnswerText`. Off by default, so
+    # every existing artifact is unchanged. Top-level `:string`, `:text`,
+    # `:flexible` and `:group` only (`Changes.ClearDeliverLlm`), and never
+    # with `private` (`Validations.PrivateField`). Flipping it re-fires the
+    # type's published documents (`Changes.BustTypeRegistry`).
+    attribute :deliver_llm, :boolean, allow_nil?: false, default: false, public?: true
 
     # Field-level localization (#1327): whether this field's value differs
     # between the locale variants of a document. `:localized` (the default) is

@@ -307,6 +307,23 @@ jq 'walk(if type == "object" and has("field_type") then del(.step, .prefix, .suf
 The older build then leaves its own values for those keys alone; it has no
 number options or title templates to set.
 
+### AI-readable outputs (`deliver_llm`)
+
+A field opted in to the fired `:llm` and `:json_ld` artifacts carries
+`"deliver_llm": true` (issue 2282; see
+[Put custom field text in the AI-readable outputs](extending-content.md#put-custom-field-text-in-the-ai-readable-outputs)).
+The key is **written only when it is `true`**, so a site that opts nothing in
+exports the file it exported before, and a missing key imports as `false`
+([ADR 0082](decisions/0082-a-fields-text-reaches-the-llm-and-json-ld-artifacts-only-when-its-container-opts-in-with-deliver-llm.md)).
+
+- **An older release refuses a file with `"deliver_llm": true`**, as an
+  unknown key (`unknown key(s) deliver_llm`), one error per field, and writes
+  nothing. Export from the older build, or remove the key with `jq`:
+  `jq 'walk(if type == "object" then del(.deliver_llm) else . end)'`.
+- **A file without the key reads it as `false`.** Run a dry run before
+  importing an older file over a site that uses the option, and keep the key in
+  the file if you want to keep it.
+
 ### Number options (`step`, `prefix`, `suffix`)
 
 A number field's export carries `"step"` (a number), `"prefix"` and

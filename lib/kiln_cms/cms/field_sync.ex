@@ -61,7 +61,7 @@ defmodule KilnCMS.CMS.FieldSync do
   `:flexible` field's `"item_types"` or an `"item_setting": true` key cannot be
   imported by one that predates #2282; `"item_setting"` is left out of the file
   when it is `false`, so a site with no flexible fields exports the same file as
-  before; `"edit_inline"` (#2283) is left out the same way unless it is `true`): every field carries
+  before; `"edit_inline"` (#2283) is left out the same way unless it is `true`, and so is `"deliver_llm"` (#2282); a file with it cannot be imported by a release that predates it): every field carries
   `"width"`, a key such a release refuses as unknown. The same holds, from
   #2432, for `"step"`, `"prefix"` and `"suffix"` (a number's editor options,
   `null` when unset); a file without them still imports unchanged.
@@ -250,7 +250,12 @@ defmodule KilnCMS.CMS.FieldSync do
   end
 
   defp field_doc(field, children) do
-    doc = field |> attrs_doc(field_keys()) |> omit_false_setting() |> omit_unset_edit_inline()
+    doc =
+      field
+      |> attrs_doc(field_keys())
+      |> omit_false_setting()
+      |> omit_unset_edit_inline()
+      |> omit_false_deliver_llm()
 
     Enum.reduce(@child_lists, doc, fn {key, type}, acc ->
       subs = if field.field_type == type, do: Map.get(children, field.id, []), else: []
@@ -271,6 +276,10 @@ defmodule KilnCMS.CMS.FieldSync do
     do: Map.delete(doc, "edit_inline")
 
   defp omit_unset_edit_inline(doc), do: doc
+
+  # `deliver_llm` (#2282) is written only when on, for the same reason.
+  defp omit_false_deliver_llm(%{"deliver_llm" => false} = doc), do: Map.delete(doc, "deliver_llm")
+  defp omit_false_deliver_llm(doc), do: doc
 
   defp attrs_doc(record, keys),
     do: Map.new(keys, fn key -> {key, jsonify(Map.get(record, String.to_existing_atom(key)))} end)

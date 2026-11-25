@@ -2637,6 +2637,11 @@ msgstr ""
 msgid "AI suggestions aren't configured."
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "AI-readable"
+msgstr ""
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "API"
@@ -3460,6 +3465,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #, elixir-autogen, elixir-format
 msgid "Adds detail drawn from this block and the rest of the page."
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Adds this field's text to the Markdown and structured data that answer engines read. For a group or flexible field, every text sub-field is included, and is public."
 msgstr ""
 
 #: lib/kiln_cms_web/live/setup_live.ex
@@ -12445,6 +12455,11 @@ msgstr ""
 msgid "Include %{type} in this site's feeds"
 msgstr ""
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Include in AI-readable outputs"
+msgstr ""
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Include in the XLIFF export"
@@ -12453,6 +12468,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Include private fields"
+msgstr ""
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Included in the AI-readable outputs (Markdown and structured data)"
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex

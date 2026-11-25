@@ -5,7 +5,8 @@ PR 2 (admin Item types panel, editor cards, field-sync `item_types`) merged
 (#2980); PR 3 (media and reference in items) merged (#3217); PR 4 (grants) merged (#3220)
 ([ADR 0065](decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md#item-type-grants-pr-4-2282));
 PR 5 (API and typed export) is on branch `feat/2282-flexible-content-pr5-api-export`, not yet merged;
-PRs 6 and 7 are plan only. Design record for
+PR 7 (the `:llm` / `:json_ld` projection, [ADR 0082](decisions/0082-a-fields-text-reaches-the-llm-and-json-ld-artifacts-only-when-its-container-opts-in-with-deliver-llm.md)) is done, in a pull request that is not yet merged, and is the last PR of this plan;
+PR 6 is plan only. Design record for
 [#2282](https://github.com/The-Verscienta/kiln_cms/issues/2282), written from a
 read of the model as it stood on 2026-11-10 (after custom-field waves 1–5). Read
 the resources for current behavior and this for *why*. Nothing here is a
@@ -14,8 +15,8 @@ The decisions PR 1 makes are argued in
 [ADR 0065](decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
 
 Where PR 3 differs from this plan is listed under "Where PR 3 differs" below
-the PR 2 list, PR 5's under "Where PR 5 differs" below that, and PR 6's under
-"Where PR 6 differs" after it.
+the PR 2 list, PR 5's under "Where PR 5 differs" below that, PR 6's under
+"Where PR 6 differs" after it, and PR 7's under "Where PR 7 differs" after that.
 
 **Where PR 2 differs from this plan** (the code is right; this text is
 unchanged below):
@@ -105,6 +106,27 @@ unchanged below):
 - The history screens list added, removed, changed and moved items with the
   type's label and old and new text (`FieldDisplay.display_item/3`). They do
   not print `changed_keys`; it is on the entry for code that wants it.
+
+**Where PR 7 differs from this plan** (the code is right; this text is
+unchanged below):
+
+- The option is the boolean `FieldDefinition.deliver_llm`, labeled **Include in
+  AI-readable outputs**, on a top-level `:string`, `:text`, `:group` or
+  `:flexible` field only; it is not a per-sub-field flag. A flagged container
+  sends every text sub-field. See
+  [ADR 0082](decisions/0082-a-fields-text-reaches-the-llm-and-json-ld-artifacts-only-when-its-container-opts-in-with-deliver-llm.md).
+- The artifacts: `:llm` gets one `##` section per flagged field after the
+  blocks; `:json_ld` gets `hasPart` (`WebPageElement`s) on the main node, none
+  on an Event-family type. At most 50 elements and 5,000 characters each. No
+  `format_version` bump (off by default).
+- Kiln's served pages keep their existing inline JSON-LD
+  (`KilnCMSWeb.StructuredData` is unchanged), so a page's markup and the fired
+  `:json_ld` artifact differ for a flagged field. Accepted, in the ADR.
+- **No theme helper.** Row 7 named "`FlexibleItems` helper docs". There is no
+  `KilnCMS.CMS.FlexibleItems` module (the only `FlexibleItems` is the editor's
+  `KilnCMSWeb.ContentEditor.FlexibleItems`, which parses form params), so
+  nothing was documented for it and the section 6 `:web` row stays a plan: a
+  theme reads the `custom_fields` map and the field definitions itself.
 
 **Where PR 1 differs from this plan** (the code is right; this text is
 unchanged below):
@@ -378,7 +400,7 @@ Extend the group-rows UI rather than build a second one
 |---|---|---|
 | **Fired `:json`** | `custom_fields` emitted verbatim (`engine.ex:640`) | Items ship as stored. `Firing.CustomFields` refresh of `:media`/`:reference` snapshots (`firing/custom_fields.ex`, top level only) must recurse into items (PR 3). |
 | **Fired `:web`** | Public HTML renders no custom fields; themes read the map | No default rendering. A documented helper (`KilnCMS.CMS.FlexibleItems`: typed items with definitions) for theme authors. |
-| **Fired `:llm`, `:json_ld`** | Take no custom fields except geolocation | The issue says these "must see" items. Groups do not reach them either, so this needs an explicit projection decision (§10 Q2); proposed PR 7. |
+| **Fired `:llm`, `:json_ld`** | Take no custom fields except geolocation | The issue says these "must see" items. Groups do not reach them either, so this needs an explicit projection decision (§10 Q2); proposed PR 7. **Done in PR 7:** an opt-in per top-level field (`deliver_llm`), see "Where PR 7 differs". |
 | **Re-fire / references** | Reference edges and snapshots are top-level only (`sync_reference_links.ex`, `content_links.ex`, `reference_edits.ex`) | Reference sub-fields inside items need edges that carry a path, a re-fire wave, and `SyncFieldValues` support. This is the "fragment" story in §7. |
 | **GraphQL** | `GroupValue {name, fields}` implementing `custom_field_value` | `FlexibleValue {name, items: [FlexibleItem {id, type, fields, settings}]}` on the same interface. Absinthe unions cannot be per-site at compile time (ADR 0016 already settles that the schema types the accessor and the per-org export types the names), so the **union lives in the typed export**. |
 | **JSON:API** | Raw `custom_fields` attribute; `/type-definitions?include=field_definitions.group_fields` | Raw attribute; include `item_types` (and nested `group_fields`) on the definitions include. |
@@ -478,7 +500,7 @@ until PR 2**.
 | 4 | **Grants** | Per-item-type grants, validators and pickers, `_id`-based `EnforceCustomFieldGrants` rewrite, copy-path handling. | 1 |
 | 5 | **API + typed export** (done on its branch; see "Where PR 5 differs") | GraphQL `FlexibleValue`, `SchemaExport` `oneOf`, TS/Swift/Kotlin/GraphQL emitters, goldens, `clients/` (js, elixir) and `kiln_client`, docs. **After 3**, so the emitters and goldens change once. | 1, 3 |
 | 6 | **Search + diff + display** | Walker skips meta keys and `searchable` becomes allowed, `VersionDiff` per item, `FieldDisplay` (coordinate with 3, which also edits it), history rendering. | 1 (after 3 for `FieldDisplay`) |
-| 7 | **`:llm` / `:json_ld` projection + theme helper** | Per Q2; `FlexibleItems` helper docs. | 1, decision |
+| 7 | **`:llm` / `:json_ld` projection + theme helper** (projection done, in an unmerged pull request; the theme helper was not built, see "Where PR 7 differs") | Per Q2; `FlexibleItems` helper docs. | 1, decision |
 
 Parallelism after 1: 2 and 4 can run together; 6 can run once 3 lands its
 `FieldDisplay` change; 5 waits for 3. Docs: every PR updates `docs/` and
@@ -492,7 +514,8 @@ Parallelism after 1: 2 and 4 can run together; 6 can run once 3 lands its
 2. **`:llm` / `:json_ld`: add projection in v1.** PR 7 delivers items to both
    surfaces (a generic opt-in for custom text, applying to all text fields,
    groups included); the exact option name and format are PR 7's first design
-   question.
+   question. Answered in PR 7: `deliver_llm`, a flag on the top-level field
+   ([ADR 0082](decisions/0082-a-fields-text-reaches-the-llm-and-json-ld-artifacts-only-when-its-container-opts-in-with-deliver-llm.md)).
 3. **Shared items: a `:reference` sub-field to an entry** is the reuse of
    Fragments (§7). Inlining a block tree into an item stays out of scope.
 4. **Nesting: allowed**, capped (§2). Supersedes the earlier one-level proposal.
