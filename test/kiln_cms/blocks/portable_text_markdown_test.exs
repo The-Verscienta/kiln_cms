@@ -98,9 +98,23 @@ defmodule KilnCMS.Blocks.PortableTextMarkdownTest do
     assert PortableText.to_markdown(pt) == "- top\n#{indent}1. deep\n#{indent}2. deeper"
   end
 
+  # The shape repair turns a whole-number string or float into its integer
+  # first, so the cap applies to it too.
+  test "a repaired numeric level is capped at max_list_level" do
+    indent = String.duplicate("    ", PortableText.max_list_level() - 1)
+
+    pt = [
+      %{"listItem" => "bullet", "level" => 1, "children" => [%{"text" => "top"}]},
+      %{"listItem" => "bullet", "level" => "1000000000", "children" => [%{"text" => "s"}]},
+      %{"listItem" => "bullet", "level" => 1.0e9, "children" => [%{"text" => "f"}]}
+    ]
+
+    assert PortableText.to_markdown(pt) == "- top\n#{indent}- s\n#{indent}- f"
+  end
+
   test "a list item's level below one, or not an integer, is level one" do
     pt =
-      for level <- [0, -5, "3", 2.5, nil] do
+      for level <- [0, -5, "three", 2.5, nil] do
         %{"listItem" => "bullet", "level" => level, "children" => [%{"text" => "x"}]}
       end
 
