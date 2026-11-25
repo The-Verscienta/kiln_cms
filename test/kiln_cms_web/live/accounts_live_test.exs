@@ -113,6 +113,31 @@ defmodule KilnCMSWeb.AccountsLiveTest do
     end)
   end
 
+  # A registration on the default site in `status`, as the queue (or a rejection)
+  # leaves it, holding `audiences`.
+  defp registration(status, audiences \\ []) do
+    applicant = seeded(:viewer)
+
+    row =
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: applicant.id,
+        organization_id: Accounts.default_org_id(),
+        role: :viewer,
+        audiences: audiences,
+        status: status
+      })
+
+    {applicant, row}
+  end
+
+  defp tick(view, audience) do
+    view
+    |> form("#audiences-form", %{"audiences" => %{"audience_#{audience}" => "true"}})
+    |> render_submit()
+  end
+
+  defp save_unchanged(view), do: view |> form("#audiences-form") |> render_submit()
+
   defp flash_text(html) do
     html
     |> Floki.parse_document!()
@@ -481,6 +506,28 @@ defmodule KilnCMSWeb.AccountsLiveTest do
       refute html =~ "belongs to no site yet"
     end
 
+    test "an unchanged save on a member of other sites still adds it here as a viewer", %{
+      conn: conn
+    } do
+      reader = seeded(:viewer)
+      member_of(reader, seed_org().id, :editor)
+
+      {:ok, view, html} = live(conn, ~p"/editor/accounts/#{reader.id}")
+
+      assert checked_audiences(html) == []
+      assert html =~ "belongs to other sites but not this one"
+
+      html = view |> form("#audiences-form") |> render_submit()
+
+      assert flash_text(html) ==
+               "Audiences updated. This account is now a member of #{Accounts.default_org().name}."
+
+      membership = membership_on(reader, Accounts.default_org_id())
+      assert membership.role == :viewer
+      assert membership.status == :active
+      assert membership.audiences == []
+    end
+
     test "edits the membership of the site being served, not another", %{conn: conn, admin: admin} do
       org = seed_org()
       reader = seeded(:viewer)
@@ -520,6 +567,134 @@ defmodule KilnCMSWeb.AccountsLiveTest do
 
       assert {:error, {:redirect, %{to: "/access-denied?needs=admin"}}} =
                live(conn, ~p"/editor/accounts")
+    end
+  end
+
+  # A waiting or rejected registration keeps the audiences a platform admin sets
+  # on its row and reads none of them until it is approved (#2251). The boxes
+  # used to show what it reads now, which is nothing, so a second save, or a save
+  # of the panel left as shown, wrote `[]` over the first (#2783).
+  describe "a registration awaiting a decision" do
+    setup %{conn: conn} do
+      admin = authed_user(:admin)
+      site_admin = seeded(:viewer)
+      member_of(site_admin, Accounts.default_org_id(), :admin)
+      %{conn: log_in(conn, admin), admin: admin, site_admin: site_admin}
+    end
+
+    test "a ticked audience stays ticked after the save and on a fresh visit", %{conn: conn} do
+      {applicant, _row} = registration(:pending)
+
+      {:ok, view, html} = live(conn, ~p"/editor/accounts/#{applicant.id}")
+      assert checked_audiences(html) == []
+      assert html =~ "has not been approved, so it reads nothing gated here yet"
+
+      html = tick(view, @gated)
+
+      assert flash_text(html) == "Audiences updated."
+      assert checked_audiences(html) == [to_string(@gated)]
+      assert membership_on(applicant, Accounts.default_org_id()).audiences == [@gated]
+
+      {:ok, _view, html} = live(conn, ~p"/editor/accounts/#{applicant.id}")
+      assert checked_audiences(html) == [to_string(@gated)]
+    end
+
+    test "audiences already stored on the registration show ticked", %{conn: conn} do
+      {applicant, _row} = registration(:pending, [@gated])
+
+      {:ok, _view, html} = live(conn, ~p"/editor/accounts/#{applicant.id}")
+
+      assert checked_audiences(html) == [to_string(@gated)]
+    end
+
+    test "saving the panel unchanged keeps what is stored", %{conn: conn} do
+      {applicant, _row} = registration(:pending, [@gated])
+
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts/#{applicant.id}")
+      html = save_unchanged(view)
+
+      assert checked_audiences(html) == [to_string(@gated)]
+      assert membership_on(applicant, Accounts.default_org_id()).audiences == [@gated]
+    end
+
+    test "ticking another audience adds it to what is stored", %{conn: conn} do
+      {applicant, _row} = registration(:pending, [@gated])
+
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts/#{applicant.id}")
+      tick(view, :public)
+
+      assert membership_on(applicant, Accounts.default_org_id()).audiences ==
+               Enum.sort([@gated, :public])
+    end
+
+    test "the audiences survive later saves and apply once a site admin approves it", %{
+      conn: conn,
+      admin: admin,
+      site_admin: site_admin
+    } do
+      {applicant, _row} = registration(:pending)
+      page = gated_page(admin, Accounts.default_org_id())
+
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts/#{applicant.id}")
+      tick(view, @gated)
+      view |> form("#access-form") |> render_submit()
+      save_unchanged(view)
+
+      row = membership_on(applicant, Accounts.default_org_id())
+      assert row.audiences == [@gated]
+
+      {:ok, approved} = Accounts.approve_registration(row, %{}, actor: site_admin)
+
+      assert approved.audiences == [@gated]
+      assert Scoping.audiences(reread(applicant), Accounts.default_org_id()) == [@gated]
+      assert can_read?(applicant, page, Accounts.default_org_id())
+    end
+
+    test "storing audiences on a waiting registration grants nothing until approval", %{
+      conn: conn,
+      admin: admin,
+      site_admin: site_admin
+    } do
+      {applicant, _row} = registration(:pending)
+      page = gated_page(admin, Accounts.default_org_id())
+
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts/#{applicant.id}")
+      tick(view, @gated)
+
+      assert Scoping.audiences(reread(applicant), Accounts.default_org_id()) == []
+      refute can_read?(applicant, page, Accounts.default_org_id())
+
+      row = membership_on(applicant, Accounts.default_org_id())
+      {:ok, _approved} = Accounts.approve_registration(row, %{}, actor: site_admin)
+
+      assert can_read?(applicant, page, Accounts.default_org_id())
+    end
+
+    test "a rejected registration keeps its audiences too, and they apply if it is approved", %{
+      conn: conn,
+      admin: admin,
+      site_admin: site_admin
+    } do
+      {applicant, _row} = registration(:rejected)
+      page = gated_page(admin, Accounts.default_org_id())
+
+      {:ok, view, html} = live(conn, ~p"/editor/accounts/#{applicant.id}")
+      assert html =~ "was rejected, so it reads nothing gated here"
+
+      html = tick(view, @gated)
+      assert checked_audiences(html) == [to_string(@gated)]
+
+      html = save_unchanged(view)
+      assert checked_audiences(html) == [to_string(@gated)]
+
+      row = membership_on(applicant, Accounts.default_org_id())
+      assert row.audiences == [@gated]
+      refute can_read?(applicant, page, Accounts.default_org_id())
+
+      {:ok, _approved} = Accounts.approve_registration(row, %{}, actor: site_admin)
+
+      assert Scoping.audiences(reread(applicant), Accounts.default_org_id()) == [@gated]
+      assert can_read?(applicant, page, Accounts.default_org_id())
     end
   end
 

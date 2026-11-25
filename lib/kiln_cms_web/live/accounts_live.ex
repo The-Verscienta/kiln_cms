@@ -34,6 +34,14 @@ defmodule KilnCMSWeb.AccountsLive do
   and never the global `User.audiences` column, which no access decision reads
   since 1.0 removed the no-membership fallback (#1646, #1543). An account with no membership here gets
   one on the first save; `KilnCMS.Accounts.SiteAudiences` says with what role.
+
+  The boxes show what is **stored** (`SiteAudiences.stored/3`), not what the
+  account can read now (`SiteAudiences.for_site/3`, which only picks the note
+  under the heading). The two differ for a registration that is waiting or was
+  rejected: its row keeps the audiences a platform admin sets, it reads none of
+  them until it is approved, and a save writes exactly the ticked boxes — so the
+  boxes must start from the stored set, or saving the panel unchanged clears it
+  (#2783).
   """
   use KilnCMSWeb, :live_view
 
@@ -403,9 +411,15 @@ defmodule KilnCMSWeb.AccountsLive do
         &{&1.id, RoleDisplay.site_access_for_membership(user, &1.organization_id, &1)}
       )
     )
+    # What it reads now picks the note; what is stored is what the boxes show,
+    # since a save writes exactly the ticked boxes (#2783).
     |> assign(
       :site_audiences,
       SiteAudiences.for_site(user, memberships, socket.assigns.current_org.id)
+    )
+    |> assign(
+      :stored_audiences,
+      SiteAudiences.stored(user, memberships, socket.assigns.current_org.id)
     )
     |> assign(:passkey_count, length(Accounts.list_passkeys!(user.id, actor: actor)))
     |> assign(:api_key_count, length(Accounts.list_api_keys!(user.id, actor: actor)))
@@ -737,12 +751,10 @@ defmodule KilnCMSWeb.AccountsLive do
   # The audiences on the site this page is served from — per site, because that
   # is how `Scoping.audiences/2` reads them. The note under the heading says which
   # branch they come from, since saving moves an account without a membership
-  # here onto one.
+  # here onto one. The boxes are the stored set (`@stored_audiences`), which for a
+  # waiting or rejected registration is not what it reads now.
   defp audiences_panel(assigns) do
-    assigns =
-      assigns
-      |> assign(:source, elem(assigns.site_audiences, 0))
-      |> assign(:checked, elem(assigns.site_audiences, 1))
+    assigns = assign(assigns, :source, elem(assigns.site_audiences, 0))
 
     ~H"""
     <section class="card card-pad space-y-4" id="site-audiences">
@@ -765,13 +777,14 @@ defmodule KilnCMSWeb.AccountsLive do
             "This account belongs to other sites but not this one, so it reads nothing gated here. Saving adds it to this site as a viewer."
           )}
         </p>
-        <p
-          :if={@source in [:pending, :rejected]}
-          class="mt-2 text-sm text-base-content/70"
-          id="audiences-source"
-        >
+        <p :if={@source == :pending} class="mt-2 text-sm text-base-content/70" id="audiences-source">
           {gettext(
-            "This account's registration on this site has not been approved, so it reads nothing gated here. What you save applies once it is approved."
+            "This account's registration on this site has not been approved, so it reads nothing gated here yet. The ticked audiences are saved on its registration and apply once it is approved."
+          )}
+        </p>
+        <p :if={@source == :rejected} class="mt-2 text-sm text-base-content/70" id="audiences-source">
+          {gettext(
+            "This account's registration on this site was rejected, so it reads nothing gated here. The ticked audiences are saved on its registration and apply if it is approved later."
           )}
         </p>
       </div>
@@ -791,7 +804,7 @@ defmodule KilnCMSWeb.AccountsLive do
                 type="checkbox"
                 name={"audiences[audience_#{audience}]"}
                 value="true"
-                checked={audience in @checked}
+                checked={audience in @stored_audiences}
                 class="rounded border-base-content/30"
               />
               {audience}

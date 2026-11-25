@@ -107,6 +107,45 @@ defmodule KilnCMS.Accounts.SiteAudiencesTest do
     end
   end
 
+  # What a save edits, and so what the console shows ticked — unlike for_site/3,
+  # not what the account reads now (#2783).
+  describe "stored/3" do
+    test "a membership here answers its own audiences, in every status" do
+      for status <- [:active, :pending, :rejected] do
+        account = user()
+        membership(account, default_org_id(), %{audiences: [@gated], status: status})
+
+        assert SiteAudiences.stored(account, memberships(account), default_org_id()) == [@gated]
+      end
+    end
+
+    test "a waiting or rejected registration's stored audiences are not what it reads" do
+      for status <- [:pending, :rejected] do
+        account = user()
+        membership(account, default_org_id(), %{audiences: [@gated], status: status})
+
+        assert {^status, []} =
+                 SiteAudiences.for_site(account, memberships(account), default_org_id())
+
+        assert Scoping.audiences(account, default_org_id()) == []
+        assert SiteAudiences.stored(account, memberships(account), default_org_id()) == [@gated]
+      end
+    end
+
+    test "no membership anywhere answers the account's column, which the first save carries" do
+      legacy = user(%{audiences: [@gated]})
+
+      assert SiteAudiences.stored(legacy, [], default_org_id()) == [@gated]
+    end
+
+    test "a member only of other sites answers nothing" do
+      foreign = user(%{audiences: [@gated]})
+      membership(foreign, org().id, %{audiences: [@gated]})
+
+      assert SiteAudiences.stored(foreign, memberships(foreign), default_org_id()) == []
+    end
+  end
+
   describe "an account with a membership on the site" do
     test "ticking an audience lets it read gated content there, and unticking takes it away" do
       reader = user()

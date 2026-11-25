@@ -25425,8 +25425,13 @@ msgstr "Ce compte a été effacé. Il n'a aucun niveau ici et ne peut pas en rec
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "This account's registration on this site has not been approved, so it reads nothing gated here. What you save applies once it is approved."
-msgstr "L'inscription de ce compte sur ce site n'a pas été approuvée : il ne lit ici aucun contenu réservé. Ce que vous enregistrez s'appliquera une fois l'inscription approuvée."
+msgid "This account's registration on this site has not been approved, so it reads nothing gated here yet. The ticked audiences are saved on its registration and apply once it is approved."
+msgstr "L'inscription de ce compte sur ce site n'a pas encore été approuvée : il ne lit encore ici aucun contenu réservé. Les audiences cochées sont enregistrées sur son inscription et s'appliqueront une fois l'inscription approuvée."
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "This account's registration on this site was rejected, so it reads nothing gated here. The ticked audiences are saved on its registration and apply if it is approved later."
+msgstr "L'inscription de ce compte sur ce site a été refusée : il ne lit ici aucun contenu réservé. Les audiences cochées sont enregistrées sur son inscription et s'appliqueront si elle est approuvée plus tard."
 
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format

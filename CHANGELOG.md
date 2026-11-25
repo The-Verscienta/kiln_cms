@@ -65,6 +65,8 @@ else.
   ([long form](docs/changelog/unreleased.md#links-backfill-multiple-upgrade))
 - **A draft of a live record saved before a custom field was renamed or deleted on 1.0.0 to 1.12.1 still holds the old key: publishing it after upgrading still drops that value, so re-enter it or discard the draft (#2744). Values already lost are in version history under the old key; copy them back by hand, since a restore drops them.**
   ([long form](docs/changelog/unreleased.md#rename-rewrites-working-copies-upgrade))
+- **On 1.9.0 to 1.12.1, saving an account's audiences panel twice for a waiting or rejected registration removed what the first save set, so accounts approved since may lack audiences you gave them (#2783). Check and re-tick them; KilnCMS can't restore them, though billing-managed audiences return on the next billing change.**
+  ([long form](docs/changelog/unreleased.md#audiences-panel-stored-upgrade))
 
 ### Added
 
@@ -94,6 +96,10 @@ else.
   ([long form](docs/changelog/unreleased.md#list-item-error-position))
 
 ### Fixed
+
+- **The audiences panel on `/editor/accounts/(id)` shows a waiting or rejected registration's saved audiences, so saving it again no longer clears them (#2783).**
+  They still grant nothing until the registration is approved. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#audiences-panel-stored))
 
 - **Closing the content editor's image picker while an Unsplash import is still running no longer crashes the editor (#2784).**
   The photo is still added to the media library, but not to the field or block, and a flash says so.

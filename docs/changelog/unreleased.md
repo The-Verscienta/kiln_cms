@@ -29,6 +29,13 @@ carries the reasoning.
   - **Affected releases.** Top-level fields since 1.0.0; reshapes and link fields since 1.5.0; group sub-fields since 1.6.0; flexible items since 1.11.0; held lists since 1.12.0.
   - **No migration; rolling the pin back is safe.**
 
+<a id="audiences-panel-stored-upgrade"></a>
+
+- **Audiences set on a waiting or rejected registration on 1.9.0 to 1.12.1 may have been lost (#2783).** On those releases the audiences panel on `/editor/accounts/(id)` showed a waiting or rejected registration with every box clear, whatever its registration held, and a save writes exactly the ticked boxes. Saving the panel a second time, or saving it unchanged, therefore removed what the first save set ([below](#audiences-panel-stored)).
+  - **Who to check.** Accounts approved since you upgraded to 1.9.0 that a platform admin gave audiences while they waited or after they were rejected. Open each one's account page on the site it registered on and re-tick what is missing.
+  - **What can't be restored.** KilnCMS keeps no record of an audience edit on its own, so it can't put back what was removed. Audiences a paid membership manages return on that membership's next billing change.
+  - **No migration.**
+
 ## Added
 
 <a id="condition-text-ops"></a>
@@ -86,6 +93,13 @@ carries the reasoning.
   - **No migration; rolling the pin back is safe.** An older release writes the old messages again.
 
 ## Fixed
+
+<a id="audiences-panel-stored"></a>
+
+- **The audiences panel shows what a waiting or rejected registration holds (#2783).** A platform admin can set audiences on a registration that is waiting for approval or was rejected; they are kept on its registration and take effect when it is approved. The panel on `/editor/accounts/(id)` ticked the boxes from what the account can read now, which for such a registration is nothing, while a save writes exactly the ticked boxes. So the first save stored the audiences and then showed every box clear, and the next save of the panel, unchanged or for another audience, wrote that empty set over them.
+  - **What changes.** The boxes show the audiences stored for the account on this site, in every registration state. The note under the heading still says what the account reads now: a waiting registration's note says the ticked audiences apply once it is approved, and a rejected one's says they apply if it is approved later.
+  - **Unchanged.** A waiting or rejected registration reads nothing gated until it is approved, whatever is ticked. A save still writes exactly the ticked boxes, and a first save for an account with no membership on the site still gives it one. Approving grants the *Viewer* tier and the audiences stored on the registration, as before.
+  - **No migration; rolling the pin back is safe.** On an older release the panel shows the boxes clear again.
 
 <a id="picker-close-during-import"></a>
 

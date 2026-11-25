@@ -42,6 +42,22 @@ defmodule KilnCMS.Accounts.SiteAudiences do
 
   Every write goes through the membership's own actions as the caller's actor, so
   `OrgMembership`'s policies decide who may make it (platform admins today).
+
+  ## What it reads, and what a save edits
+
+  Two readers answer different questions, and the difference matters only for a
+  registration that is waiting or was rejected (#2251, #2783):
+
+    * `for_site/3` is what the account **reads now**. A `:pending` or `:rejected`
+      membership answers `[]`, as `KilnCMS.Accounts.Scoping.audiences/2` does,
+      whatever the row stores.
+    * `stored/3` is what a **save edits**: the row's own `audiences` in every
+      status. Audiences set on a waiting registration are kept on its row and
+      take effect when it is approved.
+
+  The console's checkboxes show `stored/3` and its note says `for_site/3`'s
+  branch. Showing the "reads now" list instead left a waiting registration's
+  boxes clear, so an unchanged save wrote `[]` over what the last save stored.
   """
 
   alias KilnCMS.Accounts
@@ -68,7 +84,8 @@ defmodule KilnCMS.Accounts.SiteAudiences do
 
   A membership that is not `:active` — a registration awaiting approval or
   rejected (#2251) — answers `{:pending, []}` or `{:rejected, []}`: `Scoping`
-  grants nothing through it, whatever audiences the row holds.
+  grants nothing through it, whatever audiences the row holds. What the row
+  holds, which a save edits, is `stored/3`.
   """
   @spec for_site(map(), [map()], String.t()) :: {source(), [atom()]}
   def for_site(user, memberships, org_id) when is_list(memberships) do
@@ -78,6 +95,27 @@ defmodule KilnCMS.Accounts.SiteAudiences do
       %{} -> {:pending, []}
       nil when memberships == [] -> {:legacy, list(Map.get(user, :audiences))}
       nil -> {:none, []}
+    end
+  end
+
+  @doc """
+  The audiences a save on `org_id` edits, given the user's memberships (every
+  site) — what the console shows ticked.
+
+    * A membership here, in **any** status, answers its own `audiences`: for a
+      `:pending` or `:rejected` registration, what applies once it is approved.
+    * No membership anywhere (`for_site/3`'s `:legacy`) answers the
+      `User.audiences` column, which the first save carries onto a membership.
+    * A member only of other sites (`:none`) answers `[]`.
+
+  Unlike `for_site/3`, this is not what the account can read now.
+  """
+  @spec stored(map(), [map()], String.t()) :: [atom()]
+  def stored(user, memberships, org_id) when is_list(memberships) do
+    case Enum.find(memberships, &(&1.organization_id == org_id)) do
+      %{} = membership -> list(membership.audiences)
+      nil when memberships == [] -> list(Map.get(user, :audiences))
+      nil -> []
     end
   end
 
