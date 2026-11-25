@@ -87,6 +87,13 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="experiment-goal-select"></a>
+
+- **The goal select on `/editor/experiments` takes effect (#2779).** The new-experiment form posts every field on each change, and the page's change handler matched on the content type first, so a change of the **Counts as a conversion** select was never read. Picking **A funnel is completed** left the form showing the **Goal form** picker, so the experiment was created with a funnel goal and no funnel, and could not be started. The same happened to **A page is reached**, whose target fields never appeared.
+  - **What changes.** One change reads both the content type and the goal, so the picked goal shows its own target field and the funnel, form or page picked there is saved with the experiment. The document list is reloaded only when the content type changes, not on every keystroke in **Name**.
+  - **Unchanged.** How a funnel goal is measured: a visitor converts on reaching the funnel's last step, as before. Who may create experiments, and which goal fields are saved for each goal.
+  - **No migration; rolling the pin back is safe.**
+
 <a id="collab-join-fallback"></a>
 
 - **With live collaboration on, a rich-text block whose collab connection can't join now mounts a single-user editor instead of no editor at all (#2772).** A block bound to the collaboration room waited for its channel join before mounting TipTap, and that wait ended only on a successful join or a lasting refusal. A collab socket that never connected (a tab left open past the token's 24-hour lifetime and reconnecting after a deploy, or a proxy that drops WebSockets) or a join that timed out left the block without an editor until a full reload.
