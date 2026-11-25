@@ -472,6 +472,262 @@ defmodule KilnCMS.Storage.S3Test do
     end
   end
 
+  describe "slow and failing parts (#2725)" do
+    # A part used to get a fixed 30 s, killed at the deadline, so an uplink
+    # under about 5 Mbit/s could never store anything over 16 MB. Each attempt
+    # now has a deadline that follows the part's size, and a part that misses
+    # it, or meets a server error, is sent again before the upload is aborted.
+    # The limits are configured small here so the tests run in milliseconds.
+
+    @mib 1024 * 1024
+
+    defp source_of(size) do
+      path = tmp_source(:binary.copy(<<0>>, size))
+      on_exit(fn -> File.rm(path) end)
+      path
+    end
+
+    defp with_part_limits(limits) do
+      original = Application.get_env(:kiln_cms, KilnCMS.Storage.S3)
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Storage.S3, original) end)
+      Application.put_env(:kiln_cms, KilnCMS.Storage.S3, Keyword.merge(original, limits))
+    end
+
+    # ExAws retries a 5xx itself, with a backoff of up to 10 s; one attempt
+    # each keeps these fast and shows the part-level retry on its own.
+    defp with_one_ex_aws_attempt do
+      original = Application.get_env(:ex_aws, :retries)
+
+      on_exit(fn ->
+        if original,
+          do: Application.put_env(:ex_aws, :retries, original),
+          else: Application.delete_env(:ex_aws, :retries)
+      end)
+
+      Application.put_env(:ex_aws, :retries,
+        max_attempts: 1,
+        base_backoff_in_ms: 1,
+        max_backoff_in_ms: 1
+      )
+    end
+
+    # Answers the multipart calls. `answer.(n, attempt)` decides each part's
+    # reply: `:ok` (200 + ETag), `{:sleep, ms}` (then 200) or `{:status, s}`.
+    # Each part request is reported as `{:mp, :part, n, attempt}`, then as
+    # `{:mp, :in_flight, count}` with how many parts are being answered.
+    defp stub_parts(answer) do
+      test_pid = self()
+      attempts = :counters.new(64, [])
+      in_flight = :counters.new(1, [])
+
+      Req.Test.stub(KilnCMS.Storage.S3, fn conn ->
+        conn = Plug.Conn.fetch_query_params(conn)
+        {:ok, body, conn} = Plug.Conn.read_body(conn, length: 32 * 1024 * 1024)
+
+        case {conn.method, conn.query_params} do
+          {"POST", %{"uploads" => _}} ->
+            Plug.Conn.send_resp(conn, 200, """
+            <InitiateMultipartUploadResult><Bucket>kiln-test</Bucket><Key>big.mp4</Key><UploadId>up-1</UploadId></InitiateMultipartUploadResult>
+            """)
+
+          {"PUT", %{"partNumber" => n, "uploadId" => "up-1"}} ->
+            n = String.to_integer(n)
+            :counters.add(attempts, n, 1)
+            attempt = :counters.get(attempts, n)
+            send(test_pid, {:mp, :part, n, attempt})
+
+            :counters.add(in_flight, 1, 1)
+            send(test_pid, {:mp, :in_flight, :counters.get(in_flight, 1)})
+
+            try do
+              reply_part(conn, n, answer.(n, attempt))
+            after
+              :counters.sub(in_flight, 1, 1)
+            end
+
+          {"POST", %{"uploadId" => "up-1"}} ->
+            send(test_pid, {:mp, :complete, body})
+            answer_complete(conn, 200)
+
+          {"DELETE", %{"uploadId" => upload_id}} ->
+            send(test_pid, {:mp, :abort, upload_id})
+            Plug.Conn.send_resp(conn, 204, "")
+        end
+      end)
+    end
+
+    defp reply_part(conn, n, :ok), do: answer_part(conn, n, false)
+
+    defp reply_part(conn, n, {:sleep, ms}) do
+      Process.sleep(ms)
+      answer_part(conn, n, false)
+    end
+
+    defp reply_part(conn, _n, {:status, status}), do: Plug.Conn.send_resp(conn, status, "")
+    defp reply_part(_conn, n, :raise), do: raise("part #{n} blew up")
+
+    defp part_attempts(n) do
+      receive do
+        {:mp, :part, ^n, _attempt} -> 1 + part_attempts(n)
+      after
+        0 -> 0
+      end
+    end
+
+    defp in_flight_counts do
+      receive do
+        {:mp, :in_flight, count} -> [count | in_flight_counts()]
+      after
+        0 -> []
+      end
+    end
+
+    test "a part slower than the old fixed deadline still lands when its size allows the time" do
+      # A 5 MiB part at a 5 MiB/s floor has a second; the floor for any part
+      # is 100 ms. The first part takes 400 ms: past the floor, inside its own.
+      with_part_limits(part_min_timeout_ms: 100, part_min_bytes_per_second: 5 * @mib)
+
+      stub_parts(fn
+        1, _attempt -> {:sleep, 400}
+        _n, _attempt -> :ok
+      end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, "big.mp4"} = S3.store("big.mp4", big_source())
+        end)
+
+      assert part_attempts(1) == 1
+      assert_received {:mp, :complete, _body}
+      refute_received {:mp, :abort, _upload_id}
+      refute log =~ "retrying"
+    end
+
+    test "a part that misses its deadline once is sent again and the upload completes" do
+      with_part_limits(
+        part_min_timeout_ms: 100,
+        part_min_bytes_per_second: 1_000 * @mib,
+        part_retry_backoff_ms: 1
+      )
+
+      stub_parts(fn
+        2, 1 -> {:sleep, 2_000}
+        _n, _attempt -> :ok
+      end)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, "big.mp4"} = S3.store("big.mp4", big_source())
+        end)
+
+      assert part_attempts(2) == 2
+      assert_received {:mp, :complete, complete}
+      assert complete =~ "<PartNumber>2</PartNumber><ETag>&quot;etag-2&quot;</ETag>"
+      refute_received {:mp, :abort, _upload_id}
+      assert log =~ "part 2 failed (:timeout); retrying, attempt 2 of 3"
+    end
+
+    test "a part answered with a server error once is sent again and the upload completes" do
+      with_one_ex_aws_attempt()
+      with_part_limits(part_retry_backoff_ms: 1)
+
+      stub_parts(fn
+        3, 1 -> {:status, 503}
+        _n, _attempt -> :ok
+      end)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, "big.mp4"} = S3.store("big.mp4", big_source())
+      end)
+
+      assert part_attempts(3) == 2
+      assert_received {:mp, :complete, _body}
+      refute_received {:mp, :abort, _upload_id}
+    end
+
+    test "a part that always misses its deadline fails the store and aborts the upload" do
+      with_part_limits(
+        part_min_timeout_ms: 100,
+        part_min_bytes_per_second: 1_000 * @mib,
+        part_retry_backoff_ms: 1
+      )
+
+      stub_parts(fn
+        2, _attempt -> {:sleep, 2_000}
+        _n, _attempt -> :ok
+      end)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, :timeout} = S3.store("big.mp4", big_source())
+      end)
+
+      assert part_attempts(2) == 3
+      refute_received {:mp, :complete, _body}
+      assert_received {:mp, :abort, "up-1"}
+    end
+
+    test "a part that always meets a server error fails the store with it and aborts the upload" do
+      with_one_ex_aws_attempt()
+      with_part_limits(part_retry_backoff_ms: 1)
+
+      stub_parts(fn
+        4, _attempt -> {:status, 500}
+        _n, _attempt -> :ok
+      end)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, {:http_error, 500, _resp}} = S3.store("big.mp4", big_source())
+      end)
+
+      assert part_attempts(4) == 3
+      refute_received {:mp, :complete, _body}
+      assert_received {:mp, :abort, "up-1"}
+    end
+
+    test "a part whose request crashes fails the store and still aborts the upload" do
+      # The attempt runs unlinked, so a raise in ExAws or Req is the part's
+      # error rather than an exit that takes the caller, and the abort, down.
+      with_part_limits(part_retry_backoff_ms: 1)
+
+      stub_parts(fn
+        2, _attempt -> :raise
+        _n, _attempt -> :ok
+      end)
+
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:error, {:part_crashed, {%RuntimeError{message: "part 2 blew up"}, _stack}}} =
+                 S3.store("big.mp4", big_source())
+      end)
+
+      assert part_attempts(2) == 1
+      refute_received {:mp, :complete, _body}
+      assert_received {:mp, :abort, "up-1"}
+    end
+
+    test "a part the store refuses is not sent again" do
+      # A 4xx is an answer about the request (a credential, a policy), which
+      # a second attempt would only repeat.
+      with_part_limits(part_retry_backoff_ms: 1)
+
+      stub_parts(fn
+        2, _attempt -> {:status, 403}
+        _n, _attempt -> :ok
+      end)
+
+      assert {:error, {:http_error, 403, _resp}} = S3.store("big.mp4", big_source())
+      assert part_attempts(2) == 1
+      assert_received {:mp, :abort, "up-1"}
+    end
+
+    test "parts still go up four at a time" do
+      # Seven parts, each held long enough to overlap the others.
+      stub_parts(fn _n, _attempt -> {:sleep, 100} end)
+
+      assert {:ok, "big.mp4"} = S3.store("big.mp4", source_of(31 * @mib))
+      assert Enum.max(in_flight_counts()) == 4
+    end
+  end
+
   test "a missing :bucket or :public_base_url is a configuration error, raised" do
     original = Application.get_env(:kiln_cms, KilnCMS.Storage.S3)
     on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Storage.S3, original) end)

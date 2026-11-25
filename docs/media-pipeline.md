@@ -1137,6 +1137,15 @@ relocation; and the stream route chunks its responses as described above. The
 one deliberate exception is `GET /media/:id/download`, which is a whole-file
 response by definition — keep the document caps in mind if you raise them.
 
+A multipart upload sends 5 MB parts, four at a time. Each attempt at a part has
+as long as its size takes at `S3_UPLOAD_MIN_BYTES_PER_SECOND` (32768 by
+default, about 1 Mbit/s of uplink shared by the four), and never less than 30
+seconds. A part that runs out of time or meets a server error is sent again, up
+to three attempts in all, before the upload is aborted (#2725). On a slower
+uplink, lower that variable
+([environment-variables.md](environment-variables.md#object-storage-s3-compatible)).
+`Media.AVStripWorker` still gives each strip, upload included, 10 minutes.
+
 ## Uploading over the API
 
 `POST /api/media`, `POST /api/media/import-url` and the direct-upload pair
