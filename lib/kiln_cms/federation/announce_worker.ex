@@ -32,7 +32,13 @@ defmodule KilnCMS.Federation.AnnounceWorker do
     unique: [
       period: 60,
       keys: [:org_id, :document_id, :verb],
-      states: [:scheduled, :available, :executing, :retryable, :suspended]
+      # Only jobs that have not read the row yet (#2757). A duplicate of one of
+      # these loses nothing: it reads the live record when it runs, so it sends
+      # the newer content. An `:executing` job has already read the row, so an
+      # edit that lands while it fans out must queue its own job, or followers
+      # keep the older copy. `:retryable` stays in: a retry reads the row again.
+      # `:completed` stays out for the same reason as `:executing`.
+      states: [:scheduled, :available, :retryable, :suspended]
     ]
 
   alias KilnCMS.CMS.ContentTypes
