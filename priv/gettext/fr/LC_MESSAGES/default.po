@@ -21249,6 +21249,7 @@ msgstr "Segment supprimé."
 msgid "Segments"
 msgstr "Segments"
 
+#: lib/kiln_cms/cms/field_types/address.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Select"
@@ -25501,6 +25502,11 @@ msgstr "Ce contenu a été modifié ailleurs. Rechargez avant d'enregistrer."
 #, elixir-autogen, elixir-format
 msgid "This content changed elsewhere. Reload to get the latest before saving."
 msgstr "Ce contenu a été modifié ailleurs. Rechargez pour obtenir la dernière version avant d'enregistrer."
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "This content exists in more than one language. Open it from its editor and choose Visual there."
+msgstr "Ce contenu existe en plusieurs langues. Ouvrez-le depuis son éditeur et choisissez Visuel."
 
 #: lib/kiln_cms_web/live/release_preview_live.ex
 #, elixir-autogen, elixir-format

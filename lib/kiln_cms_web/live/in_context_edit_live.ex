@@ -57,7 +57,7 @@ defmodule KilnCMSWeb.InContextEditLive do
     # into one "no such content": an unwritable record is not a missing one, and
     # the reader is sent somewhere useful.
     with ct when not is_nil(ct) <- ContentTypes.get(type, socket.assigns.current_org),
-         record when not is_nil(record) <-
+         %_{} = record <-
            fetch_by_slug(ct.type, slug, locale, actor, socket.assigns.current_org),
          {true, _ct, _record} <-
            {may_write?(record, actor, socket.assigns.current_org), ct, record} do
@@ -70,6 +70,15 @@ defmodule KilnCMSWeb.InContextEditLive do
          socket
          |> put_flash(:info, gettext("You can view this content but not edit it."))
          |> push_navigate(to: ~p"/editor/preview/#{ct.type}/#{record.id}")}
+
+      :ambiguous ->
+        {:ok,
+         redirect_to_editor(
+           socket,
+           gettext(
+             "This content exists in more than one language. Open it from its editor and choose Visual there."
+           )
+         )}
 
       nil ->
         {:ok, redirect_to_editor(socket, gettext("No such content to edit."))}
@@ -126,29 +135,31 @@ defmodule KilnCMSWeb.InContextEditLive do
   # and an out-of-scope type falls through to the published/audience filters —
   # so this can return a *published* record to someone who may not author it,
   # which is exactly why `mount/3` now asks whether they may write it.
+  #
+  # Locale is part of the identity (`[slug, locale]`), and shared block ids
+  # across locale variants (#502) make loading the wrong variant a silent
+  # cross-locale write: every edit and autosave lands on it. So an absent
+  # `?locale=` (an older bridge or a hand-typed URL, #1104) falls back to the
+  # default only when the slug names one variant. With several it is a guess,
+  # and the answer is `:ambiguous` rather than the default (#2758).
   defp fetch_by_slug(kind, slug, locale, actor, org) do
     # Scope to the current site's org (epic #336) so in-context editing on one
     # site's host only resolves that site's content.
-    #
-    # Locale is part of the identity (`[slug, locale]`). Absent `?locale=` falls
-    # back to the default — an older bridge or a hand-typed URL (#1104). Shared
-    # block ids across locale variants (#502) make loading the wrong variant a
-    # silent cross-locale write.
+    filter = if locale, do: [slug: slug, locale: locale], else: [slug: slug]
+
     case ContentTypes.list!(kind,
            actor: actor,
            tenant: org,
-           query: [
-             filter: [slug: slug, locale: locale],
-             select: [:id],
-             limit: 1
-           ]
+           query: [filter: filter, select: [:id, :locale], limit: 2]
          ) do
+      [_, _] when is_nil(locale) ->
+        :ambiguous
+
+      [%{id: id, locale: found}] when is_nil(locale) ->
+        if found == KilnCMS.I18n.default_locale(), do: load_record(kind, id, actor, org)
+
       [%{id: id} | _] ->
-        ContentTypes.get_record!(kind, id,
-          actor: actor,
-          tenant: org,
-          load: [:category, :featured_image, :tags]
-        )
+        load_record(kind, id, actor, org)
 
       _ ->
         nil
@@ -157,9 +168,16 @@ defmodule KilnCMSWeb.InContextEditLive do
     _ -> nil
   end
 
-  defp locale_param(params) do
-    KilnCMSWeb.Params.string(params, "locale", KilnCMS.I18n.default_locale())
+  defp load_record(kind, id, actor, org) do
+    ContentTypes.get_record!(kind, id,
+      actor: actor,
+      tenant: org,
+      load: [:category, :featured_image, :tags]
+    )
   end
+
+  # nil when absent: `fetch_by_slug/5` decides what an absent locale means.
+  defp locale_param(params), do: KilnCMSWeb.Params.string(params, "locale")
 
   defp assign_record(socket, record) do
     typed = TypedBlocks.to_typed(record.blocks)

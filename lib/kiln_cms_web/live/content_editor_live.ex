@@ -8151,7 +8151,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
             <%!-- In-context (front-end) editing on Kiln's own rendered page
                   (#354) — a primary mode, not a detour (Theme C). --%>
             <.link
-              navigate={~p"/editor/site/#{@kind}/#{@record.slug}"}
+              navigate={~p"/editor/site/#{@kind}/#{@record.slug}?#{[locale: @record.locale]}"}
               class="btn btn-sm btn-default"
               title={gettext("Edit on the rendered page")}
             >

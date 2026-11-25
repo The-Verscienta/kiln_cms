@@ -21249,6 +21249,7 @@ msgstr ""
 msgid "Segments"
 msgstr ""
 
+#: lib/kiln_cms/cms/field_types/address.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Select"
@@ -25500,6 +25501,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #, elixir-autogen, elixir-format
 msgid "This content changed elsewhere. Reload to get the latest before saving."
+msgstr ""
+
+#: lib/kiln_cms_web/live/in_context_edit_live.ex
+#, elixir-autogen, elixir-format
+msgid "This content exists in more than one language. Open it from its editor and choose Visual there."
 msgstr ""
 
 #: lib/kiln_cms_web/live/release_preview_live.ex

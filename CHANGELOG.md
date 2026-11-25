@@ -83,6 +83,10 @@ else.
   No migration. Data: MIT-licensed commerceguys/addressing, derived from Google's CC BY 4.0 libaddressinput.
   ([long form](docs/changelog/unreleased.md#address-country-formats))
 
+- **An address field offers the country's states, provinces or prefectures as a select for 62 countries and stores the area's code (`CA`, not `California`). A name or lower-case code is converted on save and unrecognized text is kept as typed ([#2996](https://github.com/The-Verscienta/kiln_cms/issues/2996)).**
+  No migration. Data: MIT-licensed commerceguys/addressing, derived from Google's CC BY 4.0 libaddressinput.
+  ([long form](docs/changelog/unreleased.md#address-admin-area-lists))
+
 ### Changed
 
 - **A list field's errors count items one way: a value rule now says `Scores (scores) item 2 must be at most 10` (from 1) instead of `Scores (scores[1]) …`, and a type error, field conversion reports included, no longer counts a dropped repeat (#2683).**
@@ -91,6 +95,9 @@ else.
 
 ### Fixed
 
+- **A newsletter campaign's counts add up: a recipient whose last delivery attempt still fails (a down MX, a hung relay) or whose campaign has no fired content is counted failed once, instead of being dropped from the tally (#2755).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#newsletter-exhausted-counts-failed))
 - **An API key minted by a newer release with a scope this one doesn't know no longer breaks key lookups, the API keys page, revoke or erasure; it is refused at sign-in like a revoked key, and the security posture warns about it (#2604).**
   No migration; rolling the pin back is safe. The posture JSON's `core.api_keys` check gains the fact `unrecognized_scope_keys`.
   ([long form](docs/changelog/unreleased.md#api-key-unknown-scope))
@@ -139,6 +146,13 @@ else.
 - **`mix kiln.links.backfill` no longer deletes the edges of list reference fields or of references in groups and flexible items: it writes and realigns top-level single and list edges, and prints `N written, M realigned, K removed` (#2742).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#links-backfill-multiple))
+- **The "Visual" button and a preview block's "Edit" link open the in-context editor on the translation you were editing; they left the locale out, so a `fr` variant's edits and autosaves landed on the `en` record sharing its slug (#2758).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#in-context-editor-locale))
+
+- **The daily health sweep now raises a `health_overdue` or `health_expired` event for every stale record, not the same 500 per content type each day (#2738).**
+  Its telemetry counts every record too. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#health-sweep-every-record))
 
 - **Renaming, deleting or reshaping a custom field (group sub-fields, link fields and flexible items included) now rewrites the drafts of live records too, so *Publish changes*, a release or an unpublish no longer reports a conflict nobody made or drops the draft's value (#2744).**
   No migration. Open editors of the affected records see "changed elsewhere" once; an `If-Match` client gets one 412.

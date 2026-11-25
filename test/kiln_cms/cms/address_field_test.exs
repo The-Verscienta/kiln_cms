@@ -285,6 +285,53 @@ defmodule KilnCMS.CMS.AddressFieldTest do
     end
   end
 
+  describe "administrative-area lists (#2996)" do
+    defp area(country, text) do
+      {:ok, stored} = Address.cast(%{"country" => country, "administrative_area" => text}, %{})
+      stored["administrative_area"]
+    end
+
+    test "a code or a name is stored as the code" do
+      assert area("US", "CA") == "CA"
+      assert area("us", "ca") == "CA"
+      assert area("US", "California") == "CA"
+      assert area("JP", "Tokyo") == "13"
+      assert area("CA", "ontario") == "ON"
+    end
+
+    test "text the list does not know is kept as typed, not refused" do
+      assert area("GB", "England") == "England"
+      assert area("US", "Atlantis") == "Atlantis"
+    end
+
+    test "a country without a list keeps free text" do
+      assert area("DE", "Bayern") == "Bayern"
+    end
+
+    test "the editor offers a select for a country with a list" do
+      parts = Map.new(Address.input_parts(%{}, %{"country" => "US"}), &{&1.key, &1})
+      assert %{type: "select", options: [{"", _} | options]} = parts["administrative_area"]
+      assert {"CA", "California"} in options
+      assert parts["administrative_area"].label == "State"
+      refute Map.has_key?(parts["administrative_area"], :attrs)
+    end
+
+    test "a country without a list keeps a text box" do
+      parts = Map.new(Address.input_parts(%{}, %{"country" => "BY"}), &{&1.key, &1})
+      assert parts["administrative_area"].type == "text"
+    end
+
+    test "a stored value that is not an option is kept as one, so a save never drops it" do
+      value = %{"country" => "US", "administrative_area" => "California"}
+      parts = Map.new(Address.input_parts(%{}, value), &{&1.key, &1})
+      assert {"California", "California"} in parts["administrative_area"].options
+
+      known = %{"country" => "US", "administrative_area" => "CA"}
+      parts = Map.new(Address.input_parts(%{}, known), &{&1.key, &1})
+      refute {"CA", "CA"} in parts["administrative_area"].options
+    end
+  end
+
   describe "json_schema and input_parts" do
     test "the schema accepts what cast stores and refuses unknown keys" do
       schema = Address.json_schema(%{})

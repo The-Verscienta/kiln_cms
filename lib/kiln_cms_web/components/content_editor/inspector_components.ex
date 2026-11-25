@@ -2974,6 +2974,10 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
   attr :kind, :atom, required: true
   attr :slug, :string, required: true
 
+  # Part of the record's identity with the slug (#1104): without it the
+  # in-context editor opens the default-locale variant (#2758).
+  attr :locale, :string, required: true
+
   def preview_article(assigns) do
     ~H"""
     <article class="prose max-w-none space-y-3 rounded border border-base-content/15 p-5">
@@ -2985,7 +2989,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorComponents do
         <div class="kiln-block">{html}</div>
         <.link
           :if={id}
-          navigate={~p"/editor/site/#{@kind}/#{@slug}?#{[focus: id]}"}
+          navigate={~p"/editor/site/#{@kind}/#{@slug}?#{[locale: @locale, focus: id]}"}
           class="absolute right-1 top-1 z-10 inline-flex items-center gap-1 rounded bg-base-100/95 px-1.5 py-0.5 text-xs font-medium text-base-content no-underline opacity-0 shadow ring-1 ring-base-content/10 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-primary pointer-coarse:opacity-100"
           title={gettext("Edit this block on the page")}
           aria-label={gettext("Edit block %{n} on the page", n: i)}
