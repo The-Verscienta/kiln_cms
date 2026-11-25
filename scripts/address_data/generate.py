@@ -87,6 +87,7 @@ def main(root):
     defs = parse(tokens(body))
 
     out = {}
+    with_list = set()
     for country in sorted(defs):
         d = defs[country]
         fmt = d.get("format", "")
@@ -109,12 +110,29 @@ def main(root):
             "postal_code": d.get("postal_code_type", "postal"),
         }
         out[country] = entry
+        if "administrativeArea" in d.get("subdivision_data_fields", []):
+            with_list.add(country)
 
     dest = os.path.join(os.path.dirname(__file__), "..", "..", "priv", "address")
     with open(os.path.join(dest, "formats.json"), "w", encoding="utf-8") as f:
         json.dump(out, f, indent=1, sort_keys=True, ensure_ascii=False)
         f.write("\n")
     print("formats: %d countries" % len(out))
+
+    # First-level subdivisions (the file's keys are the dataset's stable ids:
+    # "CA" for California, "01" for Hokkaido) for the countries whose address
+    # format asks for an administrative area. Names are the Latin ones.
+    lists = {}
+    for country in sorted(with_list):
+        path = os.path.join(root, "resources", "subdivision", country + ".json")
+        if not os.path.exists(path):
+            continue
+        subs = json.load(open(path, encoding="utf-8"))["subdivisions"]
+        lists[country] = [[code, sub["name"] if isinstance(sub, dict) else code] for code, sub in subs.items()]
+    with open(os.path.join(dest, "subdivisions.json"), "w", encoding="utf-8") as f:
+        json.dump(lists, f, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        f.write("\n")
+    print("subdivisions: %d countries, %d areas" % (len(lists), sum(map(len, lists.values()))))
 
 
 if __name__ == "__main__":

@@ -21249,6 +21249,7 @@ msgstr ""
 msgid "Segments"
 msgstr ""
 
+#: lib/kiln_cms/cms/field_types/address.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Select"

@@ -160,6 +160,34 @@ defmodule KilnCMSWeb.CompositeFieldEditorTest do
     refute html =~ ~r/name="form\[custom_fields\]\[venue\]\[postal_code\]"/
   end
 
+  test "the administrative area is a select with the country's list, saved as its code (#2996)",
+       %{conn: conn} do
+    admin = authed_admin()
+    {lv, _html, page} = editor(conn, admin, %{})
+
+    html = change(lv, %{"venue" => %{"country" => "US"}})
+    assert html =~ ~r/<select[^>]*name="form\[custom_fields\]\[venue\]\[administrative_area\]"/
+    assert html =~ ~r/<option[^>]*value="CA"[^>]*>\s*California/
+
+    html = change(lv, %{"venue" => %{"country" => "BY"}})
+
+    assert html =~
+             ~r/<input[^>]*name="form\[custom_fields\]\[venue\]\[administrative_area\]"/
+
+    lv
+    |> form("#page-editor", %{
+      "form" => %{
+        "custom_fields" => %{
+          "venue" => %{"country" => "US", "administrative_area" => "CA"}
+        }
+      }
+    })
+    |> render_submit()
+
+    saved = CMS.get_page!(page.id, actor: admin)
+    assert saved.custom_fields["venue"] == %{"country" => "US", "administrative_area" => "CA"}
+  end
+
   test "an address saves normalised, refuses a bad postal code, and an untouched one saves nothing",
        %{conn: conn} do
     admin = authed_admin()
