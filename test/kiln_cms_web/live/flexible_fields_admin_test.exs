@@ -121,7 +121,7 @@ defmodule KilnCMSWeb.FlexibleFieldsAdminTest do
       assert html =~ "data with settings, not page layout"
       assert has_element?(lv, "#new-field-multiple-bounds")
       assert has_element?(lv, "#new-field-multiple-item-types-hint")
-      refute has_element?(lv, "#new-field-form input[name='field_definition[searchable]']")
+      assert has_element?(lv, "#new-field-form input[name='field_definition[searchable]']")
       refute has_element?(lv, "#new-field-form input[name='field_definition[names_record]']")
 
       lv

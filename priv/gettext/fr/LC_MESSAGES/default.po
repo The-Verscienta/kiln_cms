@@ -14404,6 +14404,11 @@ msgstr "Placer « %{title} » dans la corbeille ? Les administrateurs peuvent le
 msgid "Move “%{title}” to trash? It comes off the live site now. Admins can restore it from Trash for %{days} days, which puts it back on the site."
 msgstr "Placer « %{title} » dans la corbeille ? Il est retiré du site en ligne immédiatement. Les administrateurs peuvent le restaurer depuis la Corbeille pendant %{days} jours, ce qui le remet en ligne."
 
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "Moved"
+msgstr "Déplacé"
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Moved %{count} item to trash."

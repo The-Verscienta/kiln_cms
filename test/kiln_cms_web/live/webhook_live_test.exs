@@ -86,14 +86,14 @@ defmodule KilnCMSWeb.WebhookLiveTest do
       admin = authed_user(:admin)
       endpoint = seed_endpoint()
 
-      :ok = KilnCMS.Webhooks.HealthNotice.surface(endpoint, %{endpoint | consecutive_failures: 1})
+      :ok = KilnCMS.Webhooks.HealthNotice.surface(%{endpoint | consecutive_failures: 1})
 
+      # The record `:record_delivery_failure` returns when it switched the
+      # endpoint off.
       :ok =
-        KilnCMS.Webhooks.HealthNotice.surface(endpoint, %{
-          endpoint
-          | active: false,
-            consecutive_failures: 10
-        })
+        %{endpoint | active: false, consecutive_failures: 10}
+        |> Ash.Resource.put_metadata(:auto_disabled, true)
+        |> KilnCMS.Webhooks.HealthNotice.surface()
 
       assert length(health_notices(admin)) == 2
 

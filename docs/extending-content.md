@@ -2656,6 +2656,78 @@ imports.
 | "Couldn't delete that field: its section's layout could not be removed with it." | The flexible field was the last of its section, and that section's layout could not be deleted with it; nothing was deleted, and the dialog closes. See [Lay out custom fields as tabs, fieldsets or columns](#lay-out-custom-fields-as-tabs-fieldsets-or-columns). |
 | "Couldn't save the new order of item types." | The reorder was not saved; try again. |
 
+### Search a flexible field and read its history
+
+A flexible field can be **searchable**, and its items show up item by item in a
+record's version history. Both work on the stored items, so nothing changes in
+how editors fill the field in.
+
+**Make its items searchable (admin)**
+
+1. Open `/editor/fields`. When you add the flexible field (see above), tick
+   **Searchable (search indexes this value as text)** before **Add field**.
+   **Names the record** is not offered for a flexible field.
+2. From code, set `searchable: true` on the definition, as for any field. A
+   flexible field's `names_record` is still refused.
+3. Publish or save a record. The keyword search legs now find it by the text in
+   its items.
+
+What is indexed is the prose of each item, read through the definitions of its
+item type, in the order of the items and, within an item, of its fields:
+
+- the same text each sub-field would contribute at the top of a record (a
+  link's label, an address's lines, the values of a key-value field, and the
+  strings and numbers of a plain field);
+- a nested flexible field's items too, down to the depth cap;
+- never an item's `_id`, `_type` or `_settings`, so a setting such as a
+  background color is not searchable text;
+- never a **Media** or **Reference** sub-field: what is stored there is a
+  snapshot of a picture or record, which search indexes under its own record;
+- an item whose type was deleted still contributes its text, by the generic
+  rule (`KilnCMS.CMS.SearchableFields.default_texts/1`), which skips `_id`,
+  `_type` and `_settings` of any item;
+- a sub-field's own `searchable` flag is ignored and stays cleared.
+
+Existing records pick this up as follows. Flipping the flag re-fires the type's
+published documents, which recomputes their search text, and a draft catches up
+on its next save. The re-fire leaves `updated_at` alone. To redo it by hand,
+run `mix kiln.refire_all` (on a release,
+`/app/bin/kiln_cms rpc "KilnCMS.Firing.Sweep.run()"`). Editing the
+definitions of an item type does not re-index by itself: after you change which
+sub-fields an item type has, run the same sweep. The semantic index's
+"custom-fields" pseudo-block is built from the same text, so it follows.
+
+**Read the history of items (editor)**
+
+1. Open a record and the version **Compare** for two versions, or start a
+   **Restore** (the restore preview lists what would change before you
+   confirm).
+2. Find the flexible field in the list of changed custom fields. Beside the
+   usual added, removed or changed pill, it lists one row per item that was
+   added, removed or changed, in the new order, each with its item type's
+   label and its text before and after.
+3. An item that only changed place carries a **Moved** pill and its text. Items
+   that kept their place and content are not listed.
+
+Items are matched by their `_id`, so editing an item's words reads as a change
+to that item, not as one removed and one added. A stored list that is not made
+of items (no `_id` and `_type` on each, or a repeated `_id`) is compared as one
+value, as before. The version's `changes` and the API are unchanged: the diff is
+computed when it is shown. In code, `KilnCMS.CMS.VersionDiff` adds an `items`
+list to a custom-field entry: `id`, `type`, `status` (`:added`, `:removed`,
+`:changed`, `:unchanged`), `moved?`, `old_index`, `new_index`, `old`, `new`
+and `changed_keys` (the keys that differ; `_settings` keys read
+`settings.<key>`). An entry that is not a list of items has no `items` key.
+`KilnCMS.CMS.FieldDisplay.display_item/3` renders one item as text.
+
+**What can go wrong**
+
+| You see | Meaning |
+|---|---|
+| No **Searchable** box on a flexible field's form | The box is on the form for adding a field. For an existing field, set `searchable` from code. |
+| "a flexible field can't be a name of the record" | `names_record` is not allowed on a flexible field. |
+| A record is not found by its items' text | It has not been re-indexed: save the record, or run the sweep above. Text in a **Media** or **Reference** sub-field, and in `_settings`, is never indexed. |
+
 ### Put custom field text in the AI-readable outputs
 
 Answer engines read two fired artifacts, the `:llm` Markdown and the `:json_ld`
@@ -2853,12 +2925,13 @@ Things to know:
   To change the default for the whole installation, set
   `config :kiln_cms, :flexible, max_items: 250` in `config/config.exs`; it is
   read at compile time, so recompile after changing it.
-- **Excluded options.** A flexible field can't be `private`, `searchable`,
-  `unique`, or take a `default`, `names_record`, or its own `visible_when` /
+- **Excluded options.** A flexible field can't be `private`, `unique`, or take
+  a `default`, `names_record`, or its own `visible_when` /
   `required_when`; it is not offered as a list column, an index or a
   `custom_filter` leaf (a filter on it answers only `null`). Sub-fields keep
   their own `required`, `validation` and conditions, which see the item's own
-  fields and settings together.
+  fields and settings together. `searchable` is allowed: see
+  [Search a flexible field and read its history](#search-a-flexible-field-and-read-its-history).
 - **Grants.** `custom_fields.sections` grants the whole field. A grant that
   names an item type (`custom_fields.sections.hero`) is not valid yet.
 - **Renaming and deleting.** Renaming a sub-field renames its key in every

@@ -266,6 +266,7 @@ defmodule KilnCMS.CMS.VersionDiff do
               old: old_entry,
               new: new_entry
             }
+            |> put_items(old_entry, new_entry)
           ]
         end
       end)
@@ -279,6 +280,98 @@ defmodule KilnCMS.CMS.VersionDiff do
       entries: entries
     }
   end
+
+  # A flexible field's value (#2282): a list of items, each with a unique
+  # `_id` and a `_type`. Anything else (a group's rows, a list of snapshots)
+  # diffs as one value, as before.
+  defp put_items(entry, old_value, new_value) do
+    with true <- item_list?(old_value) or old_value in [nil, []],
+         true <- item_list?(new_value) or new_value in [nil, []],
+         true <- item_list?(old_value) or item_list?(new_value) do
+      Map.put(entry, :items, diff_items(List.wrap(old_value), List.wrap(new_value)))
+    else
+      _not_items -> entry
+    end
+  end
+
+  defp item_list?([_ | _] = list) do
+    ids = Enum.map(list, &item_id/1)
+    Enum.all?(list, &item?/1) and length(Enum.uniq(ids)) == length(ids)
+  end
+
+  defp item_list?(_value), do: false
+
+  defp item?(%{"_id" => id, "_type" => type}) when is_binary(id) and is_binary(type), do: true
+  defp item?(_value), do: false
+
+  defp item_id(%{"_id" => id}), do: id
+  defp item_id(_value), do: nil
+
+  defp diff_items(old_list, new_list) do
+    old_by_id = old_list |> Enum.with_index() |> Map.new(fn {i, idx} -> {i["_id"], {i, idx}} end)
+    new_by_id = new_list |> Enum.with_index() |> Map.new(fn {i, idx} -> {i["_id"], {i, idx}} end)
+
+    script =
+      List.myers_difference(Enum.map(old_list, & &1["_id"]), Enum.map(new_list, & &1["_id"]))
+
+    moved = moved_keys(script)
+
+    script
+    |> Enum.flat_map(fn {op, ids} -> Enum.map(ids, &{op, &1}) end)
+    |> Enum.flat_map(fn
+      {:del, id} ->
+        if MapSet.member?(moved, id), do: [], else: [item_entry(id, old_by_id, new_by_id, false)]
+
+      {:ins, id} ->
+        [item_entry(id, old_by_id, new_by_id, MapSet.member?(moved, id))]
+
+      {:eq, id} ->
+        [item_entry(id, old_by_id, new_by_id, false)]
+    end)
+  end
+
+  defp item_entry(id, old_by_id, new_by_id, moved?) do
+    old = Map.get(old_by_id, id)
+    new = Map.get(new_by_id, id)
+    {old_item, old_index} = old || {nil, nil}
+    {new_item, new_index} = new || {nil, nil}
+
+    %{
+      id: id,
+      type: (new_item || old_item || %{})["_type"],
+      status:
+        cond do
+          is_nil(old) -> :added
+          is_nil(new) -> :removed
+          old_item != new_item -> :changed
+          true -> :unchanged
+        end,
+      moved?: moved?,
+      old_index: old_index,
+      new_index: new_index,
+      old: old_item,
+      new: new_item,
+      changed_keys: changed_item_keys(old_item, new_item)
+    }
+  end
+
+  defp changed_item_keys(%{} = old, %{} = new) do
+    flat = fn item ->
+      {settings, rest} = Map.pop(item, "_settings")
+      Map.merge(rest, Map.new(settings || %{}, fn {k, v} -> {"settings." <> k, v} end))
+    end
+
+    {old, new} = {flat.(old), flat.(new)}
+
+    old
+    |> Map.keys()
+    |> Enum.concat(Map.keys(new))
+    |> Enum.uniq()
+    |> Enum.reject(&(&1 == "_id" or Map.get(old, &1) == Map.get(new, &1)))
+    |> Enum.sort()
+  end
+
+  defp changed_item_keys(_old, _new), do: []
 
   defp entry_status(false, true), do: :added
   defp entry_status(true, false), do: :removed
