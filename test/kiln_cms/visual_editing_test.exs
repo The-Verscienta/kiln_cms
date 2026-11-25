@@ -295,4 +295,192 @@ defmodule KilnCMS.VisualEditingTest do
       refute Map.has_key?(VisualEditing.annotate(json), "custom_fields")
     end
   end
+
+  # #2770: only prose is encoded. URLs and identifiers on a block are what a
+  # front end requests or looks up, so an invisible tail would 404 or miss.
+  describe "annotate/1 leaves URLs and identifiers alone (#2770)" do
+    @media_id "0b0e8c1e-3f4a-4c2b-9d8e-5a6b7c8d9e0f"
+
+    # One realistic `:json` render per block type that carries URL or id
+    # strings: `{block, keys that must come out byte-for-byte, prose keys}`.
+    @fixtures [
+      {%{
+         "_type" => "video",
+         "src" => "/media/#{@media_id}/stream",
+         "media_id" => @media_id,
+         "title" => "Launch day",
+         "caption" => "Filmed on site",
+         "poster" => "/media/#{@media_id}/poster.jpg",
+         "captions_url" => "/media/#{@media_id}/captions.vtt",
+         "captions_label" => "English captions",
+         "captions_lang" => "en"
+       }, ~w(src media_id poster captions_url captions_lang), ~w(title caption captions_label)},
+      {%{
+         "_type" => "audio",
+         "src" => "https://cdn.example.com/a/episode.mp3",
+         "media_id" => @media_id,
+         "title" => "Episode one"
+       }, ~w(src media_id), ~w(title)},
+      {%{
+         "_type" => "file",
+         "media_id" => @media_id,
+         "download_url" => "/media/#{@media_id}/download",
+         "filename" => "annual-report.pdf",
+         "content_type" => "application/pdf",
+         "title" => "Annual report",
+         "description" => "The full year in numbers"
+       }, ~w(media_id download_url filename content_type), ~w(title description)},
+      {%{
+         "_type" => "embed",
+         "url" => "https://www.youtube.com/watch?v=abc",
+         "resolved_url" => "https://www.youtube.com/embed/abc",
+         "thumbnail_url" => "https://i.ytimg.com/vi/abc/hq.jpg",
+         "title" => "A cached provider title"
+       }, ~w(url resolved_url thumbnail_url title), []},
+      {%{
+         "_type" => "image",
+         "url" => "https://x.example/y.png",
+         "media_id" => @media_id,
+         "alt" => "A kiln at dusk"
+       }, ~w(url media_id), ~w(alt)},
+      {%{
+         "_type" => "claim",
+         "text" => "Kilns reach 1300 degrees",
+         "source_title" => "Ceramics handbook",
+         "source_url" => "https://example.org/handbook"
+       }, ~w(source_url), ~w(text source_title)},
+      {%{"_type" => "form", "form_slug" => "contact"}, ~w(form_slug), []},
+      {%{
+         "_type" => "newsletter_signup",
+         "heading" => "Stay in touch",
+         "action" => "/newsletter/subscribe",
+         "honeypot_field" => "website"
+       }, ~w(action honeypot_field), ~w(heading)},
+      {%{"_type" => "gallery", "title" => "Site photos", "layout" => "grid"}, ~w(layout),
+       ~w(title)},
+      {%{"_type" => "columns", "layout" => "2", "gap" => "md", "columns" => []}, ~w(layout gap),
+       []},
+      {%{"_type" => "custom", "legacy_type" => "hero", "content" => "<div>Hi</div>"},
+       ~w(legacy_type content), []}
+    ]
+
+    defp annotate_one(block) do
+      json = %{
+        "type" => "page",
+        "id" => "doc-2770",
+        "slug" => "s",
+        "title" => "T",
+        "blocks" => [Map.put(block, "_id", "blk")]
+      }
+
+      [out] = VisualEditing.annotate(json)["blocks"]
+      out
+    end
+
+    for {block, untouched, prose} <- @fixtures do
+      @block block
+      @untouched untouched
+      @prose prose
+
+      test "#{block["_type"]}: #{Enum.join(untouched, ", ")} come out unencoded" do
+        out = annotate_one(@block)
+
+        for key <- @untouched do
+          assert out[key] == @block[key], "#{key} was encoded: #{inspect(out[key])}"
+        end
+
+        for key <- @prose do
+          assert Stega.clean(out[key]) == @block[key]
+          assert Stega.decode(out[key])["field"] == key, "#{key} was not encoded"
+        end
+      end
+    end
+
+    test "a heading's and a paragraph's text are still encoded" do
+      heading = annotate_one(%{"_type" => "heading", "text" => "Getting started", "level" => 2})
+
+      quote =
+        annotate_one(%{"_type" => "quote", "text" => "Fire is patient.", "citation" => "Ana"})
+
+      assert Stega.decode(heading["text"])["block"] == "blk"
+      assert Stega.clean(heading["text"]) == "Getting started"
+      assert Stega.decode(quote["text"])["field"] == "text"
+      assert Stega.decode(quote["citation"])["field"] == "citation"
+    end
+
+    # Table-driven over every registered block type: a string under a key the
+    # block doesn't declare as plain-text prose stays as it is, even when it
+    # reads as prose, and a declared prose key is encoded.
+    test "every registered block encodes exactly its declared prose fields" do
+      for {type, module} <- KilnCMS.Blocks.registry() do
+        prose =
+          for {name, :text} <- Kiln.Block.Info.translatable(module), do: Atom.to_string(name)
+
+        others =
+          for %{name: name} <- Kiln.Block.Info.fields(module),
+              key = Atom.to_string(name),
+              key not in prose,
+              do: key
+
+        block =
+          Map.new(prose ++ others ++ ~w(src poster download_url), &{&1, "Plain words here"})
+          |> Map.put("_type", Atom.to_string(type))
+
+        out = annotate_one(block)
+
+        for key <- others ++ ~w(src poster download_url) do
+          assert out[key] == "Plain words here", "#{type}.#{key} was encoded"
+        end
+
+        for key <- prose do
+          assert Stega.decode(out[key])["field"] == key, "#{type}.#{key} was not encoded"
+        end
+      end
+    end
+
+    test "a block whose type isn't registered is left as is" do
+      block = %{"_type" => "no_such_block", "text" => "Some words"}
+      assert annotate_one(block)["text"] == "Some words"
+    end
+
+    test "a prose field holding a URL, path, UUID or token is left as is" do
+      for value <- [
+            "https://example.com/a",
+            "mailto:hi@example.com",
+            "/media/x/stream",
+            "../up.png",
+            @media_id,
+            "video/mp4",
+            "report.pdf",
+            "contact_form"
+          ] do
+        out = annotate_one(%{"_type" => "heading", "text" => value})
+        assert out["text"] == value, "#{value} was encoded"
+      end
+    end
+
+    test "custom fields skip paths, UUIDs and identifier-like tokens" do
+      json = %{
+        "type" => "recipe",
+        "id" => "doc-cf",
+        "title" => "T",
+        "blocks" => [],
+        "custom_fields" => %{
+          "subtitle" => "A quick loaf",
+          "hero" => "/media/#{@media_id}/original",
+          "asset" => @media_id,
+          "sku" => "loaf_large",
+          "mime" => "image/webp"
+        }
+      }
+
+      cf = VisualEditing.annotate(json)["custom_fields"]
+
+      assert Stega.decode(cf["subtitle"])["field"] == "subtitle"
+      assert cf["hero"] == "/media/#{@media_id}/original"
+      assert cf["asset"] == @media_id
+      assert cf["sku"] == "loaf_large"
+      assert cf["mime"] == "image/webp"
+    end
+  end
 end

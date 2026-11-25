@@ -79,6 +79,14 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="visual-editing-prose-only"></a>
+
+- **The visual-editing preview read stega-encodes only prose (#2770).** `GET /api/visual-editing/:type/:slug` appended its invisible field address to every string on a block except a short list (`_type`, `_id`, `_key`, `layout`, `gap`, `url`, `slug`, `locale`). Every other key was encoded, including the URLs and identifiers a front end uses as they are: a video's `src`, `poster` and `captions_url`, a file's `download_url`, an embed's `resolved_url` and `thumbnail_url`, a claim's `source_url`, every `media_id`, a file's `filename` and `content_type`, a form block's `form_slug`. A front end rendering the annotated preview then requested URLs that 404 and looked up ids that matched nothing.
+  - **What is encoded now.** The document title, and on a block only the fields its block type declares plain-text translatable (`Kiln.Block.Info.translatable/1`): heading text, image alt and caption, video and audio titles and captions, a quote's text and citation, a file's title and description, and so on. Rich-text spans are encoded as before; code blocks still aren't. A plugin block follows its own `translatable:` declarations, and a block whose type isn't registered is left as is.
+  - **A value check on top.** A string that reads as a URL (`https://…`, `mailto:…`), a path (`/media/…`, `../x.png`), a UUID, JSON or an identifier-like token (`video/mp4`, `report.pdf`, `contact_form`) is never encoded, even in a prose field. That covers a plugin field holding a URL that forgot `translatable: false`, and custom fields, which have no schema at this point and previously skipped only JSON and `http(s)` URLs. A one-word prose value with an inner dot, like a heading reading `Node.js`, loses its click-to-edit address as a result.
+  - **Fewer clickable values.** Fields that are not translatable lose their address too: an embed's cached provider `title` and `author_name`, a custom block's `content`. None of them can be edited from the bridge.
+  - **No migration; rolling the pin back is safe.** The public fired artifact was never encoded and is unchanged.
+
 <a id="translations-slug-window"></a>
 
 - **The translations dashboard's window is on slugs, not records (#2761).** `/editor/translations` read the 200 most recently updated records of each content type and only then grouped them by slug, so a slug could land in the window with some of its variants cut off. A translation older than the cut showed as **+ missing**, and clicking it failed with "Couldn't create that translation." because the variant already existed. When the default-locale source was the variant cut, the row was represented by a translation and its export checkbox was disabled with "No en source to translate from".
