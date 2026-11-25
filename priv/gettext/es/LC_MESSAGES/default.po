@@ -24522,8 +24522,8 @@ msgstr "La fórmula falla en este documento, así que se guardaría vacía: %{pr
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "The gated content this account can read on this site. Each site keeps its own; switch site to edit another."
-msgstr "El contenido restringido que esta cuenta puede leer en este sitio. Cada sitio guarda el suyo; cambia de sitio para editar otro."
+msgid "The gated content set for this account on this site. Each site keeps its own; switch site to edit another."
+msgstr "El contenido restringido asignado a esta cuenta en este sitio. Cada sitio guarda el suyo; cambia de sitio para editar otro."
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -25437,8 +25437,13 @@ msgstr "Esta cuenta se borró. No tiene ningún nivel aquí y no se le puede asi
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "This account's registration on this site has not been approved, so it reads nothing gated here. What you save applies once it is approved."
-msgstr "El registro de esta cuenta en este sitio no se ha aprobado, así que aquí no lee nada restringido. Lo que guardes se aplicará cuando se apruebe."
+msgid "This account's registration on this site has not been approved, so it reads nothing gated here yet. The ticked audiences are saved on its registration and apply once it is approved."
+msgstr "El registro de esta cuenta en este sitio aún no se ha aprobado, así que todavía no lee aquí nada restringido. Las audiencias marcadas se guardan en su registro y se aplicarán cuando se apruebe."
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "This account's registration on this site was rejected, so it reads nothing gated here. The ticked audiences are saved on its registration and apply if it is approved later."
+msgstr "El registro de esta cuenta en este sitio se rechazó, así que aquí no lee nada restringido. Las audiencias marcadas se guardan en su registro y se aplicarán si se aprueba más adelante."
 
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format

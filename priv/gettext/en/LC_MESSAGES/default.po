@@ -24522,7 +24522,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "The gated content this account can read on this site. Each site keeps its own; switch site to edit another."
+msgid "The gated content set for this account on this site. Each site keeps its own; switch site to edit another."
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -25437,7 +25437,12 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "This account's registration on this site has not been approved, so it reads nothing gated here. What you save applies once it is approved."
+msgid "This account's registration on this site has not been approved, so it reads nothing gated here yet. The ticked audiences are saved on its registration and apply once it is approved."
+msgstr ""
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "This account's registration on this site was rejected, so it reads nothing gated here. The ticked audiences are saved on its registration and apply if it is approved later."
 msgstr ""
 
 #: lib/kiln_cms_web/live/invite_live.ex
