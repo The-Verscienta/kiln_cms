@@ -138,6 +138,7 @@ defmodule KilnCMSWeb.PresentationLive do
         {:noreply,
          socket
          |> assign_record(record)
+         |> refresh_editing()
          |> update(:region_version, &(&1 + 1))
          |> assign(:save_state, :saved)
          |> assign(:conflict, false)
@@ -175,6 +176,19 @@ defmodule KilnCMSWeb.PresentationLive do
     |> assign(:scalar_changes, %{})
     |> assign(:block_inputs, InlineEditing.block_inputs(typed))
     |> assign(:blocks, InlineEditing.editable_blocks(typed))
+  end
+
+  # The open pane, re-read from the record just assigned (#2759). `@editing`
+  # holds a copy of the block descriptor taken when it was opened, and the
+  # region bumped by `region_version` remounts from it: left stale, it shows
+  # the pre-save text, and the next keystroke pushes that text back. A block
+  # the save no longer holds closes the pane, as `reload` does.
+  defp refresh_editing(socket) do
+    update(socket, :editing, fn
+      %{id: id} -> Enum.find(socket.assigns.blocks, &(&1.id == id and &1.field != nil))
+      {:scalar, field, _value} -> {:scalar, field, scalar_value(socket, field)}
+      other -> other
+    end)
   end
 
   # ── events ──────────────────────────────────────────────────────────────────
