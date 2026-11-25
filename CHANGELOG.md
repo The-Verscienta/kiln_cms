@@ -95,6 +95,9 @@ else.
 
 ### Fixed
 
+- **With live collaboration on, a rich-text block whose collab connection can't join now mounts a single-user editor instead of no editor at all (#2772).**
+  A refused or dropped socket, a join that times out and a refused join each fall back within 15 seconds, with a notice under the block.
+  ([long form](docs/changelog/unreleased.md#collab-join-fallback))
 - **The Redirects form shows a refused path as an error on its field instead of crashing the page (#2763).**
   An over-long path or locale, the root path, the target's own URL, a missing target and a write the policy refuses no longer lose the form.
   ([long form](docs/changelog/unreleased.md#redirects-refused-path))

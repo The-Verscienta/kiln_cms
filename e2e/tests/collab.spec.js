@@ -155,4 +155,47 @@ test.describe("live collaborative editing", () => {
       if (id) await deleteContentById(page, "page", id);
     }
   });
+
+  // #2772: the block used to wait on the collab join before mounting TipTap,
+  // and a socket that never connected left it with no editor at all. Closing
+  // every /ws/collab handshake stands in for an expired token after a deploy
+  // or a proxy that drops WebSockets; the LiveView socket is left alone.
+  test("a block whose collab socket can't connect still mounts and saves", async ({page}) => {
+    const errors = collectPageErrors(page);
+    await signInAsAdmin(page);
+    const collabWas = await setCollab(page, true);
+    let id;
+
+    try {
+      id = await newDraftPage(page);
+      await addBlock(page, "rich_text");
+      const first = page.locator(EDITOR_SELECTOR).first();
+      await expect(first).toBeVisible();
+      await first.click();
+      await page.keyboard.type("Before");
+      await save(page);
+
+      await page.routeWebSocket(/\/ws\/collab\//, ws => ws.close());
+      await page.reload();
+
+      const host = page.locator('[phx-hook="RichText"]').first();
+      await expect(host).toHaveAttribute("data-collab-topic", `collab:page:${id}`);
+      const editor = page.locator(EDITOR_SELECTOR).first();
+      await expect(editor).toBeVisible();
+      await expect(editor).toHaveText("Before");
+      await expect(host.locator("[data-collab-unavailable]")).toBeVisible();
+
+      // Saves through the single-user path: the words survive a reload.
+      await typeAtEnd(page, editor, " and after");
+      await save(page);
+      await page.reload();
+      await expect(page.locator(EDITOR_SELECTOR).first()).toHaveText("Before and after");
+
+      expect(errors).toEqual([]);
+    } finally {
+      await page.unrouteAll({behavior: "ignoreErrors"});
+      await setCollab(page, collabWas);
+      if (id) await deleteContentById(page, "page", id);
+    }
+  });
 });

@@ -141,6 +141,27 @@ defmodule KilnCMSWeb.CollabPersisterTest do
     assert CMS.get_page!(page.id, actor: low).title == "From low"
   end
 
+  # #2772: a tab whose rich-text blocks couldn't join the room edits in
+  # single-user editors, so its text is in its own form and not in the room.
+  # Standing down for the persister would show "Synced live" over text that
+  # nobody ever saves.
+  test "a co-editor whose blocks fell back to single-user saves its own edits", %{conn: conn} do
+    {low, high} = two_editors()
+    page = CMS.create_page!(%{title: "Fallback", slug: slug()}, actor: low)
+
+    {:ok, lv_low, _} = conn |> log_in(low) |> live(~p"/editor/content/page/#{page.id}")
+    {:ok, lv_high, _} = build_conn() |> log_in(high) |> live(~p"/editor/content/page/#{page.id}")
+    await(lv_low, &(&1 =~ "2 editing"))
+    await(lv_high, &(&1 =~ "2 editing"))
+
+    render_hook(lv_high, "collab_unavailable", %{})
+
+    lv_high |> form("#page-editor", form: %{title: "Typed alone"}) |> render_change()
+    send(lv_high.pid, :autosave)
+    await(lv_high, &(&1 =~ "Saved"))
+    assert CMS.get_page!(page.id, actor: high).title == "Typed alone"
+  end
+
   test "a lone editor autosaves exactly as before", %{conn: conn} do
     editor = authed_user(:editor)
     page = CMS.create_page!(%{title: "Solo", slug: slug()}, actor: editor)

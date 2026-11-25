@@ -13699,6 +13699,11 @@ msgstr "Les listes déjà remplies gardent leurs éléments tels quels, sans con
 msgid "Live claims"
 msgstr "Allégations publiées"
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "Live collaboration is unavailable, so others won't see your edits until you save. Reload to try again."
+msgstr "La collaboration en direct est indisponible : les autres ne verront vos modifications qu’après l’enregistrement. Rechargez la page pour réessayer."
+
 #: lib/kiln_cms_web/live/billing_live.ex
 #, elixir-autogen, elixir-format
 msgid "Live mode"
