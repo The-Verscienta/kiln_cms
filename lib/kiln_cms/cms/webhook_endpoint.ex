@@ -395,23 +395,52 @@ defmodule KilnCMS.CMS.WebhookEndpoint do
     # A delivery exhausted its retries. After the configured run of these in a
     # row, the endpoint is auto-disabled — a dead receiver shouldn't burn the
     # queue every publish, forever (system action).
+    #
+    # Decided on the row as it is in the database, like
+    # `:record_delivery_success`, not on the worker's copy read before its
+    # POST (#2737): a success may have reset the count since, and concurrent
+    # exhaustions must each count. An endpoint that is no longer active
+    # (auto-disabled by a concurrent failure, or switched off since) is left
+    # as it is.
+    #
+    # The returned record carries `:auto_disabled` metadata: true only for the
+    # update that switched the endpoint off. The stamp is this update's own
+    # `now`, so a later failure against the row cannot be mistaken for the one
+    # that crossed the threshold, and the alerts fire once.
     update :record_delivery_failure do
       require_atomic? false
 
       change fn changeset, _context ->
-        failures = (changeset.data.consecutive_failures || 0) + 1
-        changeset = Ash.Changeset.change_attribute(changeset, :consecutive_failures, failures)
+        now = DateTime.utc_now()
+        threshold = KilnCMS.Webhooks.auto_disable_after()
 
-        if failures >= KilnCMS.Webhooks.auto_disable_after() do
-          changeset
-          |> Ash.Changeset.change_attribute(:active, false)
-          |> Ash.Changeset.change_attribute(:auto_disabled_at, DateTime.utc_now())
-        else
-          changeset
-        end
+        changeset
+        |> Ash.Changeset.atomic_update(
+          :consecutive_failures,
+          expr(if active == true, do: consecutive_failures + 1, else: consecutive_failures)
+        )
+        |> Ash.Changeset.atomic_update(
+          :active,
+          expr(
+            if active == true and consecutive_failures + 1 >= ^threshold, do: false, else: active
+          )
+        )
+        |> Ash.Changeset.atomic_update(
+          :auto_disabled_at,
+          expr(
+            if active == true and consecutive_failures + 1 >= ^threshold,
+              do: ^now,
+              else: auto_disabled_at
+          )
+        )
+        |> Ash.Changeset.after_action(fn _changeset, endpoint ->
+          disabled? = endpoint.active == false and endpoint.auto_disabled_at == now
+          {:ok, Ash.Resource.put_metadata(endpoint, :auto_disabled, disabled?)}
+        end)
       end
 
       # Auto-disabling an endpoint subscribed to security alerts (#2245).
+      # After the hook above, so it reads `:auto_disabled`.
       change KilnCMS.Security.Changes.NoticeWebhookSilenced
     end
   end

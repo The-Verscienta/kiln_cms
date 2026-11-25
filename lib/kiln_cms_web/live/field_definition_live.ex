@@ -4884,7 +4884,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
               />
               {gettext("Names the record (search finds it by this value)")}
             </label>
-            <label :if={!flexible?(@form)} class="flex items-center gap-2 self-end text-sm">
+            <label class="flex items-center gap-2 self-end text-sm">
               <input type="hidden" name="field_definition[searchable]" value="false" />
               <input
                 type="checkbox"

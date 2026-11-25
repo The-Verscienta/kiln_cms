@@ -14404,6 +14404,11 @@ msgstr "¿Mover «%{title}» a la papelera? Los administradores pueden restaurar
 msgid "Move “%{title}” to trash? It comes off the live site now. Admins can restore it from Trash for %{days} days, which puts it back on the site."
 msgstr "¿Mover «%{title}» a la papelera? Sale del sitio publicado ahora mismo. Los administradores pueden restaurarlo desde la Papelera durante %{days} días, y eso lo vuelve a publicar en el sitio."
 
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "Moved"
+msgstr "Movido"
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
 msgid "Moved %{count} item to trash."

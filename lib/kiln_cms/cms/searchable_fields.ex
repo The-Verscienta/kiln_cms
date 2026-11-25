@@ -121,7 +121,8 @@ defmodule KilnCMS.CMS.SearchableFields do
 
   @doc """
   The generic rule for one value: its strings (HTML stripped) and numbers,
-  depth first, skipping map keys and `"id"`s — what a field contributes
+  depth first, skipping map keys, `"id"`s and the `_id` / `_type` / `_settings` of a
+  flexible item — what a field contributes
   when no extractor is configured, or when the extractor answers `:default`.
   Public so an extractor can apply it to a value it decoded itself.
   """
@@ -225,7 +226,55 @@ defmodule KilnCMS.CMS.SearchableFields do
   end
 
   defp type_texts(%{field_type: :address}, _value), do: []
+
+  # A flexible field (#2282): its items' prose, read by the item type's own
+  # sub-field definitions. An item's `_id`, `_type` and `_settings` are
+  # bookkeeping and presentation, never text; a media or reference sub-field
+  # holds a snapshot of something that is indexed under its own record.
+  defp type_texts(%{field_type: :flexible} = definition, items),
+    do: flexible_texts(definition, items, 1)
+
   defp type_texts(_definition, value), do: default_texts(value)
+
+  @flexible_depth KilnCMS.CMS.FieldDefinition.max_flexible_depth()
+
+  defp flexible_texts(definition, items, depth)
+       when is_list(items) and depth <= @flexible_depth do
+    types =
+      case Map.get(definition, :item_types) do
+        types when is_list(types) -> Map.new(types, &{&1.name, &1})
+        _not_loaded -> %{}
+      end
+
+    Enum.flat_map(items, fn
+      %{} = item -> item_texts(item, Map.get(types, item["_type"]), depth)
+      _other -> []
+    end)
+  end
+
+  defp flexible_texts(_definition, _items, _depth), do: []
+
+  # An item whose type is gone, or whose definitions were not loaded, still
+  # contributes its prose: the generic rule, which skips `_`-prefixed keys.
+  defp item_texts(item, nil, _depth), do: default_texts(item)
+
+  defp item_texts(item, type, depth) do
+    subs =
+      case Map.get(type, :group_fields) do
+        subs when is_list(subs) -> Enum.sort_by(subs, & &1.position)
+        _not_loaded -> []
+      end
+
+    Enum.flat_map(subs, fn sub ->
+      value = Map.get(item, sub.name)
+
+      case sub.field_type do
+        kind when kind in [:media, :reference] -> []
+        :flexible -> flexible_texts(sub, value, depth + 1)
+        _other -> type_texts(sub, value)
+      end
+    end)
+  end
 
   # An extractor runs inside every indexing write: a bug in it — a raise, a
   # throw or an exit — must cost a field's text, never the editor's save.
@@ -277,9 +326,17 @@ defmodule KilnCMS.CMS.SearchableFields do
   defp strings(%{} = map, acc) when not is_struct(map) do
     map
     |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.reject(fn {key, _value} -> to_string(key) == "id" end)
+    |> Enum.reject(fn {key, _value} -> to_string(key) == "id" or meta_key?(map, key) end)
     |> Enum.reduce(acc, fn {_key, value}, acc -> strings(value, acc) end)
   end
 
   defp strings(_other, acc), do: acc
+
+  # `_id`, `_type`, `_settings` of a flexible item (#2282). Only a map that
+  # is an item (both `_id` and `_type`) loses its `_` keys; any other map
+  # keeps a key such as `_note` as it always did.
+  defp meta_key?(%{"_id" => _, "_type" => _}, key),
+    do: key |> to_string() |> String.starts_with?("_")
+
+  defp meta_key?(_map, _key), do: false
 end

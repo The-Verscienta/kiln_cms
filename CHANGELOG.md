@@ -68,6 +68,10 @@ else.
   No migration.
   ([long form](docs/changelog/unreleased.md#condition-text-ops))
 
+- **A flexible field can be searchable: search finds a record by its items' text (never `_id`, `_type`, `_settings`, media or reference values), and version compare and restore preview list each added, removed, changed or moved item (#2282, PR 6).**
+  No migration. Flipping the flag re-fires published documents.
+  ([long form](docs/changelog/unreleased.md#flexible-search-diff))
+
 - **A custom field's text can go in the fired AI-readable outputs: tick "Include in AI-readable outputs" on a text, group or flexible field and its text joins the `:llm` Markdown and a `hasPart` list on the `:json_ld` node (issue 2282, last PR of the flexible-content plan). Run `mix ash.migrate`; off by default; rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#deliver-llm))
 
@@ -116,6 +120,10 @@ else.
 - **`scripts/staging.sh down` and `up` now refuse a database whose name doesn't look ephemeral (unless `KILN_STAGING_FORCE` is on) and drop or create it on the server in `STAGING_DATABASE_URL`, not libpq's default one; that variable must now be a URL naming the database in its path (#2722).**
   No migration; rolling the pin back is safe. A `down` that relied on dropping on the default server now acts on the URL's.
   ([long form](docs/changelog/unreleased.md#staging-script-guards-drop))
+
+- **A webhook endpoint is no longer auto-disabled by a failure counted against a stale copy: an exhausted delivery now adds one to the failure count in the database, so a success in between resets the run, concurrent failures all count, and the "switched off" alert fires once (#2737).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#webhook-failure-atomic))
 
 - **The daily health sweep now raises a `health_overdue` or `health_expired` event for every stale record, not the same 500 per content type each day (#2738).**
   Its telemetry counts every record too. No migration; rolling the pin back is safe.

@@ -9,7 +9,7 @@ defmodule KilnCMS.Security.Changes.NoticeWebhookSilenced do
   | `:update` | the URL changed, the endpoint was switched off, or it unsubscribed from a `security.*` event | `webhook_changed` |
   | `:rotate_secret` | always | `webhook_secret_rotated` |
   | `:destroy` | always | `webhook_removed` |
-  | `:record_delivery_failure` | the failure auto-disabled it | `webhook_auto_disabled` |
+  | `:record_delivery_failure` | the failure auto-disabled it (the action's `:auto_disabled` metadata) | `webhook_auto_disabled` |
 
   A secret rotation is on the list because the receiver stops verifying
   deliveries until it is given the new secret. Subscribing to more, and
@@ -60,11 +60,16 @@ defmodule KilnCMS.Security.Changes.NoticeWebhookSilenced do
   defp change_for(:rotate_secret, _before, _after_change), do: "webhook_secret_rotated"
   defp change_for(:destroy, _before, _after_change), do: "webhook_removed"
 
-  defp change_for(:record_delivery_failure, before, after_change) do
-    if before.active == true and after_change.active == false, do: "webhook_auto_disabled"
+  # Decided by the action on the row (#2737), not on `before`: the caller's
+  # copy may be stale, and only the update that crossed the threshold raises.
+  defp change_for(:record_delivery_failure, _before, after_change) do
+    if auto_disabled?(after_change), do: "webhook_auto_disabled"
   end
 
   defp change_for(_action, _before, _after_change), do: nil
+
+  defp auto_disabled?(%{__metadata__: %{auto_disabled: true}}), do: true
+  defp auto_disabled?(_endpoint), do: false
 
   defp security_events(endpoint),
     do: endpoint |> Map.get(:events) |> List.wrap() |> Enum.filter(&security_event?/1)

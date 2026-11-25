@@ -566,9 +566,8 @@ defmodule KilnCMS.CMS.FlexibleFieldsTest do
   end
 
   describe "options a flexible field refuses" do
-    test "searchable, names_record, private, default, setting", %{admin: admin} do
+    test "names_record, private, default, setting", %{admin: admin} do
       for {attrs, message} <- [
-            {%{searchable: true}, "can't be searchable"},
             {%{names_record: true}, "can't be a name of the record"},
             {%{private: true}, "can't be private"},
             {%{default: "x"}, "takes no default value"},
@@ -597,10 +596,9 @@ defmodule KilnCMS.CMS.FlexibleFieldsTest do
                "is not available for a flexible field"
     end
 
-    test "turning an existing flexible field searchable", %{admin: admin, flexible: flexible} do
-      assert error_message!(fn ->
-               CMS.update_field_definition!(flexible, %{searchable: true}, actor: admin)
-             end) =~ "can't be searchable"
+    test "a flexible field can be searchable (#2282 PR 6)", %{admin: admin, flexible: flexible} do
+      assert flexible!(admin, %{searchable: true}).searchable
+      assert CMS.update_field_definition!(flexible, %{searchable: true}, actor: admin).searchable
     end
 
     test "a flexible field cannot be retyped to private after the fact", %{admin: admin} do
