@@ -163,3 +163,11 @@ carries the reasoning.
   - **If you relied on the old behavior.** A `down` whose URL named one server while you meant the default one now drops on the URL's server. Check `STAGING_DATABASE_URL` names the server the clone is on.
   - **`scripts/restore.sh` still uses the default server** for its `createdb` and its drill's `dropdb` hint, and its drill's name check is case-sensitive; that is [#3329](https://github.com/The-Verscienta/kiln_cms/issues/3329).
   - **No migration; rolling the pin back is safe.** An older checkout's script drops on the default server again. See `docs/staging-environments.md` ("What `up` and `down` check before they create or drop").
+
+<a id="health-sweep-every-record"></a>
+
+- **The daily health sweep reaches every overdue and expired record (#2738).** `KilnCMS.CMS.HealthSweep` read at most 500 stale records per content type, in no particular order. Raising an event does not change a record's `health`, and a `:create_task` reaction leaves the record overdue, so each run got the same 500 back: on a type with more, the rest never got a `<type>.health_overdue` or `<type>.health_expired` event, or the task a rule makes from it. Only a log line said so.
+  - **It pages now.** The sweep reads 500 records at a time in `id` order and continues after the last one it saw, until a page comes back short, dispatching each page before reading the next. A sort alone would not have helped: nothing the sweep does takes a record out of the filter, so the same first page would come back every run.
+  - **Telemetry counts every record.** `[:kiln_cms, :lifecycle, :health_sweep]` was capped at 500 per type with the read; its `overdue` and `expired` counts are now the full totals. It is emitted after the events are dispatched rather than before.
+  - **More events on a large backlog.** A site with thousands of stale records of one type now gets an event, and so an `Automation.DispatchWorker` job, for each of them every day. A rule's `:create_task` stays one open task per record, as before.
+  - **No migration; rolling the pin back is safe.** An older release goes back to the first 500 per type.

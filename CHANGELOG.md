@@ -117,6 +117,10 @@ else.
   No migration; rolling the pin back is safe. A `down` that relied on dropping on the default server now acts on the URL's.
   ([long form](docs/changelog/unreleased.md#staging-script-guards-drop))
 
+- **The daily health sweep now raises a `health_overdue` or `health_expired` event for every stale record, not the same 500 per content type each day (#2738).**
+  Its telemetry counts every record too. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#health-sweep-every-record))
+
 ## [1.12.1] - 2026-11-23
 
 Long form: [docs/changelog/v1.12.1.md](docs/changelog/v1.12.1.md) —
