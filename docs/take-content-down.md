@@ -55,7 +55,7 @@ row it was: open a skipped row in the editor to see what stops it.
 
 If someone else moved one of the pages to the trash after the list loaded,
 the action goes on with the rest, and the message counts the missing pages
-apart from the skipped ones: *Unpublish: 3 updated, 1 no longer exists*. A
+apart from the skipped ones, for example "Unpublish: 3 updated, 1 no longer exists". A
 single row's **Unpublish** on such a page says
 *That content no longer exists. Someone else may have moved it to trash or deleted it.*
 and reloads the list.
