@@ -95,6 +95,10 @@ else.
 
 ### Fixed
 
+- **Closing the content editor's image picker while an Unsplash import is still running no longer crashes the editor (#2784).**
+  The photo is still added to the media library, but not to the field or block, and a flash says so.
+  ([long form](docs/changelog/unreleased.md#picker-close-during-import))
+
 - **A content-list row or bulk action on a row someone else moved to trash shows a message instead of crashing the list (#2781).**
   A row action flashes and reloads the list; the bulk bar acts on the rows that remain and reports, e.g., "Publish: 3 updated, 1 no longer exists".
   ([long form](docs/changelog/unreleased.md#content-list-stale-row))
@@ -106,6 +110,11 @@ else.
 - **With live collaboration on, a rich-text block whose collab connection can't join now mounts a single-user editor instead of no editor at all (#2772).**
   A refused or dropped socket, a join that times out and a refused join each fall back within 15 seconds, with a notice under the block.
   ([long form](docs/changelog/unreleased.md#collab-join-fallback))
+
+
+- **A stored rich text body in a malformed Portable Text shape (`marks` as a string, `children` that aren't spans, a `markDefs` entry that isn't an object) renders with the bad nodes repaired or skipped instead of a 500, and fires and indexes again (#2768).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#portable-text-render-guards))
 - **The Redirects form shows a refused path as an error on its field instead of crashing the page (#2763).**
   An over-long path or locale, the root path, the target's own URL, a missing target and a write the policy refuses no longer lose the form.
   ([long form](docs/changelog/unreleased.md#redirects-refused-path))

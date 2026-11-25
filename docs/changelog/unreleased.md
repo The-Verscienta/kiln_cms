@@ -87,6 +87,13 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="picker-close-during-import"></a>
+
+- **Closing the content editor's image picker while an Unsplash import is still running no longer crashes the editor (#2784).** The import's result was routed to whatever the picker was open for when it arrived. With the drawer closed there was nothing to route it to, and the editor crashed and remounted, losing unsaved edits. If the drawer had been reopened for another field or block in the meantime, the photo landed there instead of where it was picked.
+  - **What happens now.** An import remembers which opening of the drawer it was started from. If that drawer is still open for the same target when the photo arrives, it lands as before. Otherwise the photo stays in the media library, nothing on the page changes, and the editor shows "The Unsplash photo was added to the media library."
+  - **Other picker work.** Uploads from the picker's dropzone were already canceled when the drawer closes, and the picker starts no other background work.
+  - **No migration; rolling the pin back is safe.**
+
 <a id="content-list-stale-row"></a>
 
 - **A content-list row or bulk action on a row someone else moved to trash shows a message instead of crashing the list (#2781).** The row actions on `/editor` (**Publish**, **Submit**, **Return**, **Unpublish**, **Unarchive** and **Confirm date**) and the bulk bar read each record again with a raising fetch before the write. A row another user had moved to trash or deleted since the list loaded made that read raise: the page crashed and reconnected with no message, the selection was lost, and in a bulk run every row after the missing one was left as it was.
@@ -110,6 +117,15 @@ carries the reasoning.
   - **That tab saves its own text.** With another editor on the document, a tab in the room leaves autosave to one elected editor and shows "Synced live", since the room holds everyone's prose. A tab that fell back tells the server, and from then on it autosaves its own edits like a session with collaboration off. It can still meet a conflict when a collaborating editor saves the same record, as two editors without collaboration can.
   - **A reconnecting socket uses the newest token.** The collab socket used to keep the token of the first block that opened it, so after a deploy it reconnected with a token that had expired, and every document opened from then on waited on that dead socket. It now reconnects with the token of the most recently mounted rich-text block.
   - **Upgrade.** No migration, no new setting; rolling the pin back is safe. Only sites with the collaborative-editing prototype on (`:collab_prototype`) are affected.
+
+<a id="portable-text-render-guards"></a>
+
+- **A malformed Portable Text body that is already stored renders instead of failing every read (#2768).** The `:rich_text` type stores a list of objects and checks nothing inside them, so a body written through JSON:API, GraphQL or MCP with a span whose `marks` was a string, `children` that were a string or held non-objects, a span `text` that was an object, or a `markDefs` entry that wasn't an object was saved. Then every render raised: the public page answered 500, firing failed, the editor couldn't open the record, and saving it again failed while search text was computed. A numeric-string list `level` (`"2"`) crashed the editor's Markdown view.
+  - **What reads do now.** Before rendering, the body's shape is repaired (`KilnCMS.Blocks.PortableText.repair_body/1`), and every renderer uses it: the `:web` HTML, search text and the `:llm` artifact, the editor's Markdown view, and the `:json` artifact, so a headless client gets the same repaired body the page shows. Prose is kept wherever there is some: a string in `children` becomes a span with that text, a string `marks` becomes a one-item list, and a number or boolean where text belongs becomes its text. What holds no text is skipped: a non-object child or `markDefs` entry, a mark that isn't a string, an object or list `text` (read as empty), and a `level` that isn't a whole number (`"2"` and `2.0` become `2`). `children` and `markDefs` are checked on every node, including custom `_type` nodes and table cells; a custom node's other fields and an annotation's fields are left as they are.
+  - **A well-formed body is delivered unchanged; a malformed one is delivered repaired.** The repair never adds a key and leaves a missing or `null` one alone, so a valid body renders and fires as before. A malformed body, including one with a number in a text slot or a numeric-string `level`, reaches the `:json` artifact in its repaired form.
+  - **The stored row is not rewritten.** The repair happens on every read, and this fix never rewrites the stored row. Writes are unchanged: the same shapes are still accepted.
+  - **Also hardened.** The editor's TipTap conversion ignores a `marks` or `content` value that isn't a list, and the content advisories (`Kiln.Advisory.Body` in `kiln_plugin`) read a span with non-string `text` or a link with a non-string `href` as empty.
+  - **No migration; rolling the pin back is safe.** An older release reads the same rows and fails on them as before.
 
 <a id="redirects-refused-path"></a>
 

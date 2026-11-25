@@ -554,6 +554,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:unsplash_more?, false)
     |> assign(:unsplash_searching?, false)
     |> assign(:unsplash_importing, MapSet.new())
+    # Bumped by `reset_picker/1` each time the drawer closes. An import
+    # carries the session it was started in, so a result that lands after
+    # the drawer closed (or was reopened, maybe for another target) is told
+    # apart from one for the drawer still on screen (#2784).
+    |> assign(:picker_session, 0)
     |> assign(
       :media,
       # The picker grid needs only these fields; a select keeps 500
@@ -1014,10 +1019,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
       assign(socket, :unsplash_importing, MapSet.delete(socket.assigns.unsplash_importing, id))
 
     case result do
-      {:ok, {:ok, item}} ->
+      {:ok, {target, {:ok, item}}} ->
         socket
         |> assign(:media, [media_row(item) | socket.assigns.media])
-        |> route_picked_item(item)
+        |> route_imported_item(target, item)
         |> then(&{:noreply, &1})
 
       _error ->
@@ -3478,12 +3483,15 @@ defmodule KilnCMSWeb.ContentEditorLive do
       else
         actor = socket.assigns.actor
         org = socket.assigns.current_org
+        # What the drawer is open for, and which opening of it: the result
+        # lands only if both still hold when it arrives.
+        target = {socket.assigns.picker_session, socket.assigns.picking}
 
         {:noreply,
          socket
          |> assign(:unsplash_importing, MapSet.put(socket.assigns.unsplash_importing, id))
          |> start_async({:unsplash_import, id}, fn ->
-           Unsplash.import_photo(photo, actor: actor, tenant: org)
+           {target, Unsplash.import_photo(photo, actor: actor, tenant: org)}
          end)}
       end
     else
@@ -4720,6 +4728,21 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # `@picked` (same as `toggle_pick`) and leaves the drawer open for more
   # picks, while every single-select target goes through `apply_pick/4` and
   # then closes the picker, matching `pick_image`'s own behavior.
+  # An import that finishes after its drawer closed — or after it was closed
+  # and reopened, perhaps for another field or block — has nothing left to
+  # land on (#2784): the item is in the library, and the editor says so
+  # rather than putting it somewhere the author did not pick it for.
+  defp route_imported_item(
+         %{assigns: %{picker_session: session, picking: picking}} = socket,
+         {session, picking},
+         item
+       )
+       when not is_nil(picking),
+       do: route_picked_item(socket, item)
+
+  defp route_imported_item(socket, _target, _item),
+    do: put_flash(socket, :info, gettext("The Unsplash photo was added to the media library."))
+
   defp route_picked_item(socket, item) do
     case socket.assigns.picking do
       {kind, _target} when kind in [:gallery, :field_gallery] ->
@@ -6777,6 +6800,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   defp reset_picker(socket) do
     socket
     |> cancel_picker_uploads()
+    |> update(:picker_session, &(&1 + 1))
     |> assign(:picking, nil)
     |> assign(:picked, [])
     |> assign(:media_query, "")

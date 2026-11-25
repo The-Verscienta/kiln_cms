@@ -24147,6 +24147,11 @@ msgstr "El título SEO solo repite el título de la página — uno distinto sue
 msgid "The URL needs fixing — see Settings → URL."
 msgstr "Hay que corregir la URL — ver Configuración → URL."
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "The Unsplash photo was added to the media library."
+msgstr "La foto de Unsplash se añadió a la biblioteca de medios."
+
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "The account could not be created."

@@ -24147,6 +24147,11 @@ msgstr ""
 msgid "The URL needs fixing — see Settings → URL."
 msgstr ""
 
+#: lib/kiln_cms_web/live/content_editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "The Unsplash photo was added to the media library."
+msgstr ""
+
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "The account could not be created."
