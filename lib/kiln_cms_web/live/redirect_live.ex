@@ -39,14 +39,15 @@ defmodule KilnCMSWeb.RedirectLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    socket = assign(socket, :actor, socket.assigns.current_user)
+
     {:ok,
      socket
-     |> assign(:actor, socket.assigns.current_user)
      |> assign(:page_title, gettext("Redirects"))
      |> assign(:search, "")
      |> assign(:tab, "redirects")
      |> assign(:missed_retention_days, MissedPath.retention_days())
-     |> assign(:new, to_form(empty_new(), as: :redirect))
+     |> assign(:new, new_form(socket))
      |> load_redirects()
      |> load_missed()}
   end
@@ -77,7 +78,7 @@ defmodule KilnCMSWeb.RedirectLive do
 
         {:noreply,
          socket
-         |> assign(:new, to_form(prefill, as: :redirect))
+         |> assign(:new, new_form(socket, prefill))
          |> push_patch(to: ~p"/editor/redirects")}
     end
   end
@@ -88,21 +89,18 @@ defmodule KilnCMSWeb.RedirectLive do
 
   def handle_event("create", %{"redirect" => params}, socket) when is_map(params) do
     case create_redirect(params, socket) do
-      {:ok, path} ->
+      {:ok, redirect} ->
         {:noreply,
          socket
-         |> assign(:new, to_form(empty_new(), as: :redirect))
+         |> assign(:new, new_form(socket))
          |> load_redirects()
          # The path now resolves, so its 404 counter is answered work — clear
          # it rather than leaving a fixed row in the queue.
-         |> clear_missed(path, params["locale"] || I18n.default_locale())
-         |> put_flash(:info, gettext("Redirect from %{path} created.", path: path))}
+         |> clear_missed(redirect.path, redirect.locale)
+         |> put_flash(:info, gettext("Redirect from %{path} created.", path: redirect.path))}
 
-      {:error, message} ->
-        {:noreply,
-         socket
-         |> assign(:new, to_form(params, as: :redirect))
-         |> put_flash(:error, message)}
+      {:error, form} ->
+        {:noreply, socket |> assign(:new, form) |> flash_unshown_error(form)}
     end
   end
 
@@ -239,29 +237,84 @@ defmodule KilnCMSWeb.RedirectLive do
 
   # --- manual creation ---
 
+  # The form is an AshPhoenix form on `Redirect.create` (#2763), so whatever
+  # the resource refuses — an over-long path or locale, a missing value, a
+  # refused write — comes back as `{:error, form}` and renders on its field
+  # instead of raising out of the handler. The page's own checks (path shape,
+  # target lookup, self-redirect) land on their fields the same way.
+  #
+  # `type` and `slug` are not inputs of the action: they pick the target, which
+  # is submitted as `target_type`/`target_id`. AshPhoenix skips the unknown
+  # keys and keeps them in the form's params, so the form re-renders with what
+  # was typed.
   defp create_redirect(params, socket) do
-    org = socket.assigns.current_org
+    form = AshPhoenix.Form.validate(socket.assigns.new, params)
     locale = params["locale"] || I18n.default_locale()
 
-    with {:ok, path} <- normalize_path(params["path"]),
-         {:ok, ct, record} <- find_target(params["type"], params["slug"], locale, socket),
-         :ok <- not_self(path, ct, record) do
-      CMS.create_redirect!(
-        %{path: path, locale: locale, target_type: to_string(ct.type), target_id: record.id},
-        actor: socket.assigns.actor,
-        tenant: org
+    with {:ok, path} <- on_field(normalize_path(params["path"]), form, :path),
+         {:ok, ct, record} <-
+           on_field(find_target(params["type"], params["slug"], locale, socket), form, :slug),
+         :ok <- on_field(not_self(path, ct, record), form, :path) do
+      AshPhoenix.Form.submit(form,
+        params:
+          Map.merge(params, %{
+            "path" => path,
+            "locale" => locale,
+            "target_type" => to_string(ct.type),
+            "target_id" => record.id
+          })
       )
-
-      {:ok, path}
     end
+  end
+
+  defp on_field({:error, message}, form, field) when is_binary(message) do
+    error = Ash.Error.Changes.InvalidAttribute.exception(field: field, message: message)
+    {:error, AshPhoenix.Form.add_error(form, error)}
+  end
+
+  defp on_field(ok, _form, _field), do: ok
+
+  # Field errors render under their inputs. A refusal that names none of them
+  # — a write the policy refused (the tier is re-read on every write, so an
+  # admin demoted since mount lands here) or a failure without a field — would
+  # otherwise leave the form unchanged and silent, so it gets a flash.
+  @form_fields [:path, :locale, :type, :slug]
+
+  defp flash_unshown_error(socket, form) do
+    raw = AshPhoenix.Form.raw_errors(form)
+
+    cond do
+      Enum.any?(raw, &forbidden?/1) ->
+        put_flash(socket, :error, gettext("You don't have permission to add redirects."))
+
+      Enum.any?(AshPhoenix.Form.errors(form), fn {field, _} -> field in @form_fields end) ->
+        socket
+
+      true ->
+        put_flash(socket, :error, gettext("Couldn't create that redirect."))
+    end
+  end
+
+  defp forbidden?(error),
+    do: match?(%Ash.Error.Forbidden{}, Ash.Error.to_error_class(error))
+
+  defp new_form(socket, params \\ empty_new()) do
+    Redirect
+    |> AshPhoenix.Form.for_create(:create,
+      actor: socket.assigns.actor,
+      tenant: socket.assigns.current_org,
+      as: "redirect",
+      params: params
+    )
+    |> to_form()
   end
 
   defp normalize_path(nil), do: {:error, gettext("Enter a path starting with /.")}
 
   defp normalize_path(path) do
     case String.trim(path) do
-      # The root itself: it would trim to "", which the resource refuses by
-      # raising out of the bang create below.
+      # The root itself: it would trim to "", which the resource refuses as a
+      # missing path — say what to enter instead.
       "/" <> rest = trimmed ->
         if String.trim(rest, "/") == "",
           do: {:error, gettext("Enter a path starting with /.")},
@@ -275,7 +328,7 @@ defmodule KilnCMSWeb.RedirectLive do
   defp find_target(type, slug, locale, socket) do
     with ct when not is_nil(ct) <- ContentTypes.get(type, socket.assigns.current_org),
          slug when slug not in [nil, ""] <- slug && String.trim(slug),
-         record when not is_nil(record) <- fetch_target(ct, slug, locale, socket) do
+         {:ok, %{} = record} <- fetch_target(ct, slug, locale, socket) do
       {:ok, ct, record}
     else
       _ ->
@@ -305,7 +358,9 @@ defmodule KilnCMSWeb.RedirectLive do
           query
       end
 
-    Ash.read_one!(query, actor: socket.assigns.actor, tenant: socket.assigns.current_org)
+    # Not the bang read (#2763): an input the lookup refuses is a target that
+    # can't be found, not a crash.
+    Ash.read_one(query, actor: socket.assigns.actor, tenant: socket.assigns.current_org)
   end
 
   defp not_self(path, ct, record) do

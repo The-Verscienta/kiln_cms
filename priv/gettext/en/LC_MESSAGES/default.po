@@ -7164,6 +7164,11 @@ msgstr ""
 msgid "Couldn't create that menu."
 msgstr ""
 
+#: lib/kiln_cms_web/live/redirect_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't create that redirect."
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -28755,6 +28760,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "You don't have permission to add images here."
+msgstr ""
+
+#: lib/kiln_cms_web/live/redirect_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to add redirects."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/inline_terms.ex

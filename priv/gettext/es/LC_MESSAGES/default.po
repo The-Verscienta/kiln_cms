@@ -7164,6 +7164,11 @@ msgstr "No se pudo crear esa clave. Póngale un nombre."
 msgid "Couldn't create that menu."
 msgstr "No se pudo crear ese menú."
 
+#: lib/kiln_cms_web/live/redirect_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't create that redirect."
+msgstr "No se pudo crear esa redirección."
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -28756,6 +28761,11 @@ msgstr "No tienes permiso para añadir categorías."
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to add images here."
 msgstr "No tiene permiso para añadir imágenes aquí."
+
+#: lib/kiln_cms_web/live/redirect_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to add redirects."
+msgstr "No tiene permiso para añadir redirecciones."
 
 #: lib/kiln_cms_web/live/content_editor/inline_terms.ex
 #, elixir-autogen, elixir-format

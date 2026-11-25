@@ -93,6 +93,9 @@ else.
 
 ### Fixed
 
+- **The Redirects form shows a refused path as an error on its field instead of crashing the page (#2763).**
+  An over-long path or locale, the root path, the target's own URL, a missing target and a write the policy refuses no longer lose the form.
+  ([long form](docs/changelog/unreleased.md#redirects-refused-path))
 - **The translations dashboard shows every variant of the slugs it lists: an older translation no longer shows as "missing" (and fails to create), and a slug whose default-locale source is older than its translations can still be exported (#2761).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#translations-slug-window))
