@@ -31,6 +31,7 @@ defmodule KilnCMSWeb.ContentController do
 
   require Ash.Query
 
+  alias KilnCMS.Accounts.Scoping
   alias KilnCMS.Cache
   alias KilnCMS.Challenge
   alias KilnCMS.CMS
@@ -948,22 +949,26 @@ defmodule KilnCMSWeb.ContentController do
 
   defp current_org_id(conn), do: KilnCMSWeb.Tenant.current_org_id(conn)
 
-  # The gated audiences this reader holds (#337 Phase 2). The `:browser` pipeline
-  # already runs `:load_from_session` on the delivery scope, so the signed-in user
-  # is here for free — it was simply unused before.
+  # The gated audiences this reader holds (#337 Phase 2). The `:browser`
+  # pipeline already runs `:load_from_session` on the delivery scope, so the
+  # signed-in user is here for free.
+  #
+  # The audiences come from the reader's active membership on this site, as the
+  # read policies resolve them (`Scoping.audiences/2`, used by
+  # `Checks.InAudience` and `Checks.MediaInAudience`): `[]` for a signed-out
+  # visitor, an erased account, a pending or rejected membership, or an account
+  # with no membership here.
   #
   # Filtered through `Audiences.valid?/1`: an audience dropped from
-  # `config :kiln_cms, :audiences` could still sit on a user row, and passing a
-  # stale atom into the action's `one_of` constraint would raise — a 500 on a
-  # public page. Sorted so the value is stable.
+  # `config :kiln_cms, :audiences` could still sit on a membership row, and
+  # passing a stale atom into the action's `one_of` constraint would raise — a
+  # 500 on a public page. Sorted so the value is stable.
   defp reader_audiences(conn) do
-    case conn.assigns[:current_user] do
-      %{audiences: audiences} when is_list(audiences) ->
-        audiences |> Enum.filter(&KilnCMS.CMS.Audiences.valid?/1) |> Enum.uniq() |> Enum.sort()
-
-      _other ->
-        []
-    end
+    conn.assigns[:current_user]
+    |> Scoping.audiences(current_org_id(conn))
+    |> Enum.filter(&KilnCMS.CMS.Audiences.valid?/1)
+    |> Enum.uniq()
+    |> Enum.sort()
   end
 
   # The `payload` cache namespace is the ANONYMOUS, `:public`-only shape, and it

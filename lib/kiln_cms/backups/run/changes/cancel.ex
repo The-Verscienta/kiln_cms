@@ -8,7 +8,7 @@ defmodule KilnCMS.Backups.Run.Changes.Cancel do
 
     * when the lock holds this run's chain, its step jobs are canceled
       (`Oban.cancel_all_jobs/2`: an executing one is killed when the
-      transaction commits, and `KilnCMS.ExternalCommand`'s watchers kill the
+      transaction commits, and `KilnCMS.ExternalCommand` kills the
       `pg_dump`, `tar` or `rclone` it started) and the lock is released, which
       starts the queued request if there is one. A chain past the point of no
       return (`phase: :finishing`) is refused: it is about to succeed.

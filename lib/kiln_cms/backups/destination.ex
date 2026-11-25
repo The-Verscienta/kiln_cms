@@ -690,8 +690,7 @@ defmodule KilnCMS.Backups.Destination do
   # The adapter runs in `runner`, monitored but not linked: a crash there, or
   # in a process linked to it, is a DOWN message here rather than an exit
   # signal that takes the backup step down with it. Not being linked, it
-  # would outlive a caller that is killed, so a watcher (the pattern
-  # `KilnCMS.ExternalCommand` uses for its OS process) kills it when the
+  # would outlive a caller that is killed, so a watcher kills it when the
   # caller dies. The runner waits for `:go` until the watcher is in place, so
   # no instant exists where the caller could die and leave it running.
   defp bounded(module, fun, args, timeout) do

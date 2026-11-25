@@ -10,6 +10,14 @@ defmodule Mix.Tasks.Kiln.Deprecations do
       fallback (they hold audiences but no organization membership);
     * queued webhook and newsletter jobs still in a pre-0.12 argument shape.
 
+  It also lists, for information, accounts with **account-wide audiences not on
+  a site membership**: values in `User.audiences` that none of the account's
+  active memberships carries. Gated content reads audiences from the active
+  membership on each site, so these grant nothing. Nothing moves them; grant
+  them on the right site from the console's audiences panel, or with
+  `KilnCMS.Accounts.SiteAudiences.set/4` from a remote console. They do not
+  make the task exit non-zero.
+
   ```
   mix kiln.deprecations                       # report only
   mix kiln.deprecations --migrate-audiences   # give those accounts a membership

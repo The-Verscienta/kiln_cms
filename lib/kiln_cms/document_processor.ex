@@ -103,7 +103,7 @@ defmodule KilnCMS.DocumentProcessor do
   #
   # Unlike ffmpeg, qpdf has no self-imposed CPU limit to hand it. Closing an
   # Erlang port shuts the pipes *without* signalling the child, so the timeout
-  # additionally kills the OS process by pid (#918): a `Task.shutdown/2` left an
+  # additionally kills the OS process (#918): a `Task.shutdown/2` left an
   # orphan qpdf burning CPU and then writing an unreferenced file into the temp
   # dir minutes after the upload had already been refused, with nothing reaping
   # it. `--decode-level=none` removes the amplification that made that reachable
@@ -559,10 +559,16 @@ defmodule KilnCMS.DocumentProcessor do
   defp prune_dict(other), do: other
 
   # `KilnCMS.ExternalCommand`, not `System.cmd/3`, because the timeout has to be
-  # able to KILL the child, and only a port hands back its OS pid — closing the
-  # port alone leaves qpdf running (#918). That runner used to live here; #1100
-  # moved it out when the A/V path needed the identical containment, and its
-  # moduledoc carries the reasoning that was in these comments.
+  # able to KILL the child, and `System.cmd/3` cannot be interrupted (#918).
+  # That runner used to live here; #1100 moved it out when the A/V path needed
+  # the identical containment, and its moduledoc carries the reasoning that was
+  # in these comments.
+  #
+  # Its deadline kill is asynchronous: `:timeout` comes back once the port is
+  # closed, and qpdf is SIGKILLed a moment later. So a `File.rm(out)` right
+  # after a timeout can, in that window, run before qpdf's last write to
+  # `out`. The file is a fresh UUID name in the temp dir that nothing else
+  # reads.
   defp qpdf(args) do
     case System.find_executable("qpdf") do
       nil -> {"qpdf not found", :enoent}

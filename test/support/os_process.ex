@@ -3,9 +3,11 @@ defmodule KilnCMS.Test.OsProcess do
   Probes for an OS process a test started through a port, for the tests that
   check `KilnCMS.ExternalCommand` kills its child when the caller dies (#2564).
 
-  `kill -0` (`alive?/1`) reports a **zombie** as alive: a SIGKILLed child stays
-  one until the VM's `erl_child_setup` reaps it, and on a loaded host that can
-  lag. Those tests assert the child was *killed*, not that it was reaped, so
+  `kill -0` (`alive?/1`) reports a **zombie** as alive: a SIGKILLed program
+  stays one until it is reaped. Its parent, `ExternalCommand`'s wrapper, dies
+  in the same group kill, so the program is reparented to PID 1 (or the
+  nearest subreaper) and reaped by that, which on a loaded host can lag.
+  Those tests assert the program was *killed*, not that it was reaped, so
   `gone?/1` counts a zombie as gone. It reads the state with `ps`, and falls
   back to `kill -0` (stricter: it waits for the reap) where `ps` is missing.
   """
