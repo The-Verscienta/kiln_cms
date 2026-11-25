@@ -145,6 +145,45 @@ defmodule KilnCMS.CMS.HealthSweepTest do
       assert [_task] = lifecycle_tasks(page.id, admin)
     end
 
+    # #2738: the read stopped at a fixed cap with no sort, and nothing the sweep
+    # does takes a record out of the overdue filter, so every run got the same
+    # first rows and the rest never got an event. A batch of 2 over 5 records
+    # walks three pages, the last one short.
+    test "dispatches every overdue record, however many pages they span" do
+      admin = user(:admin)
+      stale = for _ <- 1..5, do: overdue_page(admin)
+      task_rule!(admin)
+
+      HealthSweep.run_org(org_id(), batch: 2)
+      Oban.drain_queue(queue: :default, with_recursion: true, with_scheduled: true)
+
+      for page <- stale do
+        assert [_task] = lifecycle_tasks(page.id, admin)
+      end
+    end
+
+    test "counts every overdue record in its telemetry, not one page" do
+      admin = user(:admin)
+      for _ <- 1..3, do: overdue_page(admin)
+
+      ref = make_ref()
+      parent = self()
+
+      :telemetry.attach(
+        "health-sweep-pages-#{inspect(ref)}",
+        [:kiln_cms, :lifecycle, :health_sweep],
+        fn _event, measurements, _metadata, _ -> send(parent, {ref, measurements}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach("health-sweep-pages-#{inspect(ref)}") end)
+
+      HealthSweep.run_org(org_id(), batch: 1)
+
+      assert_receive {^ref, %{overdue: overdue}}
+      assert overdue >= 3
+    end
+
     test "emits telemetry with the counts by health" do
       admin = user(:admin)
       overdue_page(admin)

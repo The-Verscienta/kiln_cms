@@ -226,3 +226,14 @@ carries the reasoning.
   - **Smaller fixes on the way.** An id stored in upper case lost its edge on every run (inserted, then pruned as a mismatch against the lower-case uuid column); ids now compare in any case. A target named twice in a list kept an arbitrary place. A `link` that was not an object was copied onto the edge; it is now `{}`, as a save writes it.
   - **Known differences from a save.** When a value names no `type`, the backfill takes the field's `target_type` and ignores `target_types` (a later column the 1.1 migration's schema doesn't have); realign leaves `target_type` alone. A string id of exactly 16 bytes, which a save accepts as a raw uuid, is ignored here, and the prune deletes its edge (#3356). A record's next changing save settles both. The backfill does not check `max_sources`.
   - **No migration; rolling the pin back is safe.**
+
+
+
+
+<a id="health-sweep-every-record"></a>
+
+- **The daily health sweep reaches every overdue and expired record (#2738).** `KilnCMS.CMS.HealthSweep` read at most 500 stale records per content type, in no particular order. Raising an event does not change a record's `health`, and a `:create_task` reaction leaves the record overdue, so each run got the same 500 back: on a type with more, the rest never got a `<type>.health_overdue` or `<type>.health_expired` event, or the task a rule makes from it. Only a log line said so.
+  - **It pages now.** The sweep reads 500 records at a time in `id` order and continues after the last one it saw, until a page comes back short, dispatching each page before reading the next. A sort alone would not have helped: nothing the sweep does takes a record out of the filter, so the same first page would come back every run.
+  - **Telemetry counts every record.** `[:kiln_cms, :lifecycle, :health_sweep]` was capped at 500 per type with the read; its `overdue` and `expired` counts are now the full totals. It is emitted after the events are dispatched rather than before.
+  - **More events on a large backlog.** A site with thousands of stale records of one type now gets an event, and so an `Automation.DispatchWorker` job, for each of them every day. A rule's `:create_task` stays one open task per record, as before.
+  - **No migration; rolling the pin back is safe.** An older release goes back to the first 500 per type.
