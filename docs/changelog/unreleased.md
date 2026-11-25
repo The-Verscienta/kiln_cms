@@ -87,6 +87,14 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="redirects-refused-path"></a>
+
+- **The Redirects form shows a refused path as an error on its field instead of crashing the page (#2763).** `/editor/redirects` created a manual redirect with the bang `CMS.create_redirect!`, so anything the `Redirect` resource refused raised out of the handler: the page crashed, reconnected, and the typed form was gone. A From path longer than the URL limit was enough, as was a locale longer than the identifier limit sent by a client, or a submit from an admin whose site tier had been lowered since the page opened.
+  - **What the form does now.** It is an AshPhoenix form on `Redirect.create`, so the resource's own refusals come back as form errors: a length error shows under **From path** or **Locale**. The page's own checks land on their fields the same way: a path without a leading `/`, the root path and the target's own URL under **From path**, and a target that doesn't exist under **Target slug**. These used to be flash messages. What was typed is kept, so it can be corrected and resubmitted.
+  - **Refused writes.** A create the policy refuses shows "You don't have permission to add redirects." as a flash, since no field is at fault, and anything else without a field shows "Couldn't create that redirect.". The target lookup no longer raises either: a lookup that fails reads as a missing target.
+  - **Unchanged.** Who may create, list and delete redirects, the upsert on path and locale, and clearing a matching 404 counter after a create. Deleting a redirect already reported a failure as a flash.
+  - **No migration; rolling the pin back is safe.**
+
 <a id="translations-slug-window"></a>
 
 - **The translations dashboard's window is on slugs, not records (#2761).** `/editor/translations` read the 200 most recently updated records of each content type and only then grouped them by slug, so a slug could land in the window with some of its variants cut off. A translation older than the cut showed as **+ missing**, and clicking it failed with "Couldn't create that translation." because the variant already existed. When the default-locale source was the variant cut, the row was represented by a translation and its export checkbox was disabled with "No en source to translate from".
