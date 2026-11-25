@@ -14384,6 +14384,11 @@ msgstr ""
 msgid "Move “%{title}” to trash? It comes off the live site now. Admins can restore it from Trash for %{days} days, which puts it back on the site."
 msgstr ""
 
+#: lib/kiln_cms_web/components/version_diff_components.ex
+#, elixir-autogen, elixir-format
+msgid "Moved"
+msgstr ""
+
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format, fuzzy
 msgid "Moved %{count} item to trash."

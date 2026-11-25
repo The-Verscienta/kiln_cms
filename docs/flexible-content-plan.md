@@ -14,7 +14,8 @@ The decisions PR 1 makes are argued in
 [ADR 0065](decisions/0065-a-flexible-field-keeps-its-mixed-items-inline-and-its-item-types-are-field-definitions.md).
 
 Where PR 3 differs from this plan is listed under "Where PR 3 differs" below
-the PR 2 list, and PR 5's under "Where PR 5 differs" below that.
+the PR 2 list, PR 5's under "Where PR 5 differs" below that, and PR 6's under
+"Where PR 6 differs" after it.
 
 **Where PR 2 differs from this plan** (the code is right; this text is
 unchanged below):
@@ -82,6 +83,28 @@ unchanged below):
   200, and a flexible field makes it 1241, so the generated fragments only run
   with a raised cap. This predates PR 5, so it is a follow-up and no test
   asserts the fragment's complexity.
+
+**Where PR 6 differs from this plan** (the code is right; this text is
+unchanged below):
+
+- `searchable` is allowed on a flexible field, so the PR 1 refusal (§4 item 6,
+  §9 row 1) and §8's "sub-fields stay non-searchable" are superseded. Only
+  `names_record` is still refused. The admin form shows the **Searchable**
+  box for a flexible field and keeps **Names the record** hidden.
+- Search skips `_id`, `_type` and `_settings` (the whole `_`-prefixed set), not
+  only `_type`/`_id` as §8 says, and reads items through their item types'
+  sub-field definitions rather than a blind walk. A media or reference
+  sub-field contributes nothing. An item of an unknown type falls back to the
+  generic walk, which now skips those keys for any map that has both `_id` and
+  `_type` (another map keeps a key such as `_note`).
+- `VersionDiff` detects items structurally (a list whose every element has a
+  string `_id` and `_type`, ids unique), so `VersionDiff` takes no definitions.
+  An entry gains `items` only then. The plan's "type change under the same
+  `_id`" and "no-id fallback by hash key" cases are not built: an item
+  without an id means the list diffs as one value.
+- The history screens list added, removed, changed and moved items with the
+  type's label and old and new text (`FieldDisplay.display_item/3`). They do
+  not print `changed_keys`; it is on the entry for code that wants it.
 
 **Where PR 1 differs from this plan** (the code is right; this text is
 unchanged below):
@@ -295,7 +318,8 @@ FieldDefinition  name: "sections"  field_type: :flexible   (top-level, owned by 
    that exclusion for v1 and list it with the group gap, rather than widening
    it silently.
 6. `searchable` is refused on a flexible field in PR 1 (until the walker skips
-   meta keys in PR 6, it would index `_id`/`_type` into `search_text`).
+   meta keys in PR 6, it would index `_id`/`_type` into `search_text`); PR 6
+   allows it (see "Where PR 6 differs").
    `unique` is refused on a flexible field and on its sub-fields (as for
    groups), and a flexible field cannot be `private`, `computed`, a list
    column, an index target or a `custom_filter` leaf (`PrivateFields.@types`,
@@ -409,7 +433,7 @@ wired to `document.blocks`. Reuse that does not fight this:
   `_type` and `_id` values; its walker must skip `_`-prefixed keys (and
   optionally `_settings`) for flexible values, and sub-fields stay non-searchable
   (their `searchable` is cleared). Flagging the flexible field `searchable` is
-  the opt-in. `BlockIndexer`'s "custom-fields" pseudo-block then covers
+  the opt-in (allowed from PR 6; refused in PR 1). `BlockIndexer`'s "custom-fields" pseudo-block then covers
   embeddings for free.
 * **Revisions / diffs.** PaperTrail snapshots `custom_fields`, so history and
   restore work immediately; restore rewrites the whole map (under #2281 this
@@ -448,7 +472,7 @@ until PR 2**.
 
 | # | PR | Contents | Depends on |
 |---|---|---|---|
-| 1 | **Model + write path** | `:flexible` core type (reserved name); `flex_of_id`, `item_setting` (codegen, expand-only); `OneFieldScope`/`GroupField`/new `FlexibleField` validations; the §2 top-level-predicate audit table + tests; `resolve_flexible` with `_id`/`_type`/`_settings`, bounds, conditions, constraints; `FieldKind`/`FieldTypes` entries and **minimal handling in the schema emitters** (the exhaustive `field_kind_test` and golden tests force it here: typed as generic JSON until PR 5); exclusions (private, searchable, list column, index, filter, unique); reporting-view exclusion test; N-hop owner walks (to the nesting cap) in `BustTypeRegistry`/`SyncFieldValues`/`FieldCondition`; deletion guard; depth cap (default 3) and a three-level fixture across validation, coercion, owner walks and SQL purge/rename; code interfaces; an ADR (next free number at PR time) covering §1–3 and rollback. API-level tests only. | — |
+| 1 | **Model + write path** | `:flexible` core type (reserved name); `flex_of_id`, `item_setting` (codegen, expand-only); `OneFieldScope`/`GroupField`/new `FlexibleField` validations; the §2 top-level-predicate audit table + tests; `resolve_flexible` with `_id`/`_type`/`_settings`, bounds, conditions, constraints; `FieldKind`/`FieldTypes` entries and **minimal handling in the schema emitters** (the exhaustive `field_kind_test` and golden tests force it here: typed as generic JSON until PR 5); exclusions (private, searchable until PR 6, list column, index, filter, unique); reporting-view exclusion test; N-hop owner walks (to the nesting cap) in `BustTypeRegistry`/`SyncFieldValues`/`FieldCondition`; deletion guard; depth cap (default 3) and a three-level fixture across validation, coercion, owner walks and SQL purge/rename; code interfaces; an ADR (next free number at PR time) covering §1–3 and rollback. API-level tests only. | — |
 | 2 | **Admin + editor (one PR)** | "Item types" panel, "Setting" checkbox, per-type `max_items`, purge-count warning; `FieldSync` `item_types` nesting; item cards (recursive for nested flexible sub-fields, each level collapsible), add menu, drag/move/duplicate/remove, collapse, settings section, `_id` wire form, error paths, scalar sub-fields; e2e. Split admin from editor only if size demands, because the admin panel alone is a dead end. Gettext for new strings. | 1 |
 | 3 | **Media + reference inside items** | `item_field_types` = link types + `:media` + `:reference` (group parity, Q1); snapshots at write; path pickers addressed by `_id`; `Firing.CustomFields` refresh recursion; edges with path + re-fire; `FieldDisplay.collect`; `SyncFieldValues`. Highest risk; changes the `GroupValue` shape if groups are included. | 2 |
 | 4 | **Grants** | Per-item-type grants, validators and pickers, `_id`-based `EnforceCustomFieldGrants` rewrite, copy-path handling. | 1 |

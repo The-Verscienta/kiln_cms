@@ -91,6 +91,20 @@ defmodule KilnCMS.CMS.FieldDisplay do
   def display(definition, value, context), do: display(definition, value, context, 0)
 
   @doc """
+  One item of a flexible field (#2282) as text, led by its item type's label:
+  what the per-item diff of `KilnCMS.CMS.VersionDiff` shows on each side. A
+  `nil` item (the side where it did not exist) is `""`; an item of a type the
+  definition no longer declares reads `"?"`.
+  """
+  @spec display_item(struct() | nil, map() | nil, context()) :: String.t()
+  def display_item(_definition, nil, _context), do: ""
+
+  def display_item(definition, %{} = item, context) do
+    types = Map.new(item_type_definitions(definition || %{}), &{&1.name, &1})
+    item_text(item, types, context, 0)
+  end
+
+  @doc """
   The generic rendering: strings as written, scalars as text, structures as
   compact JSON. Always truncated, because a stored value is the editor's own
   content echoed back into the page.

@@ -68,6 +68,10 @@ else.
   No migration.
   ([long form](docs/changelog/unreleased.md#condition-text-ops))
 
+- **A flexible field can be searchable: search finds a record by its items' text (never `_id`, `_type`, `_settings`, media or reference values), and version compare and restore preview list each added, removed, changed or moved item (#2282, PR 6).**
+  No migration. Flipping the flag re-fires published documents.
+  ([long form](docs/changelog/unreleased.md#flexible-search-diff))
+
 ### Changed
 
 - **A list field's errors count items one way: a value rule now says `Scores (scores) item 2 must be at most 10` (from 1) instead of `Scores (scores[1]) …`, and a type error, field conversion reports included, no longer counts a dropped repeat (#2683).**

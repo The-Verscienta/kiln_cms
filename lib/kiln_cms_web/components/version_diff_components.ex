@@ -296,7 +296,14 @@ defmodule KilnCMSWeb.VersionDiffComponents do
         </dt>
         <dd class="flex flex-wrap items-baseline gap-2">
           <.status_pill status={entry.status} />
+          <.item_changes
+            :if={Map.get(entry, :items)}
+            items={entry.items}
+            definition={Map.get(@definitions, entry.key)}
+            display={@display}
+          />
           <.value_pair
+            :if={!Map.get(entry, :items)}
             old={entry.old}
             new={entry.new}
             format={&FieldDisplay.display(Map.get(@definitions, entry.key), &1, @display)}
@@ -330,7 +337,14 @@ defmodule KilnCMSWeb.VersionDiffComponents do
         </dt>
         <dd class="flex flex-wrap items-baseline gap-2">
           <.status_pill status={entry.status} />
+          <.item_changes
+            :if={Map.get(entry, :items)}
+            items={entry.items}
+            definition={Map.get(@definitions, entry.key)}
+            display={@display}
+          />
           <.value_pair
+            :if={!Map.get(entry, :items)}
             old={entry.old}
             new={entry.new}
             format={&FieldDisplay.display(Map.get(@definitions, entry.key), &1, @display)}
@@ -342,6 +356,43 @@ defmodule KilnCMSWeb.VersionDiffComponents do
     <p :if={is_nil(@field.inline) && @field.entries == []} class="mt-1 text-sm">
       <.value_pair old={@field.old} new={@field.new} />
     </p>
+    """
+  end
+
+  # The per-item diff of a flexible field (#2282): one row per item that was
+  # added, removed, changed or moved, in the new order. Items that only kept
+  # their place are not listed.
+  attr :items, :list, required: true
+  attr :definition, :any, default: nil
+  attr :display, :map, required: true
+
+  defp item_changes(assigns) do
+    assigns =
+      assign(
+        assigns,
+        :shown,
+        Enum.reject(assigns.items, &(&1.status == :unchanged and not &1.moved?))
+      )
+
+    ~H"""
+    <ol class="w-full space-y-1" data-flexible-items>
+      <li
+        :for={item <- @shown}
+        class="flex flex-wrap items-baseline gap-2"
+        data-item-id={item.id}
+        data-item-status={item.status}
+      >
+        <.status_pill :if={item.status != :unchanged} status={item.status} />
+        <.pill :if={item.moved? or item.status == :unchanged} tone="bg-info/20 text-info-ink">
+          {gettext("Moved")}
+        </.pill>
+        <.value_pair
+          old={if item.status in [:added, :unchanged], do: nil, else: item.old}
+          new={if item.status == :removed, do: nil, else: item.new}
+          format={&FieldDisplay.display_item(@definition, &1, @display)}
+        />
+      </li>
+    </ol>
     """
   end
 

@@ -113,8 +113,10 @@ the application is recompiled, not at boot. A definition's own `max_items`
 
 A flexible field takes none of the options that only fit a plain value, and
 each is refused with a message rather than ignored: `searchable` and
-`names_record` (until search skips `_id` and `_type`, it would index them),
-`private`, a `default`, `item_setting`, `unique` (no constraint applies), and
+`names_record` (until search skips `_id` and `_type`, it would index them;
+**update, PR 6 of #2282: `searchable` is now allowed**, and search reads an
+item's text through its item type's sub-fields, never `_id`, `_type` or
+`_settings`; `names_record` is still refused), `private`, a `default`, `item_setting`, `unique` (no constraint applies), and
 its own `visible_when` / `required_when` (as for a group). It is not a list
 column, an indexed field or a `custom_filter` leaf (a filter on it answers
 only `null`). The reporting views are unchanged: item types have no
