@@ -306,7 +306,8 @@ defmodule KilnCMS.Backups.Preflight do
   end
 
   # `path` is the backup directory or one under it, never request input, and
-  # `ExternalCommand` execs `df` directly, with no shell.
+  # `ExternalCommand` does no shell interpolation: `df` and its arguments are
+  # passed positionally, as `"$@"`.
   defp df(path) do
     with exe when is_binary(exe) <- System.find_executable("df"),
          {output, 0} <- ExternalCommand.run(exe, ["-Pk", path], @df_timeout_ms) do

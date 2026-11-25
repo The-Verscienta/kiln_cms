@@ -8,7 +8,9 @@ defmodule KilnCMS.Blocks.PortableText.Markdown do
 
     * styles — paragraphs, `#`–`######` headings, `>` quotes, fenced code
       (with its language);
-    * lists — bullet and numbered, nested by indentation;
+    * lists — bullet and numbered, nested by indentation (an item deeper
+      than `KilnCMS.Blocks.PortableText.max_list_level/0` is written at that
+      depth);
     * marks — `**strong**`, `*em*`, `` `code` ``, `~~strike~~`, links, and
       underline as `<u>` (Markdown has no syntax for it; the importer keeps
       the tag);
@@ -21,6 +23,8 @@ defmodule KilnCMS.Blocks.PortableText.Markdown do
   Text is escaped, so a literal `*` or `[` in prose stays literal on the way
   back.
   """
+
+  alias KilnCMS.Blocks.PortableText
 
   # Outermost first: a link wraps its formatting, and inline code — whose
   # content is never escaped — is always innermost.
@@ -99,7 +103,7 @@ defmodule KilnCMS.Blocks.PortableText.Markdown do
   defp list(items) do
     {lines, _counters, _kind} =
       Enum.reduce(items, {[], %{}, nil}, fn item, {lines, counters, kind} ->
-        level = if is_integer(item["level"]), do: max(item["level"], 1), else: 1
+        level = PortableText.list_level(item)
         item_kind = item["listItem"]
 
         separator? = level == 1 and kind != nil and item_kind != kind

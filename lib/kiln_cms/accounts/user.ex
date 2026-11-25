@@ -261,6 +261,24 @@ defmodule KilnCMS.Accounts.User do
       prepare build(sort: [email: :asc])
     end
 
+    # Accounts that hold account-wide audiences and at least one membership:
+    # the candidates for `mix kiln.deprecations`' "account-wide audiences not
+    # on a site membership" check, which compares each one's `User.audiences`
+    # with its active memberships (`KilnCMS.Deprecations`). Delivery and the
+    # read policies take audiences from the active membership on the site only,
+    # so a value held here alone grants nothing. Membership-less accounts are
+    # `:legacy_audience_accounts`; erased accounts read nothing gated.
+    read :account_wide_audience_accounts do
+      description "Accounts with account-wide audiences and a membership (operator report)."
+
+      filter expr(
+               is_nil(anonymized_at) and fragment("cardinality(?) > 0", audiences) and
+                 exists(org_memberships, true)
+             )
+
+      prepare build(sort: [email: :asc], load: [:org_memberships])
+    end
+
     # Sign in via an API key (`api_key` strategy). Resolves the presented key to
     # its owning user and stamps `using_api_key?` metadata, which the content
     # policy reads to keep API-key actors read-only.
@@ -1599,6 +1617,11 @@ defmodule KilnCMS.Accounts.User do
     # An operator report over every account's access columns. The admin bypass
     # above admits a platform admin; the task runs it `authorize?: false`.
     policy action(:legacy_audience_accounts) do
+      forbid_if always()
+    end
+
+    # The same operator report shape as `:legacy_audience_accounts`.
+    policy action(:account_wide_audience_accounts) do
       forbid_if always()
     end
   end

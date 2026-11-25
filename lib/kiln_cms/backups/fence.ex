@@ -71,8 +71,9 @@ defmodule KilnCMS.Backups.Fence do
   @doc """
   Kill every process registered in `KilnCMS.Backups.StepRegistry`, logging
   why: `since_ms` is how long ago this node last beat. Each step's
-  `KilnCMS.ExternalCommand` watcher then kills its `pg_dump`, `tar` or
-  `rclone`. Returns how many were killed. Registry reads only, no I/O.
+  `KilnCMS.ExternalCommand` run then kills its `pg_dump`, `tar` or `rclone`,
+  whose port closes with the step. Returns how many were killed. Registry
+  reads only, no I/O.
   """
   @spec kill_steps(non_neg_integer()) :: non_neg_integer()
   def kill_steps(since_ms) do

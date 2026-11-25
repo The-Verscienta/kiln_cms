@@ -48,9 +48,9 @@ defmodule KilnCMS.AVProcessor do
   first three all miss it (#1100). A `-c copy` remux is I/O-bound, so it burns
   almost no CPU and `-timelimit` essentially never fires; and neither
   `System.cmd/3` nor the calling Oban job's timeout can stop a running ffmpeg,
-  because closing an Erlang port shuts the pipes but sends the child no signal.
-  Only the OS pid a port hands back can be signalled, which is what
-  `ExternalCommand` is for.
+  because closing an Erlang port shuts the pipes but sends the child no signal
+  by itself. `ExternalCommand` runs the program under a wrapper that kills its
+  whole process group when the port closes, which is what it is for.
 
   ## Temp disk
 
@@ -420,10 +420,17 @@ defmodule KilnCMS.AVProcessor do
   #
   # `exe` is always a `System.find_executable/1` result for a literal
   # `"ffprobe"`/`"ffmpeg"` (see below), never anything a caller supplies, and
-  # `ExternalCommand` execs directly rather than through a shell — so neither
-  # the program nor the argument list can be injected into. `args` carries a
-  # server-generated temp path plus fixed flags; even a hostile *filename*
-  # would arrive as one exec argv entry, not as shell syntax.
+  # `ExternalCommand` does no shell interpolation: its fixed wrapper receives
+  # the program and arguments positionally and runs them as `"$@"` — so
+  # neither can be injected into. `args` carries a server-generated temp path
+  # plus fixed flags; even a hostile *filename* would arrive as one argv
+  # entry, not as shell syntax.
+  #
+  # Its deadline kill is asynchronous: `:timeout` comes back once the port is
+  # closed, and ffmpeg/ffprobe is SIGKILLed a moment later. So a caller's
+  # `File.rm(out)` right after a timeout can, in that window, run before
+  # ffmpeg's last write to `out`. Every `out` is a fresh UUID name in the temp
+  # dir that nothing else reads.
   defp cmd(exe, args) do
     case ExternalCommand.run(exe, args, @wall_clock_ms) do
       {output, 0} ->
@@ -599,6 +606,7 @@ defmodule KilnCMS.AVProcessor do
         strip_result(out)
 
       {:error, reason} ->
+        # After a timeout ffmpeg may still be dying; see `cmd/2`.
         File.rm(out)
         {:error, reason}
     end

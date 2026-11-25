@@ -36,6 +36,9 @@ defmodule KilnCMSWeb.PaywallDeliveryTest do
     })
   end
 
+  # A signed-in reader holding `audiences` on this site: an active membership
+  # on the default org (the bare test host) carries them, the way billing and
+  # the console grant them.
   defp member(audiences) do
     email = "pw-member-#{System.unique_integer([:positive])}@example.com"
 
@@ -43,8 +46,7 @@ defmodule KilnCMSWeb.PaywallDeliveryTest do
       email: email,
       hashed_password: Bcrypt.hash_pwd_salt(@password),
       confirmed_at: DateTime.utc_now(),
-      role: :viewer,
-      audiences: audiences
+      role: :viewer
     })
 
     strategy = AshAuthentication.Info.strategy!(User, :password)
@@ -60,7 +62,7 @@ defmodule KilnCMSWeb.PaywallDeliveryTest do
         []
       )
 
-    user
+    KilnCMS.OrgFixtures.grant_audiences(user, audiences)
   end
 
   defp log_in(conn, user) do
