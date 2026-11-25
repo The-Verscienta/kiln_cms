@@ -210,6 +210,28 @@ defmodule KilnCMS.Security.NoticesTest do
       assert List.last(notices())["actor_id"] == nil
     end
 
+    # #2737: decided on the row, not on the caller's copy of the endpoint.
+    test "auto-disabling is one notice, however stale the callers' copies", ctx do
+      endpoint = endpoint!(ctx, ["security.alerts_silenced"])
+      stale = Ash.Seed.update!(endpoint, %{consecutive_failures: 100})
+      opts = [actor: KilnCMS.Webhooks.system(), tenant: ctx.org.id]
+
+      CMS.record_webhook_failure!(stale, opts)
+      CMS.record_webhook_failure!(stale, opts)
+
+      assert changes() == ["webhook_auto_disabled"]
+    end
+
+    test "a stale copy past the threshold does not switch off a reset endpoint", ctx do
+      endpoint = endpoint!(ctx, ["security.alerts_silenced"])
+      stale = Ash.Seed.update!(endpoint, %{consecutive_failures: 100})
+      opts = [actor: KilnCMS.Webhooks.system(), tenant: ctx.org.id]
+      CMS.record_webhook_success!(stale, opts)
+
+      assert CMS.record_webhook_failure!(stale, opts).active
+      assert changes() == []
+    end
+
     test "an endpoint not subscribed to security events changes silently", ctx do
       endpoint = endpoint!(ctx, ["page.published"])
 

@@ -285,6 +285,65 @@ defmodule KilnCMS.WebhookReliabilityTest do
     assert is_nil(reloaded.auto_disabled_at)
   end
 
+  # #2737: the worker's copy of the endpoint was read before its POST. The
+  # failure is counted on the row as it now stands, never on that copy.
+  describe "record_delivery_failure on a stale copy" do
+    test "a success in between resets the run: the endpoint stays active at 1" do
+      put_webhook_env(auto_disable_after: 3)
+      endpoint = endpoint!()
+      # The worker read the endpoint one failure short of the threshold…
+      stale = Ash.Seed.update!(endpoint, %{consecutive_failures: 2})
+      # …and another delivery's success reset the row since.
+      CMS.record_webhook_success!(stale, %{}, authorize?: false)
+
+      recorded = CMS.record_webhook_failure!(stale, %{}, authorize?: false)
+
+      assert recorded.active
+      assert recorded.consecutive_failures == 1
+      refute Ash.Resource.get_metadata(recorded, :auto_disabled)
+
+      reloaded = CMS.get_webhook_endpoint!(endpoint.id, authorize?: false)
+      assert reloaded.active
+      assert reloaded.consecutive_failures == 1
+      assert is_nil(reloaded.auto_disabled_at)
+    end
+
+    test "two failures from the same stale copy both count" do
+      put_webhook_env(auto_disable_after: 10)
+      stale = endpoint!()
+
+      CMS.record_webhook_failure!(stale, %{}, authorize?: false)
+      CMS.record_webhook_failure!(stale, %{}, authorize?: false)
+
+      reloaded = CMS.get_webhook_endpoint!(stale.id, authorize?: false)
+      assert reloaded.consecutive_failures == 2
+      assert reloaded.active
+    end
+
+    test "the failure that crosses the threshold, and only it, auto-disables" do
+      put_webhook_env(auto_disable_after: 2)
+      stale = endpoint!()
+      CMS.record_webhook_failure!(stale, %{}, authorize?: false)
+
+      crossing = CMS.record_webhook_failure!(stale, %{}, authorize?: false)
+
+      refute crossing.active
+      assert crossing.consecutive_failures == 2
+      assert crossing.auto_disabled_at
+      assert Ash.Resource.get_metadata(crossing, :auto_disabled) == true
+
+      # A third exhaustion from a copy still saying "active" (a concurrent job)
+      # finds the endpoint already off: nothing moves, and it is not the one
+      # that switched it off.
+      late = CMS.record_webhook_failure!(stale, %{}, authorize?: false)
+
+      refute late.active
+      assert late.consecutive_failures == 2
+      assert late.auto_disabled_at == crossing.auto_disabled_at
+      assert Ash.Resource.get_metadata(late, :auto_disabled) == false
+    end
+  end
+
   test "redeliver replays a failed delivery as a fresh ledger row" do
     stub_status(500)
     endpoint!()

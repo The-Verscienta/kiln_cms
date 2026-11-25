@@ -211,7 +211,9 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
       # Bump health only for a live endpoint that truly exhausted its retries —
       # a failed ping against an already-disabled endpoint proves nothing new.
       # The first failure in a row, and the one that switches the endpoint
-      # off, are told to the site's admins (`HealthNotice`).
+      # off, are told to the site's admins (`HealthNotice`). This job's copy
+      # only filters: `record_delivery_failure` counts on the row as it now
+      # stands, and the notice reads the record it returns (#2737).
       is_struct(delivery.endpoint, KilnCMS.CMS.WebhookEndpoint) and delivery.endpoint.active ->
         record_endpoint_failure(delivery)
 
@@ -225,7 +227,7 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
            actor: Webhooks.system(),
            tenant: delivery.org_id
          ) do
-      {:ok, endpoint} -> HealthNotice.surface(delivery.endpoint, endpoint)
+      {:ok, endpoint} -> HealthNotice.surface(endpoint)
       error -> log_unrecorded(error, delivery, "endpoint failure")
     end
   end

@@ -117,6 +117,10 @@ else.
   No migration; rolling the pin back is safe. A `down` that relied on dropping on the default server now acts on the URL's.
   ([long form](docs/changelog/unreleased.md#staging-script-guards-drop))
 
+- **A webhook endpoint is no longer auto-disabled by a failure counted against a stale copy: an exhausted delivery now adds one to the failure count in the database, so a success in between resets the run, concurrent failures all count, and the "switched off" alert fires once (#2737).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#webhook-failure-atomic))
+
 ## [1.12.1] - 2026-11-23
 
 Long form: [docs/changelog/v1.12.1.md](docs/changelog/v1.12.1.md) —
