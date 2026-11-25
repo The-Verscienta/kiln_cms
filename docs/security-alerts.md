@@ -40,7 +40,7 @@ Platform alerts:
 
 | Kind | Raised when | Can be turned off |
 |---|---|---|
-| `new_admin` | An account's own role is set or raised to admin (a platform admin), standing or by a temporary grant | No |
+| `new_admin` | An account's own role is set or raised to admin (a platform admin), standing or by a temporary grant. This includes each admin seat `mix kiln.beta.round` creates, or adopts from a lower role ([beta-testing.md](beta-testing.md)) | No |
 | `platform_role_changed` | A platform admin's admin role is taken away: lowered, or a temporary admin grant ended early or replaced by a lower one | No |
 | `new_api_key` | An API key is minted. Rotating a key into its successor is not an alert | No |
 | `api_key_abuse` | A rotated-away API key is presented to `POST /api/keys/rotate` again more than 120 seconds after its rotation: two parties held the key, and Kiln revoked the whole chain ([self-rotation](headless-consumer-guide.md#keeping-the-key-alive-self-rotation)) | No |
@@ -63,6 +63,12 @@ Platform alerts:
   admin.
 - **Erasing a site admin.** Erasure writes no role event, so it raises
   nothing.
+- **An admin created outside the role actions.** The first admin made at
+  `/setup`, accounts from `priv/repo/seeds.exs` and the staging admin a scrub
+  creates write no role event, so they raise nothing
+  ([Not recorded, and why](security-events.md#not-recorded-and-why) says why for each). A beta-round
+  seat is not among them: since 1.13 its tier goes through the same action as
+  the **Accounts** page.
 - **An automatic address block being created.** The scanner guard adding a
   temporary rule is recorded as `ip_auto_blocked` and raises nothing. The
   requests that rule then refuses do raise `blocked_ip`, like any rule's.
@@ -413,7 +419,7 @@ mute silences it.
 | A security webhook changed | `webhook_changed` | Editing an endpoint subscribed to any `security.*` event: its URL changed, **Active** unticked, or a `security.*` event unticked |
 | A security webhook deleted | `webhook_removed` | Deleting such an endpoint |
 | A security webhook's secret rotated | `webhook_secret_rotated` | **Rotate secret** on such an endpoint. The receiver stops verifying deliveries until it has the new secret |
-| A security webhook auto-disabled | `webhook_auto_disabled` | Delivery switching such an endpoint off after repeated failures ([Auto-disable](webhooks.md#auto-disable)) |
+| A security webhook auto-disabled | `webhook_auto_disabled` | Delivery switching such an endpoint off after repeated failures ([Auto-disable](webhooks.md#auto-disable)). Raised once, by the failure that switched it off: another delivery exhausting against the endpoint at the same moment raises nothing |
 | An admin removed | `admin_removed` | Someone removes another person's admin membership from the site |
 | An admin demoted | `admin_demoted` | Someone lowers another person's admin role on the site |
 | A temporary admin role ended | `admin_grant_revoked` | Someone ends another person's temporary admin grant on the site early, or replaces it with a lower one |

@@ -116,6 +116,10 @@ table:
 | **Experimental** | Incomplete, or resting on a dependency that is not stable yet. May change or be withdrawn in a minor | Semantic and hybrid search and the Meilisearch backend (both feature-flagged off, and the models need a `KILN_ML=1` build); `/api/content/:type/:slug/related`, which is empty without semantic search; the Bumblebee cross-encoder reranker (`rerank: false`; its model path is not exercised in CI); the CRDT collaborative-editing prototype (`:collab_prototype`, dev and test only); GraphQL subscriptions over `/ws/gql` (on, but built on `ash_graphql`'s subscription DSL, which is still beta) |
 <!-- surface-labels:end -->
 
+One exception, written down in [ADR 0084](docs/decisions/0084-a-minor-release-may-tighten-a-documented-write-when-the-old-input-corrupted-data-or-bypassed-review.md): a minor release may refuse
+input a documented write used to accept when accepting it broke reads, corrupted content or let a change
+skip review. It is listed under Breaking, with the request before and after.
+
 **Bus factor is one.** KilnCMS has a single maintainer
 ([@The-Verscienta](https://github.com/The-Verscienta)), and 1.0 did not wait
 for a second one. There is one merged external contribution
@@ -530,6 +534,19 @@ monitoring
 ([`docs/security-posture.md`](docs/security-posture.md#monitor-each-plugin-from-a-script)).
 Signed-out content pages now load a small `public.js` instead of the console's script
 ([`docs/frontend-assets.md`](docs/frontend-assets.md#which-script-a-page-loads)).
+
+Since 1.13, also: a custom field's text, a Flexible content field's items included, can
+go into the Markdown and JSON-LD that answer engines read
+([`docs/extending-content.md`](docs/extending-content.md#put-custom-field-text-in-the-ai-readable-outputs));
+a Flexible content field can be searchable, and version history lists its items one by
+one ([`docs/extending-content.md`](docs/extending-content.md#search-a-flexible-field-and-read-its-history));
+a conditional field can test text with contains, starts with and ends with
+([`docs/extending-content.md`](docs/extending-content.md#make-a-field-conditional));
+the address field follows the chosen country, with its own labels and a list of its
+states, provinces or prefectures
+([`docs/extending-content.md`](docs/extending-content.md#address-fields)); and over
+`/mcp` a published record is edited in its working copy, for a person to publish
+([`docs/mcp.md`](docs/mcp.md#live-records)).
 
 > **Note:** clone this project to a path **without spaces**. One dependency,
 > `picosat_elixir`, cannot compile under a spaced path such as iCloud Drive's

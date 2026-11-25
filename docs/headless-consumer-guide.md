@@ -200,6 +200,20 @@ up, so any content at all is at least `1` and only genuinely empty content is
 | Preview `GET /preview/:token` | ✅ `blocks` | Raw editable blocks (what the editor holds), for a single draft |
 | JSON:API / GraphQL | ❌ none | Block tree is **not** auto-exposed (`public? false`); these surfaces are for metadata, lists, search, and relationships |
 
+A `rich_text` block's `body` in the artifact is Portable Text in the shape a
+renderer expects. In a text block (a node whose `_type` is absent, `block` or
+`code`) and its spans, `children`, `markDefs` and `marks` are lists,
+`style`, `listItem`, `_key` and a span's `text` are strings, and `level` is
+an integer; any of them may be absent or `null`. A body stored in another
+shape, as the write API allowed before 1.13, is repaired when the document
+fires: a string `marks` becomes a one-item list, a string child becomes a
+span, and a node or child that isn't an object is dropped. An artifact
+fired before 1.13 keeps the stored shape until the document fires again
+([After a Kiln upgrade](#after-a-kiln-upgrade) covers how that reaches you).
+If you send a body back as `block_tree`, send one from an artifact fired on
+1.13 or later: an older one can be refused with a `400`
+([json-api.md](json-api.md#block-tree-portable-text-check)).
+
 **Rule of thumb:** render published bodies from the **artifact** surface (it has
 CDN cache headers — `Cache-Control`/`ETag`/`Last-Modified`, see #188); use
 **JSON:API/GraphQL** for discovery, lists, filtering, taxonomy, and search; use
@@ -293,7 +307,9 @@ your side that drops `tabindex` or `aria-label` undoes this.
 ### On the `json` surface
 
 The `json` surface is data, and its rich-text blocks are the stored prose
-unchanged: a Portable Text block with `"style": "code"` in `body`, or sanitized
+(a malformed Portable Text body repaired, see
+[Why three different block shapes?](#why-three-different-block-shapes)): a
+Portable Text block with `"style": "code"` in `body`, or sanitized
 HTML in `legacy_html` (a plain `<pre>` or `<pre class="highlight">`, with no
 `tabindex`). The guides at kilncms.dev `/docs` are stored as `legacy_html`.
 If you render either one, add `tabindex="0"`, `role="group"` and a translated
@@ -379,8 +395,9 @@ HTML.
 
 ### Tables on the `json` surface
 
-The `json` surface carries the stored prose unchanged: a Portable Text
-`"_type": "table"` block in `body`, or sanitized HTML in `legacy_html`, where a
+The `json` surface carries the stored prose (a malformed Portable Text body
+repaired): a Portable Text `"_type": "table"` block in `body`, or sanitized
+HTML in `legacy_html`, where a
 table is either bare or in a `div.kiln-table-wrap` with no other attributes.
 If you render either one, put each top-level table in a scrolling wrapper with
 `tabindex="0"`, `role="group"` and a translated `aria-label`, and add the
@@ -873,6 +890,11 @@ edit **its own drafts** and nothing else, whatever the account behind it can do
 * **Drafts cannot set tags, a category or related links.** Those links are
   separate writes the key is refused, so a human files the draft when they
   review it. Custom fields, blocks, title and the like are fine.
+* **The body is checked.** Portable Text in `block_tree` that a reader would
+  have to repair (a `marks` that is a string, `children` that aren't
+  objects, …) is refused with a `400` naming the path, and nothing is
+  written ([json-api.md](json-api.md#block-tree-portable-text-check)).
+  `body_markdown` is converted on the server and never meets this check.
 * **Media is refused** on every route: `/api/media*`, the media `PATCH` and
   GraphQL `updateMediaItem`. Upload through a `read_write` key on an editor
   account, or ask an editor to attach images.

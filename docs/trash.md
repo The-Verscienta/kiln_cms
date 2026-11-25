@@ -56,7 +56,10 @@ copy keeps them for a restore (#2336).
 2. Click **Delete**. A confirmation strip appears: *Move N selected item(s) to
    trash? Admins can restore them from Trash for 30 days.*
 3. Click **Delete** in the strip. The flash says how many moved and how many
-   were skipped.
+   were skipped, for example *Moved 3 item(s) to trash, 1 skipped*. A ticked
+   row that someone else trashed or deleted after your list loaded is counted
+   apart, *Moved 2 item(s) to trash, 1 no longer exists*, and the run carries
+   on with the rows that remain.
 
 ## Restore a document
 
@@ -86,6 +89,32 @@ publish at** time passed while it was in the trash, restoring it publishes it
 on the scheduler's next run, within about a minute. A trashed document can't
 be edited, so the date can't be cleared beforehand: if it should not go live,
 unpublish it once it has.
+
+### Children of a trashed document
+
+Trashing a document leaves its children as they are, published or not, and
+they still point at the trashed parent, so restoring the parent puts them
+back underneath it. Meanwhile the structure page shows them on their own:
+
+1. In the content list (`/editor`), pick one content type in the type filter
+   and click **Structure**. The page at `/editor/structure/<type>` opens.
+2. A document whose parent is in the trash (or is one you can't read) is drawn
+   at the top level with a **Parent unavailable** badge. Its own children
+   stay beneath it.
+3. To make it top-level for good, click its **Outdent** button (the left
+   arrow), or drag it to a new place at the top level. Restoring the old
+   parent from the trash then no longer puts it back underneath.
+4. To leave it where it is until the parent comes back, don't move it.
+   Dragging other rows around it, or swapping it with the row next to it,
+   changes only the order and keeps its link to the trashed parent.
+
+Indenting a badged document nests it under the row above it, as for any
+other. Nesting a document *under* a badged one, or under anything beneath it,
+is refused with *is not a page in this site.* (naming the content type): a move
+checks the whole chain of parents, and that chain runs into the trashed one.
+Outdent the badged document first, then nest under it. Before 1.13 these
+documents and everything beneath them were missing from the structure page
+altogether (#2760).
 
 ## Delete permanently
 
@@ -126,6 +155,14 @@ trash. Either way, a refused click says what happened (see
 - *Couldn't move that to trash. It may already be gone.* (content list) The
   document was trashed or deleted by someone else since the list loaded, or
   belongs to another site.
+- *That content no longer exists. Someone else may have moved it to trash or
+  deleted it.* (content list) You clicked a row action (**Publish** or
+  **Approve**, **Submit for review**, **Return**, **Unpublish**, **Unarchive**
+  or **Confirm date**) on
+  a document someone else trashed or deleted after your list loaded. Nothing
+  was written; the row drops out of your selection and the list reloads
+  without it. Before 1.13 the list crashed and reloaded with no message
+  (#2781).
 - *Couldn't save your latest changes — fix the errors below, then try again.*
   (editor) An edit waiting for autosave failed validation, so the trash did not
   run. Fix the field it points to, or undo the edit, and try again.

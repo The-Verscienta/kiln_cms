@@ -57,6 +57,8 @@ else.
 
 ## [Unreleased]
 
+What's new, with examples and migration steps: [docs/whats-new/v1.13.md](docs/whats-new/v1.13.md).
+
 ### Upgrade notes
 
 - **Direct uploads: until every node runs this release, a completion handled by an older node can still lose its staged object to the cleanup job (#2724). A token whose cleanup job was never queued now answers `not_uploaded`. No migration; rolling the pin back is safe.**
@@ -68,7 +70,7 @@ else.
 - **On 1.9.0 to 1.12.1, saving an account's audiences panel for a waiting or rejected registration could remove audiences stored on it, even unchanged, so those registrations and accounts approved since may lack audiences you gave them (#2783). Check and re-tick them; KilnCMS can't restore them, though billing-managed audiences return on the next billing change.**
   ([long form](docs/changelog/unreleased.md#audiences-panel-stored-upgrade))
 - **Portable Text: a record stored with a malformed body is read and delivered repaired, so a `:json` consumer can see its shape change on the next fire, and a client that sends back an artifact fired before then can get a `400` (#2768). No migration; rolling the pin back is safe.**
-  A draft of such a live record pending across the upgrade can show a conflict on blocks: publish it with "Keep mine", or discard it and save the draft again.
+  A draft of such a live record pending across the upgrade can show a conflict on blocks: publish it with "Use mine", or discard it and save the draft again.
   ([long form](docs/changelog/unreleased.md#portable-text-write-check-upgrade))
 
 ### Breaking
@@ -76,6 +78,68 @@ else.
 - **Portable Text writes: a `block_tree` body (JSON:API, GraphQL, MCP) is refused with a `400` naming the path for a few shapes that used to be stored: a `marks` entry that is an object or list; an object or list in a text block's `style`, `listItem` or `_key`, or a span's `_key`; a text block's non-numeric `level`; and a plugin `:rich_text` field holding malformed Portable Text (#2768).**
   Numbers in text slots and numeric-string levels are still coerced; a `null` mark is dropped; custom nodes' own fields are kept.
   ([long form](docs/changelog/unreleased.md#portable-text-write-check))
+
+### Known issues
+
+- **A document published again within seconds of its last publish can keep serving the earlier version.** Affects any site: a second publish or edit that lands while the first fire job is still running is dropped as a duplicate, so delivery, search and embeddings keep the older text. Until it is fixed, publish the document once more after a minute, or run `mix kiln.refire_all`.
+  ([#3360](https://github.com/The-Verscienta/kiln_cms/issues/3360))
+
+- **A duplicated text block saves empty, though the editor still shows its text.** Affects editors who duplicate a rich-text block and then type anywhere before saving. Until it is fixed, add a new text block and paste the text instead of duplicating, or re-check the copy after saving.
+  ([#2778](https://github.com/The-Verscienta/kiln_cms/issues/2778))
+
+- **In the Presentation console, an unsaved edit to a block is lost when you open another block and come back.** Affects anyone editing in the Presentation console; the next keystroke writes the saved text back over the edit. Save each block before opening the next one.
+  ([#3376](https://github.com/The-Verscienta/kiln_cms/issues/3376))
+
+- **Unsaved edits in a related-record card are lost when you trash the page or use Publish changes or the Publish confirm.** Affects reference fields with "Let editors edit the related record here"; only Save and workflow steps save the cards first. Save the cards (or press Save) before trashing or publishing.
+  ([#3256](https://github.com/The-Verscienta/kiln_cms/issues/3256))
+
+- **Video, audio and file blocks in a newsletter email link nowhere.** Affects every newsletter campaign with such blocks: the email carries relative `/media/...` links. Until it is fixed, link the file's full URL in a text block instead.
+  ([#3290](https://github.com/The-Verscienta/kiln_cms/issues/3290))
+
+- **Restoring a version saved before a custom field was renamed leaves that field empty.** Affects version restore and release rollback after a field rename; the old key is dropped with a log warning. Copy the value from the version compare before restoring and re-enter it afterwards.
+  ([#3371](https://github.com/The-Verscienta/kiln_cms/issues/3371))
+
+- **A site whose custom domain was saved with capital letters is unreachable on that domain.** Affects site admins on multi-site installs; requests fall back to the default site, or are refused under strict host matching, with no error at save. Enter the custom domain in lower case.
+  ([#3281](https://github.com/The-Verscienta/kiln_cms/issues/3281))
+
+- **After a site's slug or custom domain changes, published pages keep linking to the old host.** Affects bylines and other absolute URLs in fired artifacts until each document is published again. Run `mix kiln.refire_all` after the change.
+  ([#3282](https://github.com/The-Verscienta/kiln_cms/issues/3282))
+
+- **A page slugged `developers`, `sitemap.xml`, `llms.txt`, `ready` or a few other built-in names saves, but its address shows the built-in page.** Affects editors choosing those slugs; nothing warns. Pick another slug or path alias.
+  ([#2898](https://github.com/The-Verscienta/kiln_cms/issues/2898))
+
+- **A site storage profile on a region ExAws doesn't know (Backblaze B2 `us-west-004`, Wasabi `us-central-1`) fails on every upload and read; keep such sites on the instance's storage until the fix.**
+  ([#3085](https://github.com/The-Verscienta/kiln_cms/issues/3085) · [long form](docs/changelog/v1.12.0.md#site-storage-unknown-region))
+
+- **A page opened at its path alias shows no reference byline and leaves inherited (`:fallback`) fields blank, though the same page at its slug shows both; link to the slug where that matters.**
+  ([#3193](https://github.com/The-Verscienta/kiln_cms/issues/3193) · [long form](docs/changelog/v1.12.0.md#alias-page-bylines-fallback))
+
+- **A release preview shows a fragment's currently published body, not the version the same release will publish; open the target's own entry in the preview to review it.**
+  ([#3289](https://github.com/The-Verscienta/kiln_cms/issues/3289) · [long form](docs/changelog/v1.12.1.md#release-preview-fragments))
+
+- **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check; check those on hex.pm by hand.**
+  ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/v1.12.0.md#plugin-health-tail-packages-unknown))
+
+- **An image in the middle of a line of Markdown disappears, alt text included, with no error.** Affects Markdown to Blocks, `body_markdown` writes and imports that go through it. Put each image on its own line.
+  ([#2771](https://github.com/The-Verscienta/kiln_cms/issues/2771))
+
+- **After `mix kiln.import.content`, body images still load from the old site.** Affects envelope imports with a media manifest: those images are never copied, and media usage doesn't track them. Keep the old site's media online, or re-upload and re-insert those images.
+  ([#3326](https://github.com/The-Verscienta/kiln_cms/issues/3326))
+
+- **A form field named `slug` stores the form's own slug instead of the visitor's answer.** Affects any form with a field whose machine name is `slug`. Rename the field (for example to `page_slug`).
+  ([#3273](https://github.com/The-Verscienta/kiln_cms/issues/3273))
+
+- **On a site with its own storage bucket, its logo and images don't show on form thank-you and error pages or on `/newsletter`.** Affects sites with a site storage profile: those pages' policy doesn't allow the bucket. No workaround short of serving those images from the instance's storage.
+  ([#3266](https://github.com/The-Verscienta/kiln_cms/issues/3266))
+
+- **A large video uploaded to a server with a slow upload link never finishes processing.** Affects instances on S3 where stripping and re-uploading the file takes over 10 minutes; every retry is killed the same way. Upload a smaller or pre-stripped file, or from a host with a faster uplink.
+  ([#3337](https://github.com/The-Verscienta/kiln_cms/issues/3337))
+
+- **`scripts/restore.sh` with a remote `RESTORE_DATABASE_URL` creates the database on the local default server, and the drill's closing `dropdb` hint points there too.** Affects operators restoring to another host. Create the target database on that server yourself first, and drop the drill database with a connection to the target server.
+  ([#3329](https://github.com/The-Verscienta/kiln_cms/issues/3329))
+
+- **An admin who publishes a draft from the content list, the bulk bar or a release isn't shown the editor's scheduled unpublish date.** Affects sites where editors may not publish; the page later comes down at that date. Open the draft in the editor to check "Scheduled unpublish at" before approving it.
+  ([#2892](https://github.com/The-Verscienta/kiln_cms/issues/2892))
 
 ### Added
 
@@ -170,7 +234,7 @@ else.
 - **A seat `mix kiln.beta.round` creates now records its `role_granted` in the default site's security log (raised from viewer), and an admin seat raises the platform `new_admin` alert (#2641).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#beta-round-seat-audited))
-- **Over `/mcp`, `update_page` / `update_post` / `update_entry` refuse a published record, and new `save_*_working_copy` tools stage an edit to one for a person to publish, so a model's edit no longer reaches readers unreviewed.**
+- **Over `/mcp`, `update_page` / `update_post` / `update_entry` refuse a published record, and new `save_*_working_copy` tools stage an edit to one for a person to publish, so a model's edit no longer reaches readers unreviewed (#3347).**
   No migration; rolling the pin back is safe. An MCP client that edited live records with `update_*` must switch to the working-copy tools. A project that overrides `:mcp_tools` must add the three new names. JSON:API, GraphQL and in-context editing are unchanged.
   ([long form](docs/changelog/unreleased.md#mcp-live-records-draft-only))
 - **A large WordPress, Ghost or envelope import no longer loses its media after two minutes: each image download has its own 60-second deadline, a slow image is listed by URL, and an unresponsive host is skipped after three timeouts in a row (#2720).**

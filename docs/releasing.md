@@ -246,6 +246,15 @@ agents and stops before committing. The steps:
    proves, paragraph by paragraph, that nothing was dropped on the way — run
    it before you commit, not after.
 
+   In every section but Upgrade notes, Breaking and Known issues, only `- `
+   bullets and their two-space-indented continuation lines count as entries.
+   `mix kiln.changelog --check` fails on any other non-blank line there
+   (a paragraph, a `* ` bullet, an unindented continuation), naming the
+   release, the section and the line number, with
+   "(n) line(s) belong to no entry". `--condense` prints the same report and
+   writes nothing, so fix those lines first: start each entry with `- ` and
+   indent its continuation lines by two spaces.
+
 4. **Bump the version** in [`mix.exs`](../mix.exs). This is what a running
    instance reports (`Kiln.Version`) and what the update check compares
    against, so it must match the tag.

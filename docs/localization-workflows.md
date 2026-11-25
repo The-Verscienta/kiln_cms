@@ -210,9 +210,19 @@ Two UIs surface it:
 
 - **`/editor/translations`** — the coverage dashboard: content grouped by
   `(type, slug)`, one chip per locale (published / draft / in review /
-  missing, with an *Outdated* marker). Chips link to each variant's editor; a
-  missing chip creates the draft translation in place. The nav link only
-  appears when more than one locale is configured.
+  archived / **+ missing**, with an *Outdated* marker). Chips link to each
+  variant's editor; a **+ missing** chip creates the draft translation in
+  place, for editors who may author that type. The nav link only appears when
+  more than one locale is configured.
+
+  The dashboard lists, per content type, the **200 slugs most recently edited
+  in any locale**, and every variant you can read of each of those slugs. A
+  row therefore shows every locale it has, and is represented by its
+  default-locale source when there is one (which is what its export checkbox
+  translates from). A slug that exists only in a non-default locale takes a
+  place like any other. Before 1.13 the window was the 200 newest *records*,
+  so an older translation of a listed slug could show as **+ missing** and
+  fail with "Couldn't create that translation." when clicked (#2761).
 - **The content editor's Translations panel** — the same per-locale view for
   the record being edited, with edit links and create buttons.
 
@@ -246,8 +256,10 @@ dashboard also speaks **XLIFF 2.0** (`KilnCMS.CMS.Xliff`, #502) — the
 interchange format all of them read. A direct vendor-API connector is then a
 thin plugin on top of this seam rather than a second content pipeline.
 
-On `/editor/translations`: pick a target locale, tick the rows to send, and
-**Export** downloads one XLIFF document with a `<file>` per record. Upload the
+On `/editor/translations`: pick a **Target locale**, tick the rows to send, and
+**Export N selected** downloads one XLIFF document with a `<file>` per record.
+A row with no default-locale source has its checkbox disabled ("No en source
+to translate from", naming your default locale). Upload the
 returned file with **Import XLIFF** and it is applied to the target-locale
 draft — created through the same one-click path if it does not exist yet.
 

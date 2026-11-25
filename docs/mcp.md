@@ -149,13 +149,76 @@ changes). They take:
   held text. Leave one out and the copy keeps what it had (the published text
   if there was no copy yet).
 - `fields` — the other held settings, keyed as `update_*` takes them: `slug`,
-  `excerpt`, the `seo_*` fields, `custom_fields`, `category_id`,
-  `featured_image_id`, the tag and related-content ids. They are validated as
-  an `update_*` would validate them. Audience, passphrase and schedule are not
-  held (they apply at once in the editor), and are refused here.
+  `path_alias`, `locale`, `excerpt`, the `seo_*` fields, `canonical_url`,
+  `noindex`, `nofollow`, `custom_fields`, `category_id`, `featured_image_id`,
+  and the tag and related-content ids (`tag_ids`, `add_tag_ids`,
+  `remove_tag_ids`, and the same three for each related type). They are
+  validated as an `update_*` would validate them. A key left out keeps what
+  the copy holds. Any other key, such as the audience, passphrase or
+  schedule, is refused with an error naming it: those are not held (they
+  apply at once in the editor), so over `/mcp` they can be changed on a draft
+  but not on a published record.
 
 The working-copy tools refuse a record that is not published; use `update_*`
 for those. A `draft_write` key gets neither the tools nor the action.
+
+### Edit a published page from an MCP client
+
+You need a read + write key on an `:editor` or `:admin` account (see the
+table above), and a published page. A person with an editor or admin account
+reviews the edit afterwards.
+
+1. **Find the page and its id.** Call `read_pages` filtered on the slug:
+
+   ```json
+   {"name": "read_pages", "arguments": {"input": {},
+     "filter": {"slug": {"eq": "about"}}}}
+   ```
+
+   The result lists the page with its `id`. Its `state` is `published`.
+
+2. **Stage the edit.** Call `save_page_working_copy` with the page's id. Send
+   only what changes:
+
+   ```json
+   {"name": "save_page_working_copy", "arguments": {"id": "<page id>",
+     "input": {
+       "title": "About the kitchen",
+       "body_markdown": "We cook **seasonal** food.",
+       "fields": {"seo_description": "Who we are and what we cook"}}}}
+   ```
+
+   The result is not `isError`. Readers still get the published title, body
+   and description.
+
+3. **Review and publish it.** In the editor, open the page from the content
+   list (it is marked *edited since publishing*) or at
+   `/editor/content/page/<page id>`. Its state pill reads **Live · draft**.
+   Read the changes, then click **Publish changes**, or choose **Discard the
+   changes** from the menu beside it. *Publish changes* needs an editor or
+   admin account; it is not a tool, so the model cannot do this step.
+
+Posts and entries work the same way with `read_posts` /
+`save_post_working_copy` and `read_entries` / `save_entry_working_copy`.
+
+What can go wrong:
+
+- **`update_page` on the published page** answers `isError: true` with
+  `this record is published, and MCP edits never go live directly; use the
+  save_*_working_copy tool to stage the change for a person to publish`.
+  Nothing is written. Use `save_page_working_copy`.
+- **`save_page_working_copy` on a page that is not published** (a draft, a
+  page in review, an archived one) answers `isError: true` and holds
+  nothing. Use `update_page`.
+- **Both `block_tree` and `body_markdown`** in one call is refused.
+- **A key in `fields` that the copy doesn't hold** is refused with
+  `holds only content fields; save <keys> through :update`.
+- **A malformed Portable Text body in `block_tree`** is refused with its path,
+  as on `update_*` (see *Body* below).
+- **The tool isn't listed** for a read-only key, a `draft_write` key, or a
+  write key on a `:viewer` account. On a project that overrides
+  `:mcp_tools`, check the three names are in the list (see the end of this
+  section).
 
 This rule is MCP's. JSON:API `PATCH`, GraphQL and in-context editing still
 edit a live record directly through `:update`, on purpose

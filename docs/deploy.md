@@ -74,7 +74,15 @@ Two more that a real deployment almost always wants:
 
 - **`PORT`** (default `4000`) — the port the app listens on. The public URL is
   hardcoded to `https`/443; the expected topology is a TLS-terminating proxy on
-  443 forwarding to `PORT`.
+  443 forwarding to `PORT`. A whole number from 1 to 65535, spaces around it
+  ignored. A blank `PORT=` (what compose passes through for a variable the
+  host never set) keeps `4000` silently; anything else it can't read, such as
+  `4000/tcp` or `80800`, keeps `4000` and warns at boot: "PORT is set to an
+  unrecognized value ("80800"); keeping the configured default. Use a whole
+  number from 1 to 65535." `POOL_SIZE`, `SMTP_PORT` and `S3_ENDPOINT_PORT`
+  behave the same way with their own defaults (10, 587, 443). Before 1.13 any
+  of these four crashed boot instead
+  ([environment-variables.md](environment-variables.md#server-and-networking)).
 - **`TRUSTED_PROXIES`** — comma-separated CIDRs of the reverse proxy in front
   (Coolify, Traefik, nginx, a cloud load balancer). Unset behind a proxy, every
   request looks like it came from the proxy, so every rate-limit bucket

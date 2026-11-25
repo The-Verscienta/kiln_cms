@@ -269,14 +269,23 @@ in somebody's queue.
 `KilnCMS.CMS.HealthSweep` runs daily (`KILN_HEALTH_SWEEP_CRON`, 07:30 by
 default — before the task digest, so a task it raises is in that morning's
 email rather than tomorrow's). It finds published content whose health is
-`:overdue` or `:expired`, emits
-`[:kiln_cms, :lifecycle, :health_sweep]` telemetry with the counts, and
-dispatches one automation event per record:
+`:overdue` or `:expired`, dispatches one automation event per record, and
+then emits `[:kiln_cms, :lifecycle, :health_sweep]` telemetry with the counts
+(`overdue` and `expired`, the full totals for the site):
 
 ```
 page.health_overdue
 recipe.health_expired
 ```
+
+It reaches every stale record, however many there are: it reads each content
+type 500 records at a time in `id` order, dispatching each page before it
+reads the next. A site with thousands of overdue records of one type gets an
+event, and so an automation job, for each of them every day. Before 1.13 the
+sweep read at most 500 per type, the same 500 every day, and the rest never
+got an event (#2738). If one content type's read fails, the sweep logs
+`Health sweep failed for (type)` and goes on to the next type; that type's
+records are tried again the next day.
 
 A sweep exists at all because every other editorial trigger hangs off a write —
 something was published, returned to draft, assigned. Freshness lapses because

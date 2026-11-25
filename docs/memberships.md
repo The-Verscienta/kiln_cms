@@ -850,6 +850,19 @@ table above reads. They never write the global `User.audiences` column. Before
 0.12 they wrote only that column, so for any account holding a membership they
 saved and changed nothing (#1646).
 
+The boxes show the audiences **stored** on that membership, and **Save
+audiences** writes exactly the ticked ones. For an active member that is also
+what it reads. A registration that is waiting for approval or was rejected
+reads nothing gated whatever is ticked (the table above), but the audiences you
+tick are kept on its registration and take effect when it is approved; the note
+under the heading says which case you are looking at. On 1.9.0 to 1.12.1 the
+boxes showed such a registration with every box clear, so a save of the panel
+removed what an earlier save had stored (#2783). If you saved that panel for
+a waiting or rejected registration on one of those releases, open the account
+again and re-tick what is missing: Kiln keeps no record of an audience edit on
+its own to restore it from, though audiences a paid membership manages return
+on that membership's next billing change.
+
 An account with no membership on that site gets one on the first save
 (`KilnCMS.Accounts.SiteAudiences`), with the tier it already holds there, so
 gaining a membership changes what it reads and nothing else:

@@ -202,7 +202,7 @@ that counting as a major.
 
 ## What a minor may still do to you
 
-Three things a minor is allowed to do that can still cost you work. None of
+Four things a minor is allowed to do that can still cost you work. None of
 them breaks compilation, which is why none of them is a major.
 
 **It may add migrations, including to the tables your content types project.**
@@ -225,6 +225,12 @@ documented path, and it is what keeps additions non-breaking.
 migrations: an existing deployment keeps its stored settings. Where a default
 changes in a way an operator should know about, the release carries an
 `### Upgrading` note, and `mix kiln.update` prints it before moving your pin.
+
+**It may refuse input a documented write used to accept,** when accepting it
+broke reads, corrupted content or let a change skip review. The release lists
+it under Breaking with the request before and after; renames and reshaped
+responses still need a major. See
+[ADR 0084](decisions/0084-a-minor-release-may-tighten-a-documented-write-when-the-old-input-corrupted-data-or-bypassed-review.md).
 
 ## When a covered surface must change
 

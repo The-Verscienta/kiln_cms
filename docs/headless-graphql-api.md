@@ -696,7 +696,10 @@ outcome (approve or return) is the admin's half, as is taking content down
 record that is published or has `scheduledAt` set. A refused mutation returns
 `result: null` and an authorization error in `errors`, and changes nothing.
 The hard delete (`:purge`) is **never** exposed as a mutation and is
-API-key-banned regardless of scope.
+API-key-banned regardless of scope. One difference from `/mcp`: there
+`update_*` refuses a published record and `save_*_working_copy` holds the edit
+for a person to publish ([mcp.md](mcp.md#live-records)), while `updatePost`
+here edits it directly.
 
 A **`:draft_write` key** (#2273) may run `create…` and `update…` on a draft its
 account authored while it is still a draft, whatever the owner's role; every
@@ -920,7 +923,9 @@ JSON-encoded string.
 The Portable Text in it is checked exactly as JSON:API's
 `block_tree` is ([json-api.md](json-api.md#block-tree-portable-text-check)):
 a refused body comes back in the mutation's `errors`, with `result: null`, and
-nothing is written.
+nothing is written. The message carries the same paths, which name the
+argument as `block_tree` (`block_tree[0].body[0].children[0].marks must be a
+list of strings (got a string)`), counted in your `blockTree` list.
 
 Send the API key as a bearer header (same as a read token):
 

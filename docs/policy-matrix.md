@@ -338,6 +338,18 @@ change and is allowed. The two fields have a policy each, because
 in [ADR 0051](decisions/0051-taking-content-down-needs-the-same-approval-as-putting-it-up.md),
 and the steps for each route are in [Take content down](take-content-down.md).
 
+**Over MCP, `update` refuses a published record** (#3347). This is a
+validation on `update`, not a policy row: `KilnCMS.CMS.Validations.McpDraftOnly`
+refuses the write when the request came through `/mcp` (the
+`kiln_surface: :mcp` context `KilnCMSWeb.Plugs.McpSurface` sets) and the row
+read is `:published`, whoever the actor is, admins included. The MCP tools
+`save_page_working_copy`, `save_post_working_copy` and
+`save_entry_working_copy` run `save_working_copy` instead, which holds the
+edit in the record's working copy until a person publishes it; it is an update,
+so the `create`, `update` row above decides who may call it. JSON:API `PATCH`,
+GraphQL and in-context editing still `update` a published record directly. See
+[MCP](mcp.md) and [The working copy](working-copy.md).
+
 ## Version history — `Page.Version`, `Post.Version`, `Entry.Version` (`KilnCMS.CMS.VersionPolicies`)
 
 | Action | admin | editor | viewer | anonymous |
