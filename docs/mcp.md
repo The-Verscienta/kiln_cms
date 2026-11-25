@@ -251,7 +251,11 @@ written.
 > `block_tree` (typed block maps) or as `body_markdown` — plain Markdown, the
 > shape a model usually has already, converted server-side into the same
 > blocks (see [Markdown](markdown.md#writing-markdown-through-the-api)). One or
-> the other, not both; raw HTML in the Markdown is sanitized.
+> the other, not both; raw HTML in the Markdown is sanitized. Portable Text in a
+> `block_tree` is checked as JSON:API checks it
+> ([json-api.md](json-api.md#block-tree-portable-text-check)): a
+> refused body is a tool error (`isError: true`) naming the path, and nothing is
+> written.
 
 > **Tags: prefer `add_tag_ids` / `remove_tag_ids`.** `update_page` /
 > `update_post` / `update_entry` accept three tag arguments (#521):

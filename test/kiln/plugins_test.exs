@@ -43,7 +43,8 @@ defmodule Kiln.PluginsTest do
              FixturePlugin.RestrictedRequiredBlock,
              FixturePlugin.RestrictedRequiredDefaultBlock,
              FixturePlugin.ProductCardBlock,
-             FixturePlugin.ChecklistBlock
+             FixturePlugin.ChecklistBlock,
+             FixturePlugin.NoteBlock
            ]
 
     # Rating is the one with real behaviour; Tokenless and Exploding exist to
@@ -198,7 +199,7 @@ defmodule Kiln.PluginsTest do
       assert output =~ "Test fixture exercising every plugin seam."
       assert output =~ "https://example.com/fixture-plugin"
       # Contribution summary is pluralized and omits zero-count kinds.
-      assert output =~ "5 blocks, 6 field types, 1 image backend, 1 nav item, 1 admin route"
+      assert output =~ "6 blocks, 6 field types, 1 image backend, 1 nav item, 1 admin route"
       assert output =~ "6 plug routes"
     end
 

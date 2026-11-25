@@ -24,6 +24,7 @@
             "how_to": "#/components/schemas/block_how_to",
             "image": "#/components/schemas/block_image",
             "newsletter_signup": "#/components/schemas/block_newsletter_signup",
+            "note": "#/components/schemas/block_note",
             "product_card": "#/components/schemas/block_product_card",
             "quote": "#/components/schemas/block_quote",
             "restricted_required": "#/components/schemas/block_restricted_required",
@@ -90,6 +91,9 @@
           },
           {
             "$ref": "#/components/schemas/block_newsletter_signup"
+          },
+          {
+            "$ref": "#/components/schemas/block_note"
           },
           {
             "$ref": "#/components/schemas/block_product_card"
@@ -936,6 +940,43 @@
         "title": "NewsletterSignupBlock",
         "type": "object",
         "x-kiln-block": "newsletter_signup",
+        "x-kiln-block-version": 1
+      },
+      "block_note": {
+        "additionalProperties": false,
+        "properties": {
+          "_id": {
+            "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+            "format": "uuid",
+            "type": "string"
+          },
+          "_type": {
+            "const": "note"
+          },
+          "summary": {
+            "default": [],
+            "description": "Portable Text — the canonical rich-text representation (D12).",
+            "items": {
+              "$ref": "#/components/schemas/portable_text_block"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "_type"
+        ],
+        "title": "NoteBlock",
+        "type": "object",
+        "x-kiln-block": "note",
         "x-kiln-block-version": 1
       },
       "block_product_card": {
@@ -2466,6 +2507,7 @@
       "how_to",
       "image",
       "newsletter_signup",
+      "note",
       "product_card",
       "quote",
       "restricted_required",

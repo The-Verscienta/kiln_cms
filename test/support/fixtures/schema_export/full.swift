@@ -712,6 +712,29 @@ public struct NewsletterSignupBlock: Codable, Hashable, Sendable {
     }
 }
 
+public struct NoteBlock: Codable, Hashable, Sendable {
+    /// Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.
+    public let id: String?
+    public let type: String
+    /// Portable Text — the canonical rich-text representation (D12).
+    public let summary: [PortableTextBlock]?
+    public let title: String?
+
+    public init(id: String? = nil, type: String, summary: [PortableTextBlock]? = nil, title: String? = nil) {
+        self.id = id
+        self.type = type
+        self.summary = summary
+        self.title = title
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id = "_id"
+        case type = "_type"
+        case summary
+        case title
+    }
+}
+
 public struct ProductCardBlock: Codable, Hashable, Sendable {
     /// Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.
     public let id: String?
@@ -901,6 +924,7 @@ public indirect enum Block: Codable, Hashable, Sendable {
     case howTo(HowToBlock)
     case image(ImageBlock)
     case newsletterSignup(NewsletterSignupBlock)
+    case note(NoteBlock)
     case productCard(ProductCardBlock)
     case quote(QuoteBlock)
     case restrictedRequired(RestrictedRequiredBlock)
@@ -935,6 +959,7 @@ public indirect enum Block: Codable, Hashable, Sendable {
         case .howTo: return "how_to"
         case .image: return "image"
         case .newsletterSignup: return "newsletter_signup"
+        case .note: return "note"
         case .productCard: return "product_card"
         case .quote: return "quote"
         case .restrictedRequired: return "restricted_required"
@@ -967,6 +992,7 @@ public indirect enum Block: Codable, Hashable, Sendable {
         case "how_to": self = .howTo(try HowToBlock(from: decoder))
         case "image": self = .image(try ImageBlock(from: decoder))
         case "newsletter_signup": self = .newsletterSignup(try NewsletterSignupBlock(from: decoder))
+        case "note": self = .note(try NoteBlock(from: decoder))
         case "product_card": self = .productCard(try ProductCardBlock(from: decoder))
         case "quote": self = .quote(try QuoteBlock(from: decoder))
         case "restricted_required": self = .restrictedRequired(try RestrictedRequiredBlock(from: decoder))
@@ -998,6 +1024,7 @@ public indirect enum Block: Codable, Hashable, Sendable {
         case .howTo(let value): try value.encode(to: encoder)
         case .image(let value): try value.encode(to: encoder)
         case .newsletterSignup(let value): try value.encode(to: encoder)
+        case .note(let value): try value.encode(to: encoder)
         case .productCard(let value): try value.encode(to: encoder)
         case .quote(let value): try value.encode(to: encoder)
         case .restrictedRequired(let value): try value.encode(to: encoder)

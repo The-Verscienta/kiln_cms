@@ -36,6 +36,32 @@ carries the reasoning.
   - **What can't be restored.** KilnCMS keeps no record of an audience edit on its own, so it can't put back what was removed. Audiences a paid membership manages return on that membership's next billing change.
   - **No migration.**
 
+<a id="portable-text-write-check-upgrade"></a>
+
+- **Portable Text: delivered shapes for old rows, and round-tripped artifacts (#2768).** Two things a headless client can notice after the upgrade ([the check](#portable-text-write-check), [the fix](#portable-text-write-check-fixed)):
+  - **A stored malformed body is delivered repaired on its next fire.** The `:json` artifact of a published record already carries the repaired body since the render guards ([above](#portable-text-render-guards)), but an artifact fired before them keeps the body as it was stored until the record fires again. So a `:json` consumer (`/api/content`, `/api/sync`, webhooks with the body) can see the shape of such a body change on that record's next fire, edit or `mix kiln.refire_all`: a `marks` string becomes a one-item list, a string child becomes a span, a non-object node or child is gone. A well-formed body is delivered exactly as before.
+  - **Sending back an old artifact can be a `400`.** A client that reads a `:json` artifact fired before the render guards and writes its `blocks` back as `block_tree` gets a `400` if that body holds one of the refused shapes ([Breaking](#portable-text-write-check)). An artifact fired on this release always passes: it carries the repaired body, and the check accepts every body the repair produces. So re-read the record after its next fire (or after `mix kiln.refire_all`), or repair the body before sending it.
+  - **A pending draft of such a record can show a conflict on blocks.** A live record whose stored body gets repaired, with a working copy that was pending across the upgrade, can report a conflict on **Blocks** when its changes are published, since the body it is checked against is now read repaired. Publish it with **Keep mine**, or discard the draft and save it again.
+  - **No migration; rolling the pin back is safe.** Nothing on disk is rewritten: a stored body is repaired as it is read and as it is written back, and version history keeps what it holds. An older release accepts the refused shapes again.
+
+## Breaking
+
+<a id="portable-text-write-check"></a>
+
+- **Portable Text writes: a few shapes that used to be accepted are now a `400` (#2768).** A body sent as `block_tree` (JSON:API `block_tree`, GraphQL `blockTree`, the MCP `create_*`, `update_*` and `save_*_working_copy` tools) is checked before it is cast ([the fix](#portable-text-write-check-fixed), [ADR 0083](../decisions/0083-a-portable-text-body-is-checked-against-its-published-schema-at-block-tree-and-repaired-elsewhere.md)). It refuses exactly the shapes every reader has to repair, by dropping or rewriting something, since the render guards. Most of those already failed: they were stored, and then the page answered 500 or the record could not be saved again. These were stored and rendered, and are refused now:
+
+  | Sent | Before | Now |
+  |---|---|---|
+  | a `marks` entry that is an object or a list (`"marks": [{"type": "bold"}]`) | stored; the mark was ignored when rendering | `400`: `block_tree[0].body[0].children[0].marks[0] must be a string (got an object)` |
+  | an object or list in a text block's `style`, `listItem` or `_key` (a node whose `_type` is absent, `"block"` or `"code"`) | stored; rendered as a plain paragraph, or the key ignored | `400`: `… .style must be a string (got an object)` |
+  | an object or list in a span's `_key` (a child whose `_type` is absent or `"span"`) | stored; the key ignored | `400`: `… .children[0]._key must be a string (got a list)` |
+  | a text block's `level` that is not a whole number or a numeric string (`"two"`, `2.5`, `true`) | stored; the HTML nested the item at whatever depth the value happened to compare as, and the editor's Markdown view could fail on it | `400`: `… .level must be an integer (got a non-numeric string)` |
+  | a plugin block's `:rich_text` field holding malformed Portable Text (`[{"children": "text"}]`), by the same rules as a `rich_text` body | stored as sent, links unscrubbed | `400` with the field's path, `block_tree[0].summary[0].children must be a list (got a string)` |
+
+  Still accepted, coerced as custom fields are since #2743 ([ADR 0049](../decisions/0049-a-write-that-names-an-editor-input-the-field-does-not-offer-is-refused.md)) and as the readers coerce them: a number or boolean in one of those string slots, a span's `text`, a `marks` entry or a `markDefs` entry's `_key` becomes its text (`"text": 42` is stored as `"42"`), a numeric-string or whole-number `level` becomes an integer (`"2"` and `2.0` are stored as `2`), and a `null` entry in `marks` is dropped. Left as sent, because no reader changes them: a missing or `null` key, keys the schema doesn't name, a node's or child's `_type`, a custom node's own fields (its `_key`, `style` or `level` included), an inline object's fields other than `marks`, and an annotation's fields other than `_key`. Table rows and cells that aren't objects are still dropped rather than refused (#475).
+
+  What to do: send `marks` as a list of strings, a text block's `style`, `listItem` and `_key` and a span's `_key` as strings, and `level` as an integer. A plugin's `:rich_text` field takes the same Portable Text as a `rich_text` body. Docs: [json-api.md](../json-api.md#block-tree-portable-text-check).
+
 ## Added
 
 <a id="condition-text-ops"></a>
@@ -154,6 +180,17 @@ carries the reasoning.
   - **The stored row is not rewritten.** The repair happens on every read, and this fix never rewrites the stored row. Writes are unchanged: the same shapes are still accepted.
   - **Also hardened.** The editor's TipTap conversion ignores a `marks` or `content` value that isn't a list, and the content advisories (`Kiln.Advisory.Body` in `kiln_plugin`) read a span with non-string `text` or a link with a non-string `href` as empty.
   - **No migration; rolling the pin back is safe.** An older release reads the same rows and fails on them as before.
+
+<a id="portable-text-write-check-fixed"></a>
+
+- **A headless write with a malformed Portable Text body is refused with the path instead of being stored and failing every read (#2768, PR 2).** The render guards ([above](#portable-text-render-guards)) made a stored malformed body readable; this closes the write side, so a client learns at write time that its body is wrong instead of finding the page empty where the prose should be.
+  - **Where the check runs.** On the raw `block_tree` argument of every content `create`, `update` and `save_working_copy` (`KilnCMS.CMS.Changes.ApplyBlocksInput`), which JSON:API, GraphQL and the MCP tools all send the body through. Every Portable Text value in the tree is checked: a `rich_text` block's `body` (a JSON string is decoded first), any block's `:rich_text` field, and both inside `columns`. A body sent as a TipTap document, the editor's own shape, is converted and then repaired rather than checked, so a path never points into a body the client did not send.
+  - **What a refusal looks like.** JSON:API answers `400` with one `invalid_attribute` error whose `source.pointer` is `/data/attributes/block_tree` and whose `detail` lists the paths: `is not valid Portable Text: block_tree[0].body[0].children[1].marks must be a list of strings (got a string)`. Paths are 0-based JSON paths into the sent tree; up to five are listed, then `and N more`. A reason names the JSON type it found and never echoes the value. GraphQL returns the same message in the mutation's `errors` with `result: null`, and an MCP tool answers `isError: true` with it. Nothing is written.
+  - **What is refused, coerced and kept.** Exactly what a reader's repair would drop or rewrite ([Breaking](#portable-text-write-check) has the table): a node, child or `markDefs` entry that isn't an object; `children`, `markDefs` or `marks` that isn't a list; an object or list `marks` entry; an object or list in a text block's `style`, `listItem` or `_key` or a span's `text` or `_key`; a text block's non-numeric `level`. What the repair only coerces is coerced, and the coerced body is what is stored. So a body a reader has repaired, an artifact fired on this release included, always passes.
+  - **Internal writers repair instead.** Restore, promote, copy, translation, envelope import and the editor write back what is already stored, through the `blocks` cast rather than `block_tree`. The cast now runs the same repair every reader runs before its existing sanitizing, so a body stored before this check is written back repaired instead of failing the write: restoring a version that holds a top-level string node used to fail with `is invalid`, and now restores the rest of the body.
+  - **Plugin `:rich_text` fields.** A plugin block's `field :x, :rich_text` used to be cast as a bare list of objects, never checked or scrubbed. It is now checked on a `block_tree` write, repaired on every other write, and has its link `href`s scrubbed like a core body, so a `javascript:` link no longer reaches storage or the `:json` artifact.
+  - **Loading such a row.** A body whose top-level node isn't an object (`["x", …]`) failed the field's list-of-objects cast on load, so the record could not be read at all. The stored cast now repairs a `:rich_text` value before casting it, so such a record loads with that node dropped. The same repair reaches the blocks nested in a `columns` block, whose `:rich_text` fields no cast touches, so a plugin field there is read repaired too. The row on disk is not rewritten.
+  - **No migration; rolling the pin back is safe.** Why the check sits at `block_tree` and not in the cast, and why tables stay lenient: [ADR 0083](../decisions/0083-a-portable-text-body-is-checked-against-its-published-schema-at-block-tree-and-repaired-elsewhere.md).
 
 <a id="redirects-refused-path"></a>
 

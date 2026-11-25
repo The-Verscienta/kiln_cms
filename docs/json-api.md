@@ -1223,7 +1223,15 @@ curl -s http://localhost:4000/api/json/posts \
       "attributes": {
         "title": "Written over the API",
         "slug": "hello-api",
-        "block_tree": [{ "type": "rich_text", "content": "<p>Body</p>", "order": 1 }]
+        "block_tree": [{
+          "_type": "rich_text",
+          "body": [{
+            "_type": "block",
+            "style": "normal",
+            "markDefs": [],
+            "children": [{ "_type": "span", "text": "Body", "marks": [] }]
+          }]
+        }]
       }
     }
   }'
@@ -1513,6 +1521,52 @@ the other — both is a 400. `""` clears the body; front matter is dropped (titl
 and slug are their own attributes). The blocks it produces carry no `_id`s, so
 it replaces the body wholesale, like an id-less `block_tree`. Details:
 [Markdown](markdown.md#writing-markdown-through-the-api).
+
+<a id="block-tree-portable-text-check"></a>
+
+**Portable Text in `block_tree` is checked.** Every Portable Text value in the
+tree (a `rich_text` block's `body`, a JSON string of one included, and any
+plugin block's `:rich_text` field, inside `columns` too) is checked before it
+is cast. It refuses exactly what every reader would otherwise have to repair
+by dropping or rewriting it, so a body read back from a `:json` artifact can
+always be sent again:
+
+- **Refused:** a node, child or `markDefs` entry that isn't an object;
+  `children`, `markDefs` or `marks` that isn't a list; a `marks` entry that is
+  an object or a list; an object or list in a text block's `style`,
+  `listItem` or `_key` (a node whose `_type` is absent, `"block"` or
+  `"code"`) or in a span's `text` or `_key` (a child whose `_type` is absent or
+  `"span"`); a text block's `level` that isn't a whole number or a numeric
+  string.
+- **Coerced:** a number or boolean in one of those string slots, a `marks`
+  entry or a `markDefs` entry's `_key` becomes its text (`"text": 42` is
+  stored as `"42"`); a numeric-string or whole-number `level` becomes an
+  integer. A `null` entry in `marks` is dropped.
+- **Kept as sent:** a missing or `null` key, keys the schema doesn't name, any
+  `_type`, a custom node's own fields, an inline object's fields other than
+  `marks`, and an annotation's fields other than `_key`. A custom node's
+  `children` and `markDefs` are checked like a text block's. A table row or
+  cell that isn't an object is dropped, not refused (#475). A body sent as a
+  TipTap document (`{"type": "doc", …}`) is converted and repaired, not
+  checked.
+
+A refused body is a `400` and nothing is written. The `detail` lists up to five
+0-based paths into what you sent, then `and N more`, and names the type found,
+never the value:
+
+```jsonc
+{
+  "errors": [{
+    "status": "400",
+    "code": "invalid_attribute",
+    "source": { "pointer": "/data/attributes/block_tree" },
+    "detail": "is not valid Portable Text: block_tree[0].body[0].children[1].marks must be a list of strings (got a string)"
+  }]
+}
+```
+
+Why the check sits here and not in the stored type:
+[ADR 0083](decisions/0083-a-portable-text-body-is-checked-against-its-published-schema-at-block-tree-and-repaired-elsewhere.md).
 
 **Round-trip block ids when updating.** Read the tree's identity first — the
 `block_ids` calculation (`?fields[post]=block_ids`) projects the stored tree to

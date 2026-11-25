@@ -335,6 +335,16 @@ public data class NewsletterSignupBlock(
 ) : Block
 
 @Serializable
+public data class NoteBlock(
+    /** Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted. */
+    @SerialName("_id") public val id: String? = null,
+    @SerialName("_type") public val type: String,
+    /** Portable Text — the canonical rich-text representation (D12). */
+    public val summary: List<PortableTextBlock>? = null,
+    public val title: String? = null,
+) : Block
+
+@Serializable
 public data class ProductCardBlock(
     /** Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted. */
     @SerialName("_id") public val id: String? = null,
@@ -439,6 +449,7 @@ public object BlockSerializer : KSerializer<Block> {
             "how_to" -> input.json.decodeFromJsonElement(HowToBlock.serializer(), raw)
             "image" -> input.json.decodeFromJsonElement(ImageBlock.serializer(), raw)
             "newsletter_signup" -> input.json.decodeFromJsonElement(NewsletterSignupBlock.serializer(), raw)
+            "note" -> input.json.decodeFromJsonElement(NoteBlock.serializer(), raw)
             "product_card" -> input.json.decodeFromJsonElement(ProductCardBlock.serializer(), raw)
             "quote" -> input.json.decodeFromJsonElement(QuoteBlock.serializer(), raw)
             "restricted_required" -> input.json.decodeFromJsonElement(RestrictedRequiredBlock.serializer(), raw)
@@ -471,6 +482,7 @@ public object BlockSerializer : KSerializer<Block> {
             is HowToBlock -> output.json.encodeToJsonElement(HowToBlock.serializer(), value).tagged("_type", "how_to")
             is ImageBlock -> output.json.encodeToJsonElement(ImageBlock.serializer(), value).tagged("_type", "image")
             is NewsletterSignupBlock -> output.json.encodeToJsonElement(NewsletterSignupBlock.serializer(), value).tagged("_type", "newsletter_signup")
+            is NoteBlock -> output.json.encodeToJsonElement(NoteBlock.serializer(), value).tagged("_type", "note")
             is ProductCardBlock -> output.json.encodeToJsonElement(ProductCardBlock.serializer(), value).tagged("_type", "product_card")
             is QuoteBlock -> output.json.encodeToJsonElement(QuoteBlock.serializer(), value).tagged("_type", "quote")
             is RestrictedRequiredBlock -> output.json.encodeToJsonElement(RestrictedRequiredBlock.serializer(), value).tagged("_type", "restricted_required")

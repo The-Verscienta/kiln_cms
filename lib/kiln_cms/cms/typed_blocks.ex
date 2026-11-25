@@ -115,6 +115,21 @@ defmodule KilnCMS.CMS.TypedBlocks do
                       {name, Keyword.get(opts, :constraints, [])}
                     end)
 
+  # String `_type` → the names of its `:rich_text` fields (#2768), for every
+  # registered type that has one: the write check, the cast's repair and the
+  # stored cast's repair all ask it per block. Plugins are `compile_env`, so the
+  # member list is fixed at compile time like the maps above.
+  @rich_text_fields KilnCMS.Blocks.union_types()
+                    |> Enum.map(fn {name, opts} ->
+                      {to_string(name),
+                       for(
+                         %{type: :rich_text, name: field} <- Kiln.Block.Info.fields(opts[:type]),
+                         do: to_string(field)
+                       )}
+                    end)
+                    |> Enum.reject(fn {_type, fields} -> fields == [] end)
+                    |> Map.new()
+
   @doc """
   Normalize any block representation to typed block structs.
 
@@ -238,7 +253,51 @@ defmodule KilnCMS.CMS.TypedBlocks do
         end
       end
 
-    park_unreadable(envelope)
+    envelope |> park_unreadable() |> repair_stored_rich_text()
+  end
+
+  # A `:rich_text` field casts as a list of maps, so a body stored before the
+  # write check (#2768) with a top-level node that is not a map — `["x", …]` —
+  # failed that cast and took the whole row's read down with it. The same
+  # lenient repair every renderer runs drops such a node here, before the cast.
+  # A well-formed body is returned as it is (`Shape.repair_body/1` checks
+  # before it rebuilds), and the row on disk is not rewritten.
+  #
+  # A `columns` block's children are stored inside its `{:array, :map}`
+  # field, so no cast ever reaches them; their `:rich_text` fields, a plugin
+  # block's included, are repaired here too, so what a read hands the
+  # renderers and the `:json` artifact is the same at every depth.
+  defp repair_stored_rich_text(%{"type" => type, "value" => %{} = attrs} = envelope),
+    do: %{envelope | "value" => repair_stored_attrs(type, attrs)}
+
+  defp repair_stored_attrs("columns", %{"columns" => columns} = attrs) when is_list(columns),
+    do: Map.put(attrs, "columns", Enum.map(columns, &repair_stored_column/1))
+
+  defp repair_stored_attrs(type, attrs),
+    do: update_lists(attrs, rich_text_fields(type), &KilnCMS.Blocks.PortableText.repair_body/1)
+
+  defp repair_stored_column(%{"blocks" => blocks} = column) when is_list(blocks),
+    do: Map.put(column, "blocks", Enum.map(blocks, &repair_stored_child/1))
+
+  defp repair_stored_column(column), do: column
+
+  defp repair_stored_child(%{"_type" => type} = child) when is_binary(type),
+    do: repair_stored_attrs(type, child)
+
+  defp repair_stored_child(%{"type" => type, "value" => %{}} = envelope) when is_binary(type),
+    do: repair_stored_rich_text(envelope)
+
+  defp repair_stored_child(other), do: other
+
+  # Apply `fun` to each of `fields` in `attrs` that holds a list; anything
+  # else (absent, `nil`, not a list) is left for the cast to judge.
+  defp update_lists(attrs, fields, fun) do
+    Enum.reduce(fields, attrs, fn field, attrs ->
+      case attrs do
+        %{^field => value} when is_list(value) -> Map.put(attrs, field, fun.(value))
+        _absent_or_other -> attrs
+      end
+    end)
   end
 
   # Delivery must never crash on what is stored (decision A4, #1543). Two things
@@ -327,21 +386,17 @@ defmodule KilnCMS.CMS.TypedBlocks do
   defp stringify(_), do: %{}
 
   defp sanitize_attrs(%{"_type" => "rich_text"} = m) do
-    m = Map.update(m, "body", nil, &normalize_body/1)
+    m = Map.update(m, "body", nil, &(&1 |> normalize_body() |> sanitize_rich_text_value()))
 
     case m["body"] do
       [_ | _] ->
         # Portable Text is authoritative once present: the editor writes body
         # (TipTap JSON, converted above), so a stale legacy_html copy must not
         # shadow it in render fallbacks or linger as a second source of truth.
-        m
-        |> Map.put("legacy_html", nil)
-        |> Map.update("body", nil, &KilnCMS.Blocks.PortableText.sanitize_body/1)
+        Map.put(m, "legacy_html", nil)
 
       _ ->
-        m
-        |> Map.update("legacy_html", nil, &HTMLSanitizer.sanitize_rich_text/1)
-        |> Map.update("body", nil, &KilnCMS.Blocks.PortableText.sanitize_body/1)
+        Map.update(m, "legacy_html", nil, &HTMLSanitizer.sanitize_rich_text/1)
     end
   end
 
@@ -385,7 +440,32 @@ defmodule KilnCMS.CMS.TypedBlocks do
   # pipeline a top-level block uses, so nested rich_text/image/embed are cleaned.
   defp sanitize_attrs(%{"_type" => "columns"} = m), do: sanitize_columns_block(m, 1)
 
+  # Any other block's `:rich_text` fields — a plugin's, typically — get what a
+  # core `rich_text` body gets (#2768): the shape repair and the link scrub.
+  # Before, they were cast as a bare list of maps, so a `javascript:` href in
+  # one reached storage and the `:json` artifact.
+  defp sanitize_attrs(%{"_type" => type} = m),
+    do: update_lists(m, rich_text_fields(type), &sanitize_rich_text_value/1)
+
   defp sanitize_attrs(m), do: m
+
+  # Internal writers (restore, promote, copy, envelope import, the editor)
+  # rebuild their input from what is stored, so a body stored before the
+  # headless write check (`KilnCMS.CMS.Changes.ApplyBlocksInput`) comes back
+  # through here. It is repaired, not refused: the same lenient repair every
+  # reader runs (`PortableText.Shape`), so such a write succeeds and stores
+  # the body the reader already saw.
+  defp sanitize_rich_text_value(body) do
+    body
+    |> KilnCMS.Blocks.PortableText.repair_body()
+    |> KilnCMS.Blocks.PortableText.sanitize_body()
+  end
+
+  @doc false
+  # The names of a registered block type's `:rich_text` fields, as strings
+  # (`["body"]` for `rich_text`); `[]` for a type this build does not have.
+  @spec rich_text_fields(String.t()) :: [String.t()]
+  def rich_text_fields(type), do: Map.get(@rich_text_fields, type, [])
 
   # String-keyed and url-filtered, whatever shape came in.
   #
