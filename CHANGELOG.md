@@ -96,6 +96,10 @@ else.
   `POST /api/media/uploads` answers `502 storage_failed` if that job can't be queued. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#direct-upload-cleanup-claim))
 
+- **`mix kiln.gen.content Story --plural stories`, and `--from` a dynamic type whose URL segment isn't `<name>s`, now write `plural:` into the generated resource, so it serves at `/stories` and matches its `list_stories` interfaces instead of registering `storys` (#2731).**
+  Types generated before this keep `storys` until you add `plural:` by hand. No migration.
+  ([long form](docs/changelog/unreleased.md#gen-content-plural))
+
 - **A file over 16 MB now reaches S3 on a slow uplink: each multipart part gets time in proportion to its size instead of a fixed 30 seconds, and a part that runs out of time or meets a server error is sent again before the upload is aborted (#2725).**
   New variable `S3_UPLOAD_MIN_BYTES_PER_SECOND` (default 32768). No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#s3-part-deadline))
