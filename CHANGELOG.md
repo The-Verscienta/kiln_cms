@@ -96,6 +96,10 @@ else.
   `POST /api/media/uploads` answers `502 storage_failed` if that job can't be queued. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#direct-upload-cleanup-claim))
 
+- **A file over 16 MB now reaches S3 on a slow uplink: each multipart part gets time in proportion to its size instead of a fixed 30 seconds, and a part that runs out of time or meets a server error is sent again before the upload is aborted (#2725).**
+  New variable `S3_UPLOAD_MIN_BYTES_PER_SECOND` (default 32768). No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#s3-part-deadline))
+
 ## [1.12.1] - 2026-11-23
 
 Long form: [docs/changelog/v1.12.1.md](docs/changelog/v1.12.1.md) —
