@@ -900,6 +900,13 @@ curl -s http://localhost:4000/api/media/uploads/complete \
   pipeline as `POST /api/media` — sniffed, stripped, stored under its own key —
   then deletes the staged copy **whatever the outcome**. A token completes
   once; a staged upload never completed is deleted when its token expires.
+- **A token is spent once completion has found its staged object,** whether
+  the item was then created or refused: completing it again answers
+  `422 not_uploaded`, so after a failed completion start again from
+  `POST /api/media/uploads`. A completion sent before the `PUT` finished
+  finds nothing and does not spend the token; complete it again once the
+  `PUT` has returned. Two completions of one token at the same time get one
+  item: the second answers `422 not_uploaded`.
 - Needs the **S3 storage adapter with a private bucket** (`S3_PRIVATE_BUCKET`),
   and a CORS rule on that bucket if browsers upload to it — see
   [media-pipeline.md](media-pipeline.md#direct-uploads). Without one,
@@ -922,10 +929,10 @@ Refusals use the [error envelope](#error-responses); branch on `code`:
 | 422 | `encrypted` | A password-protected PDF — its metadata can't be removed. |
 | 422 | `strip_unavailable` / `strip_failed` | Metadata couldn't be removed, so the file was refused rather than stored with it. |
 | 422 | `unsafe_url` / `fetch_failed` | `import-url`: the URL isn't a public address, or didn't answer 2xx. |
-| 422 | `invalid_upload_token` / `not_uploaded` / `size_mismatch` | Direct uploads: a bad or someone else's token; nothing staged (or already completed); the staged size isn't the declared one. |
+| 422 | `invalid_upload_token` / `not_uploaded` / `size_mismatch` | Direct uploads: a bad or someone else's token; nothing staged, already completed, or being completed by another request; the staged size isn't the declared one. |
 | 429 | `too_many_requests` | The `media_upload` bucket ([§ Rate limits](#rate-limits)). |
 | 501 | `direct_uploads_unavailable` | This deployment can't presign (no S3 private bucket). |
-| 502 | `storage_failed` | The object store refused the write; retry. |
+| 502 | `storage_failed` | The object store refused the write; retry. On `POST /api/media/uploads`, the upload's cleanup couldn't be queued, so no upload was issued; retry. On `…/uploads/complete`, the upload was interrupted before it could be stored, or the store refused the write: the token is spent (completing it again answers `not_uploaded`), so start again with `POST /api/media/uploads`. |
 | 503 | `insufficient_storage` | Out of temp disk to strip a video; retry after `retry-after`. |
 
 **Not over MCP.** `/mcp` has no upload tool on purpose: media has no draft
