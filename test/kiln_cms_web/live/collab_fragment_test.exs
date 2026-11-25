@@ -92,4 +92,26 @@ defmodule KilnCMSWeb.CollabFragmentTest do
     assert html =~ ~s(data-collab-fragment="block-#{id_b}")
     refute html =~ "block-idx-"
   end
+
+  # #2772: when the room can't be reached the RichText hook mounts a
+  # single-user editor and unhides this notice. It ships hidden inside the
+  # ignore host, one per collab-bound block, so a patch can't hide it again.
+  test "each collab block carries a hidden collaboration-unavailable notice", %{conn: conn} do
+    editor = authed_user()
+
+    page =
+      CMS.create_page!(
+        %{
+          title: "Notice",
+          slug: "notice-#{System.unique_integer([:positive])}",
+          blocks: [%{"_type" => "rich_text", "legacy_html" => "<p>first</p>"}]
+        },
+        actor: editor
+      )
+
+    {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+
+    notice = "[phx-hook=RichText][data-collab-token] [data-collab-unavailable][hidden]"
+    assert has_element?(lv, notice, "Live collaboration is unavailable")
+  end
 end

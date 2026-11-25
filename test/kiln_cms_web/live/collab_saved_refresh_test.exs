@@ -320,6 +320,21 @@ defmodule KilnCMSWeb.CollabSavedRefreshTest do
     assert render(lv) =~ "Untouched"
   end
 
+  # #2772: with collaboration off the block is a plain editor from the start,
+  # with no room to fail to reach, so it carries no collab attributes and no
+  # "collaboration unavailable" notice for the hook to reveal.
+  test "collaboration off renders no collab attributes and no unavailable notice", %{conn: conn} do
+    collab_off()
+    editor = authed_user()
+    page = rich_text_page(editor)
+
+    {:ok, lv, _} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{page.id}")
+
+    assert has_element?(lv, "[phx-hook=RichText]")
+    refute has_element?(lv, "[data-collab-token]")
+    refute has_element?(lv, "[data-collab-unavailable]")
+  end
+
   # #2775. An idle session adopted the peer's lock version but kept its own
   # stale form, so its next edit posted that form whole (as the browser and
   # `render_change/2` both do) and the autosave wrote it over the peer's save

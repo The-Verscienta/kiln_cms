@@ -698,6 +698,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # CRDT collab prototype: when enabled, rich-text blocks sync live
     # between editors over the collab channel (see KilnCMS.Collab.Crdt).
     |> assign(:collab_token, collab_token(actor, socket.assigns[:second_factor_verified?]))
+    # Set when this tab's rich-text blocks could not join the room and edit on
+    # their own (#2772): the session then saves its own text, as with
+    # collaboration off (`Session.collab_active?/1`).
+    |> assign(:collab_solo?, false)
     # From `record.id`, not the route param: the channel rebuilds the doc
     # key from the record it resolves, and a differently-cased id in the
     # URL would otherwise name the same document under a different key
@@ -3856,6 +3860,18 @@ defmodule KilnCMSWeb.ContentEditorLive do
       else: {:noreply, put_flash(socket, :info, gettext("Reloaded the latest version."))}
   end
 
+  # This tab's rich-text blocks could not join the collab room (refused, timed
+  # out, or the socket never connected) and mounted single-user editors
+  # (#2772). Their text is in this session's form and nowhere else, so this
+  # session must save it itself rather than stand down for a persister that
+  # reads the room. It changes only how this session saves its own form, so
+  # there is nothing to authorize beyond the mount's own editor gate.
+  #
+  # Idempotent: every collab-bound block that falls back sends it.
+  def handle_event("collab_unavailable", _params, socket) do
+    {:noreply, assign(socket, :collab_solo?, true)}
+  end
+
   # Somebody published this document while a collab room was open (#1061). The
   # publish carried the room's converged prose into its own write, so nothing
   # typed up to that point is lost — but from here nothing persists: this
@@ -6672,6 +6688,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # an idle session's own equal what it last saved, and keeping them instead
   # could undo a peer's Discard or version restore.
   defp carry_rich_text(socket, %{collab_token: nil}), do: reset_editors(socket)
+  defp carry_rich_text(socket, %{collab_solo?: true}), do: reset_editors(socket)
   defp carry_rich_text(socket, _previous), do: socket
 
   # Rewrite the picker's ticks into the merge verbs (#638).
@@ -8645,6 +8662,22 @@ defmodule KilnCMSWeb.ContentEditorLive do
                               below; on the empty canvas it opens the block palette. --%>
                           <p class="mt-1 text-xs text-base-content/70">
                             {gettext("Type / to format this text or insert a block below.")}
+                          </p>
+                          <%!-- Shown by the RichText hook when the collab room
+                              can't be reached and the block falls back to a
+                              single-user editor (#2772). Inside the ignore host,
+                              so a patch doesn't hide it again. --%>
+                          <p
+                            :if={@collab_token}
+                            data-collab-unavailable
+                            hidden
+                            role="status"
+                            class="mt-1 flex items-center gap-1 text-xs text-base-content/70"
+                          >
+                            <.icon name="hero-signal-slash-micro" class="size-3.5 shrink-0" />
+                            {gettext(
+                              "Live collaboration is unavailable, so others won't see your edits until you save. Reload to try again."
+                            )}
                           </p>
                         </div>
                         <%!-- No-JS/JS-pending fallback: the server-rendered form

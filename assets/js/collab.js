@@ -20,10 +20,14 @@
 //     missing, so a frame the server refused (or one in flight when it closed
 //     the connection) is recovered on the rejoin rather than lost;
 //   * an "over budget" join refusal is transient — the account's budget frees
-//     within the window and phoenix.js keeps retrying — so it must NOT resolve
-//     `whenReady` as the first peer: seeding from the stored HTML and then
-//     merging the room's real state on the retry that succeeds duplicates the
-//     document.
+//     within the window and phoenix.js keeps retrying — so it does not end the
+//     wait at once (collab_join.js caps it).
+//
+// A join that fails for any reason (refused, timed out, a socket that never
+// connects) resolves `whenReady` as `{solo}` (#2772): the block mounts a plain
+// single-user editor and leaves the room, rather than seeding the shared doc
+// and merging the room's real state on a later join, which would duplicate
+// the document.
 import {Socket} from "phoenix"
 import * as Y from "yjs"
 import {
@@ -31,6 +35,7 @@ import {
   applyAwarenessUpdate,
   encodeAwarenessUpdate,
 } from "y-protocols/awareness"
+import {awaitJoin} from "./collab_join.js"
 
 // Re-exported for debugging/verification consoles (a second in-page client
 // can build its own Y.Doc + awareness against the same channel protocol).
@@ -54,12 +59,14 @@ export const SCHEMA_VSN = 3
 // remote carets still disappear at once.
 const AWARENESS_PUSH_MS = 100
 
-// A join refusal that clears on its own (the account's frame budget, #1305):
-// phoenix.js retries the join on a backoff, and the "ok" that eventually
-// arrives resolves `whenReady` — so this one must not resolve it as an error.
-const TRANSIENT_JOIN_ERRORS = new Set(["over budget"])
-
 let socket = null
+// The newest token a block on this page carries. phoenix.js calls `params` on
+// every (re)connect, so a socket whose first token has since expired (a tab
+// open past its max_age, reconnecting after a deploy) presents the token of
+// the latest LiveView mount, not the one it was built with.
+let latestToken = null
+// Topics whose join failed on this page (see acquireDoc).
+const soloTopics = new Set()
 const docs = {} // topic -> {doc, chan, whenReady, refs}
 
 const toBase64 = bytes => {
@@ -71,8 +78,9 @@ const toBase64 = bytes => {
 const fromBase64 = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0))
 
 const collabSocket = token => {
+  latestToken = token
   if (!socket) {
-    socket = new Socket("/ws/collab", {params: {token}})
+    socket = new Socket("/ws/collab", {params: () => ({token: latestToken})})
     socket.connect()
   }
   return socket
@@ -80,12 +88,28 @@ const collabSocket = token => {
 
 // Acquire the shared doc for `topic` (creating + joining on first use).
 // Returns {doc, whenReady, release}: `whenReady` resolves to {firstPeer}
-// once the server state has been applied; `release` drops this user of the
-// doc and leaves the channel when nobody on the page needs it anymore.
+// once the server state has been applied, or to {solo} when the room can't be
+// reached; `release` drops this user of the doc and leaves the channel when
+// nobody on the page needs it anymore.
+//
+// A topic that fell back to solo stays solo for the life of the page: a block
+// mounted later (a new block, a remount after a reorder) must not join a room
+// whose other blocks on this page are saving on their own. Reloading the page
+// tries the room again.
 export function acquireDoc(topic, token) {
+  if (soloTopics.has(topic) && !docs[topic]) {
+    return {
+      doc: null,
+      awareness: null,
+      whenReady: Promise.resolve({solo: "fell back earlier"}),
+      release() {},
+    }
+  }
+
   if (!docs[topic]) {
     const doc = new Y.Doc()
-    const chan = collabSocket(token).channel(topic, {vsn: SCHEMA_VSN})
+    const sock = collabSocket(token)
+    const chan = sock.channel(topic, {vsn: SCHEMA_VSN})
 
     const pushLocal = (update, origin) => {
       if (origin === REMOTE_ORIGIN) return
@@ -148,31 +172,28 @@ export function acquireDoc(topic, token) {
       })
     })
 
-    const whenReady = new Promise(resolve => {
-      chan
-        .join()
-        // Fires on every join that succeeds, the first and each rejoin after a
-        // reconnect (phoenix.js keeps the join push's hooks).
-        .receive("ok", ({state, peers}) => {
-          const remote = fromBase64(state)
-          Y.applyUpdate(doc, remote, REMOTE_ORIGIN)
-          // Sync step 2: whatever this doc has that the room's state doesn't
-          // — the update the server refused, the ones in flight when it closed
-          // the connection, anything typed while disconnected — goes back now.
-          // Empty (two bytes) on a fresh doc and after a clean handshake.
-          const missing = Y.encodeStateAsUpdate(doc, Y.encodeStateVectorFromUpdate(remote))
-          if (missing.length > 2) chan.push("update", {update: toBase64(missing)})
-          if (peers > 1) chan.push("awareness_request", {})
-          resolve({firstPeer: peers === 1})
-        })
-        // Join refused (flag off / stale token / stale-bundle schema vsn):
-        // behave like a lone editor — autosave still works, collab doesn't.
-        // A TRANSIENT refusal is left pending: the retry that succeeds
-        // resolves it, and seeding now would duplicate the room's content.
-        .receive("error", ({reason} = {}) => {
-          if (TRANSIENT_JOIN_ERRORS.has(reason)) return
-          resolve({firstPeer: true})
-        })
+    // Settles {firstPeer} on a join, or {solo} when the room can't be reached
+    // (refused, timed out, socket down) — see collab_join.js.
+    const whenReady = awaitJoin({
+      chan,
+      socket: sock,
+      // Runs on every join that succeeds, the first and each rejoin after a
+      // reconnect (phoenix.js keeps the join push's hooks).
+      onOk: ({state, peers}) => {
+        const remote = fromBase64(state)
+        Y.applyUpdate(doc, remote, REMOTE_ORIGIN)
+        // Sync step 2: whatever this doc has that the room's state doesn't
+        // — the update the server refused, the ones in flight when it closed
+        // the connection, anything typed while disconnected — goes back now.
+        // Empty (two bytes) on a fresh doc and after a clean handshake.
+        const missing = Y.encodeStateAsUpdate(doc, Y.encodeStateVectorFromUpdate(remote))
+        if (missing.length > 2) chan.push("update", {update: toBase64(missing)})
+        if (peers > 1) chan.push("awareness_request", {})
+        return {firstPeer: peers === 1}
+      },
+    }).then(outcome => {
+      if (outcome.solo) soloTopics.add(topic)
+      return outcome
     })
 
     docs[topic] = {doc, chan, awareness, whenReady, refs: 0, pushLocal, pushAwareness}

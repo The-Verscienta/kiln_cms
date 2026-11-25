@@ -381,10 +381,14 @@ defmodule KilnCMSWeb.ContentEditor.Session do
   # More than one editor present with the CRDT prototype on — text edits flow
   # through the shared Y.Doc rather than each session's form. Public for
   # `ContentEditorLive.refresh_saved_record/1`, which must not raise a conflict
-  # on a session whose text another editor persists for it.
+  # on a session whose text another editor persists for it. Not for a tab whose
+  # blocks fell back to single-user editors (#2772): its text never reached the
+  # room, so nobody else can persist it.
   @doc false
   def collab_active?(socket),
-    do: socket.assigns.collab_token != nil and length(socket.assigns.editors) > 1
+    do:
+      socket.assigns.collab_token != nil and not socket.assigns.collab_solo? and
+        length(socket.assigns.editors) > 1
 
   # The designated persisting editor: lowest user id among those present — the
   # same deterministic tie-break the advisory field locks use, so every

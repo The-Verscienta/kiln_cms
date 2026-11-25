@@ -783,19 +783,24 @@ export function mount(hook) {
   if (collabToken && collabTopic && collabFragment) {
     mountCollab(hook, {token: collabToken, topic: collabTopic, fragment: collabFragment})
   } else {
-    buildEditor(
-      hook,
-      [
-        StarterKit.configure(STARTER_KIT),
-        ...LINK_EXTENSIONS,
-        ...TABLE_EXTENSIONS,
-        ListDetect,
-        EmptyHeadings,
-        ...bodyImageExtensions(hook),
-      ],
-      hook.el.dataset.content || ""
-    )
+    mountSolo(hook)
   }
+}
+
+// The single-user editor: local undo history, seeded from the stored HTML.
+function mountSolo(hook) {
+  buildEditor(
+    hook,
+    [
+      StarterKit.configure(STARTER_KIT),
+      ...LINK_EXTENSIONS,
+      ...TABLE_EXTENSIONS,
+      ListDetect,
+      EmptyHeadings,
+      ...bodyImageExtensions(hook),
+    ],
+    hook.el.dataset.content || ""
+  )
 }
 
 // Collaborative variant: acquire the page-shared Y.Doc for this document's
@@ -816,8 +821,26 @@ async function mountCollab(hook, {token, topic, fragment}) {
 
   const handle = acquireDoc(topic, token)
   hook.collab = handle
-  const {firstPeer} = await handle.whenReady
+  const {firstPeer, solo} = await handle.whenReady
   if (hook._destroyed) return
+
+  // The room can't be reached (#2772): a refused or timed-out join, or a
+  // socket that never connects. Edit on our own instead — the same editor and
+  // the same `rich_text_body` save path as with collaboration off — and leave
+  // the room, so a join that succeeds later can't bind a second copy of the
+  // text. Nothing was typed before this point: the block had no editor.
+  if (solo) {
+    handle.release()
+    hook.collab = null
+    // Before the editor exists, so the server hears it ahead of any body push:
+    // this session must save its own text rather than stand down for a
+    // persister that reads the room (`collab_unavailable` in the LiveView).
+    hook.pushEvent("collab_unavailable", {})
+    const notice = hook.el.querySelector("[data-collab-unavailable]")
+    if (notice) notice.hidden = false
+    mountSolo(hook)
+    return
+  }
 
   const frag = handle.doc.getXmlFragment(fragment)
   const seed = firstPeer && frag.length === 0 ? hook.el.dataset.content || "" : null
