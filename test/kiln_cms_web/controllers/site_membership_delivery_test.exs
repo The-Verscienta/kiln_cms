@@ -1,12 +1,11 @@
 defmodule KilnCMSWeb.SiteMembershipDeliveryTest do
   @moduledoc """
-  Gated documents over the public HTML site follow the reader's membership on
-  the site serving the request (#337 Phase 2): the audiences of an `:active`
-  `OrgMembership` there, resolved by `KilnCMS.Accounts.Scoping.audiences/2` as
-  the read policies resolve them. A membership on another site, one that is
-  pending or rejected, an erased account and the account-wide
-  `User.audiences` column (where billing keeps the union across sites) all
-  read like a signed-out visitor: the teaser, never the body.
+  Gated documents over the public HTML site (#337 Phase 2): the audiences come
+  from the reader's active membership on this site, as the read policies
+  resolve them (`KilnCMS.Accounts.Scoping.audiences/2`). A reader with no such
+  membership here (one on another site, a pending or rejected one, an erased
+  account, or audiences held only in the account-wide `User.audiences` column)
+  reads like a signed-out visitor: the teaser, never the body.
 
   `async: false`: the delivery payload cache is a global Cachex table while
   sandboxes are per-test, and the cache tests below depend on real cache state.
@@ -236,22 +235,139 @@ defmodule KilnCMSWeb.SiteMembershipDeliveryTest do
     end
   end
 
-  describe "an erased account" do
-    test "reads the teaser whatever its rows still hold", %{conn: conn} do
-      body = body()
-      path = gated_document(:post, body)
+  for kind <- [:page, :post] do
+    describe "an erased account reading a gated #{kind}" do
+      @kind kind
+
+      test "reads the teaser whatever its rows still hold", %{conn: conn} do
+        body = body()
+        path = gated_document(@kind, body)
+        user = reader([@gated])
+        membership(user, default_org_id(), :active, [@gated])
+        Ash.Seed.update!(user, %{anonymized_at: DateTime.utc_now()})
+
+        conn = conn |> log_in(user) |> get(path)
+
+        refute response(conn, conn.status) =~ body
+      end
+    end
+  end
+
+  describe "a gated fragment embedded in a public page" do
+    # The public page that embeds it, and the text only the fragment carries.
+    defp embedding_page do
+      text = "GATED-FRAGMENT-#{uniq()}"
+
+      target =
+        Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+          title: "Fragment",
+          slug: "smd-fragment-#{uniq()}",
+          state: :published,
+          audience: @gated,
+          blocks: KilnCMS.TypedFixtures.typed_blocks([%{type: :heading, content: text}])
+        })
+
+      host =
+        Ash.Seed.seed!(KilnCMS.CMS.Page, %{
+          title: "Host",
+          slug: "smd-host-#{uniq()}",
+          state: :published,
+          blocks:
+            KilnCMS.CMS.TypedBlocks.to_typed([
+              %{"_type" => "heading", "text" => "PUBLIC-HOST-BODY"},
+              %{"_type" => "fragment", "ref" => %{"type" => "page", "id" => target.id}}
+            ])
+        })
+
+      {"/" <> host.slug, text}
+    end
+
+    test "an account-wide audience with no membership here does not show it", %{conn: conn} do
+      {path, text} = embedding_page()
+
+      html = conn |> log_in(reader([@gated])) |> get(path) |> html_response(200)
+
+      assert html =~ "PUBLIC-HOST-BODY"
+      refute html =~ text
+    end
+
+    test "a membership on another site does not show it here", %{conn: conn} do
+      {path, text} = embedding_page()
       user = reader([@gated])
+      membership(user, org("smd-frag-other").id, :active, [@gated])
+
+      html = conn |> log_in(user) |> get(path) |> html_response(200)
+
+      assert html =~ "PUBLIC-HOST-BODY"
+      refute html =~ text
+    end
+
+    test "an active membership here holding the audience shows it", %{conn: conn} do
+      {path, text} = embedding_page()
+      user = reader([])
       membership(user, default_org_id(), :active, [@gated])
-      Ash.Seed.update!(user, %{anonymized_at: DateTime.utc_now()})
 
-      conn = conn |> log_in(user) |> get(path)
+      html = conn |> log_in(user) |> get(path) |> html_response(200)
 
-      refute response(conn, conn.status) =~ body
+      assert html =~ text
+    end
+  end
+
+  describe "a gated document behind a passphrase" do
+    # The lock page (its passphrase field) is offered only to a reader the
+    # document's audience admits: `get_locked_by_slug` at the slug,
+    # `find_locked_by_alias` at an alias.
+    defp locked_gated(:slug), do: locked_gated(%{})
+    defp locked_gated(:alias), do: locked_gated(%{path_alias: "/smd/locked/#{uniq()}"})
+
+    defp locked_gated(%{} = attrs) do
+      body = body()
+      attrs = Map.put(attrs, :access_password, "a shared passphrase")
+      {gated_document(:page, body, attrs), body}
+    end
+
+    for at <- [:slug, :alias] do
+      @at at
+
+      test "at the #{at}, an account-wide audience with no membership here gets no lock page",
+           %{conn: conn} do
+        {path, body} = locked_gated(@at)
+
+        conn = conn |> log_in(reader([@gated])) |> get(path)
+        html = response(conn, conn.status)
+
+        refute html =~ ~s(id="kiln-passphrase")
+        refute html =~ body
+      end
+
+      test "at the #{at}, a membership on another site gets no lock page here", %{conn: conn} do
+        {path, body} = locked_gated(@at)
+        user = reader([@gated])
+        membership(user, org("smd-lock-other").id, :active, [@gated])
+
+        conn = conn |> log_in(user) |> get(path)
+        html = response(conn, conn.status)
+
+        refute html =~ ~s(id="kiln-passphrase")
+        refute html =~ body
+      end
+
+      test "at the #{at}, an active membership here gets the lock page", %{conn: conn} do
+        {path, body} = locked_gated(@at)
+        user = reader([])
+        membership(user, default_org_id(), :active, [@gated])
+
+        conn = conn |> log_in(user) |> get(path)
+        html = response(conn, conn.status)
+
+        assert html =~ ~s(id="kiln-passphrase")
+        refute html =~ body
+      end
     end
   end
 
   describe "the delivery cache" do
-    test "a member's render on one site is not served for the same slug on another",
+    test "a foreign-org member's render is not served for the same slug on this site",
          %{conn: conn} do
       slug = "smd-shared-#{uniq()}"
       domain = "smd-a-#{uniq()}.example.com"

@@ -441,4 +441,69 @@ defmodule KilnCMS.DeprecationsTest do
       assert KilnCMS.Repo.get!(Oban.Job, job.id).state == "cancelled"
     end
   end
+
+  describe "account-wide audiences not on a site membership" do
+    defp membership(user, org_id, status, audiences) do
+      Ash.Seed.seed!(OrgMembership, %{
+        organization_id: org_id,
+        user_id: user.id,
+        role: :viewer,
+        status: status,
+        audiences: audiences
+      })
+    end
+
+    test "lists each account with the values none of its active memberships carries" do
+      other = KilnCMS.OrgFixtures.org("dep-other")
+
+      # Held only account-wide, with a membership that carries nothing.
+      unplaced = user(%{audiences: [@gated]})
+      membership(unplaced, default_org_id(), :active, [])
+
+      # Carried by an active membership on some site: nothing missing.
+      placed = user(%{audiences: [@gated]})
+      membership(placed, other.id, :active, [@gated])
+
+      # Only a pending membership carries it: still missing.
+      pending = user(%{audiences: [@gated]})
+      membership(pending, default_org_id(), :pending, [@gated])
+
+      # Membership-less: the legacy report's, not this one's.
+      _legacy = user(%{audiences: [@gated]})
+
+      # Erased: reads nothing gated, left out.
+      tombstone = user(%{audiences: [@gated], anonymized_at: DateTime.utc_now()})
+      membership(tombstone, default_org_id(), :active, [])
+
+      entries =
+        Deprecations.report().account_wide_audiences
+        |> Map.new(&{&1.user.id, &1.missing})
+
+      assert entries == %{unplaced.id => [@gated], pending.id => [@gated]}
+      refute Map.has_key?(entries, placed.id)
+    end
+
+    test "prints the accounts and how to grant per site, without failing the check" do
+      unplaced = user(%{audiences: [@gated]})
+      membership(unplaced, default_org_id(), :active, [])
+
+      {:ok, lines} = Agent.start_link(fn -> [] end)
+      shell = fn line -> Agent.update(lines, &[line | &1]) end
+
+      assert :ok = Deprecations.run_and_report([], shell)
+
+      printed = lines |> Agent.get(& &1) |> Enum.reverse() |> Enum.join("\n")
+      assert printed =~ "Accounts with account-wide audiences not on a site membership: 1"
+      assert printed =~ "#{unplaced.email}  #{@gated}"
+      assert printed =~ "KilnCMS.Accounts.SiteAudiences.set("
+    end
+
+    test "the report action shows a non-admin nothing" do
+      editor = user(%{role: :editor, audiences: [@gated]})
+      unplaced = user(%{audiences: [@gated]})
+      membership(unplaced, default_org_id(), :active, [])
+
+      assert {:ok, []} = Accounts.list_account_wide_audience_accounts(actor: editor)
+    end
+  end
 end
