@@ -405,6 +405,13 @@ msgstr[1] ""
 msgid "%{count} ms"
 msgstr ""
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} no longer exists"
+msgid_plural "%{count} no longer exist"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} not applicable"
@@ -23744,6 +23751,11 @@ msgstr ""
 msgid "That content couldn't be found."
 msgstr ""
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "That content no longer exists. Someone else may have moved it to trash or deleted it."
+msgstr ""
+
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "That content type no longer exists."
@@ -24510,7 +24522,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "The gated content this account can read on this site. Each site keeps its own; switch site to edit another."
+msgid "The gated content set for this account on this site. Each site keeps its own; switch site to edit another."
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
@@ -25425,7 +25437,12 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "This account's registration on this site has not been approved, so it reads nothing gated here. What you save applies once it is approved."
+msgid "This account's registration on this site has not been approved, so it reads nothing gated here yet. The ticked audiences are saved on its registration and apply once it is approved."
+msgstr ""
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "This account's registration on this site was rejected, so it reads nothing gated here. The ticked audiences are saved on its registration and apply if it is approved later."
 msgstr ""
 
 #: lib/kiln_cms_web/live/invite_live.ex

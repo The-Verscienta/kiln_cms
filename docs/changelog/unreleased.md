@@ -29,6 +29,13 @@ carries the reasoning.
   - **Affected releases.** Top-level fields since 1.0.0; reshapes and link fields since 1.5.0; group sub-fields since 1.6.0; flexible items since 1.11.0; held lists since 1.12.0.
   - **No migration; rolling the pin back is safe.**
 
+<a id="audiences-panel-stored-upgrade"></a>
+
+- **Audiences set on a waiting or rejected registration on 1.9.0 to 1.12.1 may have been lost (#2783).** On those releases the audiences panel on `/editor/accounts/(id)` showed a waiting or rejected registration with every box clear, whatever its registration held, and a save writes exactly the ticked boxes. Any save of the panel for such a registration, an unchanged one included, therefore removed the audiences stored on it that weren't ticked in that save: those an earlier save set, and those that landed there another way ([below](#audiences-panel-stored)).
+  - **Who to check.** Registrations that are still waiting or rejected, and accounts approved since you upgraded to 1.9.0, whose audiences panel a platform admin saved while they waited or after they were rejected. Open each one's account page on the site it registered on and re-tick what is missing.
+  - **What can't be restored.** KilnCMS keeps no record of an audience edit on its own, so it can't put back what was removed. Audiences a paid membership manages return on that membership's next billing change.
+  - **No migration.**
+
 <a id="portable-text-write-check-upgrade"></a>
 
 - **Portable Text: delivered shapes for old rows, and round-tripped artifacts (#2768).** Two things a headless client can notice after the upgrade ([the check](#portable-text-write-check), [the fix](#portable-text-write-check-fixed)):
@@ -113,11 +120,40 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="audiences-panel-stored"></a>
+
+- **The audiences panel shows what a waiting or rejected registration holds (#2783).** A platform admin can set audiences on a registration that is waiting for approval or was rejected; they are kept on its registration and take effect when it is approved. The panel on `/editor/accounts/(id)` ticked the boxes from what the account can read now, which for such a registration is nothing, while a save writes exactly the ticked boxes. So the first save stored the audiences and then showed every box clear, and the next save of the panel, unchanged or for another audience, wrote that empty set over them.
+  - **What changes.** The boxes show the audiences stored for the account on this site, in every registration state. The note under the heading still says what the account reads now: a waiting registration's note says the ticked audiences apply once it is approved, and a rejected one's says they apply if it is approved later.
+  - **Unchanged.** A waiting or rejected registration reads nothing gated until it is approved, whatever is ticked. A save still writes exactly the ticked boxes, and a first save for an account with no membership on the site still gives it one. Approving grants the *Viewer* tier and the audiences stored on the registration, as before.
+  - **No migration; rolling the pin back is safe.** On an older release the panel shows the boxes clear again.
+
 <a id="picker-close-during-import"></a>
 
 - **Closing the content editor's image picker while an Unsplash import is still running no longer crashes the editor (#2784).** The import's result was routed to whatever the picker was open for when it arrived. With the drawer closed there was nothing to route it to, and the editor crashed and remounted, losing unsaved edits. If the drawer had been reopened for another field or block in the meantime, the photo landed there instead of where it was picked.
   - **What happens now.** An import remembers which opening of the drawer it was started from. If that drawer is still open for the same target when the photo arrives, it lands as before. Otherwise the photo stays in the media library, nothing on the page changes, and the editor shows "The Unsplash photo was added to the media library."
   - **Other picker work.** Uploads from the picker's dropzone were already canceled when the drawer closes, and the picker starts no other background work.
+  - **No migration; rolling the pin back is safe.**
+
+<a id="fields-slug-unique"></a>
+
+- **A Slug field offers the Unique checkbox in `/editor/fields`, and saving a field no longer drops a constraint the form didn't post (#2780).** The Fields console mapped a field's type to the constraints it takes through a hand-kept list that left out Slug. A Slug field therefore showed no **Unique** checkbox, although it can be unique since 1.9.0, and editing anything on a Slug field that was made unique through the API or field sync (`/editor/fields/sync`, `mix kiln.fields.import`) (its label, say) saved it with no constraints and dropped `unique`.
+  - **What changes.** The console reads the type from the registered field types (core, built-in and plugin), so every type shows the constraint inputs it takes, Slug's **Unique** included. A save also keeps any stored constraint the type takes that the form didn't post at all, so a form that doesn't show one can't drop it. A constraint whose input is posted blank is still cleared, and changing a field's type still drops the constraints the new type doesn't take.
+  - **Unchanged.** Which constraints each type takes and how they are checked; a field inside a group or relationship, or one holding several values, still can't be unique.
+  - **No migration; rolling the pin back is safe.**
+
+<a id="auto-save-forms-no-recovery"></a>
+
+- **A reconnect no longer replays forms that save as they change (#2782).** After a reconnect (a deploy, a laptop waking), LiveView resubmits each form on the page with the values it last showed. The Sections rows in `/editor/fields` save on change, so a page left open would post its stale **Shown as** and **Starts** for every section and silently revert another admin's newer choice, at the cost of one write and reload per section.
+  - **What changes.** The Sections rows and the other console forms that save on change are left out of that recovery: a field's settings in the form builder, the **Add a tag** select in the media drawer, the content list's **Columns** picker and a backup destination's other-directory **adopt** checkboxes. After a reconnect they show what the server holds.
+  - **Unchanged.** Forms that only preview or validate as they change still recover what was typed in them.
+  - **No migration; rolling the pin back is safe.**
+
+<a id="content-list-stale-row"></a>
+
+- **A content-list row or bulk action on a row someone else moved to trash shows a message instead of crashing the list (#2781).** The row actions on `/editor` (**Publish**, **Submit**, **Return**, **Unpublish**, **Unarchive** and **Confirm date**) and the bulk bar read each record again with a raising fetch before the write. A row another user had moved to trash or deleted since the list loaded made that read raise: the page crashed and reconnected with no message, the selection was lost, and in a bulk run every row after the missing one was left as it was.
+  - **Row actions.** The list now shows "That content no longer exists. Someone else may have moved it to trash or deleted it.", drops the row from the selection, and reloads, so the row disappears.
+  - **Bulk actions.** The run continues with the rows that remain, and the message counts the missing ones apart from the skipped ones, e.g. "Publish: 3 updated, 1 no longer exists" or "Moved 2 item(s) to trash, 1 no longer exists". A missing row doesn't add the "A row is skipped when …" line, since there is nothing left to open and fix.
+  - **Unchanged.** Who may run each action, and how a row in the wrong state, a refused write or a safety-field publish is reported.
   - **No migration; rolling the pin back is safe.**
 
 <a id="experiment-goal-select"></a>

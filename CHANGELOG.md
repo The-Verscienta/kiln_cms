@@ -65,6 +65,8 @@ else.
   ([long form](docs/changelog/unreleased.md#links-backfill-multiple-upgrade))
 - **A draft of a live record saved before a custom field was renamed or deleted on 1.0.0 to 1.12.1 still holds the old key: publishing it after upgrading still drops that value, so re-enter it or discard the draft (#2744). Values already lost are in version history under the old key; copy them back by hand, since a restore drops them.**
   ([long form](docs/changelog/unreleased.md#rename-rewrites-working-copies-upgrade))
+- **On 1.9.0 to 1.12.1, saving an account's audiences panel for a waiting or rejected registration could remove audiences stored on it, even unchanged, so those registrations and accounts approved since may lack audiences you gave them (#2783). Check and re-tick them; KilnCMS can't restore them, though billing-managed audiences return on the next billing change.**
+  ([long form](docs/changelog/unreleased.md#audiences-panel-stored-upgrade))
 - **Portable Text: a record stored with a malformed body is read and delivered repaired, so a `:json` consumer can see its shape change on the next fire, and a client that sends back an artifact fired before then can get a `400` (#2768). No migration; rolling the pin back is safe.**
   A draft of such a live record pending across the upgrade can show a conflict on blocks: publish it with "Keep mine", or discard it and save the draft again.
   ([long form](docs/changelog/unreleased.md#portable-text-write-check-upgrade))
@@ -104,9 +106,25 @@ else.
 
 ### Fixed
 
+- **The audiences panel on `/editor/accounts/(id)` shows a waiting or rejected registration's saved audiences, so saving it again no longer clears them (#2783).**
+  They still grant nothing until the registration is approved. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#audiences-panel-stored))
+
 - **Closing the content editor's image picker while an Unsplash import is still running no longer crashes the editor (#2784).**
   The photo is still added to the media library, but not to the field or block, and a flash says so.
   ([long form](docs/changelog/unreleased.md#picker-close-during-import))
+
+- **A Slug field offers the Unique checkbox in `/editor/fields`, and saving a field no longer drops a constraint the form didn't post, such as a `unique` set through the API or field sync (#2780).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#fields-slug-unique))
+
+- **A reconnect no longer replays the Fields console's Sections choices, or other forms that save as they change, over another admin's newer ones (#2782).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#auto-save-forms-no-recovery))
+
+- **A content-list row or bulk action on a row someone else moved to trash shows a message instead of crashing the list (#2781).**
+  A row action flashes and reloads the list; the bulk bar acts on the rows that remain and reports, e.g., "Publish: 3 updated, 1 no longer exists".
+  ([long form](docs/changelog/unreleased.md#content-list-stale-row))
 
 - **The Experiments form's goal select takes effect, so a funnel-completion experiment can be set up from `/editor/experiments` (#2779).**
   Picking a goal now shows its target picker (funnel, form or page), and typing a name no longer reloads the document list.

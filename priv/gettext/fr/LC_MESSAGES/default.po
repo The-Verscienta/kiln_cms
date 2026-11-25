@@ -405,6 +405,13 @@ msgstr[1] "%{count} de plus le %{date} — afficher la semaine"
 msgid "%{count} ms"
 msgstr "%{count} ms"
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} no longer exists"
+msgid_plural "%{count} no longer exist"
+msgstr[0] "%{count} n'existe plus"
+msgstr[1] "%{count} n'existent plus"
+
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} not applicable"
@@ -23744,6 +23751,11 @@ msgstr "Cette colonne est pleine. Faites-y de la place d'abord."
 msgid "That content couldn't be found."
 msgstr "Ce contenu est introuvable."
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "That content no longer exists. Someone else may have moved it to trash or deleted it."
+msgstr "Ce contenu n'existe plus. Quelqu'un d'autre l'a peut-être mis à la corbeille ou supprimé."
+
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "That content type no longer exists."
@@ -24510,8 +24522,8 @@ msgstr "La formule échoue sur ce document et serait donc enregistrée vide : %{
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "The gated content this account can read on this site. Each site keeps its own; switch site to edit another."
-msgstr "Le contenu réservé que ce compte peut lire sur ce site. Chaque site garde les siennes ; changez de site pour en modifier un autre."
+msgid "The gated content set for this account on this site. Each site keeps its own; switch site to edit another."
+msgstr "Le contenu réservé attribué à ce compte sur ce site. Chaque site garde le sien ; changez de site pour en modifier un autre."
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
@@ -25425,8 +25437,13 @@ msgstr "Ce compte a été effacé. Il n'a aucun niveau ici et ne peut pas en rec
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "This account's registration on this site has not been approved, so it reads nothing gated here. What you save applies once it is approved."
-msgstr "L'inscription de ce compte sur ce site n'a pas été approuvée : il ne lit ici aucun contenu réservé. Ce que vous enregistrez s'appliquera une fois l'inscription approuvée."
+msgid "This account's registration on this site has not been approved, so it reads nothing gated here yet. The ticked audiences are saved on its registration and apply once it is approved."
+msgstr "L'inscription de ce compte sur ce site n'a pas encore été approuvée : il ne lit encore ici aucun contenu réservé. Les audiences cochées sont enregistrées sur son inscription et s'appliqueront une fois l'inscription approuvée."
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "This account's registration on this site was rejected, so it reads nothing gated here. The ticked audiences are saved on its registration and apply if it is approved later."
+msgstr "L'inscription de ce compte sur ce site a été refusée : il ne lit ici aucun contenu réservé. Les audiences cochées sont enregistrées sur son inscription et s'appliqueront si elle est approuvée plus tard."
 
 #: lib/kiln_cms_web/live/invite_live.ex
 #, elixir-autogen, elixir-format

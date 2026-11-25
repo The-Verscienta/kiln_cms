@@ -325,6 +325,13 @@ for a membership-less account edited from another site, are in
 An audience a billing tier has ever claimed is billing's to grant: a tick there
 lasts until the next entitlement recompute. Comp a membership instead.
 
+**A registration that is waiting or was rejected.** You can set audiences on a
+registration that is [waiting for approval](#approving-registrations) or was
+rejected. The boxes show what is stored on its registration, and the note
+under the heading says it reads nothing gated here yet. The ticked audiences
+take effect when it is approved, by a site admin from **Registrations** or by
+an invitation, and grant nothing before that.
+
 ## Invite someone to a site
 
 Bring a person onto one site with the tier they should have there, whether or
@@ -799,8 +806,10 @@ of another site is refused, whichever host they ask from.
    Opening the page marks your registration notice for this site read.
 2. To let someone in, click **Approve** on their row. You see "Approved
    (address). They can now read this site as a viewer. We'll email them."
-   They leave the list, appear in Team's member list as a *Viewer* with no
-   audiences, and any page they have open reconnects with the new access.
+   They leave the list and appear in Team's member list as a *Viewer*, with
+   the audiences a platform admin set on their account page while they waited,
+   if any: approving grants those too. **Registrations** doesn't show them
+   yet (#3396). Any page they have open reconnects with the new access.
    They are emailed a sign-in link. Change their tier, custom role or
    audiences afterwards as for any member.
 3. To turn someone away, click **Reject** and confirm "Reject (address)? The
@@ -819,9 +828,10 @@ remove the account itself, a platform admin uses
 [Removing an account](#removing-an-account), or the site
 [erases unconfirmed applicants it rejects](#erase-unconfirmed-applicants-you-reject).
 
-Approving gives exactly the *Viewer* tier on this site and nothing on other
-sites. Without approval, a password sign-up is a viewer on the **default
-site** only, whichever host it signed up on.
+Approving gives exactly the *Viewer* tier on this site, plus any audiences
+set on the registration while it waited, and nothing on other sites. Without
+approval, a password sign-up is a viewer on the **default site** only,
+whichever host it signed up on.
 
 **Erased applicants.** If a platform admin erased an applicant's account
 while it waited, its row shows an **Account erased** badge and has no

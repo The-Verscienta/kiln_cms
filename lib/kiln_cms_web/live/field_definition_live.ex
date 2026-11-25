@@ -1967,7 +1967,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> Map.put("option_labels", labels)
     |> Map.put("default", default)
     |> blank_source()
-    |> unpack_validation()
+    |> unpack_validation(record)
     |> unpack_targets()
     |> unpack_selection(catalog)
     |> unpack_sources_limit()
@@ -2069,18 +2069,23 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # chosen type left out — its inputs leave the page on a type change, and
   # `Validations.FieldConstraints` refuses what is stale. A value that is no
   # number stays text, so the save names the input it is wrong in. Without a
-  # type in the params the constraints are left as they were.
-  defp unpack_validation(%{"field_type" => type} = params) when is_binary(type) do
+  # type in the params the constraints are left as they were. A key the type
+  # takes but the form did not post at all keeps the edited definition's
+  # stored value (#2780), so a constraint set through the API or field sync
+  # is never dropped by a form that doesn't show it; a blank input is still
+  # posted, so clearing one clears it.
+  defp unpack_validation(%{"field_type" => type} = params, record) when is_binary(type) do
     allowed = FieldConstraints.allowed_keys(type_atom(type), format_atom(params["format"]))
 
     allowed =
       if params["multiple"] in [true, "true"], do: allowed -- ["unique"], else: allowed
 
     posted = if is_map(params["validation"]), do: params["validation"], else: %{}
+    stored = FieldConstraints.normalize(record && record.validation)
 
     validation =
       for key <- allowed,
-          {:ok, value} <- [constraint_value(key, type, posted[key])],
+          {:ok, value} <- [posted_or_stored(key, type, posted, stored)],
           into: %{},
           do: {key, value}
 
@@ -2092,7 +2097,13 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     Map.put(params, "validation", validation)
   end
 
-  defp unpack_validation(params), do: params
+  defp unpack_validation(params, _record), do: params
+
+  defp posted_or_stored(key, type, posted, stored) do
+    if Map.has_key?(posted, key),
+      do: constraint_value(key, type, posted[key]),
+      else: Map.fetch(stored, key)
+  end
 
   defp constraint_value("unique", _type, value),
     do: if(value in [true, "true"], do: {:ok, true}, else: :error)
@@ -2152,16 +2163,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp number({number, ""}, _text), do: number
   defp number(_unparsed, text), do: text
 
-  defp type_atom("integer"), do: :integer
-  defp type_atom("float"), do: :float
-  defp type_atom("string"), do: :string
-  defp type_atom("url"), do: :url
-  defp type_atom("text"), do: :text
-  defp type_atom("date"), do: :date
-  defp type_atom("datetime"), do: :datetime
-  defp type_atom("color"), do: :color
-  defp type_atom("json"), do: :json
-  defp type_atom(_other), do: :other
+  # The registered type (core, built-in or plugin) a posted name is, so every
+  # type `FieldConstraints.allowed_keys/2` speaks about gets its constraints
+  # (#2780: a hand-kept list left `:slug` out, and its `unique` with it).
+  defp type_atom(type), do: posted_type(type, :other)
 
   defp format_atom("plain"), do: :plain
   defp format_atom(_other), do: :rich
@@ -6161,9 +6166,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
           data-field-section={row.name}
           class="py-3 first:pt-0 last:pb-0"
         >
+          <%!-- Saved on change: recovery on a reconnect would replay this
+               page's stale choice over another admin's (#2782). --%>
           <form
             id={"#{@id}-#{row.index}-form"}
             phx-change="section_layout"
+            phx-auto-recover="ignore"
             class="grid items-end gap-3 sm:grid-cols-[minmax(0,1fr)_14rem_14rem]"
           >
             <input type="hidden" name="scope" value={@scope} />
