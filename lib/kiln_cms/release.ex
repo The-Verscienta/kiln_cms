@@ -142,15 +142,18 @@ defmodule KilnCMS.Release do
   end
 
   @doc """
-  `mix kiln.links.backfill` for a release (#1594): write the reference edges
-  for `:reference` custom field values that have none, and delete the ones no
-  stored value implies.
+  `mix kiln.links.backfill` for a release (#1594, #2742): write the reference
+  edges for top-level `:reference` custom field values that have none, single
+  or list, realign the position and link values of the ones that drifted, and
+  delete the ones no stored value holds.
 
       bin/kiln_cms eval 'KilnCMS.Release.backfill_reference_links()'
 
   The upgrade to 1.1 runs it once already; this is for a backup restored from
-  before it. Returns the counts `KilnCMS.CMS.ContentLinks.Backfill.run/1`
-  reports.
+  before it, or a raw import. Run it in a quiet period: a save landing mid-run
+  can be realigned to what its value held when the run read it, until that
+  record's next changing save. Returns the counts
+  `KilnCMS.CMS.ContentLinks.Backfill.run/1` reports.
   """
   @spec backfill_reference_links() :: KilnCMS.CMS.ContentLinks.Backfill.result()
   def backfill_reference_links do
@@ -159,7 +162,11 @@ defmodule KilnCMS.Release do
     {:ok, result, _} =
       Ecto.Migrator.with_repo(hd(repos()), &KilnCMS.CMS.ContentLinks.Backfill.run/1)
 
-    IO.puts("Reference links: #{result.inserted} written, #{result.deleted} removed.")
+    IO.puts(
+      "Reference links: #{result.inserted} written, #{result.updated} realigned, " <>
+        "#{result.deleted} removed."
+    )
+
     result
   end
 
