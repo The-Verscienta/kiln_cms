@@ -87,6 +87,13 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="picker-close-during-import"></a>
+
+- **Closing the content editor's image picker while an Unsplash import is still running no longer crashes the editor (#2784).** The import's result was routed to whatever the picker was open for when it arrived. With the drawer closed there was nothing to route it to, and the editor crashed and remounted, losing unsaved edits. If the drawer had been reopened for another field or block in the meantime, the photo landed there instead of where it was picked.
+  - **What happens now.** An import remembers which opening of the drawer it was started from. If that drawer is still open for the same target when the photo arrives, it lands as before. Otherwise the photo stays in the media library, nothing on the page changes, and the editor shows "The Unsplash photo was added to the media library."
+  - **Other picker work.** Uploads from the picker's dropzone were already canceled when the drawer closes, and the picker starts no other background work.
+  - **No migration; rolling the pin back is safe.**
+
 <a id="experiment-goal-select"></a>
 
 - **The goal select on `/editor/experiments` takes effect (#2779).** The new-experiment form posts every field on each change, and the page's change handler matched on the content type first, so a change of the **Counts as a conversion** select was never read. Picking **A funnel is completed** left the form showing the **Goal form** picker, so the experiment was created with a funnel goal and no funnel, and could not be started. The same happened to **A page is reached**, whose target fields never appeared.
