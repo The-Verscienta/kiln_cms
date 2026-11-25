@@ -61,6 +61,8 @@ else.
 
 - **Direct uploads: until every node runs this release, a completion handled by an older node can still lose its staged object to the cleanup job (#2724). A token whose cleanup job was never queued now answers `not_uploaded`. No migration; rolling the pin back is safe.**
   ([long form](docs/changelog/unreleased.md#direct-upload-claim-upgrade))
+- **If you ran `mix kiln.links.backfill` on 1.5.0 to 1.12.1, run it again after upgrading: it had deleted every list reference edge, and on 1.12.1 every reference edge in a group or flexible item (#2742). Nested edges return only when each record's custom fields next change.**
+  ([long form](docs/changelog/unreleased.md#links-backfill-multiple-upgrade))
 
 ### Added
 
@@ -131,6 +133,10 @@ else.
 - **A second edit to a federated document is announced even when it lands while the previous `Update` is still fanning out; it was dropped as a duplicate, so followers kept the older content (#2757).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#announce-unique-executing))
+
+- **`mix kiln.links.backfill` no longer deletes the edges of list reference fields or of references in groups and flexible items: it writes and realigns top-level single and list edges, and prints `N written, M realigned, K removed` (#2742).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#links-backfill-multiple))
 
 ## [1.12.1] - 2026-11-23
 
