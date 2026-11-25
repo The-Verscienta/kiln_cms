@@ -101,6 +101,11 @@ else.
 - **The Redirects form shows a refused path as an error on its field instead of crashing the page (#2763).**
   An over-long path or locale, the root path, the target's own URL, a missing target and a write the policy refuses no longer lose the form.
   ([long form](docs/changelog/unreleased.md#redirects-refused-path))
+
+- **The visual-editing preview read (`/api/visual-editing/:type/:slug`) encodes only prose: a video's `src`, a file's `download_url`, an embed's `resolved_url`, media ids and other URL or identifier fields come through unchanged, instead of with an invisible tail that made them 404 (#2770).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#visual-editing-prose-only))
+
 - **The translations dashboard shows every variant of the slugs it lists: an older translation no longer shows as "missing" (and fails to create), and a slug whose default-locale source is older than its translations can still be exported (#2761).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#translations-slug-window))
