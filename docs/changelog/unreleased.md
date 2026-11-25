@@ -252,3 +252,9 @@ carries the reasoning.
   - **What the links carry now.** `?locale=<the record's locale>`, alongside `focus=` on a block link. The route stays keyed on slug and locale rather than record id, because the visual-editing bridge (`priv/static/bridge.js`) and its stega payloads already address the editor that way and send the locale.
   - **An absent locale is no longer a guess.** A URL without `?locale=` (a hand-typed one, or an older bridge) still opens the default-locale record when that is the only variant of the slug you can read. When the slug has variants in more than one locale, the editor sends you back to `/editor` with "This content exists in more than one language" instead of picking the default.
   - **No migration; rolling the pin back is safe.** An older release opens the default-locale variant again.
+
+<a id="presentation-edit-after-save"></a>
+
+- **The Presentation console's edit pane keeps the saved text after a Save (#2759).** Save rebuilds the open text or rich-text region so the next edit starts from what was stored, but it rebuilt it from a copy of the block taken when the pane was opened. The region showed the text from before the save, and because the region's script sends its whole text whenever typing pauses, one more character put the old text back, and the next Save wrote it over the edit just saved.
+  - **What happens now.** After a Save the pane is re-read from the saved record: a text or rich-text block shows its stored value and stays open for more typing, and a title or excerpt input shows the saved value. A failed or conflicting Save leaves the pane as it was; Reload still closes it.
+  - **No migration; rolling the pin back is safe.** An older release shows the pre-save text again.
