@@ -67,8 +67,17 @@ else.
   ([long form](docs/changelog/unreleased.md#rename-rewrites-working-copies-upgrade))
 - **On 1.9.0 to 1.12.1, saving an account's audiences panel for a waiting or rejected registration could remove audiences stored on it, even unchanged, so those registrations and accounts approved since may lack audiences you gave them (#2783). Check and re-tick them; KilnCMS can't restore them, though billing-managed audiences return on the next billing change.**
   ([long form](docs/changelog/unreleased.md#audiences-panel-stored-upgrade))
+- **Portable Text: a record stored with a malformed body is read and delivered repaired, so a `:json` consumer can see its shape change on the next fire, and a client that sends back an artifact fired before then can get a `400` (#2768). No migration; rolling the pin back is safe.**
+  A draft of such a live record pending across the upgrade can show a conflict on blocks: publish it with "Keep mine", or discard it and save the draft again.
+  ([long form](docs/changelog/unreleased.md#portable-text-write-check-upgrade))
 - **Gated HTML pages now follow the reader's active membership on that site, not account-wide audiences (GHSA-4m98-m3c9-7cwx). Run `mix kiln.deprecations` to list account-wide audiences that are not on a site membership, and grant them per site.**
   ([GHSA-4m98-m3c9-7cwx](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-4m98-m3c9-7cwx) · [long form](docs/changelog/unreleased.md#delivery-site-membership-audiences-upgrade))
+
+### Breaking
+
+- **Portable Text writes: a `block_tree` body (JSON:API, GraphQL, MCP) is refused with a `400` naming the path for a few shapes that used to be stored: a `marks` entry that is an object or list; an object or list in a text block's `style`, `listItem` or `_key`, or a span's `_key`; a text block's non-numeric `level`; and a plugin `:rich_text` field holding malformed Portable Text (#2768).**
+  Numbers in text slots and numeric-string levels are still coerced; a `null` mark is dropped; custom nodes' own fields are kept.
+  ([long form](docs/changelog/unreleased.md#portable-text-write-check))
 
 ### Added
 
@@ -131,6 +140,9 @@ else.
 - **A stored rich text body in a malformed Portable Text shape (`marks` as a string, `children` that aren't spans, a `markDefs` entry that isn't an object) renders with the bad nodes repaired or skipped instead of a 500, and fires and indexes again (#2768).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#portable-text-render-guards))
+- **A headless write with a malformed Portable Text body is a `400` naming the path (`block_tree[0].body[0].children[1].marks must be a list of strings (got a string)`) instead of being stored and then failing every read; a plugin `:rich_text` field gets the same check and link scrub (#2768).**
+  Restore, promote, copy and import repair a stored body rather than refuse it, and a body whose top-level node isn't an object loads again.
+  ([long form](docs/changelog/unreleased.md#portable-text-write-check-fixed))
 - **The Redirects form shows a refused path as an error on its field instead of crashing the page (#2763).**
   An over-long path or locale, the root path, the target's own URL, a missing target and a write the policy refuses no longer lose the form.
   ([long form](docs/changelog/unreleased.md#redirects-refused-path))

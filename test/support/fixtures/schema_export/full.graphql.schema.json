@@ -64,6 +64,9 @@
           "$ref": "#/$defs/block_newsletter_signup"
         },
         {
+          "$ref": "#/$defs/block_note"
+        },
+        {
           "$ref": "#/$defs/block_product_card"
         },
         {
@@ -908,6 +911,43 @@
       "title": "NewsletterSignupBlock",
       "type": "object",
       "x-kiln-block": "newsletter_signup",
+      "x-kiln-block-version": 1
+    },
+    "block_note": {
+      "additionalProperties": false,
+      "properties": {
+        "_id": {
+          "description": "Stable block id, the addressing anchor for the visual-editing bridge. Absent on a block that has never been persisted.",
+          "format": "uuid",
+          "type": "string"
+        },
+        "_type": {
+          "const": "note"
+        },
+        "summary": {
+          "default": [],
+          "description": "Portable Text — the canonical rich-text representation (D12).",
+          "items": {
+            "$ref": "#/$defs/portable_text_block"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "_type"
+      ],
+      "title": "NoteBlock",
+      "type": "object",
+      "x-kiln-block": "note",
       "x-kiln-block-version": 1
     },
     "block_product_card": {
@@ -2459,6 +2499,7 @@
       "how_to",
       "image",
       "newsletter_signup",
+      "note",
       "product_card",
       "quote",
       "restricted_required",
