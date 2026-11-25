@@ -87,6 +87,13 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="experiment-goal-select"></a>
+
+- **The goal select on `/editor/experiments` takes effect (#2779).** The new-experiment form posts every field on each change, and the page's change handler matched on the content type first, so a change of the **Counts as a conversion** select was never read. Picking **A funnel is completed** left the form showing the **Goal form** picker, so the experiment was created with a funnel goal and no funnel, and could not be started. The same happened to **A page is reached**, whose target fields never appeared.
+  - **What changes.** One change reads both the content type and the goal, so the picked goal shows its own target field and the funnel, form or page picked there is saved with the experiment. The document list is reloaded only when the content type changes, not on every keystroke in **Name**.
+  - **Unchanged.** How a funnel goal is measured: a visitor converts on reaching the funnel's last step, as before. Who may create experiments, and which goal fields are saved for each goal.
+  - **No migration; rolling the pin back is safe.**
+
 <a id="redirects-refused-path"></a>
 
 - **The Redirects form shows a refused path as an error on its field instead of crashing the page (#2763).** `/editor/redirects` created a manual redirect with the bang `CMS.create_redirect!`, so anything the `Redirect` resource refused raised out of the handler: the page crashed, reconnected, and the typed form was gone. A From path longer than the URL limit was enough, as was a locale longer than the identifier limit sent by a client, or a submit from an admin whose site tier had been lowered since the page opened.
