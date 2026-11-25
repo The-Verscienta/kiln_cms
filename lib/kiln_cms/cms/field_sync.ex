@@ -1029,9 +1029,14 @@ defmodule KilnCMS.CMS.FieldSync do
   defp key_stored?(record) do
     case SyncFieldValues.target(record) do
       {:ok, table, filter, params} ->
+        # The live map or a pending working copy's held one (#2744): a
+        # delete or a narrowing rewrites both, so a value only a draft holds
+        # is data too.
         sql =
           "SELECT EXISTS (SELECT 1 FROM #{table} " <>
-            "WHERE custom_fields ? $1 AND custom_fields -> $1 <> 'null'::jsonb#{filter.(1)})"
+            "WHERE ((custom_fields ? $1 AND custom_fields -> $1 <> 'null'::jsonb) OR " <>
+            "((working_fields -> 'custom_fields') ? $1 AND " <>
+            "(working_fields -> 'custom_fields') -> $1 <> 'null'::jsonb))#{filter.(1)})"
 
         case Repo.query(sql, [record.name | params]) do
           {:ok, %{rows: [[true]]}} -> true

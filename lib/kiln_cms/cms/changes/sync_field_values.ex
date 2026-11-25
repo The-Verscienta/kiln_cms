@@ -79,15 +79,65 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   field to its item types and their sub-fields **without** passing through this
   module, which is safe because the values went with the key.
 
-  It runs `after_transaction` on success only — a write that rolls back syncs
-  nothing — and a failure is logged rather than raised: the definition write
-  itself has committed, and `ApplyCustomFields` still drops a stray key (with a
-  warning) as a backstop.
+  ## Working copies
+
+  A live record's pending working copy (`KilnCMS.CMS.WorkingCopy`) holds its
+  own `custom_fields` map in `working_fields`, and publishing it replaces the
+  live map. So every rewrite above reaches the held map too (#2744): a rename
+  left only on the live side would publish the old key, which no definition
+  declares any more, and lose the draft's value.
+
+    * **Same row, same statement.** Each operation is one SQL expression
+      (`rewrite/2`) applied to both maps of a row in a single `UPDATE`, which
+      reads the row as it was for both, so the copies cannot tear. A key only
+      the draft holds is rewritten too.
+    * **Re-base.** The copy's lost-update base (`working_base`) is the
+      fingerprint of the live map it was saved against. It moves with the
+      rewrite (`WorkingCopy.rebase/5`): a base that matched the held map now
+      matches the rewritten held map, one that matched the live map the
+      rewritten live map, and any other base — a real conflict — stays as it
+      is, so a rename never makes "Publish changes", a release or an
+      unpublish see a conflict nobody made, nor hides one somebody did. A copy
+      the rewrite leaves equal to the live map stops holding `custom_fields`;
+      `working_copy_at` stays, so the record still reads as pending until it
+      is published or discarded.
+    * **`lock_version`.** Every rewritten row's lock version moves, unlike
+      the other background writers (oEmbed resolves, media re-snapshots,
+      `mix kiln.fields.convert`, the event sweep): this write changes the set
+      of keys a form read earlier would write back, so a stale editor's save
+      or publish is refused as changed elsewhere rather than restoring the
+      old key. An API client holding an ETag gets one 412, and a release
+      go-live that read its records before the rename fails as stale and is
+      retried. `updated_at`, versions, firing and notifications are left
+      alone, as before.
+    * **Locks.** The statement locks the rows it rewrites; a transaction
+      advisory lock per table and org makes concurrent field syncs take turns
+      instead of locking rows in opposite orders.
+
+  Versions are not rewritten (they are hash-chained, #671): a version saved
+  before a rename still names the old key, and restoring it does not bring
+  that value back.
+
+  ## When, and what a failure does
+
+  The value sync runs `after_transaction` on success only — a write that rolls
+  back syncs nothing. On its own, the definition has committed by then: the
+  rewrite of both copies, its edges and the re-base run in one transaction,
+  and if that fails it is logged and the live values (and edges) are moved
+  alone, as they were before working copies were rewritten, leaving the
+  copies in their old shape. `ApplyCustomFields` still drops a stray key (with
+  a warning) as a backstop.
+
+  Inside a transaction the caller opened (`KilnCMS.CMS.JoinGraduation.retire/2`,
+  a `KilnCMS.CMS.FieldSync` import, an item type's own destroy with
+  `purge_items?`), the rewrite joins that transaction and a failure is
+  returned as the action's error, so the caller rolls back whole.
   """
   use Ash.Resource.Change
 
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.FlexiblePath
+  alias KilnCMS.CMS.WorkingCopy
 
   require Logger
 
@@ -161,17 +211,15 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   defp purge_requested?(changeset),
     do: Ash.Changeset.get_argument(changeset, :purge_items?) == true
 
-  # `sobelow_skip`: the statement comes from `FlexiblePath.update_sql/4`, whose
-  # only interpolations are the table name and `$n` placeholders; every name
-  # and value is a bound parameter.
-  # sobelow_skip ["SQL.Query"]
+  # Already inside the destroy's transaction (an `after_action`), so a
+  # failure is returned and rolls the destroy back. The held items go with the
+  # live ones (`rewrite_held/4`); the edges go after the commit, with the rest
+  # of the sync (`{:item_links, steps}`).
   defp purge_type_items(top, steps, definition) do
     with false <- KilnCMS.CMS.FieldDefinition.orphaned?(top),
          {:ok, table, filter, params} <- target(top) do
-      {sql, bound} = FlexiblePath.update_sql(table, steps, :purge_type, {filter, params})
-
-      case KilnCMS.Repo.query(sql, bound) do
-        {:ok, _result} -> {:ok, definition}
+      case rewrite_held({:item, steps, :purge_type}, top, {table, filter, params}, false) do
+        :ok -> {:ok, definition}
         {:error, error} -> {:error, error}
       end
     else
@@ -391,7 +439,11 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
 
   # An orphaned definition (#1770) governs no table: its content type is gone,
   # so there is no record of it left to purge, and nothing to warn about when
-  # an admin clears it away.
+  # an admin clears it away. An operation after one that failed inside an
+  # outer transaction would only fail again (Postgres refuses every statement
+  # of an aborted transaction), so the failure is passed on as it is.
+  defp run(_op, _definition, {:error, _reason} = failed), do: failed
+
   defp run(op, definition, result) do
     if KilnCMS.CMS.FieldDefinition.orphaned?(definition) do
       result
@@ -403,20 +455,235 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   defp run_on_target(op, definition, result) do
     case target(definition) do
       {:ok, table, filter, params} ->
-        execute(op, table, filter, params)
-
-        op
-        |> link_statements(table, filter, params)
-        |> Enum.each(fn {sql, bound, what} -> query(sql, bound, what) end)
+        case rewrite_values(op, definition, {table, filter, params}) do
+          :ok -> result
+          {:error, reason} -> {:error, reason}
+        end
 
       :error ->
         Logger.warning(
           "custom_fields: could not resolve the table for field " <>
             "#{inspect(definition.name)}; its stored values are now out of step with the registry"
         )
-    end
 
-    result
+        result
+    end
+  end
+
+  # See "Working copies" in the moduledoc for what is atomic with what.
+  #
+  # Inside a transaction someone else opened (`JoinGraduation.retire/2`, a
+  # `FieldSync` import; `purge_items/2` calls `rewrite_held/4` itself) the
+  # rewrite joins it, and a failure is returned for the caller's own error
+  # path: a nested `Repo.rollback/1` would doom the outer transaction without
+  # saying why, and a failed statement has aborted it anyway.
+  #
+  # Otherwise the definition has already committed. The rewrite runs in its
+  # own transaction; if it fails, the live values still move as they did
+  # before working copies were rewritten, so a malformed copy cannot strand
+  # every record of the type under a key no definition declares.
+  defp rewrite_values(op, definition, target) do
+    if KilnCMS.Repo.in_transaction?(),
+      do: rewrite_nested(op, definition, target),
+      else: rewrite_alone(op, definition, target)
+  end
+
+  defp rewrite_nested(op, definition, target) do
+    case rewrite_held(op, definition, target, true) do
+      :ok -> :ok
+      {:error, error} -> {:error, "could not sync (#{describe(op)} records): #{message(error)}"}
+    end
+  end
+
+  defp rewrite_alone(op, definition, target) do
+    KilnCMS.Repo.transaction(fn ->
+      with {:error, error} <- rewrite_held(op, definition, target, true),
+           do: KilnCMS.Repo.rollback(error)
+    end)
+    |> case do
+      {:ok, :ok} ->
+        :ok
+
+      {:error, error} ->
+        Logger.error(
+          "custom_fields: could not rewrite pending working copies (#{describe(op)} records): " <>
+            "#{message(error)}; moving the live values only, so those copies still hold the old shape"
+        )
+
+        live_only(op, target)
+    end
+  end
+
+  defp message(error) when is_exception(error), do: Exception.message(error)
+  defp message(error), do: inspect(error)
+
+  # What this module did before #2744: the live column and the edges, each
+  # statement on its own, a failure logged.
+  # `sobelow_skip`: the statements are `execute/4`'s and `link_statements/4`'s.
+  # sobelow_skip ["SQL.Query"]
+  defp live_only(op, {table, filter, params}) do
+    execute(op, table, filter, params)
+
+    op
+    |> link_statements(table, filter, params)
+    |> Enum.each(fn {sql, bound, what} -> query(sql, bound, what) end)
+  end
+
+  @held "(working_fields -> 'custom_fields')"
+
+  # The live map and the held one in one statement, then the edges, then the
+  # re-base of every copy the statement rewrote. Must run in a transaction.
+  defp rewrite_held(op, definition, {table, filter, params}, links?) do
+    statements = if links?, do: link_statements(op, table, filter, params), else: []
+
+    with {:ok, resource} <- target_resource(definition),
+         :ok <- lock(table, definition.org_id),
+         {:ok, rows} <- rewrite_both(op, table, filter, params),
+         :ok <- run_all(statements) do
+      rebase(rows, resource, table)
+    end
+  end
+
+  # Field syncs of one table and org take turns: each locks every row it
+  # rewrites, and two in opposite orders would otherwise deadlock.
+  defp lock(table, org_id) do
+    case KilnCMS.Repo.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+           "kiln:field_sync:#{table}:#{org_id}"
+         ]) do
+      {:ok, _result} -> :ok
+      {:error, error} -> {:error, error}
+    end
+  end
+
+  # `rewrite/2` over both maps of each row that carries what `op` changes in
+  # either: the live column, and the held copy when there is one. Every SET
+  # reads the row as it was, so the two copies are rewritten from the same
+  # pre-image, and `c` locks exactly the rows rewritten (`FOR UPDATE`; under
+  # READ COMMITTED a row a concurrent save changed is re-read and re-tested).
+  # `lock_version` moves on each: a form read before this statement must not
+  # write its pre-rewrite map back (see the moduledoc).
+  #
+  # Returns the pre- and post-images of the rows that hold a copy; the rest
+  # come back as bare ids, counted for the log.
+  defp rewrite_both({:item_links, _steps}, _table, _filter, _params), do: {:ok, []}
+
+  # sobelow_skip ["SQL.Query"]
+  defp rewrite_both(op, table, filter, params) do
+    {new_live, carries_live, bound} = rewrite(op, "custom_fields")
+    {new_held, carries_held, ^bound} = rewrite(op, @held)
+    holds = "working_fields ? 'custom_fields' AND #{carries_held}"
+
+    sql = """
+    WITH c AS (
+      SELECT id AS c_id, custom_fields AS l0, #{@held} AS h0, working_base AS b0
+        FROM #{table}
+       WHERE (#{carries_live} OR (#{holds}))#{filter.(length(bound))}
+       ORDER BY id
+         FOR UPDATE
+    ), u AS (
+      UPDATE #{table} AS t
+         SET custom_fields = CASE WHEN #{carries_live} THEN #{new_live} ELSE custom_fields END,
+             working_fields =
+               CASE WHEN #{holds}
+                    THEN jsonb_set(working_fields, '{custom_fields}', #{new_held})
+                    ELSE working_fields END,
+             lock_version = lock_version + 1
+        FROM c
+       WHERE t.id = c.c_id
+      RETURNING t.id, c.l0, c.h0, c.b0, t.custom_fields AS l1, t.working_fields -> 'custom_fields' AS h1
+    )
+    SELECT id, h0 IS NOT NULL,
+           CASE WHEN h0 IS NOT NULL THEN l0 END, h0, CASE WHEN h0 IS NOT NULL THEN b0 END,
+           CASE WHEN h0 IS NOT NULL THEN l1 END, h1
+      FROM u
+    """
+
+    case KilnCMS.Repo.query(sql, bound ++ params) do
+      {:ok, %{num_rows: 0}} ->
+        {:ok, []}
+
+      {:ok, %{num_rows: count, rows: rows}} ->
+        Logger.info("custom_fields: #{describe(op)} #{count} record(s)")
+        {:ok, for([id, true | images] <- rows, do: [id | images])}
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  # sobelow_skip ["SQL.Query"]
+  defp run_all(statements) do
+    Enum.reduce_while(statements, :ok, fn {sql, bound, what}, :ok ->
+      case KilnCMS.Repo.query(sql, bound) do
+        {:ok, result} ->
+          log_rows(result, what)
+          {:cont, :ok}
+
+        {:error, error} ->
+          {:halt, {:error, error}}
+      end
+    end)
+  end
+
+  defp log_rows(%{num_rows: 0}, _what), do: :ok
+
+  defp log_rows(%{num_rows: rows}, what),
+    do: Logger.info("custom_fields: #{what} #{rows} record(s)")
+
+  # Each rewritten copy's lost-update base follows the rewrite
+  # (`WorkingCopy.rebase/5`), and a copy left equal to the live map stops
+  # holding `custom_fields` at all — a copy holds only what differs. One
+  # statement for all of them.
+  # sobelow_skip ["SQL.Query"]
+  defp rebase(rows, resource, table) do
+    changes =
+      for [id, l0, h0, b0, l1, h1] <- rows,
+          change = rebased(resource, id, {l0, h0, b0}, {l1, h1}),
+          change != nil,
+          do: change
+
+    if changes == [] do
+      :ok
+    else
+      {ids, bases, drops} = unzip3(changes)
+
+      """
+      UPDATE #{table} AS t
+         SET working_fields =
+               CASE WHEN u.drop_held THEN t.working_fields - 'custom_fields'
+                    ELSE t.working_fields END,
+             working_base = u.new_base
+        FROM unnest($1::uuid[], $2::jsonb[], $3::boolean[]) AS u(id, new_base, drop_held)
+       WHERE t.id = u.id
+      """
+      |> KilnCMS.Repo.query([ids, bases, drops])
+      |> case do
+        {:ok, _result} -> :ok
+        {:error, error} -> {:error, error}
+      end
+    end
+  end
+
+  defp rebased(resource, id, {l0, h0, base}, {l1, h1}) do
+    rebased = WorkingCopy.rebase(resource, base, "custom_fields", {l0, h0}, {l1, h1})
+    drop? = fingerprint(resource, l1) == fingerprint(resource, h1)
+    rebased = if drop?, do: Map.delete(rebased, "custom_fields"), else: rebased
+
+    if drop? or rebased != base, do: {id, rebased, drop?}
+  end
+
+  defp fingerprint(resource, stored) do
+    WorkingCopy.fingerprint(
+      resource,
+      "custom_fields",
+      WorkingCopy.cast(resource, :custom_fields, stored)
+    )
+  end
+
+  defp unzip3(triples) do
+    triples
+    |> Enum.reduce({[], [], []}, fn {a, b, c}, {as, bs, cs} -> {[a | as], [b | bs], [c | cs]} end)
+    |> then(fn {as, bs, cs} -> {Enum.reverse(as), Enum.reverse(bs), Enum.reverse(cs)} end)
   end
 
   # One statement over the rows that carry what `op` rewrites: the rewrite
@@ -429,9 +696,9 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   # generates. Every actual *value* (the field names, the org, the type id) is
   # a bound parameter, which is what Sobelow cannot see from a `Repo.query/2`
   # handed a variable.
-  # sobelow_skip ["SQL.Query"]
   defp execute({:item_links, _steps}, _table, _filter, _params), do: :ok
 
+  # sobelow_skip ["SQL.Query"]
   defp execute(op, table, filter, params) do
     {new, carries, bound} = rewrite(op, "custom_fields")
 
@@ -459,6 +726,8 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
 
   defp describe({:rename_sub_field, field, from, to}),
     do: "moved sub-field #{inspect(from)} of #{inspect(field)} to #{inspect(to)} on"
+
+  defp describe({:item_links, steps}), do: "removed the item links of #{inspect(steps)} in"
 
   defp describe({:item, steps, op}),
     do: "rewrote the #{inspect(op_name(op))} items of #{inspect(steps)} in"
@@ -770,17 +1039,32 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
      [uuid(definition.org_id), uuid(id)]}
   end
 
-  def target(%{content_type: type} = definition) when not is_nil(type) do
-    case KilnCMS.CMS.ContentTypes.get(type, definition.org_id) do
-      %{resource: resource} ->
+  def target(definition) do
+    case target_resource(definition) do
+      {:ok, resource} ->
         {:ok, table(resource), fn n -> " AND org_id = $#{n + 1}" end, [uuid(definition.org_id)]}
 
-      _other ->
+      :error ->
         :error
     end
   end
 
-  def target(_definition), do: :error
+  @doc """
+  The resource whose table `target/1` names: `KilnCMS.CMS.Entry` for a
+  dynamic type's field, the content type's own resource otherwise, `:error`
+  when the owner no longer resolves.
+  """
+  @spec target_resource(KilnCMS.CMS.FieldDefinition.t()) :: {:ok, module()} | :error
+  def target_resource(%{type_definition_id: id}) when not is_nil(id), do: {:ok, KilnCMS.CMS.Entry}
+
+  def target_resource(%{content_type: type} = definition) when not is_nil(type) do
+    case KilnCMS.CMS.ContentTypes.get(type, definition.org_id) do
+      %{resource: resource} -> {:ok, resource}
+      _other -> :error
+    end
+  end
+
+  def target_resource(_definition), do: :error
 
   defp table(resource), do: AshPostgres.DataLayer.Info.table(resource)
 

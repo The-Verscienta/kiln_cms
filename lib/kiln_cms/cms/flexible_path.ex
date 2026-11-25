@@ -29,6 +29,9 @@ defmodule KilnCMS.CMS.FlexiblePath do
   alias KilnCMS.CMS.FieldDefinition
   alias KilnCMS.CMS.Validations.FlexibleField
 
+  # A pending working copy's held `custom_fields` (`KilnCMS.CMS.WorkingCopy`).
+  @held "(working_fields -> 'custom_fields')"
+
   @typedoc "`{flexible field name, item type name}`, outermost first."
   @type steps :: [{String.t(), String.t()}]
 
@@ -204,7 +207,9 @@ defmodule KilnCMS.CMS.FlexiblePath do
 
   @doc """
   Whether any stored item of the last step's type exists in `table` (under the
-  `filter` tail), reached through `steps`.
+  `filter` tail), reached through `steps` — in the live `custom_fields` or in
+  a pending working copy's held map (#2744): a delete removes both, so an item
+  only a draft holds is data too.
   """
   @spec items_exist?(String.t(), steps(), {function(), list()}) :: boolean()
   # `table` is a resource's own `postgres do table` (never user input); the
@@ -215,10 +220,11 @@ defmodule KilnCMS.CMS.FlexiblePath do
     {_params, jsonpath} = op_params(:purge_type, steps)
     bound = step_params(steps)
     path_index = length(bound) + 1
+    found = &"jsonb_path_exists(#{&1}, $#{path_index}::text::jsonpath, #{vars(length(steps))})"
 
     sql = """
     SELECT EXISTS (SELECT 1 FROM #{table}
-                    WHERE jsonb_path_exists(custom_fields, $#{path_index}::text::jsonpath, #{vars(length(steps))})#{filter.(path_index)})
+                    WHERE (#{found.("custom_fields")} OR #{found.(@held)})#{filter.(path_index)})
     """
 
     case KilnCMS.Repo.query(sql, bound ++ [jsonpath] ++ filter_params) do
@@ -231,8 +237,10 @@ defmodule KilnCMS.CMS.FlexiblePath do
   @doc """
   How many stored items of the last step's type exist in `table` (under the
   `filter` tail), reached through `steps`: the number `items_exist?/3` tests
-  for being non-zero. `:error` when the count cannot be read (it must not read
-  as "none").
+  for being non-zero. A record counts the larger of its live items and its
+  working copy's held ones — what a delete takes from that record — so an
+  item only a draft holds counts, and one in both copies counts once.
+  `:error` when the count cannot be read (it must not read as "none").
   """
   @spec count_items(String.t(), steps(), {function(), list()}) ::
           {:ok, non_neg_integer()} | :error
@@ -244,9 +252,13 @@ defmodule KilnCMS.CMS.FlexiblePath do
     bound = step_params(steps)
     path_index = length(bound) + 1
 
+    count = fn m ->
+      "(SELECT count(*) FROM jsonb_path_query(#{m}, $#{path_index}::text::jsonpath, #{vars(length(steps))}))"
+    end
+
     sql = """
-    SELECT count(*) FROM #{table} AS t,
-           LATERAL jsonb_path_query(t.custom_fields, $#{path_index}::text::jsonpath, #{vars(length(steps))}) AS item
+    SELECT COALESCE(sum(GREATEST(#{count.("t.custom_fields")}, #{count.("(t.working_fields -> 'custom_fields')")})), 0)::bigint
+      FROM #{table} AS t
      WHERE true#{filter.(path_index)}
     """
 

@@ -529,6 +529,16 @@ defmodule KilnCMS.CMS.ChangeSeverityTest do
       definition = define_field!(admin, "price")
       page = live_page(admin, %{custom_fields: %{"price" => "9"}})
       CMS.destroy_field_definition!(definition, actor: admin)
+
+      # A record still holding the retired key (the purge failed, or wrote
+      # before it). Read again afterwards: the purge moved the record's lock
+      # version (#2744).
+      KilnCMS.Repo.query!(
+        ~s(UPDATE pages SET custom_fields = custom_fields || '{"price": "9"}'::jsonb WHERE id = $1),
+        [Ecto.UUID.dump!(page.id)]
+      )
+
+      page = CMS.get_page!(page.id, authorize?: false, tenant: page.org_id)
       list_safety(admin, %{"page" => ["price"]})
 
       # The registry refuses a value for a key with no definition.
