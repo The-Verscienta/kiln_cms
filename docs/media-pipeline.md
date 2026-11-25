@@ -834,9 +834,10 @@ I/O-bound: it burns almost no CPU, so the rlimit essentially never fires while
 a stalled disk can hold the process for hours. And nothing outside ffmpeg could
 stop it either — neither `System.cmd/3` nor the enclosing Oban job timeout,
 because closing an Erlang port shuts the pipes but sends the child no signal.
-Only the OS pid a port hands back can be signalled, which is what
-`KilnCMS.ExternalCommand` exists to do. It is shared with the qpdf path, which
-needed the same thing first (#918).
+`KilnCMS.ExternalCommand` exists for that: it runs the program under a small
+`/bin/sh` wrapper that, when the port closes, SIGKILLs its own process group,
+so the program and anything it started stop with it (#2624). It is shared with
+the qpdf path, which needed the same thing first (#918).
 
 Two minutes, and that number is doing two jobs: a 500 MB stream copy finishes
 inside 100 seconds even at 10 MB/s, so anything past it is stuck rather than

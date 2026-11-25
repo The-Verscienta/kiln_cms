@@ -219,6 +219,10 @@ else.
   No migration. Open editors of the affected records see "changed elsewhere" once; an `If-Match` client gets one 412.
   ([long form](docs/changelog/unreleased.md#rename-rewrites-working-copies))
 
+- **A timeout, cancel or fence stops an external program (qpdf, ffmpeg/ffprobe, `pg_dump`, `pg_restore`, `tar`, `rclone`) by a process-group kill from a small `sh` wrapper, never a pid kill from the VM, so it can't signal an unrelated process that reused the pid ([#2624](https://github.com/The-Verscienta/kiln_cms/issues/2624)).**
+  The program's own children stop with it, and so does the program when the VM exits. No migration.
+  ([long form](docs/changelog/unreleased.md#external-command-group-kill))
+
 ## [1.12.1] - 2026-11-23
 
 Long form: [docs/changelog/v1.12.1.md](docs/changelog/v1.12.1.md) —
