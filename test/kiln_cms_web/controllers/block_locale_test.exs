@@ -74,8 +74,9 @@ defmodule KilnCMSWeb.BlockLocaleTest do
 
   defp text(html, selector), do: html |> one(selector) |> LazyHTML.text()
 
-  # A signed-in reader holding `audiences`, as `PaywallDeliveryTest` makes one:
-  # the session needs the token a real sign-in mints.
+  # A signed-in reader holding `audiences` on this site, as `PaywallDeliveryTest`
+  # makes one: the session needs the token a real sign-in mints, and the
+  # audiences sit on an active membership of the default org.
   defp member(audiences) do
     email = "locale-member-#{uniq()}@example.com"
 
@@ -83,8 +84,7 @@ defmodule KilnCMSWeb.BlockLocaleTest do
       email: email,
       hashed_password: Bcrypt.hash_pwd_salt("password123456"),
       confirmed_at: DateTime.utc_now(),
-      role: :viewer,
-      audiences: audiences
+      role: :viewer
     })
 
     strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
@@ -97,7 +97,7 @@ defmodule KilnCMSWeb.BlockLocaleTest do
         []
       )
 
-    user
+    KilnCMS.OrgFixtures.grant_audiences(user, audiences)
   end
 
   defp csp(conn), do: conn |> get_resp_header("content-security-policy") |> List.first()

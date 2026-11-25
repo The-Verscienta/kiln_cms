@@ -232,6 +232,9 @@ defmodule KilnCMS.Accounts do
       # post-deploy safety net and the `mix kiln.deprecations` report;
       # system-only, pass `authorize?: false`.
       define :list_legacy_audience_accounts, action: :legacy_audience_accounts
+      # Accounts whose account-wide audiences may sit on no site membership —
+      # the `mix kiln.deprecations` report; system-only, pass `authorize?: false`.
+      define :list_account_wide_audience_accounts, action: :account_wide_audience_accounts
       define :update_notification_prefs, action: :update_notification_prefs
       # The display name (the public byline) — self, or an admin; pass `actor:`.
       define :update_profile, action: :update_profile

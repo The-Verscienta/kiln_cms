@@ -24,8 +24,16 @@ defmodule KilnCMS.Deprecations do
     * queued jobs in a pre-0.12 argument shape — cancelled with a logged error
       when they run (`cancel_legacy_job/2`). Drain the queue before upgrading.
 
-  `report/0` lists both. `mix kiln.deprecations` prints it; in a release,
-  `bin/kiln_cms eval 'KilnCMS.Release.deprecations()'`.
+  `report/0` lists both, and one more thing for the operator to look at:
+  accounts with **account-wide audiences not on a site membership**
+  (`account_wide_audiences/0`). Gated delivery and the read policies take an
+  account's audiences from its active membership on the site being read, so a
+  value held only in `User.audiences` opens nothing. Nothing moves these: which
+  site each belongs on is the operator's call. Listed for information, they do
+  not make the task exit non-zero.
+
+  `mix kiln.deprecations` prints the report and exits non-zero only on the
+  first two; in a release, `bin/kiln_cms eval 'KilnCMS.Release.deprecations()'`.
   """
   import Ecto.Query, only: [from: 2]
 
@@ -93,10 +101,13 @@ defmodule KilnCMS.Deprecations do
       post-deploy worker does on its own).
     * `:legacy_jobs` — queued jobs of the three workers still in a pre-0.12
       shape. 1.0 cancels each one when it runs.
+    * `:account_wide_audiences` — accounts with account-wide audiences not on a
+      site membership (`account_wide_audiences/0`). Informational.
   """
   @spec report() :: %{
           legacy_audience_accounts: [Accounts.User.t()],
-          legacy_jobs: [%{id: integer(), worker: String.t(), state: String.t()}]
+          legacy_jobs: [%{id: integer(), worker: String.t(), state: String.t()}],
+          account_wide_audiences: [%{user: Accounts.User.t(), missing: [atom()]}]
         }
   def report do
     %{
@@ -104,8 +115,43 @@ defmodule KilnCMS.Deprecations do
       # eval` with no request and no actor. The action's policy admits only a
       # platform admin, and nothing here is reachable from a web surface.
       legacy_audience_accounts: Accounts.list_legacy_audience_accounts!(authorize?: false),
-      legacy_jobs: legacy_jobs()
+      legacy_jobs: legacy_jobs(),
+      account_wide_audiences: account_wide_audiences()
     }
+  end
+
+  @doc """
+  Accounts with **account-wide audiences not on a site membership**: each
+  account that holds a membership and whose `User.audiences` holds a value none
+  of its `:active` memberships carries, with those values under `:missing`.
+
+  Gated delivery and the read policies read an account's audiences from its
+  active membership on the site being read (`KilnCMS.Accounts.Scoping.audiences/2`),
+  so these values grant nothing anywhere. They are typically audiences set
+  from the console before it wrote them per site (#1646), or set by an admin and
+  kept by billing. Grant them on the site they belong to from the console's
+  audiences panel, or with `KilnCMS.Accounts.SiteAudiences.set/4`.
+
+  Membership-less accounts are not listed here: they are
+  `:legacy_audience_accounts`, which `migrate_legacy_audiences/0` moves. Erased
+  accounts are left out; they read nothing gated.
+  """
+  @spec account_wide_audiences() :: [%{user: Accounts.User.t(), missing: [atom()]}]
+  def account_wide_audiences do
+    # authorize?: false — the same operator tooling as `report/0`, with no
+    # actor; it reads the accounts and their memberships and writes nothing.
+    Accounts.list_account_wide_audience_accounts!(authorize?: false)
+    |> Enum.flat_map(fn user ->
+      on_memberships =
+        user.org_memberships
+        |> Enum.filter(&(&1.status == :active))
+        |> Enum.flat_map(&(&1.audiences || []))
+
+      case Enum.uniq(user.audiences) -- on_memberships do
+        [] -> []
+        missing -> [%{user: user, missing: Enum.sort(missing)}]
+      end
+    end)
   end
 
   defp legacy_jobs do
@@ -230,6 +276,26 @@ defmodule KilnCMS.Deprecations do
       )
     end
 
+    print_account_wide_audiences(report.account_wide_audiences, shell)
+
     if accounts == [] and jobs == [], do: :ok, else: {:pending, report}
+  end
+
+  defp print_account_wide_audiences(entries, shell) do
+    shell.("Accounts with account-wide audiences not on a site membership: #{length(entries)}")
+
+    Enum.each(entries, fn %{user: user, missing: missing} ->
+      shell.("  #{user.email}  #{Enum.map_join(missing, ", ", &to_string/1)}")
+    end)
+
+    if entries != [] do
+      shell.(
+        "  Gated content reads audiences from the account's active membership on each site, " <>
+          "so these grant nothing. Grant them on the site they belong to from the console's " <>
+          "audiences panel (Accounts), or from a remote console with " <>
+          "KilnCMS.Accounts.SiteAudiences.set(user, org_id, audiences, actor: admin). " <>
+          "Informational: this does not make the check fail."
+      )
+    end
   end
 end
