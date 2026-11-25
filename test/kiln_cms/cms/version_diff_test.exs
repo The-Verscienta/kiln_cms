@@ -109,6 +109,69 @@ defmodule KilnCMS.CMS.VersionDiffTest do
       refute Map.has_key?(entries, "kept")
     end
 
+    test "a flexible field diffs per item, keyed by _id (#2282)" do
+      item = fn id, type, extra -> Map.merge(%{"_id" => id, "_type" => type}, extra) end
+      a = item.("a", "hero", %{"headline" => "One", "_settings" => %{"bg" => "dark"}})
+      b = item.("b", "quote", %{"text" => "Q"})
+      c = item.("c", "quote", %{"text" => "Gone"})
+      d = item.("d", "hero", %{"headline" => "New"})
+
+      items = fn old, new ->
+        diff =
+          VersionDiff.between(
+            %{"custom_fields" => %{"s" => old}},
+            %{"custom_fields" => %{"s" => new}},
+            KilnCMS.CMS.Page
+          )
+
+        [entry] = find_field(diff, :custom_fields).entries
+        entry.items
+      end
+
+      a2 = %{a | "_settings" => %{"bg" => "light"}} |> Map.put("headline", "Two")
+
+      result = items.([a, b, c], [a2, b, d])
+      by_id = Map.new(result, &{&1.id, &1})
+
+      assert %{status: :changed, changed_keys: ["headline", "settings.bg"], type: "hero"} =
+               by_id["a"]
+
+      assert %{status: :unchanged, moved?: false} = by_id["b"]
+      assert %{status: :removed, new: nil} = by_id["c"]
+      assert %{status: :added, old: nil, new_index: 2} = by_id["d"]
+
+      # Reorder only: still an entry, nothing changed but the position.
+      reordered = items.([a, b, c], [c, a, b]) |> Map.new(&{&1.id, &1})
+      assert Enum.all?(Map.values(reordered), &(&1.status == :unchanged))
+      assert Enum.any?(Map.values(reordered), & &1.moved?)
+
+      # The type of an item changing under the same _id is a change.
+      retyped = items.([b], [%{b | "_type" => "hero"}])
+      assert [%{status: :changed, type: "hero", changed_keys: ["_type"]}] = retyped
+
+      # Emptied and filled from nothing.
+      assert [%{status: :added}] = items.([], [a])
+      assert [%{status: :removed}] = items.([a], [])
+    end
+
+    test "lists that are not flexible items diff as one value (#2282)" do
+      rows = [%{"x" => 1}, %{"x" => 2}]
+      snapshots = [%{"id" => "i", "title" => "T", "_id" => "1"}]
+      dup = [%{"_id" => "z", "_type" => "t"}, %{"_id" => "z", "_type" => "t", "v" => 1}]
+
+      for {old, new} <- [{rows, [%{"x" => 1}]}, {snapshots, []}, {dup, []}] do
+        diff =
+          VersionDiff.between(
+            %{"custom_fields" => %{"k" => old}},
+            %{"custom_fields" => %{"k" => new}},
+            KilnCMS.CMS.Page
+          )
+
+        assert [entry] = find_field(diff, :custom_fields).entries
+        refute Map.has_key?(entry, :items)
+      end
+    end
+
     test "custom_fields entries tell nil, empty string and a missing key apart (#2294)" do
       diff =
         VersionDiff.between(

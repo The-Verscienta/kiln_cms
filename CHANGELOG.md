@@ -68,6 +68,10 @@ else.
   No migration.
   ([long form](docs/changelog/unreleased.md#condition-text-ops))
 
+- **A flexible field can be searchable: search finds a record by its items' text (never `_id`, `_type`, `_settings`, media or reference values), and version compare and restore preview list each added, removed, changed or moved item (#2282, PR 6).**
+  No migration. Flipping the flag re-fires published documents.
+  ([long form](docs/changelog/unreleased.md#flexible-search-diff))
+
 - **A custom field's text can go in the fired AI-readable outputs: tick "Include in AI-readable outputs" on a text, group or flexible field and its text joins the `:llm` Markdown and a `hasPart` list on the `:json_ld` node (issue 2282, last PR of the flexible-content plan). Run `mix ash.migrate`; off by default; rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#deliver-llm))
 

@@ -18,8 +18,9 @@ defmodule KilnCMS.CMS.Validations.FlexibleField do
 
   A **flexible field** (`field_type: :flexible`) takes none of the options that
   only fit a plain value, so each is refused rather than silently ignored:
-  `searchable` and `names_record` (until search skips an item's `_id` and
-  `_type`, they would index them), `private`, a `default`, and being a setting.
+  `names_record`, `private`, a `default`, and being a setting. `searchable` is
+  allowed: `KilnCMS.CMS.SearchableFields` reads an item's sub-fields by their
+  definitions and never its `_id`, `_type` or `_settings`.
   `unique` is refused by `Validations.FieldConstraints` (no constraint applies
   to a flexible field); the other exclusions — no list column, no
   index or `custom_filter` leaf — are the readers' (`ListFields`,
@@ -136,8 +137,6 @@ defmodule KilnCMS.CMS.Validations.FlexibleField do
 
   defp refused do
     [
-      {:searchable, &(&1 == true),
-       "a flexible field can't be searchable: search would index each item's _id and _type"},
       {:names_record, &(&1 == true), "a flexible field can't be a name of the record"},
       {:private, &(&1 == true), "a flexible field can't be private"},
       {:default, &(&1 not in [nil, ""]), "a flexible field takes no default value"},

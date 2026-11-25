@@ -243,6 +243,78 @@ defmodule KilnCMSWeb.ContentEditorCompareTest do
     assert removed =~ "Removed"
   end
 
+  test "a flexible field compares item by item (#2282)", %{conn: conn} do
+    admin = authed_user(:admin)
+
+    define = fn attrs -> CMS.create_field_definition!(attrs, actor: admin) end
+
+    flexible =
+      define.(%{
+        content_type: :page,
+        name: "cmp_sections",
+        label: "Sections",
+        field_type: :flexible
+      })
+
+    hero =
+      define.(%{name: "hero", label: "Hero banner", field_type: :group, flex_of_id: flexible.id})
+
+    define.(%{name: "headline", label: "Headline", group_of_id: hero.id, field_type: :string})
+
+    page =
+      CMS.create_page!(
+        %{
+          title: "Flex",
+          slug: slug(),
+          custom_fields: %{
+            "cmp_sections" => [
+              %{"_type" => "hero", "headline" => "First"},
+              %{"_type" => "hero", "headline" => "Second"}
+            ]
+          }
+        },
+        actor: admin
+      )
+
+    [one, two] = page.custom_fields["cmp_sections"]
+
+    page =
+      CMS.update_page!(
+        page,
+        %{
+          custom_fields: %{
+            "cmp_sections" => [
+              %{"_type" => "hero", "headline" => "Third"},
+              %{one | "headline" => "First, edited"}
+            ]
+          }
+        },
+        actor: admin
+      )
+
+    [first, second] = versions(page, admin)
+
+    lv = open_editor(conn, admin, page)
+    pick(lv, first.id)
+    pick(lv, second.id)
+    render_click(lv, "open_compare", %{})
+
+    row = fn id -> lv |> element(~s{[data-item-id="#{id}"]}) |> render() end
+    edited = row.(one["_id"])
+    assert edited =~ "Changed"
+    assert edited =~ "Hero banner: Headline: First"
+    assert edited =~ "First, edited"
+
+    removed = row.(two["_id"])
+    assert removed =~ "Removed"
+    assert removed =~ "Second"
+
+    html = lv |> element(~s{[data-custom-field="cmp_sections"]}) |> render()
+    assert html =~ "Added"
+    assert html =~ "Third"
+    refute html =~ "_type"
+  end
+
   test "a retired definition still renders, under its raw key", %{conn: conn} do
     admin = authed_user(:admin)
 
