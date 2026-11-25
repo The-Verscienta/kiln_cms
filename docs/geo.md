@@ -67,6 +67,19 @@ block module may export an optional `to_markdown/1` for a richer rendering.
   artifact until re-fired — run the re-fire sweep (below) for full coverage;
   the delivery route answers 503-retryable for a missing artifact as usual.
 
+### Custom fields on the `:llm` surface
+
+After the blocks, the `:llm` Markdown carries one `##` section for each custom
+field an admin opted in with **Include in AI-readable outputs**
+(`deliver_llm`): a text field as a paragraph, a group as one
+`**Label:** text` line per text sub-field, and a flexible field as one `###`
+heading per item followed by its lines. Nothing is added until a field is
+opted in, so existing artifacts do not change. The same entries feed the
+`:json_ld` `hasPart` below. A section is capped at 5,000 characters. Steps and
+what is included are in
+[Put custom field text in the AI-readable outputs](extending-content.md#put-custom-field-text-in-the-ai-readable-outputs);
+the reasoning is [ADR 0082](decisions/0082-a-fields-text-reaches-the-llm-and-json-ld-artifacts-only-when-its-container-opts-in-with-deliver-llm.md).
+
 ## Expanded schema.org / JSON-LD (Phase 3, shipped)
 
 The fired `:json_ld` surface goes well beyond the original bare `Article`:
@@ -128,6 +141,18 @@ for everything else that folds.
 
 Same deploy note as the `:llm` surface: content published before this feature
 carries the old JSON-LD until re-fired.
+
+## Opted-in custom fields on the `:json_ld` surface
+
+The fired `:json_ld` main node carries `hasPart`, a list of schema.org
+`WebPageElement`s (`name`, `text`), for the custom fields opted in with
+**Include in AI-readable outputs**: one per text or group field, and one per
+top-level item of a flexible field, named by its item type. At most 50
+elements of 5,000 characters each. An Event-family type has none. Kiln's own
+served pages keep their existing inline JSON-LD; this is a property of the
+fired artifact. See
+[Put custom field text in the AI-readable outputs](extending-content.md#put-custom-field-text-in-the-ai-readable-outputs)
+and [ADR 0082](decisions/0082-a-fields-text-reaches-the-llm-and-json-ld-artifacts-only-when-its-container-opts-in-with-deliver-llm.md).
 
 ## Re-fire sweep
 

@@ -657,8 +657,8 @@ defmodule KilnCMS.Firing.Engine do
   end
 
   # Clean chunked Markdown for LLM/answer-engine extraction (#357, GEO).
-  defp compose(document, typed, _custom, :llm) do
-    %{"markdown" => KilnCMS.Firing.LlmMarkdown.compose(document, typed)}
+  defp compose(document, typed, custom, :llm) do
+    %{"markdown" => KilnCMS.Firing.LlmMarkdown.compose(document, typed, custom)}
   end
 
   defp compose(document, typed, custom, :json_ld) do
@@ -681,6 +681,8 @@ defmodule KilnCMS.Firing.Engine do
       # A byline (#2044): the `:reference` fields whose definition names a
       # schema.org property, one `Person` per readable target.
       |> put_bylines(custom, document)
+      # The text of the custom fields an admin opted in (`deliver_llm`, #2282).
+      |> put_answer_parts(custom)
 
     # Structured data falls out of the typed blocks (decision D9): each block that
     # has a schema.org representation contributes a node to the document @graph. A
@@ -722,6 +724,21 @@ defmodule KilnCMS.Firing.Engine do
           node,
           KilnCMS.Firing.Bylines.people(custom, Map.get(document, :org_id))
         )
+  end
+
+  # `hasPart` is a CreativeWork property, so an Event carries none, by the
+  # rule of `articleBody` and the bylines. Nothing else in the fired node sets
+  # it today; a value already there is kept, and ours added after it.
+  defp put_answer_parts(%{"@type" => type} = node, custom) do
+    with false <- KilnCMS.Firing.SchemaOrg.event_type?(type),
+         [_ | _] = elements <-
+           custom
+           |> KilnCMS.Firing.AnswerText.entries()
+           |> KilnCMS.Firing.AnswerText.web_page_elements() do
+      Map.update(node, "hasPart", elements, &(List.wrap(&1) ++ elements))
+    else
+      _event_or_none -> node
+    end
   end
 
   # The document's plain text, from the already-typed blocks. `:json_ld` wants

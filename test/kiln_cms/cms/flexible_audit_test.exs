@@ -43,6 +43,7 @@ defmodule KilnCMS.CMS.FlexibleAuditTest do
         private: true,
         deliver_plain: true,
         deliver_portable: true,
+        deliver_llm: true,
         multiple: false,
         options: [],
         allow_custom: false
@@ -76,6 +77,21 @@ defmodule KilnCMS.CMS.FlexibleAuditTest do
 
       assert PlainFields.names(defs) == ["note"]
       assert PortableFields.names(defs) == ["note"]
+    end
+
+    test "the :llm and :json_ld opt-in reads only top-level rows" do
+      custom = %{
+        definitions: [
+          ghost("shadow"),
+          top("shadow", %{private: false, field_type: :string, position: 0})
+        ],
+        values: %{"shadow" => "hello"}
+      }
+
+      assert [%{label: "shadow", parts: [{:text, "shadow", "hello"}]}] =
+               KilnCMS.Firing.AnswerText.entries(custom)
+
+      assert KilnCMS.Firing.AnswerText.entries(%{custom | definitions: [ghost("shadow")]}) == []
     end
 
     test "FieldAccess neither hides nor names an item-type row" do

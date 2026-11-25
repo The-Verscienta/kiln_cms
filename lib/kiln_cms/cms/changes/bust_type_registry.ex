@@ -63,6 +63,7 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
              replain?(changeset, record) or
              reconvert?(changeset, record) or
              rebyline?(changeset, record) or
+             llm_changed?(changeset, record) or
              item_type_destroyed?(changeset, record) or
              Ash.Changeset.changing_attribute?(changeset, :private) do
           # Determine which type this field belongs to and sweep it
@@ -159,6 +160,43 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   defp reconvert?(changeset, record) do
     Ash.Changeset.changing_attribute?(changeset, :deliver_portable) or
       (changeset.action_type == :destroy and Map.get(record, :deliver_portable) == true)
+  end
+
+  # A `deliver_llm` flip adds or drops the field's text on the fired `:llm` and
+  # `:json_ld` artifacts (`KilnCMS.Firing.AnswerText`, #2282), and deleting a
+  # flagged field drops it. The text those artifacts carry is also made of
+  # labels, order and which sub-fields count, so for a flagged top-level field
+  # a change to its `label` or `position` re-fires too, as does a nested row
+  # (sub-field, item type, an item type's sub-field) whose owner chain reaches
+  # a flagged field when it is created, deleted, or changes its `label`,
+  # `position`, `item_setting` or `field_type`. A nested write on an unflagged
+  # owner is no business of the artifacts: it costs one owner read and no sweep.
+  @llm_shaping [:label, :position, :item_setting, :field_type]
+
+  defp llm_changed?(changeset, record) do
+    cond do
+      Ash.Changeset.changing_attribute?(changeset, :deliver_llm) ->
+        true
+
+      changeset.action_type == :destroy and Map.get(record, :deliver_llm) == true ->
+        true
+
+      KilnCMS.CMS.FieldDefinition.top_level?(record) ->
+        Map.get(record, :deliver_llm) == true and
+          Enum.any?([:label, :position], &Ash.Changeset.changing_attribute?(changeset, &1))
+
+      true ->
+        (changeset.action_type in [:create, :destroy] or
+           Enum.any?(@llm_shaping, &Ash.Changeset.changing_attribute?(changeset, &1))) and
+          flagged_owner?(record)
+    end
+  end
+
+  defp flagged_owner?(record) do
+    case KilnCMS.CMS.FlexiblePath.owner(record, record.org_id) do
+      %{deliver_llm: true} -> true
+      _unflagged_or_broken -> false
+    end
   end
 
   # A `schema_org_property` change adds or drops `author` / `contributor` on
