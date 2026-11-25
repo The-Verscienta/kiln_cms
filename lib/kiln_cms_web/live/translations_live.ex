@@ -24,10 +24,14 @@ defmodule KilnCMSWeb.TranslationsLive do
   alias KilnCMS.CMS.Xliff
   alias KilnCMS.I18n
 
-  # Rows scanned per content type — recent content first; a site with more
-  # translated slugs than this sees the newest window, which is what a
-  # translation team works from.
-  @per_type_limit 200
+  # Slugs shown per content type — recently edited content first; a site with
+  # more translated slugs than this sees the newest window, which is what a
+  # translation team works from. The window is on slugs, not records (#2761):
+  # a record window cut a slug's variants in two, so a translation past the
+  # cut showed as missing and a source past it disabled the export. Runtime
+  # (not compile_env) so a test can lower it without a recompile.
+  defp per_type_limit,
+    do: :kiln_cms |> Application.get_env(__MODULE__, []) |> Keyword.get(:per_type_limit, 200)
 
   # `KilnCMS.CMS.Xliff` owns what an export is, cap included — the link would
   # 400 past it, and this page must not offer a download that fails on click.
@@ -291,20 +295,47 @@ defmodule KilnCMSWeb.TranslationsLive do
       ContentTypes.all_for_org(org.id)
       |> Enum.flat_map(fn ct ->
         ct
-        |> ContentTypes.list!(
-          actor: actor,
-          tenant: org,
-          query: [
-            select: [:id, :title, :slug, :state, :locale, :updated_at, :inserted_at],
-            sort: [updated_at: :desc],
-            limit: @per_type_limit
-          ]
-        )
+        |> list_variants(actor: actor, tenant: org)
         |> rows(ct, default, org, may_author?(actor, org.id, ct))
       end)
       |> Enum.sort_by(& &1.updated_at, {:desc, DateTime})
 
     assign(socket, :rows, rows)
+  end
+
+  # Every readable variant of the type's newest `per_type_limit/0` slugs. Two
+  # reads under the same actor and tenant: the window first, one row per slug
+  # keyed by its most recent edit in any locale (the order the table sorts
+  # rows by, and a slug that exists only in a non-default locale still counts),
+  # then all variants of those slugs, so no row is ever missing a locale it has.
+  defp list_variants(ct, scope) do
+    slugs =
+      ct
+      |> ContentTypes.list!(
+        Keyword.put(scope, :query,
+          select: [:id, :slug, :updated_at],
+          distinct: [:slug],
+          distinct_sort: [updated_at: :desc, id: :desc],
+          sort: [updated_at: :desc, id: :desc],
+          limit: per_type_limit()
+        )
+      )
+      |> Enum.map(& &1.slug)
+
+    case slugs do
+      [] ->
+        []
+
+      slugs ->
+        ContentTypes.list!(
+          ct,
+          Keyword.put(scope, :query,
+            filter: [slug: [in: slugs]],
+            select: [:id, :title, :slug, :state, :locale, :updated_at, :inserted_at],
+            sort: [updated_at: :desc]
+          )
+        )
+    end
   end
 
   # The rows for one type. Staleness is judged by each variant's last edit,

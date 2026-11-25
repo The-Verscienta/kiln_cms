@@ -79,6 +79,13 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="translations-slug-window"></a>
+
+- **The translations dashboard's window is on slugs, not records (#2761).** `/editor/translations` read the 200 most recently updated records of each content type and only then grouped them by slug, so a slug could land in the window with some of its variants cut off. A translation older than the cut showed as **+ missing**, and clicking it failed with "Couldn't create that translation." because the variant already existed. When the default-locale source was the variant cut, the row was represented by a translation and its export checkbox was disabled with "No en source to translate from".
+  - **What the window is now.** Per content type, the 200 slugs most recently edited in any locale, in the order the table sorts its rows; a slug that exists only in a non-default locale takes a place like any other. Every variant of those slugs is then loaded, so each row shows all the locales it has and is represented by its default-locale source when there is one.
+  - **Unchanged.** Both reads run as the signed-in editor on the current site, exactly as the single read did, and the XLIFF export still loads the ticked records by id.
+  - **No migration; rolling the pin back is safe.**
+
 <a id="structure-trashed-parent"></a>
 
 - **The structure page shows documents whose parent is in the trash (#2760).** Trashing a document is a soft delete that leaves its children's `parent_id` pointing at it, and `/editor/structure/:type` does not load trashed documents. The tree was drawn from the top level down, so those children, and everything beneath them, were grouped under a parent that was never drawn: they could not be seen, reordered or outdented, yet a published one still counted toward "in no menu". A type whose remaining documents were all in that state showed an empty page.
@@ -253,3 +260,9 @@ carries the reasoning.
   - **What the links carry now.** `?locale=<the record's locale>`, alongside `focus=` on a block link. The route stays keyed on slug and locale rather than record id, because the visual-editing bridge (`priv/static/bridge.js`) and its stega payloads already address the editor that way and send the locale.
   - **An absent locale is no longer a guess.** A URL without `?locale=` (a hand-typed one, or an older bridge) still opens the default-locale record when that is the only variant of the slug you can read. When the slug has variants in more than one locale, the editor sends you back to `/editor` with "This content exists in more than one language" instead of picking the default.
   - **No migration; rolling the pin back is safe.** An older release opens the default-locale variant again.
+
+<a id="presentation-edit-after-save"></a>
+
+- **The Presentation console's edit pane keeps the saved text after a Save (#2759).** Save rebuilds the open text or rich-text region so the next edit starts from what was stored, but it rebuilt it from a copy of the block taken when the pane was opened. The region showed the text from before the save, and because the region's script sends its whole text whenever typing pauses, one more character put the old text back, and the next Save wrote it over the edit just saved.
+  - **What happens now.** After a Save the pane is re-read from the saved record: a text or rich-text block shows its stored value and stays open for more typing, and a title or excerpt input shows the saved value. A failed or conflicting Save leaves the pane as it was; Reload still closes it.
+  - **No migration; rolling the pin back is safe.** An older release shows the pre-save text again.

@@ -234,6 +234,70 @@ defmodule KilnCMSWeb.PresentationLiveTest do
     assert CMS.get_post!(post.id, actor: admin).title == "Retitled via console"
   end
 
+  # #2759: Save remounts the region (new id, `phx-update="ignore"`), and the
+  # InlineText hook pushes whatever text that remount drew. Drawn from the
+  # pre-save pane, it pushed the old text back on the next keystroke.
+  describe "editing on after a Save" do
+    test "the remounted region holds the saved text, so the next keystroke extends it",
+         %{conn: conn} do
+      admin = user(:admin)
+      post = post_with_heading(admin)
+      block_id = heading_block_id(post)
+
+      {:ok, lv, _html} =
+        conn |> log_in(admin) |> live(~p"/editor/presentation/post/#{post.slug}")
+
+      render_hook(lv, "edit_field", %{
+        "type" => "post",
+        "id" => post.id,
+        "block" => block_id,
+        "field" => "text"
+      })
+
+      render_hook(lv, "update_block", %{"id" => block_id, "value" => "Saved heading"})
+      render_hook(lv, "save", %{})
+
+      # The pane stays open on the remounted region, which is what the hook
+      # reads its next push from.
+      region_text = region_text(lv, block_id)
+      assert region_text == "Saved heading"
+
+      render_hook(lv, "update_block", %{"id" => block_id, "value" => region_text <> "!"})
+      render_hook(lv, "save", %{})
+
+      updated = CMS.get_post!(post.id, actor: admin)
+      assert updated.blocks |> hd() |> Map.get(:value) |> Map.get(:text) == "Saved heading!"
+    end
+
+    test "the title input shows the saved title after a Save", %{conn: conn} do
+      admin = user(:admin)
+      post = post_with_heading(admin)
+
+      {:ok, lv, _html} =
+        conn |> log_in(admin) |> live(~p"/editor/presentation/post/#{post.slug}")
+
+      render_hook(lv, "edit_field", %{"type" => "post", "id" => post.id, "field" => "title"})
+      render_hook(lv, "update_scalar", %{"field" => "title", "value" => "Saved title"})
+      render_hook(lv, "save", %{})
+
+      assert lv |> element(~s(#scalar-edit-form input[name="value"])) |> render() =~
+               ~s(value="Saved title")
+
+      render_hook(lv, "update_scalar", %{"field" => "title", "value" => "Saved title!"})
+      render_hook(lv, "save", %{})
+
+      assert CMS.get_post!(post.id, actor: admin).title == "Saved title!"
+    end
+  end
+
+  defp region_text(lv, block_id) do
+    lv
+    |> element(~s([data-kiln-block-id="#{block_id}"]))
+    |> render()
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.text()
+  end
+
   # #2332: a post someone moved to the trash while the console had it open.
   describe "the record is moved to the trash while open" do
     @gone "This content was moved to the trash or deleted"

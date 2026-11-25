@@ -93,6 +93,10 @@ else.
 
 ### Fixed
 
+- **The translations dashboard shows every variant of the slugs it lists: an older translation no longer shows as "missing" (and fails to create), and a slug whose default-locale source is older than its translations can still be exported (#2761).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#translations-slug-window))
+
 - **A document whose parent is in the trash shows on the structure page again, at the top level and marked "Parent unavailable", and can be reordered, indented or outdented; it was invisible (#2760).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#structure-trashed-parent))
@@ -154,6 +158,10 @@ else.
 - **The daily health sweep now raises a `health_overdue` or `health_expired` event for every stale record, not the same 500 per content type each day (#2738).**
   Its telemetry counts every record too. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#health-sweep-every-record))
+
+- **After a Save in the Presentation console, the open text block shows the saved text; it showed the text from before the save, so the next keystroke and Save wrote that old text back over the edit (#2759).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#presentation-edit-after-save))
 
 ## [1.12.1] - 2026-11-23
 
