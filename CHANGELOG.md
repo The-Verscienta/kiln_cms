@@ -67,6 +67,8 @@ else.
   ([long form](docs/changelog/unreleased.md#rename-rewrites-working-copies-upgrade))
 - **On 1.9.0 to 1.12.1, saving an account's audiences panel for a waiting or rejected registration could remove audiences stored on it, even unchanged, so those registrations and accounts approved since may lack audiences you gave them (#2783). Check and re-tick them; KilnCMS can't restore them, though billing-managed audiences return on the next billing change.**
   ([long form](docs/changelog/unreleased.md#audiences-panel-stored-upgrade))
+- **Gated HTML pages now follow the reader's active membership on that site, not account-wide audiences (GHSA-4m98-m3c9-7cwx). Run `mix kiln.deprecations` to list account-wide audiences that are not on a site membership, and grant them per site.**
+  ([GHSA-4m98-m3c9-7cwx](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-4m98-m3c9-7cwx) · [long form](docs/changelog/unreleased.md#delivery-site-membership-audiences-upgrade))
 
 ### Added
 
@@ -219,9 +221,18 @@ else.
   No migration. Open editors of the affected records see "changed elsewhere" once; an `If-Match` client gets one 412.
   ([long form](docs/changelog/unreleased.md#rename-rewrites-working-copies))
 
-- **A timeout, cancel or fence stops an external program (qpdf, ffmpeg/ffprobe, `pg_dump`, `pg_restore`, `tar`, `rclone`) by a process-group kill from a small `sh` wrapper, never a pid kill from the VM, so it can't signal an unrelated process that reused the pid ([#2624](https://github.com/The-Verscienta/kiln_cms/issues/2624)).**
-  The program's own children stop with it, and so does the program when the VM exits. No migration.
-  ([long form](docs/changelog/unreleased.md#external-command-group-kill))
+### Security
+
+- **A deadline, a canceled or fenced backup step, or the death of its job now stops an external program (qpdf, ffmpeg/ffprobe, `pg_dump`, `pg_restore`, `tar`, `rclone`, `df`) in the official image, which has no `kill` binary, and the program's own children with it; affects 0.6.0 to 1.12.1 (GHSA-h3hm-8ff5-wr4v).**
+  The kill is a process-group kill from a fixed `/bin/sh` wrapper, so it never signals a reused pid (#2624). A custom entrypoint that leaves another program as PID 1 should use an init such as `tini`.
+  ([GHSA-h3hm-8ff5-wr4v](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-h3hm-8ff5-wr4v) · [#2624](https://github.com/The-Verscienta/kiln_cms/issues/2624) · [long form](docs/changelog/unreleased.md#external-command-group-kill))
+
+- **Gated HTML pages, teasers and paywalls now take the reader's audiences from their active membership on that site, as the API and the read policies do; affects 0.5.0 to 1.12.1 (GHSA-4m98-m3c9-7cwx).**
+  Audiences granted per site in the console now unlock HTML pages too. See the upgrade note.
+  ([GHSA-4m98-m3c9-7cwx](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-4m98-m3c9-7cwx) · [long form](docs/changelog/unreleased.md#delivery-site-membership-audiences))
+
+- **The content editor's Markdown mode writes a Portable Text list item at most 10 levels deep, however large its stored `level`; affects 1.0.0 to 1.12.1 (GHSA-ffw4-2w7m-xh53).**
+  ([GHSA-ffw4-2w7m-xh53](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-ffw4-2w7m-xh53) · [long form](docs/changelog/unreleased.md#portable-text-list-level-cap))
 
 ## [1.12.1] - 2026-11-23
 

@@ -36,6 +36,14 @@ carries the reasoning.
   - **What can't be restored.** KilnCMS keeps no record of an audience edit on its own, so it can't put back what was removed. Audiences a paid membership manages return on that membership's next billing change.
   - **No migration.**
 
+<a id="delivery-site-membership-audiences-upgrade"></a>
+
+- **Gated HTML pages now follow the reader's membership on that site (GHSA-4m98-m3c9-7cwx).** A member-gated page, teaser or paywall delivered as HTML now takes the signed-in reader's audiences from their `:active` membership on the site serving it, the value the API and the read policies already used ([below](#delivery-site-membership-audiences)). Audiences held only account-wide, in `User.audiences`, no longer unlock HTML pages on any site.
+  - **Find what to move.** Run `mix kiln.deprecations` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.deprecations()'`). It lists, under "Accounts with account-wide audiences not on a site membership", each account and the audiences none of its active memberships carries. The list is informational and does not make the task exit non-zero.
+  - **Grant them per site.** Tick the audiences on the account's page for the site they belong to (`/editor/accounts/(id)`), or from a remote console with `KilnCMS.Accounts.SiteAudiences.set/4`. Which site each belongs on is your call, so nothing moves them automatically. Accounts with audiences and no membership at all are listed separately, as before; `mix kiln.deprecations --migrate-audiences` gives them one.
+  - **Billing is unaffected.** Audiences a paid membership manages are already written to that site's membership.
+  - **No migration; rolling the pin back is safe.**
+
 ## Added
 
 <a id="condition-text-ops"></a>
@@ -400,9 +408,29 @@ carries the reasoning.
   **Failures.** On its own, the rewrite runs after the definition change has committed. If the combined rewrite fails, it is logged and the live values are moved alone, as before this fix, leaving the drafts in their old shape. Inside a transaction a caller opened (`mix kiln.join.retire`, a field-sync import, an item type's own delete with `purge_items?`), a failure is returned as the action's error and the whole operation rolls back.
   - **No migration; rolling the pin back is safe.** An older release reads the rewritten drafts as ordinary drafts; its own renames go back to rewriting the live map only.
 
+## Security
+
 <a id="external-command-group-kill"></a>
 
-- **External programs are stopped by a process-group kill from inside, never by a pid from the VM (#2624).** `KilnCMS.ExternalCommand` runs qpdf, ffmpeg/ffprobe, `pg_dump`, `pg_restore`, `tar` and `rclone`. It used to stop a program on a deadline, a canceled or fenced backup step, or its caller's death by sending a kill to the program's OS pid from the VM. By the time that kill was sent the program could already have exited and been reaped, and its pid reused by an unrelated process. The program now runs under a fixed `/bin/sh` wrapper whose stdin watcher, when the port closes, sends SIGKILL to its own process group: the wrapper, the program, anything the program started, and the watcher. A process group's id can't be reused while any member is alive, so the kill can't reach a stranger, and it needs no binary on `PATH`.
+- **A deadline, a cancel, a fence or its caller's death now stops an external program in the official image, and the program's own children with it (GHSA-h3hm-8ff5-wr4v, #2624).** `KilnCMS.ExternalCommand` runs qpdf, ffmpeg/ffprobe, `pg_dump`, `pg_restore`, `tar`, `rclone` and `df`. It stopped a program on a deadline, a canceled or fenced backup step, or its caller's death by running the `kill` executable against the program's OS pid. The official container image has no `kill` binary, so on 0.6.0 to 1.12.1 that stop never took effect there; on hosts that have one, the pid could in a narrow window already belong to an unrelated process. The program now runs under a fixed `/bin/sh` wrapper (arguments are passed positionally, never interpolated) whose stdin watcher, when the port closes, sends SIGKILL to its own process group with the shell builtin: the wrapper, the program, anything the program started, and the watcher. It needs no binary on `PATH`, and a process group's id can't be reused while any member is alive, so the kill can't reach another process.
   - **More is stopped.** A stopped program's own children (an ffmpeg helper, a `tar` filter) stop too, and the program stops when the VM exits, since the port's pipe closes with it.
   - **What a caller can see.** The program's stdin is `/dev/null`. A missing program returns exit status 127 and a non-executable one 126, instead of raising. The program must be given as an absolute path (every caller already passes a `System.find_executable/1` result); anything else raises `ArgumentError`. The deadline kill finishes just after `run/4` returns `:timeout`, not before.
   - **Orphans.** The killed processes are reparented to PID 1, which must reap them. The release image's `/bin/sh` command does, and so does the VM when it is PID 1. A custom entrypoint that leaves some other program as PID 1 should use an init such as `tini` (`docker run --init`).
+  - **Affected.** The official container image from 0.6.0 through 1.12.1. Installs on a host with a `kill` binary (`procps`) were affected only by the pid-reuse window.
+  ([GHSA-h3hm-8ff5-wr4v](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-h3hm-8ff5-wr4v) · [#2624](https://github.com/The-Verscienta/kiln_cms/issues/2624))
+
+<a id="delivery-site-membership-audiences"></a>
+
+- **HTML delivery takes a reader's audiences from their active membership on the site (GHSA-4m98-m3c9-7cwx).** The read policies (`CMS.Checks.InAudience`, `CMS.Checks.MediaInAudience`) decide gated access per site through `KilnCMS.Accounts.Scoping.audiences/2`, and only an `:active` membership counts. HTML delivery (`KilnCMSWeb.ContentController`: pages, posts, entries, alias lookups, teasers and paywalls) built its list from the account-wide `User.audiences` column instead. It now uses `Scoping.audiences/2` with the site serving the request: `[]` for a signed-out visitor, an erased account, a pending or rejected membership, or an account with no membership on that site.
+  - **Per-site grants now unlock HTML pages.** Audiences an admin grants from the console are stored on the membership, so before this they unlocked the API but not the HTML page.
+  - **Cached pages are unchanged.** A reader with any audience still bypasses the shared payload cache, and a gated render is still private.
+  - **The API surfaces** (JSON:API, GraphQL, MCP, API keys) already went through the policies and are unchanged.
+  - **Affected.** 0.5.0 through 1.12.1. See [the upgrade note](#delivery-site-membership-audiences-upgrade) for finding account-wide audiences to grant per site.
+  ([GHSA-4m98-m3c9-7cwx](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-4m98-m3c9-7cwx))
+
+<a id="portable-text-list-level-cap"></a>
+
+- **The Markdown view writes a list item at most 10 levels deep (GHSA-ffw4-2w7m-xh53).** A Portable Text list item's `level` is stored as sent. `KilnCMS.Blocks.PortableText.list_level/1` now reads it for any renderer that lays a list out by level: an integer from 1 to `PortableText.max_list_level/0` (10), with a missing or non-integer level read as 1 and anything outside the range clamped to the nearest bound. `PortableText.Markdown`, which the content editor's Markdown mode uses, indents by it, so a deeper item is written at depth 10. HTML rendering nests by structure and is unchanged, and stored content is not rewritten.
+  - **Affected.** 1.0.0 through 1.12.1.
+  - **No migration; rolling the pin back is safe.**
+  ([GHSA-ffw4-2w7m-xh53](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-ffw4-2w7m-xh53))
