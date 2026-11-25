@@ -148,6 +148,8 @@ defmodule KilnCMSWeb.EditorLiveColumnsTest do
     assert html =~ "Yes"
     refute html =~ "nope"
     assert has_element?(lv, ~s(#content-columns-form input[value="elc_price"][checked]))
+    # Saved on change, so a reconnect must not replay it (#2782).
+    assert has_element?(lv, ~s(#content-columns-form[phx-auto-recover="ignore"]))
 
     stored = Accounts.get_user!(admin.id, actor: admin)
 

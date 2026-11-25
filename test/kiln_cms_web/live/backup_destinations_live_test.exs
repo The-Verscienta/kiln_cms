@@ -827,6 +827,8 @@ defmodule KilnCMSWeb.BackupDestinationsLiveTest do
       assert has_element?(lv, form, "only if that server is retired")
       refute has_element?(lv, "#adopt-#{row.id}-#{own}")
       refute has_element?(lv, "#{form} input[type=checkbox][checked]")
+      # Saved on change, so a reconnect must not replay it (#2782).
+      assert has_element?(lv, ~s(#{form}[phx-auto-recover="ignore"]))
 
       lv
       |> form(form)

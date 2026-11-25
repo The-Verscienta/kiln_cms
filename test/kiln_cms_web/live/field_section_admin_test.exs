@@ -128,6 +128,25 @@ defmodule KilnCMSWeb.FieldSectionAdminTest do
       refute has_element?(lv, "#sections-type-page")
     end
 
+    # LiveViewTest does not run the client's form recovery, so the attribute
+    # that turns it off is what is asserted: a row saves on change, and a
+    # reconnect replaying this page's stale choice would revert another
+    # admin's (#2782).
+    test "each row's form is left out of form recovery", %{conn: conn} do
+      admin = authed_user(:admin)
+      field!(admin, "fsa_latin", 0, "Fsa Identity")
+      field!(admin, "fsa_dose", 1, "Fsa Dosing")
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      for index <- [0, 1] do
+        assert has_element?(
+                 lv,
+                 ~s(form#sections-type-page-#{index}-form[phx-change="section_layout"][phx-auto-recover="ignore"])
+               )
+      end
+    end
+
     test "sets a section's display, saved as the select changes", %{conn: conn} do
       admin = authed_user(:admin)
       field!(admin, "fsa_latin", 0, "Fsa Identity")

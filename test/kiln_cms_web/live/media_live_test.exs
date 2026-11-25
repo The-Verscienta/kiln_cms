@@ -600,6 +600,9 @@ defmodule KilnCMSWeb.MediaLiveTest do
 
       {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/media?id=#{item.id}")
 
+      # Saved on change, so a reconnect must not replay it (#2782).
+      assert has_element?(lv, ~s(#media-detail-tag-form[phx-auto-recover="ignore"]))
+
       html =
         lv
         |> form("#media-detail-tag-form", %{tag_id: tag.id})

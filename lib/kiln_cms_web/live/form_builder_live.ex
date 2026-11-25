@@ -1133,6 +1133,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   id={"field-settings-#{selected.id}"}
                   phx-change="update_field"
                   phx-submit="update_field"
+                  phx-auto-recover="ignore"
                   class="space-y-3 text-sm"
                 >
                   <input type="hidden" name="field[id]" value={selected.id} />

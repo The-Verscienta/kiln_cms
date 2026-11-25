@@ -1499,6 +1499,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
             for={%{}}
             id={"adopt-#{@row.id}-#{dir.dir_id}"}
             phx-change="adopt"
+            phx-auto-recover="ignore"
             data-dir={dir.dir_id}
             class="space-y-1"
           >
