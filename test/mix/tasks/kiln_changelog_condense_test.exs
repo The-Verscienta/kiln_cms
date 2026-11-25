@@ -378,4 +378,103 @@ defmodule Mix.Tasks.Kiln.ChangelogCondenseTest do
       assert message =~ "Shorten the bold lead"
     end
   end
+
+  # Every reader of a bullet section goes through `bullets/1`, which keeps `- `
+  # entries and their indented continuations only. Anything else used to pass
+  # --check as "no entries" and be deleted by --condense (#2732).
+  describe "text that belongs to no entry" do
+    @link "([#7](https://github.com/The-Verscienta/kiln_cms/issues/7))"
+
+    for {shape, body, line, text} <- [
+          {"a paragraph", "A fix written as a paragraph. (#7)\n", 7,
+           "A fix written as a paragraph. (#7)"},
+          {"a `* ` bullet", "* **Star bullet.** (#7)\n", 7, "* **Star bullet.** (#7)"},
+          {"an unindented continuation", "- **Fix.** It wraps\nonto a bare line. (#7)\n", 8,
+           "onto a bare line. (#7)"}
+        ] do
+      test "#{shape} fails --check, naming the section and line", %{tmp_dir: dir} do
+        write_changelog!(dir, "## [Unreleased]\n\n### Fixed\n\n" <> unquote(body))
+
+        assert_raise Mix.Error, fn -> check!(dir) end
+        assert_received {:mix_shell, :error, [message]}
+        assert message =~ "Unreleased / Fixed: 1 line(s) belong to no entry."
+        assert message =~ "line #{unquote(line)}: #{unquote(text)}"
+      end
+
+      test "#{shape} stops --condense before it writes anything", %{tmp_dir: dir} do
+        write_changelog!(dir, "## [Unreleased]\n\n### Fixed\n\n" <> unquote(body))
+        before = snapshot(dir)
+
+        assert_raise Mix.Error, ~r/Nothing was written/, fn -> condense!(dir) end
+        assert snapshot(dir) == before
+        assert read!(dir, "CHANGELOG.md") =~ unquote(text)
+      end
+    end
+
+    test "a stray line in an older release is reported on its own line number",
+         %{tmp_dir: dir} do
+      write_changelog!(dir, """
+      ## [Unreleased]
+
+      ### Fixed
+
+      - **Fine.** #{@link}
+
+      ## [0.9.0] - 2026-09-20
+
+      ### Added
+
+      - **Fine too.** #{@link}
+      Dropped.
+      """)
+
+      assert_raise Mix.Error, fn -> check!(dir) end
+      assert_received {:mix_shell, :error, [message]}
+      assert message =~ "0.9.0 / Added: 1 line(s) belong to no entry."
+      assert message =~ "line 14: Dropped."
+    end
+
+    test "the forms that are entries still pass, and prose sections keep their prose",
+         %{tmp_dir: dir} do
+      write_changelog!(dir, """
+      ## [Unreleased]
+
+      A release preamble is prose, and stays.
+
+      ### Upgrade notes
+
+      **Run the migration first.** It rewrites a column. (#7)
+
+      Then restart. This paragraph continues the note.
+
+      ### Known issues
+
+      **Exports time out on large sites.** Split the export. (#7)
+
+      ### Fixed
+
+      - **Wrapped.** The entry wraps
+        onto an indented line. #{@link}
+      - **Adjacent.** No blank line before it. #{@link}
+
+      - **Separated.** A blank line before it. #{@link}
+
+      ## [0.9.0] - 2026-09-20
+
+      ### Fixed
+
+      - **Released.** A released entry has no line cap. #{@link}
+
+        And a second, indented paragraph.
+      """)
+
+      check!(dir)
+      condense!(dir)
+      check!(dir)
+
+      assert read!(dir, "docs/changelog/v0.9.0.md") =~ "And a second, indented paragraph."
+      assert read!(dir, "docs/changelog/unreleased.md") =~ "Then restart."
+      assert read!(dir, "CHANGELOG.md") =~ "A release preamble is prose, and stays."
+    end
+  end
 end
