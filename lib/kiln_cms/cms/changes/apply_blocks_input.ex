@@ -9,6 +9,9 @@ defmodule KilnCMS.CMS.Changes.ApplyBlocksInput do
   accept a public `:block_tree` argument: an array of plain block maps (the same
   shape the editor and MCP submit). When present it is cast into the `blocks`
   union — the cast sanitizes rich-text HTML and media URLs (see `BlockUnion`).
+  Before that, every Portable Text value in it is checked against the published
+  schema (#2768): a malformed one is refused with its path on `:block_tree`
+  (see the section comment below).
 
   Or `:body_markdown`: the body as Markdown, converted by `KilnCMS.Markdown`
   (the converter the editor's paste and `.md` import use) into the same block
@@ -49,13 +52,172 @@ defmodule KilnCMS.CMS.Changes.ApplyBlocksInput do
         end
 
       {blocks, _markdown} when is_list(blocks) ->
-        # `change_attribute` casts through the `blocks` union type, which
-        # sanitizes untrusted rich-text/media inside each member's cast.
-        Ash.Changeset.change_attribute(changeset, target, blocks)
+        case check_portable_text(blocks) do
+          # `change_attribute` casts through the `blocks` union type, which
+          # sanitizes untrusted rich-text/media inside each member's cast.
+          {:ok, blocks} ->
+            Ash.Changeset.change_attribute(changeset, target, blocks)
+
+          {:error, errors} ->
+            Ash.Changeset.add_error(
+              changeset,
+              Ash.Error.Changes.InvalidAttribute.exception(
+                field: :block_tree,
+                message: portable_text_message(errors)
+              )
+            )
+        end
 
       _ ->
         changeset
     end
+  end
+
+  # ── Portable Text write check (#2768) ──────────────────────────────────────
+  #
+  # Every Portable Text value in the tree — a `rich_text` block's `body`, any
+  # block's `:rich_text` field, nested in `columns` too — is held to the
+  # published `portable_text_block` schema (`Shape.check_body/2`): a shape
+  # that would crash or misrender a reader, or that the schema does not admit,
+  # is refused with its path; scalars are coerced and the coerced tree is what
+  # is cast. See ADR 0083 (docs/decisions/).
+  #
+  # Here, on the raw argument, and not in the `blocks` cast: the cast is also
+  # how every internal writer (restore, promote, copy, envelope import) writes
+  # back what is already stored, and those repair a stored body rather than
+  # fail on it. Only this argument is a client's own fresh input.
+  #
+  # Only a list-shaped body is checked. A TipTap document (the editor's shape,
+  # also accepted here) is converted by `PortableText.from_tiptap/1` in the
+  # cast, and what that produces is repaired, not checked, so a path never
+  # points into a body the client did not send.
+
+  @max_reported 5
+
+  defp check_portable_text(blocks) do
+    {blocks, errors} = check_blocks(blocks, "block_tree")
+
+    case errors do
+      [] -> {:ok, blocks}
+      errors -> {:error, errors}
+    end
+  end
+
+  defp check_blocks(blocks, path) do
+    {blocks, errors} =
+      blocks
+      |> Enum.with_index()
+      |> Enum.map_reduce([], fn {block, index}, errors ->
+        {block, new} = check_block(block, "#{path}[#{index}]")
+        {block, [new | errors]}
+      end)
+
+    {blocks, errors |> Enum.reverse() |> List.flatten()}
+  end
+
+  # A stored `type`/`value` envelope is accepted input too (what a version
+  # holds); its attributes sit one level down.
+  defp check_block(%{} = block, path) do
+    case {field(block, "_type"), field(block, "type"), field(block, "value")} do
+      {{_key, type}, _envelope_type, _value} when is_binary(type) or is_atom(type) ->
+        check_typed(block, to_string(type), path)
+
+      {nil, {_key, type}, {value_key, %{} = value}} when is_binary(type) or is_atom(type) ->
+        {value, errors} = check_typed(value, to_string(type), "#{path}.#{value_key}")
+        {Map.put(block, value_key, value), errors}
+
+      _other ->
+        {block, []}
+    end
+  end
+
+  defp check_block(block, _path), do: {block, []}
+
+  defp check_typed(block, "columns", path) do
+    case field(block, "columns") do
+      {key, columns} when is_list(columns) ->
+        {columns, errors} =
+          columns
+          |> Enum.with_index()
+          |> Enum.map_reduce([], fn {column, index}, errors ->
+            {column, new} = check_column(column, "#{path}.#{key}[#{index}]")
+            {column, [new | errors]}
+          end)
+
+        {Map.put(block, key, columns), errors |> Enum.reverse() |> List.flatten()}
+
+      _absent_or_other ->
+        {block, []}
+    end
+  end
+
+  defp check_typed(block, type, path) do
+    type
+    |> KilnCMS.CMS.TypedBlocks.rich_text_fields()
+    |> Enum.reduce({block, []}, fn name, {block, errors} ->
+      case field(block, name) do
+        {key, value} ->
+          {value, new} = check_rich_text(value, type, "#{path}.#{key}")
+          {Map.put(block, key, value), errors ++ new}
+
+        nil ->
+          {block, errors}
+      end
+    end)
+  end
+
+  defp check_column(%{} = column, path) do
+    case field(column, "blocks") do
+      {key, blocks} when is_list(blocks) ->
+        {blocks, errors} = check_blocks(blocks, "#{path}.#{key}")
+        {Map.put(column, key, blocks), errors}
+
+      _absent_or_other ->
+        {column, []}
+    end
+  end
+
+  defp check_column(column, _path), do: {column, []}
+
+  # A core `rich_text` body may arrive as a JSON string of either shape (the
+  # editor posts one); it is decoded so a list inside is checked too.
+  defp check_rich_text(body, "rich_text", path) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, decoded} when is_list(decoded) -> check_rich_text(decoded, "rich_text", path)
+      _tiptap_or_invalid -> {body, []}
+    end
+  end
+
+  defp check_rich_text(body, _type, path) when is_list(body) do
+    case KilnCMS.Blocks.PortableText.Shape.check_body(body, path) do
+      {:ok, body} -> {body, []}
+      {:error, errors} -> {body, errors}
+    end
+  end
+
+  defp check_rich_text(other, _type, _path), do: {other, []}
+
+  # Input maps are string-keyed off the wire, atom-keyed from Elixir callers.
+  defp field(map, name) do
+    atom = String.to_existing_atom(name)
+
+    cond do
+      Map.has_key?(map, name) -> {name, Map.fetch!(map, name)}
+      Map.has_key?(map, atom) -> {atom, Map.fetch!(map, atom)}
+      true -> nil
+    end
+  end
+
+  defp portable_text_message(errors) do
+    {shown, rest} = Enum.split(errors, @max_reported)
+
+    more =
+      case length(rest) do
+        0 -> ""
+        n -> "; and #{n} more"
+      end
+
+    "is not valid Portable Text: " <> Enum.join(shown, "; ") <> more
   end
 
   defp argument(changeset, name) do

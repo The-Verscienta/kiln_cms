@@ -65,6 +65,14 @@ else.
   ([long form](docs/changelog/unreleased.md#links-backfill-multiple-upgrade))
 - **A draft of a live record saved before a custom field was renamed or deleted on 1.0.0 to 1.12.1 still holds the old key: publishing it after upgrading still drops that value, so re-enter it or discard the draft (#2744). Values already lost are in version history under the old key; copy them back by hand, since a restore drops them.**
   ([long form](docs/changelog/unreleased.md#rename-rewrites-working-copies-upgrade))
+- **Portable Text: a published record stored with a malformed body delivers it repaired on its next fire, so a `:json` consumer can see a changed shape; a client that sends back an old artifact holding a now-refused shape gets a `400` (#2768). No migration; rolling the pin back is safe.**
+  ([long form](docs/changelog/unreleased.md#portable-text-write-check-upgrade))
+
+### Breaking
+
+- **Portable Text writes: a `block_tree` body (JSON:API, GraphQL, MCP) is checked against the published `portable_text_block` schema, so a few shapes that used to be stored are a `400` naming their path: an object or list `marks` entry, `style`, `listItem`, `_key` or `_type`, a non-numeric `level`, and a plugin `:rich_text` field holding non-Portable-Text data (#2768).**
+  Numbers in text slots and numeric-string levels are still coerced; a `null` mark is dropped.
+  ([long form](docs/changelog/unreleased.md#portable-text-write-check))
 
 ### Added
 
@@ -111,6 +119,9 @@ else.
 - **A stored rich text body in a malformed Portable Text shape (`marks` as a string, `children` that aren't spans, a `markDefs` entry that isn't an object) renders with the bad nodes repaired or skipped instead of a 500, and fires and indexes again (#2768).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#portable-text-render-guards))
+- **A headless write with a malformed Portable Text body is a `400` naming the path (`block_tree[0].body[0].children[1].marks must be a list of strings (got a string)`) instead of being stored and then failing every read; a plugin `:rich_text` field gets the same check and link scrub (#2768).**
+  Restore, promote, copy and import repair a stored body rather than refuse it, and a body whose top-level node isn't an object loads again.
+  ([long form](docs/changelog/unreleased.md#portable-text-write-check-fixed))
 - **The Redirects form shows a refused path as an error on its field instead of crashing the page (#2763).**
   An over-long path or locale, the root path, the target's own URL, a missing target and a write the policy refuses no longer lose the form.
   ([long form](docs/changelog/unreleased.md#redirects-refused-path))

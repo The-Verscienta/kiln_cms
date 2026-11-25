@@ -131,6 +131,32 @@ defmodule KilnCMS.FixturePlugin.ChecklistBlock do
   defp esc(value), do: value |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
 end
 
+defmodule KilnCMS.FixturePlugin.NoteBlock do
+  @moduledoc """
+  A plugin-contributed block type (test fixture) with a `:rich_text` field
+  (#2768): a plugin's Portable Text gets the same write check, repair and
+  link scrub as a core `rich_text` body.
+  """
+  use Kiln.Block
+
+  block :note do
+    field :title, :string
+    field :summary, :rich_text, default: []
+  end
+
+  @impl Kiln.Block.Renderer
+  def render(block, :web),
+    do: [~s(<aside class="note">), KilnCMS.Blocks.PortableText.to_html(block.summary), "</aside>"]
+
+  def render(block, :json),
+    do: %{"_type" => "note", "title" => block.title, "summary" => block.summary}
+
+  def render(_block, _surface), do: nil
+
+  @impl Kiln.Block.Renderer
+  def search_text(block), do: KilnCMS.Blocks.PortableText.to_plain_text(block.summary)
+end
+
 defmodule KilnCMS.FixturePlugin.ProductCardBlock do
   @moduledoc """
   A plugin-contributed block type (test fixture) that opts fields into
@@ -587,7 +613,8 @@ defmodule KilnCMS.FixturePlugin do
       KilnCMS.FixturePlugin.RestrictedRequiredBlock,
       KilnCMS.FixturePlugin.RestrictedRequiredDefaultBlock,
       KilnCMS.FixturePlugin.ProductCardBlock,
-      KilnCMS.FixturePlugin.ChecklistBlock
+      KilnCMS.FixturePlugin.ChecklistBlock,
+      KilnCMS.FixturePlugin.NoteBlock
     ]
 
   @impl true

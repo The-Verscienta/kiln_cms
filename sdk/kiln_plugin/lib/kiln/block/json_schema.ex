@@ -463,11 +463,13 @@ defmodule Kiln.Block.JsonSchema do
           "items" => portable_text_mark_def_schema()
         }
       },
-      # Not `required`, though every well-formed node has one: nothing on the
-      # write path enforces it. `TypedBlocks.normalize_body/1` passes any list
-      # through untouched and `PortableText.sanitize_block/1`'s catch-all only
-      # scrubs `markDefs`, so a headless write of `body: [%{"text" => "hi"}]` is
-      # stored and fired verbatim. The schema describes what is served.
+      # Not `required`, though every well-formed node has one: a headless
+      # write of `body: [%{"text" => "hi"}]` is accepted and fired verbatim.
+      # The core's `block_tree` write check (#2768) holds a body to the key
+      # *types* declared here (a string where a string is declared, a list of
+      # objects for `children` and `markDefs`), never to their presence, and
+      # every reader repairs a stored body to the same shape. The schema
+      # describes what is served.
       "additionalProperties" => true
     }
   end

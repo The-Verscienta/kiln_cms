@@ -100,15 +100,16 @@ defmodule KilnCMSWeb.MalformedPortableTextDeliveryTest do
     Enum.find(artifacts.json["blocks"], &(&1["_type"] == "rich_text"))
   end
 
-  # A top-level node that is not a map is left out: the stored `:rich_text`
-  # value is refused on load, before any renderer sees it, so the read fails
-  # whatever the renderers do. The renderer tests cover it.
-  for {name, poison, kept} <- MalformedPortableText.shapes(), is_map(poison) do
+  # A top-level node that is not a map used to be refused on load, by the
+  # `:rich_text` field's list-of-maps cast, before any renderer saw it; the
+  # stored cast now repairs the body first (PR 2 of #2768).
+  for {name, poison, kept} <- MalformedPortableText.shapes() do
     @poison poison
     @kept kept
 
     # Fails on the code before #2768 for every shape but the numeric-string
-    # level, which the old HTML renderer already nested correctly.
+    # level, which the old HTML renderer already nested correctly. The
+    # top-level binary node failed until the stored cast repaired it.
     test "the published page renders (#{name})", %{conn: conn} do
       page = published_page()
       :ok = plant(page, :blocks, [envelope(body(@poison))])
@@ -240,5 +241,125 @@ defmodule KilnCMSWeb.MalformedPortableTextDeliveryTest do
 
     assert promoted.search_text =~ "Working copy words"
     assert PortableText.to_html(hd(reload(page).blocks).value.body) =~ "Working copy words"
+  end
+
+  # PR 2 of #2768: an internal writer rebuilds its input from what is stored,
+  # so it repairs a stored body instead of refusing it the way a headless
+  # `block_tree` write is refused.
+  describe "internal writers holding a stored malformed body" do
+    # Fails on the code before #2768: the record could not be loaded at all.
+    test "a record whose body holds a top-level non-map node loads, repaired" do
+      page = published_page()
+      :ok = plant(page, :blocks, [envelope([MalformedPortableText.neighbor(), "x", 1, nil])])
+
+      assert [%Ash.Union{value: %{body: [neighbor]}}] = reload(page).blocks
+      assert neighbor == MalformedPortableText.neighbor()
+    end
+
+    # Fails on the code before #2768: the stored body was written back as it
+    # was (and, with a top-level non-map node, refused by the cast).
+    test "promoting a working copy stores the repaired body" do
+      admin = admin()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Promote",
+            slug: "pt-shape-#{System.unique_integer([:positive])}",
+            blocks: [%{"_type" => "rich_text", "body" => [MalformedPortableText.neighbor()]}]
+          },
+          actor: admin
+        )
+
+      page = CMS.publish_page!(page, %{}, actor: admin)
+
+      {:ok, page} =
+        CMS.save_page_working_copy(
+          reload(page),
+          %{working_title: "Promote", working_blocks: [%{"_type" => "rich_text", "body" => []}]},
+          actor: admin,
+          tenant: page.org_id
+        )
+
+      poison = MalformedPortableText.block([MalformedPortableText.span("Held", "strong")])
+      :ok = plant(page, :working_blocks, [envelope(["x", poison])])
+
+      assert {:ok, _promoted} = CMS.publish_page_changes(reload(page), %{}, actor: admin)
+
+      assert [%{"children" => [%{"marks" => ["strong"]}]}] = stored_body(page)
+    end
+
+    # Fails on the code before #2768: the version's body was refused by the cast.
+    test "restoring a version whose body holds a malformed node succeeds" do
+      admin = admin()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Restore",
+            slug: "pt-shape-#{System.unique_integer([:positive])}",
+            blocks: [%{"_type" => "rich_text", "body" => [MalformedPortableText.neighbor()]}]
+          },
+          actor: admin
+        )
+
+      [version] =
+        CMS.list_page_versions!(authorize?: false, tenant: page.org_id)
+        |> Enum.filter(&(&1.version_source_id == page.id))
+
+      poison = MalformedPortableText.block([MalformedPortableText.span("Old", "strong")])
+      blocks = [envelope([MalformedPortableText.neighbor(), "x", poison])]
+
+      {1, _} =
+        Repo.update_all(
+          from(v in "pages_versions", where: v.id == type(^version.id, Ecto.UUID)),
+          set: [changes: Map.put(version.changes, "blocks", blocks)]
+        )
+
+      {:ok, edited} = CMS.update_page(reload(page), %{title: "Edited"}, actor: admin)
+
+      assert {:ok, _restored} =
+               CMS.restore_page_version(edited, %{version_id: version.id}, actor: admin)
+
+      assert [neighbor, %{"children" => [%{"marks" => ["strong"]}]}] = stored_body(page)
+      assert neighbor == MalformedPortableText.neighbor()
+    end
+
+    # Fails on the code before #2768: the imported body was stored as sent.
+    test "an envelope import stores the repaired body" do
+      admin = admin()
+      slug = "pt-shape-#{System.unique_integer([:positive])}"
+      poison = MalformedPortableText.block([MalformedPortableText.span("Imported", "strong")])
+
+      envelope = %{
+        "records" => [
+          %{
+            "type" => "page",
+            "title" => "Imported",
+            "slug" => slug,
+            "blocks" => [envelope(["x", poison])]
+          }
+        ]
+      }
+
+      {:ok, report} =
+        KilnCMS.Portability.Import.run_envelope(envelope,
+          actor: admin,
+          skip_media: true
+        )
+
+      assert report.failed == []
+      [%{id: id}] = report.created
+
+      assert [%{"children" => [%{"marks" => ["strong"]}]}] = stored_body(%{id: id})
+    end
+  end
+
+  # The body as it sits in the column, not as a read repairs it.
+  defp stored_body(page) do
+    [%{"value" => %{"body" => body}}] =
+      Repo.one!(from(p in "pages", where: p.id == type(^page.id, Ecto.UUID), select: p.blocks))
+
+    body
   end
 end

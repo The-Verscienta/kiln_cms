@@ -907,10 +907,20 @@ mutation ($input: CreatePostInput!) {
   "input": {
     "title": "Written over GraphQL",
     "slug": "hello-api",
-    "blockTree": [{ "type": "rich_text", "content": "<p>Body</p>", "order": 1 }]
+    "blockTree": [
+      "{\"_type\":\"rich_text\",\"body\":[{\"_type\":\"block\",\"style\":\"normal\",\"markDefs\":[],\"children\":[{\"_type\":\"span\",\"text\":\"Body\",\"marks\":[]}]}]}"
+    ]
   }
 }
 ```
+
+`blockTree` is a list of `JsonString`s: each block is sent as its own
+JSON-encoded string.
+
+The Portable Text in it is checked against its schema exactly as JSON:API's
+`block_tree` is ([json-api.md](json-api.md#block-tree-portable-text-check)):
+a refused body comes back in the mutation's `errors`, with `result: null`, and
+nothing is written.
 
 Send the API key as a bearer header (same as a read token):
 

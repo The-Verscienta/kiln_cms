@@ -260,6 +260,146 @@ defmodule KilnCMS.Blocks.PortableTextShapeTest do
     end
   end
 
+  # The strict check a headless `block_tree` write goes through. Every test
+  # here fails on the code before #2768, which had no check.
+  describe "check_body/2 (#2768 write check)" do
+    alias KilnCMS.Blocks.PortableText.Shape
+
+    test "names each violation by its 0-based path and the type it found, never the value" do
+      body = [
+        @neighbor,
+        block([span("a", "strong"), "loose", span(%{"secret" => 1}, [%{}, nil, ["x"]])], %{
+          "markDefs" => [nil],
+          "style" => ["h2"],
+          "level" => 2.5
+        }),
+        %{"_type" => "table", "rows" => [%{"cells" => [%{"children" => "cell"}]}]},
+        :not_json
+      ]
+
+      assert Shape.check_body(body) ==
+               {:error,
+                [
+                  "body[1].style must be a string (got a list)",
+                  "body[1].level must be an integer (got a fractional number)",
+                  "body[1].children[0].marks must be a list of strings (got a string)",
+                  "body[1].children[1] must be an object (got a string)",
+                  "body[1].children[2].text must be a string (got an object)",
+                  "body[1].children[2].marks[0] must be a string (got an object)",
+                  "body[1].children[2].marks[2] must be a string (got a list)",
+                  "body[1].markDefs[0] must be an object (got null)",
+                  "body[2].rows[0].cells[0].children must be a list (got a string)",
+                  "body[3] must be an object (got an unsupported value)"
+                ]}
+    end
+
+    test "takes the path prefix it is given" do
+      assert {:error, ["block_tree[0].summary[0] must be an object (got a number)"]} =
+               Shape.check_body([1], "block_tree[0].summary")
+    end
+
+    test "refuses a level that is not an integer, a whole number or a numeric string" do
+      for {level, got} <- [
+            {"two", "a non-numeric string"},
+            {"2.5", "a non-numeric string"},
+            {2.5, "a fractional number"},
+            {true, "a boolean"},
+            {%{}, "an object"},
+            {[2], "a list"}
+          ] do
+        assert {:error, ["body[0].level must be an integer (got #{got})"]} ==
+                 Shape.check_body([%{"_type" => "block", "level" => level}])
+      end
+    end
+
+    test "coerces scalars and drops null marks" do
+      body = [
+        %{
+          "_type" => "block",
+          "_key" => 3,
+          "style" => true,
+          "level" => "2",
+          "children" => [%{"_type" => "span", "text" => 42, "marks" => [nil, 1, "em"]}],
+          "markDefs" => [%{"_key" => 7, "_type" => "link", "href" => 1}]
+        },
+        %{"_type" => "block", "listItem" => "bullet", "level" => 3.0}
+      ]
+
+      assert {:ok, [coerced, whole]} = Shape.check_body(body)
+
+      assert coerced == %{
+               "_type" => "block",
+               "_key" => "3",
+               "style" => "true",
+               "level" => 2,
+               "children" => [%{"_type" => "span", "text" => "42", "marks" => ["1", "em"]}],
+               "markDefs" => [%{"_key" => "7", "_type" => "link", "href" => "1"}]
+             }
+
+      assert whole["level"] == 3
+    end
+
+    test "holds a custom node's standard keys to the schema and leaves its own alone" do
+      own = %{"_type" => "callout", "tone" => %{"any" => ["shape"]}, "children" => []}
+      assert Shape.check_body([own]) == {:ok, [own]}
+
+      assert {:error,
+              [
+                "body[0]._key must be a string (got an object)",
+                "body[0].children[0].text must be a string (got an object)"
+              ]} =
+               Shape.check_body([
+                 %{
+                   "_type" => "callout",
+                   "_key" => %{},
+                   "children" => [%{"_type" => "mention", "text" => %{"id" => 1}}]
+                 }
+               ])
+    end
+
+    test "keeps table rows and cells lenient (#475)" do
+      table = %{"_type" => "table", "rows" => ["junk", %{"cells" => [nil, %{"children" => []}]}]}
+      assert Shape.check_body([table]) == {:ok, [table]}
+    end
+
+    test "accepts what the repair returns for every malformed shape" do
+      for {_name, poison, _kept} <- @shapes do
+        repaired = PortableText.repair_body([@neighbor, poison])
+        assert Shape.check_body(repaired) == {:ok, repaired}
+      end
+    end
+
+    test "is the identity on bodies the editor and the importers write" do
+      for body <- valid_bodies() ++ importer_bodies() do
+        assert Shape.check_body(body) == {:ok, body}
+      end
+    end
+  end
+
+  # What `KilnCMS.Markdown` (the API's `body_markdown`, the editor's paste)
+  # and `KilnCMS.Blocks.Html` (the WordPress and Ghost importers) produce.
+  defp importer_bodies do
+    markdown =
+      Path.expand("../../support/fixtures/markdown/beta_1800_specimen.md", __DIR__)
+      |> File.read!()
+
+    html = """
+    <h2>Title</h2><p>Some <strong>bold</strong> and <a href="https://x.test">a link</a>.</p>
+    <ul><li>one<ul><li>nested</li></ul></li></ul><ol><li>first</li></ol>
+    <blockquote><p>Quoted</p></blockquote><pre><code class="language-elixir">IO.puts(1)</code></pre>
+    <table><tr><th colspan="2">H</th></tr><tr><td>C</td><td><em>D</em></td></tr></table>
+    """
+
+    blocks =
+      KilnCMS.Markdown.to_blocks(markdown) ++
+        KilnCMS.Blocks.Html.to_blocks(html) ++
+        KilnCMS.Blocks.Html.to_blocks(html, autop: false, shortcodes: false)
+
+    bodies = for %{"type" => "rich_text", "value" => %{"body" => body}} <- blocks, do: body
+    assert length(bodies) >= 3
+    bodies
+  end
+
   # Bodies from every producer that writes Portable Text: the TipTap
   # conversion on the fixtures, the HTML conversion across the legacy corpus,
   # and the bodies the corpus stores as they are.

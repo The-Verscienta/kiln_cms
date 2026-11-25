@@ -189,6 +189,13 @@ export interface NewsletterSignupBlock {
   intro?: string | null;
 }
 
+export interface NoteBlock {
+  _id?: string;
+  _type: "note";
+  summary?: Array<PortableTextBlock> | null;
+  title?: string | null;
+}
+
 export interface ProductCardBlock {
   _id?: string;
   _type: "product_card";
@@ -264,6 +271,7 @@ export type KilnBlock =
   | HowToBlock
   | ImageBlock
   | NewsletterSignupBlock
+  | NoteBlock
   | ProductCardBlock
   | QuoteBlock
   | RestrictedRequiredBlock
