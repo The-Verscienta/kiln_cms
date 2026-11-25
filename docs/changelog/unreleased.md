@@ -65,3 +65,11 @@ carries the reasoning.
   - **What `--check` says now.** It fails on any non-blank line in such a section that belongs to no entry, naming the release, the section and each line by its line number in `CHANGELOG.md`, with the fix: start the entry with `- ` and indent its continuation lines by two spaces. This covers released sections too, since `--condense` rewrites those as well.
   - **What `--condense` does now.** It prints the same report and stops before writing anything.
   - **Unchanged.** Upgrade notes, Breaking, Known issues and a release's opening paragraphs are prose and keep every line, as before. The real `CHANGELOG.md` already passes.
+
+
+<a id="runtime-integer-env-vars"></a>
+
+- **Four numeric variables no longer crash boot on a value they cannot read (#2728).** `PORT`, `POOL_SIZE`, `SMTP_PORT` and `S3_ENDPOINT_PORT` were read with a bare `String.to_integer`, so `PORT=` (what compose passes through for a variable the host never set), `POOL_SIZE=" 20"` or `SMTP_PORT=587/tcp` stopped the release with an `ArgumentError` before anything else ran. They now go through `KilnCMS.Config.Env`, the reader every other numeric variable uses.
+  - **What each value does now.** Surrounding whitespace is trimmed, so `" 4000 "` is 4000. Blank is the same as unset and keeps the default silently: 4000, 10, 587 and 443. Anything else keeps the default and warns on stderr, and the warning is replayed through `Logger` and Sentry once the system is up.
+  - **Ports are bounded.** The three ports accept 1 to 65535; a value outside that range, such as `PORT=80800`, keeps the default and warns rather than failing inside the listener. `POOL_SIZE` accepts any positive integer up to 2147483647; `0` keeps 10 and warns.
+  - **No migration; rolling the pin back is safe.** An older release crashes on the same values again.
