@@ -20,7 +20,13 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
   ## What it flags
 
   Only the forward direction (`def up` or `def change`) is read; `def down` is
-  a rollback and is expected to undo things.
+  a rollback and is expected to undo things. The forward direction includes
+  every function of the migration module it reaches, directly, through a
+  capture (`&helper/1`, `execute(&helper/0)`) or through other functions: a
+  `drop table` in a `defp` that `up` calls is judged and reported at the
+  `defp` (#2736). The SQL of `repo().query!` / `Ecto.Adapters.SQL.query!` is
+  read like `execute`'s, including inside an `execute` closure, and an
+  `execute(@attr)` reads the attribute.
 
     * `drop table(...)` / `drop_if_exists table(...)` — the old release still
       reads the table.
@@ -49,8 +55,9 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
       VIEW kiln_reporting_v1.<table>`). Both the `up` and the `down` of the
       migration are checked, in the Ecto DSL and in raw `ALTER TABLE ... DROP
       COLUMN / RENAME COLUMN / ALTER COLUMN ... TYPE`; each must drop the
-      table's view and its `_field_values` twin earlier in the same function
-      (and re-create them), which is a `kiln:contract-ok` change like any
+      table's view and its `_field_values` twin earlier in the same function,
+      or in a function of the module it calls earlier (and re-create them),
+      which is a `kiln:contract-ok` change like any
       other. A `kiln:contract-ok` marker does not excuse this rule: only
       dropping the views does. For the definition tables, every viewed
       table's pair must be dropped.
@@ -61,6 +68,16 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
       `@disable_ddl_transaction true` — Postgres refuses `CREATE INDEX
       CONCURRENTLY` inside a transaction, so the deploy would fail at boot.
       Not overridable.
+    * Forward code this check cannot read, so fails closed on (#2736): SQL
+      built at run time (`execute(sql)`, `"ALTER ..." <> x`, `execute_file`),
+      a call into a module outside a short list of standard-library modules
+      that never reach the database (an app module, `Oban.Migration`, `Code`),
+      `apply`, a function held in a variable, and `use`/`import` of any module
+      but `Ecto.Migration` and that list. Interpolation is read as before: its
+      literal parts are the SQL and the interpolated values are taken to be
+      names. A `kiln:contract-ok` marker excuses such a statement; whoever
+      writes it vouches that the code also changes no column the reporting
+      views read.
 
   ## Overrides
 
@@ -178,8 +195,28 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
     :type_change,
     :set_not_null,
     :add_not_null,
-    :raw_sql
+    :raw_sql,
+    :unanalyzable
   ]
+
+  # The parts of a `def` whose code runs.
+  @function_blocks [:do, :else, :rescue, :catch, :after]
+
+  # `repo().query!(sql)`, `Ecto.Adapters.SQL.query!(repo(), sql)`: raw SQL
+  # outside `execute`.
+  @query_funs [:query, :query!, :query_many, :query_many!]
+
+  # Modules a forward direction may call without the check losing sight of
+  # what it does: none of them reaches the database. Any other module's code
+  # (an app module, `Oban.Migration`, `Code`, `System`) is out of view, so a
+  # call into it is flagged. `use` and `import` are held to the same list, plus
+  # `Ecto.Migration` itself.
+  @transparent_modules ~w(
+    Kernel Enum String IO Map List Keyword Integer Float Atom Tuple MapSet Stream
+    Regex Path Logger Jason Application DateTime NaiveDateTime Date Time Calendar
+    Base URI Access Ecto.UUID Ecto.Query
+    :crypto :erlang :lists :maps :binary :string :unicode :io_lib :timer
+  )
 
   @sql_patterns [
     {~r/\bDROP\s+(?:MATERIALIZED\s+)?(?:TABLE|COLUMN|VIEW|SCHEMA|TYPE)\b/i, "DROP"},
@@ -463,6 +500,7 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
       {:ok, ast, comments} ->
         bodies = forward_bodies(ast)
         own = Enum.flat_map(bodies, &events(&1, nil))
+        attrs = attributes(ast)
 
         ctx = %{
           file: file,
@@ -470,14 +508,16 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
           own_events: own,
           new_tables: Map.new(for({:create_table, t, _} <- own, do: {t, true})),
           large: Keyword.get(opts, :large_tables, @large_tables),
-          executes: executes(bodies),
+          attrs: attrs,
+          executes: executes(bodies, attrs),
           no_transaction?: disables_ddl_transaction?(ast)
         }
 
         viewed = Keyword.get(opts, :viewed_tables, [])
-        raw = Enum.flat_map(bodies, &walk(&1, nil, ctx))
-        pins = Enum.flat_map(all_bodies(ast), &pin_findings(&1, ctx, viewed))
-        units = Enum.flat_map(bodies, &units/1)
+        {module_findings, module_units} = module_findings(ast, ctx)
+        raw = Enum.uniq(Enum.flat_map(bodies, &walk(&1, nil, ctx)) ++ module_findings)
+        pins = Enum.uniq(Enum.flat_map(all_bodies(ast), &pin_findings(&1, ctx, viewed)))
+        units = Enum.flat_map(bodies, &units/1) ++ module_units
 
         {markers, marker_errors} =
           markers(comments, file, Keyword.get(opts, :version, Version.parse!("0.0.0")))
@@ -501,28 +541,23 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
     end
   end
 
-  # The bodies of `def up` and `def change` — the forward direction.
-  defp forward_bodies(ast) do
-    {_, bodies} =
-      Macro.prewalk(ast, [], fn
-        {:def, _, [{name, _, args}, [{:do, body} | _]]} = node, acc
-        when name in [:up, :change] and (args == [] or is_nil(args)) ->
-          {node, [body | acc]}
-
-        node, acc ->
-          {node, acc}
-      end)
-
-    Enum.reverse(bodies)
-  end
+  # The bodies of `def up` and `def change` — the forward direction — with the
+  # module's own functions they call inlined (#2736).
+  defp forward_bodies(ast), do: root_bodies(ast, [:up, :change])
 
   # Every function body that changes the schema: `up`, `down` and `change`.
-  defp all_bodies(ast) do
+  defp all_bodies(ast), do: root_bodies(ast, [:up, :down, :change])
+
+  defp root_bodies(ast, names) do
+    fns = functions(ast)
+
     {_, bodies} =
       Macro.prewalk(ast, [], fn
         {:def, _, [{name, _, args}, [{:do, body} | _]]} = node, acc
-        when name in [:up, :down, :change] and (args == [] or is_nil(args)) ->
-          {node, [body | acc]}
+        when is_atom(name) and (args == [] or is_nil(args)) ->
+          if name in names,
+            do: {node, [expand_root(name, body, fns) | acc]},
+            else: {node, acc}
 
         node, acc ->
           {node, acc}
@@ -531,18 +566,185 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
     Enum.reverse(bodies)
   end
 
-  defp executes(bodies) do
-    {_, found} =
-      Macro.prewalk(bodies, [], fn
-        {:execute, meta, [sql | _]} = node, acc ->
-          {node, [{meta[:line] || 0, sql_text(sql)} | acc]}
+  ## Following the module's own functions (#2736)
+
+  # A migration can move its statements into a `defp` and call it from `up`,
+  # or hand `execute` a capture of one. Each root is judged with the bodies of
+  # the local functions it reaches inlined at their first call site, so a
+  # statement in a helper is a statement of `up`. Its line stays its own (the
+  # report and a marker point at the helper), and `:kiln_pos` records the call
+  # path (`[call_line, ..., own_line]`), which orders it among the root's
+  # statements for the reporting-view rule. Each function is inlined once per
+  # root, which also ends recursion and cycles.
+
+  # %{{name, arity} => [clause_body]} for every def/defp/defmacro/defmacrop.
+  defp functions(ast) do
+    {_, fns} =
+      Macro.prewalk(ast, %{}, fn
+        {kind, _, [head, blocks]} = node, acc
+        when kind in [:def, :defp, :defmacro, :defmacrop] and is_list(blocks) ->
+          {node, add_function(acc, function_key(head), blocks)}
 
         node, acc ->
           {node, acc}
+      end)
+
+    fns
+  end
+
+  defp add_function(fns, nil, _blocks), do: fns
+
+  defp add_function(fns, key, blocks) do
+    bodies = for {block, body} <- blocks, block in @function_blocks, do: body
+    Map.update(fns, key, bodies, &(&1 ++ bodies))
+  end
+
+  defp function_key({:when, _, [head | _]}), do: function_key(head)
+
+  defp function_key({name, _, args}) when is_atom(name) and is_list(args),
+    do: {name, length(args)}
+
+  defp function_key({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: {name, 0}
+  defp function_key(_), do: nil
+
+  defp expand_root(name, body, fns) do
+    {ast, _seen} = inline(annotate(body, []), fns, MapSet.new([{name, 0}]))
+    ast
+  end
+
+  # Every node with a line gets `kiln_pos: prefix ++ [line]`.
+  defp annotate(ast, prefix) do
+    Macro.prewalk(ast, fn
+      {form, meta, args} when is_list(meta) ->
+        case meta[:line] do
+          nil -> {form, meta, args}
+          line -> {form, Keyword.put(meta, :kiln_pos, prefix ++ [line]), args}
+        end
+
+      node ->
+        node
+    end)
+  end
+
+  defp position(meta), do: meta[:kiln_pos] || [meta[:line] || 0]
+
+  # Only the forward half of `execute/2` runs in this direction.
+  defp inline({:execute, meta, [sql | rest]}, fns, seen) do
+    {sql, seen} = inline(sql, fns, seen)
+    {{:execute, meta, [sql | rest]}, seen}
+  end
+
+  # `&helper/0`, `&__MODULE__.helper/1`: the body, as a closure.
+  defp inline({:&, meta, [{:/, _, [callee, arity]}]} = node, fns, seen) when is_integer(arity) do
+    case local_name(callee) do
+      {:ok, name} when is_map_key(fns, {name, arity}) ->
+        {block, seen} = inline_function({name, arity}, meta, fns, seen)
+        {{:fn, [], [{:->, [], [[], block]}]}, seen}
+
+      _ ->
+        {node, seen}
+    end
+  end
+
+  defp inline({callee, meta, args}, fns, seen) when is_list(args) do
+    case local_name(callee) do
+      {:ok, name} when is_map_key(fns, {name, length(args)}) ->
+        {args, seen} = inline(args, fns, seen)
+        {block, seen} = inline_function({name, length(args)}, meta, fns, seen)
+        {{:__block__, [], [{:__block__, [], args}, block]}, seen}
+
+      _ ->
+        {callee, seen} = inline(callee, fns, seen)
+        {args, seen} = inline(args, fns, seen)
+        {{callee, meta, args}, seen}
+    end
+  end
+
+  defp inline(list, fns, seen) when is_list(list),
+    do: Enum.map_reduce(list, seen, &inline(&1, fns, &2))
+
+  defp inline({a, b}, fns, seen) do
+    {a, seen} = inline(a, fns, seen)
+    {b, seen} = inline(b, fns, seen)
+    {{a, b}, seen}
+  end
+
+  defp inline(other, _fns, seen), do: {other, seen}
+
+  # A function already inlined in this root (or the root itself) is not
+  # inlined again: its statements are judged once, where it is first reached.
+  defp inline_function(key, meta, fns, seen) do
+    if MapSet.member?(seen, key) do
+      {{:__block__, [], []}, seen}
+    else
+      seen = MapSet.put(seen, key)
+      prefix = position(meta)
+
+      fns
+      |> Map.fetch!(key)
+      |> Enum.map(&annotate(&1, prefix))
+      |> inline(fns, seen)
+      |> then(fn {bodies, seen} -> {{:__block__, [], bodies}, seen} end)
+    end
+  end
+
+  defp local_name(name) when is_atom(name), do: {:ok, name}
+  defp local_name({:., _, [{:__MODULE__, _, ctx}, name]}) when is_atom(ctx), do: {:ok, name}
+  defp local_name({{:., _, _} = dot, _, []}), do: local_name(dot)
+  defp local_name({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: {:ok, name}
+  defp local_name(_), do: :error
+
+  # %{name => value} for the module's attributes, so `execute(@sql)` reads.
+  defp attributes(ast) do
+    {_, attrs} =
+      Macro.prewalk(ast, %{}, fn
+        {:@, _, [{name, _, [value]}]} = node, acc when is_atom(name) ->
+          {node, Map.put(acc, name, value)}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    attrs
+  end
+
+  # Every raw SQL statement in `bodies`, as {position, line, text}: `execute`
+  # and `repo().query!`-style calls. SQL this check cannot read is "".
+  defp executes(bodies, attrs) do
+    {_, found} =
+      Macro.prewalk(bodies, [], fn node, acc ->
+        case sql_statement(node) do
+          {meta, sql} ->
+            {node, [{position(meta), meta[:line] || 0, readable_sql(sql, attrs)} | acc]}
+
+          nil ->
+            {node, acc}
+        end
       end)
 
     found
   end
+
+  defp readable_sql(sql, attrs) do
+    case sql_value(sql, attrs) do
+      {:ok, text} -> text
+      :error -> ""
+    end
+  end
+
+  # The SQL argument of a statement that runs raw SQL, or nil. A closure
+  # handed to `execute` is not SQL; the statements inside it are.
+  defp sql_statement({:execute, _, [{:fn, _, _} | _]}), do: nil
+  defp sql_statement({:execute, meta, [sql | _]}), do: {meta, sql}
+
+  defp sql_statement({{:., _, [{:__aliases__, _, [:Ecto, :Adapters, :SQL]}, fun]}, meta, args})
+       when fun in @query_funs and length(args) >= 2,
+       do: {meta, Enum.at(args, 1)}
+
+  defp sql_statement({{:., _, [_receiver, fun]}, meta, [sql | _]}) when fun in @query_funs,
+    do: {meta, sql}
+
+  defp sql_statement(_), do: nil
 
   defp disables_ddl_transaction?(ast) do
     {_, found} =
@@ -641,19 +843,61 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
     end
   end
 
-  defp walk({:execute, meta, [sql | _]}, _table, ctx) do
-    sql
-    |> sql_text()
-    |> then(fn text ->
-      for {re, label} <- @sql_patterns, Regex.match?(re, text) do
-        finding(ctx, meta, :raw_sql, "raw SQL contains #{label} (heuristic; review it)",
-          hint:
-            "if it drops, renames or retypes something the running release reads, it " <>
-              "belongs in a later release"
-        )
-      end
-    end)
+  # A closure runs its statements when the migration flushes; judge them.
+  defp walk({:execute, _meta, [{:fn, _, _} = closure | _]}, table, ctx),
+    do: walk(closure, table, ctx)
+
+  defp walk({:execute, meta, [{:&, _, _} | _]}, _table, ctx) do
+    [unanalyzable(ctx, meta, "`execute` is handed a function this check cannot follow")]
   end
+
+  defp walk({:execute_file, meta, args}, _table, ctx) when is_list(args) do
+    [unanalyzable(ctx, meta, "`execute_file` runs SQL from a file this check does not read")]
+  end
+
+  defp walk({:apply, meta, args}, _table, ctx) when is_list(args) do
+    [unanalyzable(ctx, meta, "`apply` calls a function this check cannot follow")]
+  end
+
+  defp walk({{:., _, [_, :apply]}, meta, args}, _table, ctx) when is_list(args) do
+    [unanalyzable(ctx, meta, "`apply` calls a function this check cannot follow")]
+  end
+
+  defp walk({:execute, meta, [sql | _]}, _table, ctx), do: sql_findings(ctx, meta, sql)
+
+  # `repo().query!(sql)` and `Ecto.Adapters.SQL.query!(repo(), sql)`.
+  defp walk({{:., _, [_, fun]}, meta, args} = node, _table, ctx)
+       when fun in @query_funs and is_list(args) do
+    case sql_statement(node) do
+      {_, sql} -> sql_findings(ctx, meta, sql)
+      nil -> [unanalyzable(ctx, meta, "a raw SQL call this check cannot read")]
+    end
+  end
+
+  # A call into another module.
+  defp walk({{:., _, [{:__aliases__, _, _} = module, fun]}, meta, args}, table, ctx)
+       when is_atom(fun) and is_list(args),
+       do: module_call(module, fun, meta, args, table, ctx)
+
+  defp walk({{:., _, [module, fun]}, meta, args}, table, ctx)
+       when is_atom(module) and is_atom(fun) and is_list(args),
+       do: module_call(module, fun, meta, args, table, ctx)
+
+  # A variable receiver: `row.id` is a field, `mod.drop()` a call chosen at
+  # run time.
+  defp walk({{:., _, [{name, _, c}, fun]}, meta, args}, _table, ctx)
+       when is_atom(name) and is_atom(c) and is_atom(fun) and is_list(args) do
+    if meta[:no_parens] == true and args == [], do: [], else: [dynamic_call(ctx, meta)]
+  end
+
+  # `repo().update_all(...)` and the like: the repo's data functions.
+  defp walk({{:., _, [receiver, fun]}, _meta, args}, table, ctx)
+       when is_atom(fun) and is_list(args),
+       do: walk(receiver, table, ctx) ++ walk(args, table, ctx)
+
+  # `fun.(...)`: an anonymous function this check cannot see into.
+  defp walk({{:., _, [_fun]}, meta, args}, _table, ctx) when is_list(args),
+    do: [dynamic_call(ctx, meta)]
 
   defp walk({:__block__, _, stmts}, table, ctx), do: Enum.flat_map(stmts, &walk(&1, table, ctx))
 
@@ -666,6 +910,88 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
 
   defp kind(:alter), do: :alter
   defp kind(_), do: :create
+
+  defp sql_findings(ctx, meta, sql) do
+    case sql_value(sql, ctx.attrs) do
+      {:ok, text} ->
+        for {re, label} <- @sql_patterns, Regex.match?(re, text) do
+          finding(ctx, meta, :raw_sql, "raw SQL contains #{label} (heuristic; review it)",
+            hint:
+              "if it drops, renames or retypes something the running release reads, it " <>
+                "belongs in a later release"
+          )
+        end
+
+      :error ->
+        [unanalyzable(ctx, meta, "runs SQL built at run time (`#{short(sql)}`)")]
+    end
+  end
+
+  defp module_call(receiver, fun, meta, args, table, ctx) do
+    name = module_name(receiver)
+
+    if name in @transparent_modules do
+      walk(args, table, ctx)
+    else
+      [
+        unanalyzable(
+          ctx,
+          meta,
+          "calls #{name || short(receiver)}.#{fun}/#{length(args)}, whose code this check cannot read"
+        )
+        | walk(args, table, ctx)
+      ]
+    end
+  end
+
+  defp dynamic_call(ctx, meta),
+    do: unanalyzable(ctx, meta, "calls a function chosen at run time")
+
+  # `use` and `import` of a module outside the transparent list: either can
+  # bring in functions (even an `up`) whose code is not in this file.
+  defp module_findings(ast, ctx) do
+    {_, found} =
+      Macro.prewalk(ast, [], fn
+        {op, meta, [module | _]} = node, acc when op in [:use, :import] ->
+          name = module_name(module)
+
+          if name in @transparent_modules or name == "Ecto.Migration" do
+            {node, acc}
+          else
+            hit =
+              unanalyzable(
+                ctx,
+                meta,
+                "`#{op} #{name || short(module)}` brings in code this check cannot read"
+              )
+
+            {node, [{hit, {meta[:line] || 1, end_line(node)}} | acc]}
+          end
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    {Enum.map(found, &elem(&1, 0)), Enum.map(found, &elem(&1, 1))}
+  end
+
+  defp module_name({:__aliases__, _, parts}) do
+    if Enum.all?(parts, &is_atom/1), do: Enum.map_join(parts, ".", &Atom.to_string/1)
+  end
+
+  defp module_name(module) when is_atom(module), do: inspect(module)
+  defp module_name(_), do: nil
+
+  defp short(ast), do: ast |> Macro.to_string() |> String.slice(0, 60)
+
+  defp unanalyzable(ctx, meta, what) do
+    finding(ctx, meta, :unanalyzable, "#{what}, so it cannot be judged",
+      hint:
+        "write the statement out in this migration (literal SQL, or the migration DSL in " <>
+          "`up`/`change` or a function of this module), or, if it changes nothing the " <>
+          "running release reads, say so with a kiln:contract-ok marker above it"
+    )
+  end
 
   defp modify_findings(ctx, meta, table, col, type, opts) do
     {from_type, from_opts} =
@@ -777,7 +1103,7 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
   # reads. Dropping the views earlier in the same function body is the way out
   # (a drop in `up` does nothing for `down`, which runs on its own).
   defp pin_findings(body, ctx, viewed) do
-    ctx = %{ctx | executes: executes([body])}
+    ctx = %{ctx | executes: executes([body], ctx.attrs)}
 
     {_, found} =
       Macro.prewalk(body, [], fn
@@ -834,24 +1160,25 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
 
   # The same changes written as raw SQL in an `execute`.
   defp raw_pin_findings(ctx, viewed) do
-    for {line, sql} <- ctx.executes,
+    for {pos, line, sql} <- ctx.executes,
         [_, table, actions] <- Regex.scan(@raw_alter, sql),
         {re, verb} <- @raw_actions,
         [_, col] <- Regex.scan(re, actions),
-        hit <- pinned_hit(table, col, verb, [line: line], ctx, viewed) do
+        hit <- pinned_hit(table, col, verb, [line: line, kiln_pos: pos], ctx, viewed) do
       hit
     end
   end
 
-  defp pinned_hit(table, col, verb, meta, ctx, viewed, outer \\ nil) do
-    line = meta[:line] || (outer && outer[:line]) || 1
+  defp pinned_hit(table, col, verb, meta, ctx, viewed, outer \\ []) do
+    line = meta[:line] || outer[:line] || 1
+    pos = meta[:kiln_pos] || outer[:kiln_pos] || [line]
 
     case pinned_views(table, col, viewed) do
       [] ->
         []
 
       tables ->
-        if Enum.all?(tables, &view_dropped_before?(ctx, &1, line)) do
+        if Enum.all?(tables, &view_dropped_before?(ctx, &1, pos)) do
           []
         else
           [
@@ -881,12 +1208,13 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
     end
   end
 
-  # An `execute` ahead of `line`, in the same function body, that drops the
-  # table's view and its `_field_values` twin.
-  defp view_dropped_before?(ctx, table, line) do
+  # An `execute` ahead of `pos`, in the same function body (or a function of
+  # the module it calls first), that drops the table's view and its
+  # `_field_values` twin. Positions are call paths, compared as lists.
+  defp view_dropped_before?(ctx, table, pos) do
     Enum.all?([table, "#{table}_field_values"], fn view ->
-      Enum.any?(ctx.executes, fn {l, sql} ->
-        l < line and sql =~ ~r/DROP\s+VIEW\s+(IF\s+EXISTS\s+)?kiln_reporting_v1\.#{view}\b/i
+      Enum.any?(ctx.executes, fn {p, _line, sql} ->
+        p < pos and sql =~ ~r/DROP\s+VIEW\s+(IF\s+EXISTS\s+)?kiln_reporting_v1\.#{view}\b/i
       end)
     end)
   end
@@ -1045,15 +1373,44 @@ defmodule Mix.Tasks.Kiln.Migrations.Check do
   defp type_string(type) when is_atom(type), do: inspect(type)
   defp type_string(type), do: Macro.to_string(type)
 
-  # The literal text of an `execute` argument; interpolations contribute their
-  # literal parts, and anything not a string contributes nothing.
-  defp sql_text(sql) when is_binary(sql), do: sql
+  # The text of a SQL argument, or :error when it is built at run time.
+  # Interpolations contribute their literal parts: the interpolated values are
+  # taken to be names and values, not SQL. A module attribute, a `<>` of
+  # readable parts, and a call to one of the module's functions whose body is
+  # one readable value (inlined by then) are read through.
+  defp sql_value(sql, attrs, depth \\ 0)
+  defp sql_value(_sql, _attrs, depth) when depth > 16, do: :error
+  defp sql_value(sql, _attrs, _depth) when is_binary(sql), do: {:ok, sql}
 
-  defp sql_text({:<<>>, _, parts}),
-    do: parts |> Enum.filter(&is_binary/1) |> Enum.join(" ")
+  defp sql_value({:<<>>, _, parts}, _attrs, _depth),
+    do: {:ok, parts |> Enum.filter(&is_binary/1) |> Enum.join(" ")}
 
-  defp sql_text({sigil, _, [{:<<>>, _, parts}, _]}) when sigil in [:sigil_S, :sigil_s],
-    do: parts |> Enum.filter(&is_binary/1) |> Enum.join(" ")
+  defp sql_value({sigil, _, [{:<<>>, _, _} = string, _]}, attrs, depth)
+       when sigil in [:sigil_S, :sigil_s],
+       do: sql_value(string, attrs, depth + 1)
 
-  defp sql_text(_), do: ""
+  defp sql_value({:@, _, [{name, _, ctx}]}, attrs, depth) when is_atom(name) and is_atom(ctx) do
+    case Map.fetch(attrs, name) do
+      {:ok, value} -> sql_value(value, attrs, depth + 1)
+      :error -> :error
+    end
+  end
+
+  defp sql_value({:<>, _, [left, right]}, attrs, depth) do
+    with {:ok, l} <- sql_value(left, attrs, depth + 1),
+         {:ok, r} <- sql_value(right, attrs, depth + 1),
+         do: {:ok, l <> r}
+  end
+
+  defp sql_value({:__block__, _, _} = block, attrs, depth) do
+    case flatten_block(block) do
+      [one] -> sql_value(one, attrs, depth + 1)
+      _ -> :error
+    end
+  end
+
+  defp sql_value(_, _attrs, _depth), do: :error
+
+  defp flatten_block({:__block__, _, stmts}), do: Enum.flat_map(stmts, &flatten_block/1)
+  defp flatten_block(other), do: [other]
 end

@@ -100,6 +100,9 @@ else.
   Types generated before this keep `storys` until you add `plural:` by hand. No migration.
   ([long form](docs/changelog/unreleased.md#gen-content-plural))
 
+- **`mix kiln.migrations.check` judges the migration module's functions that `up`/`change` call and the SQL of `repo().query!`, and fails closed on forward code it cannot read, such as run-time SQL or a call into another module (#2736).**
+  ([long form](docs/changelog/unreleased.md#migrations-check-follows-helpers))
+
 - **A file over 16 MB now reaches S3 on a slow uplink: each multipart part gets time in proportion to its size instead of a fixed 30 seconds, and a part that runs out of time or meets a server error is sent again before the upload is aborted (#2725).**
   New variable `S3_UPLOAD_MIN_BYTES_PER_SECOND` (default 32768). No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#s3-part-deadline))
