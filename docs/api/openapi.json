@@ -32760,6 +32760,37 @@
               }
             },
             "description": "This deployment can't presign — no S3 private bucket (`direct_uploads_unavailable`)"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The upload's cleanup couldn't be queued (`storage_failed`)"
           }
         },
         "security": [
@@ -33107,7 +33138,7 @@
                 }
               }
             },
-            "description": "`invalid_upload_token`, `not_uploaded` (nothing staged, or already completed), `size_mismatch`, `invalid_parameter`, `create_failed`, or a strip refusal"
+            "description": "`invalid_upload_token`, `not_uploaded` (nothing staged, already completed, or being completed by another request), `size_mismatch`, `invalid_parameter`, `create_failed`, or a strip refusal"
           },
           "429": {
             "content": {
@@ -33170,6 +33201,37 @@
               }
             },
             "description": "No S3 private bucket (`direct_uploads_unavailable`)"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "errors": {
+                      "items": {
+                        "properties": {
+                          "code": {
+                            "description": "Stable token to branch on",
+                            "type": "string"
+                          },
+                          "detail": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "description": "Numeric HTTP status",
+                            "type": "string"
+                          }
+                        },
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "The object store refused the write, or the upload was interrupted and must be started again (`storage_failed`)"
           }
         },
         "security": [

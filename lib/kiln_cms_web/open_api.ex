@@ -750,7 +750,8 @@ defmodule KilnCMSWeb.OpenApi do
               501 =>
                 error_response(
                   "This deployment can't presign — no S3 private bucket (`direct_uploads_unavailable`)"
-                )
+                ),
+              502 => error_response("The upload's cleanup couldn't be queued (`storage_failed`)")
             })
         }
       },
@@ -778,11 +779,16 @@ defmodule KilnCMSWeb.OpenApi do
               415 => error_response("Not a kind the library accepts (`unsupported_media_type`)"),
               422 =>
                 error_response(
-                  "`invalid_upload_token`, `not_uploaded` (nothing staged, or already " <>
-                    "completed), `size_mismatch`, `invalid_parameter`, `create_failed`, " <>
-                    "or a strip refusal"
+                  "`invalid_upload_token`, `not_uploaded` (nothing staged, already " <>
+                    "completed, or being completed by another request), `size_mismatch`, " <>
+                    "`invalid_parameter`, `create_failed`, or a strip refusal"
                 ),
-              501 => error_response("No S3 private bucket (`direct_uploads_unavailable`)")
+              501 => error_response("No S3 private bucket (`direct_uploads_unavailable`)"),
+              502 =>
+                error_response(
+                  "The object store refused the write, or the upload was interrupted " <>
+                    "and must be started again (`storage_failed`)"
+                )
             })
         }
       }

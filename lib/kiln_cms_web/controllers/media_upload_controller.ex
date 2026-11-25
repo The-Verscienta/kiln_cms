@@ -287,6 +287,18 @@ defmodule KilnCMSWeb.MediaUploadController do
         "Nothing was uploaded for this token (or it was already completed)."
       )
 
+  # The cleanup job's claim lapsed mid-completion (#2724), so the staged
+  # object may be gone: the same code as any other storage failure, but the
+  # token is spent, so the client starts the upload again.
+  defp refuse(conn, :claim_lost),
+    do:
+      ApiError.send(
+        conn,
+        502,
+        "storage_failed",
+        "The upload was interrupted before it could be stored. Start it again with POST /api/media/uploads."
+      )
+
   defp refuse(conn, :size_mismatch),
     do:
       ApiError.send(

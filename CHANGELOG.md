@@ -57,6 +57,11 @@ else.
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Direct uploads: until every node runs this release, a completion handled by an older node can still lose its staged object to the cleanup job (#2724). A token whose cleanup job was never queued now answers `not_uploaded`. No migration; rolling the pin back is safe.**
+  ([long form](docs/changelog/unreleased.md#direct-upload-claim-upgrade))
+
 ### Added
 
 - **Conditional fields have four text tests: "contains", "does not contain", "starts with" and "ends with", ignoring case, for text, URL and choice fields ([#3270](https://github.com/The-Verscienta/kiln_cms/pull/3270)).**
@@ -86,6 +91,10 @@ else.
 - **A blank, space-padded or unparseable `PORT`, `POOL_SIZE`, `SMTP_PORT` or `S3_ENDPOINT_PORT` no longer crashes boot: it keeps the default and warns like every other numeric variable (#2728).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#runtime-integer-env-vars))
+
+- **A large direct upload no longer fails mid-completion when its staging cleanup comes due, or when the same token is completed twice at once: a completion now holds off the cleanup job until it is done (#2724).**
+  `POST /api/media/uploads` answers `502 storage_failed` if that job can't be queued. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#direct-upload-cleanup-claim))
 
 ## [1.12.1] - 2026-11-23
 
