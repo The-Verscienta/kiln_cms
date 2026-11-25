@@ -45,17 +45,22 @@ defmodule KilnCMSWeb.OrganizeLive do
      |> assign(:loading?, false)
      |> assign(:filter, %{"type" => "", "state" => "any", "untagged" => "true"})
      |> assign(:type_options, ContentTypes.options(socket.assigns.current_org))
+     |> assign(:selection_ref, make_ref())
+     |> assign(:proposing?, false)
+     |> assign(:indexing?, false)
      |> reset_run()
      |> assign(:failed_tags, [])}
   end
 
+  # Clears the run's results only. `proposing?`/`indexing?` track tasks that
+  # keep running whatever the filter says, so they clear when the task
+  # reports back, never here: clearing them early would let a second run
+  # start beside the first and spend the embedding budget twice (#2762).
   defp reset_run(socket) do
     socket
     |> assign(:run, nil)
     |> assign(:rows, %{})
     |> assign(:applied, %{})
-    |> assign(:proposing?, false)
-    |> assign(:indexing?, false)
   end
 
   @impl true
@@ -68,12 +73,12 @@ defmodule KilnCMSWeb.OrganizeLive do
 
   defp load_tab(socket) do
     %{tab: tab, current_org: org, current_user: actor, filter: filter} = socket.assigns
-    failed = socket.assigns.failed_tags
+    %{failed_tags: failed, selection_ref: ref} = socket.assigns
 
     socket
     |> assign(:data, nil)
     |> assign(:loading?, true)
-    |> start_async(:tab, fn -> {tab, compute(tab, org, actor, filter, failed)} end)
+    |> start_async(:tab, fn -> {tab, ref, compute(tab, org, actor, filter, failed)} end)
   end
 
   defp compute("clusters", org, actor, _filter, _failed), do: Clusters.browse(org, actor)
@@ -98,9 +103,10 @@ defmodule KilnCMSWeb.OrganizeLive do
   end
 
   @impl true
-  def handle_async(:tab, {:ok, {tab, data}}, socket) do
-    # A tab switched while this one computed: drop the stale answer.
-    if tab == socket.assigns.tab,
+  def handle_async(:tab, {:ok, {tab, ref, data}}, socket) do
+    # A tab switched, or the filter changed, while this one computed: drop the
+    # stale answer; the newer load is already on its way.
+    if tab == socket.assigns.tab and ref == socket.assigns.selection_ref,
       do: {:noreply, socket |> assign(:data, data) |> assign(:loading?, false)},
       else: {:noreply, socket}
   end
@@ -112,7 +118,23 @@ defmodule KilnCMSWeb.OrganizeLive do
      |> put_flash(:error, gettext("That view couldn't be loaded. Try again in a moment."))}
   end
 
-  def handle_async(:propose, {:ok, run}, socket) do
+  # The run was for a selection the filter has since replaced (#2762): its
+  # rows describe other documents, so they are dropped rather than shown as
+  # this selection's run.
+  def handle_async(:propose, {:ok, {ref, _run}}, %{assigns: %{selection_ref: current}} = socket)
+      when ref != current do
+    {:noreply,
+     socket
+     |> assign(:proposing?, false)
+     |> put_flash(
+       :info,
+       gettext(
+         "The filter changed during the run, so its proposals were set aside. Propose again for this selection."
+       )
+     )}
+  end
+
+  def handle_async(:propose, {:ok, {_ref, run}}, socket) do
     rows = Map.merge(socket.assigns.rows, Map.new(run.rows, &{&1.id, &1}))
     order = (socket.assigns.run && socket.assigns.run.order) || []
 
@@ -168,7 +190,12 @@ defmodule KilnCMSWeb.OrganizeLive do
       "untagged" => if(params["untagged"] == "true", do: "true", else: "false")
     }
 
-    {:noreply, socket |> assign(:filter, filter) |> reset_run() |> load_tab()}
+    {:noreply,
+     socket
+     |> assign(:filter, filter)
+     |> assign(:selection_ref, make_ref())
+     |> reset_run()
+     |> load_tab()}
   end
 
   # One chunk of tag-name inferences — seconds, so off the LiveView process.
@@ -220,12 +247,14 @@ defmodule KilnCMSWeb.OrganizeLive do
   # Anything else (a stale button, a forged payload) falls through to
   # `KilnCMSWeb.MalformedEvent`'s injected catch-all: ignored, not crashed.
 
+  # The result carries the selection it was proposed for, so a filter change
+  # while it runs cannot pass it off as the new selection's run.
   defp start_propose(socket, docs) do
-    %{current_org: org, current_user: actor} = socket.assigns
+    %{current_org: org, current_user: actor, selection_ref: ref} = socket.assigns
 
     socket
     |> assign(:proposing?, true)
-    |> start_async(:propose, fn -> Tagging.propose(org, actor, docs) end)
+    |> start_async(:propose, fn -> {ref, Tagging.propose(org, actor, docs)} end)
   end
 
   defp apply_row(socket, row, ticked) do

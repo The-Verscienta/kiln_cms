@@ -206,6 +206,74 @@ defmodule KilnCMSWeb.OrganizeLiveTest do
       assert length(Regex.scan(~r/id="row-#{draft.id}"/, html)) == 1
     end
 
+    # #2762: a run held in flight while the filter changes reports back for
+    # the selection it was started on; its rows must not appear as the run
+    # for the new selection.
+    test "a run that finishes after the filter changed is set aside", %{conn: conn} do
+      editor = authed_user(:admin)
+      tag!(org(), editor, "stale tag #{uniq()}")
+      draft = post!(org(), editor, "stale passage #{uniq()}", title: "Stale row", publish?: false)
+
+      view = open(conn, editor, "tagging")
+      view |> element("#index-tags") |> render_click()
+      render_async(view, 2_000)
+      render_async(view, 2_000)
+      assert has_element?(view, "#propose")
+
+      put_search_env(embedder: LatchEmbedder)
+      Application.put_env(:kiln_cms, :organize_latch, {:armed, self()})
+      on_exit(fn -> Application.delete_env(:kiln_cms, :organize_latch) end)
+
+      render_click(view, "propose", %{})
+      assert_receive {:embed_started, blocked}, 2_000
+
+      # Published only: the draft the run is proposing for is not selected.
+      render_change(view, "filter", %{
+        "filter" => %{"type" => "", "state" => "published", "untagged" => "true"}
+      })
+
+      Application.delete_env(:kiln_cms, :organize_latch)
+      send(blocked, :go)
+      html = render_async(view, 2_000)
+
+      refute html =~ ~s(id="row-#{draft.id}")
+      refute has_element?(view, "#proposal-rows")
+      assert html =~ "The filter changed during the run"
+      # The stale run is over, so this selection can be proposed for.
+      assert has_element?(view, "#propose", "Propose tags")
+    end
+
+    # #2762: changing the filter used to clear `indexing?` while the chunk was
+    # still running, so a second chunk could start beside it and size itself
+    # to the same budget room.
+    test "a filter change does not let a second index chunk start", %{conn: conn} do
+      editor = authed_user(:admin)
+      tag!(org(), editor, "index latch tag #{uniq()}")
+
+      view = open(conn, editor, "tagging")
+      assert has_element?(view, "#index-tags")
+
+      put_search_env(embedder: LatchEmbedder)
+      Application.put_env(:kiln_cms, :organize_latch, {:armed, self()})
+      on_exit(fn -> Application.delete_env(:kiln_cms, :organize_latch) end)
+
+      render_click(view, "index_tags", %{})
+      assert_receive {:embed_started, blocked}, 2_000
+
+      render_change(view, "filter", %{
+        "filter" => %{"type" => "", "state" => "draft", "untagged" => "false"}
+      })
+
+      put_search_env(embedder: ReportingEmbedder)
+      render_click(view, "index_tags", %{})
+      refute_receive {:embed_started, _}, 300
+
+      Application.delete_env(:kiln_cms, :organize_latch)
+      send(blocked, :go)
+      render_async(view, 2_000)
+      assert Process.alive?(view.pid)
+    end
+
     test "malformed payloads are ignored, not crashed", %{conn: conn} do
       admin = authed_user(:admin)
       view = open(conn, admin, "tagging")
