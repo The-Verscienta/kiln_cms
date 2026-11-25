@@ -27,6 +27,7 @@ defmodule KilnCMSWeb.ContentEditor.InspectorPreviewComponent do
         html={@preview_html}
         kind={@kind}
         slug={@record.slug}
+        locale={@record.locale}
       />
       <p :if={@preview_html == []} class="mt-3 text-center text-xs text-base-content/60">
         {gettext("Add blocks on the left — this pane shows exactly what publishes.")}

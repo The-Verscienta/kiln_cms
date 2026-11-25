@@ -237,3 +237,11 @@ carries the reasoning.
   - **Telemetry counts every record.** `[:kiln_cms, :lifecycle, :health_sweep]` was capped at 500 per type with the read; its `overdue` and `expired` counts are now the full totals. It is emitted after the events are dispatched rather than before.
   - **More events on a large backlog.** A site with thousands of stale records of one type now gets an event, and so an `Automation.DispatchWorker` job, for each of them every day. A rule's `:create_task` stays one open task per record, as before.
   - **No migration; rolling the pin back is safe.** An older release goes back to the first 500 per type.
+
+
+<a id="in-context-editor-locale"></a>
+
+- **The in-context editor opens the locale variant it was linked from (#2758).** The editor at `/editor/site/<type>/<slug>` finds its record by slug and `?locale=`, and an absent locale meant the default one. Both links into it from the content editor, the toolbar's "Visual" button and each preview block's "Edit", left the locale out. On a `fr` variant whose slug its `en` source shares, they opened the English record, and every inline edit, reorder and autosave was written there. With different slugs they answered "No such content to edit."
+  - **What the links carry now.** `?locale=<the record's locale>`, alongside `focus=` on a block link. The route stays keyed on slug and locale rather than record id, because the visual-editing bridge (`priv/static/bridge.js`) and its stega payloads already address the editor that way and send the locale.
+  - **An absent locale is no longer a guess.** A URL without `?locale=` (a hand-typed one, or an older bridge) still opens the default-locale record when that is the only variant of the slug you can read. When the slug has variants in more than one locale, the editor sends you back to `/editor` with "This content exists in more than one language" instead of picking the default.
+  - **No migration; rolling the pin back is safe.** An older release opens the default-locale variant again.

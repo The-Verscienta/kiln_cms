@@ -1518,7 +1518,7 @@ defmodule KilnCMSWeb.EditorLiveTest do
       # The block still renders in the preview, now with a per-block Edit link that
       # focuses that block in the visual (in-context) editor.
       assert html =~ "Clickable"
-      assert html =~ ~s(href="/editor/site/page/click-me?focus=#{block.id}")
+      assert html =~ ~s(href="/editor/site/page/click-me?focus=#{block.id}&amp;locale=en")
       assert html =~ "Hover a block and click Edit"
     end
   end

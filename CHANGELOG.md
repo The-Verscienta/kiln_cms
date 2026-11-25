@@ -144,6 +144,9 @@ else.
 - **`mix kiln.links.backfill` no longer deletes the edges of list reference fields or of references in groups and flexible items: it writes and realigns top-level single and list edges, and prints `N written, M realigned, K removed` (#2742).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#links-backfill-multiple))
+- **The "Visual" button and a preview block's "Edit" link open the in-context editor on the translation you were editing; they left the locale out, so a `fr` variant's edits and autosaves landed on the `en` record sharing its slug (#2758).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#in-context-editor-locale))
 
 - **The daily health sweep now raises a `health_overdue` or `health_expired` event for every stale record, not the same 500 per content type each day (#2738).**
   Its telemetry counts every record too. No migration; rolling the pin back is safe.
