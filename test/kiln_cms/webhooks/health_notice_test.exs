@@ -84,37 +84,35 @@ defmodule KilnCMS.Webhooks.HealthNoticeTest do
 
   defp to_address(%{to: [{_name, address} | _]}), do: address
 
-  describe "event_for/2" do
+  # The record `:record_delivery_failure` returns when it switched the
+  # endpoint off.
+  defp switched_off(endpoint), do: Map.put(endpoint, :__metadata__, %{auto_disabled: true})
+
+  # Decided on the record the failure action returned (#2737), not on the
+  # worker's copy from before its POST.
+  describe "event_for/1" do
     test "the first failure in a row of an active endpoint is :webhook_failing" do
-      assert HealthNotice.event_for(
-               %{active: true, consecutive_failures: 0},
-               %{active: true, consecutive_failures: 1}
-             ) == :webhook_failing
+      assert HealthNotice.event_for(%{active: true, consecutive_failures: 1}) == :webhook_failing
     end
 
-    test "the failure that switches it off is :webhook_disabled" do
-      assert HealthNotice.event_for(
-               %{active: true, consecutive_failures: 9},
-               %{active: false, consecutive_failures: 10}
-             ) == :webhook_disabled
+    test "the failure that switched it off is :webhook_disabled" do
+      assert HealthNotice.event_for(switched_off(%{active: false, consecutive_failures: 10})) ==
+               :webhook_disabled
 
       # A threshold of one: the first failure is also the last.
-      assert HealthNotice.event_for(
-               %{active: true, consecutive_failures: 0},
-               %{active: false, consecutive_failures: 1}
-             ) == :webhook_disabled
+      assert HealthNotice.event_for(switched_off(%{active: false, consecutive_failures: 1})) ==
+               :webhook_disabled
     end
 
     test "the failures in between are not news" do
-      assert HealthNotice.event_for(
-               %{active: true, consecutive_failures: 1},
-               %{active: true, consecutive_failures: 2}
-             ) == nil
+      assert HealthNotice.event_for(%{active: true, consecutive_failures: 2}) == nil
 
-      assert HealthNotice.event_for(
-               %{active: false, consecutive_failures: 10},
-               %{active: false, consecutive_failures: 10}
-             ) == nil
+      # Already off when this failure was recorded: another one switched it off.
+      assert HealthNotice.event_for(%{
+               active: false,
+               consecutive_failures: 10,
+               __metadata__: %{auto_disabled: false}
+             }) == nil
     end
   end
 
@@ -196,7 +194,7 @@ defmodule KilnCMS.Webhooks.HealthNoticeTest do
     admin = admin(%{notify_on_webhook_failure: false})
     endpoint = endpoint!(admin)
 
-    :ok = HealthNotice.surface(endpoint, %{endpoint | consecutive_failures: 1})
+    :ok = HealthNotice.surface(%{endpoint | consecutive_failures: 1})
 
     assert [_notice] = notices(admin, :webhook_failing)
     assert mails_to(admin) == []
@@ -207,7 +205,8 @@ defmodule KilnCMS.Webhooks.HealthNoticeTest do
     endpoint = endpoint!(admin)
     erased = admin(%{anonymized_at: DateTime.utc_now()})
 
-    :ok = HealthNotice.surface(endpoint, %{endpoint | active: false, consecutive_failures: 10})
+    :ok =
+      HealthNotice.surface(switched_off(%{endpoint | active: false, consecutive_failures: 10}))
 
     assert [_notice] = notices(admin, :webhook_disabled)
     refute erased.id in Enum.map(HealthNotice.recipients(endpoint.org_id), & &1.id)
