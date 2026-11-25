@@ -58,8 +58,10 @@ defmodule KilnCMS.Blocks.RichText do
 
   def render(block, :json) do
     case block.body do
+      # Repaired as `:web` is (#2768), so a headless client never receives a
+      # shape the web renderer would have refused.
       [_ | _] = body ->
-        %{"_type" => "rich_text", "body" => body}
+        %{"_type" => "rich_text", "body" => PortableText.repair_body(body)}
 
       _ ->
         # TipTap-authored prose is stored in legacy_html until the PT round-trip

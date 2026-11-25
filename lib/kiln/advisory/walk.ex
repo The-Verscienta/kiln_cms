@@ -229,10 +229,20 @@ defmodule Kiln.Advisory.Walk do
 
   defp heading_level(_style), do: nil
 
-  defp pt_text(%{"children" => children}) when is_list(children),
-    do: children |> Enum.map_join(&to_string(&1["text"] || "")) |> String.trim()
+  # The body comes straight off the stored struct, so a malformed span (a
+  # binary child, a map `text`) must read as no text rather than raise (#2768).
+  defp pt_text(%{"children" => children}) when is_list(children) do
+    children
+    |> Enum.filter(&is_map/1)
+    |> Enum.map_join(&span_text(&1["text"]))
+    |> String.trim()
+  end
 
   defp pt_text(_node), do: ""
+
+  defp span_text(text) when is_binary(text), do: text
+  defp span_text(text) when is_number(text) or is_boolean(text), do: to_string(text)
+  defp span_text(_other), do: ""
 
   # A blank heading is recorded, not dropped. It used to vanish here, which
   # meant the one heading defect an author cannot see — an empty H2 that
