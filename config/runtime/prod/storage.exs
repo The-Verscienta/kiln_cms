@@ -74,10 +74,18 @@ if bucket = System.get_env("S3_BUCKET") do
 
   # Custom endpoint for any non-AWS S3-compatible store (R2/B2/Wasabi/MinIO).
   # Leave unset for AWS S3 (ExAws derives the host from the region).
+  # A blank, padded or unparseable S3_ENDPOINT_PORT keeps 443 and warns
+  # rather than crashing boot (#2728).
   if endpoint_host = System.get_env("S3_ENDPOINT_HOST") do
+    endpoint_port =
+      case KilnCMS.Config.Env.integer_in("S3_ENDPOINT_PORT", 1, 65_535) do
+        {:ok, port} -> port
+        _unset_or_unrecognized -> 443
+      end
+
     config :ex_aws, :s3,
       scheme: System.get_env("S3_ENDPOINT_SCHEME") || "https://",
       host: endpoint_host,
-      port: String.to_integer(System.get_env("S3_ENDPOINT_PORT") || "443")
+      port: endpoint_port
   end
 end

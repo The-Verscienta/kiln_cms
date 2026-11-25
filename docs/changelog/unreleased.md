@@ -75,6 +75,15 @@ carries the reasoning.
   - **Unchanged.** Upgrade notes, Breaking, Known issues and a release's opening paragraphs are prose and keep every line, as before. The real `CHANGELOG.md` already passes.
 
 
+<a id="runtime-integer-env-vars"></a>
+
+- **Four numeric variables no longer crash boot on a value they cannot read (#2728).** `PORT`, `POOL_SIZE`, `SMTP_PORT` and `S3_ENDPOINT_PORT` were read with a bare `String.to_integer`, so `PORT=` (what compose passes through for a variable the host never set), `POOL_SIZE=" 20"` or `SMTP_PORT=587/tcp` stopped the release with an `ArgumentError` before anything else ran. They now go through `KilnCMS.Config.Env`, the reader every other numeric variable uses.
+  - **What each value does now.** Surrounding whitespace is trimmed, so `" 4000 "` is 4000. Blank is the same as unset and keeps the default silently: 4000, 10, 587 and 443. Anything else keeps the default and warns on stderr, and the warning is replayed through `Logger` and Sentry once the system is up.
+  - **Ports are bounded.** The three ports accept 1 to 65535; a value outside that range, such as `PORT=80800`, keeps the default and warns rather than failing inside the listener. `POOL_SIZE` accepts any positive integer up to 2147483647; `0` keeps 10 and warns.
+  - **No migration; rolling the pin back is safe.** An older release crashes on the same values again.
+
+
+
 <a id="direct-upload-cleanup-claim"></a>
 
 - **A direct-upload completion holds off its staging cleanup until it is done (#2724).** `POST /api/media/uploads` queues `KilnCMS.Media.StagedUploadCleanup` to delete the staged object a minute after the token expires. A completion sent near the end of the token's hour, for a file whose copy down from the bucket took longer than that minute, had the object deleted under it; the truncated copy failed the byte sniff and the client got `415 unsupported_media_type`. Two completions of the same token at the same time could do the same to each other: each deleted the object when it finished, whatever the other was still reading.
