@@ -281,6 +281,70 @@ defmodule KilnCMS.CMS.ReferenceLinksTest do
     end
   end
 
+  defp list_field!(admin) do
+    name = "related_#{System.unique_integer([:positive])}"
+
+    CMS.create_field_definition!(
+      %{
+        content_type: :post,
+        name: name,
+        label: "Related",
+        field_type: :reference,
+        target_type: "page",
+        multiple: true
+      },
+      actor: admin
+    )
+
+    name
+  end
+
+  defp snapshot(page),
+    do: %{"id" => page.id, "type" => "page", "slug" => page.slug, "title" => page.title}
+
+  # A row stored without the write path: no snapshot cast, no edge.
+  defp seed_post!(fields),
+    do: Ash.Seed.seed!(KilnCMS.CMS.Post, %{title: "Old", slug: slug(), custom_fields: fields})
+
+  # Overwrites a row's custom fields without the write path (a raw import).
+  defp set_fields!(table, record, fields) do
+    Ecto.Adapters.SQL.query!(
+      KilnCMS.Repo,
+      "UPDATE #{table} SET custom_fields = $1 WHERE id = $2",
+      [fields, Ecto.UUID.dump!(record.id)]
+    )
+  end
+
+  defp positioned(source),
+    do: source |> edges() |> Enum.map(&{&1.field, &1.target_id, &1.position}) |> Enum.sort()
+
+  # The edges in the table are exactly the ones the write path would keep for
+  # the stored value: `reconcile/1` keys `desired/2` by (field, target), last
+  # occurrence winning, and the uuid column reads back in lower case.
+  defp assert_desired(record) do
+    record = reload!(record)
+
+    want =
+      record.custom_fields
+      |> ContentLinks.desired(ContentLinks.reference_definitions(record))
+      |> Enum.map(&%{&1 | target_id: String.downcase(&1.target_id)})
+      |> Map.new(&{{&1.field, &1.target_id}, &1})
+      |> Map.values()
+      |> Enum.map(&{&1.field, &1.target_id, &1.position, &1.metadata, &1.target_type})
+      |> Enum.sort()
+
+    got =
+      record
+      |> edges()
+      |> Enum.map(&{&1.field, &1.target_id, &1.position, &1.metadata, &1.target_type})
+      |> Enum.sort()
+
+    assert got == want
+  end
+
+  defp reload!(%KilnCMS.CMS.Post{id: id}), do: CMS.get_post!(id, authorize?: false)
+  defp reload!(%KilnCMS.CMS.Entry{id: id}), do: CMS.get_entry!(id, authorize?: false)
+
   describe "backfill" do
     test "writes edges for values stored before 1.1, idempotently", %{admin: admin} do
       target = page!(admin, "Old target")
@@ -321,6 +385,305 @@ defmodule KilnCMS.CMS.ReferenceLinksTest do
 
       assert %{deleted: 1} = Backfill.run()
       assert edges(post) == []
+    end
+
+    # #2742: before the fix, a list value's edges were deleted and never
+    # written, and a nested path's edge was deleted too.
+    test "keeps the edges of a list value the write path wrote", %{admin: admin} do
+      list = list_field!(admin)
+      [a, b, c] = for t <- ~w(A B C), do: page!(admin, t)
+      post = post!(admin, %{list => [a.id, b.id, c.id]})
+
+      assert %{inserted: 0, deleted: 0} = Backfill.run()
+      assert positioned(post) == Enum.sort([{list, a.id, 0}, {list, b.id, 1}, {list, c.id, 2}])
+      assert_desired(post)
+    end
+
+    test "writes one edge per resolved element of a stored list, at its index", %{admin: admin} do
+      list = list_field!(admin)
+      a = page!(admin, "A")
+      b = page!(admin, "B")
+
+      old =
+        seed_post!(%{
+          list => [
+            Map.put(snapshot(a), "link", %{"role" => "x"}),
+            "not-a-uuid",
+            %{"id" => "nope"},
+            snapshot(b)
+          ]
+        })
+
+      assert %{inserted: 2, deleted: 0} = Backfill.run()
+      assert positioned(old) == Enum.sort([{list, a.id, 0}, {list, b.id, 3}])
+      assert Enum.find(edges(old), &(&1.target_id == a.id)).metadata == %{"role" => "x"}
+      assert_desired(old)
+
+      assert Backfill.run() == %{inserted: 0, updated: 0, deleted: 0}
+    end
+
+    test "rewrites a list value's deleted edges in order", %{admin: admin} do
+      list = list_field!(admin)
+      [a, b, c] = for t <- ~w(A B C), do: page!(admin, t)
+      post = post!(admin, %{list => [a.id, b.id, c.id]})
+
+      Ecto.Adapters.SQL.query!(KilnCMS.Repo, "DELETE FROM content_links WHERE source_id = $1", [
+        Ecto.UUID.dump!(post.id)
+      ])
+
+      assert %{inserted: 3, deleted: 0} = Backfill.run()
+      assert positioned(post) == Enum.sort([{list, a.id, 0}, {list, b.id, 1}, {list, c.id, 2}])
+    end
+
+    test "prunes a dropped element and realigns the rest", %{admin: admin} do
+      list = list_field!(admin)
+      [a, b, c] = for t <- ~w(A B C), do: page!(admin, t)
+      post = post!(admin, %{list => [a.id, b.id, c.id]})
+
+      set_fields!("posts", post, %{list => [snapshot(a), snapshot(c)]})
+
+      assert %{inserted: 0, deleted: 1} = result = Backfill.run()
+      assert result.updated == 1
+      assert positioned(post) == Enum.sort([{list, a.id, 0}, {list, c.id, 1}])
+      assert_desired(post)
+
+      assert Backfill.run() == %{inserted: 0, updated: 0, deleted: 0}
+    end
+
+    test "writes a single and a list reference of one record", %{admin: admin} do
+      list = list_field!(admin)
+      [a, b, c] = for t <- ~w(A B C), do: page!(admin, t)
+      old = seed_post!(%{"hero" => snapshot(a), list => [snapshot(b), snapshot(c)]})
+
+      assert %{inserted: 3, deleted: 0} = Backfill.run()
+
+      assert positioned(old) ==
+               Enum.sort([{"hero", a.id, 0}, {list, b.id, 0}, {list, c.id, 1}])
+
+      assert_desired(old)
+    end
+
+    test "values that resolve to no target imply no edge", %{admin: admin} do
+      list = list_field!(admin)
+      empty = list_field!(admin)
+      a = page!(admin, "A")
+
+      old =
+        seed_post!(%{
+          "hero" => a.id,
+          "sidekick" => nil,
+          list => [a.id],
+          empty => []
+        })
+
+      assert %{inserted: 0} = Backfill.run()
+      assert edges(old) == []
+      assert_desired(old)
+
+      # The write path snapshots bare ids; a raw import may store JSON null.
+      written = post!(admin, %{list => [a.id, page!(admin, "B").id]})
+      assert length(edges(written)) == 2
+      set_fields!("posts", written, %{list => [], "hero" => nil})
+
+      assert %{deleted: 2} = Backfill.run()
+      assert edges(written) == []
+    end
+
+    test "a target named twice in a list is one edge, at its last place", %{admin: admin} do
+      list = list_field!(admin)
+      a = page!(admin, "A")
+      b = page!(admin, "B")
+      old = seed_post!(%{list => [snapshot(a), snapshot(b), snapshot(a)]})
+
+      assert %{inserted: 2, deleted: 0} = Backfill.run()
+      assert positioned(old) == Enum.sort([{list, a.id, 2}, {list, b.id, 1}])
+      assert_desired(old)
+      assert Backfill.run() == %{inserted: 0, updated: 0, deleted: 0}
+    end
+
+    test "an upper-case id is the edge the uuid column holds", %{admin: admin} do
+      a = page!(admin, "A")
+      old = seed_post!(%{"hero" => %{snapshot(a) | "id" => String.upcase(a.id)}})
+
+      assert %{inserted: 1, deleted: 0} = Backfill.run()
+      assert positioned(old) == [{"hero", a.id, 0}]
+      assert_desired(old)
+      assert Backfill.run() == %{inserted: 0, updated: 0, deleted: 0}
+    end
+
+    test "keeps a nested reference edge while its source exists", %{admin: admin} do
+      visits =
+        CMS.create_field_definition!(
+          %{
+            content_type: :post,
+            name: "visits",
+            label: "Visits",
+            field_type: :group,
+            multiple: true
+          },
+          actor: admin
+        )
+
+      %{name: "doctor", label: "Doctor", group_of_id: visits.id, field_type: :string}
+      |> CMS.create_field_definition!(actor: admin)
+      # A plain group's rows are not lifted: retype directly.
+      |> Ash.Seed.update!(%{field_type: :reference, target_type: "page"})
+
+      a = page!(admin, "A")
+      post = post!(admin, %{"visits" => [%{"doctor" => a.id}]})
+      assert edge_keys(post) == [{"visits.doctor", a.id}]
+
+      assert %{deleted: 0} = Backfill.run()
+      assert edge_keys(post) == [{"visits.doctor", a.id}]
+
+      Ecto.Adapters.SQL.query!(KilnCMS.Repo, "DELETE FROM posts WHERE id = $1", [
+        Ecto.UUID.dump!(post.id)
+      ])
+
+      assert %{deleted: 1} = Backfill.run()
+      assert edges(post) == []
+    end
+
+    test "writes, realigns and prunes a dynamic type's list edges", %{admin: admin} do
+      type =
+        CMS.create_type_definition!(
+          %{name: "gadget#{System.unique_integer([:positive])}", label: "Gadget"},
+          actor: admin
+        )
+
+      CMS.create_field_definition!(
+        %{
+          type_definition_id: type.id,
+          name: "parts",
+          label: "Parts",
+          field_type: :reference,
+          target_type: "page",
+          multiple: true
+        },
+        actor: admin
+      )
+
+      [a, b, c] = for t <- ~w(A B C), do: page!(admin, t)
+
+      entry =
+        Ash.Seed.seed!(KilnCMS.CMS.Entry, %{
+          title: "Old entry",
+          slug: slug(),
+          type_definition_id: type.id,
+          custom_fields: %{
+            "parts" => [
+              Map.put(snapshot(a), "link", %{"qty" => 2}),
+              "junk",
+              %{"id" => "nope"},
+              snapshot(b),
+              snapshot(c)
+            ]
+          }
+        })
+
+      assert %{inserted: 3, deleted: 0} = Backfill.run()
+      assert Enum.all?(edges(entry), &(&1.source_type == type.name))
+
+      assert positioned(entry) ==
+               Enum.sort([{"parts", a.id, 0}, {"parts", b.id, 3}, {"parts", c.id, 4}])
+
+      assert_desired(entry)
+      assert Backfill.run() == %{inserted: 0, updated: 0, deleted: 0}
+
+      set_fields!("entries", entry, %{"parts" => [snapshot(c), snapshot(a)]})
+
+      assert Backfill.run() == %{inserted: 0, updated: 2, deleted: 1}
+      assert positioned(entry) == Enum.sort([{"parts", c.id, 0}, {"parts", a.id, 1}])
+      assert Enum.find(edges(entry), &(&1.target_id == a.id)).metadata == %{}
+      assert_desired(entry)
+      assert Backfill.run() == %{inserted: 0, updated: 0, deleted: 0}
+    end
+
+    test "realigns a list element whose link values changed in place", %{admin: admin} do
+      list = list_field!(admin)
+      a = page!(admin, "A")
+      b = page!(admin, "B")
+      linked = fn role -> Map.put(snapshot(a), "link", %{"role" => role}) end
+      old = seed_post!(%{list => [linked.("x"), snapshot(b)]})
+
+      assert %{inserted: 2, updated: 0, deleted: 0} = Backfill.run()
+
+      set_fields!("posts", old, %{list => [linked.("y"), snapshot(b)]})
+
+      assert Backfill.run() == %{inserted: 0, updated: 1, deleted: 0}
+      assert Enum.find(edges(old), &(&1.target_id == a.id)).metadata == %{"role" => "y"}
+      assert positioned(old) == Enum.sort([{list, a.id, 0}, {list, b.id, 1}])
+      assert_desired(old)
+    end
+
+    test "realigns a single reference's drifted position and link values", %{admin: admin} do
+      a = page!(admin, "A")
+      post = post!(admin, %{"hero" => a.id})
+      assert_desired(post)
+
+      drift! = fn set ->
+        Ecto.Adapters.SQL.query!(
+          KilnCMS.Repo,
+          "UPDATE content_links SET #{set} WHERE source_id = $1",
+          [Ecto.UUID.dump!(post.id)]
+        )
+      end
+
+      drift!.("position = 5")
+      assert Backfill.run() == %{inserted: 0, updated: 1, deleted: 0}
+      assert positioned(post) == [{"hero", a.id, 0}]
+
+      drift!.(~S|metadata = '{"stale": true}'::jsonb|)
+      assert Backfill.run() == %{inserted: 0, updated: 1, deleted: 0}
+      assert [%{metadata: %{}}] = edges(post)
+      assert_desired(post)
+    end
+
+    # The 1.1 data migration (20261003000000) runs this module against the
+    # schema as of that migration, so a column added later would crash an
+    # upgrade from 1.0. Every column the statements name must be one that
+    # existed then (the moduledoc's list); an alias not listed here fails too.
+    test "names only columns that existed at the 1.1 data migration" do
+      content = ~w(id org_id custom_fields type_definition_id)
+
+      link =
+        ~w(id org_id source_id target_id kind position metadata field source_type target_type)
+
+      allowed = %{
+        # a content table
+        "c" => content,
+        "fd" => ~w(org_id content_type type_definition_id name field_type target_type),
+        "td" => ~w(id name),
+        "cl" => link,
+        # the desired-rows subquery's own output
+        "d" => ~w(org_id source_id field target_id position metadata source_type target_type),
+        # jsonb_array_elements(...) WITH ORDINALITY AS e(v, ord)
+        "e" => ~w(v ord)
+      }
+
+      statements = Backfill.statements()
+      assert statements != []
+
+      for sql <- statements do
+        qualified =
+          for [_, table, column] <- Regex.scan(~r/\b([a-z_]+)\.([a-z_]+)\b/, sql),
+              do: {table, column}
+
+        bare =
+          (Regex.scan(~r/INSERT INTO content_links\s*\(([^)]*)\)/, sql) ++
+             Regex.scan(~r/\bSET\s+(.*?)\s+FROM\b/s, sql))
+          |> Enum.flat_map(fn [_, list] ->
+            list |> String.split(",") |> Enum.map(&(&1 |> String.split("=") |> hd()))
+          end)
+          |> Enum.map(&{"cl", String.trim(&1)})
+
+        assert qualified != []
+
+        for {table, column} <- qualified ++ bare do
+          assert column in Map.get(allowed, table, []),
+                 "backfill SQL names `#{table}.#{column}`:\n#{sql}"
+        end
+      end
     end
   end
 end

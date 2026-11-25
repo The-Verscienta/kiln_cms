@@ -61,6 +61,8 @@ else.
 
 - **Direct uploads: until every node runs this release, a completion handled by an older node can still lose its staged object to the cleanup job (#2724). A token whose cleanup job was never queued now answers `not_uploaded`. No migration; rolling the pin back is safe.**
   ([long form](docs/changelog/unreleased.md#direct-upload-claim-upgrade))
+- **If you ran `mix kiln.links.backfill` on 1.5.0 to 1.12.1, run it again after upgrading: it had deleted every list reference edge, and on 1.12.1 every reference edge in a group or flexible item (#2742). Nested edges return only when each record's custom fields next change.**
+  ([long form](docs/changelog/unreleased.md#links-backfill-multiple-upgrade))
 
 ### Added
 
@@ -74,6 +76,10 @@ else.
 
 - **A custom field's text can go in the fired AI-readable outputs: tick "Include in AI-readable outputs" on a text, group or flexible field and its text joins the `:llm` Markdown and a `hasPart` list on the `:json_ld` node (issue 2282, last PR of the flexible-content plan). Run `mix ash.migrate`; off by default; rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#deliver-llm))
+
+- **An address field's editor relabels itself for the selected country ("State" and "ZIP code" for the US, "County" for the UK, "Prefecture" for Japan), hides parts the country does not use, and on a required field marks the parts the country needs. Guidance only: the API and imports are unchanged ([#2995](https://github.com/The-Verscienta/kiln_cms/issues/2995)).**
+  No migration. Data: MIT-licensed commerceguys/addressing, derived from Google's CC BY 4.0 libaddressinput.
+  ([long form](docs/changelog/unreleased.md#address-country-formats))
 
 ### Changed
 
@@ -127,6 +133,10 @@ else.
 - **A second edit to a federated document is announced even when it lands while the previous `Update` is still fanning out; it was dropped as a duplicate, so followers kept the older content (#2757).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#announce-unique-executing))
+
+- **`mix kiln.links.backfill` no longer deletes the edges of list reference fields or of references in groups and flexible items: it writes and realigns top-level single and list edges, and prints `N written, M realigned, K removed` (#2742).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#links-backfill-multiple))
 
 - **The daily health sweep now raises a `health_overdue` or `health_expired` event for every stale record, not the same 500 per content type each day (#2738).**
   Its telemetry counts every record too. No migration; rolling the pin back is safe.
