@@ -38,9 +38,10 @@ defmodule KilnCMSWeb.StructureLive do
   Trash is a soft delete that leaves the children's `parent_id` set, and the
   list loads neither trashed rows nor any the actor cannot read. Such a
   *detached* document is drawn at the top level with a marker, rather than
-  grouped under an id no level renders. Where it is drawn is what a move
-  writes: reordering the top level, or outdenting, gives it `parent_id: nil`,
-  and outdenting one of its children lands at the top level too, never under
+  grouped under an id no level renders. Dragging it within the top level, or
+  outdenting it, gives it `parent_id: nil`; a drag of some other row leaves its
+  `parent_id` alone, so restoring the parent still brings it back. Outdenting
+  one of its children lands at the top level too, never under
   the parent nobody can see (`KilnCMS.CMS.Validations.ContentPlacement` would
   refuse that).
   """
@@ -87,7 +88,9 @@ defmodule KilnCMSWeb.StructureLive do
   def handle_event("reorder_items", %{"parent_id" => parent_id, "order" => order}, socket)
       when is_binary(parent_id) and is_list(order) do
     parent_id = if parent_id == "", do: nil, else: parent_id
-    level_ids = socket.assigns.by_parent |> Map.get(parent_id, []) |> MapSet.new(& &1.id)
+    drawn = socket |> siblings(parent_id) |> Enum.map(& &1.id)
+    level_ids = MapSet.new(drawn)
+    dragged = dragged_id(drawn, Enum.filter(order, &MapSet.member?(level_ids, &1)))
 
     failed? =
       order
@@ -95,7 +98,8 @@ defmodule KilnCMSWeb.StructureLive do
       |> Enum.any?(fn {id, index} ->
         if MapSet.member?(level_ids, id) do
           record = find(socket, id)
-          match?({:error, _}, move(socket, record, reorder_attrs(socket, record, index)))
+          attrs = reorder_attrs(socket, record, index, id == dragged)
+          match?({:error, _}, move(socket, record, attrs))
         else
           # Another level's id.
           false
@@ -142,13 +146,42 @@ defmodule KilnCMSWeb.StructureLive do
     end
   end
 
-  # A detached document dropped at the top level stops pointing at its hidden
-  # parent; everything else only changes position.
-  defp reorder_attrs(socket, record, index) do
-    if detached?(socket, record),
+  # The detached document the user dragged stops pointing at its hidden parent.
+  # Every other row only changes position, a detached one included: severing it
+  # too would mean restoring its parent from the trash no longer brings it back,
+  # because of a drag that never touched it. A position on a row that keeps a
+  # hidden `parent_id` is harmless; it only orders siblings under that parent.
+  defp reorder_attrs(socket, record, index, dragged?) do
+    if dragged? and detached?(socket, record),
       do: %{parent_id: nil, position: index},
       else: %{position: index}
   end
+
+  # Which row a drag moved, worked out from the level as drawn and the dropped
+  # order: the hook (`MenuSortable`, shared with the menu builder) reports only
+  # the order. One drag moves one row, so the two orders differ in a single
+  # window that is the old one rotated by one place. Anything else (a stale
+  # page, a hand-sent payload) names no row. Neither does a swap of two
+  # neighbors, where either could have been the one dragged; outdent detaches
+  # a row explicitly.
+  defp dragged_id(drawn, dropped) when length(drawn) == length(dropped) do
+    pairs = Enum.zip(drawn, dropped)
+
+    with first when is_integer(first) <- Enum.find_index(pairs, fn {a, b} -> a != b end) do
+      last = length(pairs) - 1 - Enum.find_index(Enum.reverse(pairs), fn {a, b} -> a != b end)
+      old = Enum.slice(drawn, first..last//1)
+      new = Enum.slice(dropped, first..last//1)
+
+      cond do
+        last - first < 2 -> nil
+        new == tl(old) ++ [hd(old)] -> hd(old)
+        new == [List.last(old) | Enum.drop(old, -1)] -> List.last(old)
+        true -> nil
+      end
+    end
+  end
+
+  defp dragged_id(_drawn, _dropped), do: nil
 
   defp detached?(socket, record), do: MapSet.member?(socket.assigns.detached, record.id)
 

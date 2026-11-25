@@ -243,17 +243,44 @@ defmodule KilnCMSWeb.StructureLiveTest do
     test "dragging it within the top level reorders and detaches it", %{conn: conn} do
       admin = authed_user(:admin)
       root = page(admin, "Root")
-      {child, _none} = under_trashed_parent(admin, "Stranded")
+      {stranded, _none} = under_trashed_parent(admin, "Stranded")
+      {dragged, _none} = under_trashed_parent(admin, "Waiting")
+      trashed_parent_id = stranded.parent_id
+
+      {:ok, lv, _html} = open(conn, admin)
+
+      # Drawn as Root, Stranded, Waiting (positions tie, titles break it);
+      # Waiting is dragged to the top.
+      lv
+      |> element("#structure-level-root")
+      |> render_hook("reorder_items", %{
+        "parent_id" => "",
+        "order" => [dragged.id, root.id, stranded.id]
+      })
+
+      # The dragged row is stored where it is drawn.
+      assert %{parent_id: nil, position: 0} = reload(dragged)
+      assert reload(root).position == 1
+
+      # The row the drag only shifted keeps its link to the trashed parent, so
+      # restoring that parent still brings it back; its position still updates.
+      assert %{parent_id: ^trashed_parent_id, position: 2} = reload(stranded)
+    end
+
+    test "a swap of two neighbors detaches neither — either could be the one dragged",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      root = page(admin, "Root")
+      {stranded, _none} = under_trashed_parent(admin, "Stranded")
+      trashed_parent_id = stranded.parent_id
 
       {:ok, lv, _html} = open(conn, admin)
 
       lv
       |> element("#structure-level-root")
-      |> render_hook("reorder_items", %{"parent_id" => "", "order" => [child.id, root.id]})
+      |> render_hook("reorder_items", %{"parent_id" => "", "order" => [stranded.id, root.id]})
 
-      # Where it is drawn is where it is stored: a position at the top level is
-      # meaningless against a parent nobody can see.
-      assert %{parent_id: nil, position: 0} = reload(child)
+      assert %{parent_id: ^trashed_parent_id, position: 0} = reload(stranded)
       assert reload(root).position == 1
     end
 
