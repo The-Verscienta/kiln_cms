@@ -66,6 +66,9 @@ defmodule KilnCMSWeb.TranslationsLive do
     Enum.find(I18n.locales(), &(&1 != I18n.default_locale()))
   end
 
+  defp translation_target?(locale),
+    do: I18n.supported?(locale) and locale != I18n.default_locale()
+
   # A field grant can leave a translation narrower than its source, and so can
   # the block-field policy (#1157/#890) — the editor is told which, rather than
   # being left to wonder why half the document is missing. Same wording as the
@@ -95,9 +98,12 @@ defmodule KilnCMSWeb.TranslationsLive do
 
     # Hidden button is not the boundary — a forged event lands here regardless
     # (#922 / #1156). Match ContentEditorLive: silent refuse, no error flash.
+    # The locale is the client's too: only a configured, non-default one can
+    # be a translation target, or a crafted event would create a variant in a
+    # locale the site does not run (#2764).
     case ContentTypes.get(kind, org) do
       ct when not is_nil(ct) ->
-        if may_author?(actor, org.id, ct) do
+        if translation_target?(locale) and may_author?(actor, org.id, ct) do
           source = ContentTypes.get_record!(kind, id, actor: actor, tenant: org)
 
           {translation, withheld} =

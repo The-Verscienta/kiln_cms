@@ -66,12 +66,24 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
 
   # --- inline edit -------------------------------------------------------------
 
+  # The id comes from a row rendered earlier: another admin may have deleted
+  # it since (#2764). Refresh the list rather than crash on the stale row.
   def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
-    {:noreply,
-     assign(socket, :edit, %{
-       id: id,
-       form: edit_form(id, socket.assigns.actor, socket.assigns.current_org)
-     })}
+    %{actor: actor, current_org: org} = socket.assigns
+
+    socket =
+      case CMS.get_type_definition(id, actor: actor, tenant: org) do
+        {:ok, definition} ->
+          assign(socket, :edit, %{id: id, form: edit_form(definition, actor, org)})
+
+        {:error, _error} ->
+          socket
+          |> assign(:edit, nil)
+          |> load_definitions()
+          |> put_flash(:error, gettext("That content type no longer exists."))
+      end
+
+    {:noreply, socket}
   end
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
@@ -160,8 +172,8 @@ defmodule KilnCMSWeb.TypeDefinitionLive do
       |> AshPhoenix.Form.for_create(:create, actor: actor, tenant: org, as: "type_definition")
       |> to_form()
 
-  defp edit_form(id, actor, org) do
-    CMS.get_type_definition!(id, actor: actor, tenant: org)
+  defp edit_form(definition, actor, org) do
+    definition
     # A distinct `id` keeps the inputs' DOM ids (`edit_type_definition_label`)
     # apart from the new-type form's, which is on the page at the same time.
     |> AshPhoenix.Form.for_update(:update,

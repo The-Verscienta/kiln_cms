@@ -188,6 +188,23 @@ defmodule KilnCMSWeb.SiteAiLiveTest do
     end
   end
 
+  # #2764: Remove reset the row it read at mount with a bang call, so a row
+  # another admin had removed since crashed the page.
+  describe "a stale row" do
+    test "Remove after the AI provider was removed behind the page says so and reloads",
+         %{conn: conn, org: org} do
+      lv = mount_as_admin(conn, org)
+      save(lv, @valid)
+
+      CMS.reset_site_ai_provider!(row!(org), tenant: org, authorize?: false)
+
+      html = lv |> element("button[phx-click=reset]") |> render_click()
+
+      assert html =~ "Couldn&#39;t remove these settings. The page now shows what is saved."
+      refute has_element?(lv, "button[phx-click=reset]")
+    end
+  end
+
   defp mount_as_admin(conn, org) do
     {:ok, lv, _html} =
       conn |> org_conn(org) |> log_in(authed_user(:admin)) |> live(~p"/editor/site-ai")

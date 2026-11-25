@@ -7431,6 +7431,14 @@ msgstr "No se pudo eliminar esa clave de acceso."
 msgid "Couldn't remove that subscriber."
 msgstr "No se pudo eliminar ese suscriptor."
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#: lib/kiln_cms_web/live/site_search_live.ex
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't remove these settings. The page now shows what is saved."
+msgstr "No se han podido eliminar estos ajustes. La página muestra ahora lo que está guardado."
+
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't restore that content type."
@@ -23590,6 +23598,11 @@ msgstr "Esa URL no está permitida por la política de imágenes del sitio. Sube
 msgid "That account couldn't be found."
 msgstr "No se encontró esa cuenta."
 
+#: lib/kiln_cms_web/live/social_live.ex
+#, elixir-autogen, elixir-format
+msgid "That account no longer exists."
+msgstr "Esa cuenta ya no existe."
+
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
 msgid "That account was erased, so it can't be approved."
@@ -23725,6 +23738,11 @@ msgstr "Esa columna está llena. Haga espacio en ella primero."
 #, elixir-autogen, elixir-format
 msgid "That content couldn't be found."
 msgstr "No se pudo encontrar ese contenido."
+
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "That content type no longer exists."
+msgstr "Ese tipo de contenido ya no existe."
 
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
@@ -24009,6 +24027,11 @@ msgstr "Esa versión guardaba un valor para cada uno de ellos, pero ninguna defi
 #, elixir-autogen, elixir-format
 msgid "That view couldn't be loaded. Try again in a moment."
 msgstr "No se pudo cargar esa vista. Inténtelo de nuevo en un momento."
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "That webhook no longer exists."
+msgstr "Ese webhook ya no existe."
 
 #: lib/kiln_cms_web/live/content_editor/markdown_mode.ex
 #, elixir-autogen, elixir-format

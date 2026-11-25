@@ -44,18 +44,17 @@ defmodule KilnCMSWeb.SlugRegenLive do
      |> assign(:result, nil)}
   end
 
+  # Gated like "apply" below (#2764): the scan reads every record of the type,
+  # drafts included, without authorization (`SlugRegeneration.preview/3`), so
+  # the tier is the only gate in front of it, and it is re-checked per event so
+  # an admin demoted mid-session stops seeing titles they can no longer read.
   @impl true
   def handle_event("preview", params, socket) do
-    socket = read_options(socket, params)
-
-    preview =
-      SlugRegeneration.preview(
-        parse_kind(socket.assigns.kind),
-        socket.assigns.current_org,
-        include_pinned: socket.assigns.include_pinned
-      )
-
-    {:noreply, socket |> assign(:preview, preview) |> assign(:result, nil)}
+    if KilnCMSWeb.LiveUserAuth.effective_tier(socket) == :admin do
+      preview(socket, params)
+    else
+      {:noreply, socket}
+    end
   end
 
   # Re-checked here, not only in `mount/3` (#1160). `SlugRegenerationWorker.enqueue/4`
@@ -75,6 +74,19 @@ defmodule KilnCMSWeb.SlugRegenLive do
     else
       {:noreply, socket}
     end
+  end
+
+  defp preview(socket, params) do
+    socket = read_options(socket, params)
+
+    preview =
+      SlugRegeneration.preview(
+        parse_kind(socket.assigns.kind),
+        socket.assigns.current_org,
+        include_pinned: socket.assigns.include_pinned
+      )
+
+    {:noreply, socket |> assign(:preview, preview) |> assign(:result, nil)}
   end
 
   defp apply_regeneration(socket) do
