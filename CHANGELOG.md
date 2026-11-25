@@ -98,6 +98,10 @@ else.
 - **The translations dashboard shows every variant of the slugs it lists: an older translation no longer shows as "missing" (and fails to create), and a slug whose default-locale source is older than its translations can still be exported (#2761).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#translations-slug-window))
+
+- **A document whose parent is in the trash shows on the structure page again, at the top level and marked "Parent unavailable", and can be reordered, indented or outdented; it was invisible (#2760).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#structure-trashed-parent))
 - **A newsletter campaign's counts add up: a recipient whose last delivery attempt still fails (a down MX, a hung relay) or whose campaign has no fired content is counted failed once, instead of being dropped from the tally (#2755).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#newsletter-exhausted-counts-failed))
@@ -160,6 +164,9 @@ else.
 - **After a Save in the Presentation console, the open text block shows the saved text; it showed the text from before the save, so the next keystroke and Save wrote that old text back over the edit (#2759).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#presentation-edit-after-save))
+- **Organize's tag review sets aside a run that finishes after the filter changed, instead of showing its proposals for the new selection, and a filter change no longer lets a second run start beside the first (#2762).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#organize-stale-run))
 
 - **Renaming, deleting or reshaping a custom field (group sub-fields, link fields and flexible items included) now rewrites the drafts of live records too, so *Publish changes*, a release or an unpublish no longer reports a conflict nobody made or drops the draft's value (#2744).**
   No migration. Open editors of the affected records see "changed elsewhere" once; an `If-Match` client gets one 412.
