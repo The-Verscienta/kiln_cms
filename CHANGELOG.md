@@ -70,6 +70,9 @@ else.
 - **A seat `mix kiln.beta.round` creates now records its `role_granted` in the default site's security log (raised from viewer), and an admin seat raises the platform `new_admin` alert (#2641).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#beta-round-seat-audited))
+- **Over `/mcp`, `update_page` / `update_post` / `update_entry` refuse a published record, and new `save_*_working_copy` tools stage an edit to one for a person to publish, so a model's edit no longer reaches readers unreviewed.**
+  No migration; rolling the pin back is safe. An MCP client that edited live records with `update_*` must switch to the working-copy tools. A project that overrides `:mcp_tools` must add the three new names. JSON:API, GraphQL and in-context editing are unchanged.
+  ([long form](docs/changelog/unreleased.md#mcp-live-records-draft-only))
 
 ## [1.12.1] - 2026-11-23
 

@@ -32,7 +32,7 @@ never applies to a key: it keeps working for an owner the site holds.
 | ------------- | ---------- | -------------------------------------------------------- |
 | Read-only     | any        | Read tools only (scoped to the owner's visibility)       |
 | Read + write  | `:viewer`  | Reads only — the role has no authoring rights            |
-| Read + write  | `:editor`  | Author: create/update drafts, tag, submit for review     |
+| Read + write  | `:editor`  | Author: create/update drafts, stage edits to live records, tag, submit for review |
 | Read + write  | `:admin`   | As editor, plus edit any record its role could           |
 | Draft write   | `:viewer` service account | `create_*`; `update_*` of its **own drafts** only. No submit-for-review, no tags or categories, no publishing |
 
@@ -125,11 +125,42 @@ best first, each hit with its `type`, `id`, `slug`, `score` and `legs`, plus
 `also_searched`: the alternate wordings the site's synonyms added.
 
 Authoring (require a write key + editor role): `create_page` / `update_page` /
-`submit_page_for_review`, the same trio for posts and dynamic-type entries
-(`create_entry` needs a `type_definition_id` — discover them with
-`read_type_definitions`), plus `create_tag` and `create_category`.
-`create_tag` takes an optional `tag_group_id` — discover the groups with
-`read_tag_groups`.
+`save_page_working_copy` / `submit_page_for_review`, the same four for posts
+and dynamic-type entries (`create_entry` needs a `type_definition_id` —
+discover them with `read_type_definitions`), plus `create_tag` and
+`create_category`. `create_tag` takes an optional `tag_group_id` — discover
+the groups with `read_tag_groups`.
+
+### Live records
+
+`update_*` edits **drafts** (and records in review or archived). On a
+**published** record it is refused, whatever the key's role, with an error
+naming `save_*_working_copy`: `update_*` writes the live row, so the edit
+would reach readers without anyone reviewing it.
+
+`save_page_working_copy` / `save_post_working_copy` /
+`save_entry_working_copy` edit a published record the way the editor does
+([The working copy](working-copy.md)). The edit is held in the record's
+working copy, readers keep the published version, and the document shows
+**Live · draft** until a person clicks **Publish changes** (or discards the
+changes). They take:
+
+- `title` and the body as `block_tree` or `body_markdown` (not both) — the
+  held text. Leave one out and the copy keeps what it had (the published text
+  if there was no copy yet).
+- `fields` — the other held settings, keyed as `update_*` takes them: `slug`,
+  `excerpt`, the `seo_*` fields, `custom_fields`, `category_id`,
+  `featured_image_id`, the tag and related-content ids. They are validated as
+  an `update_*` would validate them. Audience, passphrase and schedule are not
+  held (they apply at once in the editor), and are refused here.
+
+The working-copy tools refuse a record that is not published; use `update_*`
+for those. A `draft_write` key gets neither the tools nor the action.
+
+This rule is MCP's. JSON:API `PATCH`, GraphQL and in-context editing still
+edit a live record directly through `:update`, on purpose
+([The working copy](working-copy.md#not-in-this-change)). A **content link**
+on a published source also shows at once (see *Links* below).
 
 Links: `read_content_links`, `create_content_link` and `update_content_link`
 read and write payload links between any two records, the same links
@@ -204,9 +235,10 @@ written.
 
 > **Change severity: `change_severity`.** `update_page` / `update_post` /
 > `update_entry` accept an optional `change_severity` (`critical`, `notable` or
-> `routine`). It is recorded on the edit only when the document is published and
-> the edit touches a field the site lists as safety-relevant; leave it out and
-> that edit is recorded `notable`. Per call — there is no batch tool. See
+> `routine`), but it is recorded only on an edit of a **published** document,
+> and over MCP those are refused ([Live records](#live-records)). An edit
+> staged with `save_*_working_copy` gets its severity when a person clicks
+> **Publish changes**. See
 > [json-api.md](json-api.md#change-severity-how-much-an-edit-matters).
 
 > **Change note: `change_note`.** The same update tools accept an optional
@@ -292,7 +324,10 @@ content domain, then override `:mcp_tools` in your project config. As with
 `ash_domains`, the override replaces the list — restate the core tools and
 append your own. An override written before 1.12 lacks `read_content_links`,
 `create_content_link` and `update_content_link`, so `/mcp` doesn't serve them
-until you add the three names.
+until you add the three names. One written before the working-copy tools lacks
+`save_page_working_copy`, `save_post_working_copy` and
+`save_entry_working_copy`: without them a model can't edit a published record
+over `/mcp` at all, since `update_*` refuses one.
 
 ## Connecting a client
 

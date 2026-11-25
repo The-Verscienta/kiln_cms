@@ -187,22 +187,23 @@ defmodule KilnCMSWeb.ChangeSeveritySurfacesTest do
     end
   end
 
+  # Severity is recorded only on an edit of a live document, and `/mcp` no
+  # longer edits one: `update_page` refuses a published page (docs/mcp.md,
+  # "Live records"). The edit is staged in the working copy instead, and the
+  # person who clicks Publish changes sets the severity then.
   describe "MCP" do
-    test "update_page takes change_severity; omitted records :notable", ctx do
+    test "update_page on a live page is refused, severity and all", ctx do
       page = live_page(ctx.admin)
+      baseline = severity_of_latest(page)
 
-      assert {200, %{"result" => %{"isError" => false}}} =
+      assert {200, %{"result" => %{"isError" => true}}} =
                mcp(ctx.key, "update_page", %{
                  id: page.id,
                  input: %{title: "One", change_severity: "critical"}
                })
 
-      assert severity_of_latest(page) == :critical
-
-      assert {200, %{"result" => %{"isError" => false}}} =
-               mcp(ctx.key, "update_page", %{id: page.id, input: %{title: "Two"}})
-
-      assert severity_of_latest(page) == :notable
+      assert severity_of_latest(page) == baseline
+      assert unchanged?(page)
     end
 
     test "an unknown value is a tool error, nothing is written", ctx do
