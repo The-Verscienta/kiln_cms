@@ -34,17 +34,27 @@ defmodule KilnCMS.CMS.ContentLinks.Backfill do
   is still read as what it is.
 
   Realign rewrites `position` and `metadata` of an existing edge that
-  disagrees with the stored value. A save that lands while a run is in
-  progress can be realigned back to what the value held when the run read it,
-  until that record's next changing save; run it in a quiet period.
+  disagrees with the stored value.
+
+  A save that lands while a run is in progress can race it in two ways, each
+  lasting until that record's next changing save:
+
+    * realign can set the edge back to the position or link values the value
+      held when the run read it;
+    * a save that removes a target can be crossed by the insert, which writes
+      back the edge the save just deleted. That stale edge holds a target
+      whose field is `on_target_delete: :restrict`.
+
+  Run it in a quiet period.
 
   ## What it keeps
 
-  The prune is deliberately the most permissive test of "still held": an edge
-  stays while its source row still holds its target's id under its field, in
-  either shape and in any case, whatever the field definitions say. A bug in
-  the prune deletes data, so it never joins the definitions and never
-  compares positions.
+  The prune errs toward keeping: an edge stays while its source row still
+  holds its target's id, as uuid text, under its field, in either shape and
+  in any case, whatever the field definitions say. A bug in the prune deletes
+  data, so it never joins the definitions and never compares positions. The
+  one edge it deletes although the write path would keep it is one for a raw
+  16-byte id (see below).
 
   A reference inside a group row or a flexible item (#2282) has an edge keyed
   by its dotted definition path (`visits.doctor`). The backfill neither writes
@@ -59,10 +69,11 @@ defmodule KilnCMS.CMS.ContentLinks.Backfill do
       no `"type"`; the write path also consults `target_types`, a later
       column. Snapshots carry `"type"` anyway, and realign leaves
       `target_type` alone, so the next changing save settles it.
-    * Any 16-character string passes `Ecto.UUID.cast/1` as a raw id, so the
-      write path writes an edge for one. This backfill reads only the 36
-      character text form: it writes no such edge and its prune deletes one;
-      the record's next changing save writes it back.
+    * Any 16-byte string passes `Ecto.UUID.cast/1` as a raw id, so the write
+      path writes an edge for one. This backfill reads only the 36-character
+      text form: it writes no such edge, and its prune deletes one, since it
+      never matches the text compare; the record's next changing save writes
+      it back. Follow-up #3356.
     * It does not check a field's `max_sources` cap.
 
   ## Why SQL, not Ash

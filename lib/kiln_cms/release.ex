@@ -151,7 +151,9 @@ defmodule KilnCMS.Release do
 
   The upgrade to 1.1 runs it once already; this is for a backup restored from
   before it, or a raw import. Run it in a quiet period: a save landing mid-run
-  can be realigned to what its value held when the run read it, until that
+  can be realigned to what its value held when the run read it, or, if it
+  removes a target, crossed by the run's insert, which leaves a stale edge
+  holding an `on_target_delete: :restrict` target; either lasts until that
   record's next changing save. Returns the counts
   `KilnCMS.CMS.ContentLinks.Backfill.run/1` reports.
   """

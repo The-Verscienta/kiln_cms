@@ -599,15 +599,90 @@ defmodule KilnCMS.CMS.ReferenceLinksTest do
       assert Backfill.run() == %{inserted: 0, updated: 0, deleted: 0}
     end
 
-    # The 1.1 data migration runs this module against the schema as of that
-    # migration, so a column added later would crash an upgrade from 1.0.
-    test "names no field definition column added after the 1.1 data migration" do
+    test "realigns a list element whose link values changed in place", %{admin: admin} do
+      list = list_field!(admin)
+      a = page!(admin, "A")
+      b = page!(admin, "B")
+      linked = fn role -> Map.put(snapshot(a), "link", %{"role" => role}) end
+      old = seed_post!(%{list => [linked.("x"), snapshot(b)]})
+
+      assert %{inserted: 2, updated: 0, deleted: 0} = Backfill.run()
+
+      set_fields!("posts", old, %{list => [linked.("y"), snapshot(b)]})
+
+      assert Backfill.run() == %{inserted: 0, updated: 1, deleted: 0}
+      assert Enum.find(edges(old), &(&1.target_id == a.id)).metadata == %{"role" => "y"}
+      assert positioned(old) == Enum.sort([{list, a.id, 0}, {list, b.id, 1}])
+      assert_desired(old)
+    end
+
+    test "realigns a single reference's drifted position and link values", %{admin: admin} do
+      a = page!(admin, "A")
+      post = post!(admin, %{"hero" => a.id})
+      assert_desired(post)
+
+      drift! = fn set ->
+        Ecto.Adapters.SQL.query!(
+          KilnCMS.Repo,
+          "UPDATE content_links SET #{set} WHERE source_id = $1",
+          [Ecto.UUID.dump!(post.id)]
+        )
+      end
+
+      drift!.("position = 5")
+      assert Backfill.run() == %{inserted: 0, updated: 1, deleted: 0}
+      assert positioned(post) == [{"hero", a.id, 0}]
+
+      drift!.(~S|metadata = '{"stale": true}'::jsonb|)
+      assert Backfill.run() == %{inserted: 0, updated: 1, deleted: 0}
+      assert [%{metadata: %{}}] = edges(post)
+      assert_desired(post)
+    end
+
+    # The 1.1 data migration (20261003000000) runs this module against the
+    # schema as of that migration, so a column added later would crash an
+    # upgrade from 1.0. Every column the statements name must be one that
+    # existed then (the moduledoc's list); an alias not listed here fails too.
+    test "names only columns that existed at the 1.1 data migration" do
+      content = ~w(id org_id custom_fields type_definition_id)
+
+      link =
+        ~w(id org_id source_id target_id kind position metadata field source_type target_type)
+
+      allowed = %{
+        # a content table
+        "c" => content,
+        "fd" => ~w(org_id content_type type_definition_id name field_type target_type),
+        "td" => ~w(id name),
+        "cl" => link,
+        # the desired-rows subquery's own output
+        "d" => ~w(org_id source_id field target_id position metadata source_type target_type),
+        # jsonb_array_elements(...) WITH ORDINALITY AS e(v, ord)
+        "e" => ~w(v ord)
+      }
+
       statements = Backfill.statements()
       assert statements != []
 
-      for sql <- statements,
-          column <- ~w(multiple target_types link_of_id group_of_id flex_of_id) do
-        refute sql =~ ~r/\b#{column}\b/, "backfill SQL names `#{column}`:\n#{sql}"
+      for sql <- statements do
+        qualified =
+          for [_, table, column] <- Regex.scan(~r/\b([a-z_]+)\.([a-z_]+)\b/, sql),
+              do: {table, column}
+
+        bare =
+          (Regex.scan(~r/INSERT INTO content_links\s*\(([^)]*)\)/, sql) ++
+             Regex.scan(~r/\bSET\s+(.*?)\s+FROM\b/s, sql))
+          |> Enum.flat_map(fn [_, list] ->
+            list |> String.split(",") |> Enum.map(&(&1 |> String.split("=") |> hd()))
+          end)
+          |> Enum.map(&{"cl", String.trim(&1)})
+
+        assert qualified != []
+
+        for {table, column} <- qualified ++ bare do
+          assert column in Map.get(allowed, table, []),
+                 "backfill SQL names `#{table}.#{column}`:\n#{sql}"
+        end
       end
     end
   end

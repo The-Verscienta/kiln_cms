@@ -11,9 +11,13 @@ defmodule Mix.Tasks.Kiln.Links.Backfill do
 
   The upgrade to 1.1 runs this once, as a data migration. Run it again after
   restoring a backup taken before the upgrade, or after writing
-  `custom_fields` outside the application (a raw SQL import). Idempotent. Run
-  it in a quiet period: a save landing mid-run can be realigned to what its
-  value held when the run read it, until that record's next changing save.
+  `custom_fields` outside the application (a raw SQL import). Idempotent.
+
+  Run it in a quiet period. A save landing mid-run can be realigned to the
+  position or link values its value held when the run read it, and a save
+  that removes a target can be crossed by the run's insert, which leaves a
+  stale edge holding an `on_target_delete: :restrict` target. Either lasts
+  until that record's next changing save.
   See `KilnCMS.CMS.ContentLinks.Backfill`.
 
   In a release (no Mix):
