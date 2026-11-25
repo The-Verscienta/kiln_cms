@@ -529,11 +529,27 @@ defmodule KilnCMS.CMS.ChangeSeverityTest do
       definition = define_field!(admin, "price")
       page = live_page(admin, %{custom_fields: %{"price" => "9"}})
       CMS.destroy_field_definition!(definition, actor: admin)
+
+      # A record still holding the retired key (the purge failed, or wrote
+      # before it). Read again afterwards: the purge moved the record's lock
+      # version (#2744).
+      KilnCMS.Repo.query!(
+        ~s(UPDATE pages SET custom_fields = custom_fields || '{"price": "9"}'::jsonb WHERE id = $1),
+        [Ecto.UUID.dump!(page.id)]
+      )
+
+      page = CMS.get_page!(page.id, authorize?: false, tenant: page.org_id)
       list_safety(admin, %{"page" => ["price"]})
 
-      # The registry refuses a value for a key with no definition.
-      assert {:error, %Ash.Error.Invalid{}} =
+      # The registry refuses a value for a key with no definition — that
+      # refusal, not a stale-record one, which is also `Invalid`.
+      assert {:error, %Ash.Error.Invalid{errors: errors}} =
                CMS.update_page(page, %{custom_fields: %{"price" => "12"}}, actor: admin)
+
+      assert [%Ash.Error.Changes.InvalidAttribute{field: :custom_fields, message: message}] =
+               errors
+
+      assert message =~ ~s("price" is not a defined custom field)
 
       assert last_version(page, :update) == nil
 

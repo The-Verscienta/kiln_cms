@@ -244,9 +244,11 @@ defmodule KilnCMS.CMS.FlexibleSyncTest do
     test "the next write still validates against the new name", ctx do
       CMS.update_field_definition!(ctx.hero, %{name: "banner"}, actor: ctx.admin)
 
+      # Read again: the rename moved the record's lock version (#2744), so
+      # the struct from before it is refused as stale.
       assert {:ok, _} =
                CMS.update_post(
-                 ctx.post,
+                 CMS.get_post!(ctx.post.id, actor: ctx.admin),
                  %{
                    custom_fields: %{"fs2_sections" => stored(ctx.post, ctx.admin)["fs2_sections"]}
                  },

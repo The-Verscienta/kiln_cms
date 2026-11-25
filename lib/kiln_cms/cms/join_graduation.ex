@@ -578,27 +578,39 @@ defmodule KilnCMS.CMS.JoinGraduation do
         {:ok, :dry_run, reports}
 
       true ->
-        Enum.each(definitions, fn {org_id, definition} ->
-          # authorize?: false — the last step of an operator's graduation, at
-          # the host's shell with no actor, as `Promotion` archives a type.
-          # Granting a system actor `destroy` here would let every system
-          # caller delete a site's fields.
-          #
-          # Its `after_transaction` hooks — the value purge
-          # (`SyncFieldValues`) above all — run inside this transaction on
-          # purpose: the purge must commit or roll back with the check.
-          #
-          # A field that was the last of its section takes the section's
-          # layout with it (`Changes.KeepSectionLayouts`, #2881), in this
-          # same transaction and under this same `authorize?: false`.
-          CMS.destroy_field_definition!(definition,
-            authorize?: false,
-            tenant: org_id,
-            context: %{warn_on_transaction_hooks?: false}
-          )
-        end)
+        case Enum.reduce_while(definitions, :ok, &retire_definition/2) do
+          :ok -> {:ok, :retired, reports}
+          {:error, reason} -> KilnCMS.Repo.rollback(reason)
+        end
+    end
+  end
 
-        {:ok, :retired, reports}
+  # The destroy's `after_transaction` hooks — the value purge (`SyncFieldValues`) above
+  # all — run inside this transaction on purpose: the purge must commit or
+  # roll back with the check. One that fails fails the destroy, and the
+  # retire rolls back with the reason (#2744).
+  #
+  # A field that was the last of its section takes the section's layout with
+  # it (`Changes.KeepSectionLayouts`, #2881), in this same transaction and
+  # under this same `authorize?: false`.
+  defp retire_definition({org_id, definition}, :ok) do
+    # authorize?: false — the last step of an operator's graduation, at the
+    # host's shell with no actor, as `Promotion` archives a type. Granting a
+    # system actor `destroy` here would let every system caller delete a
+    # site's fields.
+    case CMS.destroy_field_definition(definition,
+           authorize?: false,
+           tenant: org_id,
+           context: %{warn_on_transaction_hooks?: false}
+         ) do
+      :ok ->
+        {:cont, :ok}
+
+      {:error, error} ->
+        {:halt,
+         {:error,
+          "could not delete #{definition.name} in organization #{org_id}: " <>
+            Exception.message(error)}}
     end
   end
 

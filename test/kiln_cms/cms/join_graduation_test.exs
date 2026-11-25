@@ -304,6 +304,29 @@ defmodule KilnCMS.CMS.JoinGraduationTest do
       assert length(rows(ctx.spec)) == 2
     end
 
+    # #2744: the purge runs inside this transaction, so a failed rewrite
+    # (here of a malformed working copy, which nothing writes but stands in
+    # for any failed statement) is retire's own `{:error, reason}`, not a
+    # raise, and nothing is deleted.
+    test "a value purge that fails is an error, and deletes nothing", ctx do
+      copy!(ctx.spec)
+      other = CMS.create_post!(%{title: "Other", slug: slug()}, actor: ctx.admin)
+
+      Repo.query!(
+        "UPDATE posts SET working_fields = jsonb_build_object('custom_fields', to_jsonb($2::text)), " <>
+          "working_base = '{\"custom_fields\": \"x\"}'::jsonb WHERE id = $1",
+        [Ecto.UUID.dump!(other.id), ctx.name]
+      )
+
+      assert {:error, reason} = JoinGraduation.retire(ctx.spec)
+      assert is_binary(reason)
+      assert reason =~ ctx.name
+
+      assert {:ok, _field} = find_field(ctx)
+      assert length(edges(ctx.post, ctx.name)) == 3
+      assert Map.has_key?(CMS.get_post!(ctx.post.id, actor: ctx.admin).custom_fields, ctx.name)
+    end
+
     test "drops the layout of the section the field was the last of (#2881)", ctx do
       relations!(ctx)
       copy!(ctx.spec)

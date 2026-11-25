@@ -106,8 +106,9 @@ must fail on a refused import.
   a value under its name and the import would delete it, change its type, or
   turn a list (`multiple`) into a single value. Nothing is written until you
   pass `--allow-data-loss`, which then behaves exactly as the same edit in the
-  console (a delete purges the key from every record). A link or group
-  sub-field is judged by its parent's key. A
+  console (a delete purges the key from every record). A value held only in a
+  live record's pending draft counts, since the delete removes it from the
+  draft too. A link or group sub-field is judged by its parent's key. A
   [held list](extending-content.md#narrow-a-list-field-whose-type-stopped-taking-lists)
   (a list field whose plugin type no longer takes lists) stays a list
   through any other change the file makes to it.
