@@ -1175,6 +1175,51 @@ Two pieces of bucket configuration, on the **private** bucket:
   token expires (`KilnCMS.Media.StagedUploadCleanup`); the rule covers a job
   lost with its node.
 
+The cleanup job is queued when the upload is issued, an hour plus a minute
+ahead. If it can't be queued, `POST /api/media/uploads` answers
+`502 storage_failed` and issues nothing: a token without that job could be
+neither completed nor cleaned up.
+
+A completion never races that job (#2724). It first **claims** the job
+(`KilnCMS.Media.StagedUploadClaim`): one compare-and-set `UPDATE` of the job's
+`oban_jobs` row that records a claim id in `meta` and pushes `scheduled_at`
+out by a 300-second lease. A heartbeat renews the lease every 60 seconds
+until the completion has finished copying, stripping and storing, so the job
+is never due while the object is being read, however long that takes. Only
+one completion can claim a job, so a second, concurrent completion of the
+same token is refused with `422 not_uploaded`. When the completion ends:
+
+* **It found the staged object.** It deletes the object and makes the job due
+  at once, keeping the claim, so the token stays spent. The job then deletes
+  again: a no-op, or the retry of a delete that failed.
+* **It found nothing** (the client completed before its `PUT` landed, or the
+  staged object or the site's store couldn't be read). The client gets an
+  error, usually `422 not_uploaded`, and the completion gives the claim back
+  and restores the job's original schedule, so the same token can be
+  completed again once the `PUT` has finished.
+* **It died** (the node went down mid-copy). The heartbeat dies with it, the
+  lease lapses, and the job deletes the object.
+* **It lost the claim anyway** (the heartbeat stalled past the lease and the
+  job ran). The completion is abandoned rather than storing a copy the job may
+  have cut short, and the client gets `502 storage_failed` asking it to start
+  again from `POST /api/media/uploads`; the token is spent.
+
+Every time involved is the database's clock, so node clock skew doesn't
+decide who holds the lease; Oban's stager compares `scheduled_at` with its
+own node's clock, and the four minutes between a renewal and the lease's end
+absorb that. The lease and the heartbeat interval are application config,
+for tests rather than production:
+
+```elixir
+config :kiln_cms, KilnCMS.Media.StagedUploadClaim,
+  lease_ms: 300_000,
+  heartbeat_ms: 60_000
+```
+
+Keep `heartbeat_ms` well under `lease_ms`: a renewal that fails (the database
+briefly unreachable) is only a missed beat, and the lease has to outlast
+several.
+
 Presigned `PUT` rather than a presigned `POST` form, so the flow works on R2
 and B2, which do not implement S3's POST Object.
 

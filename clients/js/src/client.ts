@@ -925,7 +925,8 @@ export class KilnClient {
    * presigned URL to `PUT` exactly `byteSize` bytes to (send `headers` as
    * given), and a token for `completeDirectUpload`. Throws `KilnHttpError`
    * 501 when the server's storage can't presign (it needs S3 with a private
-   * bucket) — fall back to `uploadMedia`.
+   * bucket) — fall back to `uploadMedia`. A 502 (`storage_failed`) means no
+   * upload was issued; try again.
    */
   async beginDirectUpload(
     filename: string,
