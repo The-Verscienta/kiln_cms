@@ -405,6 +405,13 @@ msgstr[1] ""
 msgid "%{count} ms"
 msgstr ""
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} no longer exists"
+msgid_plural "%{count} no longer exist"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} not applicable"
@@ -23742,6 +23749,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "That content couldn't be found."
+msgstr ""
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "That content no longer exists. Someone else may have moved it to trash or deleted it."
 msgstr ""
 
 #: lib/kiln_cms_web/live/type_definition_live.ex

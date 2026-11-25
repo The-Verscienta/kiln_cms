@@ -998,19 +998,16 @@ defmodule KilnCMSWeb.EditorLive do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
 
-    {ok, skipped, needs_severity} =
-      Enum.reduce(socket.assigns.selected, {0, 0, 0}, fn key, counts ->
+    # A selected row another user has since trashed or deleted reads as not
+    # found: it is counted as gone and the run goes on with the rest (#2781).
+    {ok, skipped, needs_severity, gone} =
+      Enum.reduce(socket.assigns.selected, {0, 0, 0, 0}, fn key, counts ->
         [kind, id] = String.split(key, ":", parts: 2)
 
-        result =
-          if verb == "delete",
-            do: destroy(kind, id, actor, org),
-            else: do_transition(kind, verb, get!(kind, id, actor, org), actor, org)
-
-        tally_bulk(result, counts)
+        tally_bulk(bulk_row(kind, id, verb, actor, org), counts)
       end)
 
-    flash = bulk_flash(verb, ok, skipped + needs_severity)
+    flash = bulk_flash(verb, ok, skipped + needs_severity) <> gone_suffix(gone)
 
     flash =
       if needs_severity > 0,
@@ -1069,9 +1066,9 @@ defmodule KilnCMSWeb.EditorLive do
   def handle_event("confirm_proposed_date", %{"kind" => kind, "id" => id}, socket)
       when is_binary(kind) and is_binary(id) do
     %{actor: actor, current_org: org} = socket.assigns
-    record = get!(kind, id, actor, org)
 
-    with %DateTime{} = at <- record.proposed_publish_at,
+    with {:ok, record} <- fetch_row(kind, id, actor, org),
+         %DateTime{} = at <- record.proposed_publish_at,
          {:ok, _record} <-
            ContentTypes.update(kind, record, %{scheduled_at: at}, actor: actor, tenant: org) do
       {:noreply,
@@ -1084,6 +1081,9 @@ defmodule KilnCMSWeb.EditorLive do
          )
        )}
     else
+      :gone ->
+        {:noreply, row_gone(socket, kind, id)}
+
       nil ->
         {:noreply, load_items(socket)}
 
@@ -1403,7 +1403,15 @@ defmodule KilnCMSWeb.EditorLive do
   defp transition(socket, %{"kind" => kind, "id" => id}, verb) do
     actor = socket.assigns.actor
     org = socket.assigns.current_org
-    record = get!(kind, id, actor, org)
+
+    case fetch_row(kind, id, actor, org) do
+      {:ok, record} -> transition_row(socket, kind, verb, record)
+      :gone -> row_gone(socket, kind, id)
+    end
+  end
+
+  defp transition_row(socket, kind, verb, record) do
+    %{actor: actor, current_org: org} = socket.assigns
 
     # Flash copy shared with the content editor, chosen from the error the
     # transition returned rather than from the verb (see WorkflowMessages).
@@ -1435,8 +1443,45 @@ defmodule KilnCMSWeb.EditorLive do
   # tenant-scoped so an editor on one site's subdomain can only see and act on
   # that site's content. `org_id` is writable? false, so the tenant is the only
   # way to set/scope it.
-  defp get!(kind, id, actor, org),
-    do: ContentTypes.get_record!(kind, id, actor: actor, tenant: org)
+  #
+  # `kind`/`id` come off a row the list drew earlier, so the record may have
+  # been trashed or deleted by someone else since, or the type removed: any
+  # miss is `:gone`, never a raise that would take the LiveView down (#2781).
+  defp fetch_row(kind, id, actor, org) do
+    case ContentTypes.get_record(kind, id, actor: actor, tenant: org) do
+      {:ok, record} -> {:ok, record}
+      {:error, _not_found} -> :gone
+    end
+  end
+
+  # One row of a bulk run. Delete is a soft delete (archival) and admin-only;
+  # the policy refuses anyone else, and the row is tallied as skipped.
+  defp bulk_row(kind, id, verb, actor, org) do
+    case fetch_row(kind, id, actor, org) do
+      {:ok, record} when verb == "delete" ->
+        ContentTypes.destroy(kind, record, actor: actor, tenant: org)
+
+      {:ok, record} ->
+        do_transition(kind, verb, record, actor, org)
+
+      :gone ->
+        :gone
+    end
+  end
+
+  # A row action whose row no longer exists: say so, drop it from the
+  # selection, and reload the list so the row disappears.
+  defp row_gone(socket, kind, id) do
+    socket
+    |> refresh()
+    |> assign(:selected, MapSet.delete(socket.assigns.selected, "#{kind}:#{id}"))
+    |> put_flash(
+      :error,
+      gettext(
+        "That content no longer exists. Someone else may have moved it to trash or deleted it."
+      )
+    )
+  end
 
   # A publish from the list has no severity picker, so the action is told to
   # refuse (rather than default to :notable) a publish that touches a site
@@ -1460,11 +1505,6 @@ defmodule KilnCMSWeb.EditorLive do
   end
 
   defp severity_required?(_error), do: false
-
-  # Hard delete (soft via archival). Admin-only; the policy rejects others, in
-  # which case the item is counted as skipped.
-  defp destroy(kind, id, actor, org),
-    do: ContentTypes.destroy(kind, get!(kind, id, actor, org), actor: actor, tenant: org)
 
   defp move_to_trash(socket, kind, record) do
     %{actor: actor, current_org: org} = socket.assigns
@@ -1599,6 +1639,13 @@ defmodule KilnCMSWeb.EditorLive do
         ),
       else: gettext("%{action}: %{count} updated", action: bulk_verb_label(verb), count: ok)
   end
+
+  # Rows trashed or deleted elsewhere after the list loaded (#2781), counted
+  # apart from "skipped": there is nothing left to open and fix.
+  defp gone_suffix(0), do: ""
+
+  defp gone_suffix(gone),
+    do: ", " <> ngettext("%{count} no longer exists", "%{count} no longer exist", gone)
 
   # "Skipped" here has one dominant cause worth naming: a record already sitting
   # in another open release, which the database refuses (#500's conflict rule).
@@ -3262,12 +3309,15 @@ defmodule KilnCMSWeb.EditorLive do
   defp status_filter_label(other) when is_atom(other),
     do: other |> to_string() |> String.replace("_", " ") |> String.capitalize()
 
-  defp tally_bulk(:ok, {ok, skipped, sev}), do: {ok + 1, skipped, sev}
-  defp tally_bulk({:ok, _}, {ok, skipped, sev}), do: {ok + 1, skipped, sev}
+  defp tally_bulk(:ok, {ok, skipped, sev, gone}), do: {ok + 1, skipped, sev, gone}
+  defp tally_bulk({:ok, _}, {ok, skipped, sev, gone}), do: {ok + 1, skipped, sev, gone}
+  defp tally_bulk(:gone, {ok, skipped, sev, gone}), do: {ok, skipped, sev, gone + 1}
 
-  defp tally_bulk({:error, error}, {ok, skipped, sev}) do
-    if severity_required?(error), do: {ok, skipped, sev + 1}, else: {ok, skipped + 1, sev}
+  defp tally_bulk({:error, error}, {ok, skipped, sev, gone}) do
+    if severity_required?(error),
+      do: {ok, skipped, sev + 1, gone},
+      else: {ok, skipped + 1, sev, gone}
   end
 
-  defp tally_bulk(_other, {ok, skipped, sev}), do: {ok, skipped + 1, sev}
+  defp tally_bulk(_other, {ok, skipped, sev, gone}), do: {ok, skipped + 1, sev, gone}
 end
