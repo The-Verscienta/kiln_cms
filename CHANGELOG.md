@@ -93,6 +93,9 @@ else.
 
 ### Fixed
 
+- **A document whose parent is in the trash shows on the structure page again, at the top level and marked "Parent unavailable", and can be reordered, indented or outdented; it was invisible (#2760).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#structure-trashed-parent))
 - **A newsletter campaign's counts add up: a recipient whose last delivery attempt still fails (a down MX, a hung relay) or whose campaign has no fired content is counted failed once, instead of being dropped from the tally (#2755).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#newsletter-exhausted-counts-failed))

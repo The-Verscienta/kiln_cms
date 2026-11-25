@@ -12866,6 +12866,11 @@ msgstr ""
 msgid "Items with no recorded reference from a published document. Drafts don't count as uses; a document that published a reference keeps counting until it is published again without it."
 msgstr ""
 
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Its parent is in the trash or not visible to you. Outdent to make it top-level."
+msgstr ""
+
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "Its review date has arrived: check it is still accurate."
@@ -17359,6 +17364,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #, elixir-autogen, elixir-format
 msgid "Parent"
+msgstr ""
+
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Parent unavailable"
 msgstr ""
 
 #: lib/kiln_cms/cms/address_formats.ex

@@ -32,6 +32,17 @@ defmodule KilnCMSWeb.StructureLive do
   honest limit `candidate_parents/3` carries, and the same answer if a site
   outgrows it (search-as-you-type, lazily expanded levels), rather than a
   half-measure now.
+
+  ## A parent the page cannot see (#2760)
+
+  Trash is a soft delete that leaves the children's `parent_id` set, and the
+  list loads neither trashed rows nor any the actor cannot read. Such a
+  *detached* document is drawn at the top level with a marker, rather than
+  grouped under an id no level renders. Where it is drawn is what a move
+  writes: reordering the top level, or outdenting, gives it `parent_id: nil`,
+  and outdenting one of its children lands at the top level too, never under
+  the parent nobody can see (`KilnCMS.CMS.Validations.ContentPlacement` would
+  refuse that).
   """
   use KilnCMSWeb, :live_view
 
@@ -76,18 +87,18 @@ defmodule KilnCMSWeb.StructureLive do
   def handle_event("reorder_items", %{"parent_id" => parent_id, "order" => order}, socket)
       when is_binary(parent_id) and is_list(order) do
     parent_id = if parent_id == "", do: nil, else: parent_id
-    by_id = Map.new(socket.assigns.records, &{&1.id, &1})
+    level_ids = socket.assigns.by_parent |> Map.get(parent_id, []) |> MapSet.new(& &1.id)
 
     failed? =
       order
       |> Enum.with_index()
       |> Enum.any?(fn {id, index} ->
-        case Map.get(by_id, id) do
-          %{parent_id: ^parent_id} = record ->
-            match?({:error, _}, move(socket, record, %{position: index}))
-
-          _other_level ->
-            false
+        if MapSet.member?(level_ids, id) do
+          record = find(socket, id)
+          match?({:error, _}, move(socket, record, reorder_attrs(socket, record, index)))
+        else
+          # Another level's id.
+          false
         end
       end)
 
@@ -112,18 +123,38 @@ defmodule KilnCMSWeb.StructureLive do
     end
   end
 
-  # Outdent: become the next sibling of the current parent.
+  # Outdent: become the next sibling of the current parent. A detached document
+  # is drawn at the top level already, so outdenting it detaches it for real.
   def handle_event("outdent", %{"id" => id}, socket) when is_binary(id) do
     with %{parent_id: parent_id} = record when not is_nil(parent_id) <- find(socket, id),
-         %{} = parent <- find(socket, parent_id) do
-      apply_move(socket, record, %{
-        parent_id: parent.parent_id,
-        position: next_position(socket, parent.parent_id)
-      })
+         {:ok, target} <- outdent_target(socket, record) do
+      apply_move(socket, record, %{parent_id: target, position: next_position(socket, target)})
     else
       _ -> {:noreply, socket}
     end
   end
+
+  defp outdent_target(socket, record) do
+    if detached?(socket, record) do
+      {:ok, nil}
+    else
+      {:ok, socket |> find(record.parent_id) |> shown_parent_id(socket)}
+    end
+  end
+
+  # A detached document dropped at the top level stops pointing at its hidden
+  # parent; everything else only changes position.
+  defp reorder_attrs(socket, record, index) do
+    if detached?(socket, record),
+      do: %{parent_id: nil, position: index},
+      else: %{position: index}
+  end
+
+  defp detached?(socket, record), do: MapSet.member?(socket.assigns.detached, record.id)
+
+  # The parent the tree draws `record` under: its own, unless that is not loaded.
+  defp shown_parent_id(record, socket),
+    do: if(detached?(socket, record), do: nil, else: record.parent_id)
 
   defp apply_move(socket, record, attrs) do
     case move(socket, record, attrs) do
@@ -167,13 +198,13 @@ defmodule KilnCMSWeb.StructureLive do
 
   defp sibling_above(socket, record) do
     socket
-    |> siblings(record.parent_id)
+    |> siblings(shown_parent_id(record, socket))
     |> Enum.take_while(&(&1.id != record.id))
     |> List.last()
   end
 
-  defp siblings(socket, parent_id),
-    do: Enum.filter(socket.assigns.records, &(&1.parent_id == parent_id))
+  # The level as drawn, so the top level includes detached documents.
+  defp siblings(socket, parent_id), do: Map.get(socket.assigns.by_parent, parent_id, [])
 
   # One past the last child, so an indented document lands at the end of its
   # new level rather than colliding with an existing position.
@@ -203,9 +234,22 @@ defmodule KilnCMSWeb.StructureLive do
       |> Enum.filter(&orphan?(&1, linked))
       |> MapSet.new(& &1.id)
 
+    # A parent that is not loaded (trashed, or unreadable to this actor) would
+    # otherwise group its children under an id no level renders (#2760).
+    ids = MapSet.new(records, & &1.id)
+
+    detached =
+      records
+      |> Enum.filter(&(&1.parent_id && not MapSet.member?(ids, &1.parent_id)))
+      |> MapSet.new(& &1.id)
+
+    by_parent =
+      Enum.group_by(records, &if(MapSet.member?(detached, &1.id), do: nil, else: &1.parent_id))
+
     socket
     |> assign(:records, records)
-    |> assign(:by_parent, Enum.group_by(records, & &1.parent_id))
+    |> assign(:by_parent, by_parent)
+    |> assign(:detached, detached)
     |> assign(:orphans, orphans)
   end
 
@@ -260,6 +304,7 @@ defmodule KilnCMSWeb.StructureLive do
           max_depth={@max_depth}
           ct={@ct}
           orphans={@orphans}
+          detached={@detached}
         />
       </div>
     </Layouts.console>
@@ -277,6 +322,7 @@ defmodule KilnCMSWeb.StructureLive do
   attr :max_depth, :integer, required: true
   attr :ct, :map, required: true
   attr :orphans, :any, required: true
+  attr :detached, :any, required: true
 
   defp level(assigns) do
     ~H"""
@@ -308,6 +354,19 @@ defmodule KilnCMSWeb.StructureLive do
                   {gettext("Not in any menu")}
                 </span>
               </.badge>
+              <.badge
+                :if={MapSet.member?(@detached, node.id)}
+                variant="neutral"
+                class="ml-2 align-middle"
+              >
+                <span title={
+                  gettext(
+                    "Its parent is in the trash or not visible to you. Outdent to make it top-level."
+                  )
+                }>
+                  {gettext("Parent unavailable")}
+                </span>
+              </.badge>
             </p>
             <p class="truncate font-mono text-xs text-base-content/60">
               {node.path_alias || "/#{node.slug}"}
@@ -326,7 +385,7 @@ defmodule KilnCMSWeb.StructureLive do
               <.icon name="hero-arrow-right" class="size-4" />
             </button>
             <button
-              :if={@parent_id}
+              :if={@parent_id || MapSet.member?(@detached, node.id)}
               type="button"
               phx-click="outdent"
               phx-value-id={node.id}
@@ -353,6 +412,7 @@ defmodule KilnCMSWeb.StructureLive do
           max_depth={@max_depth}
           ct={@ct}
           orphans={@orphans}
+          detached={@detached}
         />
       </li>
     </ul>
