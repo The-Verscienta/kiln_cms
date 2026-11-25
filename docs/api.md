@@ -2967,6 +2967,11 @@ six months, whichever is longer**. The prefix is not introduced before it is
 needed: 1.0 ships the unprefixed paths (decided 2026-09-18, #1539). Adding new endpoints, optional query params, or new
 `public?` fields is **not** breaking and can land at any time.
 
+A minor release may also refuse input a documented write used to accept,
+without a prefix, when accepting it broke reads, corrupted content or let a
+change skip review; it is listed under Breaking with the request before and
+after ([ADR 0084](decisions/0084-a-minor-release-may-tighten-a-documented-write-when-the-old-input-corrupted-data-or-bypassed-review.md)).
+
 To insulate yourself: consume the published OpenAPI spec (`/api/json/open_api`),
 request only the fields you use (GraphQL selection / JSON:API sparse fieldsets),
 and treat unknown fields as additive.

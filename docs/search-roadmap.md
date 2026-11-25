@@ -200,7 +200,12 @@ the body, so the keyword legs find a record by a structured identity field —
 a Chinese name, a Latin binomial — that the prose never repeats. Opt-in per
 field: most `custom_fields` keys are numbers, enums and snapshots that would
 only add noise. Text inside a list or map value (a list of common names) is
-indexed, map keys and `id`s are not. Flipping the flag, or deleting a flagged
+indexed, map keys and `id`s are not. Since 1.13 a Flexible content field can be
+flagged too: its items are read through their item types' sub-fields, never an
+item's `_id`, `_type` or `_settings` or a media or reference sub-field, and the
+generic reading skips the `_`-prefixed keys of any map that has both `_id` and
+`_type` ([Search a flexible field and read its history](extending-content.md#search-a-flexible-field-and-read-its-history)).
+Flipping the flag, or deleting a flagged
 field, re-fires the type's published documents so the index catches up; a
 draft catches up on its next save. `names_record` is separate: it makes the
 value a *name* (the alias leg's phrase match), not body text.

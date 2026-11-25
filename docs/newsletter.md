@@ -87,6 +87,36 @@ delivery happens asynchronously.
    `KilnCMS.Mail.deliver_for_worker/2`. It skips a subscriber who unsubscribed —
    or whose address hard-bounced — between fan-out and delivery.
 
+### Read a campaign's counts
+
+On `/editor/newsletter`, the campaign history table has a **Sent** column,
+shown as `sent_count/total_recipients`, and a **Failed** column
+(`failed_count`). The **Subscribers** heading counts every confirmed
+subscriber on the site, not only those in the list below it, which shows the
+newest 100.
+
+Each recipient lands in one of the two counts once delivery is settled:
+
+- **Sent**: the relay accepted the message.
+- **Failed**: the relay rejected it permanently; or the post has no fired
+  `:web` artifact to send; or the eighth and last attempt still failed (a
+  recipient's mail server down for the whole retry window of about 15 hours,
+  a greylist that never lifts, a relay that never answers, or the attempt
+  running past its 60-second ceiling). For the last case the log has a
+  warning, `Newsletter.MailWorker gave up after 8 attempts: (reason)`, naming
+  the campaign and subscriber ids, and the job ends cancelled with the same
+  reason.
+
+Earlier attempts retry without moving either count, so **Sent** plus
+**Failed** can sit below the total while retries are still pending. Once they
+are done, the only gap left is subscribers skipped because they unsubscribed,
+hard-bounced or were erased between fan-out and their delivery. Those are
+counted in neither column.
+
+Before 1.13, a recipient whose every attempt failed transiently was counted
+nowhere, so a campaign could stay short of its total for good (#2755).
+Campaigns sent before the upgrade keep their old counts.
+
 Newsletter delivery runs on a **dedicated `:newsletter` Oban queue** so a large
 blast can't starve transactional `:mail` (auth, workflow notices). This raises
 total worker concurrency to ~37 — size `POOL_SIZE` accordingly in production

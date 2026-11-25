@@ -174,6 +174,19 @@ Authorization: Bearer <read-write key>
   the Markdown. Title, slug and excerpt are their own attributes.
 - **Grants and limits.** It needs the same `blocks` field grant as
   `block_tree`, and the limit is 1 MB.
+- **Always well-formed.** The converter writes Portable Text in the shape
+  every reader expects, so `body_markdown` never meets the check that refuses
+  a malformed `block_tree` body with a `400`
+  ([json-api.md](json-api.md#block-tree-portable-text-check)). If a client
+  struggles to build valid Portable Text, sending Markdown instead avoids the
+  problem.
+
+The reverse direction, Portable Text to Markdown (the editor's Markdown view,
+`KilnCMS.Blocks.PortableText.to_markdown/1`), repairs a stored body first,
+as every reader does: a `marks` string reads as one mark, a string child as
+a span, a list `level` of `"2"` as `2`, and one that isn't a whole number as
+the top level. A body stored in a malformed shape before 1.13 therefore
+opens in the Markdown view instead of failing.
 
 ## For developers
 

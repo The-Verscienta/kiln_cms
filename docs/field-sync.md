@@ -404,6 +404,11 @@ A hand-written entry may leave out `field_type` and `multiple` on an item type
   [What an older build refuses in a new export](#what-an-older-build-refuses-in-a-new-export)),
   and do not know the `flexible` type either. Export from the older build, or
   remove the flexible field from the file.
+- **1.12.x and older refuse a flexible field with `"searchable": true`**,
+  which 1.13.0 allows. The older build's dry run already reports it (`a
+  flexible field can't be searchable: search would index each item's _id and
+  _type`), and its apply writes nothing. Set the key to `false` in the file, or
+  export from the older build.
 - **Flipping `item_setting` over stored items is blocked** without
   `--allow-data-loss`, because the stored values stay where they were.
 - **Deleting a whole flexible field that holds items needs `--prune` and

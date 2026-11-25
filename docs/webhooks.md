@@ -201,6 +201,9 @@ What can go wrong:
 - **"Couldn't reveal that URL."**: the endpoint was not found (another admin
   deleted it after your page loaded) or you are no longer an admin of the
   site. Reload the page.
+- **"That webhook no longer exists."**: you clicked **Edit** on an endpoint
+  another admin deleted after your page loaded. The list is reloaded without
+  it.
 - **Two rows look the same.** Two endpoints on one host whose paths end alike
   mask to the same text. Reveal both, or tell them apart by their events.
   The governance exports carry each endpoint's `endpoint_id` for this.
@@ -725,7 +728,17 @@ After **10** exhausted deliveries in a row, the endpoint is auto-disabled
 (`auto_disabled_at` stamped, shown in the UI) and stops receiving new
 deliveries — a dead receiver doesn't burn the delivery queue forever. Any
 successful delivery to an active endpoint, or any admin edit, resets the
-counter to zero. `auto_disabled_at` is cleared only when the endpoint is
+counter to zero.
+
+The count is kept in the database, one `UPDATE` per exhausted delivery,
+not on the delivery job's copy of the endpoint. So a success that lands
+while a failing delivery is still retrying resets the run, and that
+failure then counts as the first of a new run rather than pushing a
+healthy endpoint over the limit. Two deliveries that exhaust at the same
+moment each count. A failure against an endpoint that is already off,
+whether auto-disabled by a concurrent failure or unticked by an admin, leaves
+it as it is. (Before 1.13, a failure was counted on the job's copy, so an
+endpoint could be switched off by a run a success had already broken.) `auto_disabled_at` is cleared only when the endpoint is
 active again: a ping or a retraction that gets through to an auto-disabled
 endpoint leaves it auto-disabled, and so does an edit that leaves **Active**
 unticked (fixing the URL before you ping it, say). Tick **Active** to turn it
@@ -737,9 +750,13 @@ The site's admins are told when an endpoint stops getting through, at two
 points:
 
 - **"A webhook is failing"**: the first delivery in a row that exhausts its
-  retries (`consecutive_failures` goes from 0 to 1). Content changes may not
-  be reaching the receiver from this point on.
-- **"A webhook was switched off"**: the failure that auto-disables it.
+  retries (the failure that leaves an active endpoint at a
+  `consecutive_failures` of 1). Content changes may not be reaching the
+  receiver from this point on.
+- **"A webhook was switched off"**: the failure that auto-disables it. Only
+  the one update that switched the endpoint off raises it, so several
+  deliveries exhausting at once against the same endpoint send one notice
+  and one email, not one each.
 
 Each one is a notice in the console bell and `/editor/inbox`, linking to
 `/editor/webhooks`, and an email to the same effect, titled "A webhook is

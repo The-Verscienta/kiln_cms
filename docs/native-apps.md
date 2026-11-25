@@ -220,6 +220,11 @@ type, or into a type whose properties beyond `id` and `type` are optional.
 
 Prose in **blocks** is already structured: a `rich_text` block's `body` is
 Portable Text, an array of blocks whose spans carry their formatting as data.
+In an artifact fired on 1.13 or later its text blocks and spans always have
+the standard shape (`marks` a list of strings, `level` an integer, and so on),
+even when the stored body did not, so a strict decoder doesn't fail on a
+body stored by an earlier release
+([Why three different block shapes?](headless-consumer-guide.md#why-three-different-block-shapes)).
 A rich `:text` **custom field** stores HTML instead (its `format` is `:rich`
 by default; [extending-content.md](extending-content.md)), and
 `custom_fields` delivers that HTML as it is.

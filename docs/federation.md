@@ -78,6 +78,16 @@ Each of those is a deliberate narrowing, not an oversight:
 Workflow transitions (in-review, returned-to-draft) federate nothing. A follower
 has no business learning that a draft moved between editorial columns.
 
+**Quick edits are collapsed, never lost.** Each announcement is one
+`KilnCMS.Federation.AnnounceWorker` job per document and verb. A second job for
+the same document and verb within 60 seconds is dropped only while the first
+is still waiting to run (scheduled, available, retryable or suspended): that
+job reads the live record when it runs, so it sends the newest content anyway.
+Once a job is running it has already read the record, so an edit that lands
+while its `Update` is fanning out queues an `Update` of its own. Before 1.13 a
+running job also blocked the new one, and followers kept the older content
+(#2757).
+
 ## Endpoints
 
 | URL | |

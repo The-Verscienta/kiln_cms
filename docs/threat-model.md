@@ -442,6 +442,14 @@ build if a resource is ever registered without that authorizer.
   still unpublish or archive live content
   ([policy matrix](policy-matrix.md)).
 - **Mass assignment** — Ash actions accept only declared inputs (`accept`).
+- **A stored body that breaks every read** — closed (#2768). A rich text
+  body in a malformed Portable Text shape (`marks` as a string, children that
+  aren't spans) used to be stored and then fail every render, fire and index
+  of the record. A `block_tree` write over JSON:API, GraphQL or MCP, and a
+  plugin `:rich_text` field, is now refused with `400` naming the path
+  (`block_tree[0].body[0].children[1].marks must be a list of strings (got a
+  string)`), and a body stored before that is rendered with the bad nodes
+  repaired or skipped.
 - **Query cost** — each document is capped at complexity 200, depth 15 and
   2,000 tokens on both transports, and a batch at 10 operations. Complexity is
   a price, not a row count: a relationship list without `limit` is priced at
@@ -469,6 +477,17 @@ build if a resource is ever registered without that authorizer.
   (401 without one). The tool allowlist is compile-time and deliberately omits
   publish and destroy, so an LLM client can author and submit for review but
   cannot publish or delete.
+- **An edit to a published record going live unreviewed** — closed (#3347).
+  `update_page`, `update_post` and `update_entry` write the live row, so
+  before 1.13 a write key could change what readers see on a published
+  record with no one reviewing it. Over `/mcp` they now refuse a published
+  record (`KilnCMS.CMS.Validations.McpDraftOnly`, keyed on the
+  `kiln_surface: :mcp` context `KilnCMSWeb.Plugs.McpSurface` sets), and
+  `save_page_working_copy`, `save_post_working_copy` and
+  `save_entry_working_copy` stage the edit in the record's working copy until
+  a person publishes it ([working-copy.md](working-copy.md)). JSON:API,
+  GraphQL and in-context editing still edit a live record directly, on
+  purpose.
 - **Links that skip review** — accepted, bounded (#3191). `create_content_link`
   and `update_content_link` write payload links, which are not part of their
   source's document: a link on a published record shows at once, with no

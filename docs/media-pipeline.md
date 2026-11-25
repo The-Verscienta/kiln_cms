@@ -1230,6 +1230,15 @@ Keep `heartbeat_ms` well under `lease_ms`: a renewal that fails (the database
 briefly unreachable) is only a missed beat, and the lease has to outlast
 several.
 
+The claim arrived in 1.13. During a rolling upgrade from an earlier release, a
+completion handled by an older node doesn't claim, so it can still lose its
+staged object to a cleanup that comes due mid-copy; the client sees
+`415 unsupported_media_type` and starts again. A token an older release issued
+without queuing its cleanup job (it logged `staging cleanup was not queued`)
+can't be completed on 1.13 and answers `422 not_uploaded`: start that upload
+again. Rolling back is safe: an older release ignores the claim, and a job a
+completion was holding runs when its lease ends.
+
 Presigned `PUT` rather than a presigned `POST` form, so the flow works on R2
 and B2, which do not implement S3's POST Object.
 

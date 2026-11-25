@@ -6,7 +6,11 @@
 > rich-text block) is a **separate prototype, disabled in production**: it is
 > gated on `config :kiln_cms, :collab_prototype`, which is on only in
 > `config/dev.exs` and `config/test.exs` (`config/prod.exs` pins it off). See
-> [collaborative-editing-spike.md](collaborative-editing-spike.md).
+> [collaborative-editing-spike.md](collaborative-editing-spike.md). Where the
+> prototype is on, a rich-text block whose collaboration channel can't join
+> (refused, timed out, or still waiting after 15 seconds) falls back to the
+> ordinary single-user editor and says *Live collaboration is unavailable, so
+> others won't see your edits until you save. Reload to try again.* (#2772).
 
 Two (or more) people can open the **same** live preview of a draft and see each
 other in it — a live presence bar of who's watching, plus each other's **cursors**

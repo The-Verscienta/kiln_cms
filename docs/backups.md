@@ -1239,6 +1239,19 @@ Only the URL given to the tools is translated. `restore.sh drill` and
 `staging.sh` hands `STAGING_DATABASE_URL` to the app's migrate and scrub
 commands untranslated: Ecto reads `ssl=false` and `pool_size` itself there.
 
+**`staging.sh up` and `down` take only a URL that names its database
+(#2722).** Before they create, copy into or drop anything, both read the
+database name from `STAGING_DATABASE_URL`'s path and refuse a name that does
+not look like a throwaway clone (see
+[what they check](staging-environments.md#what-up-and-down-check-before-they-create-or-drop)). So for them the URL must
+be `postgres://`, `postgresql://` or `ecto://`, with the database in its path
+and no `dbname` in its query. The passwordless `key=value` string and the bare
+database name that the table below passes through are refused there, because
+their database can't be checked. `createdb` and `dropdb` then connect to the
+URL's own host, port and user, not libpq's default server. `staging.sh scrub`
+does no such check of its own: it hands the URL to the app, whose scrub
+refuses a name that doesn't look throwaway.
+
 **A `key=value` connection string is accepted only without a password
 (#2831).** A string that is not a `postgres://` or `postgresql://` URL after
 the scheme rewrite is passed through unchanged when it carries no secret, and
@@ -6068,7 +6081,7 @@ What can go wrong:
 An untested backup is a hope, not a backup. Once a quarter:
 
 ```bash
-RESTORE_DATABASE_URL=postgres://localhost/kiln_drill \
+RESTORE_DATABASE_URL=postgres://localhost/kiln_drill_scratch \
   ./scripts/restore.sh drill /var/backups/kiln/db/<newest>.dump
 ```
 
@@ -6083,7 +6096,19 @@ and sanity-checks core tables (`users`, `pages`, `posts`,
 against the drill DB, **scrub it first** — it contains production PII and
 webhook config: `STAGING_DATABASE_URL=… ./scripts/staging.sh scrub` (the
 staging tooling exists precisely for "serve a prod clone safely" —
-[staging-environments.md](staging-environments.md)). Then `dropdb kiln_drill`.
+[staging-environments.md](staging-environments.md)). Then drop it with
+`STAGING_DATABASE_URL=… ./scripts/staging.sh down`, which drops it on the
+server the URL names.
+
+The two scripts check the name against different lists. The drill takes a
+name containing `drill`, `staging`, `scratch` or `tmp`; the scrub and
+`staging.sh up` and `down` take one containing `staging`, `preview`,
+`ephemeral`, `tmp` or `scratch`, in any case. A name like
+`kiln_drill_scratch` passes both. A plain `kiln_drill` passes the drill but
+is refused by the scrub and `down` unless you set `KILN_STAGING_FORCE=true`.
+The drill's own closing hint, `dropdb <name>`, connects to libpq's default
+server rather than the URL's
+([#3329](https://github.com/The-Verscienta/kiln_cms/issues/3329)).
 
 Record each drill here:
 

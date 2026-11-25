@@ -230,8 +230,15 @@ elements, where there's no text to encode), annotate elements yourself from the
   refuses, including when a token expires.
 - **Deep-link:** `/editor/site/:type/:slug?focus=<block_id>` (in-context editor,
   block-level). Locale variants share a slug, so the bridge also passes
-  `locale=` from the stega payload (#1104); absent locale falls back to the
-  site default. The structured editor accepts the field-level twin:
+  `locale=` from the stega payload (#1104), and so do the content editor's own
+  links in (the toolbar's **Visual** button and each preview block's **Edit**,
+  since #2758). Without `locale=` (an older bridge, a hand-typed URL) the
+  in-context editor opens the default-locale record only when it is the one
+  variant of that slug you can read; when the slug has variants in more than
+  one locale it sends you back to `/editor` with *This content exists in more
+  than one language. Open it from its editor and choose Visual there.* rather
+  than guess. Send `locale=` from your own deep links. The structured editor
+  accepts the field-level twin:
   `/editor/content/:type/:id?focus=<field>` scrolls to, opens (if collapsed),
   pulses, and focuses that field's input — `<field>` is a custom field's `name`
   or a core field (`title`, `slug`, `excerpt`, `seo_title`, …). Unknown fields
@@ -290,6 +297,15 @@ field in the right pane → edit (same contenteditable hooks as in-context
 editing) → **Save** writes through Ash (`:update`, policies + PaperTrail native)
 → the console broadcasts on the preview topic, so `bridge.js` (over `/ws/bridge`)
 re-fetches and the frame updates. No deep-link tab needed.
+
+After a **Save** the open pane is re-read from the saved record: a text or
+rich-text block shows what was stored and stays open for more typing, and a
+title or excerpt input shows the saved value. A Save that fails (*Could not
+save. Please try again.*) or meets a newer edit (*This content changed
+elsewhere. Reload before saving.*) leaves the pane as it was; **Reload**
+fetches the latest and closes it. Before 1.13 the pane kept showing the
+pre-save text after a Save, and the next keystroke wrote that old text back
+(#2759).
 
 ### Preview iframe sandbox (#1059)
 

@@ -201,9 +201,13 @@ the draft's value over it without a word. It no longer does (#1815):
   to the draft's custom fields and the live ones, and the recorded base moves
   with it. *Publish changes* then reports no conflict nobody made, and a real
   one stays reported. The record's `lock_version` moves, so an editor who had
-  it open gets the "changed elsewhere, reload" banner once. Versions keep the
-  old key: restoring one saved before a rename drops that value
-  (`KilnCMS.CMS.Changes.SyncFieldValues`, "Working copies").
+  it open sees "This content changed elsewhere. Reload to get the latest
+  before saving." once; **Reload latest** picks up the renamed field with the
+  draft's value. Versions keep the old key: restoring one saved before a
+  rename drops that value (`KilnCMS.CMS.Changes.SyncFieldValues`, "Working
+  copies"). A draft saved before a rename on 1.12.1 or earlier still holds
+  the old key, and nothing records which renames happened, so it is not
+  repaired: re-enter the value under the new field, or discard the draft.
 
 ## When a co-editor saves while you have the document open
 

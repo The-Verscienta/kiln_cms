@@ -328,8 +328,9 @@ lasts until the next entitlement recompute. Comp a membership instead.
 **A registration that is waiting or was rejected.** You can set audiences on a
 registration that is [waiting for approval](#approving-registrations) or was
 rejected. The boxes show what is stored on its registration, and the note
-under the heading says it reads nothing gated here yet. The ticked audiences
-take effect when it is approved, by a site admin from **Registrations** or by
+under the heading says it reads nothing gated here, and that the ticked
+audiences apply once it is approved (or, for a rejected one, if it is approved
+later). They take effect when it is approved, by a site admin from **Registrations** or by
 an invitation, and grant nothing before that.
 
 ## Invite someone to a site

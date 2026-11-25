@@ -1199,6 +1199,9 @@ editor submits for review; deciding the outcome — approve or return — is the
 admin's half, and so is taking content down (#2134). A refused route answers
 `403` and changes nothing. Hard delete (`:purge`) is **never** routed and is
 API-key-banned regardless of scope — `DELETE` is the reversible soft-delete.
+One difference from `/mcp`: there `update_*` refuses a published record and
+`save_*_working_copy` holds the edit for a person to publish
+([mcp.md](mcp.md#live-records)), while `PATCH` here edits it directly.
 
 A **`:draft_write` key** (#2273) may `POST` a create and `PATCH` a draft its
 account authored while it is still a draft, whatever the owner's role; every
@@ -1536,8 +1539,8 @@ always be sent again:
   an object or a list; an object or list in a text block's `style`,
   `listItem` or `_key` (a node whose `_type` is absent, `"block"` or
   `"code"`) or in a span's `text` or `_key` (a child whose `_type` is absent or
-  `"span"`); a text block's `level` that isn't a whole number or a numeric
-  string.
+  `"span"`); a text block's `level` that isn't a whole number or a string
+  holding one (`"2"` passes; `"2.0"`, `"two"` and `2.5` are refused).
 - **Coerced:** a number or boolean in one of those string slots, a `marks`
   entry or a `markDefs` entry's `_key` becomes its text (`"text": 42` is
   stored as `"42"`); a numeric-string or whole-number `level` becomes an
@@ -1545,10 +1548,10 @@ always be sent again:
 - **Kept as sent:** a missing or `null` key, keys the schema doesn't name, any
   `_type`, a custom node's own fields, an inline object's fields other than
   `marks`, and an annotation's fields other than `_key`. A custom node's
-  `children` and `markDefs` are checked like a text block's. A table row or
-  cell that isn't an object is dropped, not refused (#475). A body sent as a
-  TipTap document (`{"type": "doc", …}`) is converted and repaired, not
-  checked.
+  and a table cell's `children` and `markDefs` are checked like a text
+  block's. A table row or cell that isn't an object is dropped, not refused
+  (#475). A body sent as a TipTap document (`{"type": "doc", …}`) is
+  converted and repaired, not checked.
 
 A refused body is a `400` and nothing is written. The `detail` lists up to five
 0-based paths into what you sent, then `and N more`, and names the type found,
@@ -1564,6 +1567,25 @@ never the value:
   }]
 }
 ```
+
+The path follows the keys you sent: a block inside `columns` reads
+`block_tree[0].columns[1].blocks[0].body[…]`, a plugin block's field goes
+under its own name (`block_tree[0].summary[…]` for a field `summary`), and a
+block sent in the stored `type`/`value`
+envelope `block_tree[0].value.body[…]`. More than five problems end with
+`; and 2 more` (for seven).
+
+To fix a refused body:
+
+1. Take each path in `detail` and find that node in what you sent
+   (`block_tree[0].body[0].children[1].marks` is the second span of the
+   first text block of the first block).
+2. Change it to the type the message names: `marks` a list of strings
+   (`["strong"]`, not `"strong"`), `children` a list of span objects, a
+   text block's `style`, `listItem` and `_key` strings, `level` an integer.
+3. Send the write again. If the `detail` ended with `and N more`, the next
+   response lists the next ones; repeat until it succeeds. The stored body
+   is unchanged until then.
 
 Why the check sits here and not in the stored type:
 [ADR 0083](decisions/0083-a-portable-text-body-is-checked-against-its-published-schema-at-block-tree-and-repaired-elsewhere.md).
@@ -1668,7 +1690,9 @@ internal callers of those actions default to `notable`):
 * **Sent without a safety edit:** ignored. The version records none.
 * **Per request only.** There is no batch write endpoint, so each write names
   its own severity; MCP's `update_page` / `update_post` / `update_entry` take the
-  same `change_severity` argument.
+  same `change_severity` argument, but over `/mcp` they refuse a published
+  document, so a severity sent there is never recorded
+  ([mcp.md](mcp.md#live-records)).
 * **Computed fields:** don't list them as safety fields. The daily refresh
   rewrites them, and each new value would be recorded as a `notable` edit.
 

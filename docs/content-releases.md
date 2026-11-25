@@ -54,6 +54,13 @@ groups: **Planned** (open, scheduled, publishing, failed), **Published**, and
 5. **Ship it.** Either set a **Go live at** datetime (a minute-resolution cron
    fires it, same cadence as per-item scheduling) or hit **Publish now**.
 
+   You type **Go live at** in your browser's local time zone; Kiln stores it
+   in UTC. Everywhere a release time is shown afterwards (the **Go-live**
+   panel's **Scheduled**, **Published** and **Rolled back**, and the releases
+   list's **Go-live** and **Published** columns) it is in UTC and says so:
+   `2026-11-25 14:00 UTC`. Before 1.13 those times carried no zone, so a
+   release scheduled for 09:00 in New York read as `14:00` (#2764).
+
    **Publish now is withheld** while any item is blocked, or while the release
    is empty — the go-live could only abort, and the page already knows it.
    **Scheduling only warns.** With a blocked item, pressing **Schedule** asks
