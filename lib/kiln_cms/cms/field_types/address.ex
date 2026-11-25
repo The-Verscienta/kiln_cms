@@ -52,6 +52,20 @@ defmodule KilnCMS.CMS.FieldTypes.Address do
   subset of parts, so existing API clients, imports and stored values keep
   working. A format is guidance for the person typing, not a validation rule.
 
+  ## Administrative-area lists (#2996)
+
+  For the 62 countries with a known list (`KilnCMS.CMS.AddressSubdivisions`:
+  the US states, Canadian provinces, Japanese prefectures, UK local
+  authorities, ...) the editor offers the administrative area as a **select**
+  and the address stores the area's **code** (`"CA"`, not `"California"`).
+
+  The server is lenient on purpose. A code in any case (`"ca"`) and an exact
+  name (`"California"`) are both stored as the code, so an address saved before
+  this carried free text becomes a code the next time it is saved. Text that is
+  neither (`"England"`, a spelling the list lacks) is kept as typed rather than
+  refused, so existing values, imports and API clients keep working. A country
+  without a list keeps a free-text box.
+
   Schema.org `PostalAddress` output and a geocode hand-off to `:geolocation`
   are not implemented.
 
@@ -66,7 +80,7 @@ defmodule KilnCMS.CMS.FieldTypes.Address do
   use Kiln.FieldType
   use Gettext, backend: KilnCMSWeb.Gettext
 
-  alias KilnCMS.CMS.{AddressFormats, Countries}
+  alias KilnCMS.CMS.{AddressFormats, AddressSubdivisions, Countries}
 
   # Display order of the editor; storage is a map, so the order is not stored.
   @keys ~w(country address_line1 address_line2 locality administrative_area postal_code)
@@ -208,6 +222,7 @@ defmodule KilnCMS.CMS.FieldTypes.Address do
         part
         |> Map.put(:required?, part.key in format.required)
         |> relabel(country)
+        |> area_select(country, value)
       end
     )
   end
@@ -220,6 +235,36 @@ defmodule KilnCMS.CMS.FieldTypes.Address do
       _other -> false
     end
   end
+
+  # A country with a list gets a select (blank first, so an untouched widget
+  # submits nothing). A stored value the list does not know is kept as an
+  # extra option, so opening and saving the record never changes or drops it.
+  defp area_select(%{key: "administrative_area"} = part, country, value) do
+    case AddressSubdivisions.list(country) do
+      nil ->
+        part
+
+      areas ->
+        # Compared exactly, as the select does: a stored name ("California")
+        # or a lower-case code is not an option's value, so it is kept as one
+        # of its own (and `cast/2` turns it into the code on save).
+        stored = value |> Map.get("administrative_area") |> stored_text()
+
+        extra =
+          if stored == "" or List.keymember?(areas, stored, 0),
+            do: [],
+            else: [{stored, stored}]
+
+        part
+        |> Map.delete(:attrs)
+        |> Map.merge(%{type: "select", options: [{"", gettext("Select")} | extra ++ areas]})
+    end
+  end
+
+  defp area_select(part, _country, _value), do: part
+
+  defp stored_text(text) when is_binary(text), do: String.trim(text)
+  defp stored_text(_text), do: ""
 
   defp relabel(%{key: "administrative_area"} = part, country),
     do: %{part | label: AddressFormats.label(:administrative_area, country)}
@@ -238,7 +283,7 @@ defmodule KilnCMS.CMS.FieldTypes.Address do
          {:ok, texts} <- texts(parts),
          {:ok, country} <- country(Map.get(parts, "country"), texts),
          {:ok, texts} <- postal(texts, country) do
-      {:ok, Map.put(texts, "country", country)}
+      {:ok, texts |> area(country) |> Map.put("country", country)}
     end
   end
 
@@ -326,6 +371,17 @@ defmodule KilnCMS.CMS.FieldTypes.Address do
   end
 
   defp postal(texts, _country), do: {:ok, texts}
+
+  # A known area's code, whether it arrived as the code or the name; anything
+  # else stays as typed (see the moduledoc).
+  defp area(%{"administrative_area" => text} = texts, country) do
+    case AddressSubdivisions.find(country, text) do
+      {:ok, {code, _name}} -> Map.put(texts, "administrative_area", code)
+      :error -> texts
+    end
+  end
+
+  defp area(texts, _country), do: texts
 
   # Per-country format and canonical spacing. Every pattern is anchored and
   # built from bounded, non-nested quantifiers, so matching is linear in the
