@@ -2515,7 +2515,12 @@ defmodule KilnCMSWeb.EditorLive do
                 phx-mounted={JS.ignore_attributes(["hidden"])}
                 class="absolute right-0 z-30 mt-2 w-64 max-w-[calc(100vw-2rem)] rounded-lg border border-base-content/10 bg-base-100 p-3 shadow-lg"
               >
-                <form id="content-columns-form" phx-change="set_columns" class="space-y-2">
+                <form
+                  id="content-columns-form"
+                  phx-change="set_columns"
+                  phx-auto-recover="ignore"
+                  class="space-y-2"
+                >
                   <input type="hidden" name="type" value={type_value(@column_type)} />
                   <input type="hidden" name="columns[]" value="" />
                   <p class="text-xs text-base-content/60">
