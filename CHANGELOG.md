@@ -110,6 +110,10 @@ else.
   New variable `S3_UPLOAD_MIN_BYTES_PER_SECOND` (default 32768). No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#s3-part-deadline))
 
+- **`scripts/staging.sh down` and `up` now refuse a database whose name doesn't look ephemeral (unless `KILN_STAGING_FORCE` is on) and drop or create it on the server in `STAGING_DATABASE_URL`, not libpq's default one; that variable must now be a URL naming the database in its path (#2722).**
+  No migration; rolling the pin back is safe. A `down` that relied on dropping on the default server now acts on the URL's.
+  ([long form](docs/changelog/unreleased.md#staging-script-guards-drop))
+
 ## [1.12.1] - 2026-11-23
 
 Long form: [docs/changelog/v1.12.1.md](docs/changelog/v1.12.1.md) —

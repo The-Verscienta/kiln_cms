@@ -50,6 +50,9 @@ reach to both databases. Before the first `scripts/staging.sh up`:
       `STAGING_DATABASE_URL` (write).
 - [ ] The staging database's role can `CREATE`/`DROP` its own database, **or** you
       pre-create the throwaway DB and skip `createdb` (the script tolerates this).
+      `createdb` and `dropdb` run on the server in `STAGING_DATABASE_URL`, as its
+      user, connecting through its `postgres` (then `template1`) database, so
+      that role needs to be able to connect to one of them.
 - [ ] The staging DB is a **separate database** (ideally a separate host/instance)
       from production — never point `STAGING_DATABASE_URL` at the prod database.
 
@@ -62,8 +65,13 @@ Full flow, recipe, and the serve step live in
       `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD` are exported.
 - [ ] `STAGING_DATABASE_URL`'s database **name looks ephemeral** (contains
       `staging` / `preview` / `ephemeral` / `tmp` / `scratch`) — the scrub refuses
-      otherwise, which is the seat-belt against scrubbing prod. (`--force` /
-      `KILN_STAGING_FORCE=true` overrides, so don't set those casually.)
+      otherwise, which is the seat-belt against scrubbing prod, and so do
+      `scripts/staging.sh up` and `down`, before they create or drop anything.
+      (`--force` / `KILN_STAGING_FORCE=true` overrides, so don't set those
+      casually.) For `up` and `down` it must be a `postgres://`,
+      `postgresql://` or `ecto://` URL with the database in its path, not a
+      `key=value` string
+      ([what they check](staging-environments.md#what-up-and-down-check-before-they-create-or-drop)).
 - [ ] Run `./scripts/staging.sh up` (dump → restore → migrate → **scrub**). With
       the default `KILN_BIN=mix`, export the variables a prod boot requires
       (`SECRET_KEY_BASE`, `TOKEN_SIGNING_SECRET`) first, and
@@ -153,7 +161,9 @@ Full flow, recipe, and the serve step live in
 
 ## 5. Tear down
 
-- [ ] `./scripts/staging.sh down` drops the throwaway database.
+- [ ] `./scripts/staging.sh down` drops the throwaway database, on the server
+      `STAGING_DATABASE_URL` names. It refuses a name that doesn't look
+      ephemeral unless `KILN_STAGING_FORCE` is on.
 - [ ] Stop/delete the staging Coolify app. Nothing else persists.
 
 ## 6. Rollback

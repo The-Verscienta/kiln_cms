@@ -137,3 +137,21 @@ carries the reasoning.
   - **Configuration.** `config :kiln_cms, KilnCMS.Storage.S3` takes `part_min_bytes_per_second`, `part_min_timeout_ms`, `part_attempts` and `part_retry_backoff_ms`; only the first has an environment variable. Concurrency stays at four parts.
   - **Still bounded elsewhere.** `AVStripWorker` gives a strip, upload included, 10 minutes, so a promotion of a file larger than about 10 minutes of uplink still fails and retries.
   - **No migration; rolling the pin back is safe.** An older release goes back to 30 seconds per part.
+
+
+
+
+
+
+
+
+<a id="staging-script-guards-drop"></a>
+
+- **`scripts/staging.sh down` and `up` check the database they act on, and act on the server `STAGING_DATABASE_URL` names (#2722).** `down` ran `dropdb <name>` against libpq's default server (`PGHOST`, the local socket, the current user), whatever host the URL named, and checked no name, although the script's header promised the name "must look ephemeral". `up`'s `createdb`, and the drop that cleans up an unscrubbed clone after a failed migrate or scrub, did the same: `up` could create the database on one server and copy production into another, and its cleanup could drop a same-named database on the default server.
+  - **A name check before anything is created or dropped.** `up` and `down` refuse a database whose name lacks `staging`, `preview`, `ephemeral`, `tmp` or `scratch` (any case, percent-decoded as libpq reads it), the list the scrub already checked. A refusal ends with `Nothing was dropped` or `Nothing was created or copied`. `up` checks before its `mix` preflight, so nothing runs.
+  - **`KILN_STAGING_FORCE` overrides it.** The script still never sets it, but now reads it for `up` and `down`, spelled as the app reads a flag: `true`, `1`, `yes` or `on`, any case, trimmed. Exported for `up`, it also reaches the scrub `up` runs, as it did before.
+  - **A URL is required.** For `up` and `down`, `STAGING_DATABASE_URL` must be a `postgres://`, `postgresql://` or `ecto://` URL with the database in its path and no `dbname` in its query (which libpq would connect to instead). A passwordless `key=value` string or a bare database name was accepted before and is now refused, because the name it points at can't be checked. `scrub` is unchanged.
+  - **The URL's server.** `createdb` and `dropdb` connect to the URL's host, port and user, with its TLS settings, through its `postgres` database and then `template1` if that fails. The password reaches them as `PGPASSWORD` only. When both attempts fail, the script prints each one's error: `up` carries on, assuming the database exists, `down` stops with `could not drop <name> on the server in STAGING_DATABASE_URL`.
+  - **If you relied on the old behavior.** A `down` whose URL named one server while you meant the default one now drops on the URL's server. Check `STAGING_DATABASE_URL` names the server the clone is on.
+  - **`scripts/restore.sh` still uses the default server** for its `createdb` and its drill's `dropdb` hint, and its drill's name check is case-sensitive; that is [#3329](https://github.com/The-Verscienta/kiln_cms/issues/3329).
+  - **No migration; rolling the pin back is safe.** An older checkout's script drops on the default server again. See `docs/staging-environments.md` ("What `up` and `down` check before they create or drop").

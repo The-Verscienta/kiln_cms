@@ -365,6 +365,9 @@ the guards exist so a mistyped `DATABASE_URL` can't scrub production:
 - **The target database name must look ephemeral** — it must contain `staging`,
   `preview`, `ephemeral`, `tmp`, or `scratch`. Override a deliberately-named clone with
   `--force` / `KILN_STAGING_FORCE=true`, but the name check is your seat-belt.
+  `scripts/staging.sh up` and `down` run the same check before they create or drop
+  anything, and `KILN_STAGING_FORCE` overrides it there too
+  ([below](#what-up-and-down-check-before-they-create-or-drop)).
 - **The target is always printed first** (`database@host`) so you can see what you're
   about to scrub before it happens.
 - **A node whose Oban queues are running is refused** (path 3 without
@@ -388,7 +391,8 @@ laptop and on the production VPS.
 | Variable | Required | Purpose |
 |----------|----------|---------|
 | `PROD_DATABASE_URL` | yes (`up`) | Source to `pg_dump`. Read-only; the script never writes to it. |
-| `STAGING_DATABASE_URL` | yes | Throwaway target. Its **name must look ephemeral** (see guards). |
+| `STAGING_DATABASE_URL` | yes | Throwaway target. Its **name must look ephemeral** (see guards). For `up` and `down`, a URL with the database in its path ([below](#what-up-and-down-check-before-they-create-or-drop)). |
+| `KILN_STAGING_FORCE` | no | `true`, `1`, `yes` or `on`: `up` and `down` accept a database whose name doesn't look ephemeral, and the scrub `up` runs inherits it. For a deliberately named clone only. |
 | `STAGING_ADMIN_EMAIL` / `STAGING_ADMIN_PASSWORD` | recommended | Seed one usable admin; without them you can't sign in to staging. |
 | `KILN_BIN` | no (default `mix`) | How to run migrate + scrub: `mix` for a checkout, or a release bin path like `/app/bin/kiln_cms` in Docker. With `mix`, also export the variables a prod boot needs (see [Running the scrub](#running-the-scrub)). |
 | `MIX_ENV` | no | With `KILN_BIN=mix`: leave it unset (the script runs Mix with `prod`) or set `prod`. Any other value is refused before anything runs, because only the prod configuration reads `DATABASE_URL`. Ignored with a release `KILN_BIN`. |
@@ -413,7 +417,8 @@ before anything runs
 
 If migrate or the scrub fails after `up` has copied production, the clone holds
 production's data unscrubbed. The script says so ("holds UNSCRUBBED production data")
-and drops the database, or, if it can't, tells you to drop it yourself. A failed
+and drops the database on the URL's server, as `down` does, or, if it can't, prints
+both errors and tells you to drop it yourself. A failed
 `scrub` against an existing clone is reported the same way but not dropped: treat that
 clone as unscrubbed until a scrub succeeds.
 
@@ -421,8 +426,67 @@ clone as unscrubbed until a scrub succeeds.
 table but none of production's queued jobs. The scrub purges the table anyway, for a
 clone made some other way, such as a restored backup.
 
-The script never sets `KILN_STAGING_FORCE`; the ephemeral-name guard stays in force
-unless you invoke the scrub yourself.
+The script never sets `KILN_STAGING_FORCE`. It reads it, for `up` and `down`, only
+when you export it yourself; see the next section.
+
+### What `up` and `down` check before they create or drop
+
+`down` drops a database and `up` creates one and copies production into it, so
+both check what `STAGING_DATABASE_URL` names before they touch anything:
+
+1. **It must be a URL whose path names the database:** `postgres://`,
+   `postgresql://` or `ecto://`, as in `postgres://stage@stage-db/kiln_staging`.
+   A `key=value` string (`host=… dbname=…`) or a bare database name is refused,
+   because the script can't check which database it names. So is a URL with no
+   database in its path, and one with `dbname` in its query, which libpq would
+   connect to instead of the path's database.
+2. **The name must look ephemeral:** it contains `staging`, `preview`,
+   `ephemeral`, `tmp` or `scratch`, in any case, read percent-decoded as libpq
+   reads it (`kiln%5Fpreview` is `kiln_preview`). It's the same list the scrub
+   checks.
+3. **`KILN_STAGING_FORCE` overrides the name check only.** Spelled `true`, `1`,
+   `yes` or `on` (any case, surrounding spaces ignored), the script prints
+   `KILN_STAGING_FORCE is on: accepting <name>, whose name does not look like a
+   throwaway clone` and goes on. It does not override step 1. Exported for
+   `up`, it also reaches the scrub `up` runs, which skips its own name check.
+
+`createdb` and `dropdb` then run against **the server in the URL**: its host,
+port, user and TLS settings, never libpq's default server (`PGHOST`, the local
+socket). They connect to that server's `postgres` database and, if that fails,
+to `template1`. The password reaches them as `PGPASSWORD`, never on the command
+line. If `up`'s `createdb` fails both ways, `up` prints both errors and carries
+on, assuming the database exists. If `down`'s `dropdb` fails both ways, `down`
+stops and prints both errors.
+
+A refusal ends with `Nothing was dropped` (`down`) or `Nothing was created or
+copied` (`up`). The messages you can hit:
+
+- `STAGING_DATABASE_URL names kiln_prod, which does not look like a throwaway
+  clone`: rename the database, or, if it really is a clone, re-run with
+  `KILN_STAGING_FORCE=true`.
+- `STAGING_DATABASE_URL must be a postgres://, postgresql:// or ecto:// URL
+  whose path names the database`: you passed a `key=value` string or a bare
+  name. Write it as a URL.
+- `STAGING_DATABASE_URL names no database`: put the database in the path.
+- `STAGING_DATABASE_URL sets dbname in its query, which overrides the database
+  in its path`: remove `dbname` from the query and name the database in the
+  path.
+- `STAGING_DATABASE_URL has a host in [ ] that libpq cannot read`: the `[`
+  has no closing `]`, nothing inside, or something other than `:port`, `/`,
+  `?` or `,` after it. Write an IPv6 address as `[::1]` or `[::1]:5432`.
+- `STAGING_DATABASE_URL has a # after its host`: libpq reads `kiln_prod#staging`
+  as the database name, but Ecto reads `kiln_prod` and drops the rest, so the
+  migration would run against a different database than the copy. Use a
+  database name without `#`.
+- `could not drop <name> on the server in STAGING_DATABASE_URL`, followed by
+  a `through postgres:` and a `through template1:` line: `down` couldn't
+  connect or wasn't allowed to drop. The URL's user needs to own the database
+  (or be a superuser) and to be able to connect to `postgres` or `template1`.
+
+Before this check (#2722), `down` ran `dropdb <name>` against libpq's default
+server, whatever host the URL named, and checked no name. If you relied on
+that, for example a URL naming a remote host while you meant the local one,
+`down` now drops on the URL's server instead.
 
 ## Docker / Coolify recipe
 
@@ -480,7 +544,9 @@ scrubbed database — no new build, no new service definition:
      ([deploy-staging.md](deploy-staging.md#3-stand-up-a-staging-environment)
      has the checklist.)
    - optionally set the crawler to noindex via your reverse proxy.
-4. **Tear down.** Stop/delete the staging application and `dropdb kiln_staging`.
+4. **Tear down.** Stop/delete the staging application and drop the clone:
+   `STAGING_DATABASE_URL="postgres://…/kiln_staging" ./scripts/staging.sh down`,
+   or `dropdb` with the same `-h`/`-U` you used for `createdb`.
 
 Because it's the same image, "upgrade staging" is just redeploying it — the exact
 rehearsal for the production Redeploy.
