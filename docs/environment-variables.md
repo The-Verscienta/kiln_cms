@@ -361,6 +361,7 @@ these. See [Per-site buckets](media-pipeline.md#per-site-buckets-1559).
 | `S3_ENDPOINT_HOST` | unset | Custom endpoint host for non-AWS stores (R2/B2/Wasabi/MinIO). Leave unset for AWS S3. | [`config/runtime/prod/storage.exs:79`](../config/runtime/prod/storage.exs#L79) |
 | `S3_ENDPOINT_SCHEME` | `https://` | Scheme for the custom endpoint. | [`config/runtime/prod/storage.exs:87`](../config/runtime/prod/storage.exs#L87) |
 | `S3_ENDPOINT_PORT` | `443` | Port for the custom endpoint. 1 to 65535; a blank value keeps `443`, and anything else unreadable keeps it and warns. | [`config/runtime/prod/storage.exs:81`](../config/runtime/prod/storage.exs#L81) |
+| `S3_UPLOAD_MIN_BYTES_PER_SECOND` | `32768` | The slowest a part of a large upload (over 16 MiB, sent as 5 MiB parts, four at a time) may go before it is sent again (#2725). Each part gets its size at this rate, and at least 30 seconds, per attempt, and three attempts before the upload is aborted. The default suits an uplink of about 1 Mbit/s or more; lower it on a slower one. A positive whole number; a blank value keeps the default, and anything else unreadable keeps it and warns. | [`config/runtime/prod/storage.exs:97`](../config/runtime/prod/storage.exs#L97) |
 
 Media objects are uploaded with `Cache-Control: public, max-age=31536000,
 immutable` — there is no env var for it, because storage keys are write-once
