@@ -91,8 +91,19 @@ mix kiln.import.wordpress wordpress.xml
 ```
 
 Records that already exist (matched by slug and locale) are skipped, so this
-picks up where the slice left off. The report ends by listing anything that did
-not come over exactly as WordPress had it, and why.
+picks up where the slice left off. Images are fetched first, then posts and
+pages are created, and each phase prints a line every 25 items, such as
+`media: 150/512`, so a long run shows it is moving. The report ends by listing
+anything that did not come over exactly as WordPress had it, and why.
+
+Images under **Media that could not be fetched** are listed by URL. Their posts
+were imported and still show the image from your old site. Each image gets 60
+seconds to download, and a host that times out three times in a row is skipped
+for the rest of the run. Running the import again does not retry them, because
+their posts already exist: upload each one to the media library and swap it
+into its post. See
+[Images that could not be fetched](../content-portability.md#images-that-could-not-be-fetched)
+for what each reason means.
 
 If you ran the import somewhere no Kiln node is processing background jobs, add
 `--drain-media`. Without it, imported images are served full size until a

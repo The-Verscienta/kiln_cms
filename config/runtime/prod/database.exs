@@ -41,13 +41,21 @@ database_ssl_opts =
       [verify: :verify_peer, cacertfile: cacertfile, depth: 3]
   end
 
+# Through the shared reader, so `POOL_SIZE=` (a compose pass-through) or a
+# typo keeps 10 and warns instead of crashing boot (#2728).
+pool_size =
+  case Env.positive_integer("POOL_SIZE") do
+    {:ok, size} -> size
+    _unset_or_unrecognized -> 10
+  end
+
 config :kiln_cms,
        KilnCMS.Repo,
        url: database_url,
        # Shared by web requests and Oban workers (~34 concurrent across the
        # split queues) — size up from 10 in production. See the pool-sizing
        # formula in docs/performance.md.
-       pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+       pool_size: pool_size,
        # For machines with several cores, consider starting multiple pools of `pool_size`
        # pool_count: 4,
        socket_options: maybe_ipv6,

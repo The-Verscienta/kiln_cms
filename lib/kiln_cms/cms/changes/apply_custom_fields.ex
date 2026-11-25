@@ -1081,7 +1081,9 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
   # an item already stored is not re-litigated, so adding a tag to a list
   # holding one now-too-long tag — or a score to a list holding one above a
   # since-tightened `max` — still saves. Only the items it did not hold are
-  # checked, each under its own position (`scores[2]`).
+  # checked, each under its own position in the list as stored: the path
+  # `scores[2]` from 0, the text `item 3` from 1, as a coercion error counts
+  # (`FieldConstraints.check_item/4`, #2683).
   defp stored_item_list?(%{multiple: true, field_type: type}, value, stored)
        when type in @scalar_list_types,
        do: is_list(value) and is_list(stored)
@@ -1092,9 +1094,7 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
     value
     |> Enum.with_index()
     |> Enum.reject(fn {item, _index} -> item in stored end)
-    |> Enum.flat_map(fn {item, index} ->
-      FieldConstraints.check(def, item, "#{def.name}[#{index}]")
-    end)
+    |> Enum.flat_map(fn {item, index} -> FieldConstraints.check_item(def, item, index) end)
   end
 
   # A reference field's `selection` (#2285): every target the write ADDS must
@@ -1992,25 +1992,30 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
         {:error, "holds a JSON-encoded list — send the items as a list instead"}
 
       true ->
-        with {:ok, items} <- coerce_each(raw, Map.put(def, :multiple, false)) do
-          {:ok, if(ScalarLists.distinct?(type), do: Enum.uniq(items), else: items)}
-        end
+        coerce_each(raw, Map.put(def, :multiple, false), ScalarLists.distinct?(type))
     end
   end
 
   # Each item coerced as the single field (`single`) would coerce it, in
-  # order; the first refusal is named by its position. An item must coerce to
-  # one string or one number: a plugin type's `cast/2` (#2680) answering a
-  # map or a list for an item refuses the write rather than storing a value
-  # no list filter or schema describes.
-  defp coerce_each(raw, single) do
+  # order, a repeat dropped where `distinct?` (keeping where it first
+  # appears); the first refusal is named by its position. An item must
+  # coerce to one string or one number: a plugin type's `cast/2` (#2680)
+  # answering a map or a list for an item refuses the write rather than
+  # storing a value no list filter or schema describes.
+  #
+  # The position is the one the item would have in the list as stored,
+  # counting from 1 — one per line, blanks and repeats left out — so it is
+  # the `item N` a value rule names for the same item
+  # (`FieldConstraints.check_item/4`, #2683).
+  defp coerce_each(raw, single, distinct?) do
     raw
     |> Enum.flat_map(&split_item/1)
-    |> Enum.with_index(1)
-    |> Enum.reduce_while({:ok, []}, fn {item, position}, {:ok, acc} ->
+    |> Enum.reduce_while({:ok, [], 0, MapSet.new()}, fn item, {:ok, acc, count, seen} ->
+      position = count + 1
+
       case coerce(item, single) do
         {:ok, coerced} when is_binary(coerced) or is_number(coerced) ->
-          {:cont, {:ok, [coerced | acc]}}
+          {:cont, keep_item(coerced, {:ok, acc, count, seen}, distinct?)}
 
         {:ok, other} ->
           note_non_scalar(single, other)
@@ -2024,9 +2029,19 @@ defmodule KilnCMS.CMS.Changes.ApplyCustomFields do
       end
     end)
     |> case do
-      {:ok, items} -> {:ok, Enum.reverse(items)}
-      error -> error
+      {:ok, items, _count, _seen} -> {:ok, Enum.reverse(items)}
+      {:error, _message} = error -> error
     end
+  end
+
+  # A coerced item joins the list, unless the list is distinct and already
+  # holds it (the first occurrence stays, as `Enum.uniq/1` keeps it).
+  defp keep_item(item, {:ok, acc, count, seen}, false), do: {:ok, [item | acc], count + 1, seen}
+
+  defp keep_item(item, {:ok, acc, count, seen} = state, true) do
+    if MapSet.member?(seen, item),
+      do: state,
+      else: {:ok, [item | acc], count + 1, MapSet.put(seen, item)}
   end
 
   # Say once per field type module, not once per write, that its `cast/2`

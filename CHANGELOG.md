@@ -51,16 +51,28 @@ else.
 
   which moves the long form to docs/changelog/ and leaves the summary here.
   `mix kiln.changelog --check` runs in precommit and CI; it holds Unreleased
-  entries to three lines and fails on an entry with nowhere to link.
+  entries to three lines and fails on an entry with nowhere to link, or on
+  text in a section that is not part of a `- ` entry.
 -->
 
 ## [Unreleased]
+
+### Upgrade notes
+
+- **Direct uploads: until every node runs this release, a completion handled by an older node can still lose its staged object to the cleanup job (#2724). A token whose cleanup job was never queued now answers `not_uploaded`. No migration; rolling the pin back is safe.**
+  ([long form](docs/changelog/unreleased.md#direct-upload-claim-upgrade))
 
 ### Added
 
 - **Conditional fields have four text tests: "contains", "does not contain", "starts with" and "ends with", ignoring case, for text, URL and choice fields ([#3270](https://github.com/The-Verscienta/kiln_cms/pull/3270)).**
   No migration.
   ([long form](docs/changelog/unreleased.md#condition-text-ops))
+
+### Changed
+
+- **A list field's errors count items one way: a value rule now says `Scores (scores) item 2 must be at most 10` (from 1) instead of `Scores (scores[1]) …`, and a type error, field conversion reports included, no longer counts a dropped repeat (#2683).**
+  Only the human text changes; JSON:API `code`/`source.pointer` and GraphQL `code`/`fields` are as before. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#list-item-error-position))
 
 ### Fixed
 
@@ -73,6 +85,26 @@ else.
 - **Over `/mcp`, `update_page` / `update_post` / `update_entry` refuse a published record, and new `save_*_working_copy` tools stage an edit to one for a person to publish, so a model's edit no longer reaches readers unreviewed.**
   No migration; rolling the pin back is safe. An MCP client that edited live records with `update_*` must switch to the working-copy tools. A project that overrides `:mcp_tools` must add the three new names. JSON:API, GraphQL and in-context editing are unchanged.
   ([long form](docs/changelog/unreleased.md#mcp-live-records-draft-only))
+- **A large WordPress, Ghost or envelope import no longer loses its media after two minutes: each image download has its own 60-second deadline, a slow image is listed by URL, and an unresponsive host is skipped after three timeouts in a row (#2720).**
+  WordPress and Ghost imports now print `media:` and `records:` progress. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#import-media-per-asset-deadline))
+- **`mix kiln.changelog --check` fails on text in a bullet section that is not part of a `- ` entry, naming its line, and `--condense` refuses to run rather than delete it (#2732).**
+  ([long form](docs/changelog/unreleased.md#changelog-stray-lines))
+
+- **A blank, space-padded or unparseable `PORT`, `POOL_SIZE`, `SMTP_PORT` or `S3_ENDPOINT_PORT` no longer crashes boot: it keeps the default and warns like every other numeric variable (#2728).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#runtime-integer-env-vars))
+
+- **A large direct upload no longer fails mid-completion when its staging cleanup comes due, or when the same token is completed twice at once: a completion now holds off the cleanup job until it is done (#2724).**
+  `POST /api/media/uploads` answers `502 storage_failed` if that job can't be queued. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#direct-upload-cleanup-claim))
+
+- **`mix kiln.gen.content Story --plural stories`, and `--from` a dynamic type whose URL segment isn't `<name>s`, now write `plural:` into the generated resource, so it serves at `/stories` and matches its `list_stories` interfaces instead of registering `storys` (#2731).**
+  Types generated before this keep `storys` until you add `plural:` by hand. No migration.
+  ([long form](docs/changelog/unreleased.md#gen-content-plural))
+
+- **`mix kiln.migrations.check` judges the migration module's functions that `up`/`change` call and the SQL of `repo().query!`, and fails closed on forward code it cannot read, such as run-time SQL or a call into another module (#2736).**
+  ([long form](docs/changelog/unreleased.md#migrations-check-follows-helpers))
 
 ## [1.12.1] - 2026-11-23
 

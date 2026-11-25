@@ -5,6 +5,14 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Upgrade notes
+
+<a id="direct-upload-claim-upgrade"></a>
+
+- **The direct-upload cleanup fix takes effect once every node runs this release (#2724).** A completion now claims its upload's cleanup job before it reads the staged object ([below](#direct-upload-cleanup-claim)). During a rolling deploy, a `POST /api/media/uploads/complete` that lands on an older node doesn't claim, so it can still lose its staged object to a cleanup that comes due mid-copy, or to a concurrent completion; the client sees the old failure (`415 unsupported_media_type`) and starts the upload again. Nothing to configure, and no migration: the claim lives in the existing `oban_jobs` row (`meta` and `scheduled_at`).
+  - **A token with no cleanup job can't be completed.** Completion now requires the job, so a token an older release issued when its cleanup failed to queue (it logged `staging cleanup was not queued`) answers `422 not_uploaded`. Start that upload again; what it staged is left to the bucket's lifecycle rule on `direct-uploads/`, if you have one ([media-pipeline.md](../media-pipeline.md#direct-uploads)).
+  - **Rolling back is safe.** An older release ignores the claim in `meta`: a job a completion was holding runs when its lease ends, at most five minutes later, and deletes the staged object as before.
+
 ## Added
 
 <a id="condition-text-ops"></a>
@@ -13,6 +21,18 @@ carries the reasoning.
   - **Matching ignores case and surrounding spaces.** Both sides are trimmed, as for `eq`, and lowercased. The editor's evaluator and the server agree on non-ASCII text too (a Greek word-final sigma folds to ς on both); one shared fixture holds them to it.
   - **Lists and non-text values.** On a multiple field a test holds when any item matches, so **does not contain** holds only when no item contains the text. An empty value contains nothing. A number, yes/no or date field cannot use these tests: the definition is refused, and so is retyping a field to a non-text type while a text test reads it.
   - **Additive.** No migration. An older release reading a rule with one of these operators treats it as a rule it cannot read: the field is shown and not required, and the definition cannot be saved until the rule is changed.
+
+## Changed
+
+<a id="list-item-error-position"></a>
+
+- **A list field's errors name an item one way, by its position as the list is stored, counting from 1 (#2683).** On a list custom field (a list of numbers, dates, links, …), a type error counted items from 1 (`item 2 must be a date (YYYY-MM-DD)`) while a value rule (`min`, `max`, a length, `pattern`, a color palette) named the item by its index from 0 inside the field's name (`Scores (scores[1]) must be at most 10`). One save could report the same item as 2 and as `[1]`.
+  - **What a message says now.** Both kinds name the item as `Label (name) item N`: `Scores (scores) item 2 must be at most 10`. N is the item's position in the list as stored, counting from 1: one item per line, with blank items and dropped repeats left out. It is the same N whether the save, the editor's field error, the JSON:API `detail` or the GraphQL `message` shows it.
+  - **Type errors can name a lower N.** A list that drops repeats (every core list type but numbers, and a plugin type whose `unique_items?/0` is `true`) used to count a repeat before the bad item; it no longer does. `["2026-03-01", "2026-03-01", "soon"]` on a date list now reports `item 2`, not `item 3`. This holds for `mix kiln.fields.convert` reports too, which coerce each item as a save would. What is stored is unchanged: the first occurrence of a repeat stays, as before.
+  - **Groups and flexible fields still count from 0.** A group row's sub-field (`dosages[2].unit`) and a flexible field's block (`sections[2]._type`) keep their 0-based paths in the message.
+  - **API clients.** Only the human-readable text changed, and error text is not among the surfaces `docs/api.md` lists as stable ("Versioning & stability"). JSON:API still answers `code` `invalid_attribute` with `source.pointer` `/data/attributes/custom_fields` and no `meta`; GraphQL still answers `code` `invalid_attribute` with `fields` `["custom_fields"]`. A client that parsed `name[i]` out of the text should read `item N` instead, and subtract 1 for an index.
+  - **French and Spanish.** The value-rule message is translated (`élément 2`, `elemento 2`), but type errors are not yet translated, so one list can show both `item` and `élément` (or `elemento`). Translating type errors is [#3324](https://github.com/The-Verscienta/kiln_cms/issues/3324).
+  - **No migration; rolling the pin back is safe.** An older release writes the old messages again.
 
 ## Fixed
 
@@ -41,3 +61,64 @@ carries the reasoning.
   - **New tools.** `save_page_working_copy`, `save_post_working_copy` and `save_entry_working_copy` run `:save_working_copy`, the action the editor uses for a live document. They take `title`, the body as `block_tree` or `body_markdown`, and `fields` for the other held settings. `:save_working_copy` gains those three public arguments for them (the working attributes are internal), and `KilnCMS.CMS.Changes.ApplyBlocksInput` takes a `target:` so the Markdown conversion lands in `working_blocks`. They refuse a record that is not published.
   - **Not changed.** JSON:API `PATCH`, GraphQL and in-context editing still edit a live record directly, as `docs/working-copy.md` ("Not in this change") describes. A content link on a published source still shows at once.
   - **No migration; rolling the pin back is safe.** An older release lets `update_*` edit live records again and does not serve the working-copy tools. A project that overrides `config :kiln_cms, :mcp_tools` must add the three new names; without them a model cannot edit a published record over `/mcp` at all.
+
+<a id="import-media-per-asset-deadline"></a>
+
+- **A large single-origin import keeps its media: each image download has its own deadline (#2720).** The importers fetch one host's images one after another, so no host sees more than one request at a time, and that whole host group shared one 120-second timeout. A WordPress export points almost entirely at one origin, so any import whose images took longer than two minutes in total (a few hundred images at a second each) hit it. The kill landed mid-run: images already stored stayed in the media library with no post pointing at them, every post kept hotlinking the old site, and the report showed a single `(host group)` failure in place of hundreds of URLs. `mix kiln.import.wordpress`, `mix kiln.import.ghost`, `mix kiln.import.content` and their `KilnCMS.Release` functions were all affected.
+  - **What happens now.** Each image gets 60 seconds, wall clock, for its download: DNS, connect, waiting for a SafeFetch pool slot and the body. The 5-second connect timeout and the 30-second limit on a connection that goes silent still apply inside it; the 60 seconds catches a server that trickles bytes. An image past the deadline is reported `{:fetch_timeout, 60000}` under its own URL and its block keeps the source URL; every other image is stored and linked as usual. The deadline stops before anything is written, so a cut-off fetch leaves no temp file, stored file or media item behind. The media phase as a whole has no time limit.
+  - **A host that stops answering is cut off.** After three timeouts in a row on one host, its remaining images are reported `:host_unresponsive` without a request, and the log gets one warning naming the host. Without this, a dead origin would cost a timeout (up to 60 seconds) for every image it holds. A timeout here is the deadline or a connect or receive timeout; any other answer, a `404` or a refused connection included, resets the count.
+  - **The trade.** One 25 MB file (the download cap) had up to 120 seconds under the old shared timeout; it now has 60, which needs about 420 KB/s sustained. A large file on a slower origin is now listed as failed, to upload by hand.
+  - **Other new reasons in the report.** `{:fetch_crashed, message}`, `{:exception, message}` and `{:exit, message}` when the fetch or the store raised or exited (that image is skipped, the run carries on), and `:too_many_outbound_requests` when the node had no capacity to start the fetch.
+  - **Progress for WordPress and Ghost.** Only the envelope import printed progress before. All three now print `media: N/T` and `records: N/T` every 25 items and at the end, so a long media phase shows it is moving.
+  - **Re-running does not refetch.** A re-run only fetches images for the posts it is about to create, so images listed as failed are not retried. Upload them to the media library and swap them into their posts. `docs/content-portability.md` ("Images that could not be fetched") lists each reason.
+  - **For library callers.** `KilnCMS.Media.Ingest.store_url/2` takes a new `:fetch_timeout` option (milliseconds, default no bound), and `KilnCMS.Portability.Import.run/2` takes `:media_fetch_timeout` (default `60_000`; anything but a positive integer means the default). A `:fetch_timeout` that is not `nil` or a positive integer raises `ArgumentError`. There is no CLI flag for either.
+  - **Not fixed here.** An envelope import still does not sideload body images that resolve through the envelope's media manifest; they keep hotlinking the source. That is [#3326](https://github.com/The-Verscienta/kiln_cms/issues/3326).
+  - **No migration; rolling the pin back is safe.** An older release goes back to the shared 120-second timeout.
+
+<a id="changelog-stray-lines"></a>
+
+- **`mix kiln.changelog` no longer deletes a changelog entry that is not written as a `- ` bullet (#2732).** Every section but Upgrade notes, Breaking and Known issues is read as `- ` bullets with two-space-indented continuation lines, and anything else was skipped without a word. An entry written as a paragraph, with `* ` bullets, or with a continuation line that was not indented counted as no entry at all, so `--check` passed it (no line cap, no link needed), and `--condense` then rewrote `CHANGELOG.md` without that text and archived none of it.
+  - **What `--check` says now.** It fails on any non-blank line in such a section that belongs to no entry, naming the release, the section and each line by its line number in `CHANGELOG.md`, with the fix: start the entry with `- ` and indent its continuation lines by two spaces. This covers released sections too, since `--condense` rewrites those as well.
+  - **What `--condense` does now.** It prints the same report and stops before writing anything.
+  - **Unchanged.** Upgrade notes, Breaking, Known issues and a release's opening paragraphs are prose and keep every line, as before. The real `CHANGELOG.md` already passes.
+
+
+<a id="runtime-integer-env-vars"></a>
+
+- **Four numeric variables no longer crash boot on a value they cannot read (#2728).** `PORT`, `POOL_SIZE`, `SMTP_PORT` and `S3_ENDPOINT_PORT` were read with a bare `String.to_integer`, so `PORT=` (what compose passes through for a variable the host never set), `POOL_SIZE=" 20"` or `SMTP_PORT=587/tcp` stopped the release with an `ArgumentError` before anything else ran. They now go through `KilnCMS.Config.Env`, the reader every other numeric variable uses.
+  - **What each value does now.** Surrounding whitespace is trimmed, so `" 4000 "` is 4000. Blank is the same as unset and keeps the default silently: 4000, 10, 587 and 443. Anything else keeps the default and warns on stderr, and the warning is replayed through `Logger` and Sentry once the system is up.
+  - **Ports are bounded.** The three ports accept 1 to 65535; a value outside that range, such as `PORT=80800`, keeps the default and warns rather than failing inside the listener. `POOL_SIZE` accepts any positive integer up to 2147483647; `0` keeps 10 and warns.
+  - **No migration; rolling the pin back is safe.** An older release crashes on the same values again.
+
+
+
+<a id="direct-upload-cleanup-claim"></a>
+
+- **A direct-upload completion holds off its staging cleanup until it is done (#2724).** `POST /api/media/uploads` queues `KilnCMS.Media.StagedUploadCleanup` to delete the staged object a minute after the token expires. A completion sent near the end of the token's hour, for a file whose copy down from the bucket took longer than that minute, had the object deleted under it; the truncated copy failed the byte sniff and the client got `415 unsupported_media_type`. Two completions of the same token at the same time could do the same to each other: each deleted the object when it finished, whatever the other was still reading.
+  - **What happens now.** A completion first claims the cleanup job (`KilnCMS.Media.StagedUploadClaim`): one compare-and-set `UPDATE` of its `oban_jobs` row records a claim in `meta` and moves `scheduled_at` out by a 300-second lease, which a heartbeat renews every 60 seconds until the completion has finished. The job isn't due while the lease holds, so the delete can't run mid-copy however long the copy, the metadata strip and the variants take. When the completion has consumed the object it makes the job due at once; the job deletes again, which retries a staged-object delete that failed.
+  - **One completion per token.** Only one completion can claim the job, so a concurrent second completion answers `422 not_uploaded`, and one item is created. A completion sent before the client's `PUT` landed finds nothing, gives the claim back and leaves the token usable, as before.
+  - **A lost claim.** If the heartbeat stalls past the lease (the database unreachable for minutes) and the job runs, the completion stores nothing and answers `502 storage_failed`, "The upload was interrupted before it could be stored. Start it again with POST /api/media/uploads." The token is spent. A completion whose node dies leaves its lease to lapse, and the job then deletes the object.
+  - **Issuing an upload.** `POST /api/media/uploads` now answers `502 storage_failed` when the cleanup job can't be queued (it used to log a warning and issue the upload anyway), since completing needs the job. Retry.
+  - **For library callers.** `KilnCMS.Media.StagedUploadCleanup.schedule/4` returns `{:error, reason}` instead of `:ok` when the job can't be inserted; `KilnCMS.Media.DirectUpload.begin/3` returns `{:error, :storage_failed}` then, and `complete/4` can return `{:error, :claim_lost}`. The lease and heartbeat are `config :kiln_cms, KilnCMS.Media.StagedUploadClaim, lease_ms: 300_000, heartbeat_ms: 60_000`, there for tests to shorten. `docs/media-pipeline.md` ("Direct uploads") has the full lifecycle.
+  - **No migration; rolling the pin back is safe.** See the [upgrade note](#direct-upload-claim-upgrade) for rolling deploys.
+
+
+
+
+<a id="gen-content-plural"></a>
+
+- **`mix kiln.gen.content` writes an irregular plural into the resource it generates (#2731).** `--plural` (and the plural `--from` takes from a dynamic type's `path_segment`) named the domain's code interfaces and the printed notices, but the generated `use KilnCMS.CMS.Content, type: :story` line had no `plural:`, so the macro fell back to `"<type>s"`. `mix kiln.gen.content Story --plural stories` gave the domain `list_stories` and `search_stories` and promised `/stories/<slug>`, while the resource registered `storys`: its JSON:API routes and public pages lived under `/storys`, and anything dispatching by the registered plural looked for a `list_storys` that was never generated.
+  - **What the generator writes now.** When the plural differs from `"<type>s"`, the `use` line carries it: `use KilnCMS.CMS.Content, type: :story, plural: "stories"`. A regular plural (`Product`, or `--plural products`) is left implicit, so the line is unchanged for those.
+  - **Promoting a dynamic type.** `--from` a type whose `path_segment` is `stories` now generates a resource that serves at `/stories`, so its public URLs stay where they were. A segment that can't name functions (one with a hyphen) still falls back to `"<type>s"`, and the promotion notice still says the URLs move.
+  - **The notice's Tag hint names the right aggregate.** It suggested `count :storie_count` for `stories`, by trimming an `s`; it now says `count :story_count`, after the type, as `Tag` names its own counts.
+  - **Not changed: the table.** The table name still defaults to `"<type>s"` (`storys`); `--plural` never set it, and the notice's `search_vector` migration still names that table. Pass `table:` by hand before the first migration if you want another name.
+  - **Types you generated already.** A resource generated with an irregular `--plural` before this release still registers `"<type>s"`. Add `plural: "stories"` to its `use` line to make it match its interfaces; that moves its JSON:API base route and public URLs from `/storys` to `/stories`, so redirect the old paths if anything links to them. No migration.
+
+
+<a id="migrations-check-follows-helpers"></a>
+
+- **`mix kiln.migrations.check` reads the code `up` and `change` reach, not only the code written inside them (#2736).** The expand/contract gate judged the statements lexically inside `def up`/`def change` and nothing else, and read an `execute` argument only when it was a string literal. A `drop table` moved into a `defp` that `up` calls, `execute(fn -> repo().query!("ALTER TABLE posts DROP COLUMN slug") end)` and `execute("ALTER ..." <> x)` all passed as "none breaks the running release", and the reporting-view pin rule missed them too.
+  - **What is followed now.** Every function of the migration module that `up`/`change` reaches, called directly, through other functions, through `__MODULE__.f()` or through a capture (`&drop_one/1`, `execute(&add_fkey/0)`), is judged as part of the forward direction. Each is read once, so recursion and cycles end. A finding points at the line in the helper, and a marker goes above the statement there. Only the forward half of `execute/2` is followed. The reporting-view rule follows `down`'s calls the same way, and a view dropped by a function called before the change counts.
+  - **More SQL is read.** `repo().query!` and `Ecto.Adapters.SQL.query!` are judged like `execute`, inside an `execute` closure too. `execute(@backfill)` reads the attribute, `<>` of literals reads as one string, and a module function that returns a literal is read through. Interpolated SQL is read as before.
+  - **What fails closed.** Forward code the check cannot read is a new `unanalyzable` finding: SQL built at run time (`execute(sql)`, `"ALTER ..." <> x`, `execute_file`), a call into another module (an app module, `Oban.Migration`, `Code.eval_string`), `apply`, a function held in a variable, and `use`/`import` of a module other than `Ecto.Migration`. Standard-library modules that never reach the database and the repo's data functions (`repo().update_all`) pass. Write the statement out, or excuse it with a `kiln:contract-ok` marker whose reason says what the code changes; see `docs/releasing.md`, "The check".
+  - **Existing migrations.** Only added migrations are judged, so nothing already merged is affected. Over the whole history, `--all` reports five more findings than before, all opaque calls: `Oban.Migration.up`, three app-module backfills and one overlay `import`. No earlier finding went away.

@@ -32,6 +32,11 @@ defmodule KilnCMS.Media.Ingest do
   connects to that *literal address*, so the name cannot be re-resolved to
   `169.254.169.254` between the check and the connection. It is the only place
   in the ingest path that touches the network.
+
+  A caller fetching many URLs in a row (the importers) passes `:fetch_timeout`
+  so one stalled server costs that one asset a bounded wait. The bound covers
+  the download only, never the writes after it, so hitting it leaves nothing
+  half-created.
   """
 
   require Logger
@@ -87,7 +92,10 @@ defmodule KilnCMS.Media.Ingest do
           # `:defer` suppresses the per-item published-cache clear; the
           # caller owns ONE `BustMediaCache.bust/0` after its loop. Default:
           # bust per create.
-          cache_bust: :immediate | :defer
+          cache_bust: :immediate | :defer,
+          # `store_url/2` only: a wall-clock bound, in milliseconds, on the
+          # download. Default `nil`: no bound beyond SafeFetch's own timeouts.
+          fetch_timeout: pos_integer() | nil
         ]
 
   @doc """
@@ -126,14 +134,27 @@ defmodule KilnCMS.Media.Ingest do
   checks, and `{:error, {:http_status, status}}` / `{:error, :too_large}` for a
   fetch that did not produce a usable body. Importers treat every one of these
   as "skip this asset and carry on", never as a reason to abandon the run.
+
+  `:fetch_timeout` (milliseconds) bounds the download as a whole: DNS, connect,
+  waiting for a SafeFetch pool slot, redirects and the body. SafeFetch's own
+  `receive_timeout` is a gap between chunks, so without it a server trickling
+  bytes can hold the call for as long as it likes. A download still running
+  at the deadline is killed and gives `{:error, {:fetch_timeout, ms}}`, and one
+  that raises gives `{:error, {:fetch_crashed, message}}`. The bound stops
+  before anything is written: the sniff, the store and the `MediaItem` create
+  run after it, so a killed fetch leaves no temp file, blob or row behind.
+  A `:fetch_timeout` other than `nil` or a positive integer raises
+  `ArgumentError`, since quietly reading it as "no bound" would drop the
+  deadline the caller asked for.
   """
   @spec store_url(String.t(), opts()) :: {:ok, struct()} | {:error, term()}
-  # `path` is this module's own `download/1` temp file (a UUID under tmp_dir),
-  # never caller input — the traversal warning is a false positive.
+  # `path` is this module's own `write_temp/1` temp file (a UUID under
+  # tmp_dir), never caller input — the traversal warning is a false positive.
   # sobelow_skip ["Traversal.FileModule"]
   def store_url(url, opts \\ []) when is_binary(url) do
     with :ok <- safe_url(url),
-         {:ok, path} <- download(url, Keyword.get(opts, :max_redirects, 0)) do
+         {:ok, body} <- fetch_body(url, opts),
+         {:ok, path} <- write_temp(body) do
       try do
         store_file(path, opts[:filename] || filename_from_url(url), opts)
       after
@@ -731,6 +752,63 @@ defmodule KilnCMS.Media.Ingest do
     end
   end
 
+  defp fetch_body(url, opts) do
+    fetch = fn -> download(url, Keyword.get(opts, :max_redirects, 0)) end
+
+    case Keyword.get(opts, :fetch_timeout) do
+      nil ->
+        fetch.()
+
+      ms when is_integer(ms) and ms > 0 ->
+        bounded(fetch, ms)
+
+      # Only `nil` means "no bound". A zero, negative or non-integer value is a
+      # caller bug, and quietly reading it as unbounded would drop the very
+      # deadline the caller asked for.
+      other ->
+        raise ArgumentError,
+              ":fetch_timeout must be a positive integer (milliseconds) or nil, " <>
+                "got: #{inspect(other)}"
+    end
+  end
+
+  # The download runs in a task of its own so the deadline can kill it. Only
+  # the download: the task returns the body and the caller writes the temp
+  # file, so a kill can never leave one behind. Unlinked, so a kill or a crash
+  # here is this asset's error and not the caller's exit. SafeFetch's pool
+  # watcher stops a private pool whose caller was killed, so the slot frees.
+  defp bounded(fetch, ms) do
+    with {:ok, task} <- start_fetch(fetch) do
+      # `Task.shutdown/2` can still hand back a reply that landed between the
+      # yield giving up and the kill, and that reply is used as is.
+      case Task.yield(task, ms) || Task.shutdown(task, :brutal_kill) do
+        {:ok, result} -> result
+        {:exit, reason} -> {:error, {:fetch_crashed, Exception.format_exit(reason)}}
+        nil -> {:error, {:fetch_timeout, ms}}
+      end
+    end
+  end
+
+  # A full `KilnCMS.TaskSupervisor` (`max_children`) raises rather than
+  # returning an error. That is this asset failing for want of capacity, the
+  # same answer SafeFetch gives when its pool slots are all taken, and not a
+  # reason to crash the caller's whole import.
+  defp start_fetch(fetch) do
+    {:ok, Task.Supervisor.async_nolink(KilnCMS.TaskSupervisor, fn -> guarded(fetch) end)}
+  rescue
+    RuntimeError -> {:error, :too_many_outbound_requests}
+  end
+
+  # Inside the task: a raise becomes this asset's error rather than an exit,
+  # which would also log a crash report for what is an ordinary skipped asset.
+  defp guarded(fetch) do
+    fetch.()
+  rescue
+    error -> {:error, {:fetch_crashed, Exception.message(error)}}
+  catch
+    kind, value -> {:error, {:fetch_crashed, Exception.format_banner(kind, value)}}
+  end
+
   # `SafeFetch`, not a bare `Req.get`. Validating a hostname and then handing
   # that *hostname* to an HTTP client re-resolves it at connect time, which is a
   # DNS-rebinding hole: an attacker controlling the name answers with a public
@@ -740,8 +818,6 @@ defmodule KilnCMS.Media.Ingest do
   # and connects to the literal address with SNI pointed back at the real name.
   # `SafeFetch` also refuses redirects by default (a followed redirect is a
   # fresh resolution the pin never sees) and enforces `:max_bytes` itself.
-  #
-  # sobelow_skip ["Traversal.FileModule"]
   defp download(url, max_redirects) do
     case SafeFetch.get(url,
            max_bytes: @max_download_size,
@@ -750,7 +826,7 @@ defmodule KilnCMS.Media.Ingest do
            req_options: req_options()
          ) do
       {:ok, %{status: status, body: body}} when status in 200..299 ->
-        write_temp(body)
+        {:ok, body}
 
       {:ok, %{status: status}} ->
         {:error, {:http_status, status}}

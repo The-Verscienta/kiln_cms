@@ -101,6 +101,12 @@ defmodule KilnCMS.Portability.Import do
     * `:dry_run` — plan only, no writes (default `false`)
     * `:skip_media` — do not sideload images (default `false`). Blocks keep the
       source URLs, so the imported site hotlinks the old one.
+    * `:media_fetch_timeout` — the most one image download may take, in
+      milliseconds (default `60_000`; anything but a positive integer means
+      the default). An image past it is reported failed
+      with `{:fetch_timeout, ms}` and its block keeps the source URL. After
+      three timeouts in a row on one host, that host's remaining images are
+      reported `:host_unresponsive` without being requested.
     * `:redirects` — create a redirect from each old permalink (default `true`)
     * `:locale` — locale for created records (default `"en"`)
     * `:on_conflict` — `:skip` (default) or `:error`
@@ -600,28 +606,54 @@ defmodule KilnCMS.Portability.Import do
   # Grouping by host rather than a flat `max_concurrency` is what keeps it
   # polite: a WordPress export points overwhelmingly at ONE origin, so a flat
   # pool of 8 would be 8 parallel requests at the site being migrated away from.
+  #
+  # The deadline is per asset, never per host group (#2720). A group is every
+  # asset on one host fetched one after another, so its run time grows with the
+  # export: 300 images at 1 s each is five minutes of a healthy origin. The
+  # group used to share one 120 s timeout, and its kill landed on the process
+  # creating the `MediaItem`s: the items already created were orphaned in the
+  # library (their results never came back, so no post was re-pointed at them)
+  # and the report showed one "(host group)" failure for hundreds of assets.
+  #
+  # So the stream waits as long as the groups take, and each download carries
+  # its own `fetch_timeout`. That bound wraps the download alone (see
+  # `Ingest.store_url/2`), so nothing that writes a row is ever killed.
+  #
+  # The bound is deliberately generous: 60 s for one asset, which a 25 MB file
+  # (the download cap) only meets at about 420 KB/s or better. It is the
+  # ceiling for a server that trickles bytes; a host answering nothing usually
+  # fails sooner, on SafeFetch's 5 s connect timeout or Ingest's 30 s receive
+  # timeout. Either way each dead asset costs seconds, which is what the
+  # breaker below is for. There is no bound on the phase as a whole; the
+  # progress lines show it moving.
   @sideload_concurrency 8
-  @sideload_timeout 120_000
+  @sideload_fetch_timeout 60_000
 
   defp sideload(wanted, opts) do
     by_host = Enum.group_by(wanted, &host_of/1)
     total = length(wanted)
     progress = progress_fun(opts, total, "media")
+    fetch_timeout = fetch_timeout(opts)
 
     results =
       by_host
-      |> Map.values()
       |> Task.async_stream(
-        fn assets -> Enum.map(assets, &fetch_one(&1, opts, progress)) end,
+        fn {host, assets} -> fetch_host(host, assets, opts, fetch_timeout, progress) end,
         max_concurrency: @sideload_concurrency,
-        timeout: @sideload_timeout,
-        on_timeout: :kill_task,
-        ordered: false
+        timeout: :infinity,
+        ordered: false,
+        zip_input_on_exit: true
       )
       |> Enum.flat_map(fn
-        {:ok, list} -> list
-        # A killed host-group loses its assets, not the run.
-        {:exit, reason} -> [{:error, %{url: "(host group)", reason: reason}}]
+        {:ok, list} ->
+          list
+
+        # Unreachable under normal linking: `store/3` rescues and catches
+        # exits and the stream has no timeout, so a worker only exits if it is
+        # killed from outside. Kept so that case reports the host's assets
+        # under its name rather than losing them without a trace.
+        {:exit, {{host, _assets}, reason}} ->
+          [{:error, %{url: "(#{host}) worker exited", reason: reason}}]
       end)
 
     by_url = for {:ok, asset, item} <- results, into: %{}, do: {asset.url, item}
@@ -646,18 +678,70 @@ defmodule KilnCMS.Portability.Import do
     }
   end
 
-  defp fetch_one(asset, opts, progress) do
-    # `uploaded_by: :none`: the operator's actor authorizes the create, but a
-    # migrated asset was not uploaded by them — same principle as the byline
-    # handling above, which reassigns `author` to the mapped original writer
-    # rather than crediting whoever ran the import. Media has no per-asset
-    # uploader in any export format, so the honest value is none at all.
-    # `cache_bust: :defer`: `sideload/2` issues one clear for the whole run.
+  # Anything but a positive integer (`nil`, `0`, a negative, `:infinity`) is
+  # the default: an unbounded download is what #2720's deadline exists to
+  # prevent, and a zero or negative one would fail every asset unrequested.
+  defp fetch_timeout(opts) do
+    case Keyword.get(opts, :media_fetch_timeout) do
+      ms when is_integer(ms) and ms > 0 -> ms
+      _other -> @sideload_fetch_timeout
+    end
+  end
+
+  # A host that has stopped answering would otherwise cost a timeout for every
+  # asset it holds: 300 images behind a dead origin is 25 minutes at a 5 s
+  # connect timeout, and hours at the full deadline, of waiting to be told 300
+  # times what the third timeout already said. After
+  # this many timeouts in a row the rest of that host's assets are reported
+  # `:host_unresponsive` without a request. Any answer that is not a timeout,
+  # a 404 included, shows the host is there and resets the count.
+  @host_breaker_threshold 3
+
+  defp fetch_host(host, assets, opts, fetch_timeout, progress) do
+    {results, _timeouts} =
+      Enum.map_reduce(assets, 0, fn asset, timeouts ->
+        result =
+          if timeouts >= @host_breaker_threshold,
+            do: unresponsive(asset, progress),
+            else: fetch_one(asset, opts, fetch_timeout, progress)
+
+        timeouts = if timed_out?(result), do: timeouts + 1, else: 0
+
+        if timeouts == @host_breaker_threshold do
+          Logger.warning(
+            "Import: #{host} timed out #{timeouts} times in a row; " <>
+              "skipping the rest of its assets"
+          )
+        end
+
+        {result, timeouts}
+      end)
+
+    results
+  end
+
+  defp unresponsive(asset, progress) do
+    progress.()
+    {:error, %{url: asset.url, reason: :host_unresponsive}}
+  end
+
+  # Our own deadline, and SafeFetch's connect or receive timeout, which it
+  # reports as a string (`SafeFetch.get/2` stringifies transport errors as
+  # `"request failed: " <> inspect(reason)`). The match is on the inspected
+  # `TransportError{reason: :timeout}` (Req's or Mint's), so a refused or
+  # closed connection, which answers fast, does not count.
+  # A skipped asset counts too, so a tripped breaker stays tripped.
+  defp timed_out?({:error, %{reason: {:fetch_timeout, _ms}}}), do: true
+  defp timed_out?({:error, %{reason: :host_unresponsive}}), do: true
+
+  defp timed_out?({:error, %{reason: "request failed: " <> reason}}),
+    do: String.contains?(reason, "TransportError{reason: :timeout}")
+
+  defp timed_out?(_result), do: false
+
+  defp fetch_one(asset, opts, fetch_timeout, progress) do
     result =
-      case Ingest.store_url(
-             asset.url,
-             scope(opts) ++ [alt: asset.alt, uploaded_by: :none, cache_bust: :defer]
-           ) do
+      case store(asset, opts, fetch_timeout) do
         {:ok, item} ->
           {:ok, asset, item}
 
@@ -671,6 +755,30 @@ defmodule KilnCMS.Portability.Import do
 
     progress.()
     result
+  end
+
+  # `uploaded_by: :none`: the operator's actor authorizes the create, but a
+  # migrated asset was not uploaded by them — same principle as the byline
+  # handling above, which reassigns `author` to the mapped original writer
+  # rather than crediting whoever ran the import. Media has no per-asset
+  # uploader in any export format, so the honest value is none at all.
+  # `cache_bust: :defer`: `sideload/2` issues one clear for the whole run.
+  #
+  # The rescue and catch are the per-asset boundary. This runs in a stream
+  # worker linked to the import, so an exception or exit here (a
+  # `GenServer.call` timing out inside the store, say) would end the whole run
+  # and lose the report of everything already created. One asset's surprise
+  # is that asset's failure, like any other.
+  defp store(asset, opts, fetch_timeout) do
+    Ingest.store_url(
+      asset.url,
+      scope(opts) ++
+        [alt: asset.alt, uploaded_by: :none, cache_bust: :defer, fetch_timeout: fetch_timeout]
+    )
+  rescue
+    error -> {:error, {:exception, Exception.message(error)}}
+  catch
+    :exit, reason -> {:error, {:exit, Exception.format_exit(reason)}}
   end
 
   defp host_of(%{url: url}) do

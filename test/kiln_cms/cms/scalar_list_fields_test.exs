@@ -259,12 +259,59 @@ defmodule KilnCMS.CMS.ScalarListFieldsTest do
       assert Exception.message(error) =~ "at most 3 items"
     end
 
-    test "value constraints apply to each item, named by its index" do
+    test "value constraints apply to each item, named by its position from 1" do
       admin = admin()
       field = list!(:integer, admin, %{label: "Scores", validation: %{"max" => 10}})
 
       assert {:error, error} = page(%{field.name => [3, 11]}, admin)
-      assert Exception.message(error) =~ "(#{field.name}[1]) must be at most 10"
+      message = Exception.message(error)
+      assert message =~ "Scores (#{field.name}) item 2 must be at most 10"
+      refute message =~ "["
+    end
+
+    # #2683: a coercion error and a value rule name an item by the same
+    # position, the one it has in the list as stored — so a repeat a distinct
+    # type drops (only equal once normalised) moves the items after it up. No
+    # built-in distinct type has both a refusal and a per-item rule, so a date
+    # list shows the one and a link list the other.
+    test "a coercion error and a value rule count a repeat the same way" do
+      admin = admin()
+      dates = list!(:date, admin, %{label: "Dates"})
+
+      assert {:error, error} =
+               page(%{dates.name => ["2026-03-01", " 2026-03-01 ", "soon"]}, admin)
+
+      message = Exception.message(error)
+      assert message =~ "item 2 must be a date (YYYY-MM-DD)"
+      refute message =~ "item 3"
+
+      field = list!(:url, admin, %{label: "Links", validation: %{"max_length" => 20}})
+      a = "https://a.example"
+
+      assert {:error, error} =
+               page(%{field.name => [a, " #{a} ", "https://b.example/long"]}, admin)
+
+      message = Exception.message(error)
+      assert message =~ "Links (#{field.name}) item 2 must be at most 20 characters long"
+      refute message =~ "["
+    end
+
+    test "a blank item and a two-line item are counted as stored, one per line" do
+      admin = admin()
+      field = list!(:integer, admin, %{label: "Scores", validation: %{"max" => 10}})
+
+      assert {:error, error} = page(%{field.name => ["", "3\n4", "", "x"]}, admin)
+      assert Exception.message(error) =~ "item 3 must be a whole number"
+
+      assert {:error, error} = page(%{field.name => ["", "3\n4", "", "11"]}, admin)
+      assert Exception.message(error) =~ "Scores (#{field.name}) item 3 must be at most 10"
+
+      # A number list keeps its repeats, so a repeat is counted.
+      assert {:error, error} = page(%{field.name => [3, 3, "x"]}, admin)
+      assert Exception.message(error) =~ "item 3 must be a whole number"
+
+      assert {:error, error} = page(%{field.name => [3, 3, 11]}, admin)
+      assert Exception.message(error) =~ "Scores (#{field.name}) item 3 must be at most 10"
     end
 
     test "an item already stored is not re-checked when a constraint tightens" do
@@ -285,7 +332,49 @@ defmodule KilnCMS.CMS.ScalarListFieldsTest do
                  actor: admin
                )
 
-      assert Exception.message(error) =~ "(#{field.name}[3]) must be at most 6"
+      message = Exception.message(error)
+      assert message =~ "Scores (#{field.name}) item 4 must be at most 6"
+      refute message =~ "["
+    end
+
+    test "a new item after a repeat of a stored one is counted as stored" do
+      admin = admin()
+      dates = list!(:date, admin, %{label: "Dates"})
+      page = page!(%{dates.name => ["2026-03-01", "2026-05-01"]}, admin)
+
+      assert {:error, error} =
+               CMS.update_page(
+                 page,
+                 %{
+                   custom_fields: %{
+                     dates.name => ["2026-03-01", "2026-03-01", "2026-05-01", "soon"]
+                   }
+                 },
+                 actor: admin
+               )
+
+      message = Exception.message(error)
+      assert message =~ "item 3 must be a date (YYYY-MM-DD)"
+      refute message =~ "item 4"
+
+      field = list!(:url, admin, %{label: "Links", validation: %{"max_length" => 30}})
+      a = "https://a.example"
+      b = "https://b.example"
+      page = page!(%{field.name => [a, b]}, admin)
+
+      CMS.update_field_definition!(field, %{validation: %{"max_length" => 20}}, actor: admin)
+
+      assert {:error, error} =
+               CMS.update_page(
+                 page,
+                 %{custom_fields: %{field.name => [a, a, b, "https://c.example/long"]}},
+                 actor: admin
+               )
+
+      message = Exception.message(error)
+      assert message =~ "Links (#{field.name}) item 3 must be at most 20 characters long"
+      refute message =~ "["
+      assert stored(page, field, admin) == [a, b]
     end
 
     test "a default is coerced to a one-item list" do

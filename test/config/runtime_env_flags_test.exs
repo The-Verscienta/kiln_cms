@@ -73,6 +73,7 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
             KILN_CRAWLER_VERIFICATION KILN_CRAWLER_RANGES KILN_CRAWLER_RANGES_CRON
             KILN_PRIVATE_ARGS_SCRUB_CRON
             KILN_MEDIA_ROOT MEDIA_DIR S3_PUBLIC_BASE_URL
+            PORT POOL_SIZE SMTP_PORT S3_ENDPOINT_HOST S3_ENDPOINT_SCHEME S3_ENDPOINT_PORT
             AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
             KILN_IMAGE_TRANSFORM_KEY KILN_IMAGE_TRANSFORM_UNSIGNED
             KILN_IMAGE_TRANSFORM_AUTO_AVIF
@@ -1443,6 +1444,83 @@ defmodule KilnCMS.Config.RuntimeEnvFlagsTest do
       for value <- ["", "  "] do
         assert {[], _} = metrics_config(%{"KILN_METRICS_TOKEN" => value})
       end
+    end
+  end
+
+  # These four were a bare `String.to_integer`, so `PORT=` — what compose
+  # passes through for a variable the host never set — or `POOL_SIZE=" 20"`
+  # crashed boot with an ArgumentError instead of keeping the default (#2728).
+  describe "PORT, POOL_SIZE, SMTP_PORT and S3_ENDPOINT_PORT (#2728)" do
+    @s3_endpoint %{
+      "S3_BUCKET" => "media",
+      "S3_PUBLIC_BASE_URL" => "https://cdn.example.com",
+      "AWS_ACCESS_KEY_ID" => "id",
+      "AWS_SECRET_ACCESS_KEY" => "secret",
+      "S3_ENDPOINT_HOST" => "minio.internal"
+    }
+
+    # {variable, extra vars its branch needs, path to the value, default, range}
+    @integer_vars [
+      {"PORT", %{}, [:kiln_cms, KilnCMSWeb.Endpoint, :http, :port], 4000,
+       {:integer_in, 1, 65_535}},
+      {"POOL_SIZE", %{}, [:kiln_cms, KilnCMS.Repo, :pool_size], 10, :positive_integer},
+      {"SMTP_PORT", %{"MAIL_MODE" => "smtp", "SMTP_HOST" => "smtp.example.com"},
+       [:kiln_cms, KilnCMS.Mailer, :port], 587, {:integer_in, 1, 65_535}},
+      {"S3_ENDPOINT_PORT", @s3_endpoint, [:ex_aws, :s3, :port], 443, {:integer_in, 1, 65_535}}
+    ]
+
+    test "a set value is read, and whitespace padding is trimmed" do
+      for {var, base, path, _default, _expected} <- @integer_vars,
+          value <- ["25", " 25 ", "25\n"] do
+        {config, stderr} = eval_io(Map.put(base, var, value), :prod)
+
+        assert get_in(config, path) == 25, "#{var}=#{inspect(value)} was not read as 25"
+        refute stderr =~ var
+      end
+    end
+
+    test "unset or blank keeps the default, silently" do
+      for {var, base, path, default, _expected} <- @integer_vars, value <- [nil, "", "   "] do
+        {config, stderr} = eval_io(Map.put(base, var, value), :prod)
+
+        assert get_in(config, path) == default,
+               "#{var}=#{inspect(value)} did not keep the default #{default}"
+
+        refute stderr =~ var
+      end
+    end
+
+    test "garbage keeps the default and warns, through :config_warnings" do
+      for {var, base, path, default, expected} <- @integer_vars,
+          value <- ["http", "4000abc", "1.5", "0", "-1"] do
+        {config, stderr} = eval_io(Map.put(base, var, value), :prod)
+
+        assert get_in(config, path) == default,
+               "#{var}=#{inspect(value)} must keep the default #{default}"
+
+        assert stderr =~ "#{var} is set to"
+
+        assert {^var, ^value, ^expected} =
+                 config
+                 |> get_in([:kiln_cms, :config_warnings])
+                 |> Enum.find(&(elem(&1, 0) == var))
+      end
+    end
+
+    test "a port past 65535 is refused by name rather than handed to the listener" do
+      for {var, base, path, default, {:integer_in, 1, 65_535}} <- @integer_vars do
+        {config, stderr} = eval_io(Map.put(base, var, "80800"), :prod)
+
+        assert get_in(config, path) == default
+        assert stderr =~ "#{var} is set to"
+      end
+    end
+
+    test "PORT is read the same way outside :prod" do
+      path = [:kiln_cms, KilnCMSWeb.Endpoint, :http, :port]
+
+      assert get_in(eval(%{"PORT" => " 4100 "}, :dev), path) == 4100
+      assert get_in(eval(%{"PORT" => ""}, :dev), path) == 4000
     end
   end
 

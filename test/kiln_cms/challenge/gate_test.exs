@@ -5,6 +5,10 @@ defmodule KilnCMS.Challenge.GateTest do
 
   `async: false`: `KilnCMS.ChallengeFixtures.enable!/1` writes application env
   and an OS variable, both node-wide.
+
+  Every axis's window is pinned (`pin_windows!/1`, #2649): these tests spend
+  an axis and then expect a challenge, and a window boundary in between would
+  make the gate's charge free.
   """
   use KilnCMS.DataCase, async: false
 
@@ -42,6 +46,10 @@ defmodule KilnCMS.Challenge.GateTest do
     do: Enum.each(1..n//1, fn _ -> Gate.record_sign_in_failure(context(ip)) end)
 
   defp ip_window, do: Challenge.threshold(:ip_window)
+
+  setup do
+    pin_windows!([:account, :ip, :registration])
+  end
 
   describe "a sign-in under :adaptive" do
     setup do
