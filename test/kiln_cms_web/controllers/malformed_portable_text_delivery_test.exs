@@ -19,6 +19,7 @@ defmodule KilnCMSWeb.MalformedPortableTextDeliveryTest do
 
   alias KilnCMS.Accounts.User
   alias KilnCMS.Blocks.PortableText
+  alias KilnCMS.Blocks.PortableText.Shape
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Page
   alias KilnCMS.Firing.Engine
@@ -106,7 +107,8 @@ defmodule KilnCMSWeb.MalformedPortableTextDeliveryTest do
     @poison poison
     @kept kept
 
-    # Fails on the code before #2768 for every shape but the numeric-string level.
+    # Fails on the code before #2768 for every shape but the numeric-string
+    # level, which the old HTML renderer already nested correctly.
     test "the published page renders (#{name})", %{conn: conn} do
       page = published_page()
       :ok = plant(page, :blocks, [envelope(body(@poison))])
@@ -126,7 +128,54 @@ defmodule KilnCMSWeb.MalformedPortableTextDeliveryTest do
       assert {:ok, artifacts} = Engine.fire(reload(page))
 
       assert artifacts.web["html"] =~ "Neighbor stays"
-      assert rich_text_json(artifacts)["body"] == PortableText.repair_body(body(@poison))
+
+      json_body = rich_text_json(artifacts)["body"]
+      assert Shape.well_formed?(json_body)
+      assert hd(json_body) == MalformedPortableText.neighbor()
+    end
+  end
+
+  describe "the :json artifact carries the repaired body" do
+    # Fails on the code before #2768: firing raised in the `:web` render.
+    test "marks as a string become a one-item list" do
+      page = published_page()
+      poison = MalformedPortableText.block([MalformedPortableText.span("Bold", "strong")])
+      :ok = plant(page, :blocks, [envelope(body(poison))])
+
+      assert {:ok, artifacts} = Engine.fire(reload(page))
+
+      assert rich_text_json(artifacts)["body"] == [
+               MalformedPortableText.neighbor(),
+               %{
+                 "_type" => "block",
+                 "_key" => "b0",
+                 "style" => "normal",
+                 "markDefs" => [],
+                 "children" => [%{"_type" => "span", "text" => "Bold", "marks" => ["strong"]}]
+               }
+             ]
+    end
+
+    # Fails on the code before #2768: firing raised in the `:web` render.
+    test "string children become one span" do
+      page = published_page()
+      poison = MalformedPortableText.block("Loose prose", %{"style" => "h2"})
+      :ok = plant(page, :blocks, [envelope(body(poison))])
+
+      assert {:ok, artifacts} = Engine.fire(reload(page))
+
+      assert rich_text_json(artifacts)["body"] == [
+               MalformedPortableText.neighbor(),
+               %{
+                 "_type" => "block",
+                 "_key" => "b0",
+                 "style" => "h2",
+                 "markDefs" => [],
+                 "children" => [%{"_type" => "span", "text" => "Loose prose", "marks" => []}]
+               }
+             ]
+
+      assert artifacts.web["html"] =~ "Loose prose</h2>"
     end
   end
 

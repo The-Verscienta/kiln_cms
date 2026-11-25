@@ -476,6 +476,9 @@ defmodule KilnCMS.Blocks.PortableText do
   defp style_for("heading", _), do: "h2"
   defp style_for(_other, _node), do: "normal"
 
+  # A node's `content` is client-controlled JSON as well (#2768).
+  defp spans_and_defs(content) when not is_list(content), do: {[], []}
+
   defp spans_and_defs(content) do
     {spans, defs, _next} =
       Enum.reduce(content, {[], [], 0}, fn node, {spans, defs, key_idx} ->
@@ -824,7 +827,7 @@ defmodule KilnCMS.Blocks.PortableText do
   defp wrap(_normal, inner), do: "<p>#{inner}</p>"
 
   defp span_to_html(%{} = span, defs) do
-    text = esc(span["text"] || "")
+    text = esc(span_text(span))
     Enum.reduce(span["marks"] || [], text, &apply_mark(&1, &2, defs))
   end
 
@@ -894,7 +897,13 @@ defmodule KilnCMS.Blocks.PortableText do
   # Second layer behind `repair_body/1` (#2768).
   defp block_text(_other), do: ""
 
+  # A span's text — or an inline object's, which `repair_body/1` leaves as it
+  # is — as a string; a map or list reads as nothing.
   defp span_text(%{"text" => text}) when is_binary(text), do: text
+
+  defp span_text(%{"text" => text}) when is_number(text) or is_boolean(text),
+    do: to_string(text)
+
   defp span_text(_span), do: ""
 
   defp esc(value) do

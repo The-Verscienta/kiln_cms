@@ -84,7 +84,7 @@ defmodule KilnCMS.Blocks.PortableText.Markdown do
   defp block(block), do: inline(block)
 
   defp code(block) do
-    code = block |> children() |> Enum.map_join(&(&1["text"] || ""))
+    code = block |> children() |> Enum.map_join(&span_text/1)
     fence = fence_for(code)
     language = if is_binary(block["language"]), do: block["language"], else: ""
     fence <> language <> "\n" <> code <> "\n" <> fence
@@ -99,7 +99,7 @@ defmodule KilnCMS.Blocks.PortableText.Markdown do
   defp list(items) do
     {lines, _counters, _kind} =
       Enum.reduce(items, {[], %{}, nil}, fn item, {lines, counters, kind} ->
-        level = max(item["level"] || 1, 1)
+        level = if is_integer(item["level"]), do: max(item["level"], 1), else: 1
         item_kind = item["listItem"]
 
         separator? = level == 1 and kind != nil and item_kind != kind
@@ -209,12 +209,21 @@ defmodule KilnCMS.Blocks.PortableText.Markdown do
   defp style_for(_mark, _out), do: :markdown
   defp children(block), do: block["children"] |> List.wrap() |> Enum.filter(&is_map/1)
 
+  # An inline object's `text` is left as stored by `repair_body/1`, so only a
+  # string or scalar counts.
+  defp span_text(%{"text" => text}) when is_binary(text), do: text
+
+  defp span_text(%{"text" => text}) when is_number(text) or is_boolean(text),
+    do: to_string(text)
+
+  defp span_text(_span), do: ""
+
   # Each span as `{text, marks}` with its marks resolved (a link key becomes
   # `{:link, href}`, an unknown key is dropped) and ordered; neighbours with the
   # same marks are joined, and empty spans vanish.
   defp merge_runs(spans, defs) do
     spans
-    |> Enum.map(fn span -> {span["text"] || "", resolve_marks(span["marks"], defs)} end)
+    |> Enum.map(fn span -> {span_text(span), resolve_marks(span["marks"], defs)} end)
     |> Enum.reject(fn {text, _} -> text == "" end)
     |> Enum.chunk_by(fn {_, marks} -> marks end)
     |> Enum.map(fn [{_, marks} | _] = run -> {Enum.map_join(run, &elem(&1, 0)), marks} end)

@@ -27,7 +27,7 @@ defmodule KilnCMS.Blocks.PortableTextShapeTest do
       @kept kept
 
       # Fails on the code before #2768 for every shape but the numeric-string
-      # level (which rendered, as a misplaced item).
+      # level, which the old HTML renderer already nested correctly.
       test "to_html/1: #{name}" do
         html = PortableText.to_html([@neighbor, @poison])
 
@@ -47,7 +47,7 @@ defmodule KilnCMS.Blocks.PortableTextShapeTest do
 
       # Fails on the code before #2768 for a binary child, string children, a
       # map text, the custom node, the code block's string children (their
-      # text was dropped) and the numeric-string level.
+      # text was dropped) and the numeric-string level (which raised).
       test "to_markdown/1: #{name}" do
         markdown = PortableText.to_markdown([@neighbor, @poison])
 
@@ -62,7 +62,8 @@ defmodule KilnCMS.Blocks.PortableTextShapeTest do
                "<p><strong>Bold</strong></p>"
     end
 
-    # Fails on the code before #2768.
+    # Fails on the code before #2768 in Markdown, which raised; the old HTML
+    # already nested the item.
     test "a numeric-string level nests the item as that level would" do
       items = [
         block([span("one", [])], %{"listItem" => "bullet", "level" => 1}),
@@ -80,6 +81,16 @@ defmodule KilnCMS.Blocks.PortableTextShapeTest do
       for marks <- ["bold", %{"type" => "bold"}, 1] do
         assert [%{"children" => [%{"text" => "hi", "marks" => []}]}] =
                  PortableText.from_tiptap(doc(para([text("hi", marks)])))
+      end
+    end
+
+    # Fails on the code before #2768: `content` went straight into Enum.reduce.
+    test "a node whose content is not a list converts as an empty block" do
+      for content <- ["abc", %{"type" => "text", "text" => "x"}, 1] do
+        for type <- ["paragraph", "heading", "codeBlock"] do
+          assert [%{"_type" => "block", "children" => [], "markDefs" => []}] =
+                   PortableText.from_tiptap(doc([%{"type" => type, "content" => content}]))
+        end
       end
     end
   end
@@ -144,17 +155,17 @@ defmodule KilnCMS.Blocks.PortableTextShapeTest do
       assert repaired["children"] == [%{"text" => ""}, %{"text" => ""}]
     end
 
-    test "a numeric-string level becomes an integer; any other non-integer level is removed" do
+    test "a numeric-string level or whole-number float becomes an integer; any other non-integer level is removed" do
       levels =
-        for level <- ["2", "two", "2.5", 2.5, %{}, true] do
+        for level <- ["2", 2.0, "two", "2.5", 2.5, %{}, true] do
           [repaired] = PortableText.repair_body([%{"listItem" => "bullet", "level" => level}])
           Map.fetch(repaired, "level")
         end
 
-      assert levels == [{:ok, 2}, :error, :error, :error, :error, :error]
+      assert levels == [{:ok, 2}, {:ok, 2}, :error, :error, :error, :error, :error]
     end
 
-    test "checks every map node: custom types, markDefs entries and table cells" do
+    test "repairs what the renderers read on custom nodes, markDefs entries and table cells" do
       [custom, table] =
         PortableText.repair_body([
           %{"_type" => "callout", "children" => "abc", "markDefs" => %{"_key" => 1}},
@@ -162,7 +173,7 @@ defmodule KilnCMS.Blocks.PortableTextShapeTest do
             "_type" => "table",
             "rows" => [
               "junk",
-              %{"cells" => [%{"children" => ["cell"], "marks" => "strong"}, nil]}
+              %{"cells" => [%{"children" => ["cell", %{"text" => 7, "marks" => "em"}]}, nil]}
             ]
           }
         ])
@@ -171,8 +182,51 @@ defmodule KilnCMS.Blocks.PortableTextShapeTest do
       assert custom["markDefs"] == [%{"_key" => "1"}]
 
       assert table["rows"] == [
-               %{"cells" => [%{"children" => [span("cell", [])], "marks" => ["strong"]}]}
+               %{
+                 "cells" => [
+                   %{"children" => [span("cell", []), %{"text" => "7", "marks" => ["em"]}]}
+                 ]
+               }
              ]
+    end
+
+    test "leaves a custom node's own fields and an annotation's fields alone" do
+      custom = %{
+        "_type" => "callout",
+        "_key" => %{"not" => "a string"},
+        "style" => ["warning"],
+        "level" => %{"severity" => 3},
+        "text" => %{"title" => "Heads up"},
+        "marks" => "anything",
+        "tone" => 4.5,
+        "children" => [
+          %{"_type" => "span", "text" => "Inside", "marks" => ["note"]},
+          %{"_type" => "mention", "text" => %{"id" => 1}, "user" => [1, 2], "marks" => []}
+        ],
+        "markDefs" => [
+          %{
+            "_key" => "note",
+            "_type" => "footnote",
+            "level" => %{"depth" => 1},
+            "style" => %{"italic" => true},
+            "text" => %{"body" => "A note"}
+          }
+        ]
+      }
+
+      assert PortableText.repair_body([custom]) == [custom]
+      assert PortableText.to_html([custom]) == "<p>Inside</p>"
+      assert PortableText.to_plain_text([custom]) == "Inside"
+      assert PortableText.to_markdown([custom]) == "Inside"
+      assert PortableText.to_markdown([Map.put(custom, "listItem", "bullet")]) == "- Inside"
+    end
+
+    test "returns a well-formed body itself, without rebuilding it" do
+      body = [@neighbor, block([span("b", ["strong"])], %{"listItem" => "bullet", "level" => 2})]
+
+      assert PortableText.Shape.well_formed?(body)
+      assert :erts_debug.same(PortableText.repair_body(body), body)
+      refute PortableText.Shape.well_formed?([block("abc")])
     end
 
     test "never adds a missing key and leaves nil values alone" do
