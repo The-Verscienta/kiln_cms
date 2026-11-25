@@ -96,6 +96,10 @@ else.
   `POST /api/media/uploads` answers `502 storage_failed` if that job can't be queued. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#direct-upload-cleanup-claim))
 
+- **`mix kiln.gen.content Story --plural stories`, and `--from` a dynamic type whose URL segment isn't `<name>s`, now write `plural:` into the generated resource, so it serves at `/stories` and matches its `list_stories` interfaces instead of registering `storys` (#2731).**
+  Types generated before this keep `storys` until you add `plural:` by hand. No migration.
+  ([long form](docs/changelog/unreleased.md#gen-content-plural))
+
 - **`mix kiln.migrations.check` judges the migration module's functions that `up`/`change` call and the SQL of `repo().query!`, and fails closed on forward code it cannot read, such as run-time SQL or a call into another module (#2736).**
   ([long form](docs/changelog/unreleased.md#migrations-check-follows-helpers))
 

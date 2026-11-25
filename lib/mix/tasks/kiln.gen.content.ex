@@ -29,7 +29,9 @@ if Code.ensure_loaded?(Igniter) do
     * `--excerpt` / `-e` - add an `excerpt` field (for listings/feeds).
     * `--published` / `-p` - add a `list_published_*` interface for the
       `:published` read every type has.
-    * `--plural` - override the plural used in interface names (default `<type>s`).
+    * `--plural` - override the plural (default `<type>s`). It names the
+      collection interfaces and the public URL segment, and an irregular one is
+      written into the resource's `use` line as `plural:` so both agree.
     * `--from <name>` - **promote an admin-defined dynamic type** (decision
       D17): derives the module, flags and plural from its `TypeDefinition`.
       After the migration, run `mix kiln.promote_data <name>` to move its
@@ -95,7 +97,7 @@ if Code.ensure_loaded?(Igniter) do
         {:"list_#{type}_versions", "define :list_#{type}_versions, action: :read"}
       ])
       |> Igniter.add_notice(notice(module, type, plural))
-      |> maybe_add_promotion_notice(opts, definition)
+      |> maybe_add_promotion_notice(opts, definition, plural)
     end
 
     # With --from, flags/plural come from the dynamic type's TypeDefinition
@@ -185,14 +187,14 @@ if Code.ensure_loaded?(Igniter) do
       end
     end
 
-    defp maybe_add_promotion_notice(igniter, opts, definition) do
+    # `plural` is the one the resource registers, so the URL note below names
+    # the segment the promoted type actually serves at.
+    defp maybe_add_promotion_notice(igniter, opts, definition, plural) do
       case opts[:from] do
         nil ->
           igniter
 
         name ->
-          plural = opts[:plural] || "#{name}s"
-
           Igniter.add_notice(igniter, """
           Promoting dynamic type "#{name}" (D17). After the migration above, move
           its data over:
@@ -280,6 +282,14 @@ if Code.ensure_loaded?(Igniter) do
 
       label = module |> Module.split() |> List.last()
 
+      # The macro defaults the plural to `"<type>s"`. An irregular one has to be
+      # spelled out, or the resource registers `storys` (routes, delivery
+      # segment, dispatch) while the domain gets `list_stories` (#2731).
+      plural =
+        if opts[:plural] in [nil, "#{type}s"],
+          do: "",
+          else: ", plural: #{inspect(opts[:plural])}"
+
       """
       @moduledoc \"\"\"
       A #{label} — a KilnCMS content type. All of its behaviour (block editor,
@@ -287,7 +297,7 @@ if Code.ensure_loaded?(Igniter) do
       relationships) comes from `KilnCMS.CMS.Content`; add only what is unique to
       a #{label} below.
       \"\"\"
-      use KilnCMS.CMS.Content, type: #{inspect(type)}#{flags}
+      use KilnCMS.CMS.Content, type: #{inspect(type)}#{plural}#{flags}
       """
     end
 
@@ -345,7 +355,7 @@ if Code.ensure_loaded?(Igniter) do
       them, add by hand:
         * KilnCMS.CMS.Category — `has_many :#{plural}, #{inspect(module)}`
         * KilnCMS.CMS.Tag — a `many_to_many :#{plural}` through `KilnCMS.CMS.Tagging`
-          (source `:tag_id`, destination `:subject_id`) + a `count :#{String.trim_trailing(plural, "s")}_count` aggregate
+          (source `:tag_id`, destination `:subject_id`) + a `count :#{type}_count` aggregate
         * KilnCMS.CMS.MediaItem — `has_many :featured_#{plural}, #{inspect(module)}`
           (destination_attribute `:featured_image_id`)
       """
