@@ -87,6 +87,13 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="experiment-goal-select"></a>
+
+- **The goal select on `/editor/experiments` takes effect (#2779).** The new-experiment form posts every field on each change, and the page's change handler matched on the content type first, so a change of the **Counts as a conversion** select was never read. Picking **A funnel is completed** left the form showing the **Goal form** picker, so the experiment was created with a funnel goal and no funnel, and could not be started. The same happened to **A page is reached**, whose target fields never appeared.
+  - **What changes.** One change reads both the content type and the goal, so the picked goal shows its own target field and the funnel, form or page picked there is saved with the experiment. The document list is reloaded only when the content type changes, not on every keystroke in **Name**.
+  - **Unchanged.** How a funnel goal is measured: a visitor converts on reaching the funnel's last step, as before. Who may create experiments, and which goal fields are saved for each goal.
+  - **No migration; rolling the pin back is safe.**
+
 <a id="portable-text-render-guards"></a>
 
 - **A malformed Portable Text body that is already stored renders instead of failing every read (#2768).** The `:rich_text` type stores a list of objects and checks nothing inside them, so a body written through JSON:API, GraphQL or MCP with a span whose `marks` was a string, `children` that were a string or held non-objects, a span `text` that was an object, or a `markDefs` entry that wasn't an object was saved. Then every render raised: the public page answered 500, firing failed, the editor couldn't open the record, and saving it again failed while search text was computed. A numeric-string list `level` (`"2"`) crashed the editor's Markdown view.
@@ -111,6 +118,16 @@ carries the reasoning.
   - **A value check on top.** A string that reads as a URL (`https://…`, `mailto:…`), a path (`/media/…`, `../x.png`), a UUID, JSON or an identifier-like token (`video/mp4`, `report.pdf`, `contact_form`) is never encoded, even in a prose field. That covers a plugin field holding a URL that forgot `translatable: false`, and custom fields, which have no schema at this point and previously skipped only JSON and `http(s)` URLs. A one-word prose value with an inner dot, like a heading reading `Node.js`, loses its click-to-edit address as a result.
   - **Fewer clickable values.** Fields that are not translatable lose their address too: an embed's cached provider `title` and `author_name`, a custom block's `content`. None of them can be edited from the bridge.
   - **No migration; rolling the pin back is safe.** The public fired artifact was never encoded and is unchanged.
+
+<a id="console-small-defects"></a>
+
+- **Smaller console fixes from the November bug sweep (#2764).**
+  - **A row deleted behind the page.** **Edit** on `/editor/webhooks`, `/editor/types` and `/editor/social` read the row with a raising call, so editing one that another admin had just deleted or archived crashed the page. It now says "That webhook (content type, account) no longer exists." and refreshes the list. **Remove** on `/editor/site-mail`, `/editor/site-storage`, `/editor/site-ai` and `/editor/site-search` did the same with the row read when the page opened; a removal that fails (the row already gone, or the admin no longer one) now says "Couldn't remove these settings. The page now shows what is saved." and reloads.
+  - **Counts.** The newsletter's "N confirmed" heading counted the 100 newest subscribers it lists; it now counts every confirmed subscriber on the site, read as the signed-in admin. The overview's "All quiet." showed under open block tasks and unresolved block discussions; it now shows only when none of the lines above it does.
+  - **Release times.** Go-live, published and rolled-back times on `/editor/releases` are stored and shown in UTC, beside a schedule field that takes local time. They now read `2026-11-25 14:00 UTC`.
+  - **Checks.** A social announcement's link, which comes back from the remote instance, goes through the same href rule as every other link, so a `javascript:` URL is not linked. A crafted `create_translation` event on `/editor/translations` can no longer create a variant in a locale the site does not run, or in the default locale. The slug **preview** on `/editor/slugs` re-checks that the user is still a site admin on each run, as **apply** already did: it lists every record's title, drafts included.
+  - **Not changed.** The funnel builder's handling of an unknown content type was already fixed; a test now holds it.
+  - **No migration; rolling the pin back is safe.**
 
 <a id="translations-slug-window"></a>
 

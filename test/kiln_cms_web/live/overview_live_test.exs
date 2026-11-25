@@ -305,6 +305,44 @@ defmodule KilnCMSWeb.OverviewLiveTest do
     assert html =~ "All quiet."
   end
 
+  # #2764: "All quiet." sat under the two lines above it, because its own
+  # condition left both counts out.
+  test "an unresolved block discussion is not quiet", %{conn: conn} do
+    editor = authed_user(:editor)
+    page = seed_page(%{})
+
+    CMS.add_comment!(
+      %{content_type: "page", content_id: page.id, block_id: Ecto.UUID.generate(), body: "Hm?"},
+      actor: editor
+    )
+
+    {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/overview")
+
+    assert html =~ "1 block with an unresolved discussion"
+    refute html =~ "All quiet."
+  end
+
+  test "an open task on a block, assigned to someone else, is not quiet", %{conn: conn} do
+    editor = authed_user(:editor)
+    page = seed_page(%{})
+
+    CMS.assign_task!(
+      %{
+        content_type: "page",
+        content_id: page.id,
+        block_id: Ecto.UUID.generate(),
+        assignee_id: authed_user(:editor).id
+      },
+      actor: editor
+    )
+
+    {:ok, _lv, html} = conn |> log_in(editor) |> live(~p"/editor/overview")
+
+    assert html =~ "1 open task anchored to a block"
+    refute html =~ "task assigned to you"
+    refute html =~ "All quiet."
+  end
+
   test "the centre tile surfaces tasks assigned to the viewer (#501)", %{conn: conn} do
     editor = authed_user(:editor)
     page = seed_page(%{})

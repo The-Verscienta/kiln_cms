@@ -259,7 +259,24 @@ defmodule KilnCMSWeb.NewsletterLive do
 
     socket
     |> assign(:subscribers, subscribers)
-    |> assign(:confirmed_count, Enum.count(subscribers, &(&1.status == :confirmed)))
+    |> assign(:confirmed_count, confirmed_count(socket))
+  end
+
+  # Counted in the database, not from the list above (#2764): the list is a
+  # 100-row display window, so a site with more subscribers than that showed
+  # only the confirmed ones among its newest 100. Same actor and site as the
+  # list. A failed count shows zero rather than failing the page, as the nav
+  # badges do.
+  defp confirmed_count(socket) do
+    %{actor: actor, current_org: org} = socket.assigns
+
+    Subscriber
+    |> Ash.Query.for_read(:confirmed, %{}, actor: actor, tenant: org)
+    |> Ash.count(actor: actor, tenant: org)
+    |> case do
+      {:ok, count} -> count
+      {:error, _error} -> 0
+    end
   end
 
   # Whether the audience the send form targets has a confirmed subscriber

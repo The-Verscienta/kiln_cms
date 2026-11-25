@@ -1173,4 +1173,26 @@ defmodule KilnCMSWeb.WebhookLiveTest do
       assert CMS.list_webhook_endpoints!(authorize?: false) == []
     end
   end
+
+  # #2764: Edit read the endpoint with a bang getter, so editing a row another
+  # admin had just deleted crashed the page.
+  describe "a stale row" do
+    test "Edit on an endpoint deleted behind the page says so and refreshes the list",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      endpoint = seed_endpoint()
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/webhooks")
+
+      CMS.destroy_webhook_endpoint!(endpoint, actor: admin, tenant: endpoint.org_id)
+
+      html =
+        lv
+        |> element(~s{button[phx-click="edit"][phx-value-id="#{endpoint.id}"]})
+        |> render_click()
+
+      assert html =~ "That webhook no longer exists."
+      refute html =~ @masked_url
+      refute has_element?(lv, ~s{form[phx-submit="save_edit"]})
+    end
+  end
 end

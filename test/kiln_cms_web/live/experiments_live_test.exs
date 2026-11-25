@@ -138,8 +138,8 @@ defmodule KilnCMSWeb.ExperimentsLiveTest do
 
       create = fn goal, goal_params ->
         {:ok, lv, _html} = live(conn, ~p"/editor/experiments")
-        render_change(lv, "pick_type", %{"experiment" => %{"content_type" => "post"}})
-        render_change(lv, "pick_type", %{"experiment" => %{"goal" => goal}})
+        lv |> form("#new-experiment", experiment: %{content_type: "post"}) |> render_change()
+        lv |> form("#new-experiment", experiment: %{goal: goal}) |> render_change()
 
         name = "Blank #{goal} target"
 

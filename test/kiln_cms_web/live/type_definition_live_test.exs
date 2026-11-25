@@ -270,6 +270,29 @@ defmodule KilnCMSWeb.TypeDefinitionLiveTest do
 
   # The edit form is on the page beside the new-type form; their input ids
   # must differ or LiveViewTest raises on the duplicate id.
+  # #2764: Edit read the type with a bang getter, so editing a type another
+  # admin had just archived crashed the page.
+  test "Edit on a type archived behind the page says so and refreshes the list",
+       %{conn: conn} do
+    admin = authed_user(:admin)
+
+    definition =
+      CMS.create_type_definition!(
+        %{name: "stale#{System.unique_integer([:positive])}", label: "Stale"},
+        actor: admin
+      )
+
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/types")
+
+    CMS.destroy_type_definition!(definition, actor: admin)
+
+    html = lv |> element("#type-#{definition.id} button[phx-click=edit]") |> render_click()
+
+    assert html =~ "That content type no longer exists."
+    refute has_element?(lv, "#type-#{definition.id}")
+    refute has_element?(lv, "#edit-type-#{definition.id}")
+  end
+
   test "the robots defaults are edited on an existing type", %{conn: conn} do
     admin = authed_user(:admin)
 

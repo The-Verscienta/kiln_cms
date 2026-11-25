@@ -86,20 +86,35 @@ defmodule KilnCMSWeb.SiteAiLive do
       nil ->
         {:noreply, socket}
 
+      # The row was read when the page loaded. Another admin may have reset
+      # or changed it since, or this admin may no longer be one (#2764), so a
+      # refused or stale reset reloads and says so rather than crashing.
       row ->
-        CMS.reset_site_ai_provider!(row,
-          actor: socket.assigns.current_user,
-          tenant: socket.assigns.current_org,
-          context: socket.assigns.security_context
-        )
+        case CMS.reset_site_ai_provider(row,
+               actor: socket.assigns.current_user,
+               tenant: socket.assigns.current_org,
+               context: socket.assigns.security_context
+             ) do
+          :ok ->
+            {:noreply,
+             socket
+             |> put_flash(
+               :info,
+               gettext(
+                 "Removed. This site's AI features use the deployment's configuration again."
+               )
+             )
+             |> load_provider()}
 
-        {:noreply,
-         socket
-         |> put_flash(
-           :info,
-           gettext("Removed. This site's AI features use the deployment's configuration again.")
-         )
-         |> load_provider()}
+          {:error, _error} ->
+            {:noreply,
+             socket
+             |> put_flash(
+               :error,
+               gettext("Couldn't remove these settings. The page now shows what is saved.")
+             )
+             |> load_provider()}
+        end
     end
   end
 

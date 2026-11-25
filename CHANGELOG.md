@@ -95,6 +95,10 @@ else.
 
 ### Fixed
 
+- **The Experiments form's goal select takes effect, so a funnel-completion experiment can be set up from `/editor/experiments` (#2779).**
+  Picking a goal now shows its target picker (funnel, form or page), and typing a name no longer reloads the document list.
+  ([long form](docs/changelog/unreleased.md#experiment-goal-select))
+
 - **A stored rich text body in a malformed Portable Text shape (`marks` as a string, `children` that aren't spans, a `markDefs` entry that isn't an object) renders with the bad nodes repaired or skipped instead of a 500, and fires and indexes again (#2768).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#portable-text-render-guards))
@@ -105,6 +109,11 @@ else.
 - **The visual-editing preview read (`/api/visual-editing/:type/:slug`) encodes only prose: a video's `src`, a file's `download_url`, an embed's `resolved_url`, media ids and other URL or identifier fields come through unchanged, instead of with an invisible tail that made them 404 (#2770).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#visual-editing-prose-only))
+
+
+- **Console fixes: Edit on a webhook, content type or social account, and Remove on a site's mail, storage, AI or search settings, no longer crash when another admin deleted the row; the newsletter's confirmed count, the overview's "All quiet." and release go-live times (now labeled UTC) are right; and a few events check more (#2764).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#console-small-defects))
 
 - **The translations dashboard shows every variant of the slugs it lists: an older translation no longer shows as "missing" (and fails to create), and a slug whose default-locale source is older than its translations can still be exported (#2761).**
   No migration; rolling the pin back is safe.

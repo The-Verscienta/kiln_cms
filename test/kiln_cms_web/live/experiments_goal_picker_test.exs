@@ -188,6 +188,64 @@ defmodule KilnCMSWeb.ExperimentsGoalPickerTest do
   end
 
   describe "the picker" do
+    # A browser posts the whole form on every change, so a change of the goal
+    # select arrives with the content type beside it (#2779). Driven through
+    # `form/3` so the payload is the one a browser sends, not a goal-only map.
+    test "a funnel goal picked in the form shows its picker, saves and lists", %{
+      conn: conn,
+      admin: admin
+    } do
+      post = post!(admin)
+      funnel = ExperimentFixtures.funnel_ending_at(page!(admin), page!(admin), org_id())
+
+      {:ok, lv, _html} = live(conn, ~p"/editor/experiments")
+
+      lv |> form("#new-experiment", experiment: %{content_type: "post"}) |> render_change()
+
+      lv
+      |> form("#new-experiment", experiment: %{goal: "funnel_completion"})
+      |> render_change()
+
+      assert has_element?(lv, "#experiment-goal-funnel option[value='#{funnel.id}']")
+      assert has_element?(lv, "#experiment-goal option[value='funnel_completion'][selected]")
+      refute has_element?(lv, "#experiment-goal-form")
+
+      # Changing the type afterwards keeps the goal picked.
+      lv |> form("#new-experiment", experiment: %{content_type: "page"}) |> render_change()
+      assert has_element?(lv, "#experiment-goal-funnel")
+
+      lv |> form("#new-experiment", experiment: %{content_type: "post"}) |> render_change()
+
+      {:error, {:live_redirect, _}} =
+        lv
+        |> form("#new-experiment",
+          experiment: %{
+            name: "Funnel from the form",
+            document_id: post.id,
+            goal: "funnel_completion",
+            goal_funnel_id: funnel.id
+          }
+        )
+        |> render_submit()
+
+      experiment = created("Funnel from the form")
+      assert experiment.goal == :funnel_completion
+      assert experiment.goal_funnel_id == funnel.id
+      assert is_nil(experiment.goal_form_id)
+
+      {:ok, _lv, html} = live(conn, ~p"/editor/experiments")
+      assert html =~ "Original title · Completes a funnel · 1 variant"
+    end
+
+    test "a goal the select does not offer is ignored", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/editor/experiments")
+
+      render_change(lv, "pick_type", %{"experiment" => %{"goal" => "nonsense"}})
+
+      assert has_element?(lv, "#experiment-goal-form")
+      assert has_element?(lv, "#experiment-goal option[value='form_submission'][selected]")
+    end
+
     test "documents are offered only once a type is picked", %{conn: conn, admin: admin} do
       post = post!(admin)
 
@@ -207,11 +265,19 @@ defmodule KilnCMSWeb.ExperimentsGoalPickerTest do
       assert html =~ "Pick a form…"
       refute html =~ "Pick a funnel…"
 
-      html = render_change(lv, "pick_type", %{"experiment" => %{"goal" => "funnel_completion"}})
+      html =
+        lv
+        |> form("#new-experiment", experiment: %{goal: "funnel_completion"})
+        |> render_change()
+
       assert html =~ "Pick a funnel…"
       refute html =~ "Pick a form…"
 
-      html = render_change(lv, "pick_type", %{"experiment" => %{"goal" => "content_view"}})
+      html =
+        lv
+        |> form("#new-experiment", experiment: %{goal: "content_view"})
+        |> render_change()
+
       refute html =~ "Pick a funnel…"
       refute html =~ "Pick a form…"
     end

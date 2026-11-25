@@ -136,6 +136,22 @@ defmodule KilnCMSWeb.FunnelBuilderLiveTest do
     assert Analytics.funnel_steps_for!(funnel.id, authorize?: false) == []
   end
 
+  # #2764: the `{:error, _}` clause used to be reached only because
+  # `ContentTypes.get_record/3` raised on an unknown type; it now answers
+  # `{:error, :unknown_content_type}`, and the clause handles that too.
+  test "a step of an unknown type is refused, not crashed on", %{conn: conn} do
+    admin = authed_user(:admin)
+    page = CMS.create_page!(%{title: "About", slug: "funb-unknown-#{slug()}"}, actor: admin)
+
+    {funnel, [], lv, _html} = builder(conn, admin)
+
+    render_hook(lv, "pick_step_type", %{"type" => "no_such_type"})
+    html = render_submit(lv, "add_step", %{"content_id" => page.id})
+
+    assert html =~ "That item is no longer available"
+    assert Analytics.funnel_steps_for!(funnel.id, authorize?: false) == []
+  end
+
   test "adding a step without picking an item shows an error", %{conn: conn} do
     admin = authed_user(:admin)
     {funnel, [], lv, _html} = builder(conn, admin)

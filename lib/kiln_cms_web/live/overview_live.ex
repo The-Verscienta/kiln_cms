@@ -808,9 +808,12 @@ defmodule KilnCMSWeb.OverviewLive do
                   {gettext("%{count} webhook failures in 24h", count: @webhooks.failed_24h)}
                 </.link>
               </li>
+              <%!-- Quiet only when none of the lines above is showing, block
+                    tasks and unresolved discussions included (#2764). --%>
               <li
                 :if={
-                  @my_open_tasks == 0 and Map.get(@by_state, :in_review, 0) == 0 and
+                  @my_open_tasks == 0 and @open_block_tasks == 0 and @unresolved_threads == 0 and
+                    Map.get(@by_state, :in_review, 0) == 0 and
                     @stale == 0 and @upcoming == 0 and
                     (is_nil(@webhooks) or @webhooks.failed_24h == 0)
                 }

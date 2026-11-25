@@ -103,4 +103,27 @@ defmodule KilnCMSWeb.SlugRegenLiveTest do
              &String.starts_with?(&1.worker, "KilnCMS.CMS.Workers.SlugRegenerationWorker")
            )
   end
+
+  # #2764: the preview scans every record without authorization, titles of
+  # drafts included, and unlike "apply" it did not re-check the tier.
+  test "the preview handler refuses on its own, without the mount guard in front of it" do
+    socket = %Phoenix.LiveView.Socket{
+      assigns: %{
+        __changed__: %{},
+        current_user: %{role: :editor},
+        current_org: KilnCMS.Accounts.default_org(),
+        kind: "all",
+        include_pinned: false,
+        preview: nil,
+        result: nil
+      }
+    }
+
+    assert {:noreply, ^socket} =
+             KilnCMSWeb.SlugRegenLive.handle_event(
+               "preview",
+               %{"kind" => "page", "include_pinned" => "true"},
+               socket
+             )
+  end
 end
