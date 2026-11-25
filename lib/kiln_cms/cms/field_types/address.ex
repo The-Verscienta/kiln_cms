@@ -33,11 +33,27 @@ defmodule KilnCMS.CMS.FieldTypes.Address do
       country Kiln knows nothing about. This is a *format* check only: it
       cannot tell a real postcode from a well-formed one.
 
-  No third-party country-format dataset ships with Kiln (there is no licence
-  to vet), so the table above is small and hand-written. Each pattern is
-  anchored and linear, with no nested quantifiers. Country-driven labels and
-  required parts, administrative-area lists, schema.org `PostalAddress` output
-  and a geocode hand-off to `:geolocation` are not implemented.
+  The postal-code table above is small and hand-written. Each pattern is
+  anchored and linear, with no nested quantifiers.
+
+  ## Country-driven labels and required parts (#2995)
+
+  The editor follows the selected country (`KilnCMS.CMS.AddressFormats`, from
+  a vetted, MIT-licensed dataset: `docs/extending-content.md` ("Address fields")): the administrative
+  area is "State" for the US, "County" for the UK and "Prefecture" for Japan;
+  the postal code is a "ZIP code" in the US and an "Eircode" in Ireland; a part
+  the country does not use (no postal code in the United Arab Emirates) is not
+  offered unless the stored address already has one.
+
+  The parts a country requires (the US needs a line, city, state and ZIP code;
+  the UK a line, town and postcode) are marked required **in the editor, on a
+  `required` field**: the browser will not submit that form with one empty. The
+  server does not enforce it: `cast/2` still accepts a country alone, or any
+  subset of parts, so existing API clients, imports and stored values keep
+  working. A format is guidance for the person typing, not a validation rule.
+
+  Schema.org `PostalAddress` output and a geocode hand-off to `:geolocation`
+  are not implemented.
 
   Accepted input is the editor's part map, or a map from an API client with
   atom or string keys.
@@ -50,7 +66,7 @@ defmodule KilnCMS.CMS.FieldTypes.Address do
   use Kiln.FieldType
   use Gettext, backend: KilnCMSWeb.Gettext
 
-  alias KilnCMS.CMS.Countries
+  alias KilnCMS.CMS.{AddressFormats, Countries}
 
   # Display order of the editor; storage is a map, so the order is not stored.
   @keys ~w(country address_line1 address_line2 locality administrative_area postal_code)
@@ -146,6 +162,75 @@ defmodule KilnCMS.CMS.FieldTypes.Address do
       }
     ]
   end
+
+  @doc """
+  The editor's parts for the address currently in the form (#2995): labels,
+  the required marks and the parts shown follow the selected country.
+
+  The editor calls this in preference to `input_parts/1` when it has the
+  value, so the widget changes as the country does. With no country chosen
+  yet it is `input_parts/1` (every part, neutral labels).
+  """
+  def input_parts(definition, value) do
+    case country_of(value) do
+      nil -> input_parts(definition)
+      country -> country_parts(definition, value, country)
+    end
+  end
+
+  defp country_of(%{} = value) do
+    case Map.get(value, "country") || Map.get(value, :country) do
+      code when is_binary(code) ->
+        code = code |> String.trim() |> String.upcase()
+        if Countries.valid?(code), do: code
+
+      _other ->
+        nil
+    end
+  end
+
+  defp country_of(_value), do: nil
+
+  defp country_parts(definition, value, country) do
+    format = AddressFormats.get(country)
+
+    # A part the country does not use is hidden, unless it holds something:
+    # hiding it would make the next save drop it.
+    shown? = fn key ->
+      key not in format.unused or filled?(value, key)
+    end
+
+    [country_part(definition)]
+    |> Kernel.++(
+      for part <- input_parts(definition),
+          part.key != "country",
+          shown?.(part.key) do
+        part
+        |> Map.put(:required?, part.key in format.required)
+        |> relabel(country)
+      end
+    )
+  end
+
+  defp country_part(definition), do: hd(input_parts(definition))
+
+  defp filled?(value, key) do
+    case Map.get(value, key) do
+      text when is_binary(text) -> String.trim(text) != ""
+      _other -> false
+    end
+  end
+
+  defp relabel(%{key: "administrative_area"} = part, country),
+    do: %{part | label: AddressFormats.label(:administrative_area, country)}
+
+  defp relabel(%{key: "locality"} = part, country),
+    do: %{part | label: AddressFormats.label(:locality, country)}
+
+  defp relabel(%{key: "postal_code"} = part, country),
+    do: %{part | label: AddressFormats.label(:postal_code, country)}
+
+  defp relabel(part, _country), do: part
 
   @impl Kiln.FieldType
   def cast(value, _definition) when is_map(value) and not is_struct(value) do

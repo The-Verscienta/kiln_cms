@@ -4411,6 +4411,11 @@ msgstr "Archivage des médias : partie %{part}"
 msgid "Archiving media: part %{part} of %{total}"
 msgstr "Archivage des médias : partie %{part} sur %{total}"
 
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "Area"
+msgstr "Zone"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Artifacts"
@@ -5505,6 +5510,11 @@ msgstr "Résilié"
 msgid "Canonical URL"
 msgstr "URL canonique"
 
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "Canton"
+msgstr "Canton"
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #, elixir-autogen, elixir-format
@@ -6084,6 +6094,11 @@ msgstr "Termes choisis"
 #, elixir-autogen, elixir-format
 msgid "Citation"
 msgstr "Source"
+
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "City"
+msgstr "Ville"
 
 #: lib/kiln_cms/cms/field_types/address.ex
 #, elixir-autogen, elixir-format
@@ -7646,6 +7661,11 @@ msgstr "Les décomptes sont plafonnés par type de contenu — il peut y en avoi
 msgid "Counts as a conversion"
 msgstr "Compte comme conversion"
 
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "County"
+msgstr "Comté"
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Coverage per locale for every piece of content. Click a chip to edit; a missing chip creates the draft translation."
@@ -8569,6 +8589,11 @@ msgstr "Mode d'envoi"
 msgid "Delivery test"
 msgstr "Test d'envoi"
 
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "Department"
+msgstr "Département"
+
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Deployment"
@@ -8830,6 +8855,11 @@ msgstr "Nom d'affichage"
 #, elixir-autogen, elixir-format
 msgid "Display name (optional)"
 msgstr "Nom affiché (facultatif)"
+
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "District"
+msgstr "District"
 
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
@@ -9537,6 +9567,11 @@ msgstr "Les éditeurs envoient leur travail en relecture, et un administrateur l
 msgid "Edits keep the previous file for already-published content."
 msgstr "Les modifications conservent le fichier précédent pour le contenu déjà publié."
 
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "Eircode"
+msgstr "Eircode"
+
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Either way, a platform admin can change it later on the Team page."
@@ -9691,6 +9726,11 @@ msgstr "HTML intégré ou contenu externe"
 #, elixir-autogen, elixir-format
 msgid "Embedded media"
 msgstr "Média intégré"
+
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "Emirate"
+msgstr "Émirat"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -12740,6 +12780,11 @@ msgstr "Invité par %{name}."
 #, elixir-autogen, elixir-format
 msgid "Is"
 msgstr "Est"
+
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "Island"
+msgstr "Île"
 
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
@@ -17220,6 +17265,11 @@ msgstr "En retard"
 msgid "Overrides the title in search results and browser tabs. Falls back to the title."
 msgstr "Remplace le titre dans les résultats de recherche et les onglets du navigateur. À défaut, le titre est utilisé."
 
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "PIN code"
+msgstr "Code PIN"
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "POST a signed payload to external services when content is published, updated, or unpublished."
@@ -17310,6 +17360,11 @@ msgstr "Texte du paragraphe"
 #, elixir-autogen, elixir-format
 msgid "Parent"
 msgstr "Élément parent"
+
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "Parish"
+msgstr "Paroisse"
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
@@ -17887,6 +17942,12 @@ msgstr "Publie sur Bluesky ou Mastodon quand un article est publié."
 msgid "Post to social media"
 msgstr "Publier sur les réseaux sociaux"
 
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "Post town"
+msgstr "Localité postale"
+
+#: lib/kiln_cms/cms/address_formats.ex
 #: lib/kiln_cms/cms/field_types/address.ex
 #, elixir-autogen, elixir-format
 msgid "Postal code"
@@ -17922,6 +17983,11 @@ msgstr "Propulsé par %{name}."
 #, elixir-autogen, elixir-format
 msgid "Powered by KilnCMS."
 msgstr "Propulsé par KilnCMS."
+
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "Prefecture"
+msgstr "Préfecture"
 
 #: lib/kiln_cms_web/live/security_txt_live.ex
 #, elixir-autogen, elixir-format
@@ -18189,6 +18255,11 @@ msgstr "Prestataire"
 #, elixir-autogen, elixir-format
 msgid "Provider price ID"
 msgstr "Identifiant de prix du prestataire"
+
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "Province"
+msgstr "Province"
 
 #: lib/kiln_cms_web/live/totp_enrolment.ex
 #, elixir-autogen, elixir-format
@@ -18837,6 +18908,7 @@ msgstr "Régénérer les variantes"
 msgid "Regeneration queued — renames apply in the background."
 msgstr "Régénération mise en file d'attente — les renommages s'appliquent en arrière-plan."
 
+#: lib/kiln_cms/cms/address_formats.ex
 #: lib/kiln_cms_web/live/backup_destinations_live.ex
 #: lib/kiln_cms_web/live/site_storage_live.ex
 #, elixir-autogen, elixir-format
@@ -22648,6 +22720,7 @@ msgstr "Démarrage…"
 msgid "Starts"
 msgstr "Au départ"
 
+#: lib/kiln_cms/cms/address_formats.ex
 #: lib/kiln_cms_web/components/version_diff_components.ex
 #: lib/kiln_cms_web/live/federation_live.ex
 #: lib/kiln_cms_web/live/organize_live.ex
@@ -22927,6 +23000,11 @@ msgstr "Abonnés"
 #, elixir-autogen, elixir-format
 msgid "Subscription confirmed"
 msgstr "Abonnement confirmé"
+
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "Suburb"
+msgstr "Banlieue"
 
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
@@ -26528,6 +26606,11 @@ msgstr "Total"
 msgid "Total views"
 msgstr "Vues totales"
 
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "Town or city"
+msgstr "Ville"
+
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Trail"
@@ -29267,6 +29350,11 @@ msgstr "Votre vue. Vous seul la voyez."
 #, elixir-autogen, elixir-format
 msgid "Yours alone — nobody else on the team sees or inherits these."
 msgstr "Les vôtres uniquement : personne d'autre dans l'équipe ne les voit ni n'en hérite."
+
+#: lib/kiln_cms/cms/address_formats.ex
+#, elixir-autogen, elixir-format
+msgid "ZIP code"
+msgstr "Code ZIP"
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format

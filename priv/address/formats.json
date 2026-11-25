@@ -1,0 +1,2483 @@
+{
+ "AC": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "AD": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "AE": {
+  "administrative_area": "emirate",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "administrative_area"
+  ],
+  "unused": [
+   "postal_code"
+  ]
+ },
+ "AF": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "AG": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1"
+  ],
+  "unused": [
+   "administrative_area",
+   "postal_code"
+  ]
+ },
+ "AI": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "AL": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "AM": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "AR": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "AS": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "zip",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "AT": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "AU": {
+  "administrative_area": "state",
+  "locality": "suburb",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "AX": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "AZ": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "BA": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "BB": {
+  "administrative_area": "parish",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "BD": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "BE": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "BF": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area",
+   "postal_code"
+  ]
+ },
+ "BG": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "BH": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "BJ": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area",
+   "postal_code"
+  ]
+ },
+ "BL": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "BM": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "BN": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "BO": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area",
+   "postal_code"
+  ]
+ },
+ "BR": {
+  "administrative_area": "state",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "administrative_area",
+   "locality",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "BS": {
+  "administrative_area": "island",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "postal_code"
+  ]
+ },
+ "BT": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "BY": {
+  "administrative_area": "region",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "CA": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "CC": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "CH": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "CI": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area",
+   "postal_code"
+  ]
+ },
+ "CL": {
+  "administrative_area": "region",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "CN": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "CO": {
+  "administrative_area": "department",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "CR": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "CU": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "CV": {
+  "administrative_area": "island",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "CX": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "CY": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "CZ": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "DE": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "DK": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "DO": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "DZ": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "EC": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "EE": {
+  "administrative_area": "county",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "EG": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "EH": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "ES": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "ET": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "FI": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "FK": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "FM": {
+  "administrative_area": "state",
+  "locality": "city",
+  "postal_code": "zip",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "FO": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "FR": {
+  "administrative_area": "region",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "GB": {
+  "administrative_area": "county",
+  "locality": "town_city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "GE": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "GF": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "GG": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "GI": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1"
+  ],
+  "unused": [
+   "administrative_area",
+   "locality"
+  ]
+ },
+ "GL": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "GN": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "GP": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "GR": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "GS": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "GT": {
+  "administrative_area": "department",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "GU": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "zip",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "GW": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "HK": {
+  "administrative_area": "area",
+  "locality": "district",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "administrative_area"
+  ],
+  "unused": [
+   "postal_code"
+  ]
+ },
+ "HM": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "HN": {
+  "administrative_area": "department",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "HR": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "HT": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "HU": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "ID": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "IE": {
+  "administrative_area": "county",
+  "locality": "city",
+  "postal_code": "eircode",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "IL": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "IM": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "IN": {
+  "administrative_area": "state",
+  "locality": "city",
+  "postal_code": "pin",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "IO": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "IQ": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "IR": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "IS": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "IT": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "JE": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "JM": {
+  "administrative_area": "parish",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": [
+   "postal_code"
+  ]
+ },
+ "JO": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "JP": {
+  "administrative_area": "prefecture",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "KE": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "KG": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "KH": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "KI": {
+  "administrative_area": "island",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": [
+   "postal_code"
+  ]
+ },
+ "KM": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area",
+   "postal_code"
+  ]
+ },
+ "KN": {
+  "administrative_area": "island",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": [
+   "postal_code"
+  ]
+ },
+ "KP": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "KR": {
+  "administrative_area": "do_si",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "KW": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "KY": {
+  "administrative_area": "island",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "administrative_area"
+  ],
+  "unused": [
+   "locality"
+  ]
+ },
+ "KZ": {
+  "administrative_area": "region",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "LA": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "LB": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "LI": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "LK": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "LR": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "LS": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "LT": {
+  "administrative_area": "county",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "LU": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "LV": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "MA": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "MC": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "MD": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "ME": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "MF": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "MG": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "MH": {
+  "administrative_area": "state",
+  "locality": "city",
+  "postal_code": "zip",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "MK": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "MM": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "MN": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "MO": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1"
+  ],
+  "unused": [
+   "administrative_area",
+   "locality",
+   "postal_code"
+  ]
+ },
+ "MP": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "zip",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "MQ": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "MR": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area",
+   "postal_code"
+  ]
+ },
+ "MT": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "MU": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "MV": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "MW": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area",
+   "postal_code"
+  ]
+ },
+ "MX": {
+  "administrative_area": "state",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "MY": {
+  "administrative_area": "state",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "MZ": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "NA": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "NC": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "NE": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "NF": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "NG": {
+  "administrative_area": "state",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "NI": {
+  "administrative_area": "department",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "NL": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "NO": {
+  "administrative_area": "province",
+  "locality": "post_town",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "NP": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "NR": {
+  "administrative_area": "district",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "administrative_area"
+  ],
+  "unused": [
+   "locality",
+   "postal_code"
+  ]
+ },
+ "NZ": {
+  "administrative_area": "province",
+  "locality": "town_city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "OM": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "PA": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "postal_code"
+  ]
+ },
+ "PE": {
+  "administrative_area": "region",
+  "locality": "district",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "PF": {
+  "administrative_area": "island",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "PG": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "PH": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "PK": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "PL": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "PM": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "PN": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "PR": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "zip",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "PT": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "PW": {
+  "administrative_area": "state",
+  "locality": "city",
+  "postal_code": "zip",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "PY": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "QA": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area",
+   "postal_code"
+  ]
+ },
+ "RE": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "RO": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "RS": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "RU": {
+  "administrative_area": "region",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "RW": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area",
+   "postal_code"
+  ]
+ },
+ "SA": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "SC": {
+  "administrative_area": "island",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "postal_code"
+  ]
+ },
+ "SD": {
+  "administrative_area": "province",
+  "locality": "district",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "SE": {
+  "administrative_area": "province",
+  "locality": "post_town",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "SG": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "SH": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "SI": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "SJ": {
+  "administrative_area": "province",
+  "locality": "post_town",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "SK": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "SM": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "SN": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "SO": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "SR": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "postal_code"
+  ]
+ },
+ "SV": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "SY": {
+  "administrative_area": "province",
+  "locality": "district",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area",
+   "postal_code"
+  ]
+ },
+ "SZ": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "TA": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "TC": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "TH": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "TJ": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "TM": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "TN": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "TR": {
+  "administrative_area": "province",
+  "locality": "district",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "TV": {
+  "administrative_area": "island",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "postal_code"
+  ]
+ },
+ "TW": {
+  "administrative_area": "county",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "TZ": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "UA": {
+  "administrative_area": "region",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "UM": {
+  "administrative_area": "state",
+  "locality": "city",
+  "postal_code": "zip",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "US": {
+  "administrative_area": "state",
+  "locality": "city",
+  "postal_code": "zip",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area",
+   "postal_code"
+  ],
+  "unused": []
+ },
+ "UY": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "UZ": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": []
+ },
+ "VA": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "VC": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "VE": {
+  "administrative_area": "state",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "VG": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "VI": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "zip",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "VN": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "administrative_area"
+  ],
+  "unused": []
+ },
+ "WF": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "XK": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "YT": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "ZA": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality",
+   "postal_code"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "ZM": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "administrative_area"
+  ]
+ },
+ "ZW": {
+  "administrative_area": "province",
+  "locality": "city",
+  "postal_code": "postal",
+  "required": [
+   "address_line1",
+   "locality"
+  ],
+  "unused": [
+   "postal_code"
+  ]
+ }
+}

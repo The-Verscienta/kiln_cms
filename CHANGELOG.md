@@ -75,6 +75,10 @@ else.
 - **A custom field's text can go in the fired AI-readable outputs: tick "Include in AI-readable outputs" on a text, group or flexible field and its text joins the `:llm` Markdown and a `hasPart` list on the `:json_ld` node (issue 2282, last PR of the flexible-content plan). Run `mix ash.migrate`; off by default; rolling back is safe.**
   ([long form](docs/changelog/unreleased.md#deliver-llm))
 
+- **An address field's editor relabels itself for the selected country ("State" and "ZIP code" for the US, "County" for the UK, "Prefecture" for Japan), hides parts the country does not use, and on a required field marks the parts the country needs. Guidance only: the API and imports are unchanged ([#2995](https://github.com/The-Verscienta/kiln_cms/issues/2995)).**
+  No migration. Data: MIT-licensed commerceguys/addressing, derived from Google's CC BY 4.0 libaddressinput.
+  ([long form](docs/changelog/unreleased.md#address-country-formats))
+
 ### Changed
 
 - **A list field's errors count items one way: a value rule now says `Scores (scores) item 2 must be at most 10` (from 1) instead of `Scores (scores[1]) …`, and a type error, field conversion reports included, no longer counts a dropped repeat (#2683).**

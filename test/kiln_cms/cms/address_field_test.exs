@@ -237,6 +237,54 @@ defmodule KilnCMS.CMS.AddressFieldTest do
     end
   end
 
+  describe "country-driven labels and required parts (#2995)" do
+    defp parts_by_key(value), do: Map.new(Address.input_parts(%{}, value), &{&1.key, &1})
+
+    test "labels follow the selected country" do
+      us = parts_by_key(%{"country" => "US"})
+      assert us["administrative_area"].label == "State"
+      assert us["postal_code"].label == "ZIP code"
+      assert us["locality"].label == "City"
+
+      gb = parts_by_key(%{"country" => "gb"})
+      assert gb["administrative_area"].label == "County"
+      assert gb["postal_code"].label == "Postal code"
+      assert gb["locality"].label == "Town or city"
+    end
+
+    test "required marks follow the country" do
+      us = parts_by_key(%{"country" => "US"})
+
+      assert for({k, %{required?: true}} <- us, do: k) |> Enum.sort() ==
+               ~w(address_line1 administrative_area locality postal_code)
+
+      gb = parts_by_key(%{"country" => "GB"})
+      refute gb["administrative_area"].required?
+      assert gb["postal_code"].required?
+    end
+
+    test "a part the country does not use is hidden unless the address holds it" do
+      refute Map.has_key?(parts_by_key(%{"country" => "AE"}), "postal_code")
+
+      assert Map.has_key?(
+               parts_by_key(%{"country" => "AE", "postal_code" => "12345"}),
+               "postal_code"
+             )
+    end
+
+    test "with no country chosen every part is offered with neutral labels" do
+      for value <- [nil, %{}, %{"country" => ""}, %{"country" => "ZZ"}] do
+        assert Address.input_parts(%{}, value) == Address.input_parts(%{})
+      end
+    end
+
+    test "cast stays permissive: a country alone is still an address, required or not" do
+      for definition <- [%{}, %{required: false}, %{required: true}] do
+        assert {:ok, %{"country" => "US"}} = Address.cast(%{"country" => "US"}, definition)
+      end
+    end
+  end
+
   describe "json_schema and input_parts" do
     test "the schema accepts what cast stores and refuses unknown keys" do
       schema = Address.json_schema(%{})

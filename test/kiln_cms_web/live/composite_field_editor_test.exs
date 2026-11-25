@@ -145,6 +145,21 @@ defmodule KilnCMSWeb.CompositeFieldEditorTest do
                ~r/<input[^>]*value="London"[^>]*name="form\[custom_fields\]\[venue\]\[locality\]"/
   end
 
+  test "the address widget relabels as the country changes (#2995)", %{conn: conn} do
+    {lv, html, _page} = editor(conn, authed_admin(), %{})
+
+    assert html =~ "Postal code"
+    refute html =~ "ZIP code"
+
+    html = change(lv, %{"venue" => %{"country" => "US"}})
+    assert html =~ "ZIP code"
+    assert html =~ "State"
+
+    html = change(lv, %{"venue" => %{"country" => "AE"}})
+    refute html =~ "ZIP code"
+    refute html =~ ~r/name="form\[custom_fields\]\[venue\]\[postal_code\]"/
+  end
+
   test "an address saves normalised, refuses a bad postal code, and an untouched one saves nothing",
        %{conn: conn} do
     admin = authed_admin()
