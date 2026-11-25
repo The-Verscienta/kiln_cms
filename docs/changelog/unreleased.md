@@ -86,6 +86,14 @@ carries the reasoning.
   - **Unchanged.** Both reads run as the signed-in editor on the current site, exactly as the single read did, and the XLIFF export still loads the ticked records by id.
   - **No migration; rolling the pin back is safe.**
 
+<a id="structure-trashed-parent"></a>
+
+- **The structure page shows documents whose parent is in the trash (#2760).** Trashing a document is a soft delete that leaves its children's `parent_id` pointing at it, and `/editor/structure/:type` does not load trashed documents. The tree was drawn from the top level down, so those children, and everything beneath them, were grouped under a parent that was never drawn: they could not be seen, reordered or outdented, yet a published one still counted toward "in no menu". A type whose remaining documents were all in that state showed an empty page.
+  - **Where they appear.** A document whose parent is not on the page (in the trash, or one you cannot read) is drawn at the top level with a **Parent unavailable** badge. Its own children stay beneath it.
+  - **What a move writes.** Outdenting it, or dragging it to a new place at the top level, sets its parent to none, so restoring the old parent from the trash no longer puts it back underneath. Swapping it with the document next to it only changes the order, because either of the two could have been the one dragged. Indenting it nests it under the document above it, as for any other. Outdenting one of its children moves that child to the top level, rather than trying the hidden parent, which the move would refuse.
+  - **Not changed.** Opening the page writes nothing. A badged document keeps its link to the trashed parent until you drag or outdent that document itself; a drag that only shifts it updates its position, so restoring the parent from the trash puts it back underneath. Nesting a document under one whose parent is in the trash is still refused ("is not a page in this site"); outdent the badged document first.
+  - **No migration; rolling the pin back is safe.**
+
 <a id="newsletter-exhausted-counts-failed"></a>
 
 - **Every newsletter recipient ends in the campaign's counts (#2755).** A delivery that kept failing transiently (a recipient domain's MX down for the whole ~16-hour retry window, a greylist that never lifts, a relay that never answers) was retried eight times and then dropped by Oban with no counter moved, so the campaign showed `sent_count + failed_count` below `total_recipients` for good. Now the last attempt is the recipient's outcome.
