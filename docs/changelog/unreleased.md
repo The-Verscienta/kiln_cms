@@ -21,6 +21,14 @@ carries the reasoning.
   - **What a rerun can't repair.** A record purged for good while the edges to it were missing skipped its referrers' `on_target_delete` rule: a `:restrict` field didn't block the purge, and a `:clear` field left the purged record in its referrers' values, where it now shows as a broken reference. Find those in the backlinks panel and edit the referrer. A target may also now have more sources than its field's `max_sources` allows, since the backfill does not check the cap. Existing connections stay; a new one to that target is refused until it is back under the cap.
   - **No migration; rolling the pin back is safe.** Running the backfill on an older release deletes the list and nested edges again.
 
+<a id="rename-rewrites-working-copies-upgrade"></a>
+
+- **Drafts saved before a field rename or delete on 1.0.0 to 1.12.1 still hold the old key (#2744).** This release rewrites a live record's draft when a custom field is renamed, deleted or reshaped ([below](#rename-rewrites-working-copies)). It can't repair what earlier releases left behind, because nothing recorded which renames happened.
+  - **A stale draft still drops the value.** A draft saved before a rename on an affected release holds the value under the old key, so *Publish changes* after the upgrade still drops it (and may report a conflict on *Custom fields*). Ask editors with drafts of live records that predate a field rename to re-enter the value under the new field, or to discard the draft.
+  - **Values already lost are in version history.** Each version saved before the rename stores the value under its old key. Open the record's history, compare that version with the current document, and copy the value into the renamed field by hand. Restoring the version does not bring it back: a restore checks against today's definitions and drops a key none declares (the restore dialog lists it under *These custom fields will be discarded*).
+  - **Affected releases.** Top-level fields since 1.0.0; reshapes and link fields since 1.5.0; group sub-fields since 1.6.0; flexible items since 1.11.0; held lists since 1.12.0.
+  - **No migration; rolling the pin back is safe.**
+
 ## Added
 
 <a id="condition-text-ops"></a>
@@ -211,3 +219,25 @@ carries the reasoning.
   - **Smaller fixes on the way.** An id stored in upper case lost its edge on every run (inserted, then pruned as a mismatch against the lower-case uuid column); ids now compare in any case. A target named twice in a list kept an arbitrary place. A `link` that was not an object was copied onto the edge; it is now `{}`, as a save writes it.
   - **Known differences from a save.** When a value names no `type`, the backfill takes the field's `target_type` and ignores `target_types` (a later column the 1.1 migration's schema doesn't have); realign leaves `target_type` alone. A string id of exactly 16 bytes, which a save accepts as a raw uuid, is ignored here, and the prune deletes its edge (#3356). A record's next changing save settles both. The backfill does not check `max_sources`.
   - **No migration; rolling the pin back is safe.**
+
+<a id="rename-rewrites-working-copies"></a>
+
+- **A field rename, delete or reshape now reaches the drafts of live records (#2744).** Renaming a custom field moves its stored values to the new key, deleting one purges them, and flipping `multiple` reshapes them, in one statement over the type's table. That statement rewrote the live `custom_fields` column only. A live record's pending working copy holds its own copy of the map (in `working_fields`), with a fingerprint of the live map it was saved against (`working_base`), and neither was touched. So after an admin renamed `subtitle` to `tagline`:
+  - *Publish changes* reported a conflict on *Custom fields* that nobody made, because the live map no longer matched the draft's recorded base. *Use mine* then published the draft's map with the old key, which no definition declares any more, so the draft's value was dropped.
+  - A release holding that record was blocked (*Live page changed since the draft*), and an unpublish or archive kept the live custom fields and dropped the draft's custom-field edits.
+  - The same happened for a link field (a reference's `"link"` values), a group sub-field, a flexible item's sub-field or `_settings` key, an item type rename or delete with `purge_items?: true`, and a `multiple` flip (held lists included).
+
+  **What it does now.** One `UPDATE` rewrites both the live map and the draft's map of each row with the same SQL, so the two cannot disagree. A key only the draft holds is rewritten too. The draft's base moves with the rewrite: a base that matched the draft still matches it, one that matched the live map matches the rewritten live map, and a base that already disagreed with both is left alone, so a conflict somebody really made is still reported (and *Use mine* now keeps the value under its new key). A draft the rewrite leaves equal to the live map stops holding custom fields, but stays listed as pending until it is published or discarded. Versions are not rewritten: they are hash-chained. `KilnCMS.CMS.Changes.SyncFieldValues` documents the details under "Working copies"; the new `KilnCMS.CMS.WorkingCopy.rebase/5` moves the base.
+
+  **Affected releases.** Top-level rename and delete since 1.0.0; reshape and link fields since 1.5.0; group sub-fields since 1.6.0; flexible items since 1.11.0; held lists since 1.12.0; all through 1.12.1. What to do about drafts and values from those releases is in [Upgrade notes](#rename-rewrites-working-copies-upgrade).
+
+  **One-time effects after a rename or delete.** Every rewritten row's `lock_version` moves, unlike the other background writers (oEmbed resolves, media re-snapshots, `mix kiln.fields.convert`, the event sweep). This write changes which keys a form loaded earlier would save back, so a stale save must be refused rather than restore the old key. In practice:
+  - An editor who had an affected record open sees *This content changed elsewhere. Reload to get the latest before saving.* on the next save or autosave. **Reload latest** picks up the renamed field with the draft's value.
+  - A JSON:API client that sends `If-Match` with a tag read before the rename gets one `412 precondition_failed`. Re-read the record and retry.
+  - A release go-live that read its records before the rename fails as stale. **Reopen for editing** and publish it again.
+  - `updated_at`, versions, firing and webhooks are left alone, as before.
+
+  **Delete guards count drafts too.** A value or item that only a draft holds is now data for every check that asks "would this delete lose something": `mix kiln.fields.import` (and the console's **Sync definitions from a file**) blocks a delete, retype or narrowing on it without `--allow-data-loss`; an item type with items only in a draft can't be deleted without `purge_items?: true`; and the item count on the fields screen's delete confirmation includes them (a record counts the larger of its live and draft items).
+
+  **Failures.** On its own, the rewrite runs after the definition change has committed. If the combined rewrite fails, it is logged and the live values are moved alone, as before this fix, leaving the drafts in their old shape. Inside a transaction a caller opened (`mix kiln.join.retire`, a field-sync import, an item type's own delete with `purge_items?`), a failure is returned as the action's error and the whole operation rolls back.
+  - **No migration; rolling the pin back is safe.** An older release reads the rewritten drafts as ordinary drafts; its own renames go back to rewriting the live map only.

@@ -1574,6 +1574,10 @@ curl -s -X PATCH http://localhost:4000/api/json/posts/<uuid> \
   that read a draft and PATCHes after someone published it gets a 412 rather
   than silently editing live content. `If-Match` on `/publish` likewise means
   "publish the version I reviewed": an edit made after your read refuses it.
+- **Renaming, deleting or reshaping a custom field moves the tag** of every
+  record whose values (or pending draft) it rewrites, so a client holding a
+  tag from before the change gets one 412. Re-read the record: the response
+  carries the new field names and a fresh tag.
 - The check runs inside the write's transaction, against the row locked for
   update, so a save that lands between your request arriving and the write
   cannot slip past it.
