@@ -100,6 +100,9 @@ else.
   Types generated before this keep `storys` until you add `plural:` by hand. No migration.
   ([long form](docs/changelog/unreleased.md#gen-content-plural))
 
+- **`mix kiln.migrations.check` judges the migration module's functions that `up`/`change` call and the SQL of `repo().query!`, and fails closed on forward code it cannot read, such as run-time SQL or a call into another module (#2736).**
+  ([long form](docs/changelog/unreleased.md#migrations-check-follows-helpers))
+
 ## [1.12.1] - 2026-11-23
 
 Long form: [docs/changelog/v1.12.1.md](docs/changelog/v1.12.1.md) —
