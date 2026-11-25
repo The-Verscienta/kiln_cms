@@ -87,6 +87,15 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="portable-text-render-guards"></a>
+
+- **A malformed Portable Text body that is already stored renders instead of failing every read (#2768).** The `:rich_text` type stores a list of objects and checks nothing inside them, so a body written through JSON:API, GraphQL or MCP with a span whose `marks` was a string, `children` that were a string or held non-objects, a span `text` that was an object, or a `markDefs` entry that wasn't an object was saved. Then every render raised: the public page answered 500, firing failed, the editor couldn't open the record, and saving it again failed while search text was computed. A numeric-string list `level` (`"2"`) crashed the editor's Markdown view.
+  - **What reads do now.** Before rendering, the body's shape is repaired (`KilnCMS.Blocks.PortableText.repair_body/1`), and every renderer uses it: the `:web` HTML, search text and the `:llm` artifact, the editor's Markdown view, and the `:json` artifact, so a headless client gets the same repaired body the page shows. Prose is kept wherever there is some: a string in `children` becomes a span with that text, a string `marks` becomes a one-item list, and a number or boolean where text belongs becomes its text. What holds no text is skipped: a non-object child or `markDefs` entry, a mark that isn't a string, an object or list `text` (read as empty), and a `level` that isn't a whole number. The same checks apply to every node, including custom `_type` nodes and table cells.
+  - **A well-formed body is unchanged.** The repair never adds a key and leaves a missing or `null` one alone, so a valid body renders, fires and round-trips byte for byte as before.
+  - **The stored row is not rewritten.** The repair happens on every read; the database keeps the body as written until the record is next saved. Writes are unchanged: the same shapes are still accepted.
+  - **Also hardened.** The editor's TipTap conversion ignores a `marks` value that isn't a list, and the content advisories (`Kiln.Advisory.Body` in `kiln_plugin`) read a span with non-string `text` or a link with a non-string `href` as empty.
+  - **No migration; rolling the pin back is safe.** An older release reads the same rows and fails on them as before.
+
 <a id="redirects-refused-path"></a>
 
 - **The Redirects form shows a refused path as an error on its field instead of crashing the page (#2763).** `/editor/redirects` created a manual redirect with the bang `CMS.create_redirect!`, so anything the `Redirect` resource refused raised out of the handler: the page crashed, reconnected, and the typed form was gone. A From path longer than the URL limit was enough, as was a locale longer than the identifier limit sent by a client, or a submit from an admin whose site tier had been lowered since the page opened.

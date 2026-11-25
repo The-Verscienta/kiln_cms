@@ -95,6 +95,9 @@ else.
 
 ### Fixed
 
+- **A stored rich text body in a malformed Portable Text shape (`marks` as a string, `children` that aren't spans, a `markDefs` entry that isn't an object) renders with the bad nodes repaired or skipped instead of a 500, and fires and indexes again (#2768).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#portable-text-render-guards))
 - **The Redirects form shows a refused path as an error on its field instead of crashing the page (#2763).**
   An over-long path or locale, the root path, the target's own URL, a missing target and a write the policy refuses no longer lose the form.
   ([long form](docs/changelog/unreleased.md#redirects-refused-path))

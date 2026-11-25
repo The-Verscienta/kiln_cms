@@ -30,6 +30,7 @@ defmodule KilnCMS.Blocks.PortableText.Markdown do
   @spec to_markdown([map()] | nil) :: String.t()
   def to_markdown(blocks) when is_list(blocks) do
     blocks
+    |> KilnCMS.Blocks.PortableText.repair_body()
     |> Enum.filter(&is_map/1)
     |> Enum.chunk_by(&list_item?/1)
     |> Enum.flat_map(fn

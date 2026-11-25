@@ -13,6 +13,15 @@ read for a plugin contract:
 Releases are tagged `kiln_plugin-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+### Fixed
+
+- **`Kiln.Advisory.Body.node_links/2` and `node_hrefs/1` no longer raise on a
+  malformed Portable Text node (kiln_cms#2768).** A span whose `text` is a map
+  or list, `children` that are not a list, or a link whose `href` is not a
+  string now read as empty text instead of raising.
+
 ## 1.6.0
 
 ### Added
