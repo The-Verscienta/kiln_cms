@@ -25,6 +25,26 @@ defmodule KilnCMS.Blocks.PortableText do
   @typedoc "A Portable Text block map (string keys)."
   @type pt_block :: %{optional(String.t()) => term()}
 
+  # The deepest list nesting a renderer that lays a list out by `level` will
+  # honor. A deeper item renders at this depth. Well above anything the editor
+  # or an import produces in practice.
+  @max_list_level 10
+
+  @doc "The deepest list `level` that `list_level/1` returns."
+  @spec max_list_level() :: pos_integer()
+  def max_list_level, do: @max_list_level
+
+  @doc """
+  A list item's `level`, as a renderer should use it: an integer from 1 to
+  `max_list_level/0`. A missing or non-integer level is 1; anything outside
+  the range is clamped to the nearest bound.
+  """
+  @spec list_level(pt_block()) :: pos_integer()
+  def list_level(%{"level" => level}) when is_integer(level),
+    do: level |> max(1) |> min(@max_list_level)
+
+  def list_level(_item), do: 1
+
   # ── TipTap → Portable Text ────────────────────────────────────────────────
 
   @doc "Convert TipTap JSON (string or decoded map) to a list of PT block maps."

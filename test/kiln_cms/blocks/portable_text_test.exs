@@ -542,6 +542,18 @@ defmodule KilnCMS.Blocks.PortableTextTest do
 
       assert json |> PortableText.from_tiptap() |> PortableText.to_html() == "<p>hi</p>"
     end
+
+    test "a list item's level is capped at max_list_level" do
+      max = PortableText.max_list_level()
+
+      assert PortableText.list_level(%{"level" => 3}) == 3
+      assert PortableText.list_level(%{"level" => max}) == max
+      assert PortableText.list_level(%{"level" => max + 1}) == max
+      assert PortableText.list_level(%{"level" => 1_000_000_000}) == max
+      assert PortableText.list_level(%{"level" => 0}) == 1
+      assert PortableText.list_level(%{"level" => "4"}) == 1
+      assert PortableText.list_level(%{}) == 1
+    end
   end
 
   # #1106. Stored TipTap HTML → the same PT the editor would have saved.

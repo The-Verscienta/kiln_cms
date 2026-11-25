@@ -85,6 +85,28 @@ defmodule KilnCMS.Blocks.PortableTextMarkdownTest do
     assert PortableText.to_markdown(pt) == "- x\n\n1. y"
   end
 
+  test "a list item's level is capped at max_list_level" do
+    max = PortableText.max_list_level()
+    indent = String.duplicate("    ", max - 1)
+
+    pt = [
+      %{"listItem" => "bullet", "level" => 1, "children" => [%{"text" => "top"}]},
+      %{"listItem" => "number", "level" => 1_000_000_000, "children" => [%{"text" => "deep"}]},
+      %{"listItem" => "number", "level" => max + 1, "children" => [%{"text" => "deeper"}]}
+    ]
+
+    assert PortableText.to_markdown(pt) == "- top\n#{indent}1. deep\n#{indent}2. deeper"
+  end
+
+  test "a list item's level below one, or not an integer, is level one" do
+    pt =
+      for level <- [0, -5, "3", 2.5, nil] do
+        %{"listItem" => "bullet", "level" => level, "children" => [%{"text" => "x"}]}
+      end
+
+    assert PortableText.to_markdown(pt) == Enum.map_join(1..5, "\n", fn _ -> "- x" end)
+  end
+
   test "an unknown mark key and a malformed body are ignored" do
     pt = [%{"style" => "normal", "children" => [%{"text" => "x", "marks" => ["nope"]}]}]
     assert PortableText.to_markdown(pt) == "x"
