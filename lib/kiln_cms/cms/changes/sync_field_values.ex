@@ -404,7 +404,10 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     case target(definition) do
       {:ok, table, filter, params} ->
         execute(op, table, filter, params)
-        execute_links(op, table, filter, params)
+
+        op
+        |> link_statements(table, filter, params)
+        |> Enum.each(fn {sql, bound, what} -> query(sql, bound, what) end)
 
       :error ->
         Logger.warning(
@@ -416,33 +419,64 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     result
   end
 
-  # `$1` is the key being retired, `$2` the key it becomes (rename only), so the
-  # org/type params start after it.
+  # One statement over the rows that carry what `op` rewrites: the rewrite
+  # itself is `rewrite/2` over the `custom_fields` column.
   #
-  # `sobelow_skip`: the only interpolations are the table name and the `$n`
-  # placeholder tail. The table comes from the resource's own `postgres do
-  # table` — a compile-time DSL setting, never a request value — and the
-  # placeholders are digits this module generates. Every actual *value* (the
-  # field names, the org, the type id) is a bound parameter, which is what
-  # Sobelow cannot see from a `Repo.query/2` handed a variable.
+  # `sobelow_skip`: the only interpolations are the table name, the fragments
+  # `rewrite/2` builds and the `$n` placeholder tail. The table comes from the
+  # resource's own `postgres do table` — a compile-time DSL setting, never a
+  # request value — and the fragments and placeholders are SQL this module
+  # generates. Every actual *value* (the field names, the org, the type id) is
+  # a bound parameter, which is what Sobelow cannot see from a `Repo.query/2`
+  # handed a variable.
   # sobelow_skip ["SQL.Query"]
-  defp execute({:purge, name}, table, filter, params) do
+  defp execute({:item_links, _steps}, _table, _filter, _params), do: :ok
+
+  defp execute(op, table, filter, params) do
+    {new, carries, bound} = rewrite(op, "custom_fields")
+
     """
     UPDATE #{table}
-       SET custom_fields = custom_fields - $1
-     WHERE custom_fields ? $1#{filter.(1)}
+       SET custom_fields = #{new}
+     WHERE #{carries}#{filter.(length(bound))}
     """
-    |> query([name | params], "purged #{inspect(name)} from")
+    |> query(bound ++ params, describe(op))
   end
 
-  # sobelow_skip ["SQL.Query"]
-  defp execute({:rename, from, to}, table, filter, params) do
-    """
-    UPDATE #{table}
-       SET custom_fields = (custom_fields - $1) || jsonb_build_object($2::text, custom_fields -> $1)
-     WHERE custom_fields ? $1#{filter.(2)}
-    """
-    |> query([from, to | params], "moved #{inspect(from)} to #{inspect(to)} on")
+  defp describe({:purge, name}), do: "purged #{inspect(name)} from"
+  defp describe({:rename, from, to}), do: "moved #{inspect(from)} to #{inspect(to)} on"
+  defp describe({:reshape, name, :to_list}), do: "made #{inspect(name)} a list on"
+  defp describe({:reshape, name, :to_single}), do: "made #{inspect(name)} a single item on"
+
+  defp describe({:purge_link, field, name}),
+    do: "purged link value #{inspect(name)} of #{inspect(field)} from"
+
+  defp describe({:rename_link, field, from, to}),
+    do: "moved link value #{inspect(from)} of #{inspect(field)} to #{inspect(to)} on"
+
+  defp describe({:purge_sub_field, field, name}),
+    do: "purged sub-field #{inspect(name)} of #{inspect(field)} from"
+
+  defp describe({:rename_sub_field, field, from, to}),
+    do: "moved sub-field #{inspect(from)} of #{inspect(field)} to #{inspect(to)} on"
+
+  defp describe({:item, steps, op}),
+    do: "rewrote the #{inspect(op_name(op))} items of #{inspect(steps)} in"
+
+  # A value rewrite as SQL over the map expression `m` — the `custom_fields`
+  # column, or a working copy's held map (`(working_fields -> 'custom_fields')`):
+  # `{new, carries, params}`. `new` is the rewritten map, `carries` the
+  # predicate saying `m` holds something `op` changes (`new` is only
+  # evaluated where it does), and `params` are bound to `$1…$n`, so any
+  # further parameters (the org/type filter) follow them. `m` may appear many
+  # times and is only read.
+  #
+  # `$1` is the key being retired, `$2` the key it becomes (rename only).
+  defp rewrite({:purge, name}, m), do: {"(#{m} - $1::text)", "#{m} ? $1::text", [name]}
+
+  defp rewrite({:rename, from, to}, m) do
+    {"((#{m} - $1::text) || jsonb_build_object($2::text, #{m} -> $1::text))", "#{m} ? $1::text",
+     [from, to]}
   end
 
   # Single → list wraps each stored snapshot (or select term, phrase, number,
@@ -450,38 +484,28 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   # List → single keeps each list's first snapshot and clears an empty one;
   # the rest of a list has nowhere to go, which the fields admin says before
   # the admin saves. Only values already in the other shape are touched.
-  # sobelow_skip ["SQL.Query"]
-  defp execute({:reshape, name, :to_list}, table, filter, params) do
-    """
-    UPDATE #{table}
-       SET custom_fields = jsonb_set(custom_fields, ARRAY[$1::text],
-                                     jsonb_build_array(custom_fields -> $1::text))
-     WHERE jsonb_typeof(custom_fields -> $1::text) IN ('object', 'string', 'number')#{filter.(1)}
-    """
-    |> query([name | params], "made #{inspect(name)} a list on")
+  defp rewrite({:reshape, name, :to_list}, m) do
+    {"jsonb_set(#{m}, ARRAY[$1::text], jsonb_build_array(#{m} -> $1::text))",
+     "jsonb_typeof(#{m} -> $1::text) IN ('object', 'string', 'number')", [name]}
   end
 
-  # sobelow_skip ["SQL.Query"]
-  defp execute({:reshape, name, :to_single}, table, filter, params) do
+  defp rewrite({:reshape, name, :to_single}, m) do
+    new = """
+    CASE WHEN jsonb_array_length(#{m} -> $1::text) = 0
+         THEN #{m} - $1::text
+         ELSE jsonb_set(#{m}, ARRAY[$1::text], #{m} -> $1::text -> 0)
+    END
     """
-    UPDATE #{table}
-       SET custom_fields =
-             CASE WHEN jsonb_array_length(custom_fields -> $1::text) = 0
-                  THEN custom_fields - $1::text
-                  ELSE jsonb_set(custom_fields, ARRAY[$1::text], custom_fields -> $1::text -> 0)
-             END
-     WHERE jsonb_typeof(custom_fields -> $1::text) = 'array'#{filter.(1)}
-    """
-    |> query([name | params], "made #{inspect(name)} a single item on")
+
+    {new, "jsonb_typeof(#{m} -> $1::text) = 'array'", [name]}
   end
 
   # A link field's key, removed from (or moved within) the `"link"` map of
   # every connection the parent field holds — one snapshot or a list of them.
   # `$1` is the parent field, `$2` the link key, `$3` its new name (rename).
-  # Only rows where some connection carries the key are touched: the
+  # Only maps where some connection carries the key are touched: the
   # jsonpath's lax mode looks into a list's items and a lone snapshot alike.
-  # sobelow_skip ["SQL.Query"]
-  defp execute({:purge_link, field, name}, table, filter, params) do
+  defp rewrite({:purge_link, field, name}, m) do
     item = """
     CASE WHEN jsonb_typeof(e -> 'link') = 'object' AND (e -> 'link') ? $2::text
          THEN CASE WHEN ((e -> 'link') - $2::text) = '{}'::jsonb THEN e - 'link'
@@ -489,16 +513,10 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
          ELSE e END
     """
 
-    field
-    |> link_statement(item, table, filter.(2))
-    |> query(
-      [field, name | params],
-      "purged link value #{inspect(name)} of #{inspect(field)} from"
-    )
+    {each_connection(item, m), link_carries(m), [field, name]}
   end
 
-  # sobelow_skip ["SQL.Query"]
-  defp execute({:rename_link, field, from, to}, table, filter, params) do
+  defp rewrite({:rename_link, field, from, to}, m) do
     item = """
     CASE WHEN jsonb_typeof(e -> 'link') = 'object' AND (e -> 'link') ? $2::text
          THEN jsonb_set(e, '{link}',
@@ -506,105 +524,74 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
          ELSE e END
     """
 
-    field
-    |> link_statement(item, table, filter.(3))
-    |> query(
-      [field, from, to | params],
-      "moved link value #{inspect(from)} of #{inspect(field)} to #{inspect(to)} on"
-    )
+    {each_connection(item, m), link_carries(m), [field, from, to]}
   end
 
   # A group sub-field's key, removed from (or moved within) every row the
   # group holds — one object or a list of them. `$1` is the group, `$2` the
   # sub-field, `$3` its new name (rename). A purge that empties a row drops
   # it from a list, and drops the group's key when it held one object.
-  # sobelow_skip ["SQL.Query"]
-  defp execute({:purge_sub_field, field, name}, table, filter, params) do
+  defp rewrite({:purge_sub_field, field, name}, m) do
+    new = """
+    CASE jsonb_typeof(#{m} -> $1::text)
+      WHEN 'array' THEN
+        jsonb_set(#{m}, ARRAY[$1::text],
+          (SELECT COALESCE(jsonb_agg(r ORDER BY ord), '[]'::jsonb)
+             FROM (SELECT CASE WHEN jsonb_typeof(e) = 'object' THEN e - $2::text ELSE e END AS r, ord
+                     FROM jsonb_array_elements(#{m} -> $1::text)
+                          WITH ORDINALITY AS x(e, ord)) AS kept
+            WHERE r <> '{}'::jsonb))
+      WHEN 'object' THEN
+        CASE WHEN ((#{m} -> $1::text) - $2::text) = '{}'::jsonb
+             THEN #{m} - $1::text
+             ELSE jsonb_set(#{m}, ARRAY[$1::text], (#{m} -> $1::text) - $2::text)
+        END
+      ELSE #{m}
+    END
     """
-    UPDATE #{table}
-       SET custom_fields =
-             CASE jsonb_typeof(custom_fields -> $1::text)
-               WHEN 'array' THEN
-                 jsonb_set(custom_fields, ARRAY[$1::text],
-                   (SELECT COALESCE(jsonb_agg(r ORDER BY ord), '[]'::jsonb)
-                      FROM (SELECT CASE WHEN jsonb_typeof(e) = 'object' THEN e - $2::text ELSE e END AS r, ord
-                              FROM jsonb_array_elements(custom_fields -> $1::text)
-                                   WITH ORDINALITY AS x(e, ord)) AS kept
-                     WHERE r <> '{}'::jsonb))
-               WHEN 'object' THEN
-                 CASE WHEN ((custom_fields -> $1::text) - $2::text) = '{}'::jsonb
-                      THEN custom_fields - $1::text
-                      ELSE jsonb_set(custom_fields, ARRAY[$1::text], (custom_fields -> $1::text) - $2::text)
-                 END
-               ELSE custom_fields
-             END
-     WHERE jsonb_path_exists(custom_fields -> $1::text,
-                             'lax $[*].keyvalue() ? (@.key == $k)',
-                             jsonb_build_object('k', $2::text))#{filter.(2)}
-    """
-    |> query(
-      [field, name | params],
-      "purged sub-field #{inspect(name)} of #{inspect(field)} from"
-    )
+
+    {new, sub_field_carries(m), [field, name]}
   end
 
-  # sobelow_skip ["SQL.Query"]
-  defp execute({:rename_sub_field, field, from, to}, table, filter, params) do
+  defp rewrite({:rename_sub_field, field, from, to}, m) do
     item = """
     CASE WHEN jsonb_typeof(e) = 'object' AND e ? $2::text
          THEN (e - $2::text) || jsonb_build_object($3::text, e -> $2::text)
          ELSE e END
     """
 
-    """
-    UPDATE #{table}
-       SET custom_fields = jsonb_set(custom_fields, ARRAY[$1::text],
-             CASE jsonb_typeof(custom_fields -> $1::text)
-               WHEN 'array' THEN
-                 (SELECT COALESCE(jsonb_agg((#{item}) ORDER BY ord), '[]'::jsonb)
-                    FROM jsonb_array_elements(custom_fields -> $1::text) WITH ORDINALITY AS x(e, ord))
-               ELSE (SELECT (#{item}) FROM (SELECT custom_fields -> $1::text AS e) AS one)
-             END)
-     WHERE jsonb_path_exists(custom_fields -> $1::text,
-                             'lax $[*].keyvalue() ? (@.key == $k)',
-                             jsonb_build_object('k', $2::text))#{filter.(3)}
-    """
-    |> query(
-      [field, from, to | params],
-      "moved sub-field #{inspect(from)} of #{inspect(field)} to #{inspect(to)} on"
-    )
+    {each_connection(item, m), sub_field_carries(m), [field, from, to]}
   end
 
-  # An item tree's values (`KilnCMS.CMS.FlexiblePath`): one statement, qualified
-  # by every step of the path.
-  # sobelow_skip ["SQL.Query"]
-  defp execute({:item, steps, op}, table, filter, params) do
-    {sql, bound} = FlexiblePath.update_sql(table, steps, op, {filter, params})
-    query(sql, bound, "rewrote the #{inspect(op_name(op))} items of #{inspect(steps)} in")
-  end
-
-  # Only the edges (`execute_links/4`) of an item type destroyed with its items.
-  defp execute({:item_links, _steps}, _table, _filter, _params), do: :ok
+  # An item tree's values (`KilnCMS.CMS.FlexiblePath`), qualified by every
+  # step of the path.
+  defp rewrite({:item, steps, op}, m), do: FlexiblePath.map_sql(steps, op, m)
 
   defp op_name(op) when is_atom(op), do: op
   defp op_name(op), do: elem(op, 0)
 
-  # `item` rewrites one connection `e`; a list is rebuilt item by item, in
-  # its order.
-  defp link_statement(_field, item, table, filter_sql) do
+  # `item` rewrites one element `e` of the value under `$1` (a connection, a
+  # group row); a list is rebuilt item by item, in its order.
+  defp each_connection(item, m) do
     """
-    UPDATE #{table}
-       SET custom_fields = jsonb_set(custom_fields, ARRAY[$1::text],
-             CASE jsonb_typeof(custom_fields -> $1::text)
-               WHEN 'array' THEN
-                 (SELECT COALESCE(jsonb_agg((#{item}) ORDER BY ord), '[]'::jsonb)
-                    FROM jsonb_array_elements(custom_fields -> $1::text) WITH ORDINALITY AS x(e, ord))
-               ELSE (SELECT (#{item}) FROM (SELECT custom_fields -> $1::text AS e) AS one)
-             END)
-     WHERE jsonb_path_exists(custom_fields -> $1::text,
-                             'lax $.link.keyvalue() ? (@.key == $k)',
-                             jsonb_build_object('k', $2::text))#{filter_sql}
+    jsonb_set(#{m}, ARRAY[$1::text],
+      CASE jsonb_typeof(#{m} -> $1::text)
+        WHEN 'array' THEN
+          (SELECT COALESCE(jsonb_agg((#{item}) ORDER BY ord), '[]'::jsonb)
+             FROM jsonb_array_elements(#{m} -> $1::text) WITH ORDINALITY AS x(e, ord))
+        ELSE (SELECT (#{item}) FROM (SELECT #{m} -> $1::text AS e) AS one)
+      END)
     """
+  end
+
+  defp link_carries(m) do
+    "jsonb_path_exists(#{m} -> $1::text, 'lax $.link.keyvalue() ? (@.key == $k)', " <>
+      "jsonb_build_object('k', $2::text))"
+  end
+
+  defp sub_field_carries(m) do
+    "jsonb_path_exists(#{m} -> $1::text, 'lax $[*].keyvalue() ? (@.key == $k)', " <>
+      "jsonb_build_object('k', $2::text))"
   end
 
   # The field's reference edges (#1594) follow its values: a purge deletes
@@ -619,57 +606,66 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   # a sub-field or an item type acts on that whole prefix. Field names hold
   # no dot, so a prefix never matches a sibling (`sections` vs `sections2`);
   # `LIKE`'s own wildcards (`_` is common in names) are escaped.
-  # sobelow_skip ["SQL.Query"]
-  defp execute_links({:purge, name}, table, filter, params) do
-    """
-    DELETE FROM content_links
-     WHERE kind = 'reference' AND (field = $1::text OR field LIKE $2::text)
-       AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(2)})
-    """
-    |> query(
-      [name, under(name) | params],
-      "deleted the #{inspect(name)} reference links of"
-    )
+  #
+  # Each statement is `{sql, params, what}`; the only interpolations are the
+  # table name and the `$n` tail, as in `execute/4`.
+  defp link_statements({:purge, name}, table, filter, params) do
+    [
+      {
+        """
+        DELETE FROM content_links
+         WHERE kind = 'reference' AND (field = $1::text OR field LIKE $2::text)
+           AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(2)})
+        """,
+        [name, under(name) | params],
+        "deleted the #{inspect(name)} reference links of"
+      }
+    ]
   end
 
-  # sobelow_skip ["SQL.Query"]
-  defp execute_links({:rename, from, to}, table, filter, params) do
-    """
-    UPDATE content_links
-       SET field = $2::text || substr(field, char_length($1::text) + 1)
-     WHERE kind = 'reference' AND (field = $1::text OR field LIKE $3::text)
-       AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(3)})
-    """
-    |> query(
-      [from, to, under(from) | params],
-      "moved the #{inspect(from)} reference links to #{inspect(to)} on"
-    )
+  defp link_statements({:rename, from, to}, table, filter, params) do
+    [
+      {
+        """
+        UPDATE content_links
+           SET field = $2::text || substr(field, char_length($1::text) + 1)
+         WHERE kind = 'reference' AND (field = $1::text OR field LIKE $3::text)
+           AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(3)})
+        """,
+        [from, to, under(from) | params],
+        "moved the #{inspect(from)} reference links to #{inspect(to)} on"
+      }
+    ]
   end
 
   # A list → single narrowing keeps each record's first reference, so its
   # edge (position 0) stays and every later one goes with the value it
   # mirrored. Single → list keeps the one edge at position 0 as it is. A media
   # field has no reference edges, so this matches nothing for a gallery.
-  # sobelow_skip ["SQL.Query"]
-  defp execute_links({:reshape, name, :to_single}, table, filter, params) do
-    """
-    DELETE FROM content_links
-     WHERE kind = 'reference' AND field = $1 AND position > 0
-       AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(1)})
-    """
-    |> query([name | params], "deleted the narrowed #{inspect(name)} reference links of")
+  defp link_statements({:reshape, name, :to_single}, table, filter, params) do
+    [
+      {
+        """
+        DELETE FROM content_links
+         WHERE kind = 'reference' AND field = $1 AND position > 0
+           AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(1)})
+        """,
+        [name | params],
+        "deleted the narrowed #{inspect(name)} reference links of"
+      }
+    ]
   end
 
-  defp execute_links({:reshape, _name, :to_list}, _table, _filter, _params), do: :ok
+  defp link_statements({:reshape, _name, :to_list}, _table, _filter, _params), do: []
 
   # An item tree's edges follow their values: the path of the sub-field or
   # item type the operation names, as `ContentLinks.desired/2` keys them.
-  defp execute_links({:item, steps, op}, table, filter, params) do
+  defp link_statements({:item, steps, op}, table, filter, params) do
     prefix = edge_path(steps)
 
     case op do
       {:rename_field, from, to, _setting?} ->
-        execute_links(
+        link_statements(
           {:rename, prefix <> "." <> from, prefix <> "." <> to},
           table,
           filter,
@@ -677,55 +673,61 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
         )
 
       {:purge_field, name, _setting?} ->
-        execute_links({:purge, prefix <> "." <> name}, table, filter, params)
+        link_statements({:purge, prefix <> "." <> name}, table, filter, params)
 
       # `steps` end in the item type under its old name.
       {:rename_type, to} ->
         renamed = edge_path(Enum.drop(steps, -1) ++ [{elem(List.last(steps), 0), to}])
-        execute_links({:rename, prefix, renamed}, table, filter, params)
+        link_statements({:rename, prefix, renamed}, table, filter, params)
 
       :purge_type ->
-        execute_links({:purge, prefix}, table, filter, params)
+        link_statements({:purge, prefix}, table, filter, params)
     end
   end
 
   # An item type destroyed with `purge_items?` already lost its items in the
   # destroy's own transaction; its edges go here, with the rest of the sync.
-  defp execute_links({:item_links, steps}, table, filter, params),
-    do: execute_links({:purge, edge_path(steps)}, table, filter, params)
+  defp link_statements({:item_links, steps}, table, filter, params),
+    do: link_statements({:purge, edge_path(steps)}, table, filter, params)
 
   # A group's sub-field edges are `group.sub`.
-  defp execute_links({:purge_sub_field, field, name}, table, filter, params),
-    do: execute_links({:purge, field <> "." <> name}, table, filter, params)
+  defp link_statements({:purge_sub_field, field, name}, table, filter, params),
+    do: link_statements({:purge, field <> "." <> name}, table, filter, params)
 
-  defp execute_links({:rename_sub_field, field, from, to}, table, filter, params),
-    do: execute_links({:rename, field <> "." <> from, field <> "." <> to}, table, filter, params)
+  defp link_statements({:rename_sub_field, field, from, to}, table, filter, params),
+    do:
+      link_statements({:rename, field <> "." <> from, field <> "." <> to}, table, filter, params)
 
   # A link field's copy on the parent field's edges (R3): the edge's
   # `metadata` is the connection's `"link"` map.
-  # sobelow_skip ["SQL.Query"]
-  defp execute_links({:purge_link, field, name}, table, filter, params) do
-    """
-    UPDATE content_links
-       SET metadata = metadata - $2::text
-     WHERE kind = 'reference' AND field = $1 AND metadata ? $2::text
-       AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(2)})
-    """
-    |> query([field, name | params], "purged link value #{inspect(name)} from the links of")
+  defp link_statements({:purge_link, field, name}, table, filter, params) do
+    [
+      {
+        """
+        UPDATE content_links
+           SET metadata = metadata - $2::text
+         WHERE kind = 'reference' AND field = $1 AND metadata ? $2::text
+           AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(2)})
+        """,
+        [field, name | params],
+        "purged link value #{inspect(name)} from the links of"
+      }
+    ]
   end
 
-  # sobelow_skip ["SQL.Query"]
-  defp execute_links({:rename_link, field, from, to}, table, filter, params) do
-    """
-    UPDATE content_links
-       SET metadata = (metadata - $2::text) || jsonb_build_object($3::text, metadata -> $2::text)
-     WHERE kind = 'reference' AND field = $1 AND metadata ? $2::text
-       AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(3)})
-    """
-    |> query(
-      [field, from, to | params],
-      "moved link value #{inspect(from)} to #{inspect(to)} on the links of"
-    )
+  defp link_statements({:rename_link, field, from, to}, table, filter, params) do
+    [
+      {
+        """
+        UPDATE content_links
+           SET metadata = (metadata - $2::text) || jsonb_build_object($3::text, metadata -> $2::text)
+         WHERE kind = 'reference' AND field = $1 AND metadata ? $2::text
+           AND source_id IN (SELECT id FROM #{table} WHERE TRUE#{filter.(3)})
+        """,
+        [field, from, to | params],
+        "moved link value #{inspect(from)} to #{inspect(to)} on the links of"
+      }
+    ]
   end
 
   # `{flexible field, item type}` steps as the dotted prefix of their edges.

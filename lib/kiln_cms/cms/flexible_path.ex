@@ -155,29 +155,51 @@ defmodule KilnCMS.CMS.FlexiblePath do
 
   A list a purge empties loses its key (a write stores no empty list).
   `filter` is the `WHERE` tail builder `SyncFieldValues.target/1` returns, with
-  its `filter_params`, which follow the parameters bound here.
+  its `filter_params`, which follow the parameters bound here. The statement
+  is `map_sql/3` over the `custom_fields` column.
   """
   @spec update_sql(String.t(), steps(), tuple() | atom(), {function(), list()}) ::
           {String.t(), list()}
   def update_sql(table, steps, op, {filter, filter_params}) do
-    m = length(steps)
-    {op_params, jsonpath} = op_params(op, steps)
-    base = 2 * m + 1
-    bound = step_params(steps) ++ op_params
-    path_index = length(bound) + 1
-    top = "custom_fields -> #{field(0)}"
+    {new, carries, bound} = map_sql(steps, op, "custom_fields")
 
     sql = """
     UPDATE #{table}
-       SET custom_fields =
-             (SELECT CASE WHEN a = '[]'::jsonb THEN custom_fields - #{field(0)}
-                          ELSE jsonb_set(custom_fields, ARRAY[#{field(0)}], a) END
-                FROM (SELECT #{items(0, top, m, op, base)} AS a) AS s)
-     WHERE jsonb_typeof(#{top}) = 'array'
-       AND jsonb_path_exists(custom_fields, $#{path_index}::text::jsonpath, #{vars(m)})#{filter.(path_index)}
+       SET custom_fields = #{new}
+     WHERE #{carries}#{filter.(length(bound))}
     """
 
-    {sql, bound ++ [jsonpath] ++ filter_params}
+    {sql, bound ++ filter_params}
+  end
+
+  @doc """
+  `update_sql/4`'s rewrite as SQL over any map expression `m` (a column, or
+  the held copy `(working_fields -> 'custom_fields')`): `{new, carries,
+  params}`, where `new` is the rewritten map, `carries` the predicate saying
+  `m` holds something the rewrite changes (`new` is only meaningful where it
+  holds), and `params` the values bound to `$1…$n`, which any further
+  parameters follow. `m` may appear several times; it is read, never written.
+  """
+  @spec map_sql(steps(), tuple() | atom(), String.t()) :: {String.t(), String.t(), list()}
+  def map_sql(steps, op, m) do
+    n = length(steps)
+    {op_params, jsonpath} = op_params(op, steps)
+    base = 2 * n + 1
+    bound = step_params(steps) ++ op_params
+    path_index = length(bound) + 1
+    top = "#{m} -> #{field(0)}"
+
+    new = """
+    (SELECT CASE WHEN a = '[]'::jsonb THEN #{m} - #{field(0)}
+                 ELSE jsonb_set(#{m}, ARRAY[#{field(0)}], a) END
+       FROM (SELECT #{items(0, top, n, op, base)} AS a) AS s)
+    """
+
+    carries =
+      "(jsonb_typeof(#{top}) = 'array' AND " <>
+        "jsonb_path_exists(#{m}, $#{path_index}::text::jsonpath, #{vars(n)}))"
+
+    {new, carries, bound ++ [jsonpath]}
   end
 
   @doc """
