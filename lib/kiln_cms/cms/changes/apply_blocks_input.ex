@@ -9,8 +9,8 @@ defmodule KilnCMS.CMS.Changes.ApplyBlocksInput do
   accept a public `:block_tree` argument: an array of plain block maps (the same
   shape the editor and MCP submit). When present it is cast into the `blocks`
   union — the cast sanitizes rich-text HTML and media URLs (see `BlockUnion`).
-  Before that, every Portable Text value in it is checked against the published
-  schema (#2768): a malformed one is refused with its path on `:block_tree`
+  Before that, every Portable Text value in it is checked (#2768): a shape a
+  reader would have to repair is refused with its path on `:block_tree`
   (see the section comment below).
 
   Or `:body_markdown`: the body as Markdown, converted by `KilnCMS.Markdown`
@@ -76,11 +76,11 @@ defmodule KilnCMS.CMS.Changes.ApplyBlocksInput do
   # ── Portable Text write check (#2768) ──────────────────────────────────────
   #
   # Every Portable Text value in the tree — a `rich_text` block's `body`, any
-  # block's `:rich_text` field, nested in `columns` too — is held to the
-  # published `portable_text_block` schema (`Shape.check_body/2`): a shape
-  # that would crash or misrender a reader, or that the schema does not admit,
-  # is refused with its path; scalars are coerced and the coerced tree is what
-  # is cast. See ADR 0083 (docs/decisions/).
+  # block's `:rich_text` field, nested in `columns` too — is checked
+  # (`Shape.check_body/2`): a shape every reader would have to repair by
+  # dropping or rewriting it is refused with its path; what the repair only
+  # coerces is coerced, and the coerced tree is what is cast. See ADR 0083
+  # (docs/decisions/).
   #
   # Here, on the raw argument, and not in the `blocks` cast: the cast is also
   # how every internal writer (restore, promote, copy, envelope import) writes
@@ -116,13 +116,17 @@ defmodule KilnCMS.CMS.Changes.ApplyBlocksInput do
   end
 
   # A stored `type`/`value` envelope is accepted input too (what a version
-  # holds); its attributes sit one level down.
+  # holds); its attributes sit one level down. A `"_type": null` beside one
+  # does not make it a typed block: the cast reads it as the envelope.
   defp check_block(%{} = block, path) do
     case {field(block, "_type"), field(block, "type"), field(block, "value")} do
-      {{_key, type}, _envelope_type, _value} when is_binary(type) or is_atom(type) ->
+      {{_key, type}, _envelope_type, _value}
+      when not is_nil(type) and (is_binary(type) or is_atom(type)) ->
         check_typed(block, to_string(type), path)
 
-      {nil, {_key, type}, {value_key, %{} = value}} when is_binary(type) or is_atom(type) ->
+      {untyped, {_key, type}, {value_key, %{} = value}}
+      when untyped in [nil, {"_type", nil}, {:_type, nil}] and not is_nil(type) and
+             (is_binary(type) or is_atom(type)) ->
         {value, errors} = check_typed(value, to_string(type), "#{path}.#{value_key}")
         {Map.put(block, value_key, value), errors}
 

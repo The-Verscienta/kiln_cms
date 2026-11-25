@@ -333,40 +333,57 @@ defmodule KilnCMS.Blocks.PortableTextShapeTest do
                "style" => "true",
                "level" => 2,
                "children" => [%{"_type" => "span", "text" => "42", "marks" => ["1", "em"]}],
-               "markDefs" => [%{"_key" => "7", "_type" => "link", "href" => "1"}]
+               # An annotation's own fields are left as they are.
+               "markDefs" => [%{"_key" => "7", "_type" => "link", "href" => 1}]
              }
 
       assert whole["level"] == 3
     end
 
-    test "holds a custom node's standard keys to the schema and leaves its own alone" do
-      own = %{"_type" => "callout", "tone" => %{"any" => ["shape"]}, "children" => []}
+    test "checks what the renderers read on a custom node and leaves its own fields alone" do
+      own = odd_custom_node()
       assert Shape.check_body([own]) == {:ok, [own]}
 
       assert {:error,
               [
-                "body[0]._key must be a string (got an object)",
-                "body[0].children[0].text must be a string (got an object)"
+                "body[0].children must be a list (got a string)",
+                "body[0].markDefs[0] must be an object (got a number)"
               ]} =
                Shape.check_body([
-                 %{
-                   "_type" => "callout",
-                   "_key" => %{},
-                   "children" => [%{"_type" => "mention", "text" => %{"id" => 1}}]
-                 }
+                 %{"_type" => "callout", "children" => "abc", "markDefs" => [1]}
                ])
     end
 
-    test "keeps table rows and cells lenient (#475)" do
+    test "accepts a table's non-object rows and cells, which the repair drops (#475)" do
       table = %{"_type" => "table", "rows" => ["junk", %{"cells" => [nil, %{"children" => []}]}]}
-      assert Shape.check_body([table]) == {:ok, [table]}
+
+      assert Shape.check_body([table]) ==
+               {:ok, [%{"_type" => "table", "rows" => [%{"cells" => [%{"children" => []}]}]}]}
     end
 
-    test "accepts what the repair returns for every malformed shape" do
-      for {_name, poison, _kept} <- @shapes do
-        repaired = PortableText.repair_body([@neighbor, poison])
-        assert Shape.check_body(repaired) == {:ok, repaired}
-      end
+    # The two directions that keep the check and the repair in step: a body a
+    # reader has repaired is never refused (an old artifact can be sent back),
+    # and nothing is refused that a reader would have delivered unchanged.
+    test "accepts every repaired body, and refuses only what the repair changes" do
+      outcomes =
+        for body <- property_bodies() do
+          repaired = PortableText.repair_body(body)
+          assert {:ok, ^repaired} = Shape.check_body(repaired), inspect(body)
+
+          case Shape.check_body(body) do
+            {:ok, coerced} ->
+              assert coerced == repaired
+              :accepted
+
+            {:error, [_ | _]} ->
+              assert repaired != body, inspect(body)
+              :refused
+          end
+        end
+
+      # Both sides are exercised, many times over.
+      assert %{accepted: accepted, refused: refused} = Enum.frequencies(outcomes)
+      assert accepted > 50 and refused > 50
     end
 
     test "is the identity on bodies the editor and the importers write" do
@@ -374,6 +391,56 @@ defmodule KilnCMS.Blocks.PortableTextShapeTest do
         assert Shape.check_body(body) == {:ok, body}
       end
     end
+  end
+
+  # A custom node whose own fields, an inline object's and an annotation's
+  # are all odd: none of it is read by a renderer, so none of it is refused.
+  defp odd_custom_node do
+    %{
+      "_type" => "callout",
+      "_key" => %{"not" => "a string"},
+      "style" => ["warning"],
+      "level" => %{"severity" => 3},
+      "text" => %{"title" => "Heads up"},
+      "children" => [
+        %{"_type" => "span", "text" => "Inside", "marks" => ["note"]},
+        %{"_type" => "mention", "text" => %{"id" => 1}, "_key" => [1], "marks" => []}
+      ],
+      "markDefs" => [
+        %{"_key" => %{"k" => 1}, "_type" => ["footnote"], "href" => %{}, "level" => %{}}
+      ]
+    }
+  end
+
+  @odd_values [nil, 1, true, 2.5, 2.0, "x", "2", %{}, %{"a" => 1}, [], ["a"], [nil], [%{}], [1]]
+
+  # Every malformed shape alone and beside a neighbor, the odd custom node,
+  # and each standard key of a text block, a span and an annotation set in
+  # turn to each odd value.
+  defp property_bodies do
+    shapes =
+      for {_name, poison, _kept} <- @shapes, body <- [[poison], [@neighbor, poison]], do: body
+
+    span = %{"_type" => "span", "_key" => "s0", "text" => "t", "marks" => ["lk"]}
+    def = %{"_type" => "link", "_key" => "lk", "href" => "/a"}
+    block = block([span], %{"markDefs" => [def], "listItem" => "bullet", "level" => 1})
+
+    perturbed =
+      for value <- @odd_values,
+          body <-
+            for(
+              key <- ~w(_type _key style listItem level children markDefs),
+              do: [Map.put(block, key, value)]
+            ) ++
+              for(key <- ~w(_type _key text marks), do: [block([Map.put(span, key, value)])]) ++
+              for(
+                key <- ~w(_type _key href),
+                do: [block([span], %{"markDefs" => [Map.put(def, key, value)]})]
+              ) ++
+              [[value], [block([value])], [block([span], %{"markDefs" => [value]})]],
+          do: body
+
+    shapes ++ [[odd_custom_node()]] ++ perturbed
   end
 
   # What `KilnCMS.Markdown` (the API's `body_markdown`, the editor's paste)

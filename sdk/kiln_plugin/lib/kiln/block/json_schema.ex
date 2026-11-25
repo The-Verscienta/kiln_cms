@@ -465,11 +465,11 @@ defmodule Kiln.Block.JsonSchema do
       },
       # Not `required`, though every well-formed node has one: a headless
       # write of `body: [%{"text" => "hi"}]` is accepted and fired verbatim.
-      # The core's `block_tree` write check (#2768) holds a body to the key
-      # *types* declared here (a string where a string is declared, a list of
-      # objects for `children` and `markDefs`), never to their presence, and
-      # every reader repairs a stored body to the same shape. The schema
-      # describes what is served.
+      # The core's `block_tree` write check (#2768) holds a body to these key
+      # types where a reader depends on them (the containers everywhere, the
+      # strings on text blocks and spans), never to their presence, and every
+      # reader repairs a stored body to the same shape. A custom node's own
+      # keys are not held to them. The schema describes what is served.
       "additionalProperties" => true
     }
   end

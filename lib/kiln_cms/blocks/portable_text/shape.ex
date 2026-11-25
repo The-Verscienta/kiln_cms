@@ -46,39 +46,41 @@ defmodule KilnCMS.Blocks.PortableText.Shape do
   @string_slots ["style", "listItem", "_key"]
 
   @doc """
-  Check a Portable Text body against the published `portable_text_block`
-  schema (`Kiln.Block.JsonSchema`): the strict check a headless `block_tree`
-  write goes through (#2768, `KilnCMS.CMS.Changes.ApplyBlocksInput`).
+  The strict check a headless `block_tree` write goes through (#2768,
+  `KilnCMS.CMS.Changes.ApplyBlocksInput`).
 
-  Returns `{:ok, body}` with the lossless coercions applied, or `{:error,
+  It refuses exactly what `repair_body/1` would have to repair by dropping or
+  rewriting something, and accepts what the repair only coerces. So the
+  repaired form of any body passes, and nothing passes that a reader would
+  still change, except for lossless coercions:
+
+    * Refused: a node or child that is not an object; `children`, `marks` or
+      `markDefs` that is not a list; a `markDefs` entry that is not an
+      object; a `marks` entry that is an object or a list; on a text block
+      (`_type` absent, `"block"` or `"code"`), an object or list in `style`,
+      `listItem` or `_key`, or a `level` that is not an integer, a
+      whole-number float or a numeric string; on a span (a child whose
+      `_type` is absent or `"span"`), an object or list in `text` or `_key`.
+    * Coerced (the #2743 rule), as the repair coerces them: a number or
+      boolean in one of those string slots, a `marks` entry or a `markDefs`
+      entry's `_key` becomes its text; a numeric-string or whole-number
+      `level` becomes an integer. A `nil` entry in `marks` is dropped.
+    * Left alone, as the repair leaves them: a custom node's own fields, an
+      inline object's fields other than `marks`, an annotation's fields other
+      than a scalar `_key`, and a table's rows and cells that are not objects
+      (#475: the cast drops those). The children and `markDefs` of a custom
+      node and of a table cell are checked like a text block's.
+
+  Returns `{:ok, repair_body(blocks)}`, the coerced body, or `{:error,
   errors}`: one `"<path> must … (got …)"` string per violation, in body
-  order, where the path is 0-based JSON under `path`
-  (`body[0].children[1].marks`). A reason names the JSON type it found, never
-  the value.
-
-  Every map node is checked, whatever its `_type`: a custom `_type` is
-  allowed, but its standard keys are still held to the schema.
-
-    * Refused: a node, child or `markDefs` entry that is not an object;
-      `children`, `markDefs` or `marks` that is not a list; an object or list
-      in a string slot (a node's `_type`, `_key`, `style`, `listItem`; a
-      child's `_type`, `_key`, `text`; a `markDefs` entry's `_type`, `_key`,
-      `href`; a `marks` entry); a `level` that is not an integer, a
-      whole-number float or a numeric string.
-    * Coerced (the #2743 rule): a number or boolean in a string slot becomes
-      its text; a numeric-string or whole-number `level` becomes an integer.
-    * Repaired: a `nil` entry in `marks` is dropped.
-
-  A missing or `nil` key is fine, and no key is ever added. A table's rows
-  and cells stay lenient (#475: the cast drops a row or cell that is not an
-  object), but the children and `markDefs` inside a cell are checked like a
-  node's.
+  order. The path is 0-based JSON under `path` (`body[0].children[1].marks`),
+  and a reason names the JSON type it found, never the value.
   """
   @spec check_body(list(), String.t()) :: {:ok, list()} | {:error, [String.t()]}
   def check_body(blocks, path \\ "body") when is_list(blocks) do
-    case list(blocks, path, &check_node/2) do
-      {checked, []} -> {:ok, checked}
-      {_blocks, errors} -> {:error, Enum.reverse(errors)}
+    case each(blocks, path, &check_node/2) do
+      [] -> {:ok, repair_body(blocks)}
+      errors -> {:error, errors}
     end
   end
 
@@ -151,136 +153,119 @@ defmodule KilnCMS.Blocks.PortableText.Shape do
 
   # ── strict check ──────────────────────────────────────────────────────────
   #
-  # Each check takes a value and its path and returns `{value, errors}`, the
-  # value coerced and the errors newest first (`check_body/2` reverses them).
+  # Mirrors the checks above, clause for clause, but reports a path for each
+  # shape the repair would drop or rewrite, and lets through what it only
+  # coerces. Each check returns its errors in body order.
 
-  @node_strings ["_type", "_key", "style", "listItem"]
-  @child_strings ["_type", "_key", "text"]
-  @def_strings ["_type", "_key", "href"]
-
-  defp list(items, path, check) do
+  defp each(items, path, check) do
     items
     |> Enum.with_index()
-    |> Enum.map_reduce([], fn {item, index}, errors ->
-      {item, new} = check.(item, "#{path}[#{index}]")
-      {item, new ++ errors}
-    end)
+    |> Enum.flat_map(fn {item, index} -> check.(item, "#{path}[#{index}]") end)
+  end
+
+  defp check_node(%{"_type" => "table"} = node, path) do
+    case node["rows"] do
+      rows when is_list(rows) -> each(rows, "#{path}.rows", &check_row/2)
+      _absent_or_other -> []
+    end
   end
 
   defp check_node(%{} = node, path) do
-    {node, errors} = strings(node, @node_strings, path)
-    {node, level_errors} = check_level(node, path)
-    {node, container_errors} = check_container(node, path)
-    {node, rows_errors} = check_rows(node, path)
-    {node, rows_errors ++ container_errors ++ level_errors ++ errors}
+    block_errors =
+      if node["_type"] in @block_types,
+        do:
+          Enum.flat_map(@string_slots, &check_string(node, &1, path)) ++ check_level(node, path),
+        else: []
+
+    block_errors ++ check_container(node, path)
   end
 
-  defp check_node(other, path), do: {other, [must(path, "be an object", other)]}
+  defp check_node(other, path), do: [must(path, "be an object", other)]
 
-  defp check_container(node, path) do
-    {node, children_errors} = check_list(node, "children", path, &check_child/2)
-    {node, def_errors} = check_list(node, "markDefs", path, &check_def/2)
-    {node, def_errors ++ children_errors}
-  end
+  defp check_row(%{"cells" => cells}, path) when is_list(cells),
+    do: each(cells, "#{path}.cells", &check_cell/2)
 
-  defp check_rows(%{"_type" => "table", "rows" => rows} = node, path) when is_list(rows) do
-    {rows, errors} = list(rows, "#{path}.rows", &check_row/2)
-    {Map.put(node, "rows", rows), errors}
-  end
-
-  defp check_rows(node, _path), do: {node, []}
-
-  defp check_row(%{"cells" => cells} = row, path) when is_list(cells) do
-    {cells, errors} = list(cells, "#{path}.cells", &check_cell/2)
-    {Map.put(row, "cells", cells), errors}
-  end
-
-  defp check_row(row, _path), do: {row, []}
+  defp check_row(_row, _path), do: []
 
   defp check_cell(%{} = cell, path), do: check_container(cell, path)
-  defp check_cell(cell, _path), do: {cell, []}
+  defp check_cell(_cell, _path), do: []
 
-  defp check_list(map, key, path, check) do
-    case map do
-      %{^key => items} when is_list(items) ->
-        {items, errors} = list(items, "#{path}.#{key}", check)
-        {Map.put(map, key, items), errors}
+  defp check_container(node, path) do
+    check_list(node, "children", path, &check_child/2) ++
+      check_list(node, "markDefs", path, &check_def/2)
+  end
 
-      %{^key => nil} ->
-        {map, []}
-
-      %{^key => other} ->
-        {map, [must("#{path}.#{key}", "be a list", other)]}
-
-      _absent ->
-        {map, []}
+  defp check_list(node, key, path, check) do
+    case node do
+      %{^key => items} when is_list(items) -> each(items, "#{path}.#{key}", check)
+      %{^key => nil} -> []
+      %{^key => other} -> [must("#{path}.#{key}", "be a list", other)]
+      _absent -> []
     end
   end
 
   defp check_child(%{} = child, path) do
-    {child, errors} = strings(child, @child_strings, path)
-    {child, mark_errors} = check_marks(child, path)
-    {child, mark_errors ++ errors}
+    span_errors =
+      if child["_type"] in @span_types,
+        do: check_string(child, "text", path) ++ check_string(child, "_key", path),
+        else: []
+
+    span_errors ++ check_marks(child, path)
   end
 
-  defp check_child(other, path), do: {other, [must(path, "be an object", other)]}
+  defp check_child(other, path), do: [must(path, "be an object", other)]
 
-  defp check_def(%{} = def, path), do: strings(def, @def_strings, path)
-  defp check_def(other, path), do: {other, [must(path, "be an object", other)]}
+  defp check_def(%{}, _path), do: []
+  defp check_def(other, path), do: [must(path, "be an object", other)]
 
-  defp check_marks(%{"marks" => marks} = child, path) when is_list(marks) do
-    # Indexed before the `nil`s go, so a path points into the list as sent.
-    {marks, errors} = list(marks, "#{path}.marks", &string/2)
-    {Map.put(child, "marks", Enum.reject(marks, &is_nil/1)), errors}
-  end
+  defp check_marks(%{"marks" => marks}, path) when is_list(marks) do
+    each(marks, "#{path}.marks", fn
+      mark, _path when is_binary(mark) or is_number(mark) or is_boolean(mark) or is_nil(mark) ->
+        []
 
-  defp check_marks(%{"marks" => nil} = child, _path), do: {child, []}
-
-  defp check_marks(%{"marks" => other} = child, path),
-    do: {child, [must("#{path}.marks", "be a list of strings", other)]}
-
-  defp check_marks(child, _path), do: {child, []}
-
-  defp strings(map, keys, path) do
-    Enum.reduce(keys, {map, []}, fn key, {map, errors} ->
-      case map do
-        %{^key => value} ->
-          {value, new} = string(value, "#{path}.#{key}")
-          {Map.put(map, key, value), new ++ errors}
-
-        _absent ->
-          {map, errors}
-      end
+      mark, mark_path ->
+        [must(mark_path, "be a string", mark)]
     end)
   end
 
-  defp string(value, _path) when is_binary(value) or is_nil(value), do: {value, []}
+  defp check_marks(%{"marks" => nil}, _path), do: []
 
-  defp string(value, _path) when is_number(value) or is_boolean(value),
-    do: {to_string(value), []}
+  defp check_marks(%{"marks" => other}, path),
+    do: [must("#{path}.marks", "be a list of strings", other)]
 
-  defp string(value, path), do: {value, [must(path, "be a string", value)]}
+  defp check_marks(_child, _path), do: []
 
-  defp check_level(%{"level" => level} = node, _path) when is_integer(level) or is_nil(level),
-    do: {node, []}
+  defp check_string(map, key, path) do
+    case map do
+      %{^key => value}
+      when is_binary(value) or is_nil(value) or is_number(value) or is_boolean(value) ->
+        []
 
-  defp check_level(%{"level" => level} = node, path) when is_float(level) do
-    if level == trunc(level),
-      do: {Map.put(node, "level", trunc(level)), []},
-      else: {node, ["#{path}.level must be an integer (got a fractional number)"]}
-  end
+      %{^key => other} ->
+        [must("#{path}.#{key}", "be a string", other)]
 
-  defp check_level(%{"level" => level} = node, path) when is_binary(level) do
-    case Integer.parse(level) do
-      {int, ""} -> {Map.put(node, "level", int), []}
-      _other -> {node, ["#{path}.level must be an integer (got a non-numeric string)"]}
+      _absent ->
+        []
     end
   end
 
-  defp check_level(%{"level" => level} = node, path),
-    do: {node, [must("#{path}.level", "be an integer", level)]}
+  defp check_level(%{"level" => level}, _path) when is_integer(level) or is_nil(level), do: []
 
-  defp check_level(node, _path), do: {node, []}
+  defp check_level(%{"level" => level}, path) when is_float(level) do
+    if level == trunc(level),
+      do: [],
+      else: ["#{path}.level must be an integer (got a fractional number)"]
+  end
+
+  defp check_level(%{"level" => level}, path) when is_binary(level) do
+    case Integer.parse(level) do
+      {_int, ""} -> []
+      _other -> ["#{path}.level must be an integer (got a non-numeric string)"]
+    end
+  end
+
+  defp check_level(%{"level" => level}, path), do: [must("#{path}.level", "be an integer", level)]
+  defp check_level(_node, _path), do: []
 
   defp must(path, expectation, value), do: "#{path} must #{expectation} (got #{kind(value)})"
 

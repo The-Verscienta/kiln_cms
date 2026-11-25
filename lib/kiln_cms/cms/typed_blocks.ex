@@ -115,6 +115,21 @@ defmodule KilnCMS.CMS.TypedBlocks do
                       {name, Keyword.get(opts, :constraints, [])}
                     end)
 
+  # String `_type` → the names of its `:rich_text` fields (#2768), for every
+  # registered type that has one: the write check, the cast's repair and the
+  # stored cast's repair all ask it per block. Plugins are `compile_env`, so the
+  # member list is fixed at compile time like the maps above.
+  @rich_text_fields KilnCMS.Blocks.union_types()
+                    |> Enum.map(fn {name, opts} ->
+                      {to_string(name),
+                       for(
+                         %{type: :rich_text, name: field} <- Kiln.Block.Info.fields(opts[:type]),
+                         do: to_string(field)
+                       )}
+                    end)
+                    |> Enum.reject(fn {_type, fields} -> fields == [] end)
+                    |> Map.new()
+
   @doc """
   Normalize any block representation to typed block structs.
 
@@ -247,16 +262,32 @@ defmodule KilnCMS.CMS.TypedBlocks do
   # lenient repair every renderer runs drops such a node here, before the cast.
   # A well-formed body is returned as it is (`Shape.repair_body/1` checks
   # before it rebuilds), and the row on disk is not rewritten.
-  defp repair_stored_rich_text(%{"type" => type, "value" => %{} = attrs} = envelope) do
-    case rich_text_fields(type) do
-      [] ->
-        envelope
+  #
+  # A `columns` block's children are stored inside its `{:array, :map}`
+  # field, so no cast ever reaches them; their `:rich_text` fields, a plugin
+  # block's included, are repaired here too, so what a read hands the
+  # renderers and the `:json` artifact is the same at every depth.
+  defp repair_stored_rich_text(%{"type" => type, "value" => %{} = attrs} = envelope),
+    do: %{envelope | "value" => repair_stored_attrs(type, attrs)}
 
-      fields ->
-        repaired = update_lists(attrs, fields, &KilnCMS.Blocks.PortableText.repair_body/1)
-        %{envelope | "value" => repaired}
-    end
-  end
+  defp repair_stored_attrs("columns", %{"columns" => columns} = attrs) when is_list(columns),
+    do: Map.put(attrs, "columns", Enum.map(columns, &repair_stored_column/1))
+
+  defp repair_stored_attrs(type, attrs),
+    do: update_lists(attrs, rich_text_fields(type), &KilnCMS.Blocks.PortableText.repair_body/1)
+
+  defp repair_stored_column(%{"blocks" => blocks} = column) when is_list(blocks),
+    do: Map.put(column, "blocks", Enum.map(blocks, &repair_stored_child/1))
+
+  defp repair_stored_column(column), do: column
+
+  defp repair_stored_child(%{"_type" => type} = child) when is_binary(type),
+    do: repair_stored_attrs(type, child)
+
+  defp repair_stored_child(%{"type" => type, "value" => %{}} = envelope) when is_binary(type),
+    do: repair_stored_rich_text(envelope)
+
+  defp repair_stored_child(other), do: other
 
   # Apply `fun` to each of `fields` in `attrs` that holds a list; anything
   # else (absent, `nil`, not a list) is left for the cast to judge.
@@ -434,14 +465,7 @@ defmodule KilnCMS.CMS.TypedBlocks do
   # The names of a registered block type's `:rich_text` fields, as strings
   # (`["body"]` for `rich_text`); `[]` for a type this build does not have.
   @spec rich_text_fields(String.t()) :: [String.t()]
-  def rich_text_fields(type) do
-    with {:ok, type_atom} <- Map.fetch(@type_atoms, type),
-         {:ok, mod} <- KilnCMS.Blocks.fetch(type_atom) do
-      for %{type: :rich_text, name: name} <- Kiln.Block.Info.fields(mod), do: to_string(name)
-    else
-      _unregistered -> []
-    end
-  end
+  def rich_text_fields(type), do: Map.get(@rich_text_fields, type, [])
 
   # String-keyed and url-filtered, whatever shape came in.
   #

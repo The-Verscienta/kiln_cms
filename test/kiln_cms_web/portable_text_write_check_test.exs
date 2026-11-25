@@ -37,9 +37,10 @@ defmodule KilnCMSWeb.PortableTextWriteCheckTest do
      "body[0].style must be a string (got an object)"},
     {"a non-numeric level", [block([span("a", [])], %{"listItem" => "bullet", "level" => "two"})],
      "body[0].level must be an integer (got a non-numeric string)"},
-    {"a list listItem on a custom node",
-     [%{"_type" => "callout", "listItem" => ["bullet"], "children" => []}],
+    {"a list listItem", [block([span("a", [])], %{"listItem" => ["bullet"]})],
      "body[0].listItem must be a string (got a list)"},
+    {"string children on a custom node", [%{"_type" => "callout", "children" => "Callout"}],
+     "body[0].children must be a list (got a string)"},
     {"marks as a string in a table cell",
      [
        %{
@@ -337,6 +338,53 @@ defmodule KilnCMSWeb.PortableTextWriteCheckTest do
       ]
 
       assert stored_body(post_body(key, rich_text(body))) == body
+    end
+
+    # A reader leaves these alone, so the check does too: a body a client got
+    # back from a `:json` artifact can always be sent again.
+    test "a custom node's, inline object's and annotation's own fields are kept as sent",
+         %{key: key} do
+      body = [
+        %{
+          "_type" => "callout",
+          "_key" => %{"not" => "a string"},
+          "style" => ["warning"],
+          "level" => %{"severity" => 3},
+          "children" => [
+            %{"_type" => "span", "text" => "Inside", "marks" => ["fn"]},
+            %{"_type" => "mention", "text" => %{"id" => 1}, "_key" => [1], "marks" => []}
+          ],
+          "markDefs" => [%{"_key" => "fn", "_type" => ["footnote"], "body" => %{"x" => 1}}]
+        }
+      ]
+
+      assert stored_body(post_body(key, rich_text(body))) == body
+    end
+
+    # The cast reads a `type`/`value` envelope beside a `"_type": null` as the
+    # envelope, so the check does too.
+    test "an envelope with a null _type is checked", %{key: key} do
+      tree = [
+        %{
+          "_type" => nil,
+          "type" => "rich_text",
+          "value" => %{"body" => [block([span("a", "strong")])]}
+        }
+      ]
+
+      {400, response} =
+        json_api(
+          :post,
+          "/api/json/posts",
+          %{type: "post", attributes: %{title: "Env", slug: slug(), block_tree: tree}},
+          key
+        )
+
+      assert [%{"detail" => detail}] = response["errors"]
+
+      assert detail ==
+               "is not valid Portable Text: block_tree[0].value.body[0].children[0].marks " <>
+                 "must be a list of strings (got a string)"
     end
 
     test "scalars are coerced, as the #2743 rule coerces them", %{key: key} do

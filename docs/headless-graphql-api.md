@@ -917,7 +917,7 @@ mutation ($input: CreatePostInput!) {
 `blockTree` is a list of `JsonString`s: each block is sent as its own
 JSON-encoded string.
 
-The Portable Text in it is checked against its schema exactly as JSON:API's
+The Portable Text in it is checked exactly as JSON:API's
 `block_tree` is ([json-api.md](json-api.md#block-tree-portable-text-check)):
 a refused body comes back in the mutation's `errors`, with `result: null`, and
 nothing is written.

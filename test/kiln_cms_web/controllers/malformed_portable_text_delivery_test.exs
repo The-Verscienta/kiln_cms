@@ -256,6 +256,31 @@ defmodule KilnCMSWeb.MalformedPortableTextDeliveryTest do
       assert neighbor == MalformedPortableText.neighbor()
     end
 
+    # Fails on the code before #2768: a nested child's fields reached the
+    # reader as stored. The `note` fixture block's `summary` is a plugin
+    # `:rich_text` field, which no renderer of its own repairs.
+    test "a plugin :rich_text field nested in columns loads repaired" do
+      page = published_page()
+      poison = MalformedPortableText.block([MalformedPortableText.span("Nested", "strong")])
+
+      columns = %{
+        "type" => "columns",
+        "value" => %{
+          "_type" => "columns",
+          "id" => Ash.UUID.generate(),
+          "_version" => 1,
+          "columns" => [
+            %{"blocks" => [%{"_type" => "note", "title" => "N", "summary" => ["x", poison]}]}
+          ]
+        }
+      }
+
+      :ok = plant(page, :blocks, [columns])
+
+      assert [%Ash.Union{value: %{columns: [%{"blocks" => [note]}]}}] = reload(page).blocks
+      assert [%{"children" => [%{"marks" => ["strong"]}]}] = note["summary"]
+    end
+
     # Fails on the code before #2768: the stored body was written back as it
     # was (and, with a top-level non-map node, refused by the cast).
     test "promoting a working copy stores the repaired body" do

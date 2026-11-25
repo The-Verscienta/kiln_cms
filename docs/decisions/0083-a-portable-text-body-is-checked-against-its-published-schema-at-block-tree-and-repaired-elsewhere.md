@@ -54,9 +54,11 @@ There are two kinds of writer, and they need different answers:
   in the raw `block_tree` argument: a `rich_text` block's `body` (a JSON string
   is decoded first), any block's `:rich_text` field, and both nested in
   `columns`. A node, child or `markDefs` entry that isn't an object; `children`,
-  `markDefs` or `marks` that isn't a list; an object or list in a string slot;
-  and a `level` that isn't a whole number or numeric string are refused with an
-  `InvalidAttribute` on `:block_tree`. Every content type's create, update and
+  `markDefs` or `marks` that isn't a list; a `marks` entry that is an object or
+  a list; an object or list in a text block's `style`, `listItem` or `_key` or
+  in a span's `text` or `_key`; and a text block's `level` that isn't a whole
+  number or numeric string are refused with an `InvalidAttribute` on
+  `:block_tree`. Every content type's create, update and
   `save_working_copy` runs that change, and all three surfaces send the body
   through it, so each answers in its own shape (JSON:API `400`
   `invalid_attribute` at `/data/attributes/block_tree`, GraphQL `errors` with a
@@ -68,20 +70,27 @@ There are two kinds of writer, and they need different answers:
   value converts without loss. A `null` entry in `marks` is dropped for the
   same reason: nothing is lost. The coerced body is the one that is cast and
   stored.
-- **The schema decides, not the renderer.** The check refuses what crashes or
-  misrenders a reader and what the published schema does not admit, and
-  nothing else. A missing or `null` key is fine and none is ever added, so a
-  valid body is stored byte for byte as sent. Keys the schema doesn't name are
-  kept (`additionalProperties: true`). A custom `_type` is allowed, but its
-  standard keys (`_key`, `style`, `children`, …) are still held to the
-  schema: "custom" names the node's type, it does not exempt the node.
+- **The check is never stricter than the repair.** It refuses exactly the
+  shapes `repair_body/1` has to drop or rewrite, and accepts what the repair
+  only coerces; on success it returns the repaired body. Two properties follow,
+  and a test holds both: the repaired form of any body passes the check, so a
+  body a client read back from a `:json` artifact fired on this release can
+  always be sent again; and nothing is refused that a reader would have
+  delivered unchanged. So a custom node's own fields (its `_key`, `style` or
+  `level` included), an inline object's fields other than `marks`, an
+  annotation's fields other than `_key`, and any `_type` are kept as sent, as
+  the readers keep them, though the published schema types some of them as
+  strings. A custom node's `children` and `markDefs` are checked, because the
+  renderers read them. A missing or `null` key is fine and none is ever added,
+  so a valid body is stored byte for byte as sent.
 - **Repair everywhere else.** The `blocks` cast
   (`TypedBlocks.sanitize_attrs/1`, in `KilnCMS.CMS.TypedBlocks`) runs the same lenient
   `repair_body/1` every reader runs, then the existing sanitizing, on every
   `:rich_text` field, core or plugin. The stored cast
   (`TypedBlocks.to_union_stored/1`) repairs a `:rich_text` value before Ash
   casts it, so a body whose top-level node isn't an object loads again instead
-  of failing the whole row. That is the ADR 0018 pattern: refused where a
+  of failing the whole row; it reaches the blocks nested in `columns` too,
+  whose fields no cast touches. That is the ADR 0018 pattern: refused where a
   person is choosing the value, corrected where it is only being read or
   carried.
 - **Plugin `:rich_text` fields are Portable Text.** They get the check, the
@@ -137,6 +146,13 @@ node.
   prose. It also contradicts the #2743 rule.
 - **Check in the `blocks` cast.** See above: internal writers would fail on
   rows nobody can fix.
+- **Hold every standard key to the published schema**, a custom node's
+  `_key` and `style` and an inline object's `text` included. The first draft
+  of this change did. But the readers leave those alone, so a body read back
+  from a `:json` artifact could then be refused on its way back in, and a
+  write could be refused for a shape no reader would ever change. The check
+  follows the repair instead; the schema's `string` on a custom node's keys
+  stays a description of the common case, not a write rule.
 - **Validate with the exported JSON Schema.** A generic validator cannot
   express the coercions or the lenient tables, would refuse `"text": 42`, and
   reports in its own terms rather than as a path into `block_tree`.

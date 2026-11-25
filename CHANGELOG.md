@@ -65,13 +65,14 @@ else.
   ([long form](docs/changelog/unreleased.md#links-backfill-multiple-upgrade))
 - **A draft of a live record saved before a custom field was renamed or deleted on 1.0.0 to 1.12.1 still holds the old key: publishing it after upgrading still drops that value, so re-enter it or discard the draft (#2744). Values already lost are in version history under the old key; copy them back by hand, since a restore drops them.**
   ([long form](docs/changelog/unreleased.md#rename-rewrites-working-copies-upgrade))
-- **Portable Text: a published record stored with a malformed body delivers it repaired on its next fire, so a `:json` consumer can see a changed shape; a client that sends back an old artifact holding a now-refused shape gets a `400` (#2768). No migration; rolling the pin back is safe.**
+- **Portable Text: a record stored with a malformed body is read and delivered repaired, so a `:json` consumer can see its shape change on the next fire, and a client that sends back an artifact fired before then can get a `400` (#2768). No migration; rolling the pin back is safe.**
+  A draft of such a live record pending across the upgrade can show a conflict on blocks: publish it with "Keep mine", or discard it and save the draft again.
   ([long form](docs/changelog/unreleased.md#portable-text-write-check-upgrade))
 
 ### Breaking
 
-- **Portable Text writes: a `block_tree` body (JSON:API, GraphQL, MCP) is checked against the published `portable_text_block` schema, so a few shapes that used to be stored are a `400` naming their path: an object or list `marks` entry, `style`, `listItem`, `_key` or `_type`, a non-numeric `level`, and a plugin `:rich_text` field holding non-Portable-Text data (#2768).**
-  Numbers in text slots and numeric-string levels are still coerced; a `null` mark is dropped.
+- **Portable Text writes: a `block_tree` body (JSON:API, GraphQL, MCP) is refused with a `400` naming the path for a few shapes that used to be stored: a `marks` entry that is an object or list; an object or list in a text block's `style`, `listItem` or `_key`, or a span's `_key`; a text block's non-numeric `level`; and a plugin `:rich_text` field holding malformed Portable Text (#2768).**
+  Numbers in text slots and numeric-string levels are still coerced; a `null` mark is dropped; custom nodes' own fields are kept.
   ([long form](docs/changelog/unreleased.md#portable-text-write-check))
 
 ### Added

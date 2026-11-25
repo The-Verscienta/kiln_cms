@@ -252,7 +252,7 @@ written.
 > shape a model usually has already, converted server-side into the same
 > blocks (see [Markdown](markdown.md#writing-markdown-through-the-api)). One or
 > the other, not both; raw HTML in the Markdown is sanitized. Portable Text in a
-> `block_tree` is checked against its schema as JSON:API checks it
+> `block_tree` is checked as JSON:API checks it
 > ([json-api.md](json-api.md#block-tree-portable-text-check)): a
 > refused body is a tool error (`isError: true`) naming the path, and nothing is
 > written.

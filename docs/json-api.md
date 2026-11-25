@@ -1524,23 +1524,31 @@ it replaces the body wholesale, like an id-less `block_tree`. Details:
 
 <a id="block-tree-portable-text-check"></a>
 
-**Portable Text in `block_tree` is checked against its schema.** Every
-Portable Text value in the tree (a `rich_text` block's `body`, a JSON string of
-one included, and any plugin block's `:rich_text` field, inside `columns` too)
-is held to the published `portable_text_block` schema before it is cast:
+**Portable Text in `block_tree` is checked.** Every Portable Text value in the
+tree (a `rich_text` block's `body`, a JSON string of one included, and any
+plugin block's `:rich_text` field, inside `columns` too) is checked before it
+is cast. It refuses exactly what every reader would otherwise have to repair
+by dropping or rewriting it, so a body read back from a `:json` artifact can
+always be sent again:
 
 - **Refused:** a node, child or `markDefs` entry that isn't an object;
-  `children`, `markDefs` or `marks` that isn't a list; an object or list in a
-  string slot (a node's `_type`, `_key`, `style` or `listItem`, a child's
-  `_type`, `_key` or `text`, a `markDefs` entry's `_type`, `_key` or `href`, a
-  `marks` entry); a `level` that isn't a whole number or a numeric string.
-- **Coerced:** a number or boolean in a string slot becomes its text
-  (`"text": 42` is stored as `"42"`); a numeric-string or whole-number `level`
-  becomes an integer. A `null` entry in `marks` is dropped.
-- **Kept as sent:** a missing or `null` key, keys the schema doesn't name, and
-  a custom `_type` (its standard keys are still checked). A table row or cell
-  that isn't an object is dropped, not refused (#475). A body sent as a TipTap
-  document (`{"type": "doc", …}`) is converted and repaired, not checked.
+  `children`, `markDefs` or `marks` that isn't a list; a `marks` entry that is
+  an object or a list; an object or list in a text block's `style`,
+  `listItem` or `_key` (a node whose `_type` is absent, `"block"` or
+  `"code"`) or in a span's `text` or `_key` (a child whose `_type` is absent or
+  `"span"`); a text block's `level` that isn't a whole number or a numeric
+  string.
+- **Coerced:** a number or boolean in one of those string slots, a `marks`
+  entry or a `markDefs` entry's `_key` becomes its text (`"text": 42` is
+  stored as `"42"`); a numeric-string or whole-number `level` becomes an
+  integer. A `null` entry in `marks` is dropped.
+- **Kept as sent:** a missing or `null` key, keys the schema doesn't name, any
+  `_type`, a custom node's own fields, an inline object's fields other than
+  `marks`, and an annotation's fields other than `_key`. A custom node's
+  `children` and `markDefs` are checked like a text block's. A table row or
+  cell that isn't an object is dropped, not refused (#475). A body sent as a
+  TipTap document (`{"type": "doc", …}`) is converted and repaired, not
+  checked.
 
 A refused body is a `400` and nothing is written. The `detail` lists up to five
 0-based paths into what you sent, then `and N more`, and names the type found,
