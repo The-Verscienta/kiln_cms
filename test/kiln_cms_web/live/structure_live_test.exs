@@ -188,6 +188,133 @@ defmodule KilnCMSWeb.StructureLiveTest do
     assert reload(sibling).parent_id == deepest.parent_id
   end
 
+  describe "a document whose parent is in the trash (#2760)" do
+    # Trash is a soft delete that leaves the children's `parent_id` pointing at
+    # a row the tree no longer loads. Grouped under that id, they were never
+    # rendered: invisible, and unreachable to reorder or outdent.
+    #
+    # `fun` runs before the trash: nesting under a document whose parent is
+    # already trashed is refused by `ContentPlacement`, whose ancestor walk
+    # cannot read the trashed row.
+    defp under_trashed_parent(admin, title, fun \\ fn _child -> nil end) do
+      parent = page(admin, "Trashed parent")
+      child = CMS.move_page!(page(admin, title), %{parent_id: parent.id}, actor: admin)
+      extra = fun.(child)
+      CMS.destroy_page!(parent, actor: admin)
+      {child, extra}
+    end
+
+    defp leaf_under(admin) do
+      fn child -> CMS.move_page!(page(admin, "Leaf"), %{parent_id: child.id}, actor: admin) end
+    end
+
+    test "is shown at the top level, marked", %{conn: conn} do
+      admin = authed_user(:admin)
+      {child, _none} = under_trashed_parent(admin, "Stranded")
+
+      {:ok, lv, html} = open(conn, admin)
+
+      refute html =~ "Nothing to arrange yet."
+      assert has_element?(lv, ~s(#structure-level-root > li[data-sort-id="#{child.id}"]))
+      assert has_element?(lv, ~s([data-sort-id="#{child.id}"]), "Parent unavailable")
+    end
+
+    test "its own children stay beneath it", %{conn: conn} do
+      admin = authed_user(:admin)
+      {child, leaf} = under_trashed_parent(admin, "Stranded", leaf_under(admin))
+
+      {:ok, lv, _html} = open(conn, admin)
+
+      assert has_element?(lv, ~s(#structure-level-#{child.id} > li[data-sort-id="#{leaf.id}"]))
+    end
+
+    test "outdent detaches it to the top level", %{conn: conn} do
+      admin = authed_user(:admin)
+      {child, _none} = under_trashed_parent(admin, "Stranded")
+
+      {:ok, lv, _html} = open(conn, admin)
+
+      lv |> element(~s(button[phx-click="outdent"][phx-value-id="#{child.id}"])) |> render_click()
+
+      assert reload(child).parent_id == nil
+      refute has_element?(lv, ~s([data-sort-id="#{child.id}"]), "Parent unavailable")
+    end
+
+    test "dragging it within the top level reorders and detaches it", %{conn: conn} do
+      admin = authed_user(:admin)
+      root = page(admin, "Root")
+      {stranded, _none} = under_trashed_parent(admin, "Stranded")
+      {dragged, _none} = under_trashed_parent(admin, "Waiting")
+      trashed_parent_id = stranded.parent_id
+
+      {:ok, lv, _html} = open(conn, admin)
+
+      # Drawn as Root, Stranded, Waiting (positions tie, titles break it);
+      # Waiting is dragged to the top.
+      lv
+      |> element("#structure-level-root")
+      |> render_hook("reorder_items", %{
+        "parent_id" => "",
+        "order" => [dragged.id, root.id, stranded.id]
+      })
+
+      # The dragged row is stored where it is drawn.
+      assert %{parent_id: nil, position: 0} = reload(dragged)
+      assert reload(root).position == 1
+
+      # The row the drag only shifted keeps its link to the trashed parent, so
+      # restoring that parent still brings it back; its position still updates.
+      assert %{parent_id: ^trashed_parent_id, position: 2} = reload(stranded)
+    end
+
+    test "a swap of two neighbors detaches neither — either could be the one dragged",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      root = page(admin, "Root")
+      {stranded, _none} = under_trashed_parent(admin, "Stranded")
+      trashed_parent_id = stranded.parent_id
+
+      {:ok, lv, _html} = open(conn, admin)
+
+      lv
+      |> element("#structure-level-root")
+      |> render_hook("reorder_items", %{"parent_id" => "", "order" => [stranded.id, root.id]})
+
+      assert %{parent_id: ^trashed_parent_id, position: 0} = reload(stranded)
+      assert reload(root).position == 1
+    end
+
+    test "indent nests it under the visible sibling above it", %{conn: conn} do
+      admin = authed_user(:admin)
+      above = page(admin, "Above")
+      {child, _none} = under_trashed_parent(admin, "Stranded")
+
+      {:ok, lv, _html} = open(conn, admin)
+
+      lv |> element(~s(button[phx-click="indent"][phx-value-id="#{child.id}"])) |> render_click()
+
+      assert reload(child).parent_id == above.id
+    end
+
+    test "outdenting its child lands at the top level, not under the trashed parent",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      {_child, leaf} = under_trashed_parent(admin, "Stranded", leaf_under(admin))
+
+      {:ok, lv, _html} = open(conn, admin)
+
+      # Up one level from a top-level row is the top level. Writing the row's
+      # own `parent_id` (the trashed one) would be refused by `ContentPlacement`.
+      html =
+        lv
+        |> element(~s(button[phx-click="outdent"][phx-value-id="#{leaf.id}"]))
+        |> render_click()
+
+      assert reload(leaf).parent_id == nil
+      refute html =~ "is not a page in this site"
+    end
+  end
+
   describe "orphan detection (#1597)" do
     defp menu_linking(actor, record) do
       menu =

@@ -12871,6 +12871,11 @@ msgstr "Elementos"
 msgid "Items with no recorded reference from a published document. Drafts don't count as uses; a document that published a reference keeps counting until it is published again without it."
 msgstr "Elementos sin ninguna referencia registrada desde un documento publicado. Los borradores no cuentan como usos; un documento que publicó una referencia sigue contando hasta que se publique de nuevo sin ella."
 
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Its parent is in the trash or not visible to you. Outdent to make it top-level."
+msgstr "Su elemento superior está en la papelera o no lo puedes ver. Reduce la sangría para llevarlo al primer nivel."
+
 #: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "Its review date has arrived: check it is still accurate."
@@ -17365,6 +17370,11 @@ msgstr "Texto del párrafo"
 #, elixir-autogen, elixir-format
 msgid "Parent"
 msgstr "Elemento superior"
+
+#: lib/kiln_cms_web/live/structure_live.ex
+#, elixir-autogen, elixir-format
+msgid "Parent unavailable"
+msgstr "Elemento superior no disponible"
 
 #: lib/kiln_cms/cms/address_formats.ex
 #, elixir-autogen, elixir-format
@@ -24424,6 +24434,11 @@ msgid "The file converts to %{count} block."
 msgid_plural "The file converts to %{count} blocks."
 msgstr[0] "El archivo se convierte en %{count} bloque."
 msgstr[1] "El archivo se convierte en %{count} bloques."
+
+#: lib/kiln_cms_web/live/organize_live.ex
+#, elixir-autogen, elixir-format
+msgid "The filter changed during the run, so its proposals were set aside. Propose again for this selection."
+msgstr "El filtro cambió durante la ejecución, así que sus propuestas se dejaron de lado. Vuelve a proponer para esta selección."
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format

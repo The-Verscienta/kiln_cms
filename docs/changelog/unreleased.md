@@ -94,6 +94,14 @@ carries the reasoning.
   - **Unchanged.** Both reads run as the signed-in editor on the current site, exactly as the single read did, and the XLIFF export still loads the ticked records by id.
   - **No migration; rolling the pin back is safe.**
 
+<a id="structure-trashed-parent"></a>
+
+- **The structure page shows documents whose parent is in the trash (#2760).** Trashing a document is a soft delete that leaves its children's `parent_id` pointing at it, and `/editor/structure/:type` does not load trashed documents. The tree was drawn from the top level down, so those children, and everything beneath them, were grouped under a parent that was never drawn: they could not be seen, reordered or outdented, yet a published one still counted toward "in no menu". A type whose remaining documents were all in that state showed an empty page.
+  - **Where they appear.** A document whose parent is not on the page (in the trash, or one you cannot read) is drawn at the top level with a **Parent unavailable** badge. Its own children stay beneath it.
+  - **What a move writes.** Outdenting it, or dragging it to a new place at the top level, sets its parent to none, so restoring the old parent from the trash no longer puts it back underneath. Swapping it with the document next to it only changes the order, because either of the two could have been the one dragged. Indenting it nests it under the document above it, as for any other. Outdenting one of its children moves that child to the top level, rather than trying the hidden parent, which the move would refuse.
+  - **Not changed.** Opening the page writes nothing. A badged document keeps its link to the trashed parent until you drag or outdent that document itself; a drag that only shifts it updates its position, so restoring the parent from the trash puts it back underneath. Nesting a document under one whose parent is in the trash is still refused ("is not a page in this site"); outdent the badged document first.
+  - **No migration; rolling the pin back is safe.**
+
 <a id="newsletter-exhausted-counts-failed"></a>
 
 - **Every newsletter recipient ends in the campaign's counts (#2755).** A delivery that kept failing transiently (a recipient domain's MX down for the whole ~16-hour retry window, a greylist that never lifts, a relay that never answers) was retried eight times and then dropped by Oban with no counter moved, so the campaign showed `sent_count + failed_count` below `total_recipients` for good. Now the last attempt is the recipient's outcome.
@@ -266,3 +274,9 @@ carries the reasoning.
 - **The Presentation console's edit pane keeps the saved text after a Save (#2759).** Save rebuilds the open text or rich-text region so the next edit starts from what was stored, but it rebuilt it from a copy of the block taken when the pane was opened. The region showed the text from before the save, and because the region's script sends its whole text whenever typing pauses, one more character put the old text back, and the next Save wrote it over the edit just saved.
   - **What happens now.** After a Save the pane is re-read from the saved record: a text or rich-text block shows its stored value and stays open for more typing, and a title or excerpt input shows the saved value. A failed or conflicting Save leaves the pane as it was; Reload still closes it.
   - **No migration; rolling the pin back is safe.** An older release shows the pre-save text again.
+
+<a id="organize-stale-run"></a>
+
+- **Organize's tag review no longer shows a run for the wrong selection (#2762).** Changing the Type, State or Untagged filter on `/editor/organize?tab=tagging` while **Propose tags** was running cleared the run and re-enabled the buttons, but the run kept going. When it finished, its proposals appeared as the run for the new selection, rows for documents the filter no longer selected among them. Because the buttons were enabled again, a second Propose or Index tag names could start beside the first and spend the embedding budget a second time.
+  - **What happens now.** Each run carries the selection it was started for. A run that finishes after the filter changed is set aside, with a note to propose again for this selection, and its rows are never shown. **Proposing…** and **Indexing…** stay on until the task in flight finishes, so a second run cannot start beside it. A tab load that finishes after the filter changed is dropped the same way.
+  - **No migration; rolling the pin back is safe.** An older release shows the stale run again.
