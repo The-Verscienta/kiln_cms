@@ -110,9 +110,11 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
       go-live that read its records before the rename fails as stale and is
       retried. `updated_at`, versions, firing and notifications are left
       alone, as before.
-    * **Locks.** The statement locks the rows it rewrites; a transaction
-      advisory lock per table and org makes concurrent field syncs take turns
-      instead of locking rows in opposite orders.
+    * **Locks.** The statement locks the rows it rewrites, in id order. A
+      transaction advisory lock per table, org and governing field (the field
+      itself, or the top-level field a sub-field, link field or item lives
+      under) makes two syncs of the same field take turns; syncs of different
+      fields touch disjoint keys and edges and run side by side.
 
   Versions are not rewritten (they are hash-chained, #671): a version saved
   before a rename still names the old key, and restoring it does not bring
@@ -127,6 +129,12 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   alone, as they were before working copies were rewritten, leaving the
   copies in their old shape. `ApplyCustomFields` still drops a stray key (with
   a warning) as a backstop.
+
+  The rewrite is one statement over every row of the type, so a single
+  malformed held value (one no write produces, such as a held map that is not
+  an object) fails it for all of them, and that operation falls back to the
+  live values alone for the whole type. A known limit: it is logged, and the
+  copies it leaves behind still report their conflict when published.
 
   Inside a transaction the caller opened (`KilnCMS.CMS.JoinGraduation.retire/2`,
   a `KilnCMS.CMS.FieldSync` import, an item type's own destroy with
@@ -220,6 +228,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
          {:ok, table, filter, params} <- target(top) do
       case rewrite_held({:item, steps, :purge_type}, top, {table, filter, params}, false) do
         :ok -> {:ok, definition}
+        {:error, :unresolved} -> {:ok, definition}
         {:error, error} -> {:error, error}
       end
     else
@@ -496,11 +505,7 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
   end
 
   defp rewrite_alone(op, definition, target) do
-    KilnCMS.Repo.transaction(fn ->
-      with {:error, error} <- rewrite_held(op, definition, target, true),
-           do: KilnCMS.Repo.rollback(error)
-    end)
-    |> case do
+    case transaction_alone(op, definition, target) do
       {:ok, :ok} ->
         :ok
 
@@ -514,6 +519,22 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
     end
   end
 
+  # The definition has committed and this runs after it, so a raise here
+  # (a held value the re-base cannot read, a dropped connection) would only
+  # crash the caller's already-successful write and strand the live values.
+  # It is rescued at this one boundary and takes the logged live-only path.
+  # The nested path does not rescue: there the caller's transaction owns the
+  # failure.
+  defp transaction_alone(op, definition, target) do
+    KilnCMS.Repo.transaction(fn ->
+      with {:error, error} <- rewrite_held(op, definition, target, true),
+           do: KilnCMS.Repo.rollback(error)
+    end)
+  rescue
+    error -> {:error, error}
+  end
+
+  defp message(:unresolved), do: "the content type no longer resolves"
   defp message(error) when is_exception(error), do: Exception.message(error)
   defp message(error), do: inspect(error)
 
@@ -531,24 +552,42 @@ defmodule KilnCMS.CMS.Changes.SyncFieldValues do
 
   @held "(working_fields -> 'custom_fields')"
 
+  @doc false
+  # The advisory lock's key, for the test that checks which syncs share one.
+  @spec lock_key(String.t(), FieldDefinition.t()) :: String.t()
+  def lock_key(table, definition),
+    do: "kiln:field_sync:#{table}:#{definition.org_id}:#{definition.id}"
+
   # The live map and the held one in one statement, then the edges, then the
   # re-base of every copy the statement rewrote. Must run in a transaction.
   defp rewrite_held(op, definition, {table, filter, params}, links?) do
     statements = if links?, do: link_statements(op, table, filter, params), else: []
 
-    with {:ok, resource} <- target_resource(definition),
-         :ok <- lock(table, definition.org_id),
+    with {:ok, resource} <- resolve_resource(definition),
+         :ok <- lock(table, definition),
          {:ok, rows} <- rewrite_both(op, table, filter, params),
          :ok <- run_all(statements) do
       rebase(rows, resource, table)
     end
   end
 
-  # Field syncs of one table and org take turns: each locks every row it
-  # rewrites, and two in opposite orders would otherwise deadlock.
-  defp lock(table, org_id) do
+  defp resolve_resource(definition) do
+    case target_resource(definition) do
+      {:ok, resource} -> {:ok, resource}
+      :error -> {:error, :unresolved}
+    end
+  end
+
+  # Two syncs of the same field take turns. `definition` is the governing
+  # one (the field itself, or the top-level field its values live under, for
+  # a sub-field, a link field or an item), keyed by id so a rename racing a
+  # rename of the same field still meets it. Syncs of other fields rewrite
+  # other keys and edges, lock rows in id order, and are not held up: a lock
+  # per table would serialize every field sync of a type, and a transaction
+  # lock lasts until the caller's outer transaction ends.
+  defp lock(table, definition) do
     case KilnCMS.Repo.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
-           "kiln:field_sync:#{table}:#{org_id}"
+           lock_key(table, definition)
          ]) do
       {:ok, _result} -> :ok
       {:error, error} -> {:error, error}

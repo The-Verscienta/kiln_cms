@@ -18,8 +18,9 @@ defmodule KilnCMS.CMS.FlexiblePath do
   path — a name is never matched by position-blind descent (`$.**`).
 
   `item_path/2` finds the path by walking `flex_of_id` and `group_of_id`
-  upward. `update_sql/4` builds the one statement that rewrites every item the
-  path reaches, and `items_exist?/2` asks whether any such item exists.
+  upward. `map_sql/3` builds the expression that rewrites every item the path
+  reaches (`Changes.SyncFieldValues` applies it to the live and the held
+  copy at once), and `items_exist?/3` asks whether any such item exists.
 
   All names and values reach the database as bound parameters; the only
   interpolations are the table name (a resource's own `postgres do table`) and
@@ -145,8 +146,9 @@ defmodule KilnCMS.CMS.FlexiblePath do
   # --- SQL ---------------------------------------------------------------------
 
   @doc """
-  The `UPDATE` rewriting every item `steps` reach, and its parameters, for one
-  of:
+  The rewrite of every item `steps` reach, as SQL over any map expression `m`
+  (the `custom_fields` column, or the held copy
+  `(working_fields -> 'custom_fields')`), for one of:
 
     * `{:rename_field, from, to, setting?}` — move a sub-field's key inside each
       item of the last step's type (under `_settings` for a setting);
@@ -156,32 +158,12 @@ defmodule KilnCMS.CMS.FlexiblePath do
     * `{:rename_type, to}` — rewrite `_type` of the last step's items;
     * `:purge_type` — remove the last step's items, and so everything below.
 
-  A list a purge empties loses its key (a write stores no empty list).
-  `filter` is the `WHERE` tail builder `SyncFieldValues.target/1` returns, with
-  its `filter_params`, which follow the parameters bound here. The statement
-  is `map_sql/3` over the `custom_fields` column.
-  """
-  @spec update_sql(String.t(), steps(), tuple() | atom(), {function(), list()}) ::
-          {String.t(), list()}
-  def update_sql(table, steps, op, {filter, filter_params}) do
-    {new, carries, bound} = map_sql(steps, op, "custom_fields")
-
-    sql = """
-    UPDATE #{table}
-       SET custom_fields = #{new}
-     WHERE #{carries}#{filter.(length(bound))}
-    """
-
-    {sql, bound ++ filter_params}
-  end
-
-  @doc """
-  `update_sql/4`'s rewrite as SQL over any map expression `m` (a column, or
-  the held copy `(working_fields -> 'custom_fields')`): `{new, carries,
-  params}`, where `new` is the rewritten map, `carries` the predicate saying
-  `m` holds something the rewrite changes (`new` is only meaningful where it
-  holds), and `params` the values bound to `$1…$n`, which any further
-  parameters follow. `m` may appear several times; it is read, never written.
+  A list a purge empties loses its key (a write stores no empty list). The
+  result is `{new, carries, params}`: `new` is the rewritten map, `carries`
+  the predicate saying `m` holds something the rewrite changes (`new` is only
+  meaningful where it holds), and `params` the values bound to `$1…$n`, which
+  any further parameters (a `SyncFieldValues.target/1` filter tail) follow.
+  `m` may appear several times; it is read, never written.
   """
   @spec map_sql(steps(), tuple() | atom(), String.t()) :: {String.t(), String.t(), list()}
   def map_sql(steps, op, m) do
@@ -236,10 +218,15 @@ defmodule KilnCMS.CMS.FlexiblePath do
 
   @doc """
   How many stored items of the last step's type exist in `table` (under the
-  `filter` tail), reached through `steps`: the number `items_exist?/3` tests
-  for being non-zero. A record counts the larger of its live items and its
-  working copy's held ones — what a delete takes from that record — so an
-  item only a draft holds counts, and one in both copies counts once.
+  `filter` tail), reached through `steps`, across the live `custom_fields` and
+  each pending working copy's held map: what a delete takes. `items_exist?/3`
+  tests the same items for being any at all.
+
+  Per record, an item is counted once by its `_id`, whichever copies hold it:
+  a live item and the draft item that replaced it are two, the same item in
+  both copies is one. An item with no `_id` (written before items had ids,
+  #2282) cannot be matched across copies, so those count the larger of the
+  two copies' numbers — for them alone the figure is a lower bound.
   `:error` when the count cannot be read (it must not read as "none").
   """
   @spec count_items(String.t(), steps(), {function(), list()}) ::
@@ -249,20 +236,31 @@ defmodule KilnCMS.CMS.FlexiblePath do
   # sobelow_skip ["SQL.Query"]
   def count_items(table, steps, {filter, filter_params}) do
     {_params, jsonpath} = op_params(:purge_type, steps)
-    bound = step_params(steps)
-    path_index = length(bound) + 1
+    bound = step_params(steps) ++ [jsonpath]
+    path_index = length(bound)
+    vars = vars(length(steps))
+    items = &"jsonb_path_query(#{&1}, $#{path_index}::text::jsonpath, #{vars})"
+    live = "t.custom_fields"
+    held = "(t.working_fields -> 'custom_fields')"
+    with_id = "jsonb_typeof(i) = 'object' AND i ? '_id'"
 
-    count = fn m ->
-      "(SELECT count(*) FROM jsonb_path_query(#{m}, $#{path_index}::text::jsonpath, #{vars(length(steps))}))"
-    end
+    unmatched =
+      &"(SELECT count(*) FROM #{items.(&1)} AS q(i) WHERE NOT (#{with_id}))"
 
     sql = """
-    SELECT COALESCE(sum(GREATEST(#{count.("t.custom_fields")}, #{count.("(t.working_fields -> 'custom_fields')")})), 0)::bigint
+    SELECT COALESCE(sum(
+             (SELECT count(DISTINCT i -> '_id')
+                FROM (SELECT i FROM #{items.(live)} AS l(i)
+                      UNION ALL
+                      SELECT i FROM #{items.(held)} AS h(i)) AS both_copies
+               WHERE #{with_id})
+             + GREATEST(#{unmatched.(live)}, #{unmatched.(held)})
+           ), 0)::bigint
       FROM #{table} AS t
      WHERE true#{filter.(path_index)}
     """
 
-    case KilnCMS.Repo.query(sql, bound ++ [jsonpath] ++ filter_params) do
+    case KilnCMS.Repo.query(sql, bound ++ filter_params) do
       {:ok, %{rows: [[count]]}} when is_integer(count) -> {:ok, count}
       _error -> :error
     end

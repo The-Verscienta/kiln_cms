@@ -745,6 +745,124 @@ defmodule KilnCMS.CMS.FieldSyncWorkingCopyTest do
 
       assert {:ok, 1} = KilnCMS.CMS.FlexiblePath.count_stored(ctx.row, ctx.row.org_id)
     end
+
+    test "a live item and the draft item that replaced it count as two", ctx do
+      post = live_post(ctx.admin, %{ctx.sections.name => [hero_item("A", "Row A")]})
+      draft!(post, %{ctx.sections.name => [hero_item("B", "Row B")]}, ctx.admin)
+      stored = reload(post)
+
+      [%{"_id" => live_id}] = stored.custom_fields[ctx.sections.name]
+      [%{"_id" => held_id}] = held(stored)[ctx.sections.name]
+      assert live_id != held_id
+
+      assert {:ok, 2} = KilnCMS.CMS.FlexiblePath.count_stored(ctx.hero, ctx.hero.org_id)
+    end
+
+    test "an item both copies hold counts once", ctx do
+      post = live_post(ctx.admin, %{ctx.sections.name => [hero_item("A", "Row A")]})
+      [item] = reload(post).custom_fields[ctx.sections.name]
+      draft!(post, %{ctx.sections.name => [Map.put(item, "headline", "A, edited")]}, ctx.admin)
+
+      [%{"_id" => held_id}] = held(reload(post))[ctx.sections.name]
+      assert held_id == item["_id"]
+      assert {:ok, 1} = KilnCMS.CMS.FlexiblePath.count_stored(ctx.hero, ctx.hero.org_id)
+    end
+  end
+
+  # Review: the lock is per governing field, so one field's sync never waits
+  # on another's, while two syncs of the same field share a key.
+  describe "the advisory lock" do
+    defp holds_lock?(key) do
+      %{rows: [[held?]]} =
+        KilnCMS.Repo.query!(
+          """
+          SELECT EXISTS (
+            SELECT 1 FROM pg_locks
+             WHERE locktype = 'advisory' AND pid = pg_backend_pid()
+               AND classid::bigint = ((hashtextextended($1, 0) >> 32) & 4294967295)
+               AND objid::bigint = (hashtextextended($1, 0) & 4294967295))
+          """,
+          [key]
+        )
+
+      held?
+    end
+
+    test "is keyed on the field synced, and a sub-field's sync takes its group's", ctx do
+      group =
+        field!(ctx.admin, %{name: "box_#{System.unique_integer([:positive])}", field_type: :group})
+
+      width = field!(ctx.admin, %{content_type: nil, group_of_id: group.id, name: "width"})
+      post = live_post(ctx.admin, %{ctx.subtitle.name => "Live", group.name => %{"width" => "1"}})
+      draft!(post, %{ctx.subtitle.name => "Held", group.name => %{"width" => "2"}}, ctx.admin)
+      key = &KilnCMS.CMS.Changes.SyncFieldValues.lock_key("posts", &1)
+
+      # The sandbox keeps the test's transaction open, so a lock taken stays
+      # visible until the test ends.
+      refute holds_lock?(key.(ctx.subtitle))
+      rename!(ctx.subtitle, "tagline_#{System.unique_integer([:positive])}", ctx.admin)
+      assert holds_lock?(key.(ctx.subtitle))
+      refute holds_lock?(key.(ctx.summary))
+      refute holds_lock?(key.(group))
+
+      # A rename keeps the id, so a second sync of the same field meets the
+      # first one's key; a sub-field syncs under its group's.
+      assert key.(reload_def(ctx.subtitle)) == key.(ctx.subtitle)
+      CMS.update_field_definition!(width, %{name: "span"}, actor: ctx.admin)
+      assert holds_lock?(key.(group))
+      refute holds_lock?(key.(width))
+    end
+  end
+
+  # Review: a raise inside the rewrite (here the re-base meeting a base that
+  # is not a map) takes the same logged live-only path as a failed statement.
+  test "a raise inside the held rewrite still moves the live values", ctx do
+    post = live_post(ctx.admin, %{ctx.subtitle.name => "Live"})
+    draft!(post, %{ctx.subtitle.name => "Held"}, ctx.admin)
+
+    KilnCMS.Repo.query!(~s(UPDATE posts SET working_base = '"x"'::jsonb WHERE id = $1), [
+      Ecto.UUID.dump!(post.id)
+    ])
+
+    to = "tagline_#{System.unique_integer([:positive])}"
+
+    log = ExUnit.CaptureLog.capture_log(fn -> rename!(ctx.subtitle, to, ctx.admin) end)
+
+    assert log =~ "could not rewrite pending working copies"
+    after_rename = raw("posts", post.id, "custom_fields")
+    assert after_rename[to] == "Live"
+    refute Map.has_key?(after_rename, ctx.subtitle.name)
+    # Rolled back: the copy keeps its old shape.
+    assert raw("posts", post.id, "working_fields")["custom_fields"] == %{
+             ctx.subtitle.name => "Held"
+           }
+  end
+
+  # Review: the keep-live branch of `WorkingCopy.rebase/5`. A copy whose held
+  # map is what its base recorded never changed it, so the live value stands;
+  # after the rename the base must match the rewritten held map, keeping that.
+  test "a base recording the held map follows it, and the verdict stays keep_live", ctx do
+    post = live_post(ctx.admin, %{ctx.subtitle.name => "Live", ctx.summary.name => "Sum"})
+    saved = draft!(post, %{ctx.subtitle.name => "Held"}, ctx.admin)
+    held_before = held(saved)
+
+    KilnCMS.Repo.query!(
+      "UPDATE posts SET working_base = jsonb_build_object('custom_fields', $2::text) WHERE id = $1",
+      [Ecto.UUID.dump!(post.id), fp(held_before)]
+    )
+
+    before = reload(post)
+    assert "custom_fields" in WorkingCopy.reconcile(before).keep_live
+
+    to = "tagline_#{System.unique_integer([:positive])}"
+    rename!(ctx.subtitle, to, ctx.admin)
+    renamed = reload(post)
+
+    assert held(renamed)[to] == "Held"
+    assert renamed.working_base["custom_fields"] == fp(held(renamed))
+    refute renamed.working_base["custom_fields"] == fp(renamed.custom_fields)
+    assert "custom_fields" in WorkingCopy.reconcile(renamed).keep_live
+    assert WorkingCopy.reconcile(renamed).conflicts == []
   end
 
   # Critic 1: FieldSync's data-loss report counts held values.

@@ -541,9 +541,15 @@ defmodule KilnCMS.CMS.ChangeSeverityTest do
       page = CMS.get_page!(page.id, authorize?: false, tenant: page.org_id)
       list_safety(admin, %{"page" => ["price"]})
 
-      # The registry refuses a value for a key with no definition.
-      assert {:error, %Ash.Error.Invalid{}} =
+      # The registry refuses a value for a key with no definition — that
+      # refusal, not a stale-record one, which is also `Invalid`.
+      assert {:error, %Ash.Error.Invalid{errors: errors}} =
                CMS.update_page(page, %{custom_fields: %{"price" => "12"}}, actor: admin)
+
+      assert [%Ash.Error.Changes.InvalidAttribute{field: :custom_fields, message: message}] =
+               errors
+
+      assert message =~ ~s("price" is not a defined custom field)
 
       assert last_version(page, :update) == nil
 
