@@ -83,6 +83,10 @@ else.
 - **`mix kiln.changelog --check` fails on text in a bullet section that is not part of a `- ` entry, naming its line, and `--condense` refuses to run rather than delete it (#2732).**
   ([long form](docs/changelog/unreleased.md#changelog-stray-lines))
 
+- **A blank, space-padded or unparseable `PORT`, `POOL_SIZE`, `SMTP_PORT` or `S3_ENDPOINT_PORT` no longer crashes boot: it keeps the default and warns like every other numeric variable (#2728).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#runtime-integer-env-vars))
+
 - **`mix kiln.gen.content Story --plural stories`, and `--from` a dynamic type whose URL segment isn't `<name>s`, now write `plural:` into the generated resource, so it serves at `/stories` and matches its `list_stories` interfaces instead of registering `storys` (#2731).**
   Types generated before this keep `storys` until you add `plural:` by hand. No migration.
   ([long form](docs/changelog/unreleased.md#gen-content-plural))

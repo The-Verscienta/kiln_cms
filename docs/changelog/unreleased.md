@@ -67,6 +67,15 @@ carries the reasoning.
   - **Unchanged.** Upgrade notes, Breaking, Known issues and a release's opening paragraphs are prose and keep every line, as before. The real `CHANGELOG.md` already passes.
 
 
+<a id="runtime-integer-env-vars"></a>
+
+- **Four numeric variables no longer crash boot on a value they cannot read (#2728).** `PORT`, `POOL_SIZE`, `SMTP_PORT` and `S3_ENDPOINT_PORT` were read with a bare `String.to_integer`, so `PORT=` (what compose passes through for a variable the host never set), `POOL_SIZE=" 20"` or `SMTP_PORT=587/tcp` stopped the release with an `ArgumentError` before anything else ran. They now go through `KilnCMS.Config.Env`, the reader every other numeric variable uses.
+  - **What each value does now.** Surrounding whitespace is trimmed, so `" 4000 "` is 4000. Blank is the same as unset and keeps the default silently: 4000, 10, 587 and 443. Anything else keeps the default and warns on stderr, and the warning is replayed through `Logger` and Sentry once the system is up.
+  - **Ports are bounded.** The three ports accept 1 to 65535; a value outside that range, such as `PORT=80800`, keeps the default and warns rather than failing inside the listener. `POOL_SIZE` accepts any positive integer up to 2147483647; `0` keeps 10 and warns.
+  - **No migration; rolling the pin back is safe.** An older release crashes on the same values again.
+
+
+
 <a id="gen-content-plural"></a>
 
 - **`mix kiln.gen.content` writes an irregular plural into the resource it generates (#2731).** `--plural` (and the plural `--from` takes from a dynamic type's `path_segment`) named the domain's code interfaces and the printed notices, but the generated `use KilnCMS.CMS.Content, type: :story` line had no `plural:`, so the macro fell back to `"<type>s"`. `mix kiln.gen.content Story --plural stories` gave the domain `list_stories` and `search_stories` and promised `/stories/<slug>`, while the resource registered `storys`: its JSON:API routes and public pages lived under `/storys`, and anything dispatching by the registered plural looked for a `list_storys` that was never generated.
