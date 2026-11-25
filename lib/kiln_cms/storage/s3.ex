@@ -72,6 +72,23 @@ defmodule KilnCMS.Storage.S3 do
       prefixed as `x-amz-meta-*`. Serve it from the CDN or bucket instead; see
       the "Production storage and CDN" section of `docs/media-pipeline.md`.
 
+  ## Large objects and slow uplinks (#494, #2725)
+
+  An object over 16 MiB goes up as a multipart upload in 5 MiB parts, four at
+  a time. Each part has as long as it takes at a minimum throughput, never
+  less than 30 seconds, and a part that runs out of time or meets a server
+  error is sent again, up to three attempts in all, before the upload is
+  aborted. The defaults suit an uplink of about 1 Mbit/s or more; a slower
+  one can lower the floor:
+
+      config :kiln_cms, KilnCMS.Storage.S3,
+        # Per part, and four parts share the uplink. S3_UPLOAD_MIN_BYTES_PER_SECOND.
+        part_min_bytes_per_second: 32_768,
+        part_min_timeout_ms: 30_000,
+        part_attempts: 3,
+        # Doubled before each further attempt.
+        part_retry_backoff_ms: 1_000
+
   ## Private storage (#481)
 
   Gated documents need a bucket the app can read but the public can't — this
@@ -437,22 +454,46 @@ defmodule KilnCMS.Storage.S3 do
     end
   end
 
+  # ## How long a part may take (#2725)
+  #
+  # A part used to get a fixed 30 s, killed at the deadline. Four 5 MiB parts
+  # share the uplink, so under about 5 Mbit/s no part could ever finish and no
+  # object over the multipart threshold could be stored at all, however long
+  # the caller was prepared to wait.
+  #
+  # Each attempt at a part now has a deadline that follows its size: the time
+  # it takes at `:part_min_bytes_per_second`, and never less than
+  # `:part_min_timeout_ms`. A request that goes silent is still cut sooner by
+  # `ReqClient`'s receive timeout, and ExAws retries that, a transport error
+  # and a `5xx` on its own. The deadline is the backstop for what neither
+  # sees: a body send that stops moving, which the socket never times out.
+  #
+  # A part whose attempt misses its deadline, or comes back with a `5xx` or a
+  # transport error once ExAws has given up, is sent again (S3 keeps the last
+  # upload of a part number), up to `:part_attempts` in all with a doubling
+  # `:part_retry_backoff_ms` between them. Anything else fails the part at
+  # once: a `4xx` will not change on a retry.
+  @part_concurrency 4
+  @default_part_min_bytes_per_second 32 * 1024
+  @default_part_min_timeout_ms 30_000
+  @default_part_attempts 3
+  @default_part_retry_backoff_ms 1_000
+
   # Every part runs to an answer before the error is taken, so no part is still
   # in flight when the abort goes out (S3 keeps a part that lands after it).
+  # No task-level timeout: each part bounds itself, attempt by attempt.
   defp upload_parts_and_complete(bucket, key, upload_id, source_path, site) do
+    part = %{bucket: bucket, key: key, upload_id: upload_id, site: site, limits: part_limits()}
+
     parts =
       source_path
       |> ExAws.S3.Upload.stream_file()
       |> Stream.with_index(1)
-      |> Task.async_stream(&upload_part(bucket, key, upload_id, &1, site),
-        max_concurrency: 4,
-        timeout: 30_000,
-        on_timeout: :kill_task
+      |> Task.async_stream(&upload_part(part, &1),
+        max_concurrency: @part_concurrency,
+        timeout: :infinity
       )
-      |> Enum.map(fn
-        {:ok, part} -> part
-        {:exit, reason} -> {:error, reason}
-      end)
+      |> Enum.map(fn {:ok, result} -> result end)
 
     case Enum.find(parts, &match?({:error, _reason}, &1)) do
       nil ->
@@ -465,11 +506,81 @@ defmodule KilnCMS.Storage.S3 do
     end
   end
 
-  defp upload_part(bucket, key, upload_id, {chunk, n}, site) do
-    case bucket |> ExAws.S3.upload_part(key, upload_id, n, chunk) |> request(site) do
+  defp upload_part(part, {chunk, n}) do
+    deadline = max(part.limits.min_timeout_ms, div(byte_size(chunk) * 1_000, part.limits.min_bps))
+    attempt_part(part, chunk, n, deadline, 1)
+  end
+
+  defp attempt_part(part, chunk, n, deadline, attempt) do
+    case within(fn -> send_part(part, chunk, n) end, deadline) do
+      {:error, reason} when attempt < part.limits.attempts ->
+        if retryable_part_error?(reason) do
+          Logger.warning(
+            "S3 multipart upload #{part.upload_id} for #{part.key}: part #{n} failed " <>
+              "(#{inspect(reason)}); retrying, attempt #{attempt + 1} of #{part.limits.attempts}"
+          )
+
+          Process.sleep(part.limits.backoff_ms * Integer.pow(2, attempt - 1))
+          attempt_part(part, chunk, n, deadline, attempt + 1)
+        else
+          {:error, reason}
+        end
+
+      result ->
+        result
+    end
+  end
+
+  defp send_part(part, chunk, n) do
+    case part.bucket
+         |> ExAws.S3.upload_part(part.key, part.upload_id, n, chunk)
+         |> request(part.site) do
       {:ok, %{headers: headers}} -> {n, header(headers, "etag")}
       {:error, reason} -> {:error, reason}
     end
+  end
+
+  # Runs `fun` in its own process so a send stuck past `timeout_ms` can be
+  # stopped. Killing it closes its connection, so nothing more of the part is
+  # sent once the next attempt, or the abort, goes out. (Bytes the kernel had
+  # already buffered can still drain; a part that completes that way after the
+  # abort is what the bucket's lifecycle rule is the backstop for.)
+  #
+  # Not linked: a linked attempt that raises or exits (an ExAws or Req crash)
+  # would take the part's stream worker and the caller down with it, and the
+  # upload would never be aborted. Unlinked, a crash is the part's error, and
+  # `multipart_put/5` aborts as for any other.
+  defp within(fun, timeout_ms) do
+    task = Task.Supervisor.async_nolink(KilnCMS.TaskSupervisor, fun)
+
+    case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
+      {:exit, reason} -> {:error, {:part_crashed, reason}}
+      nil -> {:error, :timeout}
+    end
+  rescue
+    # The supervisor is at its `max_children`; the part fails, and the upload
+    # is aborted, rather than the store raising.
+    error in RuntimeError -> {:error, {:part_not_started, Exception.message(error)}}
+  end
+
+  # What ExAws itself retries, and has retried already by the time it answers:
+  # a server error or a request that never got one. Plus our own deadline.
+  defp retryable_part_error?(:timeout), do: true
+  defp retryable_part_error?({:http_error, status, _body}) when status >= 500, do: true
+  defp retryable_part_error?(%Req.TransportError{}), do: true
+  defp retryable_part_error?(_reason), do: false
+
+  defp part_limits do
+    config = config()
+
+    %{
+      min_bps:
+        Keyword.get(config, :part_min_bytes_per_second, @default_part_min_bytes_per_second),
+      min_timeout_ms: Keyword.get(config, :part_min_timeout_ms, @default_part_min_timeout_ms),
+      attempts: Keyword.get(config, :part_attempts, @default_part_attempts),
+      backoff_ms: Keyword.get(config, :part_retry_backoff_ms, @default_part_retry_backoff_ms)
+    }
   end
 
   # Best-effort: the store has already failed, and the caller gets that error

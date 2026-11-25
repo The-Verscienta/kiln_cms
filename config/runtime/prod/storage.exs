@@ -88,4 +88,14 @@ if bucket = System.get_env("S3_BUCKET") do
       host: endpoint_host,
       port: endpoint_port
   end
+
+  # The throughput a multipart part is held to before an attempt at it is
+  # given up and sent again (#2725): its deadline is its size at this rate,
+  # never under 30 s. Four parts share the uplink, so the default 32768
+  # suits about 1 Mbit/s or more; lower it on a slower link. Unset, blank or
+  # unreadable keeps the default (unreadable also warns).
+  case KilnCMS.Config.Env.positive_integer("S3_UPLOAD_MIN_BYTES_PER_SECOND") do
+    {:ok, rate} -> config :kiln_cms, KilnCMS.Storage.S3, part_min_bytes_per_second: rate
+    _unset_or_unrecognized -> :ok
+  end
 end
