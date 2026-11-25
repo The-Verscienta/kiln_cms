@@ -79,6 +79,10 @@ else.
   No migration. Data: MIT-licensed commerceguys/addressing, derived from Google's CC BY 4.0 libaddressinput.
   ([long form](docs/changelog/unreleased.md#address-country-formats))
 
+- **An address field offers the country's states, provinces or prefectures as a select for 62 countries and stores the area's code (`CA`, not `California`). A name or lower-case code is converted on save and unrecognized text is kept as typed ([#2996](https://github.com/The-Verscienta/kiln_cms/issues/2996)).**
+  No migration. Data: MIT-licensed commerceguys/addressing, derived from Google's CC BY 4.0 libaddressinput.
+  ([long form](docs/changelog/unreleased.md#address-admin-area-lists))
+
 ### Changed
 
 - **A list field's errors count items one way: a value rule now says `Scores (scores) item 2 must be at most 10` (from 1) instead of `Scores (scores[1]) …`, and a type error, field conversion reports included, no longer counts a dropped repeat (#2683).**
