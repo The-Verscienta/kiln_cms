@@ -52,6 +52,21 @@ defmodule Mix.Tasks.Kiln.Gen.ContentTest do
       assert body =~ "use KilnCMS.CMS.Content, type: :page\n"
       refute body =~ "excerpt?"
     end
+
+    # #2731: the macro defaults to `"<type>s"`, so an irregular plural that
+    # stays on the domain alone registers `storys` on the resource.
+    test "writes an irregular plural into the use line" do
+      body = Content.resource_body(KilnCMS.CMS.Story, :story, plural: "stories", excerpt: true)
+
+      assert body =~
+               ~s(use KilnCMS.CMS.Content, type: :story, plural: "stories", excerpt?: true\n)
+    end
+
+    test "leaves a plural that matches the default implicit" do
+      body = Content.resource_body(KilnCMS.CMS.Product, :product, plural: "products")
+      assert body =~ "use KilnCMS.CMS.Content, type: :product\n"
+      refute body =~ "plural:"
+    end
   end
 
   describe "the generator codemod" do
@@ -120,6 +135,50 @@ defmodule Mix.Tasks.Kiln.Gen.ContentTest do
       assert patch =~ "define(:list_published_products, action: :published)"
       assert patch =~ "resource(KilnCMS.CMS.Product.Version) do"
       assert patch =~ "define(:list_product_versions, action: :read)"
+    end
+
+    test "an irregular --plural reaches the resource, the interfaces and the notice",
+         %{igniter: igniter} do
+      igniter =
+        Igniter.compose_task(igniter, "kiln.gen.content", ["Story", "--plural", "stories"])
+
+      assert_creates(
+        igniter,
+        "lib/kiln_cms/cms/story.ex",
+        """
+        defmodule KilnCMS.CMS.Story do
+          @moduledoc \"\"\"
+          A Story — a KilnCMS content type. All of its behaviour (block editor,
+          publishing workflow, version history, search, SEO, and the standard
+          relationships) comes from `KilnCMS.CMS.Content`; add only what is unique to
+          a Story below.
+          \"\"\"
+          use KilnCMS.CMS.Content, type: :story, plural: "stories"
+        end
+        """
+      )
+
+      patch = diff(igniter)
+      assert patch =~ "define(:list_stories, action: :read)"
+      assert patch =~ "define(:search_stories, action: :search, args: [:query])"
+      refute patch =~ "storys"
+
+      notice = Enum.join(igniter.notices, "\n")
+      assert notice =~ "Served publicly at /stories/<slug>"
+      assert notice =~ "mix ash.codegen add_stories"
+      assert notice =~ "count :story_count"
+      # The table keeps the macro's own default; `--plural` doesn't rename it.
+      assert notice =~ ~s{add_search_vector("storys")}
+    end
+
+    test "without --plural the default plural is used everywhere", %{igniter: igniter} do
+      igniter = Igniter.compose_task(igniter, "kiln.gen.content", ["Widget"])
+
+      patch = diff(igniter)
+      assert patch =~ "use KilnCMS.CMS.Content, type: :widget\n"
+      refute patch =~ "plural:"
+      assert patch =~ "define(:list_widgets, action: :read)"
+      assert Enum.join(igniter.notices, "\n") =~ "Served publicly at /widgets/<slug>"
     end
   end
 end
