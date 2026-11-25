@@ -54,9 +54,11 @@ not take down on this site is skipped too, and the message doesn't say which
 row it was: open a skipped row in the editor to see what stops it.
 
 If someone else moved one of the pages to the trash after the list loaded,
-the action currently fails without a message: the list reloads, and the
-pages after that one are left as they were. The same happens to a single
-row's **Unpublish** (#2781). Tick the remaining pages and try again.
+the action goes on with the rest, and the message counts the missing pages
+apart from the skipped ones: *Unpublish: 3 updated, 1 no longer exists*. A
+single row's **Unpublish** on such a page says
+*That content no longer exists. Someone else may have moved it to trash or deleted it.*
+and reloads the list.
 
 To bring archived pages back, choose **Unarchive** on an archived row, on the
 page's editor, or in the bar.

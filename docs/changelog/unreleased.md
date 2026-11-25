@@ -87,6 +87,14 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="content-list-stale-row"></a>
+
+- **A content-list row or bulk action on a row someone else moved to trash shows a message instead of crashing the list (#2781).** The row actions on `/editor` (**Publish**, **Submit**, **Return**, **Unpublish**, **Unarchive** and **Confirm date**) and the bulk bar read each record again with a raising fetch before the write. A row another user had moved to trash or deleted since the list loaded made that read raise: the page crashed and reconnected with no message, the selection was lost, and in a bulk run every row after the missing one was left as it was.
+  - **Row actions.** The list now shows "That content no longer exists. Someone else may have moved it to trash or deleted it.", drops the row from the selection, and reloads, so the row disappears.
+  - **Bulk actions.** The run continues with the rows that remain, and the message counts the missing ones apart from the skipped ones, e.g. "Publish: 3 updated, 1 no longer exists" or "Moved 2 item(s) to trash, 1 no longer exists". A missing row doesn't add the "A row is skipped when …" line, since there is nothing left to open and fix.
+  - **Unchanged.** Who may run each action, and how a row in the wrong state, a refused write or a safety-field publish is reported.
+  - **No migration; rolling the pin back is safe.**
+
 <a id="experiment-goal-select"></a>
 
 - **The goal select on `/editor/experiments` takes effect (#2779).** The new-experiment form posts every field on each change, and the page's change handler matched on the content type first, so a change of the **Counts as a conversion** select was never read. Picking **A funnel is completed** left the form showing the **Goal form** picker, so the experiment was created with a funnel goal and no funnel, and could not be started. The same happened to **A page is reached**, whose target fields never appeared.

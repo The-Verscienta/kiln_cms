@@ -95,6 +95,10 @@ else.
 
 ### Fixed
 
+- **A content-list row or bulk action on a row someone else moved to trash shows a message instead of crashing the list (#2781).**
+  A row action flashes and reloads the list; the bulk bar acts on the rows that remain and reports, e.g., "Publish: 3 updated, 1 no longer exists".
+  ([long form](docs/changelog/unreleased.md#content-list-stale-row))
+
 - **The Experiments form's goal select takes effect, so a funnel-completion experiment can be set up from `/editor/experiments` (#2779).**
   Picking a goal now shows its target picker (funnel, form or page), and typing a name no longer reloads the document list.
   ([long form](docs/changelog/unreleased.md#experiment-goal-select))

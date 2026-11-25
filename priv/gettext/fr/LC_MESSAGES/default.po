@@ -405,6 +405,13 @@ msgstr[1] "%{count} de plus le %{date} — afficher la semaine"
 msgid "%{count} ms"
 msgstr "%{count} ms"
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{count} no longer exists"
+msgid_plural "%{count} no longer exist"
+msgstr[0] "%{count} n'existe plus"
+msgstr[1] "%{count} n'existent plus"
+
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{count} not applicable"
@@ -23743,6 +23750,11 @@ msgstr "Cette colonne est pleine. Faites-y de la place d'abord."
 #, elixir-autogen, elixir-format
 msgid "That content couldn't be found."
 msgstr "Ce contenu est introuvable."
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "That content no longer exists. Someone else may have moved it to trash or deleted it."
+msgstr "Ce contenu n'existe plus. Quelqu'un d'autre l'a peut-être mis à la corbeille ou supprimé."
 
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
