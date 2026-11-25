@@ -225,6 +225,10 @@ defmodule KilnCMSWeb.Router do
     # The key that plug verified, remembered on this node so a later `:api`
     # refusal of it can alert (`KilnCMS.Security.ApiKeyTrip`).
     plug KilnCMSWeb.Plugs.RememberApiKey
+
+    # Tells an action this is a tool call: `update_*` refuses a live record
+    # here and nowhere else (`KilnCMS.CMS.Validations.McpDraftOnly`).
+    plug KilnCMSWeb.Plugs.McpSurface
   end
 
   # Swagger UI explorer — serves the published OpenAPI spec interactively in all

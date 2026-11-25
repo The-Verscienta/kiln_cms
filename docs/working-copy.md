@@ -446,7 +446,10 @@ recorded base moves with it, so the copy is neither reverted by the next
 - **In-context editing** (`InContextEditLive`) and the write API's `PATCH`
   still edit a live document directly through `:update` — kept on purpose: an
   integration writing through the API has no *Publish changes* step to wait
-  for. A pending working copy survives such an edit; the lost-update guard
+  for. `/mcp` is the exception: its `update_*` tools refuse a live
+  document, and `save_*_working_copy` stages the edit here instead
+  ([mcp.md](mcp.md#live-records)), because a model's edit should wait for a
+  person. A pending working copy survives such an edit; the lost-update guard
   above stops *Publish changes* from overwriting it silently.
 - **Restoring an older version onto a live document** still goes live at once
   (and clears the copy, since the fold has none). Landing a restore in the

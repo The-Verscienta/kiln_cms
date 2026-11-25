@@ -2981,6 +2981,11 @@ defmodule KilnCMS.CMS.Content do
           validate KilnCMS.CMS.Validations.SeoUrls
           validate KilnCMS.CMS.Validations.ScheduleOrder
 
+          # MCP authoring is draft-only: a tool call may not edit a live
+          # record through `:update`, which writes it in front of readers.
+          # `save_*_working_copy` holds the edit instead (docs/mcp.md).
+          validate KilnCMS.CMS.Validations.McpDraftOnly
+
           # The alt-text gate is on publish (#403), but `:update` re-fires
           # artifacts for an already-published record — so editing a live page
           # to show an alt-less image bypassed the gate entirely (#722). Re-run
@@ -3149,8 +3154,22 @@ defmodule KilnCMS.CMS.Content do
           require_atomic? false
           accept [:working_title, :working_blocks]
           argument :fields, :map
+
+          # The `save_*_working_copy` MCP tools' input (docs/mcp.md): the
+          # working attributes are internal, so a tool sends the held title and
+          # body under these public arguments, the body in the same two shapes
+          # `:update` takes. The editor sends the attributes and none of these.
+          argument :title, :string, constraints: [max_length: KilnCMS.Limits.line()]
+          argument :block_tree, {:array, :map}
+          argument :body_markdown, :string, constraints: [trim?: false, allow_empty?: true]
+
           change filter(expr(^ref(:state) == :published))
           change optimistic_lock(:lock_version)
+          # `present/1` would read the live `title` attribute; the argument alone decides.
+          change set_attribute(:working_title, arg(:title)),
+            where: [argument_does_not_equal(:title, nil)]
+
+          change {KilnCMS.CMS.Changes.ApplyBlocksInput, target: :working_blocks}
           # The hidden custom fields' stored values go back under the record
           # this write is built on (#2281). BEFORE the change that reads them.
           change KilnCMS.CMS.Changes.RestoreHiddenFields

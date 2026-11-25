@@ -32,6 +32,18 @@ defmodule KilnCMS.CMS do
   @body_hint "Body: block_tree (typed block maps) or body_markdown (Markdown, " <>
                "converted to blocks server-side) — not both."
 
+  # MCP authoring is draft-only (docs/mcp.md, "Live records"): `update_*`
+  # refuses a published record (`Validations.McpDraftOnly`) and points here.
+  @live_hint "Refused on a published record: stage the edit with save_%s_working_copy instead."
+
+  @working_copy_hint "Stage an edit to a PUBLISHED %s in its working copy: readers keep the " <>
+                       "published version until a person clicks Publish changes. title, and " <>
+                       "the body as block_tree or body_markdown (not both), replace the held " <>
+                       "text; fields holds the other settings keyed as update_%s takes them " <>
+                       "(slug, excerpt, seo_*, custom_fields, category_id, featured_image_id, " <>
+                       "tag and related ids). Anything left out stays as the copy has it. " <>
+                       "Refused on a draft: use update_%s."
+
   # Load the links a tag write touches back onto the tool result (#640).
   #
   # `remove_tag_ids` is `on_no_match: :ignore` so removal stays idempotent — a
@@ -146,8 +158,15 @@ defmodule KilnCMS.CMS do
     end
 
     tool :update_page, KilnCMS.CMS.Page, :update do
-      description "Update a page's content/metadata (state unchanged). #{@tag_merge_hint} #{@body_hint}"
+      description "Update a page's content/metadata (state unchanged). " <>
+                    String.replace(@live_hint, "%s", "page") <>
+                    " #{@tag_merge_hint} #{@body_hint}"
+
       load &KilnCMS.CMS.McpLoads.update/1
+    end
+
+    tool :save_page_working_copy, KilnCMS.CMS.Page, :save_working_copy do
+      description @working_copy_hint |> String.replace("%s", "page")
     end
 
     tool :submit_page_for_review, KilnCMS.CMS.Page, :submit_for_review do
@@ -159,8 +178,15 @@ defmodule KilnCMS.CMS do
     end
 
     tool :update_post, KilnCMS.CMS.Post, :update do
-      description "Update a blog post's content/metadata (state unchanged). #{@tag_merge_hint} #{@body_hint}"
+      description "Update a blog post's content/metadata (state unchanged). " <>
+                    String.replace(@live_hint, "%s", "post") <>
+                    " #{@tag_merge_hint} #{@body_hint}"
+
       load &KilnCMS.CMS.McpLoads.update/1
+    end
+
+    tool :save_post_working_copy, KilnCMS.CMS.Post, :save_working_copy do
+      description @working_copy_hint |> String.replace("%s", "post")
     end
 
     tool :submit_post_for_review, KilnCMS.CMS.Post, :submit_for_review do
@@ -172,8 +198,15 @@ defmodule KilnCMS.CMS do
     end
 
     tool :update_entry, KilnCMS.CMS.Entry, :update do
-      description "Update a dynamic-type entry's content/metadata (state unchanged). #{@tag_merge_hint} #{@body_hint}"
+      description "Update a dynamic-type entry's content/metadata (state unchanged). " <>
+                    String.replace(@live_hint, "%s", "entry") <>
+                    " #{@tag_merge_hint} #{@body_hint}"
+
       load &KilnCMS.CMS.McpLoads.update/1
+    end
+
+    tool :save_entry_working_copy, KilnCMS.CMS.Entry, :save_working_copy do
+      description @working_copy_hint |> String.replace("%s", "entry")
     end
 
     tool :submit_entry_for_review, KilnCMS.CMS.Entry, :submit_for_review do

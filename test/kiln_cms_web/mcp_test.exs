@@ -799,4 +799,160 @@ defmodule KilnCMSWeb.McpTest do
                )
     end
   end
+
+  # MCP authoring is draft-only (docs/mcp.md, "Live records"). `:update` writes
+  # a published record in front of readers and re-fires it, so over `/mcp` it is
+  # refused there (`Validations.McpDraftOnly`); `save_*_working_copy` stages
+  # the edit for a person to publish instead.
+  describe "live records" do
+    defp published_page(admin) do
+      page =
+        KilnCMS.CMS.create_page!(
+          %{
+            title: "Live title",
+            slug: "mcp-live-#{System.unique_integer([:positive])}",
+            body_markdown: "The published text."
+          },
+          actor: admin
+        )
+
+      KilnCMS.CMS.publish_page!(page, actor: admin)
+    end
+
+    defp tool(conn, key, name, arguments) do
+      conn
+      |> rpc(key, "tools/call", %{name: name, arguments: arguments})
+      |> json_response(200)
+    end
+
+    defp reload(page), do: KilnCMS.CMS.get_page!(page.id, authorize?: false)
+
+    test "update_page refuses a published page and writes nothing", %{conn: conn} do
+      page = published_page(user(:admin))
+      key = mint(user(:editor), :read_write)
+
+      assert %{"result" => %{"isError" => true, "content" => [%{"text" => text} | _]}} =
+               tool(conn, key, "update_page", %{
+                 id: page.id,
+                 input: %{title: "Rewritten by a model", seo_description: "Spam"}
+               })
+
+      assert text =~ "save_*_working_copy"
+
+      after_call = reload(page)
+      assert after_call.title == "Live title"
+      assert after_call.seo_description == page.seo_description
+      assert after_call.lock_version == page.lock_version
+    end
+
+    test "an admin key is refused too: the rule is the surface, not the role", %{conn: conn} do
+      admin = user(:admin)
+      page = published_page(admin)
+
+      assert %{"result" => %{"isError" => true}} =
+               tool(conn, mint(admin, :read_write), "update_page", %{
+                 id: page.id,
+                 input: %{title: "Rewritten"}
+               })
+
+      assert reload(page).title == "Live title"
+    end
+
+    test "save_page_working_copy holds the edit; readers keep the published text",
+         %{conn: conn} do
+      page = published_page(user(:admin))
+      key = mint(user(:editor), :read_write)
+
+      assert %{"result" => result} =
+               tool(conn, key, "save_page_working_copy", %{
+                 id: page.id,
+                 input: %{
+                   title: "Held title",
+                   body_markdown: "A **held** paragraph.",
+                   fields: %{seo_description: "Held description"}
+                 }
+               })
+
+      refute result["isError"]
+
+      saved = reload(page)
+      assert saved.title == "Live title"
+      assert saved.blocks == page.blocks
+      assert saved.seo_description == page.seo_description
+      assert %DateTime{} = saved.working_copy_at
+
+      view = KilnCMS.CMS.WorkingCopy.view(saved)
+      assert view.title == "Held title"
+      assert view.seo_description == "Held description"
+      refute KilnCMS.CMS.WorkingCopy.same_blocks?(KilnCMS.CMS.Page, view.blocks, page.blocks)
+    end
+
+    test "save_page_working_copy refuses a block_tree and body_markdown together",
+         %{conn: conn} do
+      page = published_page(user(:admin))
+
+      assert %{"result" => %{"isError" => true}} =
+               tool(conn, mint(user(:editor), :read_write), "save_page_working_copy", %{
+                 id: page.id,
+                 input: %{block_tree: [], body_markdown: "Both"}
+               })
+
+      assert reload(page).working_copy_at == nil
+    end
+
+    test "save_page_working_copy refuses a draft (update_page is the draft tool)",
+         %{conn: conn} do
+      editor = user(:editor)
+
+      draft =
+        KilnCMS.CMS.create_page!(
+          %{title: "Draft", slug: "mcp-draft-#{System.unique_integer([:positive])}"},
+          actor: editor
+        )
+
+      key = mint(editor, :read_write)
+
+      assert %{"result" => %{"isError" => true}} =
+               tool(conn, key, "save_page_working_copy", %{
+                 id: draft.id,
+                 input: %{title: "Held"}
+               })
+
+      refute tool(conn, key, "update_page", %{id: draft.id, input: %{title: "Edited draft"}})[
+               "result"
+             ]["isError"]
+
+      assert reload(draft).title == "Edited draft"
+    end
+
+    test "the working-copy tools are offered to a write key, not a read key", %{conn: conn} do
+      names = fn key ->
+        conn
+        |> recycle()
+        |> rpc(key, "tools/list")
+        |> json_response(200)
+        |> get_in(["result", "tools"])
+        |> MapSet.new(& &1["name"])
+      end
+
+      write = names.(mint(user(:editor), :read_write))
+      read = names.(mint(user(:editor), :read))
+
+      for name <- ~w(save_page_working_copy save_post_working_copy save_entry_working_copy) do
+        assert name in write
+        refute name in read
+      end
+    end
+
+    # The gate is MCP's alone: the same edit through the code interface (the
+    # path JSON:API, GraphQL and in-context editing take) still writes the live
+    # row, as docs/working-copy.md says it does on purpose.
+    test "an :update outside /mcp still edits the live record" do
+      page = published_page(user(:admin))
+
+      updated = KilnCMS.CMS.update_page!(page, %{title: "Edited live"}, actor: user(:editor))
+
+      assert updated.title == "Edited live"
+    end
+  end
 end

@@ -19,11 +19,17 @@ defmodule KilnCMS.CMS.Changes.ApplyBlocksInput do
   Omitted argument = no change, so a metadata-only PATCH never wipes the body.
   An explicit empty list (or empty Markdown) clears the body (an intentional
   "remove all blocks").
+
+  `target:` names the attribute the body lands in — `:blocks` (the default) or
+  `:working_blocks`, for `:save_working_copy`'s MCP tools, which stage a live
+  record's body in its working copy (docs/working-copy.md).
   """
   use Ash.Resource.Change
 
   @impl true
-  def change(changeset, _opts, _context) do
+  def change(changeset, opts, _context) do
+    target = Keyword.get(opts, :target, :blocks)
+
     case {argument(changeset, :block_tree), argument(changeset, :body_markdown)} do
       {blocks, markdown} when is_list(blocks) and is_binary(markdown) ->
         Ash.Changeset.add_error(changeset,
@@ -39,13 +45,13 @@ defmodule KilnCMS.CMS.Changes.ApplyBlocksInput do
             vars: [max: KilnCMS.Markdown.max_bytes()]
           )
         else
-          Ash.Changeset.change_attribute(changeset, :blocks, KilnCMS.Markdown.to_blocks(markdown))
+          Ash.Changeset.change_attribute(changeset, target, KilnCMS.Markdown.to_blocks(markdown))
         end
 
       {blocks, _markdown} when is_list(blocks) ->
         # `change_attribute` casts through the `blocks` union type, which
         # sanitizes untrusted rich-text/media inside each member's cast.
-        Ash.Changeset.change_attribute(changeset, :blocks, blocks)
+        Ash.Changeset.change_attribute(changeset, target, blocks)
 
       _ ->
         changeset
