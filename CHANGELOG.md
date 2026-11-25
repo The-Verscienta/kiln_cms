@@ -95,6 +95,14 @@ else.
 
 ### Fixed
 
+- **A Slug field offers the Unique checkbox in `/editor/fields`, and saving a field no longer drops a constraint the form didn't post, such as a `unique` set through the API or field sync (#2780).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#fields-slug-unique))
+
+- **A reconnect no longer replays the Fields console's Sections choices, or other forms that save as they change, over another admin's newer ones (#2782).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#auto-save-forms-no-recovery))
+
 - **The Experiments form's goal select takes effect, so a funnel-completion experiment can be set up from `/editor/experiments` (#2779).**
   Picking a goal now shows its target picker (funnel, form or page), and typing a name no longer reloads the document list.
   ([long form](docs/changelog/unreleased.md#experiment-goal-select))

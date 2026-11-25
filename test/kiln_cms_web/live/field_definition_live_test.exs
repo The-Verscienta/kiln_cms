@@ -2366,6 +2366,89 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       assert CMS.get_field_definition!(field.id, authorize?: false).validation == %{}
     end
 
+    test "a Slug field offers Unique (#2780)", %{conn: conn} do
+      admin = authed_user(:admin)
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+      type_change(lv, "slug")
+      assert has_element?(lv, validation_input("unique"))
+
+      field =
+        CMS.create_field_definition!(
+          %{content_type: :page, name: "handle", label: "Handle", field_type: :slug},
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+      assert has_element?(
+               lv,
+               ~s|#edit-field-validation-#{field.id} [name="field_definition[validation][unique]"]|
+             )
+    end
+
+    test "editing a unique Slug field's label keeps it unique (#2780)", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      field =
+        CMS.create_field_definition!(
+          %{
+            content_type: :page,
+            name: "handle",
+            label: "Handle",
+            field_type: :slug,
+            validation: %{"unique" => true}
+          },
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+      lv
+      |> form("#edit-field-#{field.id}", field_definition: %{label: "Public handle"})
+      |> render_submit()
+
+      field = CMS.get_field_definition!(field.id, authorize?: false)
+      assert field.label == "Public handle"
+      assert field.validation == %{"unique" => true}
+    end
+
+    test "a save that doesn't post a constraint keeps the stored one (#2780)", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      field =
+        CMS.create_field_definition!(
+          %{
+            content_type: :page,
+            name: "rating",
+            label: "Rating",
+            field_type: :integer,
+            validation: %{"min" => 1, "max" => 5, "unique" => true}
+          },
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+
+      # A form that shows no Validation fieldset (an older page, another
+      # client) posts the type but no constraints at all; one it does post
+      # still wins, so a blank `max` clears that one.
+      render_submit(lv, "save_edit", %{
+        "field_definition" => %{
+          "field_type" => "integer",
+          "label" => "Score",
+          "validation" => %{"max" => ""}
+        }
+      })
+
+      field = CMS.get_field_definition!(field.id, authorize?: false)
+      assert field.label == "Score"
+      assert field.validation == %{"min" => 1, "unique" => true}
+    end
+
     test "a bad pattern is reported under the Pattern input", %{conn: conn} do
       {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
 

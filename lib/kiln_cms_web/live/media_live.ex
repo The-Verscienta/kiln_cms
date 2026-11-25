@@ -2615,6 +2615,7 @@ defmodule KilnCMSWeb.MediaLive do
             :if={addable_tags(@tag_options, @item) != []}
             id="media-detail-tag-form"
             phx-change="item_tag"
+            phx-auto-recover="ignore"
             class="mt-2"
           >
             <input type="hidden" name="op" value="add" />

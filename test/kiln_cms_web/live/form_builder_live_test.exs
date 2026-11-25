@@ -90,6 +90,8 @@ defmodule KilnCMSWeb.FormBuilderLiveTest do
     assert field.name == "email"
     # The new field is selected — its settings form is on screen.
     assert html =~ "field-settings-#{field.id}"
+    # Saved on change, so a reconnect must not replay it (#2782).
+    assert has_element?(lv, ~s(#field-settings-#{field.id}[phx-auto-recover="ignore"]))
 
     # Adding a second field of the same type uniquifies the machine name.
     lv

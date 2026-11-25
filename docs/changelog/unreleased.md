@@ -87,6 +87,20 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="fields-slug-unique"></a>
+
+- **A Slug field offers the Unique checkbox in `/editor/fields`, and saving a field no longer drops a constraint the form didn't post (#2780).** The Fields console mapped a field's type to the constraints it takes through a hand-kept list that left out Slug. A Slug field therefore showed no **Unique** checkbox, although it can be unique since 1.9.0, and editing anything on a Slug field that was made unique through the API or field sync (`/editor/fields/sync`, `mix kiln.fields.import`) (its label, say) saved it with no constraints and dropped `unique`.
+  - **What changes.** The console reads the type from the registered field types (core, built-in and plugin), so every type shows the constraint inputs it takes, Slug's **Unique** included. A save also keeps any stored constraint the type takes that the form didn't post at all, so a form that doesn't show one can't drop it. A constraint whose input is posted blank is still cleared, and changing a field's type still drops the constraints the new type doesn't take.
+  - **Unchanged.** Which constraints each type takes and how they are checked; a field inside a group or relationship, or one holding several values, still can't be unique.
+  - **No migration; rolling the pin back is safe.**
+
+<a id="auto-save-forms-no-recovery"></a>
+
+- **A reconnect no longer replays forms that save as they change (#2782).** After a reconnect (a deploy, a laptop waking), LiveView resubmits each form on the page with the values it last showed. The Sections rows in `/editor/fields` save on change, so a page left open would post its stale **Shown as** and **Starts** for every section and silently revert another admin's newer choice, at the cost of one write and reload per section.
+  - **What changes.** The Sections rows and the other console forms that save on change are left out of that recovery: a field's settings in the form builder, the **Add a tag** select in the media drawer, the content list's **Columns** picker and a backup destination's other-directory **adopt** checkboxes. After a reconnect they show what the server holds.
+  - **Unchanged.** Forms that only preview or validate as they change still recover what was typed in them.
+  - **No migration; rolling the pin back is safe.**
+
 <a id="experiment-goal-select"></a>
 
 - **The goal select on `/editor/experiments` takes effect (#2779).** The new-experiment form posts every field on each change, and the page's change handler matched on the content type first, so a change of the **Counts as a conversion** select was never read. Picking **A funnel is completed** left the form showing the **Goal form** picker, so the experiment was created with a funnel goal and no funnel, and could not be started. The same happened to **A page is reached**, whose target fields never appeared.
