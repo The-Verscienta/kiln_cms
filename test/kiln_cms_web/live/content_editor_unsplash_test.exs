@@ -277,6 +277,116 @@ defmodule KilnCMSWeb.ContentEditorUnsplashTest do
     assert Enum.map(block.value.images, & &1["media_id"]) == [item.id]
   end
 
+  # The download is held until the test releases it, so the drawer can be
+  # closed (or reopened) while the import is still in flight (#2784).
+  defp stub_held_unsplash(png) do
+    test = self()
+
+    Req.Test.stub(KilnCMS.Unsplash, fn conn ->
+      case conn.request_path do
+        "/search/photos" ->
+          Req.Test.json(conn, %{"total_pages" => 1, "results" => [unsplash_result("abc123")]})
+
+        "/photos/abc123/download" ->
+          Req.Test.json(conn, %{"url" => "https://images.unsplash.com/file-abc123"})
+
+        "/file-abc123" ->
+          send(test, {:import_started, self()})
+
+          receive do
+            :release -> :ok
+          after
+            5_000 -> :ok
+          end
+
+          conn
+          |> Plug.Conn.put_resp_content_type("image/png")
+          |> Plug.Conn.send_resp(200, png)
+      end
+    end)
+  end
+
+  defp start_held_import(lv, open_event) do
+    render_click(lv, open_event, %{})
+    render_click(lv, "picker_tab", %{"tab" => "unsplash"})
+    lv |> form("#editor-unsplash-search", %{q: "shoes"}) |> render_submit()
+    render_async(lv, 2_000)
+
+    render_click(lv, "unsplash_import", %{"id" => "abc123"})
+    assert_receive {:import_started, download}, 2_000
+    download
+  end
+
+  describe "an import still running when the drawer closes (#2784)" do
+    test "keeps the editor alive and leaves the photo in the library only", %{conn: conn} do
+      stub_held_unsplash(@png)
+      editor = authed_user(:editor)
+      pg = page(editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{pg.id}")
+
+      download = start_held_import(lv, "open_featured_picker")
+      render_click(lv, "close_picker", %{})
+      send(download, :release)
+      html = render_async(lv, 5_000)
+
+      assert Process.alive?(lv.pid)
+      assert html =~ "The Unsplash photo was added to the media library."
+      refute html =~ "image-picker-dialog"
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [item] = CMS.list_media_items!(actor: editor)
+      assert item.filename == "unsplash-abc123.png"
+      assert CMS.get_page!(pg.id, authorize?: false).featured_image_id == nil
+    end
+
+    test "does not land on a drawer reopened for another target", %{conn: conn} do
+      stub_held_unsplash(@png)
+      editor = authed_user(:editor)
+      pg = page(editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{pg.id}")
+
+      download = start_held_import(lv, "open_featured_picker")
+      render_click(lv, "close_picker", %{})
+      render_click(lv, "open_media_browser", %{})
+      send(download, :release)
+      html = render_async(lv, 5_000)
+
+      assert Process.alive?(lv.pid)
+      assert html =~ "The Unsplash photo was added to the media library."
+      # The reopened drawer is left as it was, with nothing inserted.
+      assert html =~ "image-picker-dialog"
+
+      lv |> form("#page-editor") |> render_submit()
+
+      assert [_item] = CMS.list_media_items!(actor: editor)
+      saved = CMS.get_page!(pg.id, authorize?: false)
+      assert saved.blocks == []
+      assert saved.featured_image_id == nil
+    end
+
+    test "does not land on the same target after the drawer was closed and reopened", %{
+      conn: conn
+    } do
+      stub_held_unsplash(@png)
+      editor = authed_user(:editor)
+      pg = page(editor)
+      {:ok, lv, _html} = conn |> log_in(editor) |> live(~p"/editor/content/page/#{pg.id}")
+
+      download = start_held_import(lv, "open_featured_picker")
+      render_click(lv, "close_picker", %{})
+      render_click(lv, "open_featured_picker", %{})
+      send(download, :release)
+      html = render_async(lv, 5_000)
+
+      assert html =~ "The Unsplash photo was added to the media library."
+      assert html =~ "image-picker-dialog"
+
+      lv |> form("#page-editor") |> render_submit()
+      assert CMS.get_page!(pg.id, authorize?: false).featured_image_id == nil
+    end
+  end
+
   test "a failed import flashes an error and leaves the picker open", %{conn: conn} do
     Req.Test.stub(KilnCMS.Unsplash, fn conn ->
       case conn.request_path do

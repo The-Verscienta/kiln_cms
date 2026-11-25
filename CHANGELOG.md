@@ -95,6 +95,10 @@ else.
 
 ### Fixed
 
+- **Closing the content editor's image picker while an Unsplash import is still running no longer crashes the editor (#2784).**
+  The photo is still added to the media library, but not to the field or block, and a flash says so.
+  ([long form](docs/changelog/unreleased.md#picker-close-during-import))
+
 - **A Slug field offers the Unique checkbox in `/editor/fields`, and saving a field no longer drops a constraint the form didn't post, such as a `unique` set through the API or field sync (#2780).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#fields-slug-unique))
