@@ -9,13 +9,14 @@ defmodule KilnCMS.Webhooks.HealthNotice do
   suspect something — typically when new content has stopped appearing on a
   site that is rebuilt by a webhook.
 
-  `surface/2` compares the endpoint before and after
-  `KilnCMS.CMS.WebhookEndpoint`'s `:record_delivery_failure` and raises:
+  `surface/1` reads the endpoint as `KilnCMS.CMS.WebhookEndpoint`'s
+  `:record_delivery_failure` left it in the database, never the worker's copy
+  from before its POST (#2737), and raises:
 
   | when | event |
   |------|-------|
-  | the first exhausted delivery in a row (`consecutive_failures` 0 → 1, still active) | `:webhook_failing` |
-  | the failure that auto-disabled it (active → inactive) | `:webhook_disabled` |
+  | the first exhausted delivery in a row (`consecutive_failures` now 1, still active) | `:webhook_failing` |
+  | the failure that auto-disabled it (the action's `:auto_disabled` metadata) | `:webhook_disabled` |
 
   Nothing for the failures in between: the first notice already said the
   endpoint is failing, and the next thing worth hearing is that it was
@@ -64,25 +65,25 @@ defmodule KilnCMS.Webhooks.HealthNotice do
   def events, do: [:webhook_failing, :webhook_disabled]
 
   @doc """
-  The event a failure that took `before` to `after_failure` raises, or `nil`.
-  Pure; see the moduledoc's table.
+  The event the failure that left the endpoint as `after_failure` raises, or
+  `nil`. Pure; see the moduledoc's table.
+
+  The failure action increments only an active endpoint, one row update at a
+  time, so exactly one failure per run leaves it active at 1; and only the
+  update that switched it off carries `auto_disabled: true`.
   """
-  @spec event_for(map(), map()) :: event() | nil
-  def event_for(%{active: true}, %{active: false}), do: :webhook_disabled
-
-  def event_for(%{active: true} = before, %{active: true, consecutive_failures: 1}) do
-    if (before.consecutive_failures || 0) == 0, do: :webhook_failing
-  end
-
-  def event_for(_before, _after_failure), do: nil
+  @spec event_for(map()) :: event() | nil
+  def event_for(%{active: false, __metadata__: %{auto_disabled: true}}), do: :webhook_disabled
+  def event_for(%{active: true, consecutive_failures: 1}), do: :webhook_failing
+  def event_for(_after_failure), do: nil
 
   @doc """
-  Announce the failure that took the endpoint from `before` to
-  `after_failure`, if it is news (`event_for/2`). Returns `:ok`; never raises.
+  Announce the failure that left the endpoint as `after_failure`, if it is
+  news (`event_for/1`). Returns `:ok`; never raises.
   """
-  @spec surface(map(), map()) :: :ok
-  def surface(before, after_failure) do
-    case event_for(before, after_failure) do
+  @spec surface(map()) :: :ok
+  def surface(after_failure) do
+    case event_for(after_failure) do
       nil -> :ok
       event -> announce(event, after_failure)
     end
