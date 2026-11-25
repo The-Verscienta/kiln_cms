@@ -95,6 +95,10 @@ else.
 
 ### Fixed
 
+- **Closing the content editor's image picker while an Unsplash import is still running no longer crashes the editor (#2784).**
+  The photo is still added to the media library, but not to the field or block, and a flash says so.
+  ([long form](docs/changelog/unreleased.md#picker-close-during-import))
+
 - **The Experiments form's goal select takes effect, so a funnel-completion experiment can be set up from `/editor/experiments` (#2779).**
   Picking a goal now shows its target picker (funnel, form or page), and typing a name no longer reloads the document list.
   ([long form](docs/changelog/unreleased.md#experiment-goal-select))
