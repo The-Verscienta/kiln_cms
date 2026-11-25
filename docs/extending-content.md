@@ -438,7 +438,9 @@ UI" workflow, scoped to fields.
   next, which is how an unrelated title edit came to be what destroyed an
   editor's prose. (A destroy really does mean the values go: `custom_fields` is
   public, and a deleted definition must stop publishing what was under it. It
-  just happens where the admin asked for it.)
+  just happens where the admin asked for it.) A live record's pending
+  [working copy](working-copy.md) is rewritten in the same statement, so its
+  draft value follows the rename too (#2744).
 - **References are edges too**: a `:reference` value is stored as a snapshot
   (`%{"id", "type", "slug", "title"}`) *and* as a `ContentLink` edge
   (`kind: :reference`, `field` the field's name; a list of references has one
@@ -2969,7 +2971,7 @@ Things to know:
   item of that type; renaming an item type rewrites each item's `_type`.
   Deleting a sub-field removes its key from every item (an item left empty is
   dropped). Deleting an item type is **refused while any record holds an item
-  of it**; pass `purge_items?: true` to remove the items with the type:
+  of it**, a live record's pending draft included; pass `purge_items?: true` to remove the items with the type:
 
   ```elixir
   CMS.destroy_field_definition(hero, %{purge_items?: true}, actor: admin)

@@ -133,6 +133,129 @@ defmodule KilnCMSWeb.RedirectLiveTest do
     assert html =~ "must start with /"
   end
 
+  # #2763: whatever the resource (or the page) refuses renders on the field it
+  # concerns, and the view survives to take the next submit. Before the fix a
+  # refusal from the resource raised out of the bang create and crashed the
+  # page, losing the form.
+  describe "a refused redirect (#2763)" do
+    defp submit_new(lv, attrs) do
+      # Straight to the event, not through `form/3`: a forged select value
+      # (an unknown locale) is exactly what a client can send.
+      render_submit(lv, "create", %{"redirect" => attrs})
+    end
+
+    defp redirects_at(path),
+      do: CMS.list_redirects!(authorize?: false, query: [filter: [path: path]])
+
+    test "an over-long path shows the length error on the path field", %{conn: conn} do
+      page = published_page()
+      path = "/" <> String.duplicate("a", KilnCMS.Limits.url() + 1)
+      {lv, _html} = open(conn, authed_user(:admin))
+
+      submit_new(lv, %{"path" => path, "locale" => "en", "type" => "page", "slug" => page.slug})
+
+      assert Process.alive?(lv.pid)
+      assert has_element?(lv, "#redirect_path-error", "length must be less than or equal to")
+      assert redirects_at(path) == []
+    end
+
+    test "an over-long locale shows the error on the locale field", %{conn: conn} do
+      page = published_page()
+      locale = String.duplicate("x", KilnCMS.Limits.identifier() + 1)
+      {lv, _html} = open(conn, authed_user(:admin))
+
+      submit_new(lv, %{
+        "path" => "/long-locale-#{uniq()}",
+        "locale" => locale,
+        "type" => "page",
+        "slug" => page.slug
+      })
+
+      assert Process.alive?(lv.pid)
+      assert has_element?(lv, "#redirect_locale-error", "length must be less than or equal to")
+    end
+
+    test "the root path is refused on the path field", %{conn: conn} do
+      page = published_page()
+      {lv, _html} = open(conn, authed_user(:admin))
+
+      submit_new(lv, %{"path" => " / ", "locale" => "en", "type" => "page", "slug" => page.slug})
+
+      assert has_element?(lv, "#redirect_path-error", "Enter a path starting with /.")
+      # What was typed survives the refusal.
+      assert has_element?(
+               lv,
+               ~s(#new-redirect-form input[name="redirect[slug]"][value="#{page.slug}"])
+             )
+    end
+
+    test "a path without a leading slash is refused on the path field", %{conn: conn} do
+      page = published_page()
+      {lv, _html} = open(conn, authed_user(:admin))
+
+      submit_new(lv, %{
+        "path" => "no-slash",
+        "locale" => "en",
+        "type" => "page",
+        "slug" => page.slug
+      })
+
+      assert has_element?(lv, "#redirect_path-error", "The path must start with /.")
+    end
+
+    test "a redirect from the target's own URL is refused on the path field", %{conn: conn} do
+      page = published_page()
+      {lv, _html} = open(conn, authed_user(:admin))
+
+      submit_new(lv, %{
+        "path" => "/#{page.slug}",
+        "locale" => "en",
+        "type" => "page",
+        "slug" => page.slug
+      })
+
+      assert has_element?(lv, "#redirect_path-error", "already the target's own URL")
+      assert redirects_at("/#{page.slug}") == []
+    end
+
+    test "a target that doesn't exist is refused on the slug field", %{conn: conn} do
+      {lv, _html} = open(conn, authed_user(:admin))
+
+      submit_new(lv, %{
+        "path" => "/nowhere-#{uniq()}",
+        "locale" => "en",
+        "type" => "page",
+        "slug" => "no-such-slug"
+      })
+
+      assert has_element?(lv, "#redirect_slug-error", "check the target")
+    end
+
+    test "an admin demoted after mounting is refused without a crash", %{conn: conn} do
+      page = published_page()
+      user = authed_user(:editor)
+
+      membership =
+        Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+          user_id: user.id,
+          organization_id: KilnCMS.Accounts.default_org_id(),
+          role: :admin
+        })
+
+      {lv, _html} = open(conn, user)
+      Ash.Seed.update!(membership, %{role: :editor})
+
+      path = "/demoted-#{uniq()}"
+
+      html =
+        submit_new(lv, %{"path" => path, "locale" => "en", "type" => "page", "slug" => page.slug})
+
+      assert Process.alive?(lv.pid)
+      assert html =~ "You don&#39;t have permission to add redirects."
+      assert redirects_at(path) == []
+    end
+  end
+
   test "deleting a redirect removes it", %{conn: conn} do
     page = published_page()
     old_slug = page.slug
