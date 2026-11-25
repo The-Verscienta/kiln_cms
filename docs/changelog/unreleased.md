@@ -56,6 +56,13 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="newsletter-exhausted-counts-failed"></a>
+
+- **Every newsletter recipient ends in the campaign's counts (#2755).** A delivery that kept failing transiently (a recipient domain's MX down for the whole ~16-hour retry window, a greylist that never lifts, a relay that never answers) was retried eight times and then dropped by Oban with no counter moved, so the campaign showed `sent_count + failed_count` below `total_recipients` for good. Now the last attempt is the recipient's outcome.
+  - **What counts as failed.** On the eighth attempt, a transient delivery error, any other raise, an unreadable subscriber, an exit, or the attempt running past the mail pipeline's 60-second ceiling counts the recipient in `failed_count` once and ends the job as cancelled, with the reason (`gave up after 8 attempts: …`) in the job's errors and a warning in the log naming the campaign and subscriber ids. A campaign whose content has no fired `:web` artifact now counts each recipient failed too; it was cancelled uncounted.
+  - **What does not.** Earlier attempts still retry without touching the counts, and a permanent reject, counted as before, is not counted again. A subscriber who unsubscribed, hard-bounced or was erased between the fan-out and their delivery is skipped and still not counted, so a campaign's counts can sit below its total by that many.
+  - **Upgrade.** No migration, no new setting; rolling the pin back is safe. Campaigns already sent keep their old counts.
+
 <a id="api-key-unknown-scope"></a>
 
 - **An API key whose scope this release doesn't know loads, and authenticates as nothing (#2604).** A key's `access` scope was a plain atom column, so a key minted by a newer release with a scope this one lacks (met on an older node during a rolling deploy, or after a rollback) failed every read that touched it: the key's own lookup at sign-in, the whole list at `/editor/api-keys`, revoking it, revoking an erased account's keys (erasure, the erasure backfill) and revoking a squatter's keys on invitation takeover. `access` is now a `KilnCMS.Types.KnownAtom`, as `docs/releasing.md` ("New values in an atom column") asks of a column that will grow, so the key loads with its scope as `%UnknownAtom{}`, and all of those work again.

@@ -83,6 +83,9 @@ else.
 
 ### Fixed
 
+- **A newsletter campaign's counts add up: a recipient whose last delivery attempt still fails (a down MX, a hung relay) or whose campaign has no fired content is counted failed once, instead of being dropped from the tally (#2755).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#newsletter-exhausted-counts-failed))
 - **An API key minted by a newer release with a scope this one doesn't know no longer breaks key lookups, the API keys page, revoke or erasure; it is refused at sign-in like a revoked key, and the security posture warns about it (#2604).**
   No migration; rolling the pin back is safe. The posture JSON's `core.api_keys` check gains the fact `unrecognized_scope_keys`.
   ([long form](docs/changelog/unreleased.md#api-key-unknown-scope))
