@@ -626,4 +626,17 @@ defmodule KilnCMSWeb.ReleaseLiveTest do
     assert html =~ "Calendar release"
     assert html =~ "Release go-live"
   end
+
+  # #2764: the go-live time is stored and printed in UTC, beside a form that
+  # takes local time, and it carried no zone.
+  test "the go-live time is labeled UTC", %{conn: conn} do
+    admin = authed_user(:admin)
+    rel = release(admin, "Zoned release")
+    at = DateTime.add(DateTime.utc_now(), 60 * 60)
+    {:ok, _} = CMS.schedule_release(rel, %{scheduled_at: at}, actor: admin)
+
+    {:ok, _view, html} = conn |> log_in(admin) |> live(~p"/editor/releases/#{rel.id}")
+
+    assert html =~ Calendar.strftime(at, "%Y-%m-%d %H:%M UTC")
+  end
 end

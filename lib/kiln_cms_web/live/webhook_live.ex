@@ -106,12 +106,24 @@ defmodule KilnCMSWeb.WebhookLive do
 
   # --- inline edit -----------------------------------------------------------
 
+  # The id comes from a row rendered earlier: another admin may have deleted
+  # it since (#2764). Refresh the list rather than crash on the stale row.
   def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
-    {:noreply,
-     assign(socket, :edit, %{
-       id: id,
-       form: edit_form(id, socket.assigns.actor, socket.assigns.current_org)
-     })}
+    %{actor: actor, current_org: org} = socket.assigns
+
+    socket =
+      case CMS.get_webhook_endpoint(id, actor: actor, tenant: org) do
+        {:ok, endpoint} ->
+          assign(socket, :edit, %{id: id, form: edit_form(endpoint, actor, org)})
+
+        {:error, _error} ->
+          socket
+          |> assign(:edit, nil)
+          |> load_endpoints()
+          |> put_flash(:error, gettext("That webhook no longer exists."))
+      end
+
+    {:noreply, socket}
   end
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
@@ -378,8 +390,8 @@ defmodule KilnCMSWeb.WebhookLive do
       )
       |> to_form()
 
-  defp edit_form(id, actor, org) do
-    CMS.get_webhook_endpoint!(id, actor: actor, tenant: org)
+  defp edit_form(endpoint, actor, org) do
+    endpoint
     # Its own `id` so its inputs don't share the new form's DOM ids
     # (`webhook_url`); `as` keeps the `webhook[...]` param names.
     |> AshPhoenix.Form.for_update(:update,

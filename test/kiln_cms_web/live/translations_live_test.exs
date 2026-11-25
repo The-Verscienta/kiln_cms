@@ -95,6 +95,27 @@ defmodule KilnCMSWeb.TranslationsLiveTest do
       assert fr.title == "To translate"
     end
 
+    # #2764: the locale came from the client unchecked, so a crafted event made
+    # a variant in a locale the site does not run.
+    test "a forged create_translation in an unconfigured locale creates nothing",
+         %{conn: conn} do
+      admin = authed_admin()
+      en = CMS.create_page!(%{title: "Not in xx", slug: slug(), locale: "en"}, actor: admin)
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/translations")
+
+      for locale <- ["xx", "en"] do
+        render_click(lv, "create_translation", %{
+          "kind" => "page",
+          "id" => en.id,
+          "locale" => locale
+        })
+      end
+
+      assert [%{locale: "en"}] =
+               CMS.list_pages!(actor: admin, query: [filter: [slug: en.slug]])
+    end
+
     test "every control in a row names the content and the locale (#1768)", %{conn: conn} do
       admin = authed_admin()
       about = CMS.create_page!(%{title: "About Us", slug: slug(), locale: "en"}, actor: admin)

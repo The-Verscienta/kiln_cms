@@ -233,6 +233,19 @@ defmodule KilnCMSWeb.NewsletterLiveTest do
 
       assert html =~ "(1 confirmed)"
     end
+
+    # #2764: the count came from the 100-row display window, newest first, so
+    # a confirmed subscriber older than the newest 100 dropped out of it.
+    test "the confirmed count covers subscribers past the display window",
+         %{conn: conn} = ctx do
+      confirmed!(ctx)
+
+      for n <- 1..100, do: subscriber!(ctx, "nl-window-#{n}@example.com")
+
+      {:ok, _view, html} = live(conn, ~p"/editor/newsletter")
+
+      assert html =~ "(1 confirmed)"
+    end
   end
 
   describe "sending from the page" do

@@ -93,6 +93,10 @@ else.
 
 ### Fixed
 
+- **Console fixes: Edit on a webhook, content type or social account, and Remove on a site's mail, storage, AI or search settings, no longer crash when another admin deleted the row; the newsletter's confirmed count, the overview's "All quiet." and release go-live times (now labeled UTC) are right; and a few events check more (#2764).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#console-small-defects))
+
 - **The translations dashboard shows every variant of the slugs it lists: an older translation no longer shows as "missing" (and fails to create), and a slug whose default-locale source is older than its translations can still be exported (#2761).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#translations-slug-window))

@@ -19,6 +19,7 @@ defmodule KilnCMSWeb.SocialLive do
   """
   use KilnCMSWeb, :live_view
 
+  alias KilnCMS.HTMLSanitizer
   alias KilnCMS.Social
   alias KilnCMS.Social.Account
   alias KilnCMS.Social.Announcer
@@ -54,12 +55,24 @@ defmodule KilnCMSWeb.SocialLive do
     end
   end
 
+  # The id comes from a row rendered earlier: another admin may have deleted
+  # it since (#2764). Refresh the list rather than crash on the stale row.
   def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
-    {:noreply,
-     assign(socket, :edit, %{
-       id: id,
-       form: edit_form(id, socket.assigns.actor, socket.assigns.current_org)
-     })}
+    %{actor: actor, current_org: org} = socket.assigns
+
+    socket =
+      case Social.get_account(id, actor: actor, tenant: org) do
+        {:ok, account} ->
+          assign(socket, :edit, %{id: id, form: edit_form(account, actor, org)})
+
+        {:error, _error} ->
+          socket
+          |> assign(:edit, nil)
+          |> load_accounts()
+          |> put_flash(:error, gettext("That account no longer exists."))
+      end
+
+    {:noreply, socket}
   end
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
@@ -168,11 +181,13 @@ defmodule KilnCMSWeb.SocialLive do
       |> AshPhoenix.Form.for_create(:create, actor: actor, tenant: org, as: "account")
       |> to_form()
 
-  defp edit_form(id, actor, org) do
-    Social.get_account!(id, actor: actor, tenant: org)
+  defp edit_form(account, actor, org) do
+    account
     |> AshPhoenix.Form.for_update(:update, actor: actor, tenant: org, as: "account")
     |> to_form()
   end
+
+  defp remote_href(post), do: HTMLSanitizer.safe_href(post.remote_url)
 
   defp provider_options,
     do: Enum.map(Account.providers(), &{provider_label(&1), &1})
@@ -383,9 +398,11 @@ defmodule KilnCMSWeb.SocialLive do
               <.badge variant={state_tone(post.state)}>{post.state}</.badge>
               <span class="text-base-content/70">{provider_label(post.provider)}</span>
               <span class="grow truncate">{post.text}</span>
+              <%!-- The URL comes back from the remote instance, so it goes
+                    through the one href policy like any other link (#2764). --%>
               <a
-                :if={post.remote_url}
-                href={post.remote_url}
+                :if={remote_href(post)}
+                href={remote_href(post)}
                 target="_blank"
                 rel="noopener noreferrer"
                 class="link"

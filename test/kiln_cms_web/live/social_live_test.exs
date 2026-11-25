@@ -207,5 +207,66 @@ defmodule KilnCMSWeb.SocialLiveTest do
 
       assert html =~ "Something was announced"
     end
+
+    # #2764: the URL is the remote instance's answer, and it was rendered as a
+    # raw href.
+    test "a remote URL the href policy refuses is not linked", ctx do
+      post = posted(ctx, "javascript:alert(1)")
+
+      {:ok, live, html} = live(ctx.conn, ~p"/editor/social")
+
+      assert html =~ post.text
+      refute html =~ "javascript:alert"
+      refute has_element?(live, ~s{a[href^="javascript:"]})
+    end
+
+    test "an https remote URL is linked", ctx do
+      posted(ctx, "https://mastodon.test/@kiln/1")
+
+      {:ok, live, _html} = live(ctx.conn, ~p"/editor/social")
+
+      assert has_element?(live, ~s{a[href="https://mastodon.test/@kiln/1"]}, "View")
+    end
+  end
+
+  # #2764: Edit read the account with a bang getter, so editing one another
+  # admin had just removed crashed the page.
+  describe "a stale row" do
+    test "Edit on an account removed behind the page says so and refreshes the list", ctx do
+      account = account(ctx, %{handle: "gone-soon"})
+      {:ok, live, _html} = live(ctx.conn, ~p"/editor/social")
+
+      Social.destroy_account!(account, actor: ctx.actor, tenant: ctx.org_id)
+
+      html =
+        live
+        |> element(~s{button[phx-click="edit"][phx-value-id="#{account.id}"]})
+        |> render_click()
+
+      assert html =~ "That account no longer exists."
+      refute html =~ "gone-soon"
+      refute has_element?(live, "#edit-social-account-#{account.id}")
+    end
+  end
+
+  defp posted(ctx, remote_url) do
+    claimed =
+      Social.claim_post!(
+        %{
+          account_id: account(ctx).id,
+          provider: :mastodon,
+          content_type: "post",
+          content_id: Ash.UUID.generate(),
+          content_published_at: DateTime.utc_now(),
+          text: "Announced #{System.unique_integer([:positive])}"
+        },
+        authorize?: false,
+        tenant: ctx.org_id
+      )
+
+    Social.succeed_post!(claimed, %{remote_id: "1", remote_url: remote_url},
+      authorize?: false,
+      tenant: ctx.org_id
+    )
   end
 end

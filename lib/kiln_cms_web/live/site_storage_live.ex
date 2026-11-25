@@ -92,23 +92,36 @@ defmodule KilnCMSWeb.SiteStorageLive do
       nil ->
         {:noreply, socket}
 
+      # The row was read when the page loaded. Another admin may have reset
+      # or changed it since, or this admin may no longer be one (#2764), so a
+      # refused or stale reset reloads and says so rather than crashing.
       row ->
-        CMS.reset_site_storage!(row,
-          actor: socket.assigns.current_user,
-          tenant: socket.assigns.current_org,
-          context: socket.assigns.security_context
-        )
+        case CMS.reset_site_storage(row,
+               actor: socket.assigns.current_user,
+               tenant: socket.assigns.current_org,
+               context: socket.assigns.security_context
+             ) do
+          :ok ->
+            {:noreply,
+             socket
+             |> put_flash(
+               :info,
+               gettext(
+                 "Removed. New uploads go to the deployment's storage again; files already in your bucket are still read from it."
+               )
+             )
+             |> assign(:test_result, nil)
+             |> load()}
 
-        {:noreply,
-         socket
-         |> put_flash(
-           :info,
-           gettext(
-             "Removed. New uploads go to the deployment's storage again; files already in your bucket are still read from it."
-           )
-         )
-         |> assign(:test_result, nil)
-         |> load()}
+          {:error, _error} ->
+            {:noreply,
+             socket
+             |> put_flash(
+               :error,
+               gettext("Couldn't remove these settings. The page now shows what is saved.")
+             )
+             |> load()}
+        end
     end
   end
 

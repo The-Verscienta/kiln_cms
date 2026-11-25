@@ -7426,6 +7426,14 @@ msgstr ""
 msgid "Couldn't remove that subscriber."
 msgstr ""
 
+#: lib/kiln_cms_web/live/site_ai_live.ex
+#: lib/kiln_cms_web/live/site_mail_live.ex
+#: lib/kiln_cms_web/live/site_search_live.ex
+#: lib/kiln_cms_web/live/site_storage_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't remove these settings. The page now shows what is saved."
+msgstr ""
+
 #: lib/kiln_cms_web/live/type_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Couldn't restore that content type."
@@ -23585,6 +23593,11 @@ msgstr ""
 msgid "That account couldn't be found."
 msgstr ""
 
+#: lib/kiln_cms_web/live/social_live.ex
+#, elixir-autogen, elixir-format
+msgid "That account no longer exists."
+msgstr ""
+
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
 msgid "That account was erased, so it can't be approved."
@@ -23719,6 +23732,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "That content couldn't be found."
+msgstr ""
+
+#: lib/kiln_cms_web/live/type_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "That content type no longer exists."
 msgstr ""
 
 #: lib/kiln_cms_web/live/calendar_live.ex
@@ -24003,6 +24021,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "That view couldn't be loaded. Try again in a moment."
+msgstr ""
+
+#: lib/kiln_cms_web/live/webhook_live.ex
+#, elixir-autogen, elixir-format
+msgid "That webhook no longer exists."
 msgstr ""
 
 #: lib/kiln_cms_web/live/content_editor/markdown_mode.ex

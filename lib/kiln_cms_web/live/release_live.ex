@@ -472,8 +472,10 @@ defmodule KilnCMSWeb.ReleaseLive do
     end
   end
 
+  # Labeled UTC (#2764): the schedule form beside these takes local time, so an
+  # unlabeled UTC stamp read as the hour the admin had typed.
   defp stamp(nil), do: "—"
-  defp stamp(datetime), do: Calendar.strftime(datetime, "%Y-%m-%d %H:%M")
+  defp stamp(datetime), do: Calendar.strftime(datetime, "%Y-%m-%d %H:%M UTC")
 
   # Why this release cannot go live *right now*, or nil. Scheduling deliberately
   # does not consult it — see the schedule form's confirm.

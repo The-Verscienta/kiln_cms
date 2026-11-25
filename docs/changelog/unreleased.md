@@ -79,6 +79,16 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="console-small-defects"></a>
+
+- **Smaller console fixes from the November bug sweep (#2764).**
+  - **A row deleted behind the page.** **Edit** on `/editor/webhooks`, `/editor/types` and `/editor/social` read the row with a raising call, so editing one that another admin had just deleted or archived crashed the page. It now says "That webhook (content type, account) no longer exists." and refreshes the list. **Remove** on `/editor/site-mail`, `/editor/site-storage`, `/editor/site-ai` and `/editor/site-search` did the same with the row read when the page opened; a removal that fails (the row already gone, or the admin no longer one) now says "Couldn't remove these settings. The page now shows what is saved." and reloads.
+  - **Counts.** The newsletter's "N confirmed" heading counted the 100 newest subscribers it lists; it now counts every confirmed subscriber on the site, read as the signed-in admin. The overview's "All quiet." showed under open block tasks and unresolved block discussions; it now shows only when none of the lines above it does.
+  - **Release times.** Go-live, published and rolled-back times on `/editor/releases` are stored and shown in UTC, beside a schedule field that takes local time. They now read `2026-11-25 14:00 UTC`.
+  - **Checks.** A social announcement's link, which comes back from the remote instance, goes through the same href rule as every other link, so a `javascript:` URL is not linked. A crafted `create_translation` event on `/editor/translations` can no longer create a variant in a locale the site does not run, or in the default locale. The slug **preview** on `/editor/slugs` re-checks that the user is still a site admin on each run, as **apply** already did: it lists every record's title, drafts included.
+  - **Not changed.** The funnel builder's handling of an unknown content type was already fixed; a test now holds it.
+  - **No migration; rolling the pin back is safe.**
+
 <a id="translations-slug-window"></a>
 
 - **The translations dashboard's window is on slugs, not records (#2761).** `/editor/translations` read the 200 most recently updated records of each content type and only then grouped them by slug, so a slug could land in the window with some of its variants cut off. A translation older than the cut showed as **+ missing**, and clicking it failed with "Couldn't create that translation." because the variant already existed. When the default-locale source was the variant cut, the row was represented by a translation and its export checkbox was disabled with "No en source to translate from".
