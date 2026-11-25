@@ -205,10 +205,16 @@ elements, where there's no text to encode), annotate elements yourself from the
   decoder (verified cross-language).
 - **Annotated read:** `GET /api/visual-editing/:type/:slug` → the `:json`
   artifact shape plus the working copy's custom fields
-  (`{id, type, title, slug, blocks, custom_fields}`) with editable strings
-  stega-encoded. Plain-string custom-field values are encoded block-less
-  (`{type, id, slug, field}`); values consumers parse — JSON-encoded structures,
-  URLs — and non-strings are left untouched. `no-store`; draft visibility
+  (`{id, type, title, slug, blocks, custom_fields}`) with prose stega-encoded.
+  Only the title, a block's plain-text translatable fields (heading text,
+  image alt, video title and caption, …) and Portable Text spans are encoded.
+  URLs and identifiers are never encoded (`src`, `poster`, `captions_url`,
+  `download_url`, `resolved_url`, `media_id`, `filename`, `form_slug`, `_id`),
+  nor is any value that reads as a URL, a path, a UUID or an identifier-like
+  token, so a front end can use them as they arrive. Plain-string
+  custom-field values are encoded block-less (`{type, id, slug, field}`)
+  under the same value check; JSON-encoded structures and non-strings are
+  left untouched. `no-store`; draft visibility
   follows the caller's credential. A preview token (the `x-kiln-preview-token`
   header, or `?preview_token=` for a client that cannot set headers) reads its
   own document's working copy. The route's type and slug must be that
