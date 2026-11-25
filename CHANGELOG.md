@@ -93,6 +93,9 @@ else.
 
 ### Fixed
 
+- **The translations dashboard shows every variant of the slugs it lists: an older translation no longer shows as "missing" (and fails to create), and a slug whose default-locale source is older than its translations can still be exported (#2761).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#translations-slug-window))
 - **A newsletter campaign's counts add up: a recipient whose last delivery attempt still fails (a down MX, a hung relay) or whose campaign has no fired content is counted failed once, instead of being dropped from the tally (#2755).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#newsletter-exhausted-counts-failed))

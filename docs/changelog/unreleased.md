@@ -79,6 +79,13 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="translations-slug-window"></a>
+
+- **The translations dashboard's window is on slugs, not records (#2761).** `/editor/translations` read the 200 most recently updated records of each content type and only then grouped them by slug, so a slug could land in the window with some of its variants cut off. A translation older than the cut showed as **+ missing**, and clicking it failed with "Couldn't create that translation." because the variant already existed. When the default-locale source was the variant cut, the row was represented by a translation and its export checkbox was disabled with "No en source to translate from".
+  - **What the window is now.** Per content type, the 200 slugs most recently edited in any locale, in the order the table sorts its rows; a slug that exists only in a non-default locale takes a place like any other. Every variant of those slugs is then loaded, so each row shows all the locales it has and is represented by its default-locale source when there is one.
+  - **Unchanged.** Both reads run as the signed-in editor on the current site, exactly as the single read did, and the XLIFF export still loads the ticked records by id.
+  - **No migration; rolling the pin back is safe.**
+
 <a id="newsletter-exhausted-counts-failed"></a>
 
 - **Every newsletter recipient ends in the campaign's counts (#2755).** A delivery that kept failing transiently (a recipient domain's MX down for the whole ~16-hour retry window, a greylist that never lifts, a relay that never answers) was retried eight times and then dropped by Oban with no counter moved, so the campaign showed `sent_count + failed_count` below `total_recipients` for good. Now the last attempt is the recipient's outcome.
