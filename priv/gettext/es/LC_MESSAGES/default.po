@@ -2637,6 +2637,11 @@ msgstr "Proveedor de IA guardado."
 msgid "AI suggestions aren't configured."
 msgstr "Las sugerencias con IA no están configuradas."
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "AI-readable"
+msgstr "Legible por IA"
+
 #: lib/kiln_cms_web/live/menu_live.ex
 #, elixir-autogen, elixir-format
 msgid "API"
@@ -3461,6 +3466,11 @@ msgstr "Añade una lista junto al cuadro de búsqueda del selector, para que un 
 #, elixir-autogen, elixir-format
 msgid "Adds detail drawn from this block and the rest of the page."
 msgstr "Añade detalles extraídos de este bloque y del resto de la página."
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Adds this field's text to the Markdown and structured data that answer engines read. For a group or flexible field, every text sub-field is included, and is public."
+msgstr "Añade el texto de este campo al Markdown y a los datos estructurados que leen los motores de respuesta. En un campo de grupo o flexible se incluyen todos los subcampos de texto, que pasan a ser públicos."
 
 #: lib/kiln_cms_web/live/setup_live.ex
 #, elixir-autogen, elixir-format
@@ -12445,6 +12455,11 @@ msgstr "Bandeja de entrada"
 msgid "Include %{type} in this site's feeds"
 msgstr "Incluir %{type} en los feeds de este sitio"
 
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Include in AI-readable outputs"
+msgstr "Incluir en las salidas legibles por IA"
+
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Include in the XLIFF export"
@@ -12454,6 +12469,11 @@ msgstr "Incluir en la exportación XLIFF"
 #, elixir-autogen, elixir-format
 msgid "Include private fields"
 msgstr "Incluir campos privados"
+
+#: lib/kiln_cms_web/live/field_definition_live.ex
+#, elixir-autogen, elixir-format
+msgid "Included in the AI-readable outputs (Markdown and structured data)"
+msgstr "Incluido en las salidas legibles por IA (Markdown y datos estructurados)"
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format

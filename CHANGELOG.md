@@ -68,6 +68,9 @@ else.
   No migration.
   ([long form](docs/changelog/unreleased.md#condition-text-ops))
 
+- **A custom field's text can go in the fired AI-readable outputs: tick "Include in AI-readable outputs" on a text, group or flexible field and its text joins the `:llm` Markdown and a `hasPart` list on the `:json_ld` node (issue 2282, last PR of the flexible-content plan). Run `mix ash.migrate`; off by default; rolling back is safe.**
+  ([long form](docs/changelog/unreleased.md#deliver-llm))
+
 ### Changed
 
 - **A list field's errors count items one way: a value rule now says `Scores (scores) item 2 must be at most 10` (from 1) instead of `Scores (scores[1]) …`, and a type error, field conversion reports included, no longer counts a dropped repeat (#2683).**

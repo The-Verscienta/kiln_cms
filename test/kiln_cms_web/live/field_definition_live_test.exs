@@ -295,6 +295,54 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     refute CMS.get_field_definition!(field.id, authorize?: false).deliver_portable
   end
 
+  test "including a field in the AI-readable outputs is offered for text types only", %{
+    conn: conn
+  } do
+    admin = authed_user(:admin)
+    {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+
+    toggle = "#new-field-deliver-llm"
+
+    lv |> form("#new-field-form", field_definition: %{field_type: "integer"}) |> render_change()
+    refute has_element?(lv, toggle)
+
+    lv |> form("#new-field-form", field_definition: %{field_type: "group"}) |> render_change()
+    assert has_element?(lv, toggle)
+
+    lv |> form("#new-field-form", field_definition: %{field_type: "string"}) |> render_change()
+    assert has_element?(lv, toggle)
+
+    lv
+    |> form("#new-field-form",
+      field_definition: %{
+        scopes: ["page"],
+        name: "summary_for_ai",
+        label: "Summary for AI",
+        field_type: "string",
+        deliver_llm: "true"
+      }
+    )
+    |> render_submit()
+
+    field =
+      :page
+      |> CMS.field_definitions_for!(authorize?: false)
+      |> Enum.find(&(&1.name == "summary_for_ai"))
+
+    assert field.deliver_llm
+    assert has_element?(lv, "#field-#{field.id}-deliver-llm")
+
+    # Retyped to a number, the toggle goes and the flag with it.
+    lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+    assert has_element?(lv, "#edit-field-deliver-llm-#{field.id}[checked]")
+
+    lv
+    |> form("#edit-field-#{field.id}", field_definition: %{field_type: "integer"})
+    |> render_submit()
+
+    refute CMS.get_field_definition!(field.id, authorize?: false).deliver_llm
+  end
+
   test "an admin makes a media field a gallery, and is warned before narrowing it back", %{
     conn: conn
   } do

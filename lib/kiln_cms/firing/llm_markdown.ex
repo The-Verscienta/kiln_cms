@@ -13,13 +13,23 @@ defmodule KilnCMS.Firing.LlmMarkdown do
   Markdown headings; every other block contributes its `search_text/1`
   projection as a paragraph. Blocks are separated by blank lines, so each
   becomes a naturally chunkable passage.
+
+  After the blocks come the custom fields an admin opted in
+  (`FieldDefinition.deliver_llm`, #2282): one `##` section per field, from
+  `KilnCMS.Firing.AnswerText`. With none opted in the output is what it was
+  before.
   """
 
   alias KilnCMS.Blocks
+  alias KilnCMS.Firing.AnswerText
 
-  @doc "Render `document` (+ its typed blocks) to one Markdown string."
-  @spec compose(struct(), [struct()]) :: String.t()
-  def compose(document, typed) do
+  @doc """
+  Render `document` (+ its typed blocks) to one Markdown string. `custom` is
+  the resolved `KilnCMS.Firing.CustomFields` result, whose opted-in text
+  closes the document.
+  """
+  @spec compose(struct(), [struct()], map() | nil) :: String.t()
+  def compose(document, typed, custom \\ nil) do
     title = ["# " <> to_string(Map.get(document, :title) || "")]
 
     excerpt =
@@ -33,7 +43,9 @@ defmodule KilnCMS.Firing.LlmMarkdown do
       |> Enum.map(&block_markdown/1)
       |> Enum.reject(&(&1 in [nil, ""]))
 
-    Enum.join(title ++ excerpt ++ blocks, "\n\n") <> "\n"
+    fields = custom |> AnswerText.entries() |> AnswerText.markdown()
+
+    Enum.join(title ++ excerpt ++ blocks ++ fields, "\n\n") <> "\n"
   end
 
   # Per-block Markdown — the shared dispatcher owns the seam: block modules

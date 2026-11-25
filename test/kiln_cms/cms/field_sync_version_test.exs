@@ -31,7 +31,9 @@ defmodule KilnCMS.CMS.FieldSyncVersionTest do
   #     (`item_types` is a nested list, not a field key.)
   #   * `edit_inline` (#2283): a reference's record card. Written only when
   #     `true`, so a file of a site that never ticks it is unchanged.
-  @added_field_keys ~w(edit_inline item_setting prefix step suffix)
+  #   * `deliver_llm` (#2282): the `:llm`/`:json_ld` opt-in. Written only when
+  #     `true`, so a file of a site that never ticks it is unchanged.
+  @added_field_keys ~w(deliver_llm edit_inline item_setting prefix step suffix)
 
   @v1_section_keys ~w(display initially name)
 
