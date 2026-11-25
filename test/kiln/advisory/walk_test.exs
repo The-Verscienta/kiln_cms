@@ -34,6 +34,32 @@ defmodule Kiln.Advisory.WalkTest do
     end
   end
 
+  describe "a malformed Portable Text body (#2768)" do
+    # Fails on the code before #2768: `&1["text"]` on a binary child, and
+    # `to_string/1` on a map text, raised.
+    test "binary children and a map text read as no text, not a crash" do
+      link = %{"_key" => "lk", "_type" => "link", "href" => "/about"}
+
+      blocks = [
+        rich([
+          para("Still counted here."),
+          %{"_type" => "block", "style" => "normal", "children" => ["loose", nil]},
+          %{
+            "_type" => "block",
+            "style" => "h2",
+            "markDefs" => [link],
+            "children" => [%{"text" => %{}, "marks" => ["lk"]}, %{"text" => "Heading"}]
+          }
+        ])
+      ]
+
+      stats = Walk.compute(blocks)
+
+      assert stats.first_paragraph == "Still counted here."
+      assert [%{level: 2, text: "Heading"}] = stats.headings
+    end
+  end
+
   # credo:disable-for-next-line Credo.Check.Refactor.Apply
   defp deprecated(fun, args), do: apply(Body, fun, args)
 

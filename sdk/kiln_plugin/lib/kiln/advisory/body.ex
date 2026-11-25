@@ -229,6 +229,8 @@ defmodule Kiln.Advisory.Body do
   def node_links(node, index), do: links(node, index)
 
   defp links(%{} = node, index) do
+    # A binary or number wraps to an entry the `is_map` filter below skips; a
+    # lone map is read as the one span it is.
     children = node |> Map.get("children", []) |> List.wrap()
 
     node
@@ -238,7 +240,7 @@ defmodule Kiln.Advisory.Body do
     |> Enum.map(fn def ->
       %{
         text: anchor_text(children, def["_key"]),
-        href: to_string(def["href"] || ""),
+        href: scalar_text(def["href"]),
         index: index
       }
     end)
@@ -248,23 +250,30 @@ defmodule Kiln.Advisory.Body do
 
   # The spans carrying this annotation, in document order. `marks` holds a mix
   # of style names ("strong") and markDef keys, so matching is by key.
-  defp anchor_text(children, key) when is_binary(key) do
+  # `children` and each span's `text` are guarded rather than trusted: a body
+  # stored with a binary `children` or a map `text` reads as no anchor text
+  # instead of raising.
+  defp anchor_text(children, key) when is_list(children) and is_binary(key) do
     children
     |> Enum.filter(fn child ->
       is_map(child) and key in (child |> Map.get("marks", []) |> List.wrap())
     end)
-    |> Enum.map_join(&to_string(Map.get(&1, "text", "")))
+    |> Enum.map_join(&scalar_text(Map.get(&1, "text")))
     |> String.trim()
   end
 
   defp anchor_text(_children, _key), do: ""
+
+  defp scalar_text(text) when is_binary(text), do: text
+  defp scalar_text(text) when is_number(text) or is_boolean(text), do: to_string(text)
+  defp scalar_text(_other), do: ""
 
   defp hrefs(%{} = node) do
     node
     |> Map.get("markDefs", [])
     |> List.wrap()
     |> Enum.filter(&match?(%{"_type" => "link"}, &1))
-    |> Enum.map(&to_string(&1["href"] || ""))
+    |> Enum.map(&scalar_text(&1["href"]))
   end
 
   defp hrefs(_node), do: []

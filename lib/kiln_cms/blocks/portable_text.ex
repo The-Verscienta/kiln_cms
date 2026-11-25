@@ -476,6 +476,9 @@ defmodule KilnCMS.Blocks.PortableText do
   defp style_for("heading", _), do: "h2"
   defp style_for(_other, _node), do: "normal"
 
+  # A node's `content` is client-controlled JSON as well (#2768).
+  defp spans_and_defs(content) when not is_list(content), do: {[], []}
+
   defp spans_and_defs(content) do
     {spans, defs, _next} =
       Enum.reduce(content, {[], [], 0}, fn node, {spans, defs, key_idx} ->
@@ -487,8 +490,12 @@ defmodule KilnCMS.Blocks.PortableText do
   end
 
   defp span_from(%{"type" => "text"} = node, key_idx) do
+    # The editor's JSON arrives through a client-controlled hidden input, so
+    # `marks` may be anything (#2768).
+    marks = if is_list(node["marks"]), do: node["marks"], else: []
+
     {marks, defs, key_idx} =
-      (node["marks"] || [])
+      marks
       |> Enum.reduce({[], [], key_idx}, fn
         %{"type" => "link", "attrs" => %{"href" => href}}, {marks, defs, idx} ->
           key = "lk#{idx}"
@@ -602,12 +609,23 @@ defmodule KilnCMS.Blocks.PortableText do
 
   defp sanitize_def(def), do: def
 
+  # ── Shape repair (read side) ───────────────────────────────────────────────
+
+  @doc """
+  Repair a stored body's shape for reading — see
+  `KilnCMS.Blocks.PortableText.Shape`. Every renderer here calls it first.
+  Total and idempotent; a valid body comes back unchanged.
+  """
+  @spec repair_body(term()) :: term()
+  defdelegate repair_body(blocks), to: KilnCMS.Blocks.PortableText.Shape
+
   # ── Portable Text → HTML (web surface) ────────────────────────────────────
 
   @doc "Render PT blocks to an HTML string."
   @spec to_html([pt_block()] | nil) :: String.t()
   def to_html(blocks) when is_list(blocks) do
     blocks
+    |> repair_body()
     |> chunk_list_runs()
     |> Enum.map_join(fn
       [%{"listItem" => _} | _] = items -> list_to_html(items, 1)
@@ -724,11 +742,15 @@ defmodule KilnCMS.Blocks.PortableText do
     wrap(block["style"] || "normal", inner)
   end
 
+  # Second layer behind `repair_body/1` (#2768): nothing that is not a map
+  # renders.
+  defp block_to_html(_other), do: ""
+
   defp code_block_to_html(block) do
     language = KilnCMS.Highlight.normalize(block["language"])
-    children = block["children"] || []
+    children = block["children"] |> List.wrap() |> Enum.filter(&is_map/1)
     plain? = Enum.all?(children, &((&1["marks"] || []) == []))
-    code = Enum.map_join(children, &(&1["text"] || ""))
+    code = Enum.map_join(children, &span_text/1)
 
     case plain? && language && KilnCMS.Highlight.highlight(code, language) do
       {:ok, html} -> html
@@ -741,7 +763,7 @@ defmodule KilnCMS.Blocks.PortableText do
 
   defp plain_code_html(block, language, false = _plain?, _code) do
     defs = block["markDefs"] || []
-    inner = Enum.map_join(block["children"] || [], &span_to_html(&1, defs))
+    inner = block["children"] |> List.wrap() |> Enum.map_join(&span_to_html(&1, defs))
     "<pre><code#{language_class(language)}>#{inner}</code></pre>"
   end
 
@@ -805,9 +827,11 @@ defmodule KilnCMS.Blocks.PortableText do
   defp wrap(_normal, inner), do: "<p>#{inner}</p>"
 
   defp span_to_html(%{} = span, defs) do
-    text = esc(span["text"] || "")
+    text = esc(span_text(span))
     Enum.reduce(span["marks"] || [], text, &apply_mark(&1, &2, defs))
   end
+
+  defp span_to_html(_other, _defs), do: ""
 
   defp apply_mark("strong", acc, _defs), do: "<strong>#{acc}</strong>"
   defp apply_mark("em", acc, _defs), do: "<em>#{acc}</em>"
@@ -816,7 +840,7 @@ defmodule KilnCMS.Blocks.PortableText do
   defp apply_mark("underline", acc, _defs), do: "<u>#{acc}</u>"
 
   defp apply_mark(key, acc, defs) do
-    case Enum.find(defs, &(&1["_key"] == key)) do
+    case Enum.find(defs, &(is_map(&1) and &1["_key"] == key)) do
       %{"_type" => "link", "href" => href} ->
         # Allowlist the URL scheme so fired `:web` HTML (consumed via innerHTML by
         # headless clients) cannot carry `javascript:`/`data:` links. A rejected
@@ -841,6 +865,7 @@ defmodule KilnCMS.Blocks.PortableText do
   @spec to_plain_text([pt_block()] | nil) :: String.t()
   def to_plain_text(blocks) when is_list(blocks) do
     blocks
+    |> repair_body()
     |> Enum.map(&block_text/1)
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
@@ -856,17 +881,30 @@ defmodule KilnCMS.Blocks.PortableText do
       row
       |> table_cells()
       |> Enum.map_join(" ", fn cell ->
-        Enum.map_join(cell["children"] || [], &(&1["text"] || ""))
+        cell["children"] |> List.wrap() |> Enum.map_join(&span_text/1)
       end)
     end)
     |> String.trim()
   end
 
   defp block_text(%{} = block) do
-    (block["children"] || [])
-    |> Enum.map_join(&(&1["text"] || ""))
+    block["children"]
+    |> List.wrap()
+    |> Enum.map_join(&span_text/1)
     |> String.trim()
   end
+
+  # Second layer behind `repair_body/1` (#2768).
+  defp block_text(_other), do: ""
+
+  # A span's text — or an inline object's, which `repair_body/1` leaves as it
+  # is — as a string; a map or list reads as nothing.
+  defp span_text(%{"text" => text}) when is_binary(text), do: text
+
+  defp span_text(%{"text" => text}) when is_number(text) or is_boolean(text),
+    do: to_string(text)
+
+  defp span_text(_span), do: ""
 
   defp esc(value) do
     value |> to_string() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
