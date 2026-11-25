@@ -24510,8 +24510,8 @@ msgstr "La formule échoue sur ce document et serait donc enregistrée vide : %{
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "The gated content this account can read on this site. Each site keeps its own; switch site to edit another."
-msgstr "Le contenu réservé que ce compte peut lire sur ce site. Chaque site garde les siennes ; changez de site pour en modifier un autre."
+msgid "The gated content set for this account on this site. Each site keeps its own; switch site to edit another."
+msgstr "Le contenu réservé attribué à ce compte sur ce site. Chaque site garde le sien ; changez de site pour en modifier un autre."
 
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format

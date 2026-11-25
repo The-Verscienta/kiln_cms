@@ -65,7 +65,7 @@ else.
   ([long form](docs/changelog/unreleased.md#links-backfill-multiple-upgrade))
 - **A draft of a live record saved before a custom field was renamed or deleted on 1.0.0 to 1.12.1 still holds the old key: publishing it after upgrading still drops that value, so re-enter it or discard the draft (#2744). Values already lost are in version history under the old key; copy them back by hand, since a restore drops them.**
   ([long form](docs/changelog/unreleased.md#rename-rewrites-working-copies-upgrade))
-- **On 1.9.0 to 1.12.1, saving an account's audiences panel twice for a waiting or rejected registration removed what the first save set, so accounts approved since may lack audiences you gave them (#2783). Check and re-tick them; KilnCMS can't restore them, though billing-managed audiences return on the next billing change.**
+- **On 1.9.0 to 1.12.1, saving an account's audiences panel for a waiting or rejected registration could remove audiences stored on it, even unchanged, so those registrations and accounts approved since may lack audiences you gave them (#2783). Check and re-tick them; KilnCMS can't restore them, though billing-managed audiences return on the next billing change.**
   ([long form](docs/changelog/unreleased.md#audiences-panel-stored-upgrade))
 
 ### Added

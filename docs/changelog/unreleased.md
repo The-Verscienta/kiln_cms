@@ -31,8 +31,8 @@ carries the reasoning.
 
 <a id="audiences-panel-stored-upgrade"></a>
 
-- **Audiences set on a waiting or rejected registration on 1.9.0 to 1.12.1 may have been lost (#2783).** On those releases the audiences panel on `/editor/accounts/(id)` showed a waiting or rejected registration with every box clear, whatever its registration held, and a save writes exactly the ticked boxes. Saving the panel a second time, or saving it unchanged, therefore removed what the first save set ([below](#audiences-panel-stored)).
-  - **Who to check.** Accounts approved since you upgraded to 1.9.0 that a platform admin gave audiences while they waited or after they were rejected. Open each one's account page on the site it registered on and re-tick what is missing.
+- **Audiences set on a waiting or rejected registration on 1.9.0 to 1.12.1 may have been lost (#2783).** On those releases the audiences panel on `/editor/accounts/(id)` showed a waiting or rejected registration with every box clear, whatever its registration held, and a save writes exactly the ticked boxes. Any save of the panel for such a registration, an unchanged one included, therefore removed the audiences stored on it that weren't ticked in that save: those an earlier save set, and those that landed there another way ([below](#audiences-panel-stored)).
+  - **Who to check.** Registrations that are still waiting or rejected, and accounts approved since you upgraded to 1.9.0, whose audiences panel a platform admin saved while they waited or after they were rejected. Open each one's account page on the site it registered on and re-tick what is missing.
   - **What can't be restored.** KilnCMS keeps no record of an audience edit on its own, so it can't put back what was removed. Audiences a paid membership manages return on that membership's next billing change.
   - **No migration.**
 

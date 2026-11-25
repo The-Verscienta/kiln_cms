@@ -764,7 +764,7 @@ defmodule KilnCMSWeb.AccountsLive do
         </h2>
         <p class="text-sm text-base-content/70">
           {gettext(
-            "The gated content this account can read on this site. Each site keeps its own; switch site to edit another."
+            "The gated content set for this account on this site. Each site keeps its own; switch site to edit another."
           )}
         </p>
         <p :if={@source == :legacy} class="mt-2 text-sm text-warning-ink" id="audiences-source">

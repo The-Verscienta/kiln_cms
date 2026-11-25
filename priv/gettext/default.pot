@@ -24510,7 +24510,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/accounts_live.ex
 #, elixir-autogen, elixir-format
-msgid "The gated content this account can read on this site. Each site keeps its own; switch site to edit another."
+msgid "The gated content set for this account on this site. Each site keeps its own; switch site to edit another."
 msgstr ""
 
 #: lib/kiln_cms_web/live/overview_live.ex
