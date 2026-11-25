@@ -63,6 +63,8 @@ else.
   ([long form](docs/changelog/unreleased.md#direct-upload-claim-upgrade))
 - **If you ran `mix kiln.links.backfill` on 1.5.0 to 1.12.1, run it again after upgrading: it had deleted every list reference edge, and on 1.12.1 every reference edge in a group or flexible item (#2742). Nested edges return only when each record's custom fields next change.**
   ([long form](docs/changelog/unreleased.md#links-backfill-multiple-upgrade))
+- **A draft of a live record saved before a custom field was renamed or deleted on 1.0.0 to 1.12.1 still holds the old key: publishing it after upgrading still drops that value, so re-enter it or discard the draft (#2744). Values already lost are in version history under the old key; copy them back by hand, since a restore drops them.**
+  ([long form](docs/changelog/unreleased.md#rename-rewrites-working-copies-upgrade))
 
 ### Added
 
@@ -92,6 +94,10 @@ else.
   ([long form](docs/changelog/unreleased.md#list-item-error-position))
 
 ### Fixed
+
+- **The Redirects form shows a refused path as an error on its field instead of crashing the page (#2763).**
+  An over-long path or locale, the root path, the target's own URL, a missing target and a write the policy refuses no longer lose the form.
+  ([long form](docs/changelog/unreleased.md#redirects-refused-path))
 
 - **The visual-editing preview read (`/api/visual-editing/:type/:slug`) encodes only prose: a video's `src`, a file's `download_url`, an embed's `resolved_url`, media ids and other URL or identifier fields come through unchanged, instead of with an invisible tail that made them 404 (#2770).**
   No migration; rolling the pin back is safe.
@@ -169,6 +175,10 @@ else.
 - **Organize's tag review sets aside a run that finishes after the filter changed, instead of showing its proposals for the new selection, and a filter change no longer lets a second run start beside the first (#2762).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#organize-stale-run))
+
+- **Renaming, deleting or reshaping a custom field (group sub-fields, link fields and flexible items included) now rewrites the drafts of live records too, so *Publish changes*, a release or an unpublish no longer reports a conflict nobody made or drops the draft's value (#2744).**
+  No migration. Open editors of the affected records see "changed elsewhere" once; an `If-Match` client gets one 412.
+  ([long form](docs/changelog/unreleased.md#rename-rewrites-working-copies))
 
 ## [1.12.1] - 2026-11-23
 

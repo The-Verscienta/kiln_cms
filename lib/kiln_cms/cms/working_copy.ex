@@ -544,6 +544,49 @@ defmodule KilnCMS.CMS.WorkingCopy do
   # order (#2025).
   defp ordered_live_ids(record, key), do: record |> live_value(key) |> Enum.map(&to_string/1)
 
+  @doc """
+  The base map after something other than an editor rewrote both copies of
+  one held key in step (a field rename in `Changes.SyncFieldValues`): `base`
+  with `key`'s fingerprint moved so the rewrite is never what makes
+  `reconcile/1` report a conflict.
+
+  The values are as the data layer stores them, before and after: the live
+  column's and the held copy's. A base that matched the held value now
+  matches the rewritten held value (the copy still never changed it); one
+  that matched the live value matches the rewritten live value (the live row
+  still has not moved since the copy); any other base is a conflict already
+  and stays one. A key with no recorded base is left without one.
+  """
+  @spec rebase(module(), %{key() => String.t()}, key(), {term(), term()}, {term(), term()}) ::
+          %{key() => String.t()}
+  def rebase(resource, base, key, {live_before, held_before}, {live_after, held_after}) do
+    case Map.fetch(base, key) do
+      {:ok, recorded} ->
+        cond do
+          recorded == stored_fingerprint(resource, key, held_before) ->
+            Map.put(base, key, stored_fingerprint(resource, key, held_after))
+
+          recorded == stored_fingerprint(resource, key, live_before) ->
+            Map.put(base, key, stored_fingerprint(resource, key, live_after))
+
+          true ->
+            base
+        end
+
+      :error ->
+        base
+    end
+  end
+
+  # A stored value fingerprinted as `reconcile/1` sees it: cast back to the
+  # attribute's type first, as a loaded record (or `held_fingerprint/2`) has it.
+  defp stored_fingerprint(resource, key, stored) do
+    case attribute_named(resource, key) do
+      nil -> fingerprint(resource, key, stored)
+      name -> fingerprint(resource, key, cast(resource, name, stored))
+    end
+  end
+
   @doc "The recorded base fingerprints, by held key."
   @spec base_fingerprints(content()) :: %{key() => String.t()}
   def base_fingerprints(%{working_base: %{} = base}), do: base

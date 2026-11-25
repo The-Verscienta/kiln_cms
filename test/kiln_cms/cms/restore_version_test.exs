@@ -495,6 +495,8 @@ defmodule KilnCMS.CMS.RestoreVersionTest do
       # Retire the definition, then restore the version that still carried its key.
       page = CMS.update_page!(page, %{title: "P2"}, actor: admin)
       CMS.destroy_field_definition!(definition, actor: admin)
+      # The purge moved the record's lock version (#2744): read it again.
+      page = CMS.get_page!(page.id, actor: admin)
 
       restored = CMS.restore_page_version!(page, %{version_id: create_version.id}, actor: admin)
 

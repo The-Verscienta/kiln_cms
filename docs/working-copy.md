@@ -195,6 +195,15 @@ the draft's value over it without a word. It no longer does (#1815):
   always did. The fingerprint is a SHA-256 over the stored value; if it ever
   read differently after an upgrade, the result is a reported conflict, never
   a silent overwrite.
+- **A field rename, delete or reshape is not a live change (#2744).** When an
+  admin renames or deletes a custom field (a group sub-field, link field or
+  flexible item included) or flips its `multiple`, the same rewrite is applied
+  to the draft's custom fields and the live ones, and the recorded base moves
+  with it. *Publish changes* then reports no conflict nobody made, and a real
+  one stays reported. The record's `lock_version` moves, so an editor who had
+  it open gets the "changed elsewhere, reload" banner once. Versions keep the
+  old key: restoring one saved before a rename drops that value
+  (`KilnCMS.CMS.Changes.SyncFieldValues`, "Working copies").
 
 ## When a co-editor saves while you have the document open
 
