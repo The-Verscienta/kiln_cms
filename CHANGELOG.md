@@ -61,6 +61,9 @@ else.
 
 - **Run `mix kiln.reserved_paths` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) to list pages slugged `developers`, `ready`, `setup`, `sign-in`, `sign-out`, `actor`, `ap`, `mcp` or `password-reset`, and path aliases under them: their built-in routes already served those URLs instead (#2898). Give each a new slug or alias.** No migration; read-only.
   ([long form](docs/changelog/unreleased.md#reserved-route-slugs-upgrade))
+- **Collaborative editing: a collab token minted before this release names no session, and is still accepted with its old per-account behavior for this release only, at most 24 hours after the last old node stops (#2490).**
+  Nothing to do; the next release refuses such tokens. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#session-bound-sockets-upgrade))
 
 ### Breaking
 
@@ -145,6 +148,12 @@ else.
 - **Backups: a cron backup that History recorded as Failed "Interrupted" is corrected, once, when its stamp turns out complete (#2846).**
   The importer's summary gains a `reevaluated` count, and retention's `pruned` mark now locks the row it marks. No migration; rolling the pin back is safe.
   ([#3447](https://github.com/The-Verscienta/kiln_cms/pull/3447) · [long form](docs/changelog/unreleased.md#reevaluate-interrupted-import))
+
+### Security
+
+- **Signing out one session now also closes that session's collaborative-editing rooms (`/ws/collab`) and a `/ws/gql` socket opened with its token, which before stayed open after idle expiry, "Sign out everyone", the browser's own Sign out or a sign-out from Active sessions (#2490).**
+  A `/ws/gql` document sent after a sign-out the socket missed is refused with `extensions.code: "unauthenticated"`. No migration, no setting.
+  ([long form](docs/changelog/unreleased.md#session-bound-sockets))
 
 ## [1.13.0] - 2026-11-25
 
