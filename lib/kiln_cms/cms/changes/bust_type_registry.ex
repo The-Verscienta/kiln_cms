@@ -57,50 +57,25 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
         # `multiple` too: flipping it reshapes the stored values in SQL
         # (`SyncFieldValues`), so published documents re-fire to pick up the
         # new shape — their artifacts, media usage edges and cached responses.
-        if Ash.Changeset.changing_attribute?(changeset, :name) or
-             Ash.Changeset.changing_attribute?(changeset, :multiple) or
-             reindex_search?(changeset, record) or
-             replain?(changeset, record) or
-             reconvert?(changeset, record) or
-             rebyline?(changeset, record) or
-             llm_changed?(changeset, record) or
-             item_type_destroyed?(changeset, record) or
-             Ash.Changeset.changing_attribute?(changeset, :private) do
-          # Determine which type this field belongs to and sweep it
-          type =
-            cond do
-              not is_nil(Map.get(record, :type_definition_id)) ->
-                # Dynamic type — look up its name via the definition id, as the
-                # admin who renamed the field (#1659). FAIL CLOSED: a refusal
-                # must not read as "no such type" and skip the re-fire, leaving
-                # every document's `[field:…]` SEO tokens stale; it raises into
-                # the rescue below, which logs it.
-                case KilnCMS.CMS.get_type_definition(
-                       record.type_definition_id,
-                       context
-                       |> Ash.Context.to_opts()
-                       |> Keyword.merge(tenant: record.org_id, authorize_with: :error)
-                     ) do
-                  {:ok, type_def} -> type_def.name
-                  {:error, %Ash.Error.Forbidden{} = error} -> raise error
-                  _ -> nil
-                end
+        cond do
+          Ash.Changeset.changing_attribute?(changeset, :name) or
+            Ash.Changeset.changing_attribute?(changeset, :multiple) or
+            reindex_search?(changeset, record) or
+            replain?(changeset, record) or
+            reconvert?(changeset, record) or
+            rebyline?(changeset, record) or
+            llm_changed?(changeset, record) or
+            item_type_destroyed?(changeset, record) or
+              Ash.Changeset.changing_attribute?(changeset, :private) ->
+            sweep_field_type(record, context, [])
 
-              content_type = Map.get(record, :content_type) ->
-                to_string(content_type)
+          # `:fallback` on or off (#2905) changes only what the type's locale
+          # variants inherit, so only they re-fire.
+          refallback?(changeset, record) ->
+            sweep_field_type(record, context, only: :translations)
 
-              # A link field (R3) re-fires its reference field's type, a group
-              # sub-field its group's, an item type or an item's sub-field
-              # (#2282) its flexible field's — however deep it nests: its
-              # values were moved or purged inside that type's documents.
-              parent_id = KilnCMS.CMS.FieldDefinition.parent_id(record) ->
-                link_parent_type(parent_id, record.org_id)
-
-              true ->
-                nil
-            end
-
-          if type, do: KilnCMS.Firing.Sweep.sweep_type(record.org_id, type)
+          true ->
+            :ok
         end
 
         result
@@ -116,6 +91,44 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   end
 
   defp enqueue_seo_refire(_changeset, other, _context), do: other
+
+  # Determine which type this field belongs to and sweep it.
+  defp sweep_field_type(record, context, opts) do
+    type =
+      cond do
+        not is_nil(Map.get(record, :type_definition_id)) ->
+          # Dynamic type — look up its name via the definition id, as the
+          # admin who renamed the field (#1659). FAIL CLOSED: a refusal
+          # must not read as "no such type" and skip the re-fire, leaving
+          # every document's `[field:…]` SEO tokens stale; it raises into
+          # the rescue in `enqueue_seo_refire/3`, which logs it.
+          case KilnCMS.CMS.get_type_definition(
+                 record.type_definition_id,
+                 context
+                 |> Ash.Context.to_opts()
+                 |> Keyword.merge(tenant: record.org_id, authorize_with: :error)
+               ) do
+            {:ok, type_def} -> type_def.name
+            {:error, %Ash.Error.Forbidden{} = error} -> raise error
+            _ -> nil
+          end
+
+        content_type = Map.get(record, :content_type) ->
+          to_string(content_type)
+
+        # A link field (R3) re-fires its reference field's type, a group
+        # sub-field its group's, an item type or an item's sub-field
+        # (#2282) its flexible field's — however deep it nests: its
+        # values were moved or purged inside that type's documents.
+        parent_id = KilnCMS.CMS.FieldDefinition.parent_id(record) ->
+          link_parent_type(parent_id, record.org_id)
+
+        true ->
+          nil
+      end
+
+    if type, do: KilnCMS.Firing.Sweep.sweep_type(record.org_id, type, opts)
+  end
 
   # The type a nested definition's values live in: walk up to the top-level
   # field that owns them (one hop for a link field or a group's sub-field, up to
@@ -160,6 +173,23 @@ defmodule KilnCMS.CMS.Changes.BustTypeRegistry do
   defp reconvert?(changeset, record) do
     Ash.Changeset.changing_attribute?(changeset, :deliver_portable) or
       (changeset.action_type == :destroy and Map.get(record, :deliver_portable) == true)
+  end
+
+  # A `localization` change to or from `:fallback` (#2905) adds or drops the
+  # values a locale variant inherits for the field, and their
+  # `inherited_fields` entry, on its fired artifacts
+  # (`KilnCMS.I18n.FieldFallback`) — and deleting a `:fallback` field drops
+  # them. Between `:localized` and `:shared` nothing renders differently: a
+  # shared value is copied into the variants when the source publishes. Not on
+  # create: a new field holds no value anywhere, so there is nothing to inherit.
+  defp refallback?(changeset, record) do
+    (changeset.action_type == :update and
+       Ash.Changeset.changing_attribute?(changeset, :localization) and
+       :fallback in [
+         Ash.Changeset.get_data(changeset, :localization),
+         Map.get(record, :localization)
+       ]) or
+      (changeset.action_type == :destroy and Map.get(record, :localization) == :fallback)
   end
 
   # A `deliver_llm` flip adds or drops the field's text on the fired `:llm` and
