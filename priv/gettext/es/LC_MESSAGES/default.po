@@ -1711,6 +1711,13 @@ msgid_plural "%{count} devices are subscribed with it."
 msgstr[0] "1 dispositivo está suscrito con ella."
 msgstr[1] "%{count} dispositivos están suscritos con ella."
 
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 draft in this release has a scheduled unpublish date, shown in the item list."
+msgid_plural "%{count} drafts in this release have a scheduled unpublish date, shown in the item list."
+msgstr[0] "%{count} borrador de esta publicación tiene una fecha de despublicación programada, indicada en la lista de elementos."
+msgstr[1] "%{count} borradores de esta publicación tienen una fecha de despublicación programada, indicada en la lista de elementos."
+
 #: lib/kiln_cms_web/components/accessibility_components.ex
 #, elixir-autogen, elixir-format
 msgid "1 heading has no text — it structures the page while saying nothing."
@@ -1766,6 +1773,13 @@ msgid "1 link has no text — there's nothing to click and nothing to announce."
 msgid_plural "%{count} links have no text — there's nothing to click and nothing to announce."
 msgstr[0] "1 enlace no tiene texto: no hay nada en lo que hacer clic ni nada que anunciar."
 msgstr[1] "%{count} enlaces no tienen texto: no hay nada en lo que hacer clic ni nada que anunciar."
+
+#: lib/kiln_cms_web/live/editor_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 of these has a scheduled unpublish date:"
+msgid_plural "%{count} of these have a scheduled unpublish date:"
+msgstr[0] "%{count} de ellos tiene una fecha de despublicación programada:"
+msgstr[1] "%{count} de ellos tienen una fecha de despublicación programada:"
 
 #: lib/kiln_cms_web/components/seo_components.ex
 #, elixir-autogen, elixir-format
@@ -4402,6 +4416,11 @@ msgstr "Tipo archivado"
 #, elixir-autogen, elixir-format
 msgid "Archived types"
 msgstr "Tipos archivados"
+
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "Archives"
+msgstr "Se archiva el"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -11021,6 +11040,11 @@ msgstr "Corrige el elemento de arriba y luego reábrelo para programarlo o publi
 #, elixir-autogen, elixir-format
 msgid "Flag near-duplicates"
 msgstr "Señalar casi duplicados"
+
+#: lib/kiln_cms_web/components/core_components.ex
+#, elixir-autogen, elixir-format
+msgid "Flagged expired"
+msgstr "Se marca caducado el"
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
@@ -20885,6 +20909,12 @@ msgstr "Programado para publicarse el %{date} a las %{time} UTC."
 msgid "Scheduled to unpublish"
 msgstr "Programado para despublicarse"
 
+#: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/release_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scheduled to unpublish once published"
+msgstr "Programado para despublicarse una vez publicado"
+
 #: lib/kiln_cms_web/live/calendar_live.ex
 #, elixir-autogen, elixir-format
 msgid "Scheduled unpublish"
@@ -27174,7 +27204,7 @@ msgid "Unpublish on go-live"
 msgstr "Despublicar al lanzarse"
 
 #: lib/kiln_cms_web/components/content_editor/chrome_components.ex
-#: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/components/core_components.ex
 #, elixir-autogen, elixir-format
 msgid "Unpublishes"
 msgstr "Se despublica el"
@@ -29645,6 +29675,7 @@ msgstr "y"
 
 #: lib/kiln_cms/security/posture.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
+#: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/media_live.ex
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format

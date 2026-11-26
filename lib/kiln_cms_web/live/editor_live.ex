@@ -65,6 +65,7 @@ defmodule KilnCMSWeb.EditorLive do
      |> assign(:statuses, Filters.statuses())
      |> assign(:selected, MapSet.new())
      |> assign(:confirming_bulk, nil)
+     |> assign(:bulk_expiring, [])
      # The Export disclosure (#2293): the matching count is read when it opens
      # (`:unknown` until then), never with the list; the private-fields
      # opt-in rewrites the download links.
@@ -197,6 +198,8 @@ defmodule KilnCMSWeb.EditorLive do
     # A proposed publish date (#1812) is shown to the reviewer on the row.
     :proposed_publish_at,
     :unpublish_at,
+    # What `unpublish_at` does when it fires: unpublish, archive or flag.
+    :expiry_action,
     :working_copy_at,
     # The row's byline, named from the `@authors` roster already loaded.
     :author_id,
@@ -933,7 +936,11 @@ defmodule KilnCMSWeb.EditorLive do
   def handle_event("bulk", %{"action" => verb}, socket) when is_binary(verb) do
     if verb in bulk_verbs(socket.assigns.tier, socket.assigns.editors_can_publish) do
       confirming = if MapSet.size(socket.assigns.selected) > 0, do: verb
-      {:noreply, assign(socket, :confirming_bulk, confirming)}
+
+      {:noreply,
+       socket
+       |> assign(:confirming_bulk, confirming)
+       |> assign(:bulk_expiring, bulk_expiring(socket, confirming))}
     else
       # No one record here: the selection can span types, so the sentence is
       # decided from the tier and the publish switch alone.
@@ -1451,6 +1458,37 @@ defmodule KilnCMSWeb.EditorLive do
     case ContentTypes.get_record(kind, id, actor: actor, tenant: org) do
       {:ok, record} -> {:ok, record}
       {:error, _not_found} -> :gone
+    end
+  end
+
+  # The selected drafts a bulk Publish would put up with a takedown already
+  # set (#2892): the confirm names them, since the publisher approves the date
+  # with the page and never opens the editor that shows it. Rows on screen are
+  # read from the list; a selection kept from another page or filter is
+  # fetched. Sorted soonest first, the order they would come down in.
+  defp bulk_expiring(socket, "publish") do
+    %{items: items, selected: selected, actor: actor, current_org: org} = socket.assigns
+    on_screen = Map.new(items, fn {kind, record} -> {"#{kind}:#{record.id}", record} end)
+
+    selected
+    |> Enum.flat_map(fn key ->
+      case Map.fetch(on_screen, key) do
+        {:ok, record} -> [record]
+        :error -> fetch_selected(key, actor, org)
+      end
+    end)
+    |> Enum.filter(&(&1.state in [:draft, :in_review] and not is_nil(&1.unpublish_at)))
+    |> Enum.sort_by(& &1.unpublish_at, DateTime)
+  end
+
+  defp bulk_expiring(_socket, _verb), do: []
+
+  defp fetch_selected(key, actor, org) do
+    [kind, id] = String.split(key, ":", parts: 2)
+
+    case fetch_row(kind, id, actor, org) do
+      {:ok, record} -> [record]
+      :gone -> []
     end
   end
 
@@ -2682,6 +2720,36 @@ defmodule KilnCMSWeb.EditorLive do
             <span id="bulk-confirm-prompt">
               {bulk_confirm_prompt(@confirming_bulk, @selected_count)}
             </span>
+            <div
+              :if={@confirming_bulk == "publish" and @bulk_expiring != []}
+              id="bulk-confirm-expiring"
+              class="order-last basis-full text-xs"
+            >
+              <p class="flex items-center gap-1 font-medium">
+                <.icon name="hero-clock" class="size-3.5" />
+                {ngettext(
+                  "1 of these has a scheduled unpublish date:",
+                  "%{count} of these have a scheduled unpublish date:",
+                  length(@bulk_expiring)
+                )}
+              </p>
+              <ul class="mt-1 space-y-0.5 pl-5">
+                <li
+                  :for={record <- Enum.take(@bulk_expiring, 10)}
+                  id={"bulk-expiring-#{record.id}"}
+                >
+                  {record.title} — {expiry_verb(record.expiry_action)}
+                  <time
+                    id={"bulk-expiring-time-#{record.id}"}
+                    phx-hook="LocalTime"
+                    datetime={DateTime.to_iso8601(record.unpublish_at)}
+                  >{Calendar.strftime(record.unpublish_at, "%Y-%m-%d %H:%M")} UTC</time>
+                </li>
+                <li :if={length(@bulk_expiring) > 10} class="text-base-content/70">
+                  {gettext("and %{count} more", count: length(@bulk_expiring) - 10)}
+                </li>
+              </ul>
+            </div>
             <div class="ml-auto flex flex-wrap justify-end gap-2">
               <button
                 type="button"
@@ -2794,13 +2862,20 @@ defmodule KilnCMSWeb.EditorLive do
                       datetime={DateTime.to_iso8601(record.proposed_publish_at)}
                     >{Calendar.strftime(record.proposed_publish_at, "%Y-%m-%d %H:%M")} UTC</time>
                   </span>
+                  <%!-- On a draft or in-review row too: whoever publishes it from
+                        here approves the date with the page, and this row is all
+                        they see of it (#2892). --%>
                   <span
-                    :if={record.unpublish_at && record.state == :published}
+                    :if={record.unpublish_at && record.state in [:draft, :in_review, :published]}
                     class="flex items-center gap-1"
-                    title={gettext("Scheduled to unpublish")}
+                    title={
+                      if record.state == :published,
+                        do: gettext("Scheduled to unpublish"),
+                        else: gettext("Scheduled to unpublish once published")
+                    }
                   >
                     <.icon name="hero-clock" class="size-3.5" />
-                    <span>{gettext("Unpublishes")}</span>
+                    <span>{expiry_verb(record.expiry_action)}</span>
                     <time
                       id={"unpublish-#{kind}-#{record.id}"}
                       phx-hook="LocalTime"

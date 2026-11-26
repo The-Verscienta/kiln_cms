@@ -43,6 +43,11 @@ groups: **Planned** (open, scheduled, publishing, failed), **Published**, and
    ship controls**, because one blocked item means the whole release fails —
    on a large release, a single red badge in a long list is not a warning
    anybody reliably sees.
+   A draft the release puts up that already has a **Scheduled unpublish at**
+   date shows it under its title, and the ship controls total them (*1 draft
+   in this release has a scheduled unpublish date, shown in the item list.*).
+   Shipping the release approves those dates too
+   ([#2892](https://github.com/The-Verscienta/kiln_cms/issues/2892)).
 4. **Preview it.** **Create preview link** mints a short-lived, shareable URL
    showing every document as the release would publish it, plus everything the
    release takes down. No editor account needed to open it — useful for

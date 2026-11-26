@@ -90,11 +90,12 @@ mirrors.
   a create, `unpublish_at` and `expiry_action` do nothing until someone with
   publish rights publishes or schedules the whole record. Gating them there
   would only stop an editor preparing an embargo on their own draft. The
-  publisher is meant to approve the dates along with the page, but not every
-  route shows them ([#2892](https://github.com/The-Verscienta/kiln_cms/issues/2892)): an admin can approve or publish from a
-  content-list row or the bulk bar, where the **Unpublishes** badge appears
-  only on published rows, and a release publishes its items without showing
-  their dates.
+  publisher is meant to approve the dates along with the page. Until
+  [#2892](https://github.com/The-Verscienta/kiln_cms/issues/2892) (after
+  1.13.0) not every route showed them: a content-list row or the bulk bar
+  showed the **Unpublishes** badge only on published rows, and a release
+  published its items without their dates. Now the draft's row, the bulk
+  **Publish** confirm and the release's item list all show them.
 - **Gating `:unarchive`.** It lands on draft, so nothing goes online or
   offline. It stays with the editor-level policy, as does `:publish_changes`,
   which only changes a page that is already live

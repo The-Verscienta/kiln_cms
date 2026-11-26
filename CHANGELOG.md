@@ -67,6 +67,10 @@ else.
   The copy's text is kept by save and autosave, and is independent of the original. This was a 1.13.0 known issue.
   ([long form](docs/changelog/unreleased.md#duplicate-rich-text-body))
 
+- **Publishing a draft from the content list, the bulk bar or a release now shows its scheduled unpublish date first (#2892).**
+  The row, the bulk Publish confirm and the release's item list name the date and what happens then. A 1.13.0 known issue.
+  ([long form](docs/changelog/unreleased.md#publish-shows-unpublish-date))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —
