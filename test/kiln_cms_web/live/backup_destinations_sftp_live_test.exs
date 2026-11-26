@@ -125,6 +125,43 @@ defmodule KilnCMSWeb.BackupDestinationsSftpLiveTest do
     assert has_element?(lv, "#host-key-#{row.id} [data-role=host-key-unconfirmed]")
   end
 
+  test "a path with a space in a NAS share name saves from the form (#3199)", %{
+    conn: conn,
+    server: server
+  } do
+    lv = mount(conn)
+    lv |> element("#destination-new") |> render_click()
+    lv |> element("#destination-kind-sftp") |> render_click()
+
+    submit = fn path ->
+      lv
+      |> form("#destination-form",
+        destination: %{
+          name: "NAS",
+          enabled: "false",
+          settings: %{
+            host: "127.0.0.1",
+            port: Integer.to_string(server.port),
+            username: "kiln",
+            path: path
+          },
+          secrets: %{password: SftpServer.password()}
+        }
+      )
+      |> render_submit()
+    end
+
+    # Climbing out is still refused, and nothing is saved.
+    assert submit.("/volume1/../etc") =~ "the path must be folder names"
+    assert Backups.list_backup_destinations!(actor: platform_admin()) == []
+
+    submit.("/volume1/Backup Share/kiln")
+
+    assert [row] = Backups.list_backup_destinations!(actor: platform_admin())
+    assert row.settings["path"] == "/volume1/Backup Share/kiln"
+    assert render(lv) =~ "sftp://kiln@127.0.0.1:#{server.port}/volume1/Backup Share/kiln"
+  end
+
   test "check, compare and trust the key; the destination can then be enabled", %{
     conn: conn,
     server: server

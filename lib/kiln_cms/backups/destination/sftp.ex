@@ -88,7 +88,9 @@ defmodule KilnCMS.Backups.Destination.Sftp do
         name: "path",
         type: :string,
         required?: true,
-        help: "An absolute folder on the server to keep backups in, e.g. /backups/kiln."
+        help:
+          "An absolute folder on the server to keep backups in, e.g. /backups/kiln or " <>
+            "/volume1/Backup Share/kiln."
       },
       %{name: "password", type: :secret, required?: false, help: nil},
       %{
