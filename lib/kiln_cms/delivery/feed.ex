@@ -72,6 +72,9 @@ defmodule KilnCMS.Delivery.Feed do
       a draft's delete. An anonymous subscriber is told nothing.
 
   It fails closed: an exposure that cannot be read or written hides the event.
+  So does any other failure of the decision, a raise or an exit (a database
+  connection that goes away mid-read, #2938): the event is hidden from
+  streams, and this node's in-BEAM subscribers still get it.
 
   A resume through `GET /api/feed` replays from the sync API's version
   history, so it inherits the sync API's commit-lag assumption (see
@@ -303,7 +306,7 @@ defmodule KilnCMS.Delivery.Feed do
 
   # After the commit (see "After the commit"): decide, hand off, report.
   defp deliver(webhook_event, org_id, feed_event) do
-    feed_event = with_anonymous_view(feed_event, org_id)
+    feed_event = safe_anonymous_view(feed_event, org_id)
 
     :ok = Relay.dispatch(org_id, "feed:" <> org_id, {:kiln_feed, feed_event})
 
@@ -328,6 +331,23 @@ defmodule KilnCMS.Delivery.Feed do
   end
 
   # ── The anonymous view ───────────────────────────────────────────────────
+
+  # The decision only gates the SSE streams: whatever stops it, a raise or an
+  # exit (a connection whose owner went away mid-checkout, #2938), the event
+  # is hidden from them and still handed to the relay. Uncaught, `deliver/3`'s
+  # own catch would drop it for every in-BEAM subscriber too.
+  defp safe_anonymous_view(%Event{} = event, org_id) do
+    with_anonymous_view(event, org_id)
+  rescue
+    error -> hidden_from_streams(event, Exception.message(error))
+  catch
+    :exit, reason -> hidden_from_streams(event, inspect(reason))
+  end
+
+  defp hidden_from_streams(event, reason) do
+    Logger.error("Feed event #{event.id} hidden from streams: " <> reason)
+    %{event | anonymous: :hide, sse: nil}
+  end
 
   defp with_anonymous_view(%Event{} = event, org_id) do
     anonymous = anonymous(event, org_id)
