@@ -53,6 +53,12 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="field-schema-deadline"></a>
+
+- **A slow schema build no longer refuses a valid JSON field value (#3063).** A `:json` custom field with a JSON Schema checks each written value in its own process under a 1-second deadline, so a pathological `pattern` fails the save with a message instead of holding the request. The schema was built inside that deadline too. The first build on a node loads the JSV builder, every draft 2020-12 vocabulary and the embedded meta-schema (about 20 modules, tens of milliseconds when idle, where a later build takes well under a millisecond), and on a busy node that could pass the second. The save was then refused with "took too long to check against the schema" although the value was valid.
+  - **What changes.** The schema is built first, in the saving process, the same build that already runs unbounded when the field definition is saved. The deadline starts after it and covers only the check of the value.
+  - **Unchanged.** The schema limits (16 KB, 16 levels, 1,000 values, no remote references), the value limits, the deadline and its message. A value whose check runs past the deadline is still refused. No migration; rolling the pin back is safe.
+
 <a id="host-key-alert-per-destination"></a>
 
 - **A changed SFTP host key raises an alert for each destination, even when two change in the same alert window (#3201).** The platform alert `backup_host_key_changed` claimed the one alert window that all platform alerts of a kind share. When a second server's key changed within the same 15 minutes, its `backup_destination_host_key_mismatch` event was written to the instance security log, but the window was already taken, so no alert named that destination.
