@@ -104,14 +104,18 @@ defmodule KilnCMS.CrawlerVerification do
 
     * `:failed`: the lookup proved the claim false (`{:unverified, :failed}`).
     * `:silent`: the address's PTR query got no answer (`{:unverified, :error}`).
-      Read only while `resolver_failing?/1` is false: while this node's
-      resolver is itself failing, the silence says nothing about the network.
+      Written only while `resolver_failing?/1` is false, and read only while
+      it is false: while this node's resolver is itself failing, the silence
+      says nothing about the network.
 
   Nothing else marks: not a lookup turned away by a cap or a busy slot (an
   attacker can spend those from other networks), not a forward error in the
   engine's own zone, not a verified result, not an answer from a range list.
-  A verified result does not clear a mark; what a mark means for a verified
-  claim is the caller's policy (the guard: nothing). A `:silent` mark never replaces
+  A lookup that verifies an address clears a `:silent` mark on its `/64`, so
+  one timed-out PTR query for a real crawler does not outlive the crawler's
+  next verified address; only the engine's own DNS produces that result.
+  It never clears a `:failed` mark; what a mark means for a verified claim is
+  the caller's policy (the guard: nothing). A `:silent` mark never replaces
   a `:failed` one; every mark written refreshes the entry's
   `:network_mark_ttl_ms` (1 h).
 
@@ -837,9 +841,22 @@ defmodule KilnCMS.CrawlerVerification do
 
   # Only a finished lookup's own evidence marks, and only while the 404 guard,
   # the one reader, is on. A `:forward_error` is the engine's zone, not the
-  # address's (#2588), and marks nothing.
+  # address's (#2588), and marks nothing. Silence while this node's resolver
+  # is failing says nothing about the network, so it marks nothing either:
+  # otherwise an outage would leave every crawler `/64` it touched marked for
+  # the hour after recovery. A verified result is the engine's own DNS
+  # vouching for the address, which no claimant can forge, so it clears a
+  # `:silent` mark on its `/64` (a transient timeout), never a `:failed` one.
   defp mark_network(ip, {:unverified, :failed}, config), do: mark_if_guarded(ip, :failed, config)
-  defp mark_network(ip, {:unverified, :error}, config), do: mark_if_guarded(ip, :silent, config)
+
+  defp mark_network(ip, {:unverified, :error}, config) do
+    if resolver_failing?(config), do: :ok, else: mark_if_guarded(ip, :silent, config)
+  end
+
+  defp mark_network(ip, :verified, _config) do
+    if scanner_guard_on?(), do: clear_silent(network_key(ip)), else: :ok
+  end
+
   defp mark_network(_ip, _status, _config), do: :ok
 
   defp mark_if_guarded(ip, kind, config) do
@@ -869,6 +886,22 @@ defmodule KilnCMS.CrawlerVerification do
 
   defp merge_mark(:failed, :silent), do: {:ignore, :failed}
   defp merge_mark(_current, kind), do: {:commit, kind}
+
+  # Atomic like `put_mark/3`, so a `:failed` mark written at the same moment
+  # is never the one deleted. Never raises into the lookup either.
+  defp clear_silent(nil), do: :ok
+
+  defp clear_silent(key) do
+    Cachex.transaction(@network_cache, [key], fn worker ->
+      with {:ok, :silent} <- Cachex.get(worker, key), do: Cachex.del(worker, key)
+    end)
+
+    :ok
+  rescue
+    _exception -> :ok
+  catch
+    :exit, _reason -> :ok
+  end
 
   # The `/64` of an IPv6 address, as a tuple: never a string, never joined
   # with anything a client sends. IPv4 has no network mark.

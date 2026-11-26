@@ -1145,6 +1145,22 @@ defmodule KilnCMS.CrawlerVerificationTest do
       refute CrawlerVerification.network_flagged?(neighbor(ip), failing)
     end
 
+    test "a PTR query with no answer while the resolver fails marks nothing, " <>
+           "so the outage leaves no mark behind",
+         %{opts: opts, canary: canary} do
+      failing = failing_resolver(opts, canary)
+      ip = marked_v6()
+      Stub.put_ptr(ip, {:error, :timeout})
+
+      assert finish(:google, ip, failing) == {:unverified, :error}
+      assert network_mark(ip) == nil
+
+      # The resolver recovers: nothing marked during the outage is read now.
+      Stub.put_ptr(canary, [])
+      eventually(fn -> not CrawlerVerification.resolver_failing?(failing) end)
+      refute CrawlerVerification.network_flagged?(neighbor(ip), opts)
+    end
+
     test "a silent mark never replaces a failed one", %{opts: opts, canary: canary} do
       ip = marked_v6()
       CrawlerVerification.put_network_mark(ip, :failed)
@@ -1168,7 +1184,8 @@ defmodule KilnCMS.CrawlerVerificationTest do
       refute CrawlerVerification.network_flagged?(ip, opts)
     end
 
-    test "a verified lookup marks nothing, and clears no mark", %{opts: opts} do
+    test "a verified lookup marks nothing, clears a silent mark, and keeps a failed one",
+         %{opts: opts} do
       ip = marked_v6()
       host = unique_host("crawl.googlebot.com")
       Stub.put_ptr(ip, [host])
@@ -1177,13 +1194,36 @@ defmodule KilnCMS.CrawlerVerificationTest do
       assert finish(:google, ip, opts) == :verified
       refute CrawlerVerification.network_flagged?(ip, opts)
 
-      CrawlerVerification.put_network_mark(ip, :failed)
-      sibling = neighbor(ip)
-      Stub.put_ptr(sibling, [host])
-      Stub.put_addresses(host, [sibling])
-
-      assert finish(:google, sibling, opts) == :verified
+      CrawlerVerification.put_network_mark(ip, :silent)
       assert CrawlerVerification.network_flagged?(ip, opts)
+      silent_sibling = neighbor(ip)
+      Stub.put_ptr(silent_sibling, [host])
+      Stub.put_addresses(host, [silent_sibling])
+
+      assert finish(:google, silent_sibling, opts) == :verified
+      assert network_mark(ip) == nil
+      refute CrawlerVerification.network_flagged?(ip, opts)
+
+      CrawlerVerification.put_network_mark(ip, :failed)
+      failed_sibling = neighbor(ip)
+      Stub.put_ptr(failed_sibling, [host])
+      Stub.put_addresses(host, [failed_sibling])
+
+      assert finish(:google, failed_sibling, opts) == :verified
+      assert network_mark(ip) == :failed
+      assert CrawlerVerification.network_flagged?(ip, opts)
+    end
+
+    test "a verified lookup with the guard off clears nothing", %{opts: opts} do
+      Application.put_env(:kiln_cms, :scanner_blocking, enabled: false)
+      ip = marked_v6()
+      CrawlerVerification.put_network_mark(ip, :silent)
+      host = unique_host("crawl.googlebot.com")
+      Stub.put_ptr(ip, [host])
+      Stub.put_addresses(host, [ip])
+
+      assert finish(:google, ip, opts) == :verified
+      assert network_mark(ip) == :silent
     end
 
     test "a lookup turned away by a network cap marks nothing", %{opts: opts} do
@@ -1437,12 +1477,22 @@ defmodule KilnCMS.CrawlerVerificationTest do
   end
 
   # `opts` under which the resolver is failing: no recent answer, and a
-  # canary whose PTR query gets none.
+  # canary whose PTR query gets none. Starts from no health state: a silent
+  # lookup may already have claimed the canary for a 1-minute window, and a
+  # window number at 50 ms is not later than that one (monotonic time is
+  # negative), so no 50 ms canary would ever start.
   defp failing_resolver(opts, canary) do
+    CrawlerVerification.reset_health()
     Stub.put_ptr(canary, {:error, :timeout})
     failing = Keyword.put(opts, :health_window_ms, 50)
     eventually(fn -> CrawlerVerification.resolver_failing?(failing) end)
     failing
+  end
+
+  # The raw mark on `ip`'s /64, whether or not `network_flagged?/2` reads it.
+  defp network_mark({a, b, c, d, _e, _f, _g, _h}) do
+    {:ok, kind} = Cachex.get(CrawlerVerification.network_cache_name(), {:inet6, a, b, c, d})
+    kind
   end
 
   defp mark_ttl({a, b, c, d, _e, _f, _g, _h}) do

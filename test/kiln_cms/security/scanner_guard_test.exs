@@ -629,10 +629,15 @@ defmodule KilnCMS.Security.ScannerGuardTest do
     setup do
       previous = Application.get_env(:kiln_cms, CrawlerVerification)
 
+      # A rate scope of the describe's own, and an hour-long window so the cap
+      # tests never see their budget reset by crossing a minute boundary.
       Application.put_env(
         :kiln_cms,
         CrawlerVerification,
-        Keyword.put(previous || [], :rate_scope, "sg-net-#{System.unique_integer([:positive])}")
+        Keyword.merge(previous || [],
+          rate_scope: "sg-net-#{System.unique_integer([:positive])}",
+          rate_window_ms: :timer.hours(1)
+        )
       )
 
       on_exit(fn ->
