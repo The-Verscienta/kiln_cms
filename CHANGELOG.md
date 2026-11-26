@@ -98,6 +98,10 @@ else.
   It works around an Ash defect in the count query. The JSON:API, GraphQL and MCP counts were never affected. No migration.
   ([long form](docs/changelog/unreleased.md#counted-read-refusal))
 
+- **A refused `custom_where` over MCP or JSON:API names its keys in snake_case (`custom_filter`, `date_time`, `not_eq`), not GraphQL's `customFilter`, `dateTime`, `notEq` (#2913).**
+  GraphQL's messages are unchanged. No migration.
+  ([long form](docs/changelog/unreleased.md#custom-where-error-spelling))
+
 - **`mix kiln.gen.plugin` registers an overlay plugin in `projects/<name>/project.exs` instead of the core's tracked `config/config.exs`, and its notice covers activation and each content type's search-vector migration (#2910).**
   The field type's commented `handle_input_event/3` example now compiles cleanly once uncommented. No migration.
   ([long form](docs/changelog/unreleased.md#gen-plugin-overlay-config))

@@ -177,6 +177,17 @@ defmodule KilnCMSWeb.GraphqlSchema do
     end
   end
 
+  # Marks every Ash query and changeset run for a GraphQL document (AshGraphql
+  # copies the `:context` map onto each) as GraphQL's, so the errors
+  # `KilnCMS.CMS.Preparations.CustomFieldQuery` builds name the camelCase keys
+  # this surface takes (`customWhere`, `dateTime`, #2913). Absinthe calls this
+  # for every document, over the plug, the socket and `Absinthe.run/3` alike.
+  @impl Absinthe.Schema
+  def context(context) do
+    ash_context = Map.get(context, :context) || %{}
+    Map.put(context, :context, Map.put(ash_context, :kiln_api_surface, :graphql))
+  end
+
   mutation do
     KilnCMSWeb.Graphql.ReferenceWrites.Notation.reference_mutations(
       Application.compile_env(:kiln_cms, :content_domains, [KilnCMS.CMS])

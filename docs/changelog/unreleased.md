@@ -95,6 +95,17 @@ carries the reasoning.
 
 
 
+<a id="custom-where-error-spelling"></a>
+
+- **A refused `custom_where` names its keys the way the caller's surface spells them (#2913).** `KilnCMS.CMS.Preparations.CustomFieldQuery` built every `custom_where` refusal in GraphQL's camelCase: "needs exactly one of string, int, float, boolean, date, dateTime", "customWhere supports only eq, notEq, in and isNull on it", "which customWhere does not support; use customFilter". The MCP read tools, JSON:API's query string and the code interface take snake_case, so a client or model that followed the message failed again (`unknown key "dateTime"`, `unknown operator "notEq"`).
+  - **What changes.** Over MCP, JSON:API and the code interface the text names `custom_where`, `custom_filter`, `date_time`, `not_eq` and `is_null`, and reads "an int field" and "an int condition" where it read "a int". `docs/mcp.md` no longer warns that some messages use GraphQL's spelling.
+  - **Unchanged.** GraphQL's messages are the same, word for word, so a client matching on them keeps working: the GraphQL schema marks a GraphQL request in the Ash context, and only then are the keys spelled in camelCase. The conditions each surface accepts are the same as before.
+  - **No migration; rolling the pin back is safe.** An older release spells these messages the GraphQL way again.
+
+
+
+
+
 <a id="gen-plugin-overlay-config"></a>
 
 - **`mix kiln.gen.plugin` writes an overlay plugin's registration into the overlay (#2910).** The generator registered the plugin with `config :kiln_cms, :plugins` in `config/config.exs`, the core's tracked config, so a downstream overlay's plugin landed in the reusable core. The overlay's activation file is `projects/<name>/project.exs`, which dev copies to the git-ignored `config/project.exs` and the image build copies with `--build-arg PROJECT=<name>`, and its `:plugins` list replaces the core's rather than adding to it.
