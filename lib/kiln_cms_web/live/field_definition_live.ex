@@ -135,6 +135,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
      |> assign(:default_scopes, default_scopes)
      |> assign(:scopes, default_scopes)
      |> assign(:cond_siblings, create_siblings(socket.assigns, default_scopes))
+     |> assign(:copy_siblings, copy_siblings(socket.assigns, default_scopes))
      |> assign_create_builder()}
   end
 
@@ -236,7 +237,8 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
            builder: ComputedBuilder.new(form[:compute].value),
            ctx: nil,
            conds: edit_conds(socket.assigns, id),
-           cond_siblings: edit_siblings(socket.assigns, id)
+           cond_siblings: edit_siblings(socket.assigns, id),
+           copy_siblings: edit_siblings(socket.assigns, id, :copy)
          })
          |> assign_edit_builder()}
 
@@ -921,7 +923,10 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     socket =
       if scopes == socket.assigns.scopes and Map.has_key?(socket.assigns, :cond_siblings),
         do: socket,
-        else: assign(socket, :cond_siblings, create_siblings(socket.assigns, scopes))
+        else:
+          socket
+          |> assign(:cond_siblings, create_siblings(socket.assigns, scopes))
+          |> assign(:copy_siblings, copy_siblings(socket.assigns, scopes))
 
     conds =
       ConditionsBuilder.apply_params(
@@ -933,10 +938,14 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     {assign(socket, :conds, conds), conds}
   end
 
-  defp create_siblings(_assigns, []), do: []
+  # `use` picks which siblings: `:cond`, the ones a condition may read, or
+  # `:copy`, the ones a `:copy_of` default may name (`sibling_for?/2`).
+  defp create_siblings(assigns, scopes, use \\ :cond)
 
-  defp create_siblings(assigns, scopes) do
-    [first | rest] = Enum.map(scopes, &scope_siblings(&1, assigns.current_org))
+  defp create_siblings(_assigns, [], _use), do: []
+
+  defp create_siblings(assigns, scopes, use) do
+    [first | rest] = Enum.map(scopes, &scope_siblings(&1, assigns.current_org, use))
 
     Enum.filter(first, fn s ->
       Enum.all?(rest, fn other ->
@@ -945,18 +954,20 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     end)
   end
 
-  defp scope_siblings("def:" <> id, org),
-    do: cond_siblings(%{id: nil, type_definition_id: id}, org, nil)
+  defp scope_siblings("def:" <> id, org, use),
+    do: cond_siblings(%{id: nil, type_definition_id: id}, org, nil, use)
 
-  defp scope_siblings(type, org),
-    do: cond_siblings(%{id: nil, content_type: String.to_existing_atom(type)}, org, nil)
+  defp scope_siblings(type, org, use),
+    do: cond_siblings(%{id: nil, content_type: String.to_existing_atom(type)}, org, nil, use)
 
-  defp edit_siblings(assigns, id) do
+  defp edit_siblings(assigns, id, use \\ :cond) do
     case Enum.find(assigns.definitions, &(&1.id == id)) do
       nil -> []
-      definition -> cond_siblings(definition, assigns.current_org, definition.name)
+      definition -> cond_siblings(definition, assigns.current_org, definition.name, use)
     end
   end
+
+  defp copy_siblings(assigns, scopes), do: create_siblings(assigns, scopes, :copy)
 
   # A group's sub-fields read each other; a reference's link fields carry no
   # conditions.
@@ -965,7 +976,18 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   defp link_siblings(_assigns, _parent_id, _id, _kind), do: []
 
-  defp cond_siblings(scope, org, own_name) do
+  # A condition reads the plain, public types. A `:copy_of` default copies
+  # its own copy types, a Person (`:user`) field among them, and may name a
+  # private field when it is private itself (`Validations.DefaultSource`;
+  # `copyable/3` applies that half). Offering it the condition siblings left
+  # a Person field, always private and never a condition's, nothing to copy
+  # (#2786).
+  defp sibling_for?(sibling, :cond),
+    do: sibling.field_type in FieldDefinition.link_field_types() and not sibling.private
+
+  defp sibling_for?(sibling, :copy), do: sibling.field_type in DynamicDefaults.copy_types()
+
+  defp cond_siblings(scope, org, own_name, use \\ :cond) do
     scope =
       Map.merge(
         %{
@@ -980,7 +1002,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     scope
     |> FieldCondition.siblings(org)
-    |> Enum.filter(&(&1.field_type in FieldDefinition.link_field_types() and not &1.private))
+    |> Enum.filter(&sibling_for?(&1, use))
     |> Enum.reject(&(&1.name == own_name))
     |> Enum.sort_by(& &1.position)
   end
@@ -1055,6 +1077,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       :cond_siblings,
       create_siblings(socket.assigns, socket.assigns.default_scopes)
     )
+    |> assign(:copy_siblings, copy_siblings(socket.assigns, socket.assigns.default_scopes))
   end
 
   # The machine name tracks the label until the admin types into the name
@@ -1384,7 +1407,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     case assigns do
       nil -> params
-      assigns -> Map.put(params, "position", length(Map.get(assigns.link_fields, parent_id, [])))
+      assigns -> Map.put(params, "position", end_position(assigns.link_fields, parent_id))
     end
   end
 
@@ -1459,13 +1482,24 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> then(fn params ->
       case assigns do
         nil -> params
-        assigns -> Map.put(params, "position", length(Map.get(assigns.item_types, flex_id, [])))
+        assigns -> Map.put(params, "position", end_position(assigns.item_types, flex_id))
       end
     end)
   end
 
   defp item_params(params, _item_form, _assigns),
     do: Map.take(params, ~w(label name help_text max_items))
+
+  # One past the highest position under `parent_id`, not the count: a delete
+  # leaves a gap, and the count then lands on a sibling's position (#2786).
+  # The same rule `next_position/2` keeps for top-level fields.
+  defp end_position(by_parent, parent_id) do
+    by_parent
+    |> Map.get(parent_id, [])
+    |> Enum.map(& &1.position)
+    |> Enum.max(fn -> -1 end)
+    |> Kernel.+(1)
+  end
 
   # The unique name of an item type is per flexible field; the database's
   # identity error names no input, so the name is checked here against the
@@ -1946,6 +1980,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # default keeps none. A select's default must still be one of its options.
   # The editor input (#2284) is held to what the posted settings offer, read
   # over `record` — the stored definition being edited, nil for a new one.
+  # A type this form has no default input for keeps the default it already
+  # has (set through the API, say) while the type stays the same (#2786): the
+  # input was never on the page, so its absence from the params says nothing.
   defp normalize(params, scope \\ nil, record \\ nil, catalog \\ %{}) do
     type = params["field_type"]
     pairs = if type in [nil, "select"], do: parse_option_pairs(params["options"]), else: []
@@ -1955,7 +1992,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     default =
       cond do
         is_nil(type) -> params["default"]
-        type not in @default_types -> nil
+        type not in @default_types -> kept_default(record, type)
         type == "select" and params["default"] not in options -> nil
         true -> params["default"]
       end
@@ -2250,6 +2287,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   # Whether the default-value input applies (#1820).
   defp default?(form), do: to_string(form[:field_type].value) in @default_types
+
+  defp kept_default(%{field_type: stored, default: default}, type) when is_atom(stored),
+    do: if(to_string(stored) == type, do: default)
+
+  defp kept_default(_record, _type), do: nil
 
   # Whether the reference-target select applies to the form's current type.
   defp reference?(form), do: to_string(form[:field_type].value) == "reference"
@@ -4641,12 +4683,16 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   defp source_label(:copy_of), do: gettext("A copy of another field")
 
   # The siblings a `:copy_of` may name: the same single-valued type, not
-  # itself a copy.
-  defp copyable(siblings, type, _form) do
+  # itself a copy, and not private unless this field is too
+  # (`Validations.DefaultSource`). A Person field is always private.
+  defp copyable(siblings, type, form) do
+    private? = type == "user" or form[:private].value in [true, "true"]
+
     for s <- siblings,
         to_string(s.field_type) == type,
         not s.multiple,
         s.default_source != :copy_of,
+        private? or not s.private,
         do: {s.label, s.name}
   end
 
@@ -4851,7 +4897,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
             <.width_input field={@form[:width]} />
             <.localization_input field={@form[:localization]} />
             <.options_field form={@form} id="new-field-options" />
-            <.default_field form={@form} siblings={@cond_siblings} dynamic />
+            <.default_field form={@form} siblings={@copy_siblings} dynamic />
             <.text_format_field form={@form} id="new-field-format" />
             <.widget_field form={@form} id="new-field-widget" />
             <.deliver_plain_field form={@form} id="new-field-deliver-plain" />
@@ -5322,7 +5368,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
                   <.width_input field={@edit.form[:width]} />
                   <.localization_input field={@edit.form[:localization]} />
                   <.options_field form={@edit.form} id={"edit-field-options-#{@edit.id}"} />
-                  <.default_field form={@edit.form} siblings={@edit.cond_siblings} dynamic />
+                  <.default_field form={@edit.form} siblings={@edit.copy_siblings} dynamic />
                   <.text_format_field form={@edit.form} id={"edit-field-format-#{@edit.id}"} />
                   <.widget_field form={@edit.form} id={"edit-field-widget-#{@edit.id}"} />
                   <.deliver_plain_field

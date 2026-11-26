@@ -240,13 +240,16 @@ defmodule KilnCMSWeb.AnalyticsLive do
   # type (instead of a point query per row), tolerating content that has since
   # been deleted or whose type was removed. Shared with the analytics export
   # (#618) via `KilnCMS.Analytics.Titles`, so both apply the same fallback.
+  # The type is resolved for `org` (#2786): an admin-defined type exists on
+  # its own site only, so the org-less lookup answered "unknown type" for
+  # every dynamic type on any site but the default one.
   defp decorate_all(rows, org, actor) do
     titles = Analytics.Titles.resolve(rows, org, actor)
-    Enum.map(rows, &decorate(&1, titles))
+    Enum.map(rows, &decorate(&1, titles, org))
   end
 
-  defp decorate(row, titles) do
-    case ContentTypes.get(row.content_type) do
+  defp decorate(row, titles, org) do
+    case ContentTypes.get(row.content_type, org) do
       nil ->
         %{
           id: row.content_id,

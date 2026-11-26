@@ -3048,6 +3048,116 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
     end
   end
 
+  # Smaller defects from the bug sweep (#2786).
+  describe "stored state the forms keep" do
+    # A new sub-field took the count of its siblings as its position, which
+    # after a delete is a position a sibling already has.
+    test "a new sub-field goes after the last one, past a deleted sibling's gap",
+         %{conn: conn} do
+      admin = authed_user(:admin)
+      n = System.unique_integer([:positive])
+
+      group =
+        CMS.create_field_definition!(
+          %{content_type: :page, name: "fdl_gap_#{n}", label: "Gap", field_type: :group},
+          actor: admin
+        )
+
+      # Positions 1 and 2: the sub-field at 0 has been deleted.
+      for {name, position} <- [{"second", 1}, {"third", 2}] do
+        CMS.create_field_definition!(
+          %{
+            group_of_id: group.id,
+            name: name,
+            label: String.capitalize(name),
+            field_type: :string,
+            position: position
+          },
+          actor: admin
+        )
+      end
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{group.id}-sub-fields-add") |> render_click()
+
+      lv
+      |> element("#link-field-form-new-#{group.id}")
+      |> render_submit(%{
+        "link_field" => %{"label" => "Fourth", "name" => "fourth", "field_type" => "string"}
+      })
+
+      positions =
+        group
+        |> Ash.load!(:group_fields, authorize?: false)
+        |> Map.fetch!(:group_fields)
+        |> Map.new(&{&1.name, &1.position})
+
+      assert positions == %{"second" => 1, "third" => 2, "fourth" => 3}
+    end
+
+    # The edit form has no default input for a type outside the few that take
+    # a fixed one, so the save posted none, and the stored default (set
+    # through the API) was nulled by an edit of the label.
+    test "editing a field whose type has no default input keeps its default", %{conn: conn} do
+      admin = authed_user(:admin)
+
+      field =
+        CMS.create_field_definition!(
+          %{
+            content_type: :page,
+            name: "fdl_accent_#{System.unique_integer([:positive])}",
+            label: "Accent",
+            field_type: :color,
+            default: "#336699"
+          },
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+      refute has_element?(lv, ~s|#edit-field-#{field.id} [name="field_definition[default]"]|)
+
+      render_submit(lv, "save_edit", %{
+        "field_definition" => %{"field_type" => "color", "label" => "Accent color"}
+      })
+
+      field = CMS.get_field_definition!(field.id, authorize?: false)
+      assert field.label == "Accent color"
+      assert field.default == "#336699"
+    end
+
+    # The copy source list was the conditions' siblings, which leave out every
+    # Person field: a Person field's "A copy of another field" offered nothing.
+    test "a Person field's copy default offers the other Person fields", %{conn: conn} do
+      admin = authed_user(:admin)
+      name = "fdl_owner_#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{content_type: :page, name: name, label: "Owner", field_type: :user},
+        actor: admin
+      )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields?type=page")
+
+      lv
+      |> element("#new-field-form")
+      |> render_change(%{
+        "_target" => ["field_definition", "default_source"],
+        "field_definition" => %{
+          "scopes" => ["page"],
+          "field_type" => "user",
+          "label" => "Reviewer",
+          "default_source" => "copy_of"
+        }
+      })
+
+      assert has_element?(
+               lv,
+               ~s|#new-field-form select[name="field_definition[default_field]"] option[value="#{name}"]|
+             )
+    end
+  end
+
   defp link_ids(group) do
     group
     |> Ash.load!(:group_fields, authorize?: false)

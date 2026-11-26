@@ -114,16 +114,36 @@ defmodule KilnCMSWeb.AutomationLive do
      |> refresh_preview(:create, socket.assigns.preview.value)}
   end
 
+  # Another admin may have deleted the rule since the list loaded (#2786), so
+  # a missing one refreshes the list rather than crashing the page.
   def handle_event("edit", %{"id" => id}, socket) when is_binary(id) do
-    {:noreply,
-     assign(socket, :edit, %{
-       id: id,
-       form: edit_form(id, socket.assigns.actor, socket.assigns.current_org),
-       preview: @no_preview
-     })}
+    actor = socket.assigns.actor
+    org = socket.assigns.current_org
+
+    case Automation.get_rule(id, actor: actor, tenant: org) do
+      {:ok, rule} ->
+        {:noreply,
+         assign(socket, :edit, %{
+           id: id,
+           form: edit_form(rule, actor, org),
+           preview: @no_preview
+         })}
+
+      {:error, _error} ->
+        {:noreply,
+         socket
+         |> load_rules()
+         |> put_flash(:error, gettext("That rule no longer exists."))}
+    end
   end
 
   def handle_event("cancel_edit", _params, socket), do: {:noreply, assign(socket, :edit, nil)}
+
+  # An edit event still in flight when the form closed (its rule was deleted
+  # in this tab, say) has no form to land on.
+  def handle_event(event, _params, %{assigns: %{edit: nil}} = socket)
+      when event in ["validate_edit", "save_edit"],
+      do: {:noreply, socket}
 
   def handle_event("validate_edit", %{"rule" => params} = all, socket) when is_map(params) do
     edit = %{
@@ -148,7 +168,7 @@ defmodule KilnCMSWeb.AutomationLive do
          socket |> assign(:edit, nil) |> load_rules() |> put_flash(:info, gettext("Saved."))}
 
       {:error, form} ->
-        {:noreply, assign(socket, :edit, %{socket.assigns.edit | form: form})}
+        {:noreply, refuse_edit(socket, form)}
     end
   end
 
@@ -181,7 +201,30 @@ defmodule KilnCMSWeb.AutomationLive do
         _ -> put_flash(socket, :error, gettext("Couldn't delete that rule."))
       end
 
-    {:noreply, assign(socket, :edit, nil)}
+    {:noreply, close_edit_of(socket, id)}
+  end
+
+  # Deleting a rule closes the edit form only when it is that rule's (#2786):
+  # an edit of another rule, half typed, stays open.
+  defp close_edit_of(%{assigns: %{edit: %{id: id}}} = socket, id), do: assign(socket, :edit, nil)
+  defp close_edit_of(socket, _id), do: socket
+
+  # A refused save keeps the form and its errors, unless the rule went while
+  # it was open (#2786): an update of a deleted row fails with nothing to show
+  # beside a field, so the page says so and refreshes the list.
+  defp refuse_edit(socket, form) do
+    %{actor: actor, current_org: org, edit: edit} = socket.assigns
+
+    case Automation.get_rule(edit.id, actor: actor, tenant: org) do
+      {:ok, _rule} ->
+        assign(socket, :edit, %{edit | form: form})
+
+      {:error, _error} ->
+        socket
+        |> assign(:edit, nil)
+        |> load_rules()
+        |> put_flash(:error, gettext("That rule no longer exists."))
+    end
   end
 
   # --- data ------------------------------------------------------------------
@@ -204,8 +247,8 @@ defmodule KilnCMSWeb.AutomationLive do
       |> AshPhoenix.Form.for_create(:create, actor: actor, tenant: org, as: "rule")
       |> to_form()
 
-  defp edit_form(id, actor, org) do
-    Automation.get_rule!(id, actor: actor, tenant: org)
+  defp edit_form(rule, actor, org) do
+    rule
     # Its own `id` (inputs keep the shared `rule[...]` names): the add-rule
     # form is on the page at the same time, and both defaulting to "rule"
     # gave every field in the two forms the same DOM id.
@@ -213,7 +256,7 @@ defmodule KilnCMSWeb.AutomationLive do
       actor: actor,
       tenant: org,
       as: "rule",
-      id: "rule_#{id}"
+      id: "rule_#{rule.id}"
     )
     |> to_form()
   end

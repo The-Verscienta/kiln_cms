@@ -291,6 +291,28 @@ defmodule KilnCMSWeb.BillingLiveTest do
       refute html =~ "Doomed"
     end
 
+    # The edit form stayed bound to the deleted tier, so its next save could
+    # only fail (#2786). It goes back to adding a tier; another tier's open
+    # edit is left alone.
+    test "deleting the tier being edited closes its edit form", %{conn: conn} do
+      doomed = tier!(%{name: "Doomed"})
+      kept = tier!(%{name: "Kept"})
+      other = tier!(%{name: "Other"})
+      conn = log_in(conn, authed_user(:admin))
+      {:ok, view, _html} = live(conn, ~p"/editor/billing")
+
+      render_click(view, "edit_tier", %{"id" => kept.id})
+      html = render_click(view, "delete_tier", %{"id" => other.id})
+      assert html =~ "Edit tier"
+      assert html =~ ~s(value="Kept")
+
+      render_click(view, "edit_tier", %{"id" => doomed.id})
+      html = render_click(view, "delete_tier", %{"id" => doomed.id})
+      refute html =~ "Edit tier"
+      assert html =~ "New tier"
+      refute html =~ ~s(value="Doomed")
+    end
+
     test "only this org's tiers are listed", %{conn: conn} do
       other =
         Ash.Seed.seed!(KilnCMS.Accounts.Organization, %{

@@ -195,9 +195,11 @@ defmodule KilnCMSWeb.ContentEditor.Session do
   # text. A session with unsaved edits keeps its form — reloading would throw
   # them away — and its next save meets the optimistic lock as any stale
   # writer does. Either way the client is told to put the caret in the field.
+  # A live document autosaves into its working copy the way a draft does into
+  # its row, so it reloads the same way (#2786).
   defp info({:lock_granted, _topic, field}, socket) do
     socket =
-      if draft?(socket) and socket.assigns.save_state == :saved,
+      if autosaves?(socket) and socket.assigns.save_state == :saved,
         do: ContentEditorLive.reload_latest(socket),
         else: socket
 
@@ -598,17 +600,18 @@ defmodule KilnCMSWeb.ContentEditor.Session do
     socket
   end
 
-  # Settle every flush in flight: persist a pending draft autosave (the
-  # version snapshot a takeover promises), then tell the lock. Only a draft
-  # with an autosave queued (`:pending`) has anything to persist — published
-  # content saves by hand, and a collab non-persister's text lives in the
-  # shared document — so for those the flush is the client push alone.
+  # Settle every flush in flight: persist a pending autosave (the version
+  # snapshot a takeover promises), then tell the lock. Only a document that
+  # autosaves (a draft into its row, a live one into its working copy, #2786)
+  # with an autosave queued (`:pending`) has anything to persist — anything
+  # else saves by hand, and a collab non-persister's text lives in the shared
+  # document — so for those the flush is the client push alone.
   defp finish_flush(socket) do
     fields = socket.assigns.flushing
     socket = assign(socket, :flushing, [])
 
     socket =
-      if draft?(socket) and socket.assigns.save_state == :pending,
+      if autosaves?(socket) and socket.assigns.save_state == :pending,
         do: socket |> cancel_autosave_timer() |> ContentEditorLive.do_autosave(),
         else: socket
 

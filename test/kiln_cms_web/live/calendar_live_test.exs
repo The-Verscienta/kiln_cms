@@ -81,6 +81,15 @@ defmodule KilnCMSWeb.CalendarLiveTest do
 
   defp calendar_at(%Date{} = at), do: ~p"/editor/calendar?at=#{Date.to_iso8601(at)}"
 
+  # The distinct revisions the grid's drop lists carry.
+  defp drop_revs(html) do
+    html
+    |> Floki.parse_document!()
+    |> Floki.find("ul[data-calendar-drop]")
+    |> Floki.attribute("data-rev")
+    |> Enum.uniq()
+  end
+
   test "plots publish, unpublish, and went-live events with editor links", %{conn: conn} do
     admin = authed_admin()
     # Keep every fixture inside the *current* month regardless of today's date.
@@ -418,6 +427,32 @@ defmodule KilnCMSWeb.CalendarLiveTest do
         conn |> log_in(admin) |> live(~p"/editor/calendar?kind=not_a_lane")
 
       assert html =~ page.title
+    end
+
+    # `type[a]=b` decodes to a map, which reached the projection as a type
+    # name and crashed the mount (#2786).
+    test "a type filter that is not a string shows everything", %{conn: conn} do
+      admin = authed_admin()
+      day = soon()
+
+      page =
+        CMS.create_page!(
+          %{
+            title: "Any type #{System.unique_integer([:positive])}",
+            slug: slug(),
+            scheduled_at: DateTime.new!(day, ~T[09:00:00])
+          },
+          actor: admin
+        )
+
+      for query <- ["type[a]=b", "type[]=page"] do
+        {:ok, _lv, html} =
+          conn
+          |> log_in(admin)
+          |> live("/editor/calendar?at=#{Date.to_iso8601(day)}&#{query}")
+
+        assert html =~ page.title
+      end
     end
 
     test "each filter is named by its label alone, not its options (#1769)", %{conn: conn} do
@@ -840,6 +875,31 @@ defmodule KilnCMSWeb.CalendarLiveTest do
                html =~ "Can't reschedule into the past"
 
       assert DateTime.compare(CMS.get_page!(page.id, actor: admin).scheduled_at, at) == :eq
+    end
+
+    # SortableJS has already moved the chip in the browser when the server
+    # refuses. Re-reading an unchanged window renders nothing new, so LiveView
+    # sent no patch and the chip stayed on the refused day (#2786). The drop
+    # lists carry a revision a refusal bumps, which re-renders every one of
+    # them from the server's state.
+    test "a refused move re-renders the drop lists, so the chip goes back", %{conn: conn} do
+      admin = authed_admin()
+      day = recently()
+      page = scheduled_page(admin, DateTime.new!(day, ~T[23:59:59]))
+
+      {:ok, lv, html} = open_calendar_on(conn, admin, day, page)
+      assert drop_revs(html) == ["0"]
+
+      html =
+        render_hook(lv, "reschedule", %{
+          "id" => page.id,
+          "type" => "page",
+          "kind" => "publish",
+          "date" => Date.to_iso8601(Date.add(day, -1))
+        })
+
+      assert html =~ "reschedule into the past"
+      assert drop_revs(html) == ["1"]
     end
 
     test "refuses a drop onto today once the chip's time of day has passed", %{conn: conn} do
