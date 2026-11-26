@@ -122,6 +122,46 @@ defmodule KilnCMS.Webhooks.SlackDeliveryTest do
       refute body =~ "hooks.slack.test"
     end
 
+    # What a 1.9 node wrote for a ping during the rolling deploy to 1.10 (#2797):
+    # the same job args as today, and the Kiln ping payload, which names no
+    # site, on the ledger row.
+    test "queued by a 1.9 node names the endpoint's site, not `-`" do
+      stub()
+      endpoint = slack!()
+
+      delivery =
+        CMS.create_webhook_delivery!(
+          %{
+            endpoint_id: endpoint.id,
+            endpoint_url: endpoint.url,
+            event: "ping",
+            payload: %{
+              message: "KilnCMS webhook test",
+              endpoint_url: endpoint.url,
+              sent_at: "2026-11-10T14:03:27Z"
+            },
+            withdraws: true
+          },
+          actor: Webhooks.system(),
+          tenant: org_id()
+        )
+
+      %{delivery_id: delivery.id, org_id: delivery.org_id}
+      |> KilnCMS.Webhooks.DeliveryWorker.new()
+      |> Oban.insert!()
+
+      drain()
+
+      assert_received {:posted, _host, _path, _headers, body}
+      site = KilnCMS.Branding.for_org(org_id()).site_name
+      assert Jason.decode!(body)["text"] == "KilnCMS webhook test for `#{site}`"
+      refute body =~ "s3cr3tT0ken"
+
+      # The fallback is for the message: the ledger keeps what was queued.
+      assert [%{status: :succeeded, payload: payload}] = deliveries()
+      refute Map.has_key?(payload, "site_name")
+    end
+
     # The ping payload is a 1.x webhook contract: unchanged for Kiln receivers.
     test "to a Kiln endpoint is unchanged, the full URL included" do
       stub()
@@ -138,6 +178,25 @@ defmodule KilnCMS.Webhooks.SlackDeliveryTest do
                "delivery_id" => _
              } = Jason.decode!(body)
     end
+  end
+
+  test "a security alert whose payload names no site names the endpoint's site" do
+    stub()
+    endpoint = slack!()
+
+    Webhooks.enqueue_security!(
+      endpoint,
+      "security.lockout",
+      Map.delete(alert_data(), :site_name),
+      org_id()
+    )
+
+    drain()
+
+    assert_received {:posted, _host, _path, _headers, body}
+    site = KilnCMS.Branding.for_org(org_id()).site_name
+    assert Jason.decode!(body)["text"] =~ "Security alert on `#{site}`:"
+    refute body =~ "`-`"
   end
 
   test "the ledger keeps the real URL, and a redelivery posts to it" do

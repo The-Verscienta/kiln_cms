@@ -62,6 +62,9 @@ else.
 - **Markdown: an image that shares its line with text or another image, or sits in a list, quote or table, is kept as a link to the picture labelled with its alt text instead of vanishing (#2771).**
   A 1.13.0 known issue. Standalone images still become image blocks. No migration.
   ([long form](docs/changelog/unreleased.md#markdown-inline-image))
+- **Slack webhooks: a message whose stored payload names no site, such as a test ping queued by a 1.9 node mid-deploy, names the endpoint's site instead of `-` (#2797).**
+  No migration; the ledger row is unchanged.
+  ([long form](docs/changelog/unreleased.md#slack-missing-site-name))
 
 ## [1.13.0] - 2026-11-25
 
