@@ -12,6 +12,7 @@ defmodule KilnCMSWeb.FieldLocalizationDeliveryTest do
   this runs on the default org every other delivery test shares.
   """
   use KilnCMSWeb.ConnCase, async: false
+  use Oban.Testing, repo: KilnCMS.Repo
 
   alias KilnCMS.Accounts
   alias KilnCMS.CMS
@@ -293,6 +294,94 @@ defmodule KilnCMSWeb.FieldLocalizationDeliveryTest do
   # with exactly these keys — `inherited_fields` appears nowhere unless asked
   # for, and only on a type that can inherit. `social` (#2258) is on every
   # artifact since format_version 4, so it belongs to the golden set.
+  # #2905: the mode is a definition change, not a content save, so nothing
+  # else re-fires the variants that leave the field empty.
+  describe "changing a field's localization" do
+    setup %{actor: actor} do
+      field =
+        CMS.create_field_definition!(
+          %{content_type: :page, name: "tagline", label: "Tagline"},
+          actor: actor
+        )
+
+      {en, fr} =
+        document(actor, %{custom_fields: %{"tagline" => "Made by hand"}}, fn _fr ->
+          %{custom_fields: %{"tagline" => ""}}
+        end)
+
+      %{field: field, en: en, fr: fr}
+    end
+
+    defp artifact(conn, fr) do
+      KilnCMS.Cache.bust_published()
+      conn |> get(~p"/api/content/page/#{fr.slug}?locale=fr") |> json_response(200)
+    end
+
+    test "to :fallback re-fires the type's variants, which then inherit", %{
+      conn: conn,
+      actor: actor,
+      field: field,
+      en: en,
+      fr: fr
+    } do
+      refute Map.has_key?(artifact(conn, fr), "inherited_fields")
+
+      CMS.update_field_definition!(field, %{localization: :fallback}, actor: actor)
+
+      assert_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"type" => "page", "id" => fr.id})
+      # The default locale ends every chain: it has nothing to inherit.
+      refute_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"id" => en.id})
+
+      KilnCMS.DataCase.drain_oban()
+      body = artifact(conn, fr)
+      assert body["custom_fields"]["tagline"] == "Made by hand"
+      assert body["inherited_fields"] == %{"custom_fields" => %{"tagline" => "en"}}
+    end
+
+    test "away from :fallback re-fires them too, and the inherited value goes", %{
+      conn: conn,
+      actor: actor,
+      field: field,
+      fr: fr
+    } do
+      field = CMS.update_field_definition!(field, %{localization: :fallback}, actor: actor)
+      KilnCMS.DataCase.drain_oban()
+      assert artifact(conn, fr)["inherited_fields"]
+
+      CMS.update_field_definition!(field, %{localization: :localized}, actor: actor)
+
+      assert_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"type" => "page", "id" => fr.id})
+      KilnCMS.DataCase.drain_oban()
+      body = artifact(conn, fr)
+      refute Map.has_key?(body, "inherited_fields")
+      refute body["custom_fields"]["tagline"] == "Made by hand"
+    end
+
+    test "deleting a :fallback field re-fires the variants", %{
+      actor: actor,
+      field: field,
+      fr: fr
+    } do
+      field = CMS.update_field_definition!(field, %{localization: :fallback}, actor: actor)
+      KilnCMS.DataCase.drain_oban()
+
+      CMS.destroy_field_definition!(field, actor: actor)
+
+      assert_enqueued(worker: KilnCMS.Firing.FireWorker, args: %{"type" => "page", "id" => fr.id})
+    end
+
+    test "between :localized and :shared, or a label edit, re-fires nothing", %{
+      actor: actor,
+      field: field
+    } do
+      field = CMS.update_field_definition!(field, %{label: "Strapline"}, actor: actor)
+      refute_enqueued(worker: KilnCMS.Firing.FireWorker)
+
+      CMS.update_field_definition!(field, %{localization: :shared}, actor: actor)
+      refute_enqueued(worker: KilnCMS.Firing.FireWorker)
+    end
+  end
+
   describe "a document that opts nothing in" do
     @artifact_keys ~w(blocks custom_fields id locale slug social title type)
 
