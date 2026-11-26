@@ -6,7 +6,9 @@ defmodule KilnCMS.CMS.Validations.AvailableTypeName do
     * a **compiled** content type's type name, plural, or public path segment
       (compiled always wins — a dynamic type can never shadow `Page`/`Post`);
     * a **reserved router segment** (`/editor`, `/api`, `/search`, …), since
-      dynamic types are delivered at `/<path_segment>/<slug>`;
+      dynamic types are delivered at `/<path_segment>/<slug>`. Only when the
+      segment is being written, so a type whose segment was reserved later
+      can still be edited (#2898);
     * a configured **locale prefix** (`/fr/...` routes);
     * a **built-in webhook event namespace** for the `name`
       (`KilnCMS.CMS.WebhookEndpoint.reserved_namespaces/0`: `release`, `task`,
@@ -28,8 +30,16 @@ defmodule KilnCMS.CMS.Validations.AvailableTypeName do
   def validate(changeset, _opts, _context) do
     with :ok <- check(changeset, :name, taken_names()),
          :ok <- check_event_namespace(changeset) do
-      check(changeset, :path_segment, taken_segments())
+      check_path_segment(changeset)
     end
+  end
+
+  # Only when the segment is being written (#2898): a segment reserved after a
+  # type took it must not block every later edit of that type.
+  defp check_path_segment(changeset) do
+    if Ash.Changeset.changing_attribute?(changeset, :path_segment),
+      do: check(changeset, :path_segment, taken_segments()),
+      else: :ok
   end
 
   defp check_event_namespace(changeset) do
