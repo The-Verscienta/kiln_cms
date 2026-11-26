@@ -94,6 +94,10 @@ else.
   The row, the bulk Publish confirm and the release's item list name the date and what happens then. A 1.13.0 known issue.
   ([long form](docs/changelog/unreleased.md#publish-shows-unpublish-date))
 
+- **A counted read that the actor is refused now returns the refusal instead of raising an internal `Ash.Error.Framework` error (#2934).**
+  It works around an Ash defect in the count query. The JSON:API, GraphQL and MCP counts were never affected. No migration.
+  ([long form](docs/changelog/unreleased.md#counted-read-refusal))
+
 - **`mix kiln.gen.plugin` registers an overlay plugin in `projects/<name>/project.exs` instead of the core's tracked `config/config.exs`, and its notice covers activation and each content type's search-vector migration (#2910).**
   The field type's commented `handle_input_event/3` example now compiles cleanly once uncommented. No migration.
   ([long form](docs/changelog/unreleased.md#gen-plugin-overlay-config))
