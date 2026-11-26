@@ -128,6 +128,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   require Ash.Sort
 
   alias Ash.Error.Query.InvalidArgument
+  alias KilnCMS.CMS.FieldKind
   alias KilnCMS.CMS.FieldValue
   alias KilnCMS.CMS.IndexedCustomFields
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.DateTimes
@@ -184,7 +185,8 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         resource: query.resource,
         table: AshPostgres.DataLayer.Info.table(query.resource),
         actor: Map.get(context, :actor),
-        tenant: query.to_tenant || query.tenant
+        tenant: query.to_tenant || query.tenant,
+        spelling: spelling(query)
       }
 
       query
@@ -192,6 +194,15 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       |> apply_where(where, defs, ctx)
       |> apply_sort(sort, defs, ctx)
     end
+  end
+
+  # How `custom_where`'s errors spell its keys (#2913): GraphQL's camelCase
+  # (`dateTime`, `notEq`, `customFilter`) when the request came in over
+  # GraphQL (`KilnCMSWeb.GraphqlSchema.context/1` marks it), otherwise the
+  # snake_case JSON:API, MCP and the code interface take, so a caller that
+  # follows the message sends a key its own surface accepts.
+  defp spelling(query) do
+    if query.context[:kiln_api_surface] == :graphql, do: :graphql, else: :snake
   end
 
   # --- definitions in scope ---------------------------------------------------
@@ -856,7 +867,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # An OR of eq conditions rather than `= ANY(...)`: list params splice into
   # fragments as text literals, which can't be cast to jsonb.
   defp condition(%{name: name} = definition, "in", raw) do
-    cast_list(raw, ash_type(definition), name, fn
+    cast_list(raw, definition, name, fn
       [] ->
         expr(false)
 
@@ -889,7 +900,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   end
 
   defp condition(%{name: name} = definition, op, raw) when op in ~w(eq not_eq) do
-    with {:ok, value} <- cast_value(raw, ash_type(definition), name) do
+    with {:ok, value} <- cast_operand(raw, definition, name) do
       {:ok,
        equality(op, [value], [raw], definition, &jsonb_condition(:custom_fields, op, name, &1))}
     end
@@ -899,7 +910,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # time's tidy drops its seconds, and an email's or a slug's would move it in
   # the order.
   defp condition(%{name: name} = definition, op, raw) do
-    with {:ok, value} <- cast_value(raw, ash_type(definition), name) do
+    with {:ok, value} <- cast_operand(raw, definition, name) do
       value = range_operand(definition, op, value)
       {:ok, jsonb_condition(:custom_fields, op, name, value, Map.get(definition, :index_table))}
     end
@@ -1046,7 +1057,10 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   `:boolean`, `:date`, `:naive_datetime` (datetimes are stored offset-less
   ISO-8601, see `ApplyCustomFields`), `:dynamic` for a `:computed` field (the
   formula decides, so the supplied value's own JSON type is kept), and `nil`
-  for text-like and plugin-contributed types ("treat as text").
+  for text-like and plugin-contributed types ("treat as text"). A non-`nil`
+  type also refuses the text operators (`contains`, `starts_with`, `ilike`).
+  A plugin type's operand is cast by its GraphQL kind where it can be
+  (`cast_operand/3`), but it keeps the text operators it always had.
   """
   def ash_type(%{field_type: :integer}), do: :integer
   def ash_type(%{field_type: :float}), do: :float
@@ -1061,6 +1075,47 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # silently matches every row or none.
   def ash_type(%{field_type: :computed}), do: :dynamic
   def ash_type(_definition), do: nil
+
+  @doc """
+  A custom field's operand `raw`, cast for a predicate: as `ash_type/1` says
+  for a core type, and for a plugin-contributed type by the GraphQL kind it
+  declares (`c:Kiln.FieldType.graphql_kind/1`, #2855). An `:int`, `:float`,
+  `:boolean` or `:date` kind casts the operand as the core type of that kind,
+  so a stored JSON number compares as a number. An operand that does not
+  cast to the kind, and any other kind (`:datetime` included: a plugin's
+  stored date-time spelling is its own), is compared as the text sent, as
+  it always was, so no operand that was answered before is refused now.
+  """
+  @spec cast_operand(term(), map(), String.t()) :: {:ok, term()} | {:error, String.t()}
+  def cast_operand(raw, definition, name) do
+    case {ash_type(definition), plugin_type(definition)} do
+      {nil, nil} ->
+        cast_value(raw, nil, name)
+
+      {nil, type} ->
+        with {:error, _not_of_kind} <- cast_value(raw, type, name),
+             do: cast_value(raw, nil, name)
+
+      {type, _none} ->
+        cast_value(raw, type, name)
+    end
+  end
+
+  # The core type a `Kiln.FieldType`'s GraphQL kind casts as, `nil` for a
+  # kind compared as text. Read only where `ash_type/1` is `nil`: every core
+  # type it leaves untyped, and every built-in `Kiln.FieldType`, has a
+  # `:string` or composite kind, so only a plugin type gets a cast here.
+  defp plugin_type(%{field_type: type} = definition) when is_atom(type) do
+    case FieldKind.item_kind_for(definition) do
+      :int -> :integer
+      :float -> :float
+      :boolean -> :boolean
+      :date -> :date
+      _text_or_composite -> nil
+    end
+  end
+
+  defp plugin_type(_definition), do: nil
 
   # A list-valued field (`multiple` select/string/media/reference) holds the
   # probe: `custom_fields @> {name: [probe...]}`. Bound as text and cast in
@@ -1231,17 +1286,19 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # The same `resolve/2` as `custom_filter`, over the same already
   # privacy-filtered `defs`: a missing and a private field answer alike.
   defp where_leaf(raw, defs, ctx) do
-    with {:ok, name, kind, ops} <- parse_condition(raw),
+    spelling = ctx.spelling
+
+    with {:ok, name, kind, ops} <- parse_condition(raw, spelling),
          {:ok, definition} <- resolve(defs, name),
-         :ok <- check_kind(definition, kind, ops),
-         {:ok, filter} <- translate_ops(kind, ops, name) do
+         :ok <- check_kind(definition, kind, ops, spelling),
+         {:ok, filter} <- translate_ops(kind, ops, name, spelling) do
       conditions(definition, filter, ctx)
     end
   end
 
   # `{:ok, name, kind, ops}`: exactly one kind key, its operators (string keys,
   # nil operands dropped, as GraphQL gives an explicit `null`).
-  defp parse_condition(raw) when is_map(raw) do
+  defp parse_condition(raw, spelling) when is_map(raw) do
     raw = Map.new(raw, fn {key, value} -> {to_string(key), value} end)
     kind_names = Enum.map(@kind_keys, &Atom.to_string/1)
     unknown = Map.keys(raw) -- ["name" | kind_names ++ @group_keys]
@@ -1257,16 +1314,16 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
       length(given) != 1 ->
         {:error,
-         "the condition on #{inspect(name)} needs exactly one of #{kind_list()}, " <>
-           "got #{if given == [], do: "none", else: Enum.map_join(given, ", ", &camel/1)}"}
+         "the condition on #{inspect(name)} needs exactly one of #{kind_list(spelling)}, " <>
+           "got #{if given == [], do: "none", else: Enum.map_join(given, ", ", &spell(&1, spelling))}"}
 
       true ->
         [key] = given
-        operators(name, String.to_existing_atom(key), raw[key])
+        operators(name, String.to_existing_atom(key), raw[key], spelling)
     end
   end
 
-  defp operators(name, kind, ops) when is_map(ops) do
+  defp operators(name, kind, ops, _spelling) when is_map(ops) do
     ops =
       ops
       |> Map.new(fn {op, value} -> {to_string(op), value} end)
@@ -1277,21 +1334,29 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       else: {:ok, name, kind, ops}
   end
 
-  defp operators(name, kind, _ops),
-    do: {:error, "the #{camel(kind)} condition on #{inspect(name)} must be an object"}
+  defp operators(name, kind, _ops, spelling),
+    do: {:error, "the #{spell(kind, spelling)} condition on #{inspect(name)} must be an object"}
 
   defp group_list, do: Enum.join(@group_keys, ", ")
 
-  defp kind_list, do: Enum.map_join(@kind_keys, ", ", &camel/1)
+  defp kind_list(spelling), do: Enum.map_join(@kind_keys, ", ", &spell(&1, spelling))
 
-  defp camel(key), do: key |> to_string() |> Macro.camelize() |> lcfirst()
+  # A key as the surface that received the request spells it (`spelling/1`).
+  defp spell(key, :graphql), do: key |> to_string() |> Macro.camelize() |> lcfirst()
+  defp spell(key, :snake), do: to_string(key)
+
   defp lcfirst(<<first::utf8, rest::binary>>), do: String.downcase(<<first::utf8>>) <> rest
+
+  # "an int". GraphQL keeps the "a int" its clients may already match on.
+  defp a(word, :graphql), do: "a " <> word
+  defp a("int", :snake), do: "an int"
+  defp a(word, :snake), do: "a " <> word
 
   # The kind given must be the field's own. A `multiple` field is a `:list`;
   # a list of scalars (#2289) takes the kind of its items, with the list's
   # meaning — `eq` contains, `not_eq` does not contain, `in` contains any —
   # and `isNull`. Its other operators (`has*`, `count`) are `customFilter`'s.
-  defp check_kind(definition, kind, ops) do
+  defp check_kind(definition, kind, ops, spelling) do
     actual = KilnCMS.CMS.FieldKind.kind_for(definition)
     given = if kind == :date_time, do: :datetime, else: kind
     name = definition.name
@@ -1301,21 +1366,24 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
         :ok
 
       actual == :list and definition.field_type in @scalar_list_types ->
-        list_kind(definition, kind, given, ops)
+        list_kind(definition, kind, given, ops, spelling)
 
       actual in [:string, :int, :float, :boolean, :date, :datetime] ->
+        actual = spell(actual_key(actual), spelling)
+
         {:error,
-         "custom field #{inspect(name)} is a #{camel(actual_key(actual))} field, " <>
-           "not #{camel(kind)}; use the #{camel(actual_key(actual))} condition"}
+         "custom field #{inspect(name)} is #{a(actual, spelling)} field, " <>
+           "not #{spell(kind, spelling)}; use the #{actual} condition"}
 
       true ->
         {:error,
-         "custom field #{inspect(name)} has kind #{actual}, which customWhere does not " <>
-           "support; use customFilter"}
+         "custom field #{inspect(name)} has kind #{actual}, which " <>
+           "#{spell(:custom_where, spelling)} does not support; " <>
+           "use #{spell(:custom_filter, spelling)}"}
     end
   end
 
-  defp list_kind(definition, kind, given, ops) do
+  defp list_kind(definition, kind, given, ops, spelling) do
     item = KilnCMS.CMS.FieldKind.item_kind_for(definition)
     name = definition.name
 
@@ -1323,18 +1391,21 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       # A plugin type with no `graphql_kind/1` (#2680) has no typed condition.
       item == :json ->
         {:error,
-         "custom field #{inspect(name)}: customWhere does not support a list of json values; " <>
-           "use customFilter"}
+         "custom field #{inspect(name)}: #{spell(:custom_where, spelling)} does not support " <>
+           "a list of json values; use #{spell(:custom_filter, spelling)}"}
 
       item != given ->
+        item = spell(actual_key(item), spelling)
+
         {:error,
-         "custom field #{inspect(name)} is a list of #{camel(actual_key(item))} values, " <>
-           "not #{camel(kind)}; use the #{camel(actual_key(item))} condition"}
+         "custom field #{inspect(name)} is a list of #{item} values, " <>
+           "not #{spell(kind, spelling)}; use the #{item} condition"}
 
       Map.keys(ops) -- ~w(eq not_eq in is_null) != [] ->
         {:error,
-         "custom field #{inspect(name)} is a list: customWhere supports only eq, notEq, in " <>
-           "and isNull on it (customFilter also takes has, has_all, has_none and count)"}
+         "custom field #{inspect(name)} is a list: #{spell(:custom_where, spelling)} " <>
+           "supports only eq, #{spell(:not_eq, spelling)}, in and #{spell(:is_null, spelling)} " <>
+           "on it (#{spell(:custom_filter, spelling)} also takes has, has_all, has_none and count)"}
 
       true ->
         :ok
@@ -1346,12 +1417,12 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
 
   # `custom_filter`'s own shape: `%{operator => operand}` with operands in the
   # types `cast_value/3` takes.
-  defp translate_ops(kind, ops, name) do
+  defp translate_ops(kind, ops, name, spelling) do
     allowed = Map.fetch!(@kind_ops, kind)
 
     error =
       Enum.find_value(ops, fn {op, value} ->
-        case check_operator(op, value, allowed, kind, name) do
+        case check_operator(op, value, allowed, kind, name, spelling) do
           :ok -> nil
           {:error, _message} = error -> error
         end
@@ -1364,13 +1435,14 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
        end)}
   end
 
-  defp check_operator(op, value, allowed, kind, name) do
+  defp check_operator(op, value, allowed, kind, name, spelling) do
     max_in = KilnCMSWeb.GraphqlLimits.max_custom_in_values()
 
     cond do
       op not in allowed ->
         {:error,
-         "unknown operator #{inspect(op)} for a #{camel(kind)} condition on #{inspect(name)} " <>
+         "unknown operator #{inspect(op)} for #{a(spell(kind, spelling), spelling)} condition " <>
+           "on #{inspect(name)} " <>
            "(#{Enum.join(allowed, ", ")})"}
 
       op == "in" and not is_list(value) ->
@@ -1592,7 +1664,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     raw
     |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
       with :ok <- operand_shape(item, "in", subject),
-           {:ok, value} <- cast_value(item, type, name) do
+           {:ok, value} <- cast_item(item, type, name) do
         {:cont, {:ok, [value | acc]}}
       else
         {:error, message} -> {:halt, {:error, message}}
@@ -1603,6 +1675,13 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       error -> error
     end
   end
+
+  # `cast_list/5`'s `type` is an Ash type (or `nil`), or the field's
+  # definition, whose items are cast as `cast_operand/3` casts one operand.
+  defp cast_item(item, %{field_type: _type} = definition, name),
+    do: cast_operand(item, definition, name)
+
+  defp cast_item(item, type, name), do: cast_value(item, type, name)
 
   defp invalid(query, argument, message) do
     Ash.Query.add_error(

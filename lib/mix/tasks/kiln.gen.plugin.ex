@@ -7,8 +7,18 @@ if Code.ensure_loaded?(Igniter) do
 
     Creates `projects/<name>/plugin.ex` — a `Kiln.Plugin` module with every
     contribution callback stubbed as a commented example — registers it in
-    `config :kiln_cms, :plugins`, and (with `--block` / `--field`) generates
-    working sample contributions that immediately join the system.
+    `config :kiln_cms, :plugins` in `projects/<name>/project.exs`, the
+    overlay's activation file (created if missing; the core's tracked
+    `config/config.exs` is left alone), and (with `--block` / `--field`)
+    generates working sample contributions that join the system once the
+    overlay is active: copy that file to `config/project.exs` in dev, or
+    build the image with `docker build --build-arg PROJECT=<name>`. Its
+    `:plugins` list replaces the core's rather than merging.
+
+    The generated modules compile cleanly under `--warnings-as-errors`, and
+    so does each commented example once uncommented. An overridden plugin
+    callback inherits `@impl` from `use Kiln.Plugin`, so only `summary/0`
+    states it.
 
     ## Example
 
@@ -45,15 +55,15 @@ if Code.ensure_loaded?(Igniter) do
     `catalog/`) as the template; uncomment `domains/0` in the generated
     plugin; register the domain in `:ash_domains` and `:content_domains` in
     `projects/<name>/project.exs`, with `projects/example/project.exs` as the
-    template (its `:plugins` list replaces the one this task writes to
-    `config/config.exs`, so keep the plugin in it); activate it by copying
-    that file to `config/project.exs` in dev, or with
-    `docker build --build-arg PROJECT=<name>` for an image; then run
-    `mix ash.codegen <migration_name>` and move what it writes into
+    template (those lists replace the core's too, so restate its entries);
+    then run `mix ash.codegen <migration_name>` and move what it writes into
     `projects/<name>/priv/repo/migrations/` and
     `projects/<name>/priv/resource_snapshots/repo/`. Copy those back into
     `priv/` before the next `mix ash.codegen`: without its snapshots, codegen
-    writes create-table migrations into the core `priv/` again. The notice
+    writes create-table migrations into the core `priv/` again. Each type
+    also needs a hand-written migration calling
+    `KilnCMS.Migrations.add_search_vector/1`, sorted after the one creating
+    its table, which `mix kiln.search.check` gates. The notice
     lists these steps, and `docs/extending-content.md` ("Plugins") and
     `projects/example/README.md` explain them. Then verify the install with
     `mix kiln.plugins.doctor` (it runs in precommit too).
@@ -102,16 +112,46 @@ if Code.ensure_loaded?(Igniter) do
       )
       |> maybe_create_block(snake, camel, block)
       |> maybe_create_field(snake, camel, field)
-      |> Igniter.Project.Config.configure(
-        "config.exs",
-        :kiln_cms,
-        [:plugins],
-        [plugin_module],
-        updater: fn zipper ->
-          Igniter.Code.List.append_new_to_list(zipper, plugin_module)
-        end
-      )
+      |> register_in_overlay(snake, plugin_module)
       |> Igniter.add_notice(notice(camel, snake, block, field))
+    end
+
+    # The overlay's activation file, not the core's tracked config/config.exs
+    # (#2910). That file is copied to config/project.exs (or by the `PROJECT=`
+    # image build), which config.exs imports last, so a `:plugins` list there
+    # replaces the core's rather than adding to it. An existing project.exs
+    # gets the plugin appended to its list.
+    defp register_in_overlay(igniter, snake, plugin_module) do
+      path = "projects/#{snake}/project.exs"
+
+      igniter
+      |> Igniter.include_or_create_file(path, project_source(snake, plugin_module))
+      |> Igniter.update_elixir_file(path, fn zipper ->
+        Igniter.Project.Config.modify_config_code(
+          zipper,
+          [:plugins],
+          :kiln_cms,
+          [plugin_module],
+          updater: &Igniter.Code.List.append_new_to_list(&1, plugin_module)
+        )
+      end)
+    end
+
+    defp project_source(snake, plugin_module) do
+      """
+      import Config
+
+      # Activates this overlay. The core's config/config.exs imports
+      # config/project.exs as its last step, so copy this file there:
+      #
+      #     cp projects/#{snake}/project.exs config/project.exs   # dev
+      #     docker build --build-arg PROJECT=#{snake} .         # image
+      #
+      # Config lists are replaced, not merged: this :plugins list is the whole
+      # list once active. Content types also need :ash_domains and
+      # :content_domains here; projects/example/project.exs is the template.
+      config :kiln_cms, :plugins, [#{inspect(plugin_module)}]
+      """
     end
 
     # A standalone Mix project. Every file goes under `root`; nothing in the
@@ -299,7 +339,11 @@ if Code.ensure_loaded?(Igniter) do
         # answer its "kiln:field_event" pushes. See Kiln.FieldType, "Client hooks".
         # def input_hook(_definition),
         #   do: %{hook: Kiln.FieldType.colocated_hook(__MODULE__, "Picker"), data: %{}}
-        # def handle_input_event("lookup", %{"q" => q}, _context), do: {:ok, %{results: []}}
+
+        # Unlike the callbacks above, handle_input_event/3 has no default in
+        # `use Kiln.FieldType` to inherit an @impl from, so it states its own.
+        # @impl Kiln.FieldType
+        # def handle_input_event("lookup", %{"q" => _q}, _context), do: {:ok, %{results: []}}
       end
       """
     end
@@ -428,9 +472,17 @@ if Code.ensure_loaded?(Igniter) do
     defp notice(camel, snake, block, field) do
       """
       Generated the #{camel} plugin at projects/#{snake}/ and registered it in
-      config :kiln_cms, :plugins.
-      #{if block, do: "\nIts #{block} block is live: it appears in the editor's block palette,\nstores through the block union, and renders in firing/search.\n", else: ""}#{if field, do: "\nIts #{field} field type is live: admins can pick it at /editor/fields,\nand its cast/2 gates content writes.\n", else: ""}
+      config :kiln_cms, :plugins in projects/#{snake}/project.exs, the
+      overlay's activation file.
+      #{if block, do: "\nIts #{block} block goes live with the overlay: it joins the editor's block\npalette, stores through the block union, and renders in firing/search.\n", else: ""}#{if field, do: "\nIts #{field} field type goes live with the overlay: admins can pick it at\n/editor/fields, and its cast/2 gates content writes.\n", else: ""}
       Next:
+        * Activate the overlay: until then the plugin compiles but is not
+          registered.
+            - dev: cp projects/#{snake}/project.exs config/project.exs
+              (merge the two by hand if config/project.exs already exists)
+            - image: docker build --build-arg PROJECT=#{snake}
+          Its :plugins list replaces the core's rather than merging, so add
+          any other plugin the site runs to it.
         * Content types: mix kiln.gen.content can't write them into a plugin's
           domain yet (it registers every type on KilnCMS.CMS), so write them
           by hand, using projects/example/catalog.ex and
@@ -441,11 +493,8 @@ if Code.ensure_loaded?(Igniter) do
             - uncomment domains/0 in projects/#{snake}/plugin.ex
             - register #{camel}.Catalog in :ash_domains and :content_domains
               in projects/#{snake}/project.exs, with
-              projects/example/project.exs as the template. Its :plugins list
-              replaces the one this generator wrote to config/config.exs
-              rather than merging, so keep #{camel}.Plugin in it.
-            - activate it: cp projects/#{snake}/project.exs config/project.exs
-              in dev; docker build --build-arg PROJECT=#{snake} for an image
+              projects/example/project.exs as the template. Those lists
+              replace the core's too, so restate the core's entries.
             - mix ash.codegen <migration_name>, then move what it wrote to
               priv/ into projects/#{snake}/priv/repo/migrations/ and
               projects/#{snake}/priv/resource_snapshots/repo/. Before the
@@ -454,6 +503,14 @@ if Code.ensure_loaded?(Igniter) do
               and remove them again after: without its snapshots, codegen
               writes create-table migrations into the core priv/ again
               (see projects/example/README.md)
+            - full-text search: ash.codegen can't create a type's
+              search_vector column, so add a migration that sorts after the
+              one creating its table, in projects/#{snake}/priv/repo/migrations/:
+                import KilnCMS.Migrations
+                def up, do: add_search_vector("<table>")
+                def down, do: drop_search_vector("<table>")
+              projects/example/priv/repo/migrations/*_search_vectors.exs is
+              the template. mix kiln.search.check fails without it.
         * Verify the install: mix kiln.plugins.doctor (also runs in precommit).
       """
     end

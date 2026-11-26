@@ -83,6 +83,10 @@ else.
   No migration; the ledger row is unchanged.
   ([long form](docs/changelog/unreleased.md#slack-missing-site-name))
 
+- **Custom fields: on a plugin field type whose `graphql_kind/1` is `:int`, `:float`, `:boolean` or `:date`, a filter operand that is a value of that kind compares as that value, so `gt=9` finds `10` and `eq` matches a stored number (#2855).**
+  Every other operand, and the text operators, compare as text as before; nothing that answered `200` is refused. No migration.
+  ([long form](docs/changelog/unreleased.md#plugin-typed-filters))
+
 - **Duplicating a text block in the content editor no longer saves the copy empty (#2778).**
   The copy's text is kept by save and autosave, and is independent of the original. This was a 1.13.0 known issue.
   ([long form](docs/changelog/unreleased.md#duplicate-rich-text-body))
@@ -101,6 +105,18 @@ else.
 - **Publishing a draft from the content list, the bulk bar or a release now shows its scheduled unpublish date first (#2892).**
   The row, the bulk Publish confirm and the release's item list name the date and what happens then. A 1.13.0 known issue.
   ([long form](docs/changelog/unreleased.md#publish-shows-unpublish-date))
+
+- **A counted read that the actor is refused now returns the refusal instead of raising an internal `Ash.Error.Framework` error (#2934).**
+  It works around an Ash defect in the count query. The JSON:API, GraphQL and MCP counts were never affected. No migration.
+  ([long form](docs/changelog/unreleased.md#counted-read-refusal))
+
+- **A refused `custom_where` over MCP or JSON:API names its keys in snake_case (`custom_filter`, `date_time`, `not_eq`), not GraphQL's `customFilter`, `dateTime`, `notEq` (#2913).**
+  GraphQL's messages are unchanged. No migration.
+  ([long form](docs/changelog/unreleased.md#custom-where-error-spelling))
+
+- **`mix kiln.gen.plugin` registers an overlay plugin in `projects/<name>/project.exs` instead of the core's tracked `config/config.exs`, and its notice covers activation and each content type's search-vector migration (#2910).**
+  The field type's commented `handle_input_event/3` example now compiles cleanly once uncommented. No migration.
+  ([long form](docs/changelog/unreleased.md#gen-plugin-overlay-config))
 
 ## [1.13.0] - 2026-11-25
 

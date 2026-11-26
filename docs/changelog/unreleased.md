@@ -96,3 +96,43 @@ carries the reasoning.
   - **What changes.** `KilnCMS.CMS.Changes.BustTypeRegistry` now re-fires the field's type when its `localization` changes to or from `:fallback`, and when a `:fallback` field is deleted. Only the type's published rows outside the default locale are queued (`KilnCMS.Firing.Sweep.sweep_type/3` with `only: :translations`): the default locale ends every chain, so it never inherits. A site with no translations queues nothing.
   - **Unchanged.** A switch between `:localized` and `:shared` re-fires nothing; a shared value is copied into the variants when the source publishes, as before. Creating a field as `:fallback` re-fires nothing either: no document holds a value for it yet.
   - **No migration; rolling the pin back is safe.** An artifact fired with the old answer on an earlier release is corrected by `mix kiln.refire_all`, or by publishing the variant.
+
+
+
+
+<a id="plugin-typed-filters"></a>
+
+- **A filter operand on a plugin field type with a typed GraphQL kind compares as a value of that kind (#2855).** A `custom_filter`, `customWhere` or MCP `custom_filter` operand on a plugin `Kiln.FieldType` was always compared as the text sent, against the stored jsonb. A type whose `graphql_kind/1` is `:int` stores a JSON number, and a jsonb string sorts below every number, so `eq` and `in` (`"42"` is not jsonb `42`) never matched, `gt` and `gte` matched every stored number and `lt` and `lte` none.
+  - **What changes.** On a type whose kind is `:int`, `:float`, `:boolean` or `:date`, an operand that is a value of that kind compares as that value, as on KilnCMS's own field of the kind: `custom_filter[score][gt]=9` finds a stored `10`, `custom_filter[score]=42` a stored `42`, and a `customWhere` `int`, `float`, `boolean` or `date` condition on such a field matches what it names (a `date` one used to be refused).
+  - **Unchanged.** Everything else compares as the text sent, as before, so no read that answered `200` is refused now: an operand that is not a value of the kind (`gt=ten`), `contains`, `starts_with` and `ilike` (`starts_with=1` still finds `10`), and every operand on a type whose kind is `:string`, `:datetime` or `:json` or that has no `graphql_kind/1` (a plugin's date-time spelling is its own). `custom_sort` already compared the stored jsonb. The console's list filters don't offer plugin fields, as before. See [extending-content.md](../extending-content.md#filters-on-a-plugin-field-type).
+  - **No migration; rolling the pin back is safe.** An older release compares such operands as text again.
+
+
+
+<a id="counted-read-refusal"></a>
+
+- **A refused count-paginated read returns `Forbidden` (#2934).** A read with `authorize_with: :error` and `page: [count: true]` raised `Ash.Error.Framework` ("Invalid value returned from AshPostgres.DataLayer.run_aggregate_query/3") for an actor the policy refused, where the same read without a count returned `{:error, %Ash.Error.Forbidden{}}`. With `:error`, Ash turns the refusal into a filter that raises inside Postgres; AshPostgres hands that back as `{:error, :no_rollback, error}`, which Ash accepts from the rows query but not from the count query (seen on ash 3.38.1 and ash_postgres 2.15.2).
+  - **What changes.** `KilnCMS.CountedRead.read/1` runs such a read with its count and, when the count fails that way, runs it again without one and returns that read's error: the refusal. The backup history's "Last scheduled run" lookup (`Backups.history_page_of/3`) counts through it. A canary test fails once Ash accepts the AshPostgres return, so the workaround can be removed then.
+  - **Unchanged.** The JSON:API `page[count]`, GraphQL and MCP reads, and the console lists, authorize with Ash's default `:filter`: refused rows are left out of the page and the count, and the answer is never a 500. No migration; rolling the pin back is safe.
+
+
+
+
+<a id="custom-where-error-spelling"></a>
+
+- **A refused `custom_where` names its keys the way the caller's surface spells them (#2913).** `KilnCMS.CMS.Preparations.CustomFieldQuery` built every `custom_where` refusal in GraphQL's camelCase: "needs exactly one of string, int, float, boolean, date, dateTime", "customWhere supports only eq, notEq, in and isNull on it", "which customWhere does not support; use customFilter". The MCP read tools, JSON:API's query string and the code interface take snake_case, so a client or model that followed the message failed again (`unknown key "dateTime"`, `unknown operator "notEq"`).
+  - **What changes.** Over MCP, JSON:API and the code interface the text names `custom_where`, `custom_filter`, `date_time`, `not_eq` and `is_null`, and reads "an int field" and "an int condition" where it read "a int". `docs/mcp.md` no longer warns that some messages use GraphQL's spelling.
+  - **Unchanged.** GraphQL's messages are the same, word for word, so a client matching on them keeps working: the GraphQL schema marks a GraphQL request in the Ash context, and only then are the keys spelled in camelCase. The conditions each surface accepts are the same as before.
+  - **No migration; rolling the pin back is safe.** An older release spells these messages the GraphQL way again.
+
+
+
+
+
+<a id="gen-plugin-overlay-config"></a>
+
+- **`mix kiln.gen.plugin` writes an overlay plugin's registration into the overlay (#2910).** The generator registered the plugin with `config :kiln_cms, :plugins` in `config/config.exs`, the core's tracked config, so a downstream overlay's plugin landed in the reusable core. The overlay's activation file is `projects/<name>/project.exs`, which dev copies to the git-ignored `config/project.exs` and the image build copies with `--build-arg PROJECT=<name>`, and its `:plugins` list replaces the core's rather than adding to it.
+  - **What changes.** The generator creates `projects/<name>/project.exs` with the plugin in its `:plugins` list, or adds the plugin to that list if the file already exists, and leaves `config/config.exs` alone. The plugin and its sample block or field type go live once the overlay is activated; the notice now opens with that step.
+  - **The notice.** It also lists the per-type search-vector migration a hand-written content type needs: `mix ash.codegen` cannot create the trigger-maintained `search_vector` column, so the type needs a migration calling `KilnCMS.Migrations.add_search_vector/1`, sorted after the one that creates its table. `mix kiln.search.check` fails without it.
+  - **`@impl`.** Checked: the generated plugin compiles under `--warnings-as-errors`, including every commented example once uncommented, because an overridden `Kiln.Plugin` callback inherits `@impl` from `use Kiln.Plugin`. The one example that warned was the field type's `handle_input_event/3`, which has no default to inherit from and bound an unused variable; it now has its own `@impl Kiln.FieldType`.
+  - **Unchanged.** `--dep` plugins still touch nothing in the checkout. A plugin generated by an earlier release keeps its `config/config.exs` line until you move it into the overlay's `project.exs`. No migration.

@@ -436,6 +436,33 @@ defmodule KilnCMSWeb.GraphqlCustomWhereTest do
       assert error!([%{"name" => "where", "string" => %{"eq" => "x"}}]) =~ "customFilter"
     end
 
+    # #2913: the other surfaces get snake_case; GraphQL's own text is unchanged,
+    # word for word, so a client matching on it keeps working.
+    test "the messages keep GraphQL's camelCase spelling", %{admin: admin} do
+      CMS.create_field_definition!(
+        %{content_type: :post, name: "spot", label: "Spot", field_type: :geolocation},
+        actor: admin
+      )
+
+      assert error!([%{"name" => "at", "date" => %{"eq" => "2026-01-01"}}]) =~
+               ~s(custom field "at" is a dateTime field, not date; use the dateTime condition)
+
+      assert error!([%{"name" => "count", "string" => %{"eq" => "1"}}]) =~
+               ~s(custom field "count" is a int field, not string; use the int condition)
+
+      assert error!([%{"name" => "count"}]) =~
+               ~s(the condition on "count" needs exactly one of string, int, float, boolean, ) <>
+                 "date, dateTime, got none"
+
+      assert error!([%{"name" => "tagged", "string" => %{"contains" => "a"}}]) =~
+               ~s(custom field "tagged" is a list: customWhere supports only eq, notEq, in and ) <>
+                 "isNull on it (customFilter also takes has, has_all, has_none and count)"
+
+      assert error!([%{"name" => "spot", "string" => %{"eq" => "x"}}]) =~
+               ~s(custom field "spot" has kind geolocation, which customWhere does not ) <>
+                 "support; use customFilter"
+    end
+
     test "a built-in relationship name is not a custom field" do
       assert error!([%{"name" => "tags", "string" => %{"eq" => "x"}}]) =~ "unknown custom field"
     end
