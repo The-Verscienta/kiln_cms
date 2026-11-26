@@ -128,6 +128,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   require Ash.Sort
 
   alias Ash.Error.Query.InvalidArgument
+  alias KilnCMS.CMS.FieldKind
   alias KilnCMS.CMS.FieldValue
   alias KilnCMS.CMS.IndexedCustomFields
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.DateTimes
@@ -856,7 +857,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # An OR of eq conditions rather than `= ANY(...)`: list params splice into
   # fragments as text literals, which can't be cast to jsonb.
   defp condition(%{name: name} = definition, "in", raw) do
-    cast_list(raw, ash_type(definition), name, fn
+    cast_list(raw, definition, name, fn
       [] ->
         expr(false)
 
@@ -889,7 +890,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   end
 
   defp condition(%{name: name} = definition, op, raw) when op in ~w(eq not_eq) do
-    with {:ok, value} <- cast_value(raw, ash_type(definition), name) do
+    with {:ok, value} <- cast_operand(raw, definition, name) do
       {:ok,
        equality(op, [value], [raw], definition, &jsonb_condition(:custom_fields, op, name, &1))}
     end
@@ -899,7 +900,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # time's tidy drops its seconds, and an email's or a slug's would move it in
   # the order.
   defp condition(%{name: name} = definition, op, raw) do
-    with {:ok, value} <- cast_value(raw, ash_type(definition), name) do
+    with {:ok, value} <- cast_operand(raw, definition, name) do
       value = range_operand(definition, op, value)
       {:ok, jsonb_condition(:custom_fields, op, name, value, Map.get(definition, :index_table))}
     end
@@ -1046,7 +1047,10 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   `:boolean`, `:date`, `:naive_datetime` (datetimes are stored offset-less
   ISO-8601, see `ApplyCustomFields`), `:dynamic` for a `:computed` field (the
   formula decides, so the supplied value's own JSON type is kept), and `nil`
-  for text-like and plugin-contributed types ("treat as text").
+  for text-like and plugin-contributed types ("treat as text"). A non-`nil`
+  type also refuses the text operators (`contains`, `starts_with`, `ilike`).
+  A plugin type's operand is cast by its GraphQL kind where it can be
+  (`cast_operand/3`), but it keeps the text operators it always had.
   """
   def ash_type(%{field_type: :integer}), do: :integer
   def ash_type(%{field_type: :float}), do: :float
@@ -1061,6 +1065,47 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # silently matches every row or none.
   def ash_type(%{field_type: :computed}), do: :dynamic
   def ash_type(_definition), do: nil
+
+  @doc """
+  A custom field's operand `raw`, cast for a predicate: as `ash_type/1` says
+  for a core type, and for a plugin-contributed type by the GraphQL kind it
+  declares (`c:Kiln.FieldType.graphql_kind/1`, #2855). An `:int`, `:float`,
+  `:boolean` or `:date` kind casts the operand as the core type of that kind,
+  so a stored JSON number compares as a number. An operand that does not
+  cast to the kind, and any other kind (`:datetime` included: a plugin's
+  stored date-time spelling is its own), is compared as the text sent, as
+  it always was, so no operand that was answered before is refused now.
+  """
+  @spec cast_operand(term(), map(), String.t()) :: {:ok, term()} | {:error, String.t()}
+  def cast_operand(raw, definition, name) do
+    case {ash_type(definition), plugin_type(definition)} do
+      {nil, nil} ->
+        cast_value(raw, nil, name)
+
+      {nil, type} ->
+        with {:error, _not_of_kind} <- cast_value(raw, type, name),
+             do: cast_value(raw, nil, name)
+
+      {type, _none} ->
+        cast_value(raw, type, name)
+    end
+  end
+
+  # The core type a `Kiln.FieldType`'s GraphQL kind casts as, `nil` for a
+  # kind compared as text. Read only where `ash_type/1` is `nil`: every core
+  # type it leaves untyped, and every built-in `Kiln.FieldType`, has a
+  # `:string` or composite kind, so only a plugin type gets a cast here.
+  defp plugin_type(%{field_type: type} = definition) when is_atom(type) do
+    case FieldKind.item_kind_for(definition) do
+      :int -> :integer
+      :float -> :float
+      :boolean -> :boolean
+      :date -> :date
+      _text_or_composite -> nil
+    end
+  end
+
+  defp plugin_type(_definition), do: nil
 
   # A list-valued field (`multiple` select/string/media/reference) holds the
   # probe: `custom_fields @> {name: [probe...]}`. Bound as text and cast in
@@ -1592,7 +1637,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
     raw
     |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
       with :ok <- operand_shape(item, "in", subject),
-           {:ok, value} <- cast_value(item, type, name) do
+           {:ok, value} <- cast_item(item, type, name) do
         {:cont, {:ok, [value | acc]}}
       else
         {:error, message} -> {:halt, {:error, message}}
@@ -1603,6 +1648,13 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
       error -> error
     end
   end
+
+  # `cast_list/5`'s `type` is an Ash type (or `nil`), or the field's
+  # definition, whose items are cast as `cast_operand/3` casts one operand.
+  defp cast_item(item, %{field_type: _type} = definition, name),
+    do: cast_operand(item, definition, name)
+
+  defp cast_item(item, type, name), do: cast_value(item, type, name)
 
   defp invalid(query, argument, message) do
     Ash.Query.add_error(

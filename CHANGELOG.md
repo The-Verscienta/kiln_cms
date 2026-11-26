@@ -71,6 +71,10 @@ else.
   No migration; the ledger row is unchanged.
   ([long form](docs/changelog/unreleased.md#slack-missing-site-name))
 
+- **Custom fields: on a plugin field type whose `graphql_kind/1` is `:int`, `:float`, `:boolean` or `:date`, a filter operand that is a value of that kind compares as that value, so `gt=9` finds `10` and `eq` matches a stored number (#2855).**
+  Every other operand, and the text operators, compare as text as before; nothing that answered `200` is refused. No migration.
+  ([long form](docs/changelog/unreleased.md#plugin-typed-filters))
+
 - **Duplicating a text block in the content editor no longer saves the copy empty (#2778).**
   The copy's text is kept by save and autosave, and is independent of the original. This was a 1.13.0 known issue.
   ([long form](docs/changelog/unreleased.md#duplicate-rich-text-body))
