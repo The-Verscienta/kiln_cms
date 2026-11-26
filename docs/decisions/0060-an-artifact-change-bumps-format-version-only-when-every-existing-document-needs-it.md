@@ -78,10 +78,11 @@ The keys added so far, against that rule:
   re-fires its published siblings (`I18n.SharedFieldsWorker`), and saving the fallback
   chain at `/editor/locales` re-fires every published translation of a type
   that declares a `:fallback` field (`I18n.RefireInheritingWorker`). Changing a
-  field's `localization` to `:fallback` re-fires nothing, so a variant that
-  already left that field empty gains its inherited value at its next fire,
-  not at once. That gap is about the setting, not the deploy; a bump would not
-  close it. No bump.
+  field's `localization` to or from `:fallback`, or deleting a `:fallback`
+  field, re-fires the type's published translations
+  (`Changes.BustTypeRegistry`, #2905); before that fix it re-fired nothing.
+  That gap was about the setting, not the deploy; a bump would not have closed
+  it. No bump.
 - **`social`** (`put_social/2`) is on every document: `title` is always
   present. Every artifact fired before the deploy lacks it, and no editorial
   action re-fires an untouched document. A bump is the only thing that makes

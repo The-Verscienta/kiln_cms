@@ -264,7 +264,7 @@ Design A, with no covered surface changed. Each part of the note maps to code:
 | A sibling's open working copy gets the value too | `working_blocks` / `working_fields` are patched and each matching `working_base` fingerprint moves with the live value (`KilnCMS.I18n.SharedFields`). |
 | `:fallback` filled at fire time, before render | `KilnCMS.I18n.FieldFallback.fill/2` in `Firing.Engine.fire/2`; the `:json` body gains `inherited_fields` only when something was inherited. The public page, which renders the record live, fills the same way. |
 | Staleness must not be cleared by a copy | `Translations.edited_at/2` judges a variant by its newest version not written by `:sync_shared_fields`. |
-| Re-fire fan-out | A publish re-fires the published siblings; a chain save queues `KilnCMS.I18n.RefireInheritingWorker`. |
+| Re-fire fan-out | A publish re-fires the published siblings; a chain save queues `KilnCMS.I18n.RefireInheritingWorker`. Changing a custom field's `localization` to or from `:fallback`, or deleting a `:fallback` field, re-fires the type's published rows outside the default locale (`KilnCMS.CMS.Changes.BustTypeRegistry`, #2905). A switch between `:localized` and `:shared` re-fires nothing: the copy happens when the source publishes. |
 | An additive `x-kiln-localization` annotation | On block fields and custom fields in `KilnCMS.SchemaExport`; types that can inherit declare the optional `inherited_fields` key. |
 
 Beyond the note: JSON:API and GraphQL get the inherited values through a

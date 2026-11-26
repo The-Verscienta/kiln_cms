@@ -124,6 +124,7 @@ defmodule KilnCMSWeb.ReleaseLive do
     |> assign(:max_items, Releases.max_items())
     |> assign(:pending_count, Enum.count(items, &(&1.status == :pending)))
     |> assign_readiness_counts()
+    |> assign_expiring_count()
     |> subscribe_to(release)
   end
 
@@ -181,7 +182,10 @@ defmodule KilnCMSWeb.ReleaseLive do
     found =
       type
       |> ContentTypes.list!(
-        Keyword.put(opts, :query, filter: [id: [in: ids]], select: [:id, :title, :state])
+        Keyword.put(opts, :query,
+          filter: [id: [in: ids]],
+          select: [:id, :title, :state, :unpublish_at, :expiry_action]
+        )
       )
       |> Map.new(&{&1.id, &1})
 
@@ -189,6 +193,21 @@ defmodule KilnCMSWeb.ReleaseLive do
   rescue
     # The content type was retired since the item was added.
     _error -> Enum.map(rows, &{&1.id, nil})
+  end
+
+  # A draft this release puts up that already carries a takedown date (#2892).
+  # Whoever ships the release approves that date with the page, and the editor
+  # is the only other place that shows it, so each such item says so and the
+  # ship controls total them.
+  defp expiring?(%{status: :pending, action: :publish}, %{state: state, unpublish_at: %DateTime{}})
+       when state in [:draft, :in_review],
+       do: true
+
+  defp expiring?(_item, _record), do: false
+
+  defp assign_expiring_count(socket) do
+    %{items: items, titles: titles} = socket.assigns
+    assign(socket, :expiring_count, Enum.count(items, &expiring?(&1, titles[&1.id])))
   end
 
   defp schedule_params(%{scheduled_at: nil}), do: %{"scheduled_at" => ""}
@@ -782,6 +801,20 @@ defmodule KilnCMSWeb.ReleaseLive do
                     >
                       <.badge variant={elem(note, 0)}>{elem(note, 1)}</.badge>
                     </p>
+                    <p
+                      :if={expiring?(item, @titles[item.id])}
+                      id={"release-item-expiry-#{item.id}"}
+                      class="mt-1 flex items-center gap-1 text-xs text-base-content/70"
+                      title={gettext("Scheduled to unpublish once published")}
+                    >
+                      <.icon name="hero-clock" class="size-3.5" />
+                      <span>{expiry_verb(@titles[item.id].expiry_action)}</span>
+                      <time
+                        id={"release-item-expiry-time-#{item.id}"}
+                        phx-hook="LocalTime"
+                        datetime={DateTime.to_iso8601(@titles[item.id].unpublish_at)}
+                      >{stamp(@titles[item.id].unpublish_at)}</time>
+                    </p>
                   </td>
                   <td class="text-sm">
                     <%= if editable_item?(item, @release) do %>
@@ -921,6 +954,13 @@ defmodule KilnCMSWeb.ReleaseLive do
                     ENTIRE release fails, so this is not a nicety: without it the
                     only warning was a per-item badge somewhere in a scroll list,
                     and the way you found out was a failed go-live. --%>
+              <p :if={@expiring_count > 0} id="release-expiring" class="text-xs">
+                {ngettext(
+                  "1 draft in this release has a scheduled unpublish date, shown in the item list.",
+                  "%{count} drafts in this release have a scheduled unpublish date, shown in the item list.",
+                  @expiring_count
+                )}
+              </p>
               <p :if={@blocked_count > 0} class="text-xs text-error">
                 {ngettext(
                   "1 item can't ship as it stands. A release is all-or-nothing, so nothing would go live.",

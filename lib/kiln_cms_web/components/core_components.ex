@@ -196,6 +196,19 @@ defmodule KilnCMSWeb.CoreComponents do
   end
 
   @doc """
+  What happens to a record at its `unpublish_at`, as the short verb a list
+  row or confirm puts before the date: its `expiry_action` decides it.
+
+  ## Examples
+
+      expiry_verb(:unpublish) #=> "Unpublishes"
+      expiry_verb(:archive)   #=> "Archives"
+  """
+  def expiry_verb(:archive), do: gettext("Archives")
+  def expiry_verb(:flag), do: gettext("Flagged expired")
+  def expiry_verb(_unpublish), do: gettext("Unpublishes")
+
+  @doc """
   Renders a small status pill for content workflow states (draft / in_review /
   published / archived). The label is translated via Gettext.
 

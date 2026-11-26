@@ -78,6 +78,14 @@ anyone who may not publish. The field then says
 On a draft nobody has scheduled, any editor may set it. It does nothing until
 the page is published.
 
+Whoever publishes the draft approves the date with it, so it is shown wherever
+a draft can be published without opening the editor (#2892). The content list
+shows it on the draft's row beside **Publish** or **Approve**. The bar's
+**Publish** confirm counts and lists the selected drafts that have one, for
+example "2 of these have a scheduled unpublish date:". A release shows it under
+each item it puts up and totals them by **Publish now**. Each says
+**Unpublishes**, **Archives** or **Flagged expired**, after the page's expiry action.
+
 ## Move the date on the calendar
 
 1. Open **Calendar** (`/editor/calendar`).
