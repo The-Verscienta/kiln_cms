@@ -98,6 +98,10 @@ else.
   It works around an Ash defect in the count query. The JSON:API, GraphQL and MCP counts were never affected. No migration.
   ([long form](docs/changelog/unreleased.md#counted-read-refusal))
 
+- **A refused `custom_where` over MCP or JSON:API names its keys in snake_case (`custom_filter`, `date_time`, `not_eq`), not GraphQL's `customFilter`, `dateTime`, `notEq` (#2913).**
+  GraphQL's messages are unchanged. No migration.
+  ([long form](docs/changelog/unreleased.md#custom-where-error-spelling))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —

@@ -91,3 +91,13 @@ carries the reasoning.
 - **A refused count-paginated read returns `Forbidden` (#2934).** A read with `authorize_with: :error` and `page: [count: true]` raised `Ash.Error.Framework` ("Invalid value returned from AshPostgres.DataLayer.run_aggregate_query/3") for an actor the policy refused, where the same read without a count returned `{:error, %Ash.Error.Forbidden{}}`. With `:error`, Ash turns the refusal into a filter that raises inside Postgres; AshPostgres hands that back as `{:error, :no_rollback, error}`, which Ash accepts from the rows query but not from the count query (seen on ash 3.38.1 and ash_postgres 2.15.2).
   - **What changes.** `KilnCMS.CountedRead.read/1` runs such a read with its count and, when the count fails that way, runs it again without one and returns that read's error: the refusal. The backup history's "Last scheduled run" lookup (`Backups.history_page_of/3`) counts through it. A canary test fails once Ash accepts the AshPostgres return, so the workaround can be removed then.
   - **Unchanged.** The JSON:API `page[count]`, GraphQL and MCP reads, and the console lists, authorize with Ash's default `:filter`: refused rows are left out of the page and the count, and the answer is never a 500. No migration; rolling the pin back is safe.
+
+
+
+
+<a id="custom-where-error-spelling"></a>
+
+- **A refused `custom_where` names its keys the way the caller's surface spells them (#2913).** `KilnCMS.CMS.Preparations.CustomFieldQuery` built every `custom_where` refusal in GraphQL's camelCase: "needs exactly one of string, int, float, boolean, date, dateTime", "customWhere supports only eq, notEq, in and isNull on it", "which customWhere does not support; use customFilter". The MCP read tools, JSON:API's query string and the code interface take snake_case, so a client or model that followed the message failed again (`unknown key "dateTime"`, `unknown operator "notEq"`).
+  - **What changes.** Over MCP, JSON:API and the code interface the text names `custom_where`, `custom_filter`, `date_time`, `not_eq` and `is_null`, and reads "an int field" and "an int condition" where it read "a int". `docs/mcp.md` no longer warns that some messages use GraphQL's spelling.
+  - **Unchanged.** GraphQL's messages are the same, word for word, so a client matching on them keeps working: the GraphQL schema marks a GraphQL request in the Ash context, and only then are the keys spelled in camelCase. The conditions each surface accepts are the same as before.
+  - **No migration; rolling the pin back is safe.** An older release spells these messages the GraphQL way again.
