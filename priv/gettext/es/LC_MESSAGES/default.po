@@ -24035,6 +24035,11 @@ msgstr "Esa reanudación no se puede cancelar."
 msgid "That rule is no longer listed."
 msgstr "Esa regla ya no aparece en la lista."
 
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "That rule no longer exists."
+msgstr "Esa regla ya no existe."
+
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
 msgid "That schedule no longer exists."

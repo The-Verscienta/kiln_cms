@@ -16,8 +16,10 @@ defmodule KilnCMS.Webhooks.SlackFormat do
       (`KilnCMS.Security.AlertText.headline/1`, in English, like the email),
       the site, when, and a link to the security log (or, for a notice, the
       alert settings);
-    * a `"ping"`: "KilnCMS webhook test for `Site`". Never the endpoint's
-      URL, which for an incoming webhook is the credential;
+    * a `"ping"`: "KilnCMS webhook test for `Site`", or "KilnCMS webhook
+      test" when the payload names no site (`KilnCMS.Webhooks.DeliveryWorker`
+      fills it in from the endpoint's site first). Never the endpoint's URL,
+      which for an incoming webhook is the credential;
     * anything else (a subscription from before the format rules, or a
       redelivery of an older row): one neutral line naming the event, and
       nothing from its payload.
@@ -48,7 +50,14 @@ defmodule KilnCMS.Webhooks.SlackFormat do
   """
   @spec render(String.t(), map()) :: map()
   def render("ping", data) do
-    message("KilnCMS webhook test for #{code(get(data, "site_name"))}")
+    case get(data, "site_name") do
+      name when is_binary(name) and name != "" ->
+        message("KilnCMS webhook test for #{code(name)}")
+
+      # No name to show: a plain sentence, not a `-` placeholder (#2797).
+      _missing ->
+        message("KilnCMS webhook test")
+    end
   end
 
   def render("security." <> _ = event, data) when is_map(data) do

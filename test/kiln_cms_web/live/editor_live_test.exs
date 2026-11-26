@@ -1917,13 +1917,19 @@ defmodule KilnCMSWeb.EditorLiveTest do
       assert displaced =~ "Bob took over “Title”. Your changes are saved."
     end
 
-    test "a takeover on published content leaves the holder's unsaved text in their form",
+    # A live document autosaves into its working copy, so a takeover flushes
+    # it there as a draft's flushes into its row. Gated on the draft state, the
+    # flush left the holder's edit queued, the taker kept the text from mount,
+    # and the next save of either met the optimistic lock (#2786).
+    test "a takeover on published content flushes the holder's edit into the working copy",
          %{conn: conn} do
       page = draft_page(%{title: "Live", state: :published, published_at: DateTime.utc_now()})
       topic = Presence.topic("page", page.id)
       Phoenix.PubSub.subscribe(KilnCMS.PubSub, topic)
 
-      alice = authed_user(:editor, %{name: "Alice"})
+      # Alice's id sorts first, so she is the collab persister whose pending
+      # autosave the flush has to land (see the draft test above).
+      alice = authed_user(:editor, %{name: "Alice", id: low_uuid()})
       {:ok, holder, _html} = conn |> log_in(alice) |> live(~p"/editor/content/page/#{page.id}")
 
       {:ok, taker, _html} =
@@ -1934,24 +1940,32 @@ defmodule KilnCMSWeb.EditorLiveTest do
       holder_pid = holder.pid
       holder |> element(~s(input[name="form[title]"])) |> render_focus()
       assert_receive {:field_locks, ^topic, %{"title" => %{pid: ^holder_pid}}}, 2_000
-      holder |> form("#page-editor", form: %{title: "Not saved yet"}) |> render_change()
+      holder |> form("#page-editor", form: %{title: "Flushed live"}) |> render_change()
+      assert CMS.get_page!(page.id, authorize?: false).working_title == nil
 
       taker
       |> element(~s(button[phx-click="ask_takeover"][phx-value-field="title"]))
       |> render_click()
 
-      assert render(taker) =~ "stays in their editor, unsaved"
+      assert render(taker) =~ "Nothing is lost"
       render_click(taker, "confirm_takeover", %{})
+      assert_push_event(holder, "flush_body", %{field: "title"})
       render_hook(holder, "body_flushed", %{"field" => "title"})
 
       taker_pid = taker.pid
       assert_receive {:field_locks, ^topic, %{"title" => %{pid: ^taker_pid}}}, 2_000
+      assert_push_event(taker, "lock_granted", %{field: "title"}, 1_000)
 
-      # Nothing autosaved on published content; the note says so.
-      assert Ash.get!(Page, page.id, authorize?: false).title == "Live"
+      # The edit is in the working copy; readers still get the live title.
+      saved = CMS.get_page!(page.id, authorize?: false)
+      assert saved.working_title == "Flushed live"
+      assert saved.title == "Live"
+
+      # Bob had nothing in flight, so he edits the flushed text.
+      assert render(taker) =~ ~s(value="Flushed live")
+
       displaced = render(holder)
-      assert displaced =~ "Your unsaved changes are still in this form."
-      assert displaced =~ ~s(value="Not saved yet")
+      assert displaced =~ "Bob took over “Title”. Your changes are saved."
     end
 
     test "the activity line says how active the holder is" do

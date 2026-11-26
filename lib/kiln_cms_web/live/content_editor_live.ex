@@ -8096,7 +8096,11 @@ defmodule KilnCMSWeb.ContentEditorLive do
           {gettext("Reload latest")}
         </button>
       </div>
-      <.takeover_dialog :if={@takeover} takeover={@takeover} draft?={@record.state == :draft} />
+      <.takeover_dialog
+        :if={@takeover}
+        takeover={@takeover}
+        draft?={@record.state in [:draft, :published]}
+      />
       <.form
         for={@form}
         phx-change="validate"

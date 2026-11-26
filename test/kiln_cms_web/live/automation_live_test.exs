@@ -912,6 +912,74 @@ defmodule KilnCMSWeb.AutomationLiveTest do
       view |> element("#rule-#{rule.id} button[aria-label='Delete rule']") |> render_click()
       assert Automation.list_rules!(authorize?: false) == []
     end
+
+    # Another admin deleted the rule after this page listed it (#2786): Edit
+    # read it with a raising get and took the page down.
+    test "Edit on a rule deleted since the list loaded says so", %{conn: conn} do
+      {:ok, rule} =
+        Automation.create_rule(
+          %{name: "Gone soon", trigger_event: :updated, action: :invalidate_cache},
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      :ok = Automation.destroy_rule(rule, authorize?: false)
+
+      html = view |> element("#rule-#{rule.id} button", "Edit") |> render_click()
+
+      assert html =~ "That rule no longer exists."
+      refute has_element?(view, "#rule-#{rule.id}")
+      refute has_element?(view, "#edit-rule-#{rule.id}")
+    end
+
+    # Deleting one rule closed whatever edit was open, another rule's half-typed
+    # changes included (#2786).
+    test "deleting a rule leaves another rule's open edit alone", %{conn: conn} do
+      {:ok, editing} =
+        Automation.create_rule(
+          %{name: "Being edited", trigger_event: :updated, action: :invalidate_cache},
+          authorize?: false
+        )
+
+      {:ok, other} =
+        Automation.create_rule(
+          %{name: "Deleted", trigger_event: :updated, action: :invalidate_cache},
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      view |> element("#rule-#{editing.id} button", "Edit") |> render_click()
+      assert has_element?(view, "#edit-rule-#{editing.id}")
+
+      view |> element("#rule-#{other.id} button[aria-label='Delete rule']") |> render_click()
+
+      assert has_element?(view, "#edit-rule-#{editing.id}")
+      refute has_element?(view, "#rule-#{other.id}")
+
+      # The rule being edited, deleted (from a stale tab's event): its form goes.
+      render_click(view, "delete", %{"id" => editing.id})
+      refute has_element?(view, "#edit-rule-#{editing.id}")
+    end
+
+    test "saving an edit of a rule deleted meanwhile says so", %{conn: conn} do
+      {:ok, rule} =
+        Automation.create_rule(
+          %{name: "Deleted mid-edit", trigger_event: :updated, action: :invalidate_cache},
+          authorize?: false
+        )
+
+      {:ok, view, _html} = live(conn, ~p"/editor/automation")
+      view |> element("#rule-#{rule.id} button", "Edit") |> render_click()
+      :ok = Automation.destroy_rule(rule, authorize?: false)
+
+      html =
+        view
+        |> form("#edit-rule-#{rule.id}", rule: %{name: "Renamed"})
+        |> render_submit()
+
+      assert html =~ "That rule no longer exists."
+      refute has_element?(view, "#edit-rule-#{rule.id}")
+    end
   end
 
   describe "Wording" do

@@ -239,6 +239,32 @@ defmodule KilnCMSWeb.ComplianceLiveTest do
       refute row.enabled
     end
 
+    # A refused save used to reseed the form from the saved row, so one phrase
+    # over the length limit threw away everything else typed (#2786).
+    test "a refused save keeps what was typed", %{conn: conn, org: org} do
+      Application.put_env(:kiln_cms, Compliance, enabled: true)
+
+      {:ok, lv, _html} = admin_live(conn, org)
+      too_long = String.duplicate("x", KilnCMS.Limits.line() + 1)
+
+      html =
+        lv
+        |> form("#compliance-settings-form",
+          compliance: %{
+            enabled: "true",
+            phrases: "kept phrase\n#{too_long}",
+            disclaimer: "Kept disclaimer."
+          }
+        )
+        |> render_submit()
+
+      refute html =~ "settings saved"
+      assert {:ok, []} = CMS.list_site_compliance(tenant: org, authorize?: false)
+
+      assert html =~ "kept phrase"
+      assert html =~ "Kept disclaimer."
+    end
+
     test "resetting twice does not crash the page", %{conn: conn, org: org} do
       # `@row` is assigned at mount, so a second click (or a second tab) would
       # destroy an already-deleted record. A bang call there raises out of the
