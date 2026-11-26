@@ -338,6 +338,12 @@ defmodule Kiln.FieldType do
 
   A `multiple` field is always a list of this kind; the host handles that.
 
+  The kind also decides how a `custom_filter` or `customWhere` operand on the
+  field compares: as a value of an `:int`, `:float`, `:boolean` or `:date`
+  kind when it is one, and as the text sent otherwise (see "Filters on a plugin
+  field type" in the KilnCMS
+  [content-modeling guide](https://github.com/The-Verscienta/kiln_cms/blob/main/docs/extending-content.md#filters-on-a-plugin-field-type)).
+
   Optional, and not defaulted by `use Kiln.FieldType` (the host probes for it
   with `function_exported?/3`). A type compiled against an older `kiln_plugin`
   has no such function and is served as `:json`. Added in `kiln_plugin` 1.4.

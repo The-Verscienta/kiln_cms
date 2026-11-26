@@ -113,8 +113,9 @@ Reads (all policy-scoped — drafts are visible only if the owner is an editor):
 >   [json-api.md](json-api.md) → "Custom fields".
 > - A bad name, kind, operator or operand comes back with `isError: true` and
 >   the API's error text, prefixed by the argument (`custom_where: unknown
->   operator "notEq" …`). Some messages spell operators and kinds the GraphQL
->   way (`notEq`, `isNull`, `dateTime`). Send the snake_case form.
+>   operator "notEq" for an int condition …`). The text spells keys, kinds and
+>   operators in snake_case (`custom_filter`, `date_time`, `not_eq`,
+>   `is_null`), as these tools take them.
 
 Search: `search_content` (`query`, optional `limit` 1–25 and `locale`) runs the
 same hybrid search as `/api/search` and `/api/ask` — keyword, title, alias and

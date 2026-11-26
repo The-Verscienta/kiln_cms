@@ -2125,19 +2125,22 @@ defmodule KilnCMS.Backups do
   (`started_at` newest first, then `id`). The first is the probe: it refuses
   rather than filters (`authorize_with: :error`), and only an actor it lets
   through is counted for, since a count of a refused read is 0, which would
-  answer page 1 for any run.
+  answer page 1 for any run. The count goes through `KilnCMS.CountedRead`,
+  so a refusal there is still `Forbidden` and not a raise (#2934).
   """
   @spec history_page_of(String.t(), term(), pos_integer()) ::
           {:ok, pos_integer()} | {:error, term()}
   def history_page_of(run_id, actor, per_page) when is_integer(per_page) and per_page > 0 do
     with {:ok, run} <- history_run(run_id, actor),
          {:ok, %{count: before}} when is_integer(before) <-
-           run_history(
-             query: before_in_history(run),
-             actor: actor,
-             authorize_with: :error,
-             page: [limit: 1, count: true]
-           ) do
+           KilnCMS.CountedRead.read(fn count? ->
+             run_history(
+               query: before_in_history(run),
+               actor: actor,
+               authorize_with: :error,
+               page: [limit: 1, count: count?]
+             )
+           end) do
       {:ok, div(before, per_page) + 1}
     end
   end

@@ -338,6 +338,23 @@ defmodule KilnCMSWeb.JsonApiTest do
       assert ids(page2) == [c.id]
     end
 
+    # #2934: a count over rows the caller may not read is a filter, not a raise.
+    # The API reads with Ash's default `authorize_with: :filter`, so the draft is
+    # neither listed nor counted and the answer is a 200, never a 500.
+    test "page[count] counts only what the caller may read" do
+      admin = user(:admin)
+      cat = category(admin)
+
+      live = published_post(%{title: "Live", category_id: cat.id}, admin)
+      _draft = make_post(%{title: "Draft", category_id: cat.id}, admin)
+
+      assert {200, body} =
+               api_get("/api/json/posts?filter[category_id]=#{cat.id}&page[count]=true")
+
+      assert ids(body) == [live.id]
+      assert body["meta"]["page"]["total"] == 1
+    end
+
     test "an oversized page limit is accepted (rows are capped server-side by max_page_size)" do
       admin = user(:admin)
       cat = category(admin)
@@ -1102,6 +1119,25 @@ defmodule KilnCMSWeb.JsonApiTest do
                )
 
       assert err["source"]["pointer"] =~ "custom_where"
+    end
+
+    # #2913: the query string takes snake_case keys, and the refusal names them.
+    test "a custom_where refusal names the snake_case keys" do
+      admin = user(:admin)
+      at = "at#{System.unique_integer([:positive])}"
+
+      CMS.create_field_definition!(
+        %{content_type: :post, name: at, label: "At", field_type: :datetime},
+        actor: admin
+      )
+
+      assert {400, %{"errors" => [err | _]}} =
+               api_get(
+                 "/api/json/posts?custom_where[][name]=#{at}&custom_where[][date][eq]=2026-01-01"
+               )
+
+      assert err["detail"] =~
+               ~s(custom field "#{at}" is a date_time field, not date; use the date_time condition)
     end
   end
 
