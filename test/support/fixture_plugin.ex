@@ -454,6 +454,28 @@ defmodule KilnCMS.FixturePlugin.FieldTypes.Shapeshifter do
   def cast(value, _definition), do: {:ok, value |> to_string() |> String.trim()}
 end
 
+defmodule KilnCMS.FixturePlugin.FieldTypes.Mood do
+  @moduledoc """
+  A plugin field type whose choice of editor input reads a setting beyond
+  the type, `multiple` and `format` (test fixture, #2883): a row of faces
+  has no empty state, so `c:Kiln.FieldType.widgets/1` offers it on a
+  `required` field only. Proves the fields admin asks `widgets/1` with the
+  same whole definition the save does, so the cards it shows are the ones
+  the save takes.
+  """
+  use Kiln.FieldType
+
+  @impl Kiln.FieldType
+  def description, do: "How a reader felt, in a word."
+
+  @impl Kiln.FieldType
+  def cast(value, _definition), do: {:ok, value |> to_string() |> String.trim()}
+
+  @impl Kiln.FieldType
+  def widgets(%{required: true}), do: [:words, {:scale, "Scale"}, {:faces, "Faces"}]
+  def widgets(_definition), do: [:words, {:scale, "Scale"}]
+end
+
 defmodule KilnCMS.FixturePlugin.PanelLive do
   @moduledoc "A plugin admin panel (test fixture) mounted via `admin_routes/0`."
   use KilnCMSWeb, :live_view
@@ -625,7 +647,8 @@ defmodule KilnCMS.FixturePlugin do
       KilnCMS.FixturePlugin.FieldTypes.Exploding,
       KilnCMS.FixturePlugin.FieldTypes.Lookup,
       KilnCMS.FixturePlugin.FieldTypes.Tag,
-      KilnCMS.FixturePlugin.FieldTypes.Shapeshifter
+      KilnCMS.FixturePlugin.FieldTypes.Shapeshifter,
+      KilnCMS.FixturePlugin.FieldTypes.Mood
     ]
 
   @impl true

@@ -374,6 +374,17 @@ defmodule Kiln.FieldType do
   `c:input_type/0` takes no definition, so a widget cannot change the HTML
   `type` of the input.
 
+  `definition` is the whole field definition as the write would store it,
+  every setting included (`name`, `required`, `validation`, `multiple`, …),
+  and the host asks with the same one everywhere: the fields admin asks
+  with the admin's unsaved settings over the stored ones, so the choices
+  follow the form as it is edited, and the save checks the stored pick
+  against what that same definition offers. A list that reads any setting
+  therefore offers on the page exactly what the save accepts. A pick the
+  settings stop offering is dropped back to the default; one written through
+  the API is refused. A field holding a list (`multiple`) never asks: it uses
+  the generic list input.
+
   A name is a machine name (lowercase letters, digits and underscores,
   starting with a letter) and a label a plain string; a name with no label is
   shown humanized. `[]`, or one entry, offers no choice.

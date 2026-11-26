@@ -13,6 +13,14 @@ read for a plugin contract:
 Releases are tagged `kiln_plugin-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+### Fixed
+
+- **`c:Kiln.FieldType.widgets/1` documents the definition it is asked with
+  (kiln_cms#2883).** The whole definition, every setting included, the same
+  in the fields admin and on save; the admin used to pass only a few.
+
 ## 1.6.1
 
 ### Fixed

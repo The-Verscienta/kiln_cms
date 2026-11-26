@@ -434,7 +434,7 @@ defmodule KilnCMSWeb.SystemLiveTest do
 
       assert contribution_counts(html) == %{
                "Blocks" => "6",
-               "Field types" => "6",
+               "Field types" => "7",
                "Image backends" => "1",
                "Nav items" => "1",
                "Admin routes" => "1",
