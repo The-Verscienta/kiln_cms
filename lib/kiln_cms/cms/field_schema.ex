@@ -25,7 +25,11 @@ defmodule KilnCMS.CMS.FieldSchema do
       that is expensive to evaluate (a pathological `pattern`, say) fails the
       write with a message instead of holding the request. The value it
       checks is already capped (64 KB, 32 levels, 5,000 values) by
-      `KilnCMS.CMS.FieldTypes.Json`.
+      `KilnCMS.CMS.FieldTypes.Json`. Only the check of the value is timed:
+      the schema is built first, in the caller. That is the same build
+      `check_schema/1` runs when the definition is saved, bounded by the
+      schema limits above, so a slow build (a cold or busy node) never
+      refuses a valid value (#3063).
 
   Failures are readable sentences naming the JSON Pointer of the offending
   value (`/dosage: value 1 is lower than minimum 3`), at most five of them.
@@ -84,14 +88,27 @@ defmodule KilnCMS.CMS.FieldSchema do
   `:ok`, or `{:error, [message]}` for `value` against `schema`. A schema that
   no longer builds, or a check past its deadline, is one message rather than
   a raise.
+
+  The schema is built before the deadline starts; the deadline bounds only
+  the check of `value`. `opts` exist for tests: `:deadline_ms` (default
+  #{@deadline_ms}) and `:build`, a function standing in for the builder.
   """
-  @spec validate(term(), map()) :: :ok | {:error, [String.t()]}
-  def validate(value, %{} = schema) do
+  @spec validate(term(), map(), keyword()) :: :ok | {:error, [String.t()]}
+  def validate(value, %{} = schema, opts \\ []) do
+    build = Keyword.get(opts, :build, &build/1)
+
+    case build.(schema) do
+      {:ok, root} -> check(value, root, Keyword.get(opts, :deadline_ms, @deadline_ms))
+      {:error, message} -> {:error, [message]}
+    end
+  end
+
+  defp check(value, root, deadline_ms) do
     locale = Gettext.get_locale(KilnCMSWeb.Gettext)
 
     run = fn ->
       Gettext.put_locale(KilnCMSWeb.Gettext, locale)
-      run_check(value, schema)
+      run_check(value, root)
     end
 
     # A full supervisor exits the caller; that is a refusal, not a crash.
@@ -102,7 +119,7 @@ defmodule KilnCMS.CMS.FieldSchema do
         :exit, _reason -> nil
       end
 
-    case task && (Task.yield(task, @deadline_ms) || Task.shutdown(task, :brutal_kill)) do
+    case task && (Task.yield(task, deadline_ms) || Task.shutdown(task, :brutal_kill)) do
       {:ok, :ok} -> :ok
       {:ok, {:error, messages}} -> {:error, messages}
       nil -> {:error, [gettext("took too long to check against the schema")]}
@@ -110,16 +127,10 @@ defmodule KilnCMS.CMS.FieldSchema do
     end
   end
 
-  defp run_check(value, schema) do
-    case build(schema) do
-      {:ok, root} ->
-        case JSV.validate(value, root) do
-          {:ok, _cast} -> :ok
-          {:error, error} -> {:error, messages(error)}
-        end
-
-      {:error, message} ->
-        {:error, [message]}
+  defp run_check(value, root) do
+    case JSV.validate(value, root) do
+      {:ok, _cast} -> :ok
+      {:error, error} -> {:error, messages(error)}
     end
   end
 

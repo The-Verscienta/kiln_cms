@@ -64,6 +64,9 @@ else.
 
 ### Fixed
 
+- **JSON fields: a valid value is no longer refused as "took too long to check against the schema" when building its JSON Schema is slow on a cold or busy node (#3063).**
+  The 1-second deadline now covers only checking the value. No migration.
+  ([long form](docs/changelog/unreleased.md#field-schema-deadline))
 - **Markdown: an image that shares its line with text or another image, or sits in a list, quote or table, is kept as a link to the picture labelled with its alt text instead of vanishing (#2771).**
   A 1.13.0 known issue. Standalone images still become image blocks. No migration.
   ([long form](docs/changelog/unreleased.md#markdown-inline-image))

@@ -173,6 +173,33 @@ defmodule KilnCMS.CMS.FieldPaletteAndSchemaTest do
       assert {:error, [_ | _]} = FieldSchema.validate(%{"v" => value} |> Map.fetch!("v"), schema)
       assert System.monotonic_time(:millisecond) - started < 4_000
     end
+
+    # #3063: a cold or busy node can take longer than the deadline to build a
+    # schema. The deadline is for the value check, so a slow build must not
+    # refuse a valid value. The stand-in builder sleeps four times the
+    # deadline, so a build inside the deadline could not pass.
+    test "a slow schema build does not count against the deadline" do
+      slow_build = fn schema ->
+        Process.sleep(200)
+        JSV.build(schema, default_meta: FieldSchema.draft())
+      end
+
+      assert FieldSchema.validate(%{"id" => 5}, @schema, build: slow_build, deadline_ms: 50) ==
+               :ok
+
+      assert {:error, [message]} =
+               FieldSchema.validate(%{"id" => 1}, @schema, build: slow_build, deadline_ms: 50)
+
+      assert message =~ "minimum"
+    end
+
+    test "a value check past the deadline is refused" do
+      # Checking 200,000 items for uniqueness takes far longer than 1 ms.
+      value = Enum.to_list(1..200_000)
+
+      assert FieldSchema.validate(value, %{"uniqueItems" => true}, deadline_ms: 1) ==
+               {:error, ["took too long to check against the schema"]}
+    end
   end
 
   describe "json_schema on a field" do
