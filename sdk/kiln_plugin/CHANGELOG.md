@@ -13,6 +13,14 @@ read for a plugin contract:
 Releases are tagged `kiln_plugin-vX.Y.Z` in the
 [KilnCMS repository](https://github.com/The-Verscienta/kiln_cms).
 
+## Unreleased
+
+### Changed
+
+- **`c:Kiln.FieldType.graphql_kind/1`'s doc says the kind also decides how a
+  filter operand on the field compares (kiln_cms#2855).** Documentation only:
+  no callback or return shape changed.
+
 ## 1.6.1
 
 ### Fixed
