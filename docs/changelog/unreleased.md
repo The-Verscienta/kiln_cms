@@ -124,3 +124,13 @@ carries the reasoning.
   - **What changes.** The cards are asked with the form's own changeset, applied the way the save applies it, so the page and the save hand `widgets/1` the same definition. A card checked before a setting change that stops offering it is still dropped back to the default rather than refused; the page now decides that from the validated form instead of from the six settings. `mix kiln.plugins.doctor` asks `widgets/1` with one full sample definition in both of its checks.
   - **For plugin authors.** The `widgets/1` doc in `kiln_plugin` now says what the definition holds. Core field types are unaffected: their inputs read only the settings the page already sent.
   - **No migration; rolling the pin back is safe.**
+
+
+
+
+<a id="feed-relay-exit"></a>
+
+- **A change-feed event reaches this node's subscribers when the database connection exits mid-publish (#2938).** Before handing an event to the site's relay, `KilnCMS.Delivery.Feed.publish/4` decides what anonymous SSE streams see, which reads the event's exposure. The read failing with an error already hid the event from streams and delivered it anyway. Failing with an *exit* did not: a connection that went away while the read waited for it (a pool restarting, an owner process dying) skipped the hand-off, so live editor views and other in-BEAM subscribers on that node never got the event, and the log said "Feed event for … not published".
+  - **What changes.** Any failure of that decision, a raise or an exit, now hides the event from SSE streams and still hands it to the relay. It logs `Feed event <id> hidden from streams: <reason>`.
+  - **Unchanged.** Streams fail closed as before: an event whose exposure cannot be read or written is never shown to an anonymous subscriber. Delivery is still at most once.
+  - **No migration; rolling the pin back is safe.** An older release drops such an event for local subscribers again.
