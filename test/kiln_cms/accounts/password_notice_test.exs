@@ -1,7 +1,8 @@
 defmodule KilnCMS.Accounts.PasswordNoticeTest do
   @moduledoc """
-  The one-shot "breached password" note (#2240): keyed by user id, a boolean,
-  taken at most once, gone after its TTL.
+  The one-shot "breached password" note (#2240): keyed by user id, its kind
+  (`:set`, or `:sign_in` for an administrator's sign-in, #2407), taken at
+  most once, gone after its TTL.
 
   `async: false`: the TTL is application env, and the store is node-wide.
   """
@@ -59,15 +60,41 @@ defmodule KilnCMS.Accounts.PasswordNoticeTest do
     assert PasswordNotice.ttl() <= :timer.minutes(15)
   end
 
-  test "what is stored is a boolean under the user id, with a TTL, and nothing else" do
+  test "what is stored is the kind under the user id, with a TTL, and nothing else" do
     user_id = id()
     PasswordNotice.put(user_id)
 
     assert {:ok, [^user_id]} = Cachex.keys(PasswordNotice.cache())
-    assert {:ok, true} = Cachex.get(PasswordNotice.cache(), user_id)
+    assert {:ok, :set} = Cachex.get(PasswordNotice.cache(), user_id)
     assert {:ok, ttl} = Cachex.ttl(PasswordNotice.cache(), user_id)
     assert is_integer(ttl) and ttl > 0
 
     PasswordNotice.take(user_id)
+  end
+
+  describe "kinds (#2407)" do
+    test "put/1 is a :set note; put/2 keeps its kind" do
+      set = id()
+      sign_in = id()
+      PasswordNotice.put(set)
+      PasswordNotice.put(sign_in, :sign_in)
+
+      assert PasswordNotice.take(set) == :set
+      assert PasswordNotice.take(sign_in) == :sign_in
+      refute PasswordNotice.take(sign_in)
+    end
+
+    test "a bare true from before the kinds reads as :set" do
+      user_id = id()
+      Cachex.put(PasswordNotice.cache(), user_id, true)
+
+      assert PasswordNotice.take(user_id) == :set
+    end
+
+    test "each kind has its own message, and message/0 is the :set one" do
+      assert PasswordNotice.message() == PasswordNotice.message(:set)
+      refute PasswordNotice.message(:sign_in) == PasswordNotice.message(:set)
+      assert PasswordNotice.message(:sign_in) =~ "account page"
+    end
   end
 end

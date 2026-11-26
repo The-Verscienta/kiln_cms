@@ -62,8 +62,23 @@ else.
 - **Run `mix kiln.reserved_paths` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) to list pages slugged `developers`, `ready`, `setup`, `sign-in`, `sign-out`, `actor`, `ap`, `mcp` or `password-reset`, and path aliases under them: their built-in routes already served those URLs instead (#2898). Give each a new slug or alias.** No migration; read-only.
   ([long form](docs/changelog/unreleased.md#reserved-route-slugs-upgrade))
 
+### Breaking
+
+- **Breached passwords: an account that administers several sites is held to the strictest policy among them whenever its password is set, on any site's host, so a site's Off no longer stops the lookup (or a Block refusal) for someone who also administers a site that checks (#2408).**
+  A platform admin answers to every site, the operator default standing in for a site with no saved policy. No migration.
+  ([#3434](https://github.com/The-Verscienta/kiln_cms/pull/3434) · [long form](docs/changelog/unreleased.md#breached-password-strictest-admin-sites))
+
+### Added
+
+- **Password policy: a site can also check its administrators' passwords against known breaches as they sign in, off by default; under Block a breached one is sent to reset by email, under Warn the admin signs in with a warning (#2407).**
+  `POST /api/auth/sign_in` gains a `403` `password_reset_required` and an additive `password_breach` field. Expand-only migration; rolling the pin back is safe.
+  ([#3434](https://github.com/The-Verscienta/kiln_cms/pull/3434) · [long form](docs/changelog/unreleased.md#breached-password-sign-in-check))
+
 ### Fixed
 
+- **JSON fields: a valid value is no longer refused as "took too long to check against the schema" when building its JSON Schema is slow on a cold or busy node (#3063).**
+  The 1-second deadline now covers only checking the value. No migration.
+  ([long form](docs/changelog/unreleased.md#field-schema-deadline))
 - **Markdown: an image that shares its line with text or another image, or sits in a list, quote or table, is kept as a link to the picture labelled with its alt text instead of vanishing (#2771).**
   A 1.13.0 known issue. Standalone images still become image blocks. No migration.
   ([long form](docs/changelog/unreleased.md#markdown-inline-image))
@@ -105,6 +120,14 @@ else.
 - **`mix kiln.gen.plugin` registers an overlay plugin in `projects/<name>/project.exs` instead of the core's tracked `config/config.exs`, and its notice covers activation and each content type's search-vector migration (#2910).**
   The field type's commented `handle_input_event/3` example now compiles cleanly once uncommented. No migration.
   ([long form](docs/changelog/unreleased.md#gen-plugin-overlay-config))
+
+- **Fields admin: the editor input choices for a plugin field type now follow every setting of the field, so the page offers exactly the inputs the save accepts (#2883).**
+  Before, the page asked the type with only a few settings and could show a choice the save refused, or hide one it took. No migration.
+  ([long form](docs/changelog/unreleased.md#plugin-widgets-full-definition))
+
+- **Change feed: a published event is no longer lost to this node's live editor views and relay when a database connection exits mid-publish (#2938).**
+  SSE streams still hide such an event. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#feed-relay-exit))
 
 - **Backups: a cron backup that History recorded as Failed "Interrupted" is corrected, once, when its stamp turns out complete (#2846).**
   The importer's summary gains a `reevaluated` count, and retention's `pruned` mark now locks the row it marks. No migration; rolling the pin back is safe.

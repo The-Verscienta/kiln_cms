@@ -29,6 +29,12 @@ defmodule KilnCMSWeb.AuthSignInForm do
   `"submit"` is still upstream's; this only reads what the action answered
   afterwards and shows the widget, with the refusal's reason, when the action
   asked for a challenge (`KilnCMS.Accounts.Errors.ChallengeRequired`).
+
+  ## A breached administrator password (#2407)
+
+  Likewise read after upstream's submit: when the action refused the sign-in
+  with `KilnCMS.Accounts.Errors.PasswordResetRequired`, the form navigates to
+  `/reset` with a flash saying a reset link was mailed.
   """
   use KilnCMSWeb, :live_component
 
@@ -36,6 +42,7 @@ defmodule KilnCMSWeb.AuthSignInForm do
 
   alias AshAuthentication.Phoenix.Components.Password.Input
   alias AshAuthentication.Phoenix.Web
+  alias KilnCMS.Accounts.Errors.PasswordResetRequired
   alias KilnCMSWeb.{AuthIdentityInput, AuthOverrides, AuthPasswordInput, ChallengeComponents}
 
   # Aliased, not spelled out: the template below names it, and inside `~H` a
@@ -148,7 +155,18 @@ defmodule KilnCMSWeb.AuthSignInForm do
   def handle_event("submit", params, socket) do
     {:noreply, socket} = Upstream.handle_event("submit", params, socket)
     source = socket.assigns.form.source
-    {:noreply, update(socket, :challenge, &ChallengeComponents.after_submit(&1, source))}
+
+    if PasswordResetRequired.find(source) do
+      # An administrator's breached password, refused at sign-in (#2407): the
+      # reset mail is on its way, so straight to the page that asks for
+      # another. No email in the URL; the flash says what happened.
+      {:noreply,
+       socket
+       |> put_flash(:error, KilnCMSWeb.AuthController.password_reset_required_message())
+       |> push_navigate(to: ~p"/reset")}
+    else
+      {:noreply, update(socket, :challenge, &ChallengeComponents.after_submit(&1, source))}
+    end
   end
 
   def handle_event(event, params, socket), do: Upstream.handle_event(event, params, socket)

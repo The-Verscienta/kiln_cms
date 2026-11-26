@@ -5,6 +5,7 @@ defmodule KilnCMSWeb.AuthController do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.Errors.AlreadyRegistered
   alias KilnCMS.Accounts.Errors.ChallengeRequired
+  alias KilnCMS.Accounts.Errors.PasswordResetRequired
   alias KilnCMS.Accounts.PasswordNotice
   alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.Security.AuthEvents
@@ -91,37 +92,30 @@ defmodule KilnCMSWeb.AuthController do
 
   @doc false
   # Shared with `KilnCMSWeb.ApiAuthController`, whose refusals revoke the same
-  # way.
+  # way; the sign-in breach check (#2407) revokes through the same function.
   @spec revoke_first_factor(String.t() | nil) :: :ok
-  def revoke_first_factor(token) when is_binary(token) do
-    case AshAuthentication.TokenResource.Actions.revoke(Accounts.Token, token,
-           store_all_tokens?: true
-         ) do
-      :ok ->
-        :ok
+  defdelegate revoke_first_factor(token), to: KilnCMS.Accounts.Sessions
 
-      {:error, reason} ->
-        require Logger
-        Logger.warning("Could not revoke a refused first-factor token: #{inspect(reason)}")
-        :ok
-    end
-  end
-
-  def revoke_first_factor(_no_token), do: :ok
-
-  # The "breached password" note left by a register or reset (#2240) is taken
-  # only at a *password* sign-in (register, reset, sign-in, sign-in with token),
-  # never at a magic link or any other method. It rides the session, as a
-  # boolean, to wherever the sign-in completes: straight away below, or after
-  # the second factor in `TwoFactorController`.
+  # The "breached password" note left by a register or reset (#2240), or by a
+  # sign-in an administrator's site checks under `:warn` (#2407), is taken
+  # only at a *password* sign-in (register, reset, sign-in, sign-in with
+  # token), never at a magic link or any other method. It rides the session
+  # to wherever the sign-in completes: straight away below, or after the
+  # second factor in `TwoFactorController`.
+  #
+  # A `:set` note is stored as `true`, the value the session carried before
+  # there were kinds, so a node still running the previous release reads it
+  # during a rolling deploy; a `:sign_in` note is a string that node ignores.
   defp carry_password_notice(conn, {:password, _phase}, user) do
     # Always drop any earlier marker first: one left by another account that
     # abandoned its second-factor prompt must not surface for this one.
     conn = delete_session(conn, :password_breach_notice)
 
-    if PasswordNotice.take(user.id),
-      do: put_session(conn, :password_breach_notice, true),
-      else: conn
+    case PasswordNotice.take(user.id) do
+      :set -> put_session(conn, :password_breach_notice, true)
+      :sign_in -> put_session(conn, :password_breach_notice, "sign_in")
+      false -> conn
+    end
   end
 
   # Any other method: drop a leftover from an abandoned password attempt, so a
@@ -224,7 +218,7 @@ defmodule KilnCMSWeb.AuthController do
           {Plug.Conn.t(), String.t()}
   def establish_session(conn, user, message, method, opts \\ []) do
     return_to = sign_in_destination(conn, user)
-    notice? = get_session(conn, :password_breach_notice) == true
+    notice = notice_kind(get_session(conn, :password_breach_notice))
 
     AuthEvents.signed_in(conn, user, method)
 
@@ -241,15 +235,23 @@ defmodule KilnCMSWeb.AuthController do
       # If your resource has a different name, update the assign name here (i.e :current_admin)
       |> assign(:current_user, user)
       |> put_flash(:info, message)
-      |> flash_password_notice(notice?)
+      |> flash_password_notice(notice)
 
     {conn, return_to}
   end
 
+  # What a session's notice marker says: `true` (from this release or the
+  # previous one) is a `:set` note, `"sign_in"` a `:sign_in` one (#2407).
+  defp notice_kind(true), do: :set
+  defp notice_kind("sign_in"), do: :sign_in
+  defp notice_kind(_none), do: nil
+
   # `:error`, not `:info`: the info flash dismisses itself, and this is a
   # nudge to act on.
-  defp flash_password_notice(conn, true), do: put_flash(conn, :error, PasswordNotice.message())
-  defp flash_password_notice(conn, false), do: conn
+  defp flash_password_notice(conn, nil), do: conn
+
+  defp flash_password_notice(conn, kind),
+    do: put_flash(conn, :error, PasswordNotice.message(kind))
 
   @doc """
   Key this session's LiveView socket to its user, so it can be dropped (#675).
@@ -349,9 +351,17 @@ defmodule KilnCMSWeb.AuthController do
 
   def failure(conn, {:password, phase} = activity, reason) when phase in [:sign_in, :register] do
     cond do
-      challenge = ChallengeRequired.find(reason) -> challenge_required(conn, phase, challenge)
-      phase == :register and AlreadyRegistered.in?(reason) -> registration_requested(conn)
-      true -> rejected(conn, activity, reason)
+      phase == :sign_in and PasswordResetRequired.find(reason) ->
+        password_reset_required(conn)
+
+      challenge = ChallengeRequired.find(reason) ->
+        challenge_required(conn, phase, challenge)
+
+      phase == :register and AlreadyRegistered.in?(reason) ->
+        registration_requested(conn)
+
+      true ->
+        rejected(conn, activity, reason)
     end
   end
 
@@ -410,6 +420,30 @@ defmodule KilnCMSWeb.AuthController do
     conn
     |> put_flash(:error, ChallengeComponents.reason_text(reason, action))
     |> redirect(to: path)
+  end
+
+  @doc """
+  The flash for an administrator's sign-in refused for a breached password
+  (#2407), shown on `/reset` by both browser doors: this controller's direct
+  POST and the sign-in form (`KilnCMSWeb.AuthSignInForm`).
+  """
+  @spec password_reset_required_message() :: String.t()
+  def password_reset_required_message do
+    gettext(
+      "Your password appears in a known data breach, so it can't be used to sign in as an " <>
+        "administrator. We've emailed you a link to choose a new one. If it doesn't arrive, " <>
+        "request one below."
+    )
+  end
+
+  # The password was right but is in a breach a site the account administers
+  # blocks at sign-in (#2407): no session was made, and the reset mail is on
+  # its way. Not "Incorrect email or password", which would send someone with
+  # the right password to retype it.
+  defp password_reset_required(conn) do
+    conn
+    |> put_flash(:error, password_reset_required_message())
+    |> redirect(to: ~p"/reset")
   end
 
   defp registration_requested(conn) do

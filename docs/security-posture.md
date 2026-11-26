@@ -363,6 +363,15 @@ the operator's default (`BREACHED_PASSWORD_POLICY`) when the site has made
 none. Only **Block** is **OK**; **Warn** is **Review**; **Off**, or
 `BREACHED_PASSWORD_CHECK=false` for the installation, is **Fix now**.
 
+Its facts, for monitoring: `admin_policy` (`off`, `warn` or `block`),
+`deployment_enabled`, and `sign_in_check`, true when the site also checks its
+administrators' passwords at sign-in
+([guide](account-administration.md#check-administrator-passwords-at-sign-in))
+and `BREACHED_PASSWORD_CHECK` is on. `sign_in_check` does not change the
+status, and is left out when the site's row can't be read. The line reads this
+site's own policy only; an administrator who also runs another site may be held
+to a stricter one ([Someone who administers several sites](account-administration.md#someone-who-administers-several-sites)).
+
 ### Security alerts
 
 Whether the site's [security alerts](security-alerts.md) (lockouts, new

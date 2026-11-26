@@ -1243,17 +1243,9 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
   end
 
   defp widget_problems(plugin, mod) do
-    definition =
-      struct(FieldDefinition,
-        name: "sample_field",
-        field_type: mod.name(),
-        required: false,
-        content_type: probe_content_type()
-      )
-
     subject = "#{plugin.name()}: field type #{inspect(mod.name())} widgets/1"
 
-    case mod.widgets(definition) do
+    case mod.widgets(widget_probe(mod)) do
       widgets when is_list(widgets) ->
         names = Enum.map(widgets, &widget_entry_name/1)
 
@@ -1397,9 +1389,7 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
 
   defp offered_widget_names(mod) do
     if function_exported?(mod, :widgets, 1) do
-      probe = struct(FieldDefinition, name: "sample_field", field_type: mod.name())
-
-      for entry <- List.wrap(mod.widgets(probe)),
+      for entry <- List.wrap(mod.widgets(widget_probe(mod))),
           name = widget_entry_name(entry),
           name != nil,
           uniq: true,
@@ -1450,6 +1440,19 @@ defmodule Mix.Tasks.Kiln.Plugins.Doctor do
       mod.input_hook(struct(FieldDefinition, name: "sample_field", field_type: mod.name())) != nil
   rescue
     _exception -> false
+  end
+
+  # The one definition every `widgets/1` probe here asks with (#2883): a whole
+  # `FieldDefinition`, as the host passes on save and in the fields admin, so
+  # the shape check and the list check see the same answer.
+  defp widget_probe(mod) do
+    struct(FieldDefinition,
+      name: "sample_field",
+      label: "Sample field",
+      field_type: mod.name(),
+      required: false,
+      content_type: probe_content_type()
+    )
   end
 
   # The widget's name when `entry` is one the SDK allows, else nil.

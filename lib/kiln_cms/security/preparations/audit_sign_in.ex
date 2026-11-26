@@ -4,7 +4,9 @@ defmodule KilnCMS.Security.Preparations.AuditSignIn do
   (#2241): a wrong password or unknown address (`:sign_in_failed`, sampled per
   IP), a human-verification token that did not pass or could not be checked
   (`:sign_in_failed`, reason `challenge_failed` / `challenge_unavailable`,
-  #2249) and the two throttle lockouts (`:sign_in_locked`, scope `"account"` or
+  #2249), a breached administrator password refused at sign-in
+  (`:sign_in_failed`, reason `breached_password`, #2407, recorded in the orgs
+  whose policy refused it) and the two throttle lockouts (`:sign_in_locked`, scope `"account"` or
   `"address"`).
 
   It sits on the action rather than at a controller because the browser form
@@ -26,6 +28,7 @@ defmodule KilnCMS.Security.Preparations.AuditSignIn do
 
   alias AshAuthentication.Errors.AuthenticationFailed
   alias KilnCMS.Accounts.Errors.ChallengeRequired
+  alias KilnCMS.Accounts.Errors.PasswordResetRequired
   alias KilnCMS.Accounts.Preparations.ThrottleSignIn
   alias KilnCMS.Security.AuthEvents
   alias KilnCMS.Security.Recorder
@@ -66,6 +69,12 @@ defmodule KilnCMS.Security.Preparations.AuditSignIn do
   defp record({:challenge, :unavailable}, context, email),
     do: AuthEvents.sign_in_failed(context, email, "password", "challenge_unavailable")
 
+  # A breached administrator password refused at sign-in (#2407): recorded in
+  # the orgs whose policy refused it, unsampled and not charged to the
+  # failed-sign-in alert (`AuthEvents.sign_in_refused_breached/3`).
+  defp record({:breached, org_ids}, context, email),
+    do: AuthEvents.sign_in_refused_breached(context, email, org_ids)
+
   defp record(_required_or_other, _context, _email), do: :ok
 
   # What `error` is: the account lock, the per-address lock, any other refused
@@ -84,6 +93,9 @@ defmodule KilnCMS.Security.Preparations.AuditSignIn do
 
       %ChallengeRequired{reason: reason} ->
         {:challenge, reason}
+
+      %PasswordResetRequired{org_ids: org_ids} ->
+        {:breached, org_ids}
 
       _other ->
         nil

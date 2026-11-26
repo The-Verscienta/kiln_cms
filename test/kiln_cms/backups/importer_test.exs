@@ -347,8 +347,11 @@ defmodule KilnCMS.Backups.ImporterTest do
 
   describe "files only" do
     test "become a succeeded, unverified, imported run", %{dir: dir} do
-      path = put(dir, :db, "20260801-031700")
-      put(dir, :media, "20260801-031700")
+      # Both mtimes are set here, not read from two `put/4` clock reads that
+      # can land a second apart (#3184); `finished_at` is the newest one.
+      newest = System.os_time(:second) - 60 * 60
+      dir |> put(:db, "20260801-031700") |> File.touch!(newest - 30)
+      dir |> put(:media, "20260801-031700") |> File.touch!(newest)
 
       assert {:ok, %{imported: 1}} = Importer.run()
 
@@ -357,7 +360,7 @@ defmodule KilnCMS.Backups.ImporterTest do
       assert run.status == :succeeded
       assert run.trigger == "cron"
       assert run.started_at == ~U[2026-08-01 03:17:00.000000Z]
-      assert DateTime.to_unix(run.finished_at) == File.stat!(path, time: :posix).mtime
+      assert DateTime.to_unix(run.finished_at) == newest
       assert run.components == [:db, :media]
       assert Enum.all?(run.artifacts, &(&1.verified == false and is_nil(&1.sha256)))
     end
