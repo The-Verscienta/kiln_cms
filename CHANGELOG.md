@@ -94,6 +94,10 @@ else.
   The row, the bulk Publish confirm and the release's item list name the date and what happens then. A 1.13.0 known issue.
   ([long form](docs/changelog/unreleased.md#publish-shows-unpublish-date))
 
+- **A counted read that the actor is refused now returns the refusal instead of raising an internal `Ash.Error.Framework` error (#2934).**
+  It works around an Ash defect in the count query. The JSON:API, GraphQL and MCP counts were never affected. No migration.
+  ([long form](docs/changelog/unreleased.md#counted-read-refusal))
+
 - **A refused `custom_where` over MCP or JSON:API names its keys in snake_case (`custom_filter`, `date_time`, `not_eq`), not GraphQL's `customFilter`, `dateTime`, `notEq` (#2913).**
   GraphQL's messages are unchanged. No migration.
   ([long form](docs/changelog/unreleased.md#custom-where-error-spelling))
