@@ -698,6 +698,62 @@ defmodule KilnCMSWeb.McpTest do
     end
   end
 
+  # #2913: a read tool takes `custom_where` in snake_case, so its refusals name
+  # `custom_where`, `custom_filter`, `date_time`, `not_eq` and `is_null`, not
+  # GraphQL's `customWhere`, `dateTime`, `notEq`: a client that follows the
+  # message sends a key this surface accepts.
+  test "read_pages refuses a bad custom_where in snake_case", %{conn: conn} do
+    admin = user(:admin)
+    suffix = System.unique_integer([:positive])
+
+    {at, count, tagged, spot} =
+      {"at#{suffix}", "count#{suffix}", "tagged#{suffix}", "spot#{suffix}"}
+
+    for {field, type, extra} <- [
+          {at, :datetime, %{}},
+          {count, :integer, %{}},
+          {tagged, :string, %{multiple: true}},
+          {spot, :geolocation, %{}}
+        ] do
+      KilnCMS.CMS.create_field_definition!(
+        Map.merge(%{content_type: :page, name: field, label: field, field_type: type}, extra),
+        actor: admin
+      )
+    end
+
+    key = mint(admin, :read)
+
+    for {where, expected} <- [
+          {%{"name" => at, "date" => %{"eq" => "2026-01-01"}},
+           ~s(custom field "#{at}" is a date_time field, not date; use the date_time condition)},
+          {%{"name" => count, "string" => %{"eq" => "1"}},
+           ~s(custom field "#{count}" is an int field, not string; use the int condition)},
+          {%{"name" => count},
+           ~s(the condition on "#{count}" needs exactly one of string, int, float, boolean, ) <>
+             "date, date_time, got none"},
+          {%{"name" => count, "int" => %{"notEq" => 1}},
+           ~s(unknown operator "notEq" for an int condition on "#{count}")},
+          {%{"name" => tagged, "string" => %{"contains" => "a"}},
+           ~s(custom field "#{tagged}" is a list: custom_where supports only eq, not_eq, in ) <>
+             "and is_null on it (custom_filter also takes has, has_all, has_none and count)"},
+          {%{"name" => spot, "string" => %{"eq" => "x"}},
+           ~s(custom field "#{spot}" has kind geolocation, which custom_where does not ) <>
+             "support; use custom_filter"}
+        ] do
+      conn =
+        rpc(conn, key, "tools/call", %{
+          name: "read_pages",
+          arguments: %{input: %{custom_where: [where]}}
+        })
+
+      assert %{"result" => %{"isError" => true, "content" => [%{"text" => text}]}} =
+               json_response(conn, 200)
+
+      assert text =~ expected
+      refute text =~ ~r/customWhere|customFilter|dateTime|isNull/
+    end
+  end
+
   describe "content link tools" do
     defp draft_post(editor, title) do
       KilnCMS.CMS.create_post!(

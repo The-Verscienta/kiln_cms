@@ -98,6 +98,10 @@ else.
   It works around an Ash defect in the count query. The JSON:API, GraphQL and MCP counts were never affected. No migration.
   ([long form](docs/changelog/unreleased.md#counted-read-refusal))
 
+- **A refused `custom_where` over MCP or JSON:API names its keys in snake_case (`custom_filter`, `date_time`, `not_eq`), not GraphQL's `customFilter`, `dateTime`, `notEq` (#2913).**
+  GraphQL's messages are unchanged. No migration.
+  ([long form](docs/changelog/unreleased.md#custom-where-error-spelling))
+
 - **Fields admin: the editor input choices for a plugin field type now follow every setting of the field, so the page offers exactly the inputs the save accepts (#2883).**
   Before, the page asked the type with only a few settings and could show a choice the save refused, or hide one it took. No migration.
   ([long form](docs/changelog/unreleased.md#plugin-widgets-full-definition))
