@@ -55,6 +55,14 @@ else.
   text in a section that is not part of a `- ` entry.
 -->
 
+## [Unreleased]
+
+### Fixed
+
+- **Markdown: an image that shares its line with text or another image, or sits in a list, quote or table, is kept as a link to the picture labelled with its alt text instead of vanishing (#2771).**
+  A 1.13.0 known issue. Standalone images still become image blocks. No migration.
+  ([long form](docs/changelog/unreleased.md#markdown-inline-image))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —

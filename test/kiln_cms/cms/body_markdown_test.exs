@@ -48,6 +48,24 @@ defmodule KilnCMS.CMS.BodyMarkdownTest do
     assert Enum.map(list.value.body, & &1["listItem"]) == ["bullet", "bullet"]
   end
 
+  test "an image mid-sentence is stored as a link labelled with its alt text (#2771)" do
+    page =
+      CMS.create_page!(
+        %{
+          title: "Logo",
+          slug: slug(),
+          body_markdown: "Our logo ![Acme](https://img.example.com/a.png) is blue"
+        },
+        actor: user(:editor)
+      )
+
+    assert [%{value: %{body: body}}] = page.blocks
+    assert PortableText.to_plain_text(body) == "Our logo Acme is blue"
+
+    assert [%{"href" => "https://img.example.com/a.png"}] =
+             Enum.flat_map(body, &(&1["markDefs"] || []))
+  end
+
   test "update replaces the body; an update without it leaves the body alone" do
     editor = user(:editor)
     page = CMS.create_page!(%{title: "G", slug: slug(), body_markdown: "First."}, actor: editor)

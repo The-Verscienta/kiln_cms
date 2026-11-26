@@ -98,7 +98,10 @@ defmodule KilnCMS.Markdown do
   @doc """
   `markdown` as typed block inputs (`%{"type" => ..., "value" => ...}`), ready
   for a content write's `block_tree` — prose runs become `rich_text`, a
-  standalone image an `image`, a bare YouTube/Vimeo link an `embed`.
+  standalone image an `image`, a bare YouTube/Vimeo link an `embed`. An image
+  that shares its paragraph with anything else (words, a second image) or sits
+  in a list, quote or table has no block of its own, so it stays in the prose
+  as a link to the picture labelled with its alt text, as in `to_tiptap/1`.
 
   Options: `:media_resolver` and `:sections`, as in
   `KilnCMS.Blocks.Html.to_blocks/2`. With `sections: true` each top-level
@@ -111,7 +114,8 @@ defmodule KilnCMS.Markdown do
   def to_blocks(nil, _opts), do: []
 
   def to_blocks(markdown, opts) when is_binary(markdown) do
-    markdown |> to_html() |> Html.to_blocks(html_opts(opts))
+    {_front_matter, body} = split_front_matter(markdown)
+    body |> parse() |> render_blocks() |> Html.to_blocks(html_opts(opts))
   end
 
   @doc """
@@ -163,7 +167,7 @@ defmodule KilnCMS.Markdown do
       slug: presence(front_matter["slug"]),
       excerpt: presence(front_matter["excerpt"]) || presence(front_matter["description"]),
       front_matter: front_matter,
-      blocks: nodes |> render([]) |> Html.to_blocks(html_opts(opts))
+      blocks: nodes |> render_blocks() |> Html.to_blocks(html_opts(opts))
     }
   end
 
@@ -282,6 +286,29 @@ defmodule KilnCMS.Markdown do
 
   # ── Rendering ──────────────────────────────────────────────────────────────
 
+  # The HTML `to_blocks/2` and `parse_document/2` hand to `Html.to_blocks/2`.
+  # That adapter lifts an `<img>` out of the prose only when it is the whole of
+  # a top-level paragraph (alone, or alone inside one link); anywhere else it
+  # has no inline node for it and drops the picture and its alt text without a
+  # word (#2771). So only that paragraph keeps its `<img>`; every other image
+  # becomes the link `to_tiptap/1` already uses.
+  defp render_blocks(nodes) do
+    Enum.map_join(nodes, fn node ->
+      images = if standalone_image?(node), do: :keep, else: :link
+      render_node(node, images: images)
+    end)
+  end
+
+  defp standalone_image?({"p", _attrs, children, _meta}) do
+    case Enum.reject(children, &(is_binary(&1) and String.trim(&1) == "")) do
+      [{"img", _, _, _}] -> true
+      [{"a", _, [{"img", _, _, _}], _}] -> true
+      _ -> false
+    end
+  end
+
+  defp standalone_image?(_node), do: false
+
   # The space between two inline siblings (`**a** *b*`) is a text node of its
   # own, and the HTML parser downstream DROPS whitespace-only text nodes — so
   # "a b" arrived as "ab". A no-break space is not whitespace to that parser,
@@ -340,8 +367,12 @@ defmodule KilnCMS.Markdown do
 
   defp render_node({"a", attrs, children, _meta}, opts) do
     case attrs |> attr("href") |> HTMLSanitizer.safe_href() do
-      nil -> render(children, opts)
-      href -> ~s(<a href="#{escape(href)}">) <> render(children, opts) <> "</a>"
+      nil ->
+        render(children, opts)
+
+      href ->
+        ~s(<a href="#{escape(href)}">) <>
+          render(children, Keyword.put(opts, :in_link, true)) <> "</a>"
     end
   end
 
@@ -355,7 +386,7 @@ defmodule KilnCMS.Markdown do
         escape(alt || "")
 
       Keyword.get(opts, :images, :keep) == :link ->
-        ~s(<a href="#{escape(src)}">) <> escape(presence(alt) || src) <> "</a>"
+        image_link(src, alt, Keyword.get(opts, :in_link, false))
 
       true ->
         title = attr(attrs, "title")
@@ -375,6 +406,13 @@ defmodule KilnCMS.Markdown do
     do: render(children, opts)
 
   defp render_node(_other, _opts), do: ""
+
+  # An image as prose: a link to the picture, labelled with its alt text. Inside
+  # a link it is only the label, so one anchor never nests in another.
+  defp image_link(src, alt, true = _in_link?), do: escape(presence(alt) || src)
+
+  defp image_link(src, alt, false = _in_link?),
+    do: ~s(<a href="#{escape(src)}">) <> escape(presence(alt) || src) <> "</a>"
 
   # A text run. earmark leaves inline HTML (`<kbd>`, `<br>`, `<b>`) inside the
   # text, unescaped — which Markdown means as HTML — so a run that could hold
