@@ -62,6 +62,15 @@ else.
 - **Run `mix kiln.reserved_paths` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) to list pages slugged `developers`, `ready`, `setup`, `sign-in`, `sign-out`, `actor`, `ap`, `mcp` or `password-reset`, and path aliases under them: their built-in routes already served those URLs instead (#2898). Give each a new slug or alias.** No migration; read-only.
   ([long form](docs/changelog/unreleased.md#reserved-route-slugs-upgrade))
 
+### Changed
+
+- **Backups: an SFTP destination's path may hold spaces and `+ @ ,`, so a NAS share such as `/volume1/Backup Share/kiln` can be used (#3199).**
+  ASCII only; `..`, `~`, `\`, control characters and a space at either end of a folder name are still refused. No migration; after a rollback, a destination whose path uses the new characters fails until its path is changed.
+  ([long form](docs/changelog/unreleased.md#sftp-path-spaces))
+- **Backups: two SFTP destinations whose folders nest both prune once Kiln can tell they are different servers: both trust host keys of the same type that differ, and each has passed a Test since the later trust (#3200).**
+  Press **Test** on both rows to clear "Not pruned". No migration.
+  ([long form](docs/changelog/unreleased.md#sftp-distinct-servers-prune))
+
 ### Fixed
 
 - **Markdown: an image that shares its line with text or another image, or sits in a list, quote or table, is kept as a link to the picture labelled with its alt text instead of vanishing (#2771).**
@@ -89,6 +98,10 @@ else.
 - **Publishing a draft from the content list, the bulk bar or a release now shows its scheduled unpublish date first (#2892).**
   The row, the bulk Publish confirm and the release's item list name the date and what happens then. A 1.13.0 known issue.
   ([long form](docs/changelog/unreleased.md#publish-shows-unpublish-date))
+
+- **Backups: when two SFTP servers' host keys change in the same 15-minute window, the admins get an alert for each, not only the first (#3201).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#host-key-alert-per-destination))
 
 ## [1.13.0] - 2026-11-25
 
