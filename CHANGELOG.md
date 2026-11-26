@@ -62,6 +62,10 @@ else.
 - **Markdown: an image that shares its line with text or another image, or sits in a list, quote or table, is kept as a link to the picture labelled with its alt text instead of vanishing (#2771).**
   A 1.13.0 known issue. Standalone images still become image blocks. No migration.
   ([long form](docs/changelog/unreleased.md#markdown-inline-image))
+- **Slack webhooks: a message whose stored payload names no site, such as a test ping queued by a 1.9 node mid-deploy, names the endpoint's site instead of `-` (#2797).**
+  No migration; the ledger row is unchanged.
+  ([long form](docs/changelog/unreleased.md#slack-missing-site-name))
+
 - **Custom fields: on a plugin field type whose `graphql_kind/1` is `:int`, `:float`, `:boolean` or `:date`, a filter operand that is a value of that kind compares as that value, so `gt=9` finds `10` and `eq` matches a stored number (#2855).**
   Every other operand, and the text operators, compare as text as before; nothing that answered `200` is refused. No migration.
   ([long form](docs/changelog/unreleased.md#plugin-typed-filters))
