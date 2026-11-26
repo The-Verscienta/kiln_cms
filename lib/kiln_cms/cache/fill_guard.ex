@@ -67,6 +67,20 @@ defmodule KilnCMS.Cache.FillGuard do
   still has its value), and `bust/2` and `clear/1` still delete. A cache
   outage makes a fill uncached, never an error.
 
+  A bust that deleted but could not write its mark cannot stop a fill already
+  in flight: that fill may still store the old value, which then lasts until
+  the TTL, as it did before this guard. Such a bust logs a warning and emits
+  `[:kiln_cms, :cache, :bust_unmarked]` (below).
+
+  ## Not guarded yet
+
+    * `KilnCMS.Cache` (settings and published content) fills through
+      `Cachex.fetch/4` and is still exposed to this race: #3431.
+    * `KilnCMS.Firing.Cache` artifact bodies, which also evict node-locally
+      only: #3433.
+    * `KilnCMS.CMS.Changes.BustMediaCache` busts before the commit, which no
+      guard here can order: #3432.
+
   ## Rules for callers
 
     * The cache must be started with `transactions: true`. `Cachex.transaction/3`
@@ -82,7 +96,9 @@ defmodule KilnCMS.Cache.FillGuard do
   cache's lock queue.
 
   A discarded fill emits `[:kiln_cms, :cache, :fill_discarded]` with
-  `%{count: 1}` and `%{cache: name, reason: :busted | :too_old}`.
+  `%{count: 1}` and `%{cache: name, reason: :busted | :too_old}`. A bust or
+  clear that left no mark emits `[:kiln_cms, :cache, :bust_unmarked]` with
+  `%{count: 1}` and `%{cache: name, reason: :mark_failed | :queue_unavailable}`.
   """
 
   require Logger
@@ -107,11 +123,13 @@ defmodule KilnCMS.Cache.FillGuard do
 
   Returns `:stored`, `:discarded` (busted, or older than `window/0`), or
   `:not_stored` (the cache or its mark store could not be reached). Never
-  raises or exits.
+  raises or exits. `marks` names the mark store, for tests.
   """
-  @spec put(atom(), term(), term(), keyword(), integer()) :: :stored | :discarded | :not_stored
-  def put(cache, key, value, opts, began) when is_atom(cache) and is_integer(began) do
-    check_and_put = fn -> check_and_put(cache, key, value, opts, began) end
+  @spec put(atom(), term(), term(), keyword(), integer(), atom()) ::
+          :stored | :discarded | :not_stored
+  def put(cache, key, value, opts, began, marks \\ marks())
+      when is_atom(cache) and is_integer(began) do
+    check_and_put = fn -> check_and_put(cache, key, value, opts, {began, marks}) end
 
     case guarded(fn -> Cachex.transaction(cache, [key], check_and_put) end) do
       {:ok, :stored} ->
@@ -134,43 +152,80 @@ defmodule KilnCMS.Cache.FillGuard do
   Forget `keys` in `cache` on this node, and stop any fill already in flight
   for one of them from storing what it read.
 
-  Always deletes, even when the marks cannot be written. Returns `:ok`.
+  Always deletes, even when the marks cannot be written; that bust is then
+  reported (see the moduledoc) and cannot stop a fill already in flight.
+  Returns `:ok`. `marks` names the mark store, for tests.
   """
-  @spec bust(atom(), [term()]) :: :ok
-  def bust(cache, keys) when is_atom(cache) and is_list(keys) do
-    marked =
+  @spec bust(atom(), [term()], atom()) :: :ok
+  def bust(cache, keys, marks \\ marks()) when is_atom(cache) and is_list(keys) do
+    result =
       guarded(fn ->
         Cachex.transaction(cache, keys, fn ->
           now = System.monotonic_time()
-          Enum.each(keys, &Cachex.put(marks(), mark_key(cache, &1), now, expire: @mark_ttl))
+          marked? = Enum.all?(keys, &mark(marks, mark_key(cache, &1), now))
           Enum.each(keys, &Cachex.del(cache, &1))
-          :deleted
+          {:deleted, marked?}
         end)
       end)
 
-    if marked != {:ok, :deleted}, do: Enum.each(keys, &guarded(fn -> Cachex.del(cache, &1) end))
+    case result do
+      {:ok, {:deleted, true}} ->
+        :ok
 
-    :ok
+      {:ok, {:deleted, false}} ->
+        unmarked(cache, :mark_failed)
+
+      _queue_unavailable ->
+        Enum.each(keys, &guarded(fn -> Cachex.del(cache, &1) end))
+        unmarked(cache, :queue_unavailable)
+    end
   end
 
   @doc """
   Empty `cache` on this node, and stop every fill already in flight for it
   from storing what it read.
 
-  Always clears, even when the mark cannot be written. Returns `:ok`.
+  Always clears, even when the mark cannot be written; that clear is then
+  reported and cannot stop a fill already in flight. Returns `:ok`. `marks`
+  names the mark store, for tests.
   """
-  @spec clear(atom()) :: :ok
-  def clear(cache) when is_atom(cache) do
-    cleared =
+  @spec clear(atom(), atom()) :: :ok
+  def clear(cache, marks \\ marks()) when is_atom(cache) do
+    result =
       guarded(fn ->
         Cachex.transaction(cache, [], fn ->
-          Cachex.put(marks(), all_key(cache), System.monotonic_time(), expire: @mark_ttl)
+          marked? = mark(marks, all_key(cache), System.monotonic_time())
           Cachex.clear(cache)
-          :cleared
+          {:cleared, marked?}
         end)
       end)
 
-    if cleared != {:ok, :cleared}, do: delete_each(cache)
+    case result do
+      {:ok, {:cleared, true}} ->
+        :ok
+
+      {:ok, {:cleared, false}} ->
+        unmarked(cache, :mark_failed)
+
+      _queue_unavailable ->
+        delete_each(cache)
+        unmarked(cache, :queue_unavailable)
+    end
+  end
+
+  # Runs inside the lock queue, like `check_and_put/5`: Cachex calls only.
+  defp mark(marks, mark_key, at),
+    do: match?({:ok, true}, Cachex.put(marks, mark_key, at, expire: @mark_ttl))
+
+  # A bust that deleted but left no mark. A fill in flight for its keys can
+  # still store what it read, until the TTL; say so where an operator looks.
+  defp unmarked(cache, reason) do
+    Logger.warning("FillGuard: a bust of #{inspect(cache)} deleted but left no mark (#{reason})")
+
+    :telemetry.execute([:kiln_cms, :cache, :bust_unmarked], %{count: 1}, %{
+      cache: cache,
+      reason: reason
+    })
 
     :ok
   end
@@ -188,8 +243,8 @@ defmodule KilnCMS.Cache.FillGuard do
   # Runs in the cache's lock queue process: Cachex calls only, nothing that
   # can throw or exit (the queue rescues an exception, but an exit or a throw
   # would take it down).
-  defp check_and_put(cache, key, value, opts, began) do
-    case verdict(cache, key, began) do
+  defp check_and_put(cache, key, value, opts, {began, marks}) do
+    case verdict(cache, key, began, marks) do
       :fresh -> store(cache, key, value, opts)
       {:discarded, _reason} = discarded -> discarded
       :unknown -> :not_stored
@@ -203,16 +258,16 @@ defmodule KilnCMS.Cache.FillGuard do
     end
   end
 
-  defp verdict(cache, key, began) do
+  defp verdict(cache, key, began, marks) do
     if System.monotonic_time() - began > System.convert_time_unit(@window, :millisecond, :native),
       do: {:discarded, :too_old},
-      else: marked_verdict(cache, key, began)
+      else: marked_verdict(cache, key, began, marks)
   end
 
   # A mark store that cannot be read proves nothing either way: `:unknown`.
-  defp marked_verdict(cache, key, began) do
-    with {:ok, mark} <- Cachex.get(marks(), mark_key(cache, key)),
-         {:ok, all} <- Cachex.get(marks(), all_key(cache)) do
+  defp marked_verdict(cache, key, began, marks) do
+    with {:ok, mark} <- Cachex.get(marks, mark_key(cache, key)),
+         {:ok, all} <- Cachex.get(marks, all_key(cache)) do
       if busted_since?(mark, began) or busted_since?(all, began),
         do: {:discarded, :busted},
         else: :fresh

@@ -49,8 +49,13 @@ defmodule KilnCMS.Cache.ClusterBust do
 
   That second delete is not what keeps a fill that read before the commit out
   of the cache: it can land before that fill stores. For `broadcast_in/2`,
-  `KilnCMS.Cache.FillGuard` does that (#2972); for the other shapes the TTL is
-  still the backstop.
+  `KilnCMS.Cache.FillGuard` does that (#2972). The other shapes are not guarded
+  yet, and the TTL is still their backstop:
+
+    * `KilnCMS.Cache` settings and published-content entries (`broadcast/1`,
+      `broadcast_prefix/1`, `broadcast_clear/0`) are exposed to the race: #3431.
+    * `KilnCMS.Firing.Cache` artifact bodies: #3433.
+    * `KilnCMS.CMS.Changes.BustMediaCache` busts before the commit: #3432.
 
   ## Single-node deployments
 

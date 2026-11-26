@@ -13,7 +13,8 @@ defmodule KilnCMS.Cache.FillGuardSourceTest do
     * through a module attribute bound to that atom (`@cache`), in the module
       that binds it;
     * through `IpBlocklist.cache_name()` or `Hosts.cache_name()`, however the
-      module is aliased;
+      module is aliased, and, inside those two modules, through a local
+      `cache_name()` or `__MODULE__.cache_name()`;
     * as an argument or as the left side of a pipe.
 
   `KilnCMS.Cache.FillGuard` itself is the one exemption. Not seen: an instance
@@ -31,6 +32,9 @@ defmodule KilnCMS.Cache.FillGuardSourceTest do
 
   @guarded_modules [:IpBlocklist, :Hosts]
 
+  # The modules whose own `cache_name/0` names a guarded instance.
+  @owners [[:KilnCMS, :Security, :IpBlocklist], [:KilnCMS, :Cache, :Hosts]]
+
   @exempt ["lib/kiln_cms/cache/fill_guard.ex"]
 
   # Cachex calls that only read. Anything else on a guarded instance is a
@@ -39,10 +43,11 @@ defmodule KilnCMS.Cache.FillGuardSourceTest do
             inspect inspect! stats stats! empty? empty!)a
 
   test "lib/ writes the fill-guarded caches only through FillGuard" do
+    paths = Path.wildcard("lib/**/*.ex")
+    assert paths != [], "no lib/**/*.ex found: is the test running from the project root?"
+
     findings =
-      for path <- Path.wildcard("lib/**/*.ex"), path not in @exempt, finding <- scan_file(path) do
-        finding
-      end
+      for path <- paths, path not in @exempt, finding <- scan_file(path), do: finding
 
     assert findings == [],
            "write to a fill-guarded cache outside KilnCMS.Cache.FillGuard " <>
@@ -93,23 +98,53 @@ defmodule KilnCMS.Cache.FillGuardSourceTest do
 
       assert [] = scan_source("fine.ex", source)
     end
+
+    test "inside a guarded module, flags a write through its own cache_name/0" do
+      source = """
+      defmodule KilnCMS.Cache.Hosts do
+        def cache_name, do: :kiln_cms_host_cache
+        def a(k), do: Cachex.del(cache_name(), k)
+        def b(k), do: Cachex.put(__MODULE__.cache_name(), k, 1)
+        def c(k), do: cache_name() |> Cachex.del(k)
+        def d(k), do: Cachex.get(cache_name(), k)
+      end
+      """
+
+      assert [
+               "hosts.ex:3: Cachex.del",
+               "hosts.ex:4: Cachex.put",
+               "hosts.ex:5: Cachex.del"
+             ] = scan_source("hosts.ex", source)
+    end
+
+    test "outside a guarded module, a local cache_name/0 is another cache's" do
+      source = """
+      defmodule KilnCMS.Firing.Cache do
+        def cache_name, do: :kiln_cms_firing_cache
+        def a(k), do: Cachex.del(cache_name(), k)
+        def b(k), do: Cachex.put(__MODULE__.cache_name(), k, 1)
+      end
+      """
+
+      assert [] = scan_source("firing_cache.ex", source)
+    end
   end
 
   defp scan_file(path), do: scan_source(path, File.read!(path))
 
   defp scan_source(path, source) do
     ast = Code.string_to_quoted!(source, columns: false)
-    attributes = guarded_attributes(ast)
+    ctx = %{attributes: guarded_attributes(ast), owner?: owner?(ast)}
 
     {_ast, findings} =
       Macro.prewalk(ast, [], fn
         # `subject |> Cachex.fun(...)`: the subject is the instance.
         {:|>, _, [subject, {{:., meta, [{:__aliases__, _, [:Cachex]}, fun]}, _, _args}]} = node,
         acc ->
-          {node, finding(acc, path, meta, fun, subject, attributes)}
+          {node, finding(acc, path, meta, fun, subject, ctx)}
 
         {{:., meta, [{:__aliases__, _, [:Cachex]}, fun]}, _, [subject | _]} = node, acc ->
-          {node, finding(acc, path, meta, fun, subject, attributes)}
+          {node, finding(acc, path, meta, fun, subject, ctx)}
 
         node, acc ->
           {node, acc}
@@ -118,8 +153,8 @@ defmodule KilnCMS.Cache.FillGuardSourceTest do
     Enum.reverse(findings)
   end
 
-  defp finding(acc, path, meta, fun, subject, attributes) do
-    if fun not in @reads and guarded?(subject, attributes),
+  defp finding(acc, path, meta, fun, subject, ctx) do
+    if fun not in @reads and guarded?(subject, ctx),
       do: ["#{path}:#{meta[:line]}: Cachex.#{fun}" | acc],
       else: acc
   end
@@ -129,7 +164,7 @@ defmodule KilnCMS.Cache.FillGuardSourceTest do
     {_ast, names} =
       Macro.prewalk(ast, MapSet.new(), fn
         {:@, _, [{name, _, [value]}]} = node, acc when is_atom(name) ->
-          {node, if(guarded?(value, MapSet.new()), do: MapSet.put(acc, name), else: acc)}
+          {node, if(guarded?(value, nil), do: MapSet.put(acc, name), else: acc)}
 
         node, acc ->
           {node, acc}
@@ -138,13 +173,36 @@ defmodule KilnCMS.Cache.FillGuardSourceTest do
     names
   end
 
-  defp guarded?(atom, _attributes) when is_atom(atom), do: atom in @guarded
+  # Does this source define one of the modules that own a guarded instance?
+  defp owner?(ast) do
+    {_ast, found?} =
+      Macro.prewalk(ast, false, fn
+        {:defmodule, _, [{:__aliases__, _, segments} | _]} = node, acc ->
+          {node, acc or segments in @owners}
 
-  defp guarded?({:@, _, [{name, _, context}]}, attributes) when is_atom(context),
-    do: MapSet.member?(attributes, name)
+        node, acc ->
+          {node, acc}
+      end)
 
-  defp guarded?({{:., _, [{:__aliases__, _, segments}, :cache_name]}, _, []}, _attributes),
+    found?
+  end
+
+  # `ctx` is nil while the attributes themselves are being resolved.
+  defp guarded?(atom, _ctx) when is_atom(atom), do: atom in @guarded
+
+  defp guarded?({:@, _, [{name, _, context}]}, %{attributes: attributes})
+       when is_atom(context),
+       do: MapSet.member?(attributes, name)
+
+  defp guarded?({{:., _, [{:__aliases__, _, segments}, :cache_name]}, _, []}, _ctx),
     do: List.last(segments) in @guarded_modules
 
-  defp guarded?(_other, _attributes), do: false
+  defp guarded?({{:., _, [{:__MODULE__, _, context}, :cache_name]}, _, []}, %{owner?: owner?})
+       when is_atom(context),
+       do: owner?
+
+  defp guarded?({:cache_name, _, args}, %{owner?: owner?}) when args in [[], nil],
+    do: owner?
+
+  defp guarded?(_other, _ctx), do: false
 end

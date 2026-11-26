@@ -27,16 +27,25 @@ defmodule KilnCMS.Cache.FillGuardTest do
     at
   end
 
-  defp listen_for_discards(cache) do
+  defp listen_for_discards(cache),
+    do: listen(cache, [:kiln_cms, :cache, :fill_discarded], :discarded)
+
+  defp listen_for_unmarked(cache),
+    do: listen(cache, [:kiln_cms, :cache, :bust_unmarked], :unmarked)
+
+  # Other async tests emit the same events for their own caches. The filter
+  # is in the body, not the head: a handler that raises on their events is
+  # detached by `:telemetry`, and this test would miss its own.
+  defp listen(cache, event, tag) do
     handler = "fill-guard-test-#{System.unique_integer([:positive])}"
     test = self()
 
     :ok =
       :telemetry.attach(
         handler,
-        [:kiln_cms, :cache, :fill_discarded],
-        fn _event, measurements, %{cache: ^cache} = metadata, _config ->
-          send(test, {:discarded, measurements, metadata})
+        event,
+        fn _event, measurements, metadata, _config ->
+          if metadata[:cache] == cache, do: send(test, {tag, measurements, metadata})
         end,
         nil
       )
@@ -168,19 +177,64 @@ defmodule KilnCMS.Cache.FillGuardTest do
       assert {:ok, nil} = Cachex.get(cache, "k")
     end
 
-    test "a bust still deletes", %{cache: cache} do
+    @tag :capture_log
+    test "a bust still deletes, and reports that it left no mark", %{cache: cache} do
+      listen_for_unmarked(cache)
       {:ok, true} = Cachex.put(cache, "k", :old)
 
       assert :ok = FillGuard.bust(cache, ["k"])
       assert {:ok, nil} = Cachex.get(cache, "k")
+      assert_received {:unmarked, %{count: 1}, %{reason: :queue_unavailable}}
     end
 
-    test "a clear still clears", %{cache: cache} do
+    @tag :capture_log
+    test "a clear still clears, and reports that it left no mark", %{cache: cache} do
+      listen_for_unmarked(cache)
       {:ok, true} = Cachex.put(cache, "k", :old)
 
       assert :ok = FillGuard.clear(cache)
       assert {:ok, nil} = Cachex.get(cache, "k")
+      assert_received {:unmarked, _, %{reason: :queue_unavailable}}
     end
+  end
+
+  # A mark store that is not running stands in for the generation store
+  # being down or restarting: its puts and gets return `{:error, :no_cache}`.
+  describe "when the mark store cannot be reached" do
+    @down :fill_guard_test_no_mark_store
+
+    @tag :capture_log
+    test "a bust still deletes, and reports that it left no mark", %{cache: cache} do
+      listen_for_unmarked(cache)
+      {:ok, true} = Cachex.put(cache, "k", :old)
+
+      assert :ok = FillGuard.bust(cache, ["k"], @down)
+      assert {:ok, nil} = Cachex.get(cache, "k")
+      assert_received {:unmarked, %{count: 1}, %{reason: :mark_failed}}
+    end
+
+    @tag :capture_log
+    test "a clear still clears, and reports that it left no mark", %{cache: cache} do
+      listen_for_unmarked(cache)
+      {:ok, true} = Cachex.put(cache, "k", :old)
+
+      assert :ok = FillGuard.clear(cache, @down)
+      assert {:ok, nil} = Cachex.get(cache, "k")
+      assert_received {:unmarked, _, %{reason: :mark_failed}}
+    end
+
+    test "a fill stores nothing: no mark can prove it fresh", %{cache: cache} do
+      assert :not_stored = FillGuard.put(cache, "k", :v, [], FillGuard.begin(), @down)
+      assert {:ok, nil} = Cachex.get(cache, "k")
+    end
+  end
+
+  test "a bust that wrote its marks reports nothing", %{cache: cache} do
+    listen_for_unmarked(cache)
+
+    assert :ok = FillGuard.bust(cache, ["k"])
+    assert :ok = FillGuard.clear(cache)
+    refute_received {:unmarked, _, _}
   end
 
   describe "bust/2" do
