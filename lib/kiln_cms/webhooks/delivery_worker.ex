@@ -274,7 +274,7 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   end
 
   defp post(endpoint, secret, delivery_id, event, payload) do
-    case body(endpoint.format, delivery_id, event, payload) do
+    case body(endpoint, delivery_id, event, payload) do
       {:ok, body} -> post_body(endpoint, secret, delivery_id, event, body)
       {:error, reason} -> {:error, reason}
     end
@@ -288,17 +288,37 @@ defmodule KilnCMS.Webhooks.DeliveryWorker do
   # Kiln's envelope: `delivery_id` rides inside the body, so the signature
   # covers it; the header copy is for routing and logging without a parse.
   # Stable across a delivery's retries — it is the ledger row's id.
-  defp body(:kiln, delivery_id, event, payload),
+  defp body(%{format: :kiln}, delivery_id, event, payload),
     do: {:ok, Jason.encode!(%{event: event, data: payload, delivery_id: delivery_id})}
 
-  defp body(:slack, _delivery_id, event, payload),
-    do: {:ok, Jason.encode!(SlackFormat.render(event, payload))}
+  defp body(%{format: :slack} = endpoint, _delivery_id, event, payload),
+    do: {:ok, Jason.encode!(SlackFormat.render(event, with_site_name(payload, endpoint)))}
 
   # A format a later release added (`KilnCMS.Types.UnknownAtom`), met after a
   # rollback: this release cannot render it, and sending Kiln's envelope to a
   # receiver set up for something else would only fail there.
   defp body(_unknown, _delivery_id, _event, _payload),
     do: {:error, "delivery failed: endpoint format not supported by this release"}
+
+  # A payload that names no site gets the endpoint's site's name at send time
+  # (#2797), for the Slack message only; the ledger row keeps what was queued.
+  # A ping queued by a 1.9 node while a rolling deploy to 1.10 was under way
+  # carries Kiln's ping payload (`message`, `endpoint_url`, `sent_at`) and no
+  # `site_name`, and was posted as "KilnCMS webhook test for `-`". Not a
+  # clause for that one shape: any Slack render without a name falls back here.
+  defp with_site_name(payload, endpoint) when is_map(payload) do
+    case Map.get(payload, "site_name", Map.get(payload, :site_name)) do
+      name when is_binary(name) and name != "" ->
+        payload
+
+      _missing ->
+        payload
+        |> Map.delete(:site_name)
+        |> Map.put("site_name", KilnCMS.Branding.for_org(endpoint.org_id).site_name)
+    end
+  end
+
+  defp with_site_name(payload, _endpoint), do: payload
 
   defp post_body(endpoint, secret, delivery_id, event, body) do
     # Headers are built here, at send time, from nothing the job stored: a job
