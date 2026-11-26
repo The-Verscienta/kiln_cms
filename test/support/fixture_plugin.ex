@@ -454,6 +454,33 @@ defmodule KilnCMS.FixturePlugin.FieldTypes.Shapeshifter do
   def cast(value, _definition), do: {:ok, value |> to_string() |> String.trim()}
 end
 
+defmodule KilnCMS.FixturePlugin.FieldTypes.Score do
+  @moduledoc """
+  A plugin field type that stores a whole number of any size, typed for
+  GraphQL as `:int` (test fixture, #2855): its filters and sorts compare the
+  stored JSON number as a number, so `9` sorts before `10`.
+  """
+  use Kiln.FieldType
+
+  @impl Kiln.FieldType
+  def graphql_kind(_definition), do: :int
+
+  @impl Kiln.FieldType
+  def input_type, do: "number"
+
+  @impl Kiln.FieldType
+  def cast(value, _definition) when is_integer(value), do: {:ok, value}
+
+  def cast(value, _definition) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {score, ""} -> {:ok, score}
+      _other -> {:error, "must be a whole number"}
+    end
+  end
+
+  def cast(_value, _definition), do: {:error, "must be a whole number"}
+end
+
 defmodule KilnCMS.FixturePlugin.PanelLive do
   @moduledoc "A plugin admin panel (test fixture) mounted via `admin_routes/0`."
   use KilnCMSWeb, :live_view
@@ -625,7 +652,8 @@ defmodule KilnCMS.FixturePlugin do
       KilnCMS.FixturePlugin.FieldTypes.Exploding,
       KilnCMS.FixturePlugin.FieldTypes.Lookup,
       KilnCMS.FixturePlugin.FieldTypes.Tag,
-      KilnCMS.FixturePlugin.FieldTypes.Shapeshifter
+      KilnCMS.FixturePlugin.FieldTypes.Shapeshifter,
+      KilnCMS.FixturePlugin.FieldTypes.Score
     ]
 
   @impl true

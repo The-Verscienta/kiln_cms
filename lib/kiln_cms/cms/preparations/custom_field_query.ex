@@ -128,6 +128,7 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   require Ash.Sort
 
   alias Ash.Error.Query.InvalidArgument
+  alias KilnCMS.CMS.FieldKind
   alias KilnCMS.CMS.FieldValue
   alias KilnCMS.CMS.IndexedCustomFields
   alias KilnCMS.CMS.Preparations.CustomFieldQuery.DateTimes
@@ -1046,7 +1047,14 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   `:boolean`, `:date`, `:naive_datetime` (datetimes are stored offset-less
   ISO-8601, see `ApplyCustomFields`), `:dynamic` for a `:computed` field (the
   formula decides, so the supplied value's own JSON type is kept), and `nil`
-  for text-like and plugin-contributed types ("treat as text").
+  for text-like types ("treat as text").
+
+  A plugin-contributed type (`Kiln.FieldType`) is cast by the GraphQL kind
+  it declares (`c:Kiln.FieldType.graphql_kind/1`, #2855): `:int`, `:float`,
+  `:boolean` and `:date` as the core type of that kind, so a stored JSON
+  number compares as a number. Any other kind, `:datetime` included, is
+  text: a plugin's stored date-time spelling is its own, not the offset-less
+  one a core `:datetime` stores.
   """
   def ash_type(%{field_type: :integer}), do: :integer
   def ash_type(%{field_type: :float}), do: :float
@@ -1060,6 +1068,17 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery do
   # merely miss — jsonb orders Number below String, so a range predicate
   # silently matches every row or none.
   def ash_type(%{field_type: :computed}), do: :dynamic
+
+  def ash_type(%{field_type: type} = definition) when is_atom(type) do
+    case FieldKind.item_kind_for(definition) do
+      :int -> :integer
+      :float -> :float
+      :boolean -> :boolean
+      :date -> :date
+      _text_or_composite -> nil
+    end
+  end
+
   def ash_type(_definition), do: nil
 
   # A list-valued field (`multiple` select/string/media/reference) holds the
