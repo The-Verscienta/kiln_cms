@@ -14,7 +14,7 @@
   as the fired surfaces go).
 - **Changelog** — the Unreleased section of
   [CHANGELOG.md](../../CHANGELOG.md), under Added
-  ([long form](../changelog/unreleased.md#deliver-llm)).
+  ([long form](../changelog/v1.13.0.md#deliver-llm)).
 
 ## The problem
 

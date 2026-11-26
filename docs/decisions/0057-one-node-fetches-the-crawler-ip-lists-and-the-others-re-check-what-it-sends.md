@@ -10,7 +10,7 @@
   for why the lists are fetched on a schedule, and
   [ADR 0055](0055-a-fresh-published-list-proves-a-duckduckbot-claim-false-on-its-own-and-a-stale-one-decides-nothing.md)
   for what a fresh list decides.
-- **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md) (quoted from its long form in `docs/changelog/unreleased.md`):
+- **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md) (quoted from its long form in `docs/changelog/v1.13.0.md`):
   "Search-engine claims are checked against the engines' published crawler
   IP lists before DNS" (Added).
 

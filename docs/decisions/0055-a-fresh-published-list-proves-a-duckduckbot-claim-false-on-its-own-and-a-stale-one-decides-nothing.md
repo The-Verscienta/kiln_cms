@@ -14,7 +14,7 @@
   and
   [ADR 0057](0057-one-node-fetches-the-crawler-ip-lists-and-the-others-re-check-what-it-sends.md)
   for how the lists are fetched and shared.
-- **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md) (quoted from its long form in `docs/changelog/unreleased.md`):
+- **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md) (quoted from its long form in `docs/changelog/v1.13.0.md`):
   "Search-engine claims are checked against the engines' published crawler
   IP lists before DNS" (Added), and its upgrade note.
 
