@@ -106,6 +106,10 @@ else.
   The field type's commented `handle_input_event/3` example now compiles cleanly once uncommented. No migration.
   ([long form](docs/changelog/unreleased.md#gen-plugin-overlay-config))
 
+- **An IP block rule added or removed, or a site's new slug or custom domain, takes effect on a node's next request, instead of the old answer being cached for up to a minute (five for an old host) when a lookup straddled the save (#2972).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#cache-fill-after-bust))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —

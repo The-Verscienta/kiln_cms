@@ -190,7 +190,11 @@ site renders: canonical, hreflang and Open Graph URLs, the sitemap, feeds and
 `llms.txt`. Once the save commits, Kiln (#3194):
 
 - drops the org's cached host lookups on every node, under its old and its
-  new hosts;
+  new hosts. A lookup that ran just before the save answers its one request
+  with what it read and is not stored (#2972), so the new host resolves, and
+  the old one stops resolving, from the next request on. A node that misses
+  the message keeps its entries until they expire: one minute for a host that
+  did not resolve, five for one that did;
 - moves the `ETag` of every page on the site, so a browser or CDN revalidating
   a page gets a `200` with the new URLs, never a `304` for the old ones;
 - drops the site's cached sitemaps, feeds and `llms.txt` on every node;

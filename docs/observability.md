@@ -89,6 +89,25 @@ A rise in the refused counter right after you add a rule is expected. A rise on 
 change, or a rule that suddenly matches everyone (a proxy not declared in
 `TRUSTED_PROXIES`), is worth a look.
 
+## Cache fills discarded after a bust
+
+The IP block list and the host cache (`KilnCMS.Cache.Hosts`) store a lookup
+only if no bust of its key ran while it was reading (#2972,
+`KilnCMS.Cache.FillGuard`). Two counters report on that guard, both tagged
+`cache` (`kiln_cms_ip_blocklist_cache` or `kiln_cms_host_cache`) and `reason`:
+
+| Metric | `reason` | Counts |
+|--------|----------|--------|
+| `kiln_cms.cache.fill_discarded.count` | `busted`, `too_old` | Lookups answered but not stored: a rule or a site's host changed while they ran (`busted`), or they ran longer than five minutes (`too_old`). Harmless; the next request reads again. |
+| `kiln_cms.cache.bust_unmarked.count` | `mark_failed`, `queue_unavailable` | Busts that deleted the entry but could not record that they ran, because the mark store or the cache's lock queue was down. A lookup already in flight on that node may still store the old value, which then lasts until its TTL (one minute for block rules and unknown hosts, five for a resolved host). |
+
+The underlying events are `[:kiln_cms, :cache, :fill_discarded]` and
+`[:kiln_cms, :cache, :bust_unmarked]` (measurement `count`, metadata `cache`
+and `reason`). Each unmarked bust also logs a warning,
+`FillGuard: a bust of :kiln_cms_host_cache deleted but left no mark (mark_failed)`.
+A steady `busted` rate tracks how often rules and hosts change; any
+`bust_unmarked` is worth a look at the node's cache processes.
+
 ## Admin allowlist refusals
 
 `kiln_cms.admin_allowlist.refused.count` counts requests, LiveView joins and
@@ -682,6 +701,7 @@ Every label is bounded:
   [backups.md](backups.md#which-node-runs-a-step)).
 - **`result`, `status`, `surface`, `mode`, `action`, `event`, `class`,
   `scope` and `reason`** are small enumerations.
+- **`cache`** names one of Kiln's own Cachex instances, a fixed set.
 - **`enforced` and `read`** are booleans, exported as `"true"` or `"false"`.
 - **The content-type label (`type`, `kind`)** keeps a compiled type's name but
   folds every admin-defined type into `dynamic`. Admin-defined types are
