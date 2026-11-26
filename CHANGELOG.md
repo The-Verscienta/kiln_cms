@@ -151,6 +151,10 @@ else.
 
 ### Security
 
+- **Smart 404 blocking: a spoofed search-engine claim rotating through the addresses of one IPv6 `/64` is counted once another address there has failed its DNS check or left its reverse zone silent (#2838).**
+  Only with `KILN_SCANNER_BLOCKING` on; verified crawlers stay exempt, IPv4 is unchanged. No migration; rolling the pin back is safe.
+  ([#3449](https://github.com/The-Verscienta/kiln_cms/pull/3449) · [long form](docs/changelog/unreleased.md#scanner-guard-ipv6-rotation))
+
 - **Signing out one session now also closes that session's collaborative-editing rooms (`/ws/collab`) and a `/ws/gql` socket opened with its token, which before stayed open after idle expiry, "Sign out everyone", the browser's own Sign out or a sign-out from Active sessions (#2490).**
   A `/ws/gql` document sent after a sign-out the socket missed is refused with `extensions.code: "unauthenticated"`. No migration, no setting.
   ([long form](docs/changelog/unreleased.md#session-bound-sockets))

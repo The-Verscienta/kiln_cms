@@ -863,7 +863,10 @@ probes bait paths. Off unless `KILN_SCANNER_BLOCKING` is on; see
   engine (`KilnCMS.BotClass.search_engine/1`) skips the miss threshold only,
   never the bait threshold, and only until crawler verification (#2254, below)
   proves the claim false. A claim not yet checked or skipped keeps the
-  exemption, so a real crawler's first misses from a new address never count.
+  exemption, so a real crawler's first misses from a new address never count,
+  unless the address's IPv6 `/64` is marked by another address's failed or
+  silent lookup (#2838; see "Rotation inside an IPv6 `/64`" under Bot
+  budgets below).
   A scanner claiming to be Googlebot is therefore counted once its address
   fails the reverse-DNS check. A claim whose PTR query got no answer (a
   timeout, SERVFAIL) keeps the exemption only while this node's resolver is
@@ -960,12 +963,56 @@ see [bot-budgets.md](bot-budgets.md).
   lookups go unanswered and the 404 guard asks; it runs on a one-slot
   supervisor of its own and charges no cap. No address, hostname, user agent
   or org is in any verification event or log line.
-- **Residual: pending and skipped claims keep the 404 exemption.** A claim
-  whose lookup is running, or was not started because the node is busy or the
-  network used its lookup budget, skips the miss threshold. A spoofer rotating
-  through the addresses of one IPv6 `/64` gets 30 lookups a minute; every
-  further new address is skipped and its misses are not counted. Bait paths
-  still count. This predates #2588 and is not fixed by it.
+- **Rotation inside an IPv6 `/64` (#2838).** The 404 guard counts IPv6 per
+  `/64`, but a claim is checked per address, so a spoofer sending each request
+  from a fresh address was always judged pending or skipped, and exempt. Now a
+  finished lookup of the request's own address marks its `/64`: `:failed`
+  when it proved the claim false, `:silent` when its PTR query got no answer
+  while the resolver answered (`CrawlerVerification.network_flagged?/2`). In
+  a marked `/64` a pending, skipped or unverifiable claim is counted, and so
+  is a PTR silence during a resolver outage when the mark is `:failed`; a
+  `:silent` mark is not read while the resolver fails. A verified claim is
+  exempt in any `/64`, and a verified lookup clears a `:silent` mark, never a
+  `:failed` one. Marks are IPv6 only, keyed by the `/64` alone (never engine,
+  user agent or org), kept an hour from their last write in a bounded cache
+  of their own (10,000 networks per node), and written only while the guard
+  is on. A refused lookup (a cap, the node cap, a busy slot) writes none.
+  [ADR 0086](decisions/0086-an-ipv6-64-that-produced-claimant-controlled-negative-evidence-loses-the-404-exemption-for-unproven-claims.md)
+  records why.
+- **Residual: marks are per node.** The guard's counters are shared through
+  Postgres, but each node marks a `/64` only from its own lookups, so a
+  spoofer spread across nodes is exempt on each node until that node's first
+  lookup for the `/64` finishes: about one lookup deadline (3 seconds) of
+  exempt misses per node. A restart of either result cache wipes the node's
+  marks.
+- **Residual: the first claims from an unmarked `/64` are exempt** until one
+  of its lookups finishes. This is what keeps a real crawler's first misses
+  from a new address uncounted.
+- **Residual: a `/64` whose lookups are all refused is never marked.** A
+  lookup turned away by the node cap or a busy slot produces no evidence, so
+  it writes no mark, and its claim is skipped and exempt. An attacker holding
+  about three IPv4 `/16`s can keep the 16 lookup slots full, and then rotate
+  through a `/64` unmarked. Refusals do not mark on purpose: the shared caps
+  can be spent from other networks, which would mark a real crawler's `/64`.
+- **Residual: the first silent lookup of an outage can still mark.** Until a
+  canary has found the resolver failing, it is taken as healthy, so the
+  lookup that meets the start of an outage can write a `:silent` mark. It is
+  not read while the resolver fails, and the `/64`'s next verified lookup
+  clears it.
+- **Residual: claims that never run a DNS lookup never mark.** DuckDuckBot
+  has no DNS check, so over IPv6 (`:unverifiable`) it stays exempt in an
+  unmarked `/64`, and a spoofer rotating as DuckDuckBot through one is never
+  counted. It is counted in a `/64` another claim has marked. A DuckDuckBot
+  claim outside a fresh published list is proven false without a lookup and
+  counted anyway.
+- **Residual: a forward error keeps the exemption in any `/64`.** A claim
+  whose PTR names a host under the engine's domain and whose forward query got
+  no answer, with its full budget, is `{:unverified, :forward_error}`; it
+  writes no mark and a mark never overrides it. A PTR pointing at a lame
+  sub-delegation under a broad engine suffix (`yandex.net`, `baidu.com`)
+  therefore stays exempt.
+- **Out of scope: rotation across `/64`s.** The guard counts per `/64`, so a
+  holder of a `/48` or wider gets a fresh counter, and a fresh mark, in each.
 - **Residual: lookup starvation, narrowed.** An attacker who controls a slow or
   silent reverse zone can still hold lookup slots until the deadline, and an
   attacker who rents several networks (five `/16`s or `/32`s at their
