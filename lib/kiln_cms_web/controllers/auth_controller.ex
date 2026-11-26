@@ -527,7 +527,7 @@ defmodule KilnCMSWeb.AuthController do
   # strength of having connected (#2490). Evicted after the revocation, so
   # their reconnects find the token revoked.
   defp evict_signed_out(conn, jti) when is_binary(jti) do
-    SessionEviction.evict_session(jti, :signed_out)
+    SessionEviction.disconnect_sockets(jti, :signed_out)
     conn
   end
 

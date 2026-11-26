@@ -241,11 +241,16 @@ defmodule KilnCMSWeb.SessionBoundSocketsTest do
       jti = jti_of(get_session(conn, "user_token"))
 
       assert {:ok, _socket} = collab_connect(CollabSocket.token(user, false, jti), site)
+      Phoenix.PubSub.subscribe(KilnCMS.PubSub, SessionEviction.session_topic(jti))
 
       conn = delete(conn, ~p"/sign-out")
       assert redirected_to(conn)
       assert row(jti).purpose == "revocation"
       assert_disconnected(jti)
+
+      # Only the sockets: the session's pages are not told, so the clicking tab
+      # follows its own redirect and other tabs don't claim "another device".
+      refute_receive {:session_revoked, ^jti}, 150
     end
   end
 

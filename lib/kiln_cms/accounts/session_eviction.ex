@@ -125,6 +125,22 @@ defmodule KilnCMS.Accounts.SessionEviction do
     broadcast_session(jti)
   end
 
+  @doc """
+  Close only the sockets of one session (`session_socket_topic/1`), not its
+  LiveViews (#2490). For the browser's own Sign out: its pages follow the
+  revoked token on their next request or rejoin, and telling them now would
+  race the sign-out's own redirect and show "signed out from another device"
+  in the user's other tabs. Always `:ok`, failures logged.
+  """
+  @spec disconnect_sockets(String.t(), atom()) :: :ok
+  def disconnect_sockets(jti, reason) when is_binary(jti) do
+    Logger.info("Disconnecting sockets for one session: #{reason}")
+
+    guarded(fn ->
+      KilnCMSWeb.Endpoint.broadcast(session_socket_topic(jti), "disconnect", %{})
+    end)
+  end
+
   # Two broadcasts, each guarded on its own: a raise in the first must not
   # skip the second, or the session's sockets would stay open while its pages
   # were sent to sign-in (#2490).
