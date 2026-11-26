@@ -113,7 +113,7 @@ defmodule KilnCMS.Backups.Importer do
       turned into "succeeded, db only".
 
   The new outcome is what importing the stamp now would record, minus
-  `started_at`, `keep_days` and the log (the row keeps its own, plus one
+  `started_at`, `keep_days`, `trigger` and the log (the row keeps its own, plus one
   line). The write locks the row and refuses (`StaleRecord`, counted
   nowhere) one that is no longer that Interrupted row, or that retention has
   marked `pruned` anywhere since (`Run.Changes.ReevaluateInterrupted`).
@@ -171,7 +171,6 @@ defmodule KilnCMS.Backups.Importer do
   @settle_ms :timer.minutes(10)
   @interrupted_after_s 3 * 3600
   @future_slack_s 300
-  @interrupted "Interrupted: the backup stopped before it finished and left .partial files behind"
   @logged_partials 5
   @max_trigger 64
   @max_sidecar_bytes 4 * 1024 * 1024
@@ -234,7 +233,7 @@ defmodule KilnCMS.Backups.Importer do
   `:reevaluate_interrupted` may replace (#2846).
   """
   @spec interrupted_message() :: String.t()
-  def interrupted_message, do: @interrupted
+  def interrupted_message, do: KilnCMS.Backups.Run.interrupted_import_error()
 
   @doc false
   # Empties the backoff table. `KilnCMS.DataCase.setup_sandbox/1` calls it for
@@ -422,14 +421,16 @@ defmodule KilnCMS.Backups.Importer do
         |> run_attrs(manifest, covered, dir, sidecars, now)
         |> Map.take([:status, :error, :components, :finished_at, :artifacts])
 
-      case reevaluate.(run, attrs) do
-        {:ok, _run} -> :ok
-        {:error, error} -> if stale?(error), do: :stale, else: {:error, cause(error)}
-      end
+      run |> reevaluate.(attrs) |> reevaluated()
     else
       :skip
     end
   end
+
+  defp reevaluated({:ok, _run}), do: :ok
+
+  defp reevaluated({:error, error}),
+    do: if(stale?(error), do: :stale, else: {:error, cause(error)})
 
   defp reevaluate_run(run, attrs),
     do: Backups.reevaluate_interrupted_run(run, attrs, actor: Backups.system())
@@ -656,7 +657,7 @@ defmodule KilnCMS.Backups.Importer do
   defp prune_keep_days(%Manifest{ok: true} = manifest), do: Manifest.cron_keep_days(manifest)
   defp prune_keep_days(_none), do: nil
 
-  defp outcome(true, _manifest, _problem, _empty?), do: {:failed, @interrupted}
+  defp outcome(true, _manifest, _problem, _empty?), do: {:failed, interrupted_message()}
   defp outcome(_, %Manifest{ok: false, error: error}, _problem, _empty?), do: {:failed, error}
   defp outcome(_, _manifest, problem, _empty?) when is_binary(problem), do: {:failed, problem}
   defp outcome(_, _manifest, _problem, true), do: {:failed, "empty artifact"}

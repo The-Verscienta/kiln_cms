@@ -107,6 +107,16 @@ defmodule KilnCMS.Backups.Run do
     end
   end
 
+  # The error `KilnCMS.Backups.Importer` records on an import interrupted
+  # mid-backup (#2846). Kept here, not in the importer, so this resource's
+  # `:interrupted_imports` filter doesn't make Run depend on the importer at
+  # compile time.
+  @interrupted_import_error "Interrupted: the backup stopped before it finished and left .partial files behind"
+
+  @doc "The error an import interrupted mid-backup records (`KilnCMS.Backups.Importer`)."
+  @spec interrupted_import_error() :: String.t()
+  def interrupted_import_error, do: @interrupted_import_error
+
   actions do
     defaults [:read]
 
@@ -178,7 +188,7 @@ defmodule KilnCMS.Backups.Run do
     read :interrupted_imports do
       filter expr(
                origin == :imported and status == :failed and
-                 error == ^KilnCMS.Backups.Importer.interrupted_message()
+                 error == ^@interrupted_import_error
              )
     end
 

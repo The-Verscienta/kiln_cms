@@ -80,22 +80,22 @@ defmodule KilnCMS.Backups.ReevaluateRaceTest do
   defp hold(write) do
     parent = self()
 
-    task =
-      Task.async(fn ->
-        unboxed(fn ->
-          Repo.transaction(fn ->
-            result = write.()
-            send(parent, {:holding, self()})
-
-            receive do
-              :commit -> result
-            end
-          end)
-        end)
-      end)
+    task = Task.async(fn -> unboxed(fn -> in_transaction(write, parent) end) end)
 
     assert_receive {:holding, pid}, 10_000
     {task, pid}
+  end
+
+  defp in_transaction(write, parent),
+    do: Repo.transaction(fn -> hold_open(write, parent) end)
+
+  defp hold_open(write, parent) do
+    result = write.()
+    send(parent, {:holding, self()})
+
+    receive do
+      :commit -> result
+    end
   end
 
   defp release({task, pid}) do

@@ -5699,7 +5699,7 @@ default), and on demand:
 
 ```bash
 bin/kiln_cms rpc '{:ok, r} = KilnCMS.Backups.Importer.run(); IO.inspect(r)'
-# %{deferred: 0, failed: 0, imported: 2, pending: 0, skipped: 0}
+# %{deferred: 0, failed: 0, imported: 2, pending: 0, reevaluated: 0, skipped: 0}
 ```
 
 It runs on the serving node, as the other commands on this page do; `eval`
