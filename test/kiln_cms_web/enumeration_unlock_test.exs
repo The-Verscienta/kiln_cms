@@ -33,7 +33,10 @@ defmodule KilnCMSWeb.EnumerationUnlockTest do
     )
 
     on_exit(fn -> Application.put_env(:kiln_cms, AccountThrottle, original) end)
-    :ok
+
+    # The test pauses accounts and spends a mail budget, then asks: a window
+    # boundary in between would unpause them or refill the budget (#2937).
+    KilnCMS.ChallengeFixtures.pin_windows!([:account, :mail])
   end
 
   defp address(tag), do: "#{tag}-#{System.unique_integer([:positive])}@example.com"

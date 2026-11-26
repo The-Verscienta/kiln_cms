@@ -28,7 +28,10 @@ defmodule KilnCMSWeb.SignInUnlockControllerTest do
     original = Application.get_env(:kiln_cms, AccountThrottle, [])
     Application.put_env(:kiln_cms, AccountThrottle, Keyword.put(original, :budget, @budget))
     on_exit(fn -> Application.put_env(:kiln_cms, AccountThrottle, original) end)
-    :ok
+
+    # A window boundary between `paused_user!/0` and the request would leave
+    # nothing paused and nothing mailed (#2937).
+    KilnCMS.ChallengeFixtures.pin_windows!([:account, :mail])
   end
 
   defp email, do: "unlock-page-#{System.unique_integer([:positive])}@example.com"
