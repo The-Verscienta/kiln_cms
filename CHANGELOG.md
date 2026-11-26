@@ -146,6 +146,12 @@ else.
   The importer's summary gains a `reevaluated` count, and retention's `pruned` mark now locks the row it marks. No migration; rolling the pin back is safe.
   ([#3447](https://github.com/The-Verscienta/kiln_cms/pull/3447) · [long form](docs/changelog/unreleased.md#reevaluate-interrupted-import))
 
+### Security
+
+- **Smart 404 blocking: a spoofed search-engine claim rotating through the addresses of one IPv6 `/64` is counted once another address there has failed its DNS check or left its reverse zone silent (#2838).**
+  Only with `KILN_SCANNER_BLOCKING` on; verified crawlers stay exempt, IPv4 is unchanged. No migration; rolling the pin back is safe.
+  ([#3449](https://github.com/The-Verscienta/kiln_cms/pull/3449) · [long form](docs/changelog/unreleased.md#scanner-guard-ipv6-rotation))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —
