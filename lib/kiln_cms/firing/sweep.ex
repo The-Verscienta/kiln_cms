@@ -86,11 +86,11 @@ defmodule KilnCMS.Firing.Sweep do
 
   defp sweep(type, resource, args) do
     KilnCMS.Accounts.list_org_ids()
-    |> Enum.map(&sweep_org(type, resource, &1, args))
+    |> Enum.map(&sweep_org(type, resource, &1, args, :all))
     |> Enum.sum()
   end
 
-  defp sweep_org(type, resource, org_id, args \\ %{}) do
+  defp sweep_org(type, resource, org_id, args, only) do
     # authorize?: false — kept deliberately (#1402): converting this to the firing system
     # actor would mean admitting `Checks.SystemActor` on the `Content` read
     # policy — a standing grant over every document on every site, drafts
@@ -100,6 +100,7 @@ defmodule KilnCMS.Firing.Sweep do
     # here and they leave as Oban job args.
     resource
     |> Ash.Query.filter(state == :published)
+    |> only(only)
     |> Ash.Query.select([:id, :org_id])
     |> Ash.stream!(authorize?: false, tenant: org_id, stream_with: :full_read)
     |> Stream.map(fn record ->
@@ -121,20 +122,30 @@ defmodule KilnCMS.Firing.Sweep do
   documents need new `:json_ld` artifacts, not the whole corpus.
   Bounded via `Oban.insert_all` in `@chunk`-sized inserts, same as `run/1`.
   Silent, like `run/1` without `notify: true`.
+
+  Options:
+
+    * `:only` (default `:all`) — `:translations` re-fires only the type's
+      locale variants: its published rows outside the default locale. Those
+      are the rows a field's `:fallback` mode can fill (#2905). The default
+      locale ends every chain, so its artifacts never inherit
+      (`KilnCMS.I18n.RefireInheritingWorker` skips it for the same reason).
   """
-  @spec sweep_type(Ash.UUID.t(), String.t() | atom()) :: non_neg_integer()
-  def sweep_type(org_id, type_name) when is_binary(type_name) or is_atom(type_name) do
+  @spec sweep_type(Ash.UUID.t(), String.t() | atom(), keyword()) :: non_neg_integer()
+  def sweep_type(org_id, type_name, opts \\ [])
+      when is_binary(type_name) or is_atom(type_name) do
     type_str = to_string(type_name)
+    only = Keyword.get(opts, :only, :all)
 
     case Enum.find(KilnCMS.CMS.ContentTypes.all(), fn ct -> to_string(ct.type) == type_str end) do
       %{type: type, resource: resource} ->
-        sweep_org(type, resource, org_id)
+        sweep_org(type, resource, org_id, %{}, only)
 
       nil ->
         case KilnCMS.CMS.ContentTypes.dynamic_all(org_id)
              |> Enum.find(fn d -> d.type == type_str end) do
           %{definition: %{id: def_id}} ->
-            sweep_dynamic_type(org_id, def_id)
+            sweep_dynamic_type(org_id, def_id, only)
 
           _ ->
             0
@@ -142,12 +153,13 @@ defmodule KilnCMS.Firing.Sweep do
     end
   end
 
-  defp sweep_dynamic_type(org_id, type_definition_id) do
-    # authorize?: false — as in `sweep_org/3` above: a system content grant
+  defp sweep_dynamic_type(org_id, type_definition_id, only) do
+    # authorize?: false — as in `sweep_org/5` above: a system content grant
     # would cover every draft on every site, while this is one tenant,
     # published only, ids only — and one dynamic type narrower.
     KilnCMS.CMS.Entry
     |> Ash.Query.filter(state == :published and type_definition_id == ^type_definition_id)
+    |> only(only)
     |> Ash.Query.select([:id, :org_id])
     |> Ash.stream!(authorize?: false, tenant: org_id, stream_with: :full_read)
     |> Stream.map(fn record ->
@@ -158,6 +170,15 @@ defmodule KilnCMS.Firing.Sweep do
       Oban.insert_all(jobs)
       count + length(jobs)
     end)
+  end
+
+  # `is_nil/1` too, to keep the rows `RefireInheritingWorker` keeps: SQL's
+  # `!=` would drop a row with no locale.
+  defp only(query, :all), do: query
+
+  defp only(query, :translations) do
+    default = KilnCMS.I18n.FieldLocalization.source_locale()
+    Ash.Query.filter(query, is_nil(locale) or locale != ^default)
   end
 
   @doc """

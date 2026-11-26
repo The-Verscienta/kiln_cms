@@ -43,3 +43,10 @@ carries the reasoning.
   - **Not changed.** A `?to=9999-12-31` date filter on `/editor` was reported as a crash; it lists as expected.
   - **No migration; rolling the pin back is safe.**
 
+
+<a id="fallback-mode-refire"></a>
+
+- **Changing a custom field's localization to or from `:fallback` re-fires the type's locale variants (#2905).** A `:fallback` field that a variant leaves empty is filled from the next locale along the site's chain when the variant is fired, and the fired `:json` body names it under `inherited_fields`. Saving the chain at `/editor/locales` and publishing a variant re-fired the documents that inherit; changing the field's mode on the Fields screen re-fired nothing. A French page whose tagline was empty kept serving it empty, with no `inherited_fields`, after the field became `:fallback`, and kept serving the English tagline after it stopped being one, until that page was next published.
+  - **What changes.** `KilnCMS.CMS.Changes.BustTypeRegistry` now re-fires the field's type when its `localization` changes to or from `:fallback`, and when a `:fallback` field is deleted. Only the type's published rows outside the default locale are queued (`KilnCMS.Firing.Sweep.sweep_type/3` with `only: :translations`): the default locale ends every chain, so it never inherits. A site with no translations queues nothing.
+  - **Unchanged.** A switch between `:localized` and `:shared` re-fires nothing; a shared value is copied into the variants when the source publishes, as before. Creating a field as `:fallback` re-fires nothing either: no document holds a value for it yet.
+  - **No migration; rolling the pin back is safe.** An artifact fired with the old answer on an earlier release is corrected by `mix kiln.refire_all`, or by publishing the variant.
