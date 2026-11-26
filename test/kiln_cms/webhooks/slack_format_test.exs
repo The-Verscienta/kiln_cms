@@ -230,6 +230,26 @@ defmodule KilnCMS.Webhooks.SlackFormatTest do
              }
     end
 
+    # A ping row queued by a 1.9 node carries Kiln's payload and no name
+    # (#2797): a plain sentence, never a `-` placeholder.
+    test "a ping that names no site says so without a placeholder" do
+      for data <- [
+            %{
+              "message" => "KilnCMS webhook test",
+              "endpoint_url" => "https://hooks.slack.com/services/T0/B0/s3cr3tT0ken",
+              "sent_at" => "2026-11-10T14:03:27Z"
+            },
+            %{"site_name" => ""},
+            %{"site_name" => nil}
+          ] do
+        assert SlackFormat.render("ping", data) == %{
+                 text: "KilnCMS webhook test",
+                 unfurl_links: false,
+                 unfurl_media: false
+               }
+      end
+    end
+
     test "a content event says nothing from its payload" do
       body =
         SlackFormat.render("page.published", %{"title" => "Embargoed results", "body" => "x"})
