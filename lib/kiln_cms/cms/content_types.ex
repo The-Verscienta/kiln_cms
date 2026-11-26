@@ -16,6 +16,7 @@ defmodule KilnCMS.CMS.ContentTypes do
   follow the project's convention) **on each type's own domain**, so the
   LiveViews can stay generic instead of hard-coding `:page`/`:post`.
   """
+  alias Kiln.Plugins.PlugRoute
   alias KilnCMS.CMS
 
   @type t :: %{
@@ -42,8 +43,19 @@ defmodule KilnCMS.CMS.ContentTypes do
   # First URL segments the router owns — a dynamic type's `path_segment` (its
   # public `/<segment>/<slug>` prefix) may not shadow any of these. Compiled
   # types' segments and configured locales are added at validation time (see
-  # `Validations.AvailableTypeName`). Keep in sync with the top-level scopes in
-  # `KilnCMSWeb.Router`.
+  # `Validations.AvailableTypeName`). Installed plugins' public and plug route
+  # roots are added at runtime by `reserved_path_segments/0`.
+  #
+  # Kept in sync with `KilnCMSWeb.Router` by
+  # `KilnCMSWeb.ReservedRouteSegmentsTest` (#2898): every slug-shaped first
+  # segment of a GET route declared ahead of `/:slug` must be here, or be
+  # listed in that test as one whose routes are all three segments deep. A
+  # static list rather than one read from `Router.__routes__/0`, because the
+  # CMS layer must not depend on the web layer, and because the list also
+  # holds slug guards (`feed.xml`, ...) that no top-level route declares.
+  #
+  # Reserving a segment later shadows records stored before it was reserved;
+  # `mix kiln.reserved_paths` (`KilnCMS.CMS.ReservedPathAudit`) lists them.
   #
   # `feed.xml` / `feed.json` are here as *slug* guards rather than segment ones
   # (#486): the feed routes are `/:plural/feed.xml`, declared before the delivery
@@ -51,10 +63,12 @@ defmodule KilnCMS.CMS.ContentTypes do
   # its own type's feed — the silent-shadowing failure `Validations.SlugAvailable`
   # exists to prevent. `calendar.ics` (#480) and `index.json` (#766) are the same
   # shape: two-segment delivery routes declared ahead of `/:type/:slug`.
-  @reserved_path_segments ~w(access-denied account admin api auth billing blog calendar.ics
-                             content dev editor feed.json feed.xml gql index.json
-                             locale mailbox media membership playground preview
-                             register reset search sign_in swaggerui up)
+  @reserved_path_segments ~w(access-denied account actor admin ap api auth billing blog
+                             calendar.ics content dev developers editor feed.json
+                             feed.xml gql index.json locale mailbox mcp media
+                             membership password-reset playground preview ready
+                             register reset search setup sign-in sign-out sign_in
+                             swaggerui up)
 
   @doc "The Ash domains scanned for content types (default `[KilnCMS.CMS]`)."
   @spec content_domains() :: [module()]
@@ -202,9 +216,30 @@ defmodule KilnCMS.CMS.ContentTypes do
   def get_dynamic(name, org \\ nil) when is_binary(name),
     do: Enum.find(dynamic_all(org), &(&1.type == name))
 
-  @doc "Router-owned first URL segments a dynamic type may not use."
+  @doc """
+  Router-owned first URL segments a root-served slug, a path alias, or a
+  dynamic type's path segment may not use: the core routes, plus the first
+  segment of every installed plugin's public and plug routes (#2898), which
+  the router also declares ahead of `/:slug`.
+  """
   @spec reserved_path_segments() :: [String.t()]
-  def reserved_path_segments, do: @reserved_path_segments
+  def reserved_path_segments,
+    do: Enum.uniq(@reserved_path_segments ++ plugin_route_roots(Kiln.Plugins.all()))
+
+  @doc false
+  # The first segments `plugins`' public and plug routes take. Takes the plugin
+  # list so a test can pass test-only plugins (the installed set is fixed at
+  # compile time).
+  @spec plugin_route_roots([module()]) :: [String.t()]
+  def plugin_route_roots(plugins) do
+    public = for plugin <- plugins, {path, _lv, _action} <- plugin.public_routes(), do: path
+    plug = for plugin <- plugins, {_verb, path, _plug, _opts} <- PlugRoute.of(plugin), do: path
+
+    (public ++ plug)
+    |> Enum.map(&PlugRoute.root/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+  end
 
   @doc """
   The grant/registry key for a **record or changeset** — the dynamic type's own

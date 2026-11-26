@@ -5,6 +5,12 @@ The long-form entries behind the Unreleased section of
 merged. `CHANGELOG.md` carries the one-line summary of each; this file
 carries the reasoning.
 
+## Upgrade notes
+
+<a id="reserved-route-slugs-upgrade"></a>
+
+- **List the records a newly reserved route already shadowed (#2898).** Run `mix kiln.reserved_paths`, or in a release `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`. It lists every page whose slug, and every record whose path alias starts with, one of `developers`, `ready`, `setup`, `sign-in`, `sign-out`, `actor`, `ap`, `mcp`, `password-reset`, or the first segment of an installed plugin's public route. Those URLs were never served: the built-in route answered first. Nothing is renamed for you; give each a new slug or alias in the editor, and add a redirect if the old URL was ever linked. The records still read and save as before; only a change to the slug or alias is checked. No migration; the command is read-only.
+
 ## Fixed
 
 <a id="markdown-inline-image"></a>
@@ -42,6 +48,15 @@ carries the reasoning.
   - **Taking over a field on a live document.** A takeover flushes the holder's queued autosave first, but only did so for drafts. A live document autosaves into its working copy, so the holder's edit stayed queued, the taker kept editing the text from when the page opened, and the next save met a conflict. The holder's edit is now saved to the working copy before the field moves, the taker gets the saved text, and the takeover dialog says nothing is lost.
   - **Not changed.** A `?to=9999-12-31` date filter on `/editor` was reported as a crash; it lists as expected.
   - **No migration; rolling the pin back is safe.**
+
+
+<a id="reserved-route-slugs"></a>
+
+- **A slug that a built-in route already answers is refused (#2898).** This was a 1.13.0 known issue. `KilnCMS.CMS.ContentTypes.reserved_path_segments/0` is the list the slug, path-alias and content-type validations check, and it had fallen behind the router: `GET /developers`, `/ready`, `/setup`, `/sign-in`, `/sign-out`, `/actor`, `/ap/...`, `/mcp` and `/password-reset/:token` are all declared ahead of the `/:slug` catch-all. A page slugged `developers` saved without error, and `/developers` kept serving the developer page.
+  - **What changes.** Those segments are reserved. A page slug, a path alias's first segment, or a dynamic content type's path segment equal to one is refused with the existing reserved-slug error. A title-derived or regenerated slug steps around them (`developers-2`). Installed plugins' public and plug routes are declared ahead of `/:slug` too, so their first segments are reserved as well.
+  - **Kept in step.** `KilnCMSWeb.ReservedRouteSegmentsTest` reads the compiled route table and fails when a GET route ahead of `/:slug` has an unreserved first segment. Names with a dot (`sitemap.xml`, `llms.txt`) are skipped: no slug or alias can contain one. `forms` and `newsletter` stay free, because every route under them is three segments deep and answers neither `/forms` nor `/forms/<slug>`.
+  - **Unchanged.** Post and entry slugs live under `/blog/` or their type's segment, which no such route reaches, so `developers` is still a valid post slug. A dynamic type that already used a newly reserved segment can still be edited: its segment is checked only when it changes.
+  - **No migration; rolling the pin back is safe.** Existing records are not changed; see the upgrade note for listing them.
 
 
 

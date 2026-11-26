@@ -57,6 +57,11 @@ else.
 
 ## [Unreleased]
 
+### Upgrade notes
+
+- **Run `mix kiln.reserved_paths` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) to list pages slugged `developers`, `ready`, `setup`, `sign-in`, `sign-out`, `actor`, `ap`, `mcp` or `password-reset`, and path aliases under them: their built-in routes already served those URLs instead (#2898). Give each a new slug or alias.** No migration; read-only.
+  ([long form](docs/changelog/unreleased.md#reserved-route-slugs-upgrade))
+
 ### Fixed
 
 - **Markdown: an image that shares its line with text or another image, or sits in a list, quote or table, is kept as a link to the picture labelled with its alt text instead of vanishing (#2771).**
@@ -77,6 +82,10 @@ else.
 - **Console fixes: Edit on an automation rule another admin deleted no longer crashes; analytics names admin-defined types on every site; a refused calendar drag puts the chip back; and the field, claim-checking, billing and live-document takeover forms keep what they should (#2786).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#console-small-defects-2))
+
+- **A page slug, path alias or content type segment that a built-in route such as `/developers`, `/ready` or `/sign-out` already answers is refused with the reserved-slug error, instead of being saved and never served (#2898).**
+  A 1.13.0 known issue. Installed plugins' public routes are reserved too; a test now keeps the list in step with the router.
+  ([long form](docs/changelog/unreleased.md#reserved-route-slugs))
 
 ## [1.13.0] - 2026-11-25
 
