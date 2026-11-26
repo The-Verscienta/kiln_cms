@@ -96,6 +96,36 @@ defmodule KilnCMSWeb.AnalyticsLiveTest do
     assert AccessibleNames.repeated(html, "tbody a") == []
   end
 
+  # An admin-defined type exists on its own site only. Resolved without the
+  # org, every one on a site but the default read "(unknown type: …)" (#2786).
+  test "a dynamic type on another site resolves to its entry's title", %{conn: conn} do
+    admin = authed_user(:admin)
+    org = KilnCMS.OrgFixtures.org("ana-site")
+
+    definition =
+      CMS.create_type_definition!(
+        %{name: "gizmo#{System.unique_integer([:positive])}", label: "Gizmo"},
+        actor: admin,
+        tenant: org
+      )
+
+    entry =
+      KilnCMS.CMS.ContentTypes.create!(
+        definition.name,
+        %{title: "Site gizmo", slug: "gizmo-#{System.unique_integer([:positive])}"},
+        actor: admin,
+        tenant: org
+      )
+
+    Analytics.record_view!(definition.name, entry.id, tenant: org, authorize?: false)
+
+    {:ok, _lv, html} = conn |> org_conn(org) |> log_in(admin) |> live(~p"/editor/analytics")
+
+    assert html =~ "Site gizmo"
+    refute html =~ "unknown type"
+    assert html =~ ~p"/editor/content/#{definition.name}/#{entry.id}"
+  end
+
   test "visiting a published page records both a total and a daily bucket", %{conn: conn} do
     # `day` read BEFORE the tracked GET: the bucket lands on this day or the
     # next, and `views_since` has no upper bound, so either way it is in the

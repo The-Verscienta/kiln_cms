@@ -112,6 +112,8 @@ defmodule KilnCMSWeb.CalendarLive do
      |> assign(:new_types, new_types(socket.assigns))
      |> assign(:new_date_field, new_date_field(socket.assigns))
      |> assign(:new_on, nil)
+     # Bumped when a reschedule is refused (#2786); see `refuse_move/2`.
+     |> assign(:grid_rev, 0)
      # Present from the first render: an aria-live region inserted later is not
      # announced by every screen reader, so it has to exist (empty) up front.
      |> assign(:announcement, nil)}
@@ -212,10 +214,7 @@ defmodule KilnCMSWeb.CalendarLive do
          {:ok, message} <- do_reschedule(event, date, socket) do
       {:noreply, socket |> announce(message) |> load_events()}
     else
-      {:error, message} ->
-        # Re-render from the server's state, which snaps the optimistically
-        # moved chip back to where the data still says it belongs.
-        {:noreply, socket |> announce(message) |> put_flash(:error, message) |> load_events()}
+      {:error, message} -> {:noreply, refuse_move(socket, message)}
     end
   end
 
@@ -503,6 +502,20 @@ defmodule KilnCMSWeb.CalendarLive do
   # without sight of the grid.
   defp announce(socket, message), do: assign(socket, :announcement, message)
 
+  # A refused drag has to put the chip back where the data says it belongs.
+  # SortableJS has already moved it in the browser, and re-reading the window
+  # alone changes nothing the server renders, so LiveView sent no patch and
+  # the chip stayed on the day it was refused (#2786). Every drop list carries
+  # `grid_rev`, so bumping it re-renders each list from the server's state,
+  # without replacing the grid: a refused arrow-key nudge keeps its focus.
+  defp refuse_move(socket, message) do
+    socket
+    |> announce(message)
+    |> put_flash(:error, message)
+    |> update(:grid_rev, &(&1 + 1))
+    |> load_events()
+  end
+
   # --- window -----------------------------------------------------------------
 
   # One anchor date drives all three views, so switching view keeps your place.
@@ -605,7 +618,10 @@ defmodule KilnCMSWeb.CalendarLive do
   # not exist should show the whole calendar, not an empty one.
   defp one_of(value, _allowed) when value in [nil, "", "all"], do: nil
 
-  defp one_of(value, nil), do: [value]
+  # A query string decodes `type[a]=b` to a map and `type[]=b` to a list;
+  # only a plain string names a type (#2786).
+  defp one_of(value, nil) when is_binary(value), do: [value]
+  defp one_of(_value, nil), do: nil
 
   defp one_of(value, allowed) do
     case Enum.find(allowed, &(to_string(&1) == value)) do
@@ -911,6 +927,7 @@ defmodule KilnCMSWeb.CalendarLive do
             filters={@filters}
             can_create?={@new_types != []}
             movable={@movable}
+            rev={@grid_rev}
           />
         </div>
         <div :if={@view in ["month", "week"] and @events != []} class="md:hidden">
@@ -1085,6 +1102,7 @@ defmodule KilnCMSWeb.CalendarLive do
   attr :filters, :map, required: true
   attr :can_create?, :boolean, default: false
   attr :movable, :map, required: true
+  attr :rev, :integer, required: true, doc: "the `grid_rev` every drop list carries"
 
   defp grid(assigns) do
     ~H"""
@@ -1147,6 +1165,7 @@ defmodule KilnCMSWeb.CalendarLive do
                 day={day}
                 filters={@filters}
                 movable={@movable}
+                rev={@rev}
               />
             </td>
           </tr>
@@ -1161,6 +1180,7 @@ defmodule KilnCMSWeb.CalendarLive do
   attr :day, :any, required: true
   attr :filters, :map, required: true
   attr :movable, :map, required: true
+  attr :rev, :integer, required: true
 
   defp day_chips(assigns) do
     # Week columns are tall enough to show the day in full; month cells are not,
@@ -1175,7 +1195,7 @@ defmodule KilnCMSWeb.CalendarLive do
     ~H"""
     <%!-- Every day is a drop target, including empty ones — a day with nothing
           in it is exactly where you want to drop something. --%>
-    <ul class="min-h-6 space-y-1" data-calendar-drop={Date.to_iso8601(@day)}>
+    <ul class="min-h-6 space-y-1" data-calendar-drop={Date.to_iso8601(@day)} data-rev={@rev}>
       <%!-- The event's identity sits on the <li>, not on the link inside it,
             and that is load-bearing rather than tidiness: SortableJS resolves
             its `draggable` selector against the DIRECT CHILDREN of the list it
