@@ -36,7 +36,7 @@ defmodule KilnCMS.Backups.Verify do
   """
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Checksum, Command, DirId, DiskView, Run, WorkState}
+  alias KilnCMS.Backups.{Artifact, Chain, Checksum, Command, DirId, DiskView, Run, WorkState}
 
   @type result :: :ok | :failed | :skipped
 
@@ -62,7 +62,8 @@ defmodule KilnCMS.Backups.Verify do
               result: result()
             }
           ],
-          dir_id_mismatch: boolean()
+          dir_id_mismatch: boolean(),
+          dir_id_error: String.t() | nil
         }
 
   @doc """
@@ -71,13 +72,18 @@ defmodule KilnCMS.Backups.Verify do
   Options: `:dir` (default `KilnCMS.Backups.dir/0`), `:pg_restore` (the
   executable, default `"pg_restore"`), `:now`, `:cron_prunes` (as
   `KilnCMS.Backups.DiskView.read/4` takes it, default `nil`) and
-  `:in_flight` (what the backup lock holds, default
-  `KilnCMS.Backups.in_flight/0`).
+  `:held_stamp` (a 0-arity function answering the stamp the backup lock
+  holds, default `KilnCMS.Backups.Chain.fetch_held_stamp/0`).
 
   `{:ok, report}`, or `{:error, reason}`: `:in_progress` (the run is still
-  running, or the lock holds its stamp) or `:invalid_stamp`.
+  running, or the lock holds its stamp), `{:lock_unreadable, reason}` (the
+  lock couldn't be read, so whether it is still running can't be told: a
+  backup being written is never hashed as if it were finished) or
+  `:invalid_stamp`.
   """
-  @spec run(Run.t(), keyword()) :: {:ok, report()} | {:error, :in_progress | :invalid_stamp}
+  @spec run(Run.t(), keyword()) ::
+          {:ok, report()}
+          | {:error, :in_progress | {:lock_unreadable, term()} | :invalid_stamp}
   def run(%Run{} = run, opts \\ []) do
     dir = Keyword.get_lazy(opts, :dir, &Backups.dir/0)
 
@@ -86,13 +92,13 @@ defmodule KilnCMS.Backups.Verify do
       now = Keyword.get_lazy(opts, :now, &DateTime.utc_now/0)
       view = DiskView.read(dir, [run], now, cron_prunes: Keyword.get(opts, :cron_prunes))
       presence = Map.get(view.presence, run.id, %{artifacts: []})
-      mismatch? = dir_id_mismatch?(run, dir)
+      dir_id = dir_id(run, dir)
 
       ctx = %{
         dir: dir,
         run: run,
         pg_restore: Keyword.get(opts, :pg_restore, "pg_restore"),
-        mismatch?: mismatch?
+        dir_id: dir_id
       }
 
       judged =
@@ -103,7 +109,7 @@ defmodule KilnCMS.Backups.Verify do
           {artifact, artifact(artifact, state, ctx)}
         end)
 
-      {:ok, report(judged, mismatch?)}
+      {:ok, report(judged, dir_id)}
     end
   end
 
@@ -112,23 +118,29 @@ defmodule KilnCMS.Backups.Verify do
 
   defp not_in_progress(%Run{status: :running}, _opts), do: {:error, :in_progress}
 
+  # Fails closed: a lock that can't be read may hold this stamp.
   defp not_in_progress(%Run{stamp: stamp}, opts) do
-    case Keyword.get_lazy(opts, :in_flight, &Backups.in_flight/0) do
-      %{stamp: ^stamp} -> {:error, :in_progress}
-      _other -> :ok
+    case Keyword.get(opts, :held_stamp, &Chain.fetch_held_stamp/0).() do
+      {:ok, ^stamp} -> {:error, :in_progress}
+      {:ok, _other_or_none} -> :ok
+      {:error, reason} -> {:error, {:lock_unreadable, reason}}
     end
   end
 
-  defp dir_id_mismatch?(%Run{dir_id: nil}, _dir), do: false
+  # How this host's backup directory relates to the run's: `:same`, `:unpinned`
+  # (the run records none), `{:other, id}`, or `{:error, reason}` when this
+  # directory's id can't be read, which says nothing about where the run is.
+  defp dir_id(%Run{dir_id: nil}, _dir), do: :unpinned
 
-  defp dir_id_mismatch?(%Run{dir_id: dir_id}, dir) do
+  defp dir_id(%Run{dir_id: dir_id}, dir) do
     case DirId.current(dir) do
-      {:ok, ^dir_id} -> false
-      _other -> true
+      {:ok, ^dir_id} -> :same
+      {:ok, other} -> {:other, other}
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  defp report(judged, mismatch?) do
+  defp report(judged, dir_id) do
     checks = Enum.flat_map(judged, fn {_artifact, checks} -> checks end)
     failed = Enum.count(checks, &(&1.result == :failed))
     hashed = Enum.count(checks, &(&1.check == :sha256 and &1.result == :ok))
@@ -147,7 +159,15 @@ defmodule KilnCMS.Backups.Verify do
             result: overall(checks)
           }
         end),
-      dir_id_mismatch: mismatch?
+      dir_id_mismatch: match?({:other, _}, dir_id),
+      dir_id_error:
+        case dir_id do
+          {:error, reason} ->
+            "this host's backup directory id couldn't be read (#{inspect(reason)})"
+
+          _other ->
+            nil
+        end
     }
   end
 
@@ -302,10 +322,19 @@ defmodule KilnCMS.Backups.Verify do
       state in [:expired, :probably_expired] ->
         skipped(artifact, file, state, "removed by the cron prune (#{state})")
 
-      ctx.mismatch? ->
+      match?({:other, _}, ctx.dir_id) ->
         detail =
           "#{file.name} is missing: this run's files are in another node's backup " <>
             "directory (#{ctx.run.dir_id})"
+
+        check(artifact, file.name, :present, :failed, :missing, detail)
+
+      match?({:error, _}, ctx.dir_id) ->
+        {:error, reason} = ctx.dir_id
+
+        detail =
+          "#{file.name} is missing, and this host's backup directory id couldn't be read " <>
+            "(#{inspect(reason)}), so whether the run was recorded on another node can't be told"
 
         check(artifact, file.name, :present, :failed, :missing, detail)
 

@@ -72,6 +72,13 @@ defmodule KilnCMS.Backups.CLI do
 
   @aliases [h: :help]
 
+  @doc false
+  # Each command's switches: the one list `parse/1` reads. The mix tasks
+  # repeat theirs literally (the switch contract test reads task source) and
+  # refuse to compile when it differs from this.
+  @spec switches(command()) :: keyword()
+  def switches(command), do: Map.fetch!(@switches, command)
+
   # Need the serving node (its queue, its importer backoff): refused under eval.
   @node_commands [:run, :rescan, :prune]
   # Run beside it: refused under rpc.
@@ -211,8 +218,8 @@ defmodule KilnCMS.Backups.CLI do
   `:mix`), and test seams, each defaulting to the real call: `:retention`
   (`&Retention.run/2`), `:importer` (`&Importer.retry_failed/0`), `:await`
   (`&Backups.await/2`), `:read_runs` (`&Backups.list_runs/1`), `:caller_ref`
-  (a monitor on the caller, for `run --wait`), `:now`, `:dir` and
-  `:pg_restore`.
+  (a monitor on the caller, for `run --wait`), `:now`, `:dir`, and
+  `KilnCMS.Backups.Verify.run/2`'s `:pg_restore` and `:held_stamp`.
   """
   @spec main([String.t()], keyword()) :: {exit_code(), iodata()}
   def main(argv, opts \\ []) when is_list(argv) do
@@ -246,12 +253,39 @@ defmodule KilnCMS.Backups.CLI do
   end
 
   @doc false
-  # `mix kiln.backup.<command>`: print, and exit non-zero the Mix way.
-  @spec mix_main(String.t(), [String.t()]) :: :ok
-  def mix_main(command, argv) do
+  # `mix kiln.backup.<command>`: start the app without its job queues, print,
+  # and exit non-zero the Mix way. `start` is a test seam.
+  @spec mix_main(String.t(), [String.t()], (-> term())) :: :ok
+  def mix_main(command, argv, start \\ &mix_start/0) do
+    start.()
     {code, output} = main([command | argv], mode: :mix)
     IO.write(output)
     if code == 0, do: :ok, else: exit({:shutdown, code})
+  end
+
+  @doc false
+  # A checkout's `app.start` boots a whole second node against the database
+  # it is pointed at: every Oban queue would start draining that database's
+  # jobs (its `:mail`, `:billing`, `:webhooks`, and this very backup's steps,
+  # which the task's exit then kills mid-`pg_dump`), and the backup heartbeat
+  # would beat and sweep the lock as one more backup node. So Oban starts in
+  # `testing: :manual` (no queues, no plugins, never the leader; jobs are
+  # inserted, and the serving application runs them) and the heartbeat is off.
+  @spec mix_start() :: :ok
+  def mix_start do
+    Mix.Task.run("app.config")
+    quiet_node_env()
+    Mix.Task.run("app.start")
+    :ok
+  end
+
+  @doc false
+  @spec quiet_node_env() :: :ok
+  def quiet_node_env do
+    oban = Application.get_env(:kiln_cms, Oban, [])
+    Application.put_env(:kiln_cms, Oban, Keyword.put(oban, :testing, :manual))
+    backups = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
+    Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(backups, :heartbeat?, false))
   end
 
   @doc "The usage text."
@@ -538,16 +572,28 @@ defmodule KilnCMS.Backups.CLI do
             waited(base, args, opts)
 
           true ->
-            message =
-              "the backup was #{status}, not started: the chain running now is another " <>
-                "backup's, so there is nothing of this request's to wait for"
-
-            {1, base, {"not_started", message}, started_text(base)}
+            {1, base, not_waited(status), started_text(base)}
         end
 
       {:error, reason} ->
         {1, %{status: nil, chain: nil}, {reason_code(reason), describe_request(reason)}, []}
     end
+  end
+
+  # `--wait` follows only a backup this request started: the chain a queued
+  # or folded request returns is the running one, not the one that will run
+  # this request.
+  defp not_waited(:queued) do
+    {"queued",
+     "queued behind the running backup, which --wait doesn't follow; run `bin/backup run " <>
+       "--wait` again after it ends, or drop --wait"}
+  end
+
+  defp not_waited(:folded) do
+    {"not_started",
+     "a backup of the same kind is already queued behind the running one, and it covers " <>
+       "this request; --wait doesn't follow it: run `bin/backup list` to see it start, " <>
+       "or drop --wait"}
   end
 
   defp started_text(%{status: :started} = base),
@@ -688,11 +734,12 @@ defmodule KilnCMS.Backups.CLI do
       {:ok, %Run{} = run} ->
         verify_opts =
           [cron_prunes: cron_prunes([run], opts)] ++
-            Keyword.take(opts, [:dir, :now, :pg_restore])
+            Keyword.take(opts, [:dir, :now, :pg_restore, :held_stamp])
 
         case Verify.run(run, verify_opts) do
           {:ok, report} -> verify_result(run, report)
           {:error, :in_progress} -> in_progress(run)
+          {:error, {:lock_unreadable, reason}} -> lock_unreadable(run, reason)
           {:error, reason} -> {1, %{}, {reason_code(reason), text(reason)}, []}
         end
 
@@ -716,6 +763,14 @@ defmodule KilnCMS.Backups.CLI do
 
   defp target_text({_kind, value}), do: value
 
+  defp lock_unreadable(run, reason) do
+    message =
+      "the backup lock couldn't be read (#{text(reason)}), so whether backup #{run.stamp} " <>
+        "is still being written can't be told; nothing was checked. Try again"
+
+    {1, %{run: run_ref(run)}, {"lock_unreadable", message}, []}
+  end
+
   defp in_progress(run) do
     message = "backup #{run.stamp} is still running; verify it once it has finished"
     {1, %{run: run_ref(run)}, {"in_progress", message}, []}
@@ -728,6 +783,7 @@ defmodule KilnCMS.Backups.CLI do
       hashed: report.hashed,
       failed: report.failed,
       dir_id_mismatch: report.dir_id_mismatch,
+      dir_id_error: report.dir_id_error,
       artifacts: report.artifacts,
       checks: report.checks
     }

@@ -96,4 +96,63 @@ defmodule Mix.Tasks.Kiln.BackupTest do
 
     assert out =~ "NOT verified"
   end
+
+  describe "the app a task starts" do
+    # A checkout pointed at a deployment's database must not drain its jobs:
+    # with `app.start`'s Oban, `mix kiln.backup.run` picked up its own backup
+    # step and was killed mid-`pg_dump` when the task exited.
+    test "has no Oban queue or plugin, is never the leader, and runs no heartbeat" do
+      oban = Application.get_env(:kiln_cms, Oban)
+      backups = Application.get_env(:kiln_cms, KilnCMS.Backups)
+
+      on_exit(fn ->
+        Application.put_env(:kiln_cms, Oban, oban)
+        Application.put_env(:kiln_cms, KilnCMS.Backups, backups)
+      end)
+
+      # What a deployment's config looks like: queues and plugins, no testing mode.
+      Application.put_env(
+        :kiln_cms,
+        Oban,
+        oban
+        |> Keyword.delete(:testing)
+        |> Keyword.put(:plugins, [Oban.Plugins.Pruner])
+      )
+
+      refute KilnCMS.Application.oban_config()[:queues] in [nil, []]
+
+      Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(backups, :heartbeat?, true))
+
+      assert :ok = KilnCMS.Backups.CLI.quiet_node_env()
+
+      config =
+        Oban.Config.new(
+          AshOban.config(
+            Application.fetch_env!(:kiln_cms, :ash_domains),
+            KilnCMS.Application.oban_config()
+          )
+        )
+
+      assert config.queues == []
+      assert config.plugins == []
+      assert config.peer == {Oban.Peers.Isolated, [leader?: false]}
+      refute KilnCMS.Backups.Chain.heartbeat?()
+    end
+
+    test "no task asks Mix for the full app.start" do
+      for path <- Path.wildcard("lib/mix/tasks/kiln.backup.*.ex") do
+        refute File.read!(path) =~ ~r/^\s*@requirements/m, path
+      end
+    end
+
+    test "the start step runs before the command" do
+      test = self()
+
+      capture_io(fn ->
+        KilnCMS.Backups.CLI.mix_main("list", [], fn -> send(test, :started) end)
+      end)
+
+      assert_received :started
+    end
+  end
 end

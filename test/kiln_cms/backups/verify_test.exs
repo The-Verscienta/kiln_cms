@@ -97,7 +97,8 @@ defmodule KilnCMS.Backups.VerifyTest do
     File.write!(path, <<head::binary, Bitwise.bxor(byte, 0xFF), tail::binary>>)
   end
 
-  defp verify(run, opts \\ []), do: Verify.run(run, Keyword.put_new(opts, :in_flight, nil))
+  defp verify(run, opts \\ []),
+    do: Verify.run(run, Keyword.put_new(opts, :held_stamp, fn -> {:ok, nil} end))
 
   defp failed(report), do: Enum.filter(report.checks, &(&1.result == :failed))
 
@@ -272,7 +273,21 @@ defmodule KilnCMS.Backups.VerifyTest do
 
   test "a backup whose stamp the lock holds is refused", %{dir: dir} do
     {run, _files} = media_set!(dir, 1)
-    assert {:error, :in_progress} = Verify.run(run, in_flight: %{stamp: @stamp})
+    assert {:error, :in_progress} = Verify.run(run, held_stamp: fn -> {:ok, @stamp} end)
+  end
+
+  # `Backups.in_flight/0` answers nil on a failed lock read; that must not
+  # read as "nothing running".
+  test "a lock that can't be read refuses, rather than hashing a backup in flight", %{dir: dir} do
+    {run, _files} = media_set!(dir, 1)
+
+    assert {:error, {:lock_unreadable, :boom}} =
+             Verify.run(run, held_stamp: fn -> {:error, :boom} end)
+  end
+
+  test "the real lock: free, so the run verifies", %{dir: dir} do
+    {run, _files} = media_set!(dir, 1)
+    assert {:ok, %{verified: true}} = Verify.run(run)
   end
 
   test "a pruned part is skipped, not missing; the rest are checked", %{dir: dir} do
@@ -352,6 +367,28 @@ defmodule KilnCMS.Backups.VerifyTest do
     assert {:ok, %{dir_id_mismatch: true} = report} = verify(%{run | dir_id: other})
     assert [%{code: :missing, detail: detail}] = failed(report)
     assert detail =~ "another node's backup directory (#{other})"
+  end
+
+  test "an unreadable directory id is its own case, not another node's", %{dir: dir} do
+    {run, files} = media_set!(dir, 1)
+    for {name, _, _} <- files, do: File.rm!(Path.join([dir, "media", name]))
+    File.write!(DirId.path(dir), "not an id\n")
+
+    assert {:ok, %{dir_id_mismatch: false, dir_id_error: error} = report} =
+             verify(%{run | dir_id: Ecto.UUID.generate()})
+
+    assert error =~ "couldn't be read"
+    assert [%{code: :missing, detail: detail}] = failed(report)
+    assert detail =~ "can't be told"
+    refute detail =~ "another node's backup directory ("
+  end
+
+  test "the same directory id is no mismatch", %{dir: dir} do
+    {run, _files} = media_set!(dir, 1)
+    {:ok, here} = DirId.ensure_existing(dir)
+
+    assert {:ok, %{dir_id_mismatch: false, dir_id_error: nil, verified: true}} =
+             verify(%{run | dir_id: here})
   end
 
   test "verifying changes nothing on the row", %{dir: dir} do

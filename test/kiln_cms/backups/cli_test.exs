@@ -367,13 +367,32 @@ defmodule KilnCMS.Backups.CLITest do
       refute_received :awaited
     end
 
-    test "--wait on a queued request exits 1 and never waits" do
+    test "--wait on a queued request exits 1 with code queued, and never waits" do
       {0, _} = main(["run"])
       test = self()
       await = fn _chain, _opts -> send(test, :awaited) end
 
       {1, decoded} = json(["run", "--wait"], await: await)
-      assert %{"status" => "queued", "error" => %{"code" => "not_started"}} = decoded
+
+      assert %{"status" => "queued", "error" => %{"code" => "queued", "message" => message}} =
+               decoded
+
+      assert message =~ "queued behind the running backup"
+      refute_received :awaited
+    end
+
+    test "--wait on a folded request exits 1 with code not_started, and never waits" do
+      {0, _} = main(["run"])
+      {0, _} = main(["run"])
+      test = self()
+      await = fn _chain, _opts -> send(test, :awaited) end
+
+      {1, decoded} = json(["run", "--wait"], await: await)
+
+      assert %{"status" => "folded", "error" => %{"code" => "not_started", "message" => message}} =
+               decoded
+
+      assert message =~ "already queued behind the running one"
       refute_received :awaited
     end
   end
@@ -396,7 +415,7 @@ defmodule KilnCMS.Backups.CLITest do
       assert text =~ "Backup 20261118-031700 verified here (1 file(s) hashed)."
 
       {0, decoded} = json(["verify", run.id])
-      keys!(decoded, ~w(run verified hashed failed dir_id_mismatch artifacts checks))
+      keys!(decoded, ~w(run verified hashed failed dir_id_mismatch dir_id_error artifacts checks))
       assert %{"verified" => true, "hashed" => 1} = decoded
       keys!(hd(decoded["checks"]), ~w(kind file check result code detail))
       keys!(hd(decoded["artifacts"]), ~w(kind name recorded_verified result))
@@ -433,6 +452,18 @@ defmodule KilnCMS.Backups.CLITest do
       {1, decoded} = json(["verify", "20261118-031700"])
       assert decoded["error"]["code"] == "not_found"
       assert {1, _} = main(["verify", Ecto.UUID.generate()])
+    end
+
+    test "a backup lock that can't be read refuses with lock_unreadable", %{dir: dir} do
+      run = media!(dir, "20261118-031700")
+      unreadable = fn -> {:error, :boom} end
+
+      {1, text} = main(["verify", run.stamp], held_stamp: unreadable)
+      assert text =~ "the backup lock couldn't be read"
+
+      {1, decoded} = json(["verify", run.stamp], held_stamp: unreadable)
+      assert %{"error" => %{"code" => "lock_unreadable"}} = decoded
+      refute Map.has_key?(decoded, "checks")
     end
 
     test "a database that can't be reached says so" do
