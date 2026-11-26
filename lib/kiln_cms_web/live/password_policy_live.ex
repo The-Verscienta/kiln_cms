@@ -3,7 +3,8 @@ defmodule KilnCMSWeb.PasswordPolicyLive do
   This site's stance on breached passwords (#2240): when someone sets a password
   (registers, changes it, resets it, or the first-run wizard), it is looked up
   against a public breach corpus by k-anonymity (`KilnCMS.Accounts.BreachedPassword`).
-  This page chooses what happens when it is found.
+  This page chooses what happens when it is found, and whether administrators'
+  passwords are also looked up when they sign in (#2407).
 
   Scoped to the request's org like `/editor/security-txt`. Writes are
   policy-gated to org admins by `KilnCMS.CMS.SitePasswordPolicy`, and this
@@ -31,10 +32,19 @@ defmodule KilnCMSWeb.PasswordPolicyLive do
   end
 
   @impl true
-  def handle_event("save", %{"password_policy" => %{"breached_password_policy" => value}}, socket)
+  def handle_event(
+        "save",
+        %{"password_policy" => %{"breached_password_policy" => value} = params},
+        socket
+      )
       when value in @policies do
+    # Both fields, always: `:save` upserts every accepted field, so one left
+    # out would be reset to its default rather than kept.
     case CMS.save_site_password_policy(
-           %{breached_password_policy: String.to_existing_atom(value)},
+           %{
+             breached_password_policy: String.to_existing_atom(value),
+             check_on_sign_in: check_on_sign_in(params, socket)
+           },
            actor: socket.assigns.current_user,
            tenant: socket.assigns.current_org,
            context: socket.assigns.security_context
@@ -75,10 +85,17 @@ defmodule KilnCMSWeb.PasswordPolicyLive do
     end
   end
 
+  # The checkbox posts "true" or its hidden "false". A submit without it keeps
+  # what the row has, rather than switching the check off unasked.
+  defp check_on_sign_in(%{"check_on_sign_in" => value}, _socket), do: value == "true"
+  defp check_on_sign_in(_params, %{assigns: %{row: %{check_on_sign_in: value}}}), do: value
+  defp check_on_sign_in(_params, _socket), do: false
+
   defp load_settings(socket) do
     row = current_row(socket)
     default = BreachedPassword.default_policy()
     selected = if row, do: row.breached_password_policy, else: default
+    check_on_sign_in = if row, do: row.check_on_sign_in, else: false
 
     socket
     |> assign(:row, row)
@@ -86,7 +103,13 @@ defmodule KilnCMSWeb.PasswordPolicyLive do
     |> assign(:check_enabled?, BreachedPassword.enabled?())
     |> assign(
       :form,
-      to_form(%{"breached_password_policy" => to_string(selected)}, as: :password_policy)
+      to_form(
+        %{
+          "breached_password_policy" => to_string(selected),
+          "check_on_sign_in" => check_on_sign_in
+        },
+        as: :password_policy
+      )
     )
   end
 
@@ -192,9 +215,22 @@ defmodule KilnCMSWeb.PasswordPolicyLive do
           </li>
         </ul>
 
+        <div id="password-policy-sign-in" class="space-y-1">
+          <.input
+            field={@form[:check_on_sign_in]}
+            type="checkbox"
+            label={gettext("Also check administrators' passwords when they sign in")}
+          />
+          <p class="text-sm text-base-content/70">
+            {gettext(
+              "Applies to the people who administer this site. When one of them signs in, their password is looked up too, and this site's policy decides what happens: Block sends them to choose a new password (a reset link is emailed), Warn signs them in with a warning, and Off does nothing. Editors and other members are never checked at sign-in."
+            )}
+          </p>
+        </div>
+
         <p class="text-xs text-base-content/70">
           {gettext(
-            "If the breach service can't be reached the password is accepted, so an outage never stops anyone setting one. Signing in is never checked. This applies to registering, changing or resetting a password, and the first-run setup."
+            "If the breach service can't be reached the password is accepted, so an outage never stops anyone setting one or signing in. This applies to registering, changing or resetting a password, the first-run setup, and administrators signing in when the box above is ticked."
           )}
         </p>
 

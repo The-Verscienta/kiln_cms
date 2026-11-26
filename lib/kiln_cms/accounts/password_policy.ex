@@ -47,6 +47,15 @@ defmodule KilnCMS.Accounts.PasswordPolicy do
   when the operator default could change the answer, a count of rows against
   a count of orgs.
 
+  ## At sign-in (#2407)
+
+  `sign_in/1` answers a different question: whether an administrator's
+  password is looked up as they sign in, and under which policy. Only the
+  orgs they administer whose row has `check_on_sign_in` on take part, the
+  strictest of their policies decides, and the request's org plays no part.
+  It reads the same rows through the same cross-org actions, and fails open
+  to "not checking".
+
   ## Failing open
 
   The row is read as `KilnCMS.OrgSettings.system(:accounts)` with
@@ -59,6 +68,7 @@ defmodule KilnCMS.Accounts.PasswordPolicy do
   nothing, and `:warn` for its part of the answer.
   """
 
+  require Ash.Query
   require Logger
 
   alias KilnCMS.Accounts
@@ -75,7 +85,7 @@ defmodule KilnCMS.Accounts.PasswordPolicy do
   @tiers [:none, :viewer, :editor, :admin]
 
   # What the cross-org reads select: the org and its stance, nothing else.
-  @row_fields [:org_id, :breached_password_policy]
+  @row_fields [:org_id, :breached_password_policy, :check_on_sign_in]
 
   @doc """
   The policy for setting a password on an account of `target_tier` in `org`
@@ -133,6 +143,121 @@ defmodule KilnCMS.Accounts.PasswordPolicy do
     else
       {:ok, :off}
     end
+  end
+
+  @doc """
+  Whether `org`'s own row asks for administrators' passwords to be checked at
+  sign-in (#2407): `{:ok, false}` with no row, `:error` when the row cannot be
+  read. For the Security posture page; the switch alone, whatever the
+  deployment's `BREACHED_PASSWORD_CHECK`.
+  """
+  @spec read_sign_in_check(Accounts.Organization.t() | Ash.UUID.t() | nil) ::
+          {:ok, boolean()} | :error
+  def read_sign_in_check(org) do
+    actor = OrgSettings.system(:accounts)
+
+    resolved =
+      OrgSettings.resolve_uncached(Accounts.org_id(org),
+        read: &CMS.list_site_password_policy(tenant: &1, actor: actor, authorize_with: :error),
+        # `nil` is reserved for "could not read", so "no row" is its own value.
+        build: fn
+          nil -> {:row, false}
+          row -> {:row, row.check_on_sign_in == true}
+        end,
+        label: "breached password sign-in check"
+      )
+
+    case resolved do
+      {:row, check?} -> {:ok, check?}
+      nil -> :error
+    end
+  end
+
+  @doc """
+  Whether `user`'s password is looked up as they sign in with it (#2407), and
+  which policy decides the outcome: `{:check, :warn | :block}` or `:skip`.
+
+  Only an administrator is ever checked, and only by a site that asks for it:
+  the orgs `user` administers (`KilnCMS.Accounts.Scoping.admin_org_ids/1`)
+  whose row has `check_on_sign_in` on. The policy is the strictest of those
+  rows' alone; an admin org with the switch off plays no part, so one site's
+  switch never changes what another site's policy does at sign-in. A platform
+  admin answers to every org with the switch on. The org the request came in
+  on plays no part either, so every host and door decides alike.
+
+  `:skip` when the deployment's check is off, when `user` administers no org
+  with the switch on, when their policy is `:off`, and when anything here
+  cannot be read: a sign-in is never refused for want of a setting (one
+  warning naming nothing about the account).
+  """
+  @spec sign_in(map() | nil) :: :skip | {:check, :warn | :block}
+  def sign_in(user) do
+    case sign_in_decision(user) do
+      {:check, policy, _deciding} -> {:check, policy}
+      :skip -> :skip
+    end
+  end
+
+  @doc """
+  `sign_in/1` with the orgs whose policy decided it, as a function returning
+  their ids: the admin orgs with the switch on whose policy is the one
+  returned. A function so that the read it may cost (for a platform admin) is
+  only made by a caller that needs it, the audit of a refused sign-in. It
+  raises on a failed read.
+  """
+  @spec sign_in_decision(map() | nil) ::
+          :skip | {:check, :warn | :block, (-> [Ash.UUID.t()])}
+  def sign_in_decision(user) do
+    if BreachedPassword.enabled?(), do: sign_in_rows(user), else: :skip
+  rescue
+    # Boundary: a failure to work out whether to check must not stop a
+    # sign-in. Fail open, and say nothing about who.
+    _error -> sign_in_error()
+  end
+
+  defp sign_in_rows(user) do
+    scope = admin_scope(user)
+
+    case rows_for(scope) do
+      {:ok, rows, _uncovered?} ->
+        checking = Enum.filter(rows, &(&1.check_on_sign_in == true))
+
+        case strictest_of(checking) do
+          policy when policy in [:warn, :block] ->
+            {:check, policy, deciding_orgs(scope, checking, policy)}
+
+          _off_or_none ->
+            :skip
+        end
+
+      :error ->
+        sign_in_error()
+    end
+  end
+
+  # A member's rows are each one org's, so the ids are at hand. A platform
+  # admin's are one per distinct value, so the ids are read when asked for.
+  defp deciding_orgs(:all, _rows, policy), do: fn -> orgs_checking_with(policy) end
+
+  defp deciding_orgs(_member, rows, policy) do
+    ids = for row <- rows, row.breached_password_policy == policy, uniq: true, do: row.org_id
+    fn -> ids end
+  end
+
+  defp orgs_checking_with(policy) do
+    query =
+      SitePasswordPolicy
+      |> Ash.Query.filter(check_on_sign_in == true and breached_password_policy == ^policy)
+      |> Ash.Query.select([:org_id])
+
+    [actor: OrgSettings.system(:accounts), authorize_with: :error, query: query]
+    |> CMS.list_all_site_password_policies!()
+    |> Enum.map(& &1.org_id)
+  end
+
+  defp sign_in_error do
+    Logger.warning("breached-password sign-in policy could not be resolved; not checking")
+    :skip
   end
 
   defp org_policy(org, target_tier) do
@@ -208,19 +333,19 @@ defmodule KilnCMS.Accounts.PasswordPolicy do
   # once and naming nothing about the account.
   @spec admin_orgs_policy(map() | nil) :: {:ok, policy() | nil} | :error
   defp admin_orgs_policy(target) do
-    with {:ok, rows, uncovered?} <- admin_org_rows(target) do
-      from_rows =
-        rows
-        |> Enum.map(& &1.breached_password_policy)
-        |> Enum.reduce(nil, &strictest_or_nil/2)
+    case admin_org_rows(target) do
+      {:ok, rows, uncovered?} ->
+        from_rows = strictest_of(rows)
+        default = BreachedPassword.default_policy()
 
-      default = BreachedPassword.default_policy()
+        # The operator default takes part only for an admin org with no row,
+        # and is only worth asking about when it would be the stricter.
+        if (from_rows == nil or rank(default) > rank(from_rows)) and uncovered?.(),
+          do: {:ok, strictest_or_nil(default, from_rows)},
+          else: {:ok, from_rows}
 
-      # The operator default takes part only for an admin org with no row, and
-      # is only worth asking about when it would be the stricter.
-      if (from_rows == nil or rank(default) > rank(from_rows)) and uncovered?.(),
-        do: {:ok, strictest_or_nil(default, from_rows)},
-        else: {:ok, from_rows}
+      :error ->
+        admin_orgs_error()
     end
   rescue
     # Boundary: a failure to read the other orgs must not stop a password
@@ -228,23 +353,29 @@ defmodule KilnCMS.Accounts.PasswordPolicy do
     _error -> admin_orgs_error()
   end
 
+  defp strictest_of(rows) do
+    rows
+    |> Enum.map(& &1.breached_password_policy)
+    |> Enum.reduce(nil, &strictest_or_nil/2)
+  end
+
   defp strictest_or_nil(policy, nil), do: policy
   defp strictest_or_nil(policy, other), do: strictest(policy, other)
 
   # The saved rows of the orgs `target` administers, as `{:ok, rows,
-  # uncovered?}`: for a platform admin one row per distinct value across every
-  # org; `uncovered?` is a thunk answering whether some admin org has no row
-  # (whose policy is then the operator default), so it costs a query only when
-  # asked. `:error` when a read is refused or fails.
-  defp admin_org_rows(nil), do: {:ok, [], fn -> false end}
+  # uncovered?}`: for a platform admin one row per distinct pair of values
+  # across every org (its `org_id` is any one org holding them). `uncovered?`
+  # is a thunk answering whether some admin org has no row (whose policy is
+  # then the operator default), so it costs a query only when asked. `:error`
+  # when a read is refused or fails.
+  defp admin_org_rows(target), do: target |> admin_scope() |> rows_for()
 
-  defp admin_org_rows(target) do
-    case Scoping.admin_org_ids(target) do
-      [] -> {:ok, [], fn -> false end}
-      :all -> all_org_rows()
-      org_ids -> member_org_rows(org_ids)
-    end
-  end
+  defp admin_scope(nil), do: []
+  defp admin_scope(target), do: Scoping.admin_org_ids(target)
+
+  defp rows_for([]), do: {:ok, [], fn -> false end}
+  defp rows_for(:all), do: all_org_rows()
+  defp rows_for(org_ids), do: member_org_rows(org_ids)
 
   defp member_org_rows(org_ids) do
     case CMS.list_site_password_policies_for_orgs(org_ids,
@@ -257,7 +388,7 @@ defmodule KilnCMS.Accounts.PasswordPolicy do
         {:ok, rows, fn -> covered < length(org_ids) end}
 
       {:error, _error} ->
-        admin_orgs_error()
+        :error
     end
   end
 
@@ -267,7 +398,7 @@ defmodule KilnCMS.Accounts.PasswordPolicy do
     distinct =
       SitePasswordPolicy
       |> Ash.Query.select(@row_fields)
-      |> Ash.Query.distinct([:breached_password_policy])
+      |> Ash.Query.distinct([:breached_password_policy, :check_on_sign_in])
 
     case CMS.list_all_site_password_policies(
            actor: actor,
@@ -275,7 +406,7 @@ defmodule KilnCMS.Accounts.PasswordPolicy do
            query: distinct
          ) do
       {:ok, rows} -> {:ok, rows, fn -> some_org_without_row?(actor) end}
-      {:error, _error} -> admin_orgs_error()
+      {:error, _error} -> :error
     end
   end
 

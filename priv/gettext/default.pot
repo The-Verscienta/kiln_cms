@@ -3795,6 +3795,11 @@ msgstr ""
 msgid "Also attached"
 msgstr ""
 
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Also check administrators' passwords when they sign in"
+msgstr ""
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Also deliver as Portable Text"
@@ -4272,6 +4277,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/registrations_live.ex
 #, elixir-autogen, elixir-format
 msgid "Applies to people who sign up with a password on this site. Invitations and existing accounts are not affected, and this site's single sign-on has its own switch below. Turning it off doesn't approve anyone already waiting."
+msgstr ""
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Applies to the people who administer this site. When one of them signs in, their password is looked up too, and this site's policy decides what happens: Block sends them to choose a new password (a reset link is emailed), Warn signs them in with a warning, and Off does nothing. Editors and other members are never checked at sign-in."
 msgstr ""
 
 #: lib/kiln_cms_web/live/instance_security_log_live.ex
@@ -12294,7 +12304,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
-msgid "If the breach service can't be reached the password is accepted, so an outage never stops anyone setting one. Signing in is never checked. This applies to registering, changing or resetting a password, and the first-run setup."
+msgid "If the breach service can't be reached the password is accepted, so an outage never stops anyone setting one or signing in. This applies to registering, changing or resetting a password, the first-run setup, and administrators signing in when the box above is ticked."
 msgstr ""
 
 #: lib/kiln_cms_web/components/challenge_components.ex
@@ -29398,6 +29408,16 @@ msgstr ""
 #: lib/kiln_cms_web/live/two_factor_setup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Your passkey counts, but it has no recovery codes. Add an authenticator app too, so losing the device doesn't lock you out."
+msgstr ""
+
+#: lib/kiln_cms_web/controllers/auth_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Your password appears in a known data breach, so it can't be used to sign in as an administrator. We've emailed you a link to choose a new one. If it doesn't arrive, request one below."
+msgstr ""
+
+#: lib/kiln_cms/accounts/password_notice.ex
+#, elixir-autogen, elixir-format
+msgid "Your password appears in a public data breach. Change it soon from your account page."
 msgstr ""
 
 #: lib/kiln_cms_web/controllers/auth_controller.ex

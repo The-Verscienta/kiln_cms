@@ -110,4 +110,47 @@ defmodule KilnCMS.Accounts.PasswordPolicyStrictTenancyTest do
                CMS.list_all_site_password_policies(actor: actor, authorize_with: :error)
     end
   end
+
+  describe "at sign-in (#2407)" do
+    defp save_sign_in!(org, policy, check_on_sign_in) do
+      CMS.save_site_password_policy!(
+        %{breached_password_policy: policy, check_on_sign_in: check_on_sign_in},
+        actor: user(:admin),
+        tenant: org
+      )
+    end
+
+    test "an admin of a site checking at sign-in under :block is checked under :block",
+         %{a: a, b: b} do
+      save_sign_in!(a, :block, true)
+      save_sign_in!(b, :warn, true)
+      admin_of_a = user(:viewer)
+      member!(a, admin_of_a, :admin)
+      member!(b, admin_of_a, :viewer)
+
+      assert PasswordPolicy.sign_in(admin_of_a) == {:check, :block}
+      assert {:check, :block, deciding} = PasswordPolicy.sign_in_decision(admin_of_a)
+      assert deciding.() == [a.id]
+    end
+
+    test "only the switched-on admin orgs count, read across tenants", %{a: a, b: b} do
+      save_sign_in!(a, :warn, true)
+      save_sign_in!(b, :block, false)
+      admin = user(:viewer)
+      member!(a, admin, :admin)
+      member!(b, admin, :admin)
+
+      assert PasswordPolicy.sign_in(admin) == {:check, :warn}
+    end
+
+    test "a platform admin is checked by any org with the switch on", %{a: a, b: b} do
+      save_sign_in!(a, :warn, false)
+      save_sign_in!(b, :block, true)
+      admin = user(:admin)
+
+      assert PasswordPolicy.sign_in(admin) == {:check, :block}
+      assert {:check, :block, deciding} = PasswordPolicy.sign_in_decision(admin)
+      assert deciding.() == [b.id]
+    end
+  end
 end

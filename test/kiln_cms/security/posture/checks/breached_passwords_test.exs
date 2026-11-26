@@ -65,4 +65,36 @@ defmodule KilnCMS.Security.Posture.Checks.BreachedPasswordsTest do
     result = KilnCMS.OrgSettings.with_actor(nil, fn -> BreachedPasswords.run(context(site)) end)
     assert result.status == :unknown
   end
+
+  describe "the sign_in_check fact (#2407)" do
+    test "is false unless the site checks administrators at sign-in, and leaves the status alone",
+         %{site: site} do
+      assert %{status: :pass, facts: %{sign_in_check: false}} =
+               BreachedPasswords.run(context(site))
+
+      CMS.save_site_password_policy!(%{breached_password_policy: :warn, check_on_sign_in: true},
+        actor: user(:admin),
+        tenant: site
+      )
+
+      assert %{status: :warn, facts: %{sign_in_check: true, admin_policy: "warn"}} =
+               BreachedPasswords.run(context(site))
+    end
+
+    test "is false while the deployment switch is off", %{site: site, original: original} do
+      CMS.save_site_password_policy!(%{breached_password_policy: :block, check_on_sign_in: true},
+        actor: user(:admin),
+        tenant: site
+      )
+
+      Application.put_env(:kiln_cms, BreachedPassword, Keyword.put(original, :enabled, false))
+
+      assert %{facts: %{sign_in_check: false, deployment_enabled: false}} =
+               BreachedPasswords.run(context(site))
+    end
+
+    test "with no row at all is false", %{original: _original} do
+      assert %{facts: %{sign_in_check: false}} = BreachedPasswords.run(context(org("pfpw-none")))
+    end
+  end
 end

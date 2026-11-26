@@ -26,12 +26,19 @@ defmodule KilnCMS.CMS.SitePasswordPolicy do
   admin) are `multitenancy :bypass` reads for that, and they are the system
   actor's **alone**: the macro's read policy admits a site's own admin, and
   through a tenant-less read that would be every site's row.
+
+  ## Checking administrators at sign-in (#2407)
+
+  `check_on_sign_in` (off by default) also looks a password up when someone
+  who administers this site signs in with it. The outcome is this row's
+  policy: `:block` sends them to choose a new password, `:warn` signs them in
+  with a warning. See `KilnCMS.Accounts.PasswordPolicy.sign_in/1`.
   """
   use KilnCMS.CMS.OrgSettings,
     table: "site_password_policy",
-    accept: [:breached_password_policy],
+    accept: [:breached_password_policy, :check_on_sign_in],
     read: :admin,
-    admin_columns: [:breached_password_policy, :updated_at],
+    admin_columns: [:breached_password_policy, :check_on_sign_in, :updated_at],
     system_actions: [read: :accounts, for_orgs: :accounts, all_orgs: :accounts]
 
   attributes do
@@ -42,6 +49,17 @@ defmodule KilnCMS.CMS.SitePasswordPolicy do
       allow_nil? false
       public? true
       constraints one_of: [:off, :warn, :block]
+    end
+
+    # Also look an administrator's password up when they sign in (#2407),
+    # with this row's policy deciding the outcome. Off unless a site turns it
+    # on. `:save` upserts every accepted field, so a caller that saves the
+    # policy alone resets this to the default: the settings page always sends
+    # both.
+    attribute :check_on_sign_in, :boolean do
+      default false
+      allow_nil? false
+      public? true
     end
   end
 

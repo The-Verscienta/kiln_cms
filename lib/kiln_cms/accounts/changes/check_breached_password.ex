@@ -51,7 +51,9 @@ defmodule KilnCMS.Accounts.Changes.CheckBreachedPassword do
   Deliberately exempt: `AdminPasswordReset` (an admin sends a mail; the owner's
   later use of the link is `:reset` and is checked), magic-link, SSO and passkey
   registration (no password is set), `AnonymizeUser`, seeds, `Beta.Round` and
-  `Staging.Scrub` (operator-run). Sign-in is not checked either. See
+  `Staging.Scrub` (operator-run). Signing in is not a password being set: an
+  administrator's sign-in is checked only where a site asks for it, by
+  `KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn` (#2407). See
   `docs/threat-model.md`, "Breached passwords".
 
   See `KilnCMS.Accounts.PasswordPolicy` for how the policy is chosen and
@@ -204,7 +206,7 @@ defmodule KilnCMS.Accounts.Changes.CheckBreachedPassword do
   def lookup(password, action, org_id, tier, target) do
     case safe_policy(target, org_id, tier) do
       :off -> nil
-      policy -> run(password, action, policy)
+      policy -> lookup_with_policy(password, action, policy)
     end
   end
 
@@ -218,9 +220,20 @@ defmodule KilnCMS.Accounts.Changes.CheckBreachedPassword do
       :warn
   end
 
-  defp run(password, action, policy) do
+  @doc """
+  Look `password` up under `policy` (already resolved, not `:off`) and report
+  the lookup on `[:kiln_cms, :password, :breach_check]` with `action` as its
+  `action` tag. Shared by the password-setting actions and the sign-in check
+  (`action: :sign_in`, `KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn`,
+  #2407), which runs under `KilnCMS.Accounts.BreachedPassword.sign_in_deadline/0`.
+
+  Fails open: a lookup that could not tell is an `:unchecked` outcome, logged
+  once by its error class alone.
+  """
+  @spec lookup_with_policy(String.t(), atom(), :warn | :block) :: verdict()
+  def lookup_with_policy(password, action, policy) do
     started = System.monotonic_time()
-    result = BreachedPassword.check(password)
+    result = BreachedPassword.check(password, deadline: deadline_for(action))
     duration = System.monotonic_time() - started
 
     {outcome, reason} =
@@ -231,7 +244,7 @@ defmodule KilnCMS.Accounts.Changes.CheckBreachedPassword do
       end
 
     if reason do
-      Logger.warning("breached-password lookup failed (#{reason}); allowing the password")
+      Logger.warning("breached-password lookup failed (#{reason}); #{allowing(action)}")
     end
 
     :telemetry.execute(@event, %{count: 1, duration: duration}, %{
@@ -244,6 +257,12 @@ defmodule KilnCMS.Accounts.Changes.CheckBreachedPassword do
 
     %{outcome: outcome, policy: policy}
   end
+
+  defp deadline_for(:sign_in), do: BreachedPassword.sign_in_deadline()
+  defp deadline_for(_setting), do: BreachedPassword.deadline()
+
+  defp allowing(:sign_in), do: "allowing the sign-in"
+  defp allowing(_setting), do: "allowing the password"
 
   defp telemetry_result(:unchecked), do: :error
   defp telemetry_result(outcome), do: outcome
