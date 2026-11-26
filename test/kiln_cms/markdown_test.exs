@@ -128,6 +128,74 @@ defmodule KilnCMS.MarkdownTest do
     end
   end
 
+  # An image that is not the whole of its paragraph has no block of its own,
+  # and the HTML adapter has no inline node for it: it used to vanish, alt text
+  # and all, with no error (#2771).
+  describe "inline images (#2771)" do
+    defp hrefs(markdown) do
+      markdown |> body() |> Enum.flat_map(&(&1["markDefs"] || [])) |> Enum.map(& &1["href"])
+    end
+
+    test "an image mid-paragraph stays in place as a link labelled with its alt text" do
+      markdown = "Our logo ![Acme](https://x.test/a.png) is blue"
+
+      assert [%{"type" => "rich_text"}] = Markdown.to_blocks(markdown)
+      assert text(markdown) == "Our logo Acme is blue"
+      assert hrefs(markdown) == ["https://x.test/a.png"]
+    end
+
+    test "an image with no alt text is labelled with its URL" do
+      assert text("See ![](https://x.test/a.png) here") == "See https://x.test/a.png here"
+    end
+
+    test "two images on one line both survive, in order" do
+      markdown = "![First](https://x.test/1.png) ![Second](https://x.test/2.png)"
+
+      assert [%{"type" => "rich_text"}] = Markdown.to_blocks(markdown)
+      assert text(markdown) == "First Second"
+      assert hrefs(markdown) == ["https://x.test/1.png", "https://x.test/2.png"]
+    end
+
+    test "an image inside a list item survives" do
+      markdown = "- ![Step one](https://x.test/1.png)\n- plain item"
+
+      assert text(markdown) =~ "Step one"
+      assert hrefs(markdown) == ["https://x.test/1.png"]
+    end
+
+    test "a linked image inside prose keeps the outer link and its alt text" do
+      markdown = "Built by [![CI](https://x.test/badge.svg)](https://ci.test/run) today"
+
+      assert text(markdown) == "Built by CI today"
+      assert hrefs(markdown) == ["https://ci.test/run"]
+    end
+
+    test "a standalone linked image is still an image block" do
+      assert [%{"type" => "image", "value" => %{"url" => "https://x.test/badge.svg"}}] =
+               Markdown.to_blocks("[![CI](https://x.test/badge.svg)](https://ci.test/run)")
+    end
+
+    test "parse_document/2 keeps an inline image too" do
+      %{blocks: [%{"type" => "rich_text", "value" => %{"body" => body}}]} =
+        Markdown.parse_document("# Title\n\nOur logo ![Acme](https://x.test/a.png) is blue")
+
+      assert PortableText.to_plain_text(body) == "Our logo Acme is blue"
+    end
+
+    test "sections: true keeps a standalone image a block and an inline one a link" do
+      markdown =
+        "## Logos\n\n![Big](https://x.test/big.png)\n\nSmall ![s](https://x.test/s.png) one"
+
+      assert [
+               %{"type" => "heading"},
+               %{"type" => "image", "value" => %{"alt" => "Big"}},
+               %{"type" => "rich_text", "value" => %{"body" => body}}
+             ] = Markdown.to_blocks(markdown, sections: true)
+
+      assert PortableText.to_plain_text(body) == "Small s one"
+    end
+  end
+
   describe "untrusted input" do
     test "a raw <script> block is dropped — tag and text" do
       html = Markdown.to_html("before\n\n<script>alert(1)</script>\n\nafter")

@@ -96,7 +96,9 @@ second one; start sections at `##` if you want the title to be the only
 
 Unlike a paste, an import keeps images: a standalone image becomes an **image
 block** (its alt text and its `"title"` as the caption), and a YouTube or Vimeo
-link on a line of its own becomes an **embed block**. Imported images still
+link on a line of its own becomes an **embed block**. An image that shares
+its line with anything else stays in the text as a link to the picture,
+labelled with its alt text. Imported images still
 point at their original URLs. Pick them from the media library afterwards if
 the file came from somewhere you don't control.
 
@@ -116,6 +118,7 @@ document, the same as every other editor control.
 | `>` quotes | Blockquotes |
 | `---` / `***` | Dividers: divider blocks (import), rules in the text (paste and API) |
 | `![alt](url "caption")` on its own line | An image block (import and API); a link (paste) |
+| `![alt](url)` sharing a line with text or another image, or in a list, quote or table | A link to the picture, labelled with its alt text |
 | A YouTube or Vimeo URL on its own line | An embed block (import and API) |
 | `&copy;`, `&#8212;` … | The characters they name |
 
