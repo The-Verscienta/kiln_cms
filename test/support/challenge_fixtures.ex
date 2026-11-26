@@ -17,9 +17,13 @@ defmodule KilnCMS.ChallengeFixtures do
   @secret_var "KILN_TEST_CHALLENGE_SECRET"
 
   # The `ThrottleStore` window behind each axis of `KilnCMS.Challenge.Gate`:
-  # the application env module and key that set its length.
+  # the application env module and key that set its length. `:account` is
+  # also the sign-in pause's window, and `:mail` (not a gate axis) is
+  # `AccountThrottle`'s per-address mail budget window, which the sign-in
+  # unlock tests pin too (#2937).
   @windows %{
     account: {KilnCMS.Accounts.AccountThrottle, :window},
+    mail: {KilnCMS.Accounts.AccountThrottle, :mail_window},
     ip: {KilnCMS.Challenge, :ip_window},
     registration: {KilnCMS.Challenge, :registration_window}
   }
@@ -75,9 +79,9 @@ defmodule KilnCMS.ChallengeFixtures do
   end
 
   @doc """
-  Pin the `ThrottleStore` window behind each of `axes` (`:account`, `:ip`,
-  `:registration`) so that no window boundary falls inside this test, and
-  restore the configuration on exit.
+  Pin the `ThrottleStore` window behind each of `axes` (`:account`, `:mail`,
+  `:ip`, `:registration`) so that no window boundary falls inside this test,
+  and restore the configuration on exit.
 
   Each axis counts its free attempts in a fixed window aligned to the epoch by
   the database clock: the account axis in `AccountThrottle`'s (15 minutes),
@@ -87,6 +91,12 @@ defmodule KilnCMS.ChallengeFixtures do
   gate: the gate's charge lands in a new, empty window, so it is free, and the
   gate answers `:ok` without asking anyone (#2649, which CI hit 4 ms after
   17:30).
+
+  The same holds for a pause: a test that spends the sign-in budget and then
+  asks for an unlock mail is mailed nothing when a quarter hour falls between,
+  as the account is no longer paused in the new window (#2937). A test that
+  asserts on the unlock mail budget pins `:mail` for the same reason (an hour,
+  `mail_window`).
 
   The length is `KilnCMS.Test.BudgetWindow.fresh_window_ms/2` (about 20 days)
   computed from the database's `clock_timestamp()`, the clock
@@ -105,7 +115,7 @@ defmodule KilnCMS.ChallengeFixtures do
   from the same `setup` as `enable!/1`, or before a test spends anything. A
   window length passed to `enable!/1` after this wins over the pin.
   """
-  @spec pin_windows!([:account | :ip | :registration]) :: :ok
+  @spec pin_windows!([:account | :mail | :ip | :registration]) :: :ok
   def pin_windows!(axes) when is_list(axes) and axes != [] do
     window = BudgetWindow.fresh_window_ms(0, db_now_ms())
 
