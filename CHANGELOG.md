@@ -94,6 +94,10 @@ else.
   The row, the bulk Publish confirm and the release's item list name the date and what happens then. A 1.13.0 known issue.
   ([long form](docs/changelog/unreleased.md#publish-shows-unpublish-date))
 
+- **A counted read that the actor is refused now returns the refusal instead of raising an internal `Ash.Error.Framework` error (#2934).**
+  It works around an Ash defect in the count query. The JSON:API, GraphQL and MCP counts were never affected. No migration.
+  ([long form](docs/changelog/unreleased.md#counted-read-refusal))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —
