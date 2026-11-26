@@ -14,9 +14,11 @@ defmodule KilnCMS.Security.ScannerGuardTest do
   alias KilnCMS.CMS
   alias KilnCMS.CrawlerVerification
   alias KilnCMS.Security
+  alias KilnCMS.Security.Cidr
   alias KilnCMS.Security.IpBlocklist
   alias KilnCMS.Security.ScannerGuard
   alias KilnCMS.SystemActor
+  alias KilnCMS.Test.PublicAddress
   alias KilnCMS.Test.StubCrawlerResolver
 
   @moduletag :capture_log
@@ -116,6 +118,76 @@ defmodule KilnCMS.Security.ScannerGuardTest do
     end)
 
     refute CrawlerVerification.resolver_failing?()
+  end
+
+  # Fresh IPv6 addresses in one /64 no other test has used: no cached result,
+  # no planted answer, no mark, before or after the test.
+  defp in_one_64(count) do
+    {a, b, c, d, _, _, _, _} = PublicAddress.v6()
+    for k <- 1..count, do: fresh_v6({a, b, c, d, 0x1000 + k, 0, 0, 1})
+  end
+
+  defp fresh_v6(ip) do
+    CrawlerVerification.forget_network(ip)
+    on_exit(fn -> CrawlerVerification.forget_network(ip) end)
+    fresh_ip(ip)
+  end
+
+  # Fresh in the verifier's result cache and the DNS stub (either family).
+  defp fresh_ip(ip) do
+    CrawlerVerification.forget(ip)
+    StubCrawlerResolver.reset(ip)
+
+    on_exit(fn ->
+      CrawlerVerification.forget(ip)
+      StubCrawlerResolver.reset(ip)
+    end)
+
+    ip
+  end
+
+  defp slash_64(ip) do
+    {:ok, cidr} = Cidr.parse("#{:inet.ntoa(ip)}/64")
+    Cidr.format(cidr)
+  end
+
+  # Network lookup caps for this test; the describe's setup restores the entry.
+  defp put_prefix_caps(caps) do
+    config = Application.get_env(:kiln_cms, CrawlerVerification, [])
+
+    Application.put_env(
+      :kiln_cms,
+      CrawlerVerification,
+      Keyword.put(config, :prefix_lookups_per_minute, caps)
+    )
+  end
+
+  # Starts `ip`'s lookup and holds it on its PTR query, so the claim stays
+  # pending and its lookup writes no mark of its own.
+  defp block_lookup(ip) do
+    StubCrawlerResolver.put_ptr(ip, {:block, self()})
+    assert CrawlerVerification.check(:google, ip) == {:unverified, :pending}
+    assert_receive {StubCrawlerResolver, :blocked, resolver, _callers, :ptr, ^ip}, 2_000
+    on_exit(fn -> StubCrawlerResolver.release(resolver) end)
+    resolver
+  end
+
+  # No lookup has answered, and the canary gets no answer either.
+  defp failing_resolver do
+    CrawlerVerification.reset_health()
+    on_exit(&CrawlerVerification.reset_health/0)
+    canary = PublicAddress.v4()
+    StubCrawlerResolver.put_ptr(canary, {:error, :timeout})
+    on_exit(fn -> StubCrawlerResolver.reset(canary) end)
+    config = Application.get_env(:kiln_cms, CrawlerVerification, [])
+
+    Application.put_env(
+      :kiln_cms,
+      CrawlerVerification,
+      Keyword.put(config, :canary_address, canary)
+    )
+
+    eventually(fn -> CrawlerVerification.resolver_failing?() end)
   end
 
   describe "thresholds" do
@@ -544,6 +616,210 @@ defmodule KilnCMS.Security.ScannerGuardTest do
 
       miss(4, "/gone", ua: "facebookexternalhit/1.1", ip: ip)
       assert [_] = rules()
+    end
+  end
+
+  # #2838: the guard counts an IPv6 client as its /64, so a claim nothing has
+  # proven either way loses the exemption once another address in that /64
+  # failed its own lookup.
+  describe "a marked IPv6 /64 (#2838)" do
+    @googlebot "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
+    @duckduckbot "DuckDuckBot/1.1; (+http://duckduckgo.com/duckduckbot.html)"
+
+    setup do
+      previous = Application.get_env(:kiln_cms, CrawlerVerification)
+
+      Application.put_env(
+        :kiln_cms,
+        CrawlerVerification,
+        Keyword.put(previous || [], :rate_scope, "sg-net-#{System.unique_integer([:positive])}")
+      )
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:kiln_cms, CrawlerVerification, previous),
+          else: Application.delete_env(:kiln_cms, CrawlerVerification)
+      end)
+
+      :ok
+    end
+
+    test "a spoofer rotating through its /64 is counted once one of its lookups fails" do
+      [first | rest] = in_one_64(5)
+
+      miss(1, "/gone", ua: @googlebot, ip: first)
+      assert counter_rows() == 0
+      eventually(fn -> CrawlerVerification.network_flagged?(first) end)
+
+      # Each a new address whose lookup is still running, so each claim is
+      # pending, and each is counted.
+      for ip <- rest do
+        block_lookup(ip)
+        miss(1, "/gone", ua: @googlebot, ip: ip)
+      end
+
+      assert [rule] = rules()
+      assert rule.cidr == slash_64(first)
+      assert [event] = events()
+      assert event.metadata["reason"] == "miss_threshold"
+    end
+
+    test "an attacker spending the /48 and /32 lookup caps from other /64s never marks " <>
+           "a real crawler's /64" do
+      put_prefix_caps(inet6: [{64, 30}, {48, 2}, {32, 3}])
+      n = rem(System.unique_integer([:positive]), 0xFFF0)
+      [x1, x2, x3] = for k <- 0..2, do: fresh_v6({0x2001, 0x4860, 0x4900, n + k, 0, 0, 0, 1})
+      [y1, y2] = for k <- 0..1, do: fresh_v6({0x2001, 0x4860, 0x4901, n + k, 0, 0, 0, 1})
+
+      # Three /64s of the attacker's: two in one /48, a third in another /48
+      # of the same /32. Each lookup fails and marks its own /64.
+      for ip <- [x1, x2, y1] do
+        miss(1, "/gone", ua: @googlebot, ip: ip)
+        eventually(fn -> CrawlerVerification.network_flagged?(ip) end)
+      end
+
+      # A real crawler in a third /64 of each: DNS would verify it, but the
+      # /48's cap (x3) or the /32's (y2) turns its lookup away.
+      for ip <- [x3, y2] do
+        host = "crawl-#{System.unique_integer([:positive])}.googlebot.com"
+        StubCrawlerResolver.put_ptr(ip, [host])
+        StubCrawlerResolver.put_addresses(host, [ip])
+
+        miss(10, "/gone", ua: @googlebot, ip: ip)
+        assert CrawlerVerification.check(:google, ip) == {:unverified, :skipped}
+        assert StubCrawlerResolver.calls(:ptr, ip) == 0
+        refute CrawlerVerification.network_flagged?(ip)
+      end
+
+      assert rules() == []
+    end
+
+    test "a real crawler's verified addresses stay exempt in a marked /64; bait still counts" do
+      ips = in_one_64(3)
+      for ip <- ips, do: CrawlerVerification.put_result(:google, ip, :verified)
+
+      for ip <- ips, do: miss(4, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+
+      CrawlerVerification.put_network_mark(hd(ips), :failed)
+      assert CrawlerVerification.network_flagged?(hd(ips))
+
+      for ip <- ips, do: miss(4, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+
+      miss(3, "/wp-login.php", ua: @googlebot, ip: hd(ips))
+      assert [event] = events()
+      assert event.metadata["reason"] == "bait_path"
+    end
+
+    test "a real crawler's first misses from an unmarked /64 stay exempt while its lookups run" do
+      ips = in_one_64(3)
+      host = "crawl-#{System.unique_integer([:positive])}.googlebot.com"
+      StubCrawlerResolver.put_addresses(host, ips)
+      for ip <- ips, do: StubCrawlerResolver.put_ptr(ip, {:block, self(), [host]})
+
+      for ip <- ips, do: miss(4, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+
+      resolvers =
+        for ip <- ips do
+          assert_receive {StubCrawlerResolver, :blocked, resolver, _callers, :ptr, ^ip}, 2_000
+          resolver
+        end
+
+      Enum.each(resolvers, &StubCrawlerResolver.release/1)
+
+      for ip <- ips do
+        eventually(fn -> CrawlerVerification.check(:google, ip) == :verified end)
+      end
+
+      refute CrawlerVerification.network_flagged?(hd(ips))
+      for ip <- ips, do: miss(4, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+    end
+
+    test "a silent mark counts a pending claim while the resolver answers others" do
+      [marked, ip] = in_one_64(2)
+      CrawlerVerification.put_network_mark(marked, :silent)
+      healthy_resolver()
+      resolver = block_lookup(ip)
+
+      miss(3, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+      miss(1, "/gone", ua: @googlebot, ip: ip)
+      assert [_rule] = rules()
+
+      StubCrawlerResolver.release(resolver)
+    end
+
+    test "a silent mark is not read while the resolver itself is failing" do
+      [marked, ip] = in_one_64(2)
+      CrawlerVerification.put_network_mark(marked, :silent)
+      failing_resolver()
+      resolver = block_lookup(ip)
+
+      miss(10, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+
+      StubCrawlerResolver.release(resolver)
+    end
+
+    test "a resolver error counts in a failed /64 even while the resolver is failing" do
+      [marked, ip] = in_one_64(2)
+      CrawlerVerification.put_network_mark(marked, :failed)
+      CrawlerVerification.put_result(:google, ip, {:error, :timeout})
+      failing_resolver()
+
+      miss(4, "/gone", ua: @googlebot, ip: ip)
+      assert [_rule] = rules()
+    end
+
+    test "a DuckDuckBot claim nothing can check counts in a marked /64, not in an unmarked one" do
+      [marked, ip] = in_one_64(2)
+      assert CrawlerVerification.check(:duckduckgo, ip) == {:unverified, :unverifiable}
+
+      miss(10, "/gone", ua: @duckduckbot, ip: ip)
+      assert rules() == []
+
+      CrawlerVerification.put_network_mark(marked, :failed)
+      miss(4, "/gone", ua: @duckduckbot, ip: ip)
+      assert [rule] = rules()
+      assert rule.cidr == slash_64(ip)
+    end
+
+    test "IPv4 is unchanged: rotating or skipped claims in one /24 keep the exemption" do
+      {_, _, c, _} = PublicAddress.v4_own_24()
+      ips = for d <- 1..10, do: fresh_ip({66, 248, c, d})
+
+      for ip <- ips, do: miss(1, "/gone", ua: @googlebot, ip: ip)
+      assert rules() == []
+      assert counter_rows() == 0
+      for ip <- ips, do: refute(CrawlerVerification.network_flagged?(ip))
+
+      {_, _, c, _} = PublicAddress.v4_own_24()
+      put_prefix_caps(inet: [{24, 1}, {16, 100}])
+      [first | skipped] = for d <- 1..10, do: fresh_ip({66, 248, c, d})
+
+      miss(1, "/gone", ua: @googlebot, ip: first)
+      eventually(fn -> CrawlerVerification.check(:google, first) == {:unverified, :failed} end)
+
+      for ip <- skipped do
+        assert CrawlerVerification.check(:google, ip) == {:unverified, :skipped}
+        miss(1, "/gone", ua: @googlebot, ip: ip)
+      end
+
+      assert rules() == []
+    end
+
+    test "with the guard off nothing is counted, marked /64 or not" do
+      Application.delete_env(:kiln_cms, :scanner_blocking)
+      [first | rest] = in_one_64(5)
+      CrawlerVerification.put_network_mark(first, :failed)
+
+      for ip <- [first | rest], do: miss(2, "/gone", ua: @googlebot, ip: ip)
+
+      assert counter_rows() == 0
+      assert rules() == []
     end
   end
 

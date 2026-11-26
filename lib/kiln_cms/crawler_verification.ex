@@ -93,6 +93,36 @@ defmodule KilnCMS.CrawlerVerification do
   only write the second, so rotating through new addresses cannot evict a
   verified crawler.
 
+  ## Network marks
+
+  A scanner that rotates through the addresses of its IPv6 `/64` never meets
+  its own failures: each new address is `{:unverified, :pending}` until its
+  lookup finishes, and `KilnCMS.Security.ScannerGuard` counts per `/64`
+  (#2838). So a finished lookup that produced claimant-controlled negative
+  evidence also marks the address's `/64`, and `network_flagged?/2` answers
+  whether it is marked:
+
+    * `:failed`: the lookup proved the claim false (`{:unverified, :failed}`).
+    * `:silent`: the address's PTR query got no answer (`{:unverified, :error}`).
+      Read only while `resolver_failing?/1` is false: while this node's
+      resolver is itself failing, the silence says nothing about the network.
+
+  Nothing else marks: not a lookup turned away by a cap or a busy slot (an
+  attacker can spend those from other networks), not a forward error in the
+  engine's own zone, not a verified result, not an answer from a range list.
+  A verified result does not clear a mark; what a mark means for a verified
+  claim is the caller's policy (the guard: nothing). A `:silent` mark never replaces
+  a `:failed` one; every mark written refreshes the entry's
+  `:network_mark_ttl_ms` (1 h).
+
+  Marks are IPv6 only, keyed by the `/64` alone (never the engine, the user
+  agent or the org), per node, and written only while the 404 guard is on
+  (`config :kiln_cms, :scanner_blocking, enabled: true`), since nothing else
+  reads them. IPv4 is counted per address, so an address's own verdict
+  already lines up with what is counted; an IPv4-mapped IPv6 address is the
+  IPv4 client it carries. They live in a cache of their own
+  (`:max_network_marks`), never the verified cache an attacker cannot write.
+
   ## Is the resolver failing?
 
   A lookup that gets no answer means one of two things: this node's resolver
@@ -124,8 +154,10 @@ defmodule KilnCMS.CrawlerVerification do
       `resolver_failing?/1` to trust the resolver without a canary
     * `:canary_address` (`{8, 8, 8, 8}`): the address the canary's PTR query
       asks about; never a visitor's
+    * `:network_mark_ttl_ms` (1 h): how long a network mark is kept after
+      its last write
     * `:max_entries` (50,000), `:max_verified_entries` (10,000),
-      `:max_concurrency` (16): read once, by
+      `:max_network_marks` (10,000), `:max_concurrency` (16): read once, by
       `KilnCMS.CrawlerVerification.Supervisor`
 
   The range lists have their own (`KilnCMS.CrawlerVerification.Ranges`).
@@ -161,6 +193,7 @@ defmodule KilnCMS.CrawlerVerification do
 
   @cache :kiln_cms_crawler_verification
   @verified_cache :kiln_cms_crawler_verification_verified
+  @network_cache :kiln_cms_crawler_verification_networks
   @task_supervisor KilnCMS.CrawlerVerification.TaskSupervisor
   @canary_supervisor KilnCMS.CrawlerVerification.CanarySupervisor
 
@@ -183,6 +216,7 @@ defmodule KilnCMS.CrawlerVerification do
     verified_ttl_ms: :timer.hours(6),
     rejected_ttl_ms: :timer.hours(1),
     error_ttl_ms: :timer.minutes(5),
+    network_mark_ttl_ms: :timer.hours(1),
     lookups_per_minute: 600,
     prefix_lookups_per_minute: [
       inet: [{24, 30}, {16, 120}],
@@ -202,6 +236,7 @@ defmodule KilnCMS.CrawlerVerification do
   @type reason ::
           :pending | :failed | :unverifiable | :not_public | :skipped | :error | :forward_error
   @type status :: :verified | :disabled | {:unverified, reason()}
+  @type mark :: :failed | :silent
   @type verdict ::
           {:verified, String.t()}
           | {:rejected, :no_ptr | :wrong_domain | :forward_mismatch}
@@ -214,6 +249,10 @@ defmodule KilnCMS.CrawlerVerification do
   @doc "The verified-result cache's name: confirmed crawler names only."
   @spec verified_cache_name() :: atom()
   def verified_cache_name, do: @verified_cache
+
+  @doc "The network-mark cache's name: IPv6 `/64`s that produced negative evidence (#2838)."
+  @spec network_cache_name() :: atom()
+  def network_cache_name, do: @network_cache
 
   @doc "The lookup task supervisor's name."
   @spec task_supervisor() :: atom()
@@ -306,6 +345,26 @@ defmodule KilnCMS.CrawlerVerification do
   end
 
   @doc false
+  # Test seam: mark `ip`'s network as a finished lookup would, whether or not
+  # the 404 guard is on. A no-op for an IPv4 address.
+  @spec put_network_mark(:inet.ip_address(), mark(), keyword()) :: :ok
+  def put_network_mark(ip, kind, opts \\ []) when kind in [:failed, :silent] do
+    put_mark(network_key(normalize_ip(ip)), kind, config(opts))
+  end
+
+  @doc false
+  # Test seam: drop the mark on `ip`'s network.
+  @spec forget_network(:inet.ip_address()) :: :ok
+  def forget_network(ip) do
+    case network_key(normalize_ip(ip)) do
+      nil -> :ok
+      key -> Cachex.del(@network_cache, key)
+    end
+
+    :ok
+  end
+
+  @doc false
   # Test seam: let the once-per-node warnings fire again.
   def reset_warnings do
     InFlight.reset_latches()
@@ -338,6 +397,30 @@ defmodule KilnCMS.CrawlerVerification do
       config[:enabled] != true -> false
       answered_within?(now, window_ms) -> false
       true -> canary_verdict(now, window_ms, config) == :failing
+    end
+  rescue
+    _exception -> false
+  catch
+    :exit, _reason -> false
+  end
+
+  @doc """
+  Has `ip`'s IPv6 `/64` produced negative evidence recently? See "Network
+  marks" in the moduledoc.
+
+  `true` for a `:failed` mark, and for a `:silent` one while
+  `resolver_failing?/1` is false. Never waits on DNS. `false` for an IPv4
+  address (an IPv4-mapped one included), with verification off, and when the
+  verifier's processes are restarting.
+  """
+  @spec network_flagged?(:inet.ip_address() | nil, keyword()) :: boolean()
+  def network_flagged?(ip, opts \\ []) do
+    with true <- config(opts)[:enabled] == true,
+         key when not is_nil(key) <- network_key(normalize_ip(ip)),
+         {:ok, kind} when kind in [:failed, :silent] <- Cachex.get(@network_cache, key) do
+      kind == :failed or not resolver_failing?(opts)
+    else
+      _unmarked -> false
     end
   rescue
     _exception -> false
@@ -557,7 +640,9 @@ defmodule KilnCMS.CrawlerVerification do
     stored = lookup(ip, config)
     put_stored(ip, stored, config)
     note_outcome(stored, config)
-    emit_lookup(engine, judge(engine, stored), System.monotonic_time() - started)
+    verdict = judge(engine, stored)
+    mark_network(ip, status(verdict, engine, stored), config)
+    emit_lookup(engine, verdict, System.monotonic_time() - started)
   after
     InFlight.release(claim)
   end
@@ -747,6 +832,48 @@ defmodule KilnCMS.CrawlerVerification do
       InFlight.put_health(:last_answer_at, now())
     end
   end
+
+  # ---- network marks (#2838) ------------------------------------------------
+
+  # Only a finished lookup's own evidence marks, and only while the 404 guard,
+  # the one reader, is on. A `:forward_error` is the engine's zone, not the
+  # address's (#2588), and marks nothing.
+  defp mark_network(ip, {:unverified, :failed}, config), do: mark_if_guarded(ip, :failed, config)
+  defp mark_network(ip, {:unverified, :error}, config), do: mark_if_guarded(ip, :silent, config)
+  defp mark_network(_ip, _status, _config), do: :ok
+
+  defp mark_if_guarded(ip, kind, config) do
+    if scanner_guard_on?(), do: put_mark(network_key(ip), kind, config), else: :ok
+  end
+
+  # Read like `KilnCMS.Security.ScannerGuard.enabled?/0` reads it, off unless
+  # an operator turned it on, without depending on the guard.
+  defp scanner_guard_on? do
+    :kiln_cms |> Application.get_env(:scanner_blocking, []) |> Keyword.get(:enabled) == true
+  end
+
+  # Atomic, so a `:silent` mark never overwrites a `:failed` one written at
+  # the same moment; then every write refreshes the TTL. Never raises into
+  # the lookup: a mark that cannot be written is a mark not written.
+  defp put_mark(nil, _kind, _config), do: :ok
+
+  defp put_mark(key, kind, config) do
+    Cachex.get_and_update(@network_cache, key, &merge_mark(&1, kind))
+    Cachex.expire(@network_cache, key, config[:network_mark_ttl_ms])
+    :ok
+  rescue
+    _exception -> :ok
+  catch
+    :exit, _reason -> :ok
+  end
+
+  defp merge_mark(:failed, :silent), do: {:ignore, :failed}
+  defp merge_mark(_current, kind), do: {:commit, kind}
+
+  # The `/64` of an IPv6 address, as a tuple: never a string, never joined
+  # with anything a client sends. IPv4 has no network mark.
+  defp network_key({a, b, c, d, _e, _f, _g, _h}), do: {:inet6, a, b, c, d}
+  defp network_key(_ipv4_or_nil), do: nil
 
   # ---- resolver health ------------------------------------------------------
 
