@@ -55,6 +55,14 @@ else.
   text in a section that is not part of a `- ` entry.
 -->
 
+## [Unreleased]
+
+### Fixed
+
+- **Duplicating a text block in the content editor no longer saves the copy empty (#2778).**
+  The copy's text is kept by save and autosave, and is independent of the original. This was a 1.13.0 known issue.
+  ([long form](docs/changelog/unreleased.md#duplicate-rich-text-body))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —
