@@ -257,12 +257,12 @@ defmodule KilnCMS.CMS.Preparations.CustomFieldQuery.Lists do
        when type in @typed and (is_binary(raw) or is_number(raw)) do
     case ApplyCustomFields.coerce_item(definition, raw) do
       {:ok, value} when is_binary(value) or is_number(value) -> {:ok, value}
-      _refused -> CustomFieldQuery.cast_value(raw, CustomFieldQuery.ash_type(definition), name)
+      _refused -> CustomFieldQuery.cast_operand(raw, definition, name)
     end
   end
 
   defp cast(raw, %{name: name} = definition),
-    do: CustomFieldQuery.cast_value(raw, CustomFieldQuery.ash_type(definition), name)
+    do: CustomFieldQuery.cast_operand(raw, definition, name)
 
   defp cast_all(raw, definition, op) do
     raw
