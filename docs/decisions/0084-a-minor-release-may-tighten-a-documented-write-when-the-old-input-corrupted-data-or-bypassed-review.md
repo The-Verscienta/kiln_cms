@@ -16,8 +16,8 @@
   (where the Portable Text check sits).
 - **Changelog** — the Unreleased section of
   [CHANGELOG.md](../../CHANGELOG.md), under Breaking
-  ([long form](../changelog/unreleased.md#portable-text-write-check)) and Fixed
-  ([long form](../changelog/unreleased.md#mcp-live-records-draft-only)); the
+  ([long form](../changelog/v1.13.0.md#portable-text-write-check)) and Fixed
+  ([long form](../changelog/v1.13.0.md#mcp-live-records-draft-only)); the
   precedent in [1.10.0](../changelog/v1.10.0.md#custom-field-api-stricter-shapes).
 
 ## The problem

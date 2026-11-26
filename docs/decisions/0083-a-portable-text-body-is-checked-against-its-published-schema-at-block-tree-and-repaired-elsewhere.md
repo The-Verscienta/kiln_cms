@@ -14,8 +14,8 @@
   (1-based list item positions).
 - **Changelog** — the Unreleased section of
   [CHANGELOG.md](../../CHANGELOG.md), under Breaking
-  ([long form](../changelog/unreleased.md#portable-text-write-check)) and Fixed
-  ([long form](../changelog/unreleased.md#portable-text-write-check-fixed)).
+  ([long form](../changelog/v1.13.0.md#portable-text-write-check)) and Fixed
+  ([long form](../changelog/v1.13.0.md#portable-text-write-check-fixed)).
 
 ## The problem
 

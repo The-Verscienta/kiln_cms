@@ -55,31 +55,35 @@ else.
   text in a section that is not part of a `- ` entry.
 -->
 
-## [Unreleased]
+## [1.13.0] - 2026-11-25
+
+Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —
+the 1.13.0 entries as they were written when each change merged.
+Every summary line below that was shortened links to its own entry there.
 
 What's new, with examples and migration steps: [docs/whats-new/v1.13.md](docs/whats-new/v1.13.md).
 
 ### Upgrade notes
 
 - **Direct uploads: until every node runs this release, a completion handled by an older node can still lose its staged object to the cleanup job (#2724). A token whose cleanup job was never queued now answers `not_uploaded`. No migration; rolling the pin back is safe.**
-  ([long form](docs/changelog/unreleased.md#direct-upload-claim-upgrade))
+  ([long form](docs/changelog/v1.13.0.md#direct-upload-claim-upgrade))
 - **If you ran `mix kiln.links.backfill` on 1.5.0 to 1.12.1, run it again after upgrading: it had deleted every list reference edge, and on 1.12.1 every reference edge in a group or flexible item (#2742). Nested edges return only when each record's custom fields next change.**
-  ([long form](docs/changelog/unreleased.md#links-backfill-multiple-upgrade))
+  ([long form](docs/changelog/v1.13.0.md#links-backfill-multiple-upgrade))
 - **A draft of a live record saved before a custom field was renamed or deleted on 1.0.0 to 1.12.1 still holds the old key: publishing it after upgrading still drops that value, so re-enter it or discard the draft (#2744). Values already lost are in version history under the old key; copy them back by hand, since a restore drops them.**
-  ([long form](docs/changelog/unreleased.md#rename-rewrites-working-copies-upgrade))
+  ([long form](docs/changelog/v1.13.0.md#rename-rewrites-working-copies-upgrade))
 - **On 1.9.0 to 1.12.1, saving an account's audiences panel for a waiting or rejected registration could remove audiences stored on it, even unchanged, so those registrations and accounts approved since may lack audiences you gave them (#2783). Check and re-tick them; KilnCMS can't restore them, though billing-managed audiences return on the next billing change.**
-  ([long form](docs/changelog/unreleased.md#audiences-panel-stored-upgrade))
+  ([long form](docs/changelog/v1.13.0.md#audiences-panel-stored-upgrade))
 - **Portable Text: a record stored with a malformed body is read and delivered repaired, so a `:json` consumer can see its shape change on the next fire, and a client that sends back an artifact fired before then can get a `400` (#2768). No migration; rolling the pin back is safe.**
   A draft of such a live record pending across the upgrade can show a conflict on blocks: publish it with "Use mine", or discard it and save the draft again.
-  ([long form](docs/changelog/unreleased.md#portable-text-write-check-upgrade))
+  ([long form](docs/changelog/v1.13.0.md#portable-text-write-check-upgrade))
 - **Gated HTML pages now follow the reader's active membership on that site, not account-wide audiences (GHSA-4m98-m3c9-7cwx). Run `mix kiln.deprecations` to list account-wide audiences that are not on a site membership, and grant them per site.**
-  ([GHSA-4m98-m3c9-7cwx](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-4m98-m3c9-7cwx) · [long form](docs/changelog/unreleased.md#delivery-site-membership-audiences-upgrade))
+  ([GHSA-4m98-m3c9-7cwx](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-4m98-m3c9-7cwx) · [long form](docs/changelog/v1.13.0.md#delivery-site-membership-audiences-upgrade))
 
 ### Breaking
 
 - **Portable Text writes: a `block_tree` body (JSON:API, GraphQL, MCP) is refused with a `400` naming the path for a few shapes that used to be stored: a `marks` entry that is an object or list; an object or list in a text block's `style`, `listItem` or `_key`, or a span's `_key`; a text block's non-numeric `level`; and a plugin `:rich_text` field holding malformed Portable Text (#2768).**
   Numbers in text slots and numeric-string levels are still coerced; a `null` mark is dropped; custom nodes' own fields are kept.
-  ([long form](docs/changelog/unreleased.md#portable-text-write-check))
+  ([long form](docs/changelog/v1.13.0.md#portable-text-write-check))
 
 ### Known issues
 
@@ -111,16 +115,16 @@ What's new, with examples and migration steps: [docs/whats-new/v1.13.md](docs/wh
   ([#2898](https://github.com/The-Verscienta/kiln_cms/issues/2898))
 
 - **A site storage profile on a region ExAws doesn't know (Backblaze B2 `us-west-004`, Wasabi `us-central-1`) fails on every upload and read; keep such sites on the instance's storage until the fix.**
-  ([#3085](https://github.com/The-Verscienta/kiln_cms/issues/3085) · [long form](docs/changelog/v1.12.0.md#site-storage-unknown-region))
+  ([#3085](https://github.com/The-Verscienta/kiln_cms/issues/3085) · [long form](docs/changelog/v1.13.0.md#site-storage-unknown-region))
 
 - **A page opened at its path alias shows no reference byline and leaves inherited (`:fallback`) fields blank, though the same page at its slug shows both; link to the slug where that matters.**
-  ([#3193](https://github.com/The-Verscienta/kiln_cms/issues/3193) · [long form](docs/changelog/v1.12.0.md#alias-page-bylines-fallback))
+  ([#3193](https://github.com/The-Verscienta/kiln_cms/issues/3193) · [long form](docs/changelog/v1.13.0.md#alias-page-bylines-fallback))
 
 - **A release preview shows a fragment's currently published body, not the version the same release will publish; open the target's own entry in the preview to review it.**
-  ([#3289](https://github.com/The-Verscienta/kiln_cms/issues/3289) · [long form](docs/changelog/v1.12.1.md#release-preview-fragments))
+  ([#3289](https://github.com/The-Verscienta/kiln_cms/issues/3289) · [long form](docs/changelog/v1.13.0.md#release-preview-fragments))
 
 - **With many Hex plugins and a hex.pm that stays slow, the same plugins at the end of the list read Unknown on every plugin check; check those on hex.pm by hand.**
-  ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/v1.12.0.md#plugin-health-tail-packages-unknown))
+  ([#3165](https://github.com/The-Verscienta/kiln_cms/issues/3165) · [long form](docs/changelog/v1.13.0.md#plugin-health-tail-packages-unknown))
 
 - **An image in the middle of a line of Markdown disappears, alt text included, with no error.** Affects Markdown to Blocks, `body_markdown` writes and imports that go through it. Put each image on its own line.
   ([#2771](https://github.com/The-Verscienta/kiln_cms/issues/2771))
@@ -147,168 +151,168 @@ What's new, with examples and migration steps: [docs/whats-new/v1.13.md](docs/wh
 
 - **Conditional fields have four text tests: "contains", "does not contain", "starts with" and "ends with", ignoring case, for text, URL and choice fields ([#3270](https://github.com/The-Verscienta/kiln_cms/pull/3270)).**
   No migration.
-  ([long form](docs/changelog/unreleased.md#condition-text-ops))
+  ([long form](docs/changelog/v1.13.0.md#condition-text-ops))
 
 - **A flexible field can be searchable: search finds a record by its items' text (never `_id`, `_type`, `_settings`, media or reference values), and version compare and restore preview list each added, removed, changed or moved item (#2282, PR 6).**
   No migration. Flipping the flag re-fires published documents.
-  ([long form](docs/changelog/unreleased.md#flexible-search-diff))
+  ([long form](docs/changelog/v1.13.0.md#flexible-search-diff))
 
 - **A custom field's text can go in the fired AI-readable outputs: tick "Include in AI-readable outputs" on a text, group or flexible field and its text joins the `:llm` Markdown and a `hasPart` list on the `:json_ld` node (issue 2282, last PR of the flexible-content plan). Run `mix ash.migrate`; off by default; rolling back is safe.**
-  ([long form](docs/changelog/unreleased.md#deliver-llm))
+  ([long form](docs/changelog/v1.13.0.md#deliver-llm))
 
 - **An address field's editor relabels itself for the selected country ("State" and "ZIP code" for the US, "County" for the UK, "Prefecture" for Japan), hides parts the country does not use, and on a required field marks the parts the country needs. Guidance only: the API and imports are unchanged ([#2995](https://github.com/The-Verscienta/kiln_cms/issues/2995)).**
   No migration. Data: MIT-licensed commerceguys/addressing, derived from Google's CC BY 4.0 libaddressinput.
-  ([long form](docs/changelog/unreleased.md#address-country-formats))
+  ([long form](docs/changelog/v1.13.0.md#address-country-formats))
 
 - **An address field offers the country's states, provinces or prefectures as a select for 62 countries and stores the area's code (`CA`, not `California`). A name or lower-case code is converted on save and unrecognized text is kept as typed ([#2996](https://github.com/The-Verscienta/kiln_cms/issues/2996)).**
   No migration. Data: MIT-licensed commerceguys/addressing, derived from Google's CC BY 4.0 libaddressinput.
-  ([long form](docs/changelog/unreleased.md#address-admin-area-lists))
+  ([long form](docs/changelog/v1.13.0.md#address-admin-area-lists))
 
 ### Changed
 
 - **A list field's errors count items one way: a value rule now says `Scores (scores) item 2 must be at most 10` (from 1) instead of `Scores (scores[1]) …`, and a type error, field conversion reports included, no longer counts a dropped repeat (#2683).**
   Only the human text changes; JSON:API `code`/`source.pointer` and GraphQL `code`/`fields` are as before. No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#list-item-error-position))
+  ([long form](docs/changelog/v1.13.0.md#list-item-error-position))
 
 ### Fixed
 
 - **The audiences panel on `/editor/accounts/(id)` shows a waiting or rejected registration's saved audiences, so saving it again no longer clears them (#2783).**
   They still grant nothing until the registration is approved. No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#audiences-panel-stored))
+  ([long form](docs/changelog/v1.13.0.md#audiences-panel-stored))
 
 - **Closing the content editor's image picker while an Unsplash import is still running no longer crashes the editor (#2784).**
   The photo is still added to the media library, but not to the field or block, and a flash says so.
-  ([long form](docs/changelog/unreleased.md#picker-close-during-import))
+  ([long form](docs/changelog/v1.13.0.md#picker-close-during-import))
 
 - **A Slug field offers the Unique checkbox in `/editor/fields`, and saving a field no longer drops a constraint the form didn't post, such as a `unique` set through the API or field sync (#2780).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#fields-slug-unique))
+  ([long form](docs/changelog/v1.13.0.md#fields-slug-unique))
 
 - **A reconnect no longer replays the Fields console's Sections choices, or other forms that save as they change, over another admin's newer ones (#2782).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#auto-save-forms-no-recovery))
+  ([long form](docs/changelog/v1.13.0.md#auto-save-forms-no-recovery))
 
 - **A content-list row or bulk action on a row someone else moved to trash shows a message instead of crashing the list (#2781).**
   A row action flashes and reloads the list; the bulk bar acts on the rows that remain and reports, e.g., "Publish: 3 updated, 1 no longer exists".
-  ([long form](docs/changelog/unreleased.md#content-list-stale-row))
+  ([long form](docs/changelog/v1.13.0.md#content-list-stale-row))
 
 - **The Experiments form's goal select takes effect, so a funnel-completion experiment can be set up from `/editor/experiments` (#2779).**
   Picking a goal now shows its target picker (funnel, form or page), and typing a name no longer reloads the document list.
-  ([long form](docs/changelog/unreleased.md#experiment-goal-select))
+  ([long form](docs/changelog/v1.13.0.md#experiment-goal-select))
 
 - **With live collaboration on, a rich-text block whose collab connection can't join now mounts a single-user editor instead of no editor at all (#2772).**
   A refused or dropped socket, a join that times out and a refused join each fall back within 15 seconds, with a notice under the block.
-  ([long form](docs/changelog/unreleased.md#collab-join-fallback))
+  ([long form](docs/changelog/v1.13.0.md#collab-join-fallback))
 
 
 - **A stored rich text body in a malformed Portable Text shape (`marks` as a string, `children` that aren't spans, a `markDefs` entry that isn't an object) renders with the bad nodes repaired or skipped instead of a 500, and fires and indexes again (#2768).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#portable-text-render-guards))
+  ([long form](docs/changelog/v1.13.0.md#portable-text-render-guards))
 - **A headless write with a malformed Portable Text body is a `400` naming the path (`block_tree[0].body[0].children[1].marks must be a list of strings (got a string)`) instead of being stored and then failing every read; a plugin `:rich_text` field gets the same check and link scrub (#2768).**
   Restore, promote, copy and import repair a stored body rather than refuse it, and a body whose top-level node isn't an object loads again.
-  ([long form](docs/changelog/unreleased.md#portable-text-write-check-fixed))
+  ([long form](docs/changelog/v1.13.0.md#portable-text-write-check-fixed))
 - **The Redirects form shows a refused path as an error on its field instead of crashing the page (#2763).**
   An over-long path or locale, the root path, the target's own URL, a missing target and a write the policy refuses no longer lose the form.
-  ([long form](docs/changelog/unreleased.md#redirects-refused-path))
+  ([long form](docs/changelog/v1.13.0.md#redirects-refused-path))
 
 - **The visual-editing preview read (`/api/visual-editing/:type/:slug`) encodes only prose: a video's `src`, a file's `download_url`, an embed's `resolved_url`, media ids and other URL or identifier fields come through unchanged, instead of with an invisible tail that made them 404 (#2770).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#visual-editing-prose-only))
+  ([long form](docs/changelog/v1.13.0.md#visual-editing-prose-only))
 
 
 - **Console fixes: Edit on a webhook, content type or social account, and Remove on a site's mail, storage, AI or search settings, no longer crash when another admin deleted the row; the newsletter's confirmed count, the overview's "All quiet." and release go-live times (now labeled UTC) are right; and a few events check more (#2764).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#console-small-defects))
+  ([long form](docs/changelog/v1.13.0.md#console-small-defects))
 
 - **The translations dashboard shows every variant of the slugs it lists: an older translation no longer shows as "missing" (and fails to create), and a slug whose default-locale source is older than its translations can still be exported (#2761).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#translations-slug-window))
+  ([long form](docs/changelog/v1.13.0.md#translations-slug-window))
 
 - **A document whose parent is in the trash shows on the structure page again, at the top level and marked "Parent unavailable", and can be reordered, indented or outdented; it was invisible (#2760).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#structure-trashed-parent))
+  ([long form](docs/changelog/v1.13.0.md#structure-trashed-parent))
 - **A newsletter campaign's counts add up: a recipient whose last delivery attempt still fails (a down MX, a hung relay) or whose campaign has no fired content is counted failed once, instead of being dropped from the tally (#2755).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#newsletter-exhausted-counts-failed))
+  ([long form](docs/changelog/v1.13.0.md#newsletter-exhausted-counts-failed))
 - **An API key minted by a newer release with a scope this one doesn't know no longer breaks key lookups, the API keys page, revoke or erasure; it is refused at sign-in like a revoked key, and the security posture warns about it (#2604).**
   No migration; rolling the pin back is safe. The posture JSON's `core.api_keys` check gains the fact `unrecognized_scope_keys`.
-  ([long form](docs/changelog/unreleased.md#api-key-unknown-scope))
+  ([long form](docs/changelog/v1.13.0.md#api-key-unknown-scope))
 - **A seat `mix kiln.beta.round` creates now records its `role_granted` in the default site's security log (raised from viewer), and an admin seat raises the platform `new_admin` alert (#2641).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#beta-round-seat-audited))
+  ([long form](docs/changelog/v1.13.0.md#beta-round-seat-audited))
 - **Over `/mcp`, `update_page` / `update_post` / `update_entry` refuse a published record, and new `save_*_working_copy` tools stage an edit to one for a person to publish, so a model's edit no longer reaches readers unreviewed (#3347).**
   No migration; rolling the pin back is safe. An MCP client that edited live records with `update_*` must switch to the working-copy tools. A project that overrides `:mcp_tools` must add the three new names. JSON:API, GraphQL and in-context editing are unchanged.
-  ([long form](docs/changelog/unreleased.md#mcp-live-records-draft-only))
+  ([long form](docs/changelog/v1.13.0.md#mcp-live-records-draft-only))
 - **A large WordPress, Ghost or envelope import no longer loses its media after two minutes: each image download has its own 60-second deadline, a slow image is listed by URL, and an unresponsive host is skipped after three timeouts in a row (#2720).**
   WordPress and Ghost imports now print `media:` and `records:` progress. No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#import-media-per-asset-deadline))
+  ([long form](docs/changelog/v1.13.0.md#import-media-per-asset-deadline))
 - **`mix kiln.changelog --check` fails on text in a bullet section that is not part of a `- ` entry, naming its line, and `--condense` refuses to run rather than delete it (#2732).**
-  ([long form](docs/changelog/unreleased.md#changelog-stray-lines))
+  ([long form](docs/changelog/v1.13.0.md#changelog-stray-lines))
 
 - **A blank, space-padded or unparseable `PORT`, `POOL_SIZE`, `SMTP_PORT` or `S3_ENDPOINT_PORT` no longer crashes boot: it keeps the default and warns like every other numeric variable (#2728).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#runtime-integer-env-vars))
+  ([long form](docs/changelog/v1.13.0.md#runtime-integer-env-vars))
 
 - **A large direct upload no longer fails mid-completion when its staging cleanup comes due, or when the same token is completed twice at once: a completion now holds off the cleanup job until it is done (#2724).**
   `POST /api/media/uploads` answers `502 storage_failed` if that job can't be queued. No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#direct-upload-cleanup-claim))
+  ([long form](docs/changelog/v1.13.0.md#direct-upload-cleanup-claim))
 
 - **`mix kiln.gen.content Story --plural stories`, and `--from` a dynamic type whose URL segment isn't `<name>s`, now write `plural:` into the generated resource, so it serves at `/stories` and matches its `list_stories` interfaces instead of registering `storys` (#2731).**
   Types generated before this keep `storys` until you add `plural:` by hand. No migration.
-  ([long form](docs/changelog/unreleased.md#gen-content-plural))
+  ([long form](docs/changelog/v1.13.0.md#gen-content-plural))
 
 - **`mix kiln.migrations.check` judges the migration module's functions that `up`/`change` call and the SQL of `repo().query!`, and fails closed on forward code it cannot read, such as run-time SQL or a call into another module (#2736).**
-  ([long form](docs/changelog/unreleased.md#migrations-check-follows-helpers))
+  ([long form](docs/changelog/v1.13.0.md#migrations-check-follows-helpers))
 
 - **A file over 16 MB now reaches S3 on a slow uplink: each multipart part gets time in proportion to its size instead of a fixed 30 seconds, and a part that runs out of time or meets a server error is sent again before the upload is aborted (#2725).**
   New variable `S3_UPLOAD_MIN_BYTES_PER_SECOND` (default 32768). No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#s3-part-deadline))
+  ([long form](docs/changelog/v1.13.0.md#s3-part-deadline))
 
 - **`scripts/staging.sh down` and `up` now refuse a database whose name doesn't look ephemeral (unless `KILN_STAGING_FORCE` is on) and drop or create it on the server in `STAGING_DATABASE_URL`, not libpq's default one; that variable must now be a URL naming the database in its path (#2722).**
   No migration; rolling the pin back is safe. A `down` that relied on dropping on the default server now acts on the URL's.
-  ([long form](docs/changelog/unreleased.md#staging-script-guards-drop))
+  ([long form](docs/changelog/v1.13.0.md#staging-script-guards-drop))
 
 - **A webhook endpoint is no longer auto-disabled by a failure counted against a stale copy: an exhausted delivery now adds one to the failure count in the database, so a success in between resets the run, concurrent failures all count, and the "switched off" alert fires once (#2737).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#webhook-failure-atomic))
+  ([long form](docs/changelog/v1.13.0.md#webhook-failure-atomic))
 - **A second edit to a federated document is announced even when it lands while the previous `Update` is still fanning out; it was dropped as a duplicate, so followers kept the older content (#2757).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#announce-unique-executing))
+  ([long form](docs/changelog/v1.13.0.md#announce-unique-executing))
 
 - **`mix kiln.links.backfill` no longer deletes the edges of list reference fields or of references in groups and flexible items: it writes and realigns top-level single and list edges, and prints `N written, M realigned, K removed` (#2742).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#links-backfill-multiple))
+  ([long form](docs/changelog/v1.13.0.md#links-backfill-multiple))
 - **The "Visual" button and a preview block's "Edit" link open the in-context editor on the translation you were editing; they left the locale out, so a `fr` variant's edits and autosaves landed on the `en` record sharing its slug (#2758).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#in-context-editor-locale))
+  ([long form](docs/changelog/v1.13.0.md#in-context-editor-locale))
 
 - **The daily health sweep now raises a `health_overdue` or `health_expired` event for every stale record, not the same 500 per content type each day (#2738).**
   Its telemetry counts every record too. No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#health-sweep-every-record))
+  ([long form](docs/changelog/v1.13.0.md#health-sweep-every-record))
 
 - **After a Save in the Presentation console, the open text block shows the saved text; it showed the text from before the save, so the next keystroke and Save wrote that old text back over the edit (#2759).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#presentation-edit-after-save))
+  ([long form](docs/changelog/v1.13.0.md#presentation-edit-after-save))
 - **Organize's tag review sets aside a run that finishes after the filter changed, instead of showing its proposals for the new selection, and a filter change no longer lets a second run start beside the first (#2762).**
   No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#organize-stale-run))
+  ([long form](docs/changelog/v1.13.0.md#organize-stale-run))
 
 - **Renaming, deleting or reshaping a custom field (group sub-fields, link fields and flexible items included) now rewrites the drafts of live records too, so *Publish changes*, a release or an unpublish no longer reports a conflict nobody made or drops the draft's value (#2744).**
   No migration. Open editors of the affected records see "changed elsewhere" once; an `If-Match` client gets one 412.
-  ([long form](docs/changelog/unreleased.md#rename-rewrites-working-copies))
+  ([long form](docs/changelog/v1.13.0.md#rename-rewrites-working-copies))
 
 ### Security
 
 - **A deadline, a canceled or fenced backup step, or the death of its job now stops an external program (qpdf, ffmpeg/ffprobe, `pg_dump`, `pg_restore`, `tar`, `rclone`, `df`) in the official image, which has no `kill` binary, and the program's own children with it; affects 0.6.0 to 1.12.1 (GHSA-h3hm-8ff5-wr4v).**
   The kill is a process-group kill from a fixed `/bin/sh` wrapper, so it never signals a reused pid (#2624). A custom entrypoint that leaves another program as PID 1 should use an init such as `tini`.
-  ([GHSA-h3hm-8ff5-wr4v](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-h3hm-8ff5-wr4v) · [#2624](https://github.com/The-Verscienta/kiln_cms/issues/2624) · [long form](docs/changelog/unreleased.md#external-command-group-kill))
+  ([GHSA-h3hm-8ff5-wr4v](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-h3hm-8ff5-wr4v) · [#2624](https://github.com/The-Verscienta/kiln_cms/issues/2624) · [long form](docs/changelog/v1.13.0.md#external-command-group-kill))
 
 - **Gated HTML pages, teasers and paywalls now take the reader's audiences from their active membership on that site, as the API and the read policies do; affects 0.5.0 to 1.12.1 (GHSA-4m98-m3c9-7cwx).**
   Audiences granted per site in the console now unlock HTML pages too. See the upgrade note.
-  ([GHSA-4m98-m3c9-7cwx](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-4m98-m3c9-7cwx) · [long form](docs/changelog/unreleased.md#delivery-site-membership-audiences))
+  ([GHSA-4m98-m3c9-7cwx](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-4m98-m3c9-7cwx) · [long form](docs/changelog/v1.13.0.md#delivery-site-membership-audiences))
 
 - **The content editor's Markdown mode writes a Portable Text list item at most 10 levels deep, however large its stored `level`; affects 1.0.0 to 1.12.1 (GHSA-ffw4-2w7m-xh53).**
-  ([GHSA-ffw4-2w7m-xh53](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-ffw4-2w7m-xh53) · [long form](docs/changelog/unreleased.md#portable-text-list-level-cap))
+  ([GHSA-ffw4-2w7m-xh53](https://github.com/The-Verscienta/kiln_cms/security/advisories/GHSA-ffw4-2w7m-xh53) · [long form](docs/changelog/v1.13.0.md#portable-text-list-level-cap))
 
 ## [1.12.1] - 2026-11-23
 
