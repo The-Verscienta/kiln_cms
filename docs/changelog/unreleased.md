@@ -13,6 +13,14 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="publish-shows-unpublish-date"></a>
+
+- **Publishing a draft without opening the editor shows its scheduled unpublish date (#2892).** This was a 1.13.0 known issue. A draft can carry a takedown date, **Scheduled unpublish at** in the editor (`unpublish_at`, with `expiry_action` saying what happens then), and [ADR 0051](../decisions/0051-taking-content-down-needs-the-same-approval-as-putting-it-up.md) leaves it ungated on a draft because whoever publishes the draft approves the date with the page. Only the editor showed it. An admin who approved a draft from the content list, the bulk bar or a release never saw the date, and the page came down at it.
+  - **The content list.** A draft or in-review row with a date shows it beside its **Publish** or **Approve** button, as published rows already did: **Unpublishes**, **Archives** or **Flagged expired**, by the record's expiry action, then the time.
+  - **The bulk bar.** The **Publish** confirm says how many of the selected drafts have a date ("2 of these have a scheduled unpublish date") and lists them soonest first, up to ten. Selected rows off the current page or filter are counted too.
+  - **Releases.** Each pending publish item for a draft with a date shows it under the title, and the panel with **Schedule** and **Publish now** totals them.
+  - **Unchanged.** Publishing works as before; nothing is asked or refused that wasn't. No migration; rolling the pin back is safe.
+
 <a id="markdown-inline-image"></a>
 
 - **An image that is not alone on its line of Markdown is kept (#2771).** This was a 1.13.0 known issue. `KilnCMS.Markdown.to_blocks/2` and `parse_document/2` rendered every image as `<img>` and left it to the HTML adapter, which lifts an image into an image block only when it is the whole of a top-level paragraph. Anywhere else, mid-sentence (`Our logo ![Acme](https://x.test/a.png) is blue`), two to a line, or in a list item, quote or table cell, the adapter had no inline node for it and dropped the picture and its alt text with no error. The stored text read "Our logo is blue".

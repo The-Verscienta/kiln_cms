@@ -86,6 +86,10 @@ else.
   A 1.13.0 known issue. Installed plugins' public routes are reserved too; a test now keeps the list in step with the router.
   ([long form](docs/changelog/unreleased.md#reserved-route-slugs))
 
+- **Publishing a draft from the content list, the bulk bar or a release now shows its scheduled unpublish date first (#2892).**
+  The row, the bulk Publish confirm and the release's item list name the date and what happens then. A 1.13.0 known issue.
+  ([long form](docs/changelog/unreleased.md#publish-shows-unpublish-date))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —
