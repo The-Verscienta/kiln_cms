@@ -3544,13 +3544,35 @@ block plugin may notice, with no code change needed:
   ([json-api.md](json-api.md#block-tree-portable-text-check),
   [ADR 0083](decisions/0083-a-portable-text-body-is-checked-against-its-published-schema-at-block-tree-and-repaired-elsewhere.md)).
 
-**Filters on a plugin field type compare text.** `cast/2` runs on writes
-only. A `custom_filter` or `customWhere` operand on a plugin type's field is
-compared as the text the client sent, not passed through `cast/2`, because
-the `Kiln.FieldType` contract does not promise that `cast/2` is
-deterministic. So if `cast/2` tidies a value (lowercases it, say), a client
-must filter with the stored spelling. The built-in format types (`email`,
-`color`, `telephone`, `time`, `slug`) are the exception: their `eq`,
+<a id="filters-on-a-plugin-field-type"></a>
+
+**Filters on a plugin field type follow its GraphQL kind.** `cast/2` runs on
+writes only. A `custom_filter` or `customWhere` operand on a plugin type's
+field is not passed through `cast/2`, because the `Kiln.FieldType` contract
+does not promise that `cast/2` is deterministic. Instead, the kind
+`graphql_kind/1` names decides how it compares (#2855):
+
+- With `:int`, `:float`, `:boolean` or `:date`, an operand that is a value of
+  that kind (`9`, `"9"`, `"true"`, `"2026-11-05"`) compares as that value,
+  as on KilnCMS's own field of the kind. `custom_filter[score][gt]=9`
+  finds a stored `10`, and `eq` and `in` match a stored JSON number.
+- Anything else compares the text the client sent, as it always has: an
+  operand that is not a value of the kind (`gt=ten`), the text operators
+  (`contains`, `starts_with` and `ilike`, so `starts_with=1` still finds `10`),
+  and every operand on a type whose kind is `:string`, `:datetime` or
+  `:json`, or that has no `graphql_kind/1`. A date-time stays text because a
+  plugin's stored spelling is its own. If `cast/2` tidies a text value
+  (lowercases it, say), a client must filter with the stored spelling.
+
+No operand that was answered before is refused now. Before #2855 every
+operand was compared as text, and a jsonb string sorts below every number:
+on a numeric type `eq` and `in` never matched, `gt` and `gte` matched every
+stored number and `lt` and `lte` none. `custom_sort` compares the stored
+jsonb and always ordered numbers numerically. A stored value of another JSON
+type (text saved before the field was retyped, say) never fails a read.
+
+The built-in format types (`email`, `color`, `telephone`, `time`, `slug`)
+go further than text: their `eq`,
 `not_eq` and `in` operands also match as a save would store them
 ([json-api.md](json-api.md) → "Custom fields"). A value that is an object or
 a list reaches your `cast/2` unchanged, as before: refusing it there, with

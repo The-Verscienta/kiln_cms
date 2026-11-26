@@ -75,6 +75,17 @@ carries the reasoning.
   - **No migration; rolling the pin back is safe.** An artifact fired with the old answer on an earlier release is corrected by `mix kiln.refire_all`, or by publishing the variant.
 
 
+
+
+<a id="plugin-typed-filters"></a>
+
+- **A filter operand on a plugin field type with a typed GraphQL kind compares as a value of that kind (#2855).** A `custom_filter`, `customWhere` or MCP `custom_filter` operand on a plugin `Kiln.FieldType` was always compared as the text sent, against the stored jsonb. A type whose `graphql_kind/1` is `:int` stores a JSON number, and a jsonb string sorts below every number, so `eq` and `in` (`"42"` is not jsonb `42`) never matched, `gt` and `gte` matched every stored number and `lt` and `lte` none.
+  - **What changes.** On a type whose kind is `:int`, `:float`, `:boolean` or `:date`, an operand that is a value of that kind compares as that value, as on KilnCMS's own field of the kind: `custom_filter[score][gt]=9` finds a stored `10`, `custom_filter[score]=42` a stored `42`, and a `customWhere` `int`, `float`, `boolean` or `date` condition on such a field matches what it names (a `date` one used to be refused).
+  - **Unchanged.** Everything else compares as the text sent, as before, so no read that answered `200` is refused now: an operand that is not a value of the kind (`gt=ten`), `contains`, `starts_with` and `ilike` (`starts_with=1` still finds `10`), and every operand on a type whose kind is `:string`, `:datetime` or `:json` or that has no `graphql_kind/1` (a plugin's date-time spelling is its own). `custom_sort` already compared the stored jsonb. The console's list filters don't offer plugin fields, as before. See [extending-content.md](../extending-content.md#filters-on-a-plugin-field-type).
+  - **No migration; rolling the pin back is safe.** An older release compares such operands as text again.
+
+
+
 <a id="gen-plugin-overlay-config"></a>
 
 - **`mix kiln.gen.plugin` writes an overlay plugin's registration into the overlay (#2910).** The generator registered the plugin with `config :kiln_cms, :plugins` in `config/config.exs`, the core's tracked config, so a downstream overlay's plugin landed in the reusable core. The overlay's activation file is `projects/<name>/project.exs`, which dev copies to the git-ignored `config/project.exs` and the image build copies with `--build-arg PROJECT=<name>`, and its `:plugins` list replaces the core's rather than adding to it.

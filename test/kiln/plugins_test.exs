@@ -50,14 +50,19 @@ defmodule Kiln.PluginsTest do
     # Rating is the one with real behaviour; Tokenless and Exploding exist to
     # cover `type_token_definitions/1`'s probe and rescue branches (#804), which
     # no CORE field type can reach. Lookup carries a client hook (#1918). Tag
-    # and Shapeshifter take lists (#2680).
+    # and Shapeshifter take lists (#2680). Score, Weight, Toggle and Deadline
+    # are typed `:int`, `:float`, `:boolean` and `:date` (#2855).
     assert manifest.field_types == [
              FixturePlugin.FieldTypes.Rating,
              FixturePlugin.FieldTypes.Tokenless,
              FixturePlugin.FieldTypes.Exploding,
              FixturePlugin.FieldTypes.Lookup,
              FixturePlugin.FieldTypes.Tag,
-             FixturePlugin.FieldTypes.Shapeshifter
+             FixturePlugin.FieldTypes.Shapeshifter,
+             FixturePlugin.FieldTypes.Score,
+             FixturePlugin.FieldTypes.Weight,
+             FixturePlugin.FieldTypes.Toggle,
+             FixturePlugin.FieldTypes.Deadline
            ]
 
     # The fixture declares neither, but both keys must be in the manifest: a
@@ -199,7 +204,7 @@ defmodule Kiln.PluginsTest do
       assert output =~ "Test fixture exercising every plugin seam."
       assert output =~ "https://example.com/fixture-plugin"
       # Contribution summary is pluralized and omits zero-count kinds.
-      assert output =~ "6 blocks, 6 field types, 1 image backend, 1 nav item, 1 admin route"
+      assert output =~ "6 blocks, 10 field types, 1 image backend, 1 nav item, 1 admin route"
       assert output =~ "6 plug routes"
     end
 
