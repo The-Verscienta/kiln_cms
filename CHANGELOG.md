@@ -63,6 +63,10 @@ else.
   A 1.13.0 known issue. Standalone images still become image blocks. No migration.
   ([long form](docs/changelog/unreleased.md#markdown-inline-image))
 
+- **Duplicating a text block in the content editor no longer saves the copy empty (#2778).**
+  The copy's text is kept by save and autosave, and is independent of the original. This was a 1.13.0 known issue.
+  ([long form](docs/changelog/unreleased.md#duplicate-rich-text-body))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —
@@ -212,7 +216,6 @@ What's new, with examples and migration steps: [docs/whats-new/v1.13.md](docs/wh
   A refused or dropped socket, a join that times out and a refused join each fall back within 15 seconds, with a notice under the block.
   ([long form](docs/changelog/v1.13.0.md#collab-join-fallback))
 
-
 - **A stored rich text body in a malformed Portable Text shape (`marks` as a string, `children` that aren't spans, a `markDefs` entry that isn't an object) renders with the bad nodes repaired or skipped instead of a 500, and fires and indexes again (#2768).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/v1.13.0.md#portable-text-render-guards))
@@ -226,7 +229,6 @@ What's new, with examples and migration steps: [docs/whats-new/v1.13.md](docs/wh
 - **The visual-editing preview read (`/api/visual-editing/:type/:slug`) encodes only prose: a video's `src`, a file's `download_url`, an embed's `resolved_url`, media ids and other URL or identifier fields come through unchanged, instead of with an invisible tail that made them 404 (#2770).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/v1.13.0.md#visual-editing-prose-only))
-
 
 - **Console fixes: Edit on a webhook, content type or social account, and Remove on a site's mail, storage, AI or search settings, no longer crash when another admin deleted the row; the newsletter's confirmed count, the overview's "All quiet." and release go-live times (now labeled UTC) are right; and a few events check more (#2764).**
   No migration; rolling the pin back is safe.
