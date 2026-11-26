@@ -133,7 +133,7 @@ else.
 
 - **Smart 404 blocking: a spoofed search-engine claim rotating through the addresses of one IPv6 `/64` is counted once another address there has failed its DNS check or left its reverse zone silent (#2838).**
   Only with `KILN_SCANNER_BLOCKING` on; verified crawlers stay exempt, IPv4 is unchanged. No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#scanner-guard-ipv6-rotation))
+  ([#3449](https://github.com/The-Verscienta/kiln_cms/pull/3449) · [long form](docs/changelog/unreleased.md#scanner-guard-ipv6-rotation))
 
 ## [1.13.0] - 2026-11-25
 
