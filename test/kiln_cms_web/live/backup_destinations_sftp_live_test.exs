@@ -274,6 +274,93 @@ defmodule KilnCMSWeb.BackupDestinationsSftpLiveTest do
     refute_received {:sftp_auth, _method, _user}
   end
 
+  describe "the Prunes badge on two SFTP destinations at one path (#3200)" do
+    # An enabled, pruned destination at `/backups` on 127.0.0.1:`port`,
+    # trusting `fingerprint`. Trusting writes no connection, so no server
+    # needs to answer on `port`.
+    defp trusted!(port, type, fingerprint) do
+      admin = platform_admin()
+
+      row =
+        Backups.create_backup_destination!(
+          %{
+            name: "NAS #{port}",
+            kind: "sftp",
+            enabled: false,
+            settings: %{
+              "host" => "127.0.0.1",
+              "port" => port,
+              "username" => "kiln",
+              "path" => "/backups"
+            },
+            secrets: %{"password" => SftpServer.password()}
+          },
+          actor: admin
+        )
+
+      {:ok, row} =
+        Backups.trust_backup_destination_host_key(
+          row,
+          type,
+          fingerprint,
+          :scanned,
+          %{previous_fingerprint: nil, scanned_for: Sftp.Target.server(row.settings)},
+          actor: admin
+        )
+
+      Backups.update_backup_destination!(row, %{enabled: true}, actor: admin)
+    end
+
+    @fp_a "SHA256:" <> String.duplicate("A", 43)
+    @fp_b "SHA256:" <> String.duplicate("B", 43)
+
+    test "different trusted servers both prune", %{conn: conn} do
+      rows = [trusted!(2201, "ssh-ed25519", @fp_a), trusted!(2202, "ssh-ed25519", @fp_b)]
+      lv = mount(conn)
+
+      for row <- rows do
+        assert has_element?(
+                 lv,
+                 "#backup-destination-#{row.id} [data-role=prunes]",
+                 "Prunes its old backups"
+               )
+
+        refute has_element?(lv, "#backup-destination-#{row.id} [data-role=prune-blocked]")
+      end
+    end
+
+    test "one key trusted for both is blocked, and the badge says what would tell them apart",
+         %{conn: conn} do
+      rows = [trusted!(2201, "ssh-ed25519", @fp_a), trusted!(2202, "ssh-ed25519", @fp_a)]
+      lv = mount(conn)
+
+      for row <- rows do
+        refute has_element?(lv, "#backup-destination-#{row.id} [data-role=prunes]")
+
+        assert has_element?(
+                 lv,
+                 "#backup-destination-#{row.id} [data-role=prune-blocked]",
+                 "Not pruned: another SFTP destination uses a folder inside or around this " <>
+                   "one's; the app can't tell whether it is the same server until both trust " <>
+                   "host keys of the same type that differ, and neither key has been refused since"
+               )
+      end
+    end
+
+    test "a key refused since it was trusted blocks the pair", %{conn: conn} do
+      [_a, b] =
+        rows = [trusted!(2201, "ssh-ed25519", @fp_a), trusted!(2202, "ssh-ed25519", @fp_b)]
+
+      :ok = Sftp.HostKeyAlert.mismatch(b.id, "sftp", @fp_a, @fp_b)
+      lv = mount(conn)
+
+      for row <- rows do
+        refute has_element?(lv, "#backup-destination-#{row.id} [data-role=prunes]")
+        assert has_element?(lv, "#backup-destination-#{row.id} [data-role=prune-blocked]")
+      end
+    end
+  end
+
   test "an editor never gets the tab", %{conn: conn} do
     strategy = AshAuthentication.Info.strategy!(KilnCMS.Accounts.User, :password)
     editor = user(:editor)

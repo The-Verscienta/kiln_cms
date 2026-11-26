@@ -14,10 +14,11 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
 
   alias Kiln.BackupDestination.Config
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Destination, DirId, Retention}
-  alias KilnCMS.Backups.Destination.Rclone
+  alias KilnCMS.Backups.{Artifact, Destination, DestinationConfig, DirId, Retention}
+  alias KilnCMS.Backups.Destination.{Rclone, Sftp}
+  alias KilnCMS.Backups.Destination.Sftp.HostKeyAlert
   alias KilnCMS.Backups.Retention.Policy
-  alias KilnCMS.Test.{BackupChain, BackupSchedules}
+  alias KilnCMS.Test.{BackupChain, BackupSchedules, SftpServer}
 
   @moduletag :capture_log
 
@@ -1047,6 +1048,380 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
       assert {:error, :destination_overlap_possible = reason} = prune(dir, config)
 
       assert Retention.describe(reason) =~ "same name"
+    end
+  end
+
+  # -- two SFTP servers told apart by their host keys (#3200) ------------------
+
+  describe "prune_blocker/4: SFTP rows told apart by their trusted host keys (#3200)" do
+    @ed "ssh-ed25519"
+    @fp_a "SHA256:" <> String.duplicate("A", 43)
+    @fp_b "SHA256:" <> String.duplicate("B", 43)
+
+    # A row on `host`, path `path`, trusting `key` (`{type, fingerprint}` or nil).
+    defp sftp_row(host, path, key, user \\ "kiln") do
+      host_key =
+        with {type, fingerprint} <- key do
+          %{"algorithm" => type, "fingerprint" => fingerprint, "trusted_at" => iso_ago(3600)}
+        end
+
+      %{
+        id: Ecto.UUID.generate(),
+        kind: "sftp",
+        settings: %{"host" => host, "port" => 22, "username" => user, "path" => path},
+        host_key: host_key
+      }
+    end
+
+    defp iso_ago(seconds),
+      do: DateTime.utc_now() |> DateTime.add(-seconds) |> DateTime.to_iso8601()
+
+    # What `prune_blocker/4` says of each row, every row's key proven.
+    defp blockers(rows) do
+      proven = MapSet.new(rows, & &1.id)
+      Enum.map(rows, &Retention.prune_blocker(stored_config(&1), rows, nil, proven))
+    end
+
+    test "different trusted servers on the same path both prune" do
+      rows = [
+        sftp_row("nas-a.test", "/backups", {@ed, @fp_a}),
+        sftp_row("nas-b.test", "/backups", {@ed, @fp_b})
+      ]
+
+      assert blockers(rows) == [nil, nil]
+      # Nested, not equal, too.
+      [a, b] = rows
+      inner = %{b | settings: %{b.settings | "path" => "/backups/site"}}
+      assert blockers([a, inner]) == [nil, nil]
+    end
+
+    test "one server by name and by IP (the same fingerprint) stays blocked" do
+      rows = [
+        sftp_row("nas.test", "/backups", {@ed, @fp_a}),
+        sftp_row("10.0.0.5", "/backups", {@ed, @fp_a})
+      ]
+
+      assert blockers(rows) == List.duplicate(:destination_overlap_possible_sftp, 2)
+    end
+
+    test "a key not yet trusted on either side keeps the broad rule" do
+      one = [
+        sftp_row("nas-a.test", "/backups", {@ed, @fp_a}),
+        sftp_row("nas-b.test", "/backups", nil)
+      ]
+
+      assert blockers(one) == List.duplicate(:destination_overlap_possible_sftp, 2)
+
+      both = [
+        sftp_row("nas-a.test", "/backups", nil),
+        sftp_row("nas-b.test", "/backups", nil)
+      ]
+
+      assert blockers(both) == List.duplicate(:destination_overlap_possible_sftp, 2)
+    end
+
+    test "keys of different types stay blocked: one server holds an ed25519 and an RSA key" do
+      rows = [
+        sftp_row("nas.test", "/backups", {@ed, @fp_a}),
+        sftp_row("10.0.0.5", "/backups", {"ssh-rsa", @fp_b})
+      ]
+
+      assert blockers(rows) == List.duplicate(:destination_overlap_possible_sftp, 2)
+    end
+
+    test "a key that isn't proven keeps the pair blocked, on both sides" do
+      [a, b] =
+        rows = [
+          sftp_row("nas-a.test", "/backups", {@ed, @fp_a}),
+          sftp_row("nas-b.test", "/backups", {@ed, @fp_b})
+        ]
+
+      for proven <- [MapSet.new([a.id]), MapSet.new([b.id]), MapSet.new()] do
+        for row <- rows do
+          assert Retention.prune_blocker(stored_config(row), rows, nil, proven) ==
+                   :destination_overlap_possible_sftp
+        end
+      end
+
+      # Without the set nothing is proven: the arity callers that don't
+      # read the events keep the broad rule.
+      assert Retention.prune_blocker(stored_config(a), rows, nil) ==
+               :destination_overlap_possible_sftp
+    end
+
+    test "the same host, port and login, nested, is still an exact overlap" do
+      rows = [
+        sftp_row("nas.test", "/backups", {@ed, @fp_a}),
+        sftp_row("nas.test", "/backups/site", {@ed, @fp_b})
+      ]
+
+      assert blockers(rows) == List.duplicate(:destination_overlap, 2)
+    end
+
+    test "the subject's key is read from its own row; its config's settings only without one" do
+      [a, b] =
+        rows = [
+          sftp_row("nas-a.test", "/backups", {@ed, @fp_a}),
+          sftp_row("nas-b.test", "/backups", {@ed, @fp_b})
+        ]
+
+      proven = MapSet.new([a.id, b.id])
+
+      # The tab's config carries no key; the row's decides.
+      assert Retention.prune_blocker(stored_config(a), rows, nil, proven) == nil
+
+      # A config whose settings carry B's fingerprint is still A's row.
+      settings =
+        Map.merge(a.settings, %{Sftp.algorithm_key() => @ed, Sftp.fingerprint_key() => @fp_b})
+
+      assert Retention.prune_blocker(%{stored_config(a) | settings: settings}, rows, nil, proven) ==
+               nil
+
+      # With no row of its own, the settings' key is used: B's own key, so
+      # the same server as B.
+      ghost = %{stored_config(a) | id: Ecto.UUID.generate(), settings: settings}
+      proven = MapSet.put(proven, ghost.id)
+
+      assert Retention.prune_blocker(ghost, [b], nil, proven) ==
+               :destination_overlap_possible_sftp
+
+      # And with A's key, another server.
+      settings = %{settings | Sftp.fingerprint_key() => @fp_a}
+      ghost = %{ghost | settings: settings}
+      assert Retention.prune_blocker(ghost, [b], nil, proven) == nil
+    end
+
+    test "the reason's text says what would tell the two apart" do
+      assert Retention.describe(:destination_overlap_possible_sftp) =~
+               "until both trust host keys of the same type that differ"
+    end
+  end
+
+  describe "proven_host_keys/2 (#3200)" do
+    defp keyed(fingerprint, trusted_at) do
+      %{
+        id: Ecto.UUID.generate(),
+        kind: "sftp",
+        settings: %{},
+        host_key: %{
+          "algorithm" => @ed,
+          "fingerprint" => fingerprint,
+          "trusted_at" => DateTime.to_iso8601(trusted_at)
+        }
+      }
+    end
+
+    defp proven(rows),
+      do: Retention.proven_host_keys(rows, actor: Backups.system(), authorize_with: :error)
+
+    test "a key a mismatch was recorded against after it was trusted is not proven; " <>
+           "one trusted again since is" do
+      past = DateTime.add(DateTime.utc_now(), -3600)
+      a = keyed(@fp_a, past)
+      b = keyed(@fp_b, past)
+
+      assert proven([a, b]) == {:ok, MapSet.new([a.id, b.id])}
+
+      # The server B names replaced its key: B's next contact is refused.
+      :ok = HostKeyAlert.mismatch(b.id, "sftp", @fp_a, @fp_b)
+      assert proven([a, b]) == {:ok, MapSet.new([a.id])}
+
+      # Re-trusted after the mismatch: proven again.
+      later = DateTime.utc_now() |> DateTime.add(1) |> DateTime.to_iso8601()
+      b = %{b | host_key: %{b.host_key | "trusted_at" => later}}
+      assert proven([a, b]) == {:ok, MapSet.new([a.id, b.id])}
+    end
+
+    test "A re-trusted after a rotation, B still on the old key: blocked" do
+      past = DateTime.add(DateTime.utc_now(), -3600)
+      # One NAS at /backups rotated its key. A was trusted again with the
+      # new one; B still holds the old, and its contact was refused.
+      b = keyed(@fp_b, past)
+      :ok = HostKeyAlert.mismatch(b.id, "sftp", @fp_a, @fp_b)
+      a = keyed(@fp_a, DateTime.add(DateTime.utc_now(), 1))
+
+      a =
+        Map.put(a, :settings, %{"host" => "nas.test", "username" => "kiln", "path" => "/backups"})
+
+      b =
+        Map.put(b, :settings, %{"host" => "10.0.0.5", "username" => "kiln", "path" => "/backups"})
+
+      rows = [a, b]
+      {:ok, proven} = proven(rows)
+
+      for row <- rows do
+        assert Retention.prune_blocker(stored_config(row), rows, nil, proven) ==
+                 :destination_overlap_possible_sftp
+      end
+    end
+
+    test "only another destination's mismatches, or ones before the trust, don't count" do
+      a = keyed(@fp_a, DateTime.add(DateTime.utc_now(), -3600))
+      :ok = HostKeyAlert.mismatch(Ecto.UUID.generate(), "sftp", @fp_a, @fp_b)
+      :ok = HostKeyAlert.mismatch(a.id, "sftp", @fp_b, @fp_a)
+      a = keyed(@fp_a, DateTime.add(DateTime.utc_now(), 1)) |> Map.put(:id, a.id)
+      b = keyed(@fp_b, DateTime.add(DateTime.utc_now(), -3600))
+
+      assert proven([a, b]) == {:ok, MapSet.new([a.id, b.id])}
+    end
+
+    test "rows with no key, an unreadable trust time, or another kind are never proven" do
+      past = DateTime.add(DateTime.utc_now(), -3600)
+      a = keyed(@fp_a, past)
+      b = keyed(@fp_b, past)
+      bad = %{keyed(@fp_b, past) | host_key: Map.put(b.host_key, "trusted_at", "yesterday")}
+      untrusted = %{keyed(@fp_b, past) | host_key: nil}
+      local = %{keyed(@fp_b, past) | kind: "local"}
+
+      assert proven([a, b, bad, untrusted, local]) == {:ok, MapSet.new([a.id, b.id])}
+      # Fewer than two keyed rows: no pair to tell apart, nothing read.
+      assert proven([a, untrusted]) == {:ok, MapSet.new()}
+    end
+
+    test "a refused read is an error; retention's own actor and a platform admin are admitted" do
+      past = DateTime.add(DateTime.utc_now(), -3600)
+      rows = [keyed(@fp_a, past), keyed(@fp_b, past)]
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Retention.proven_host_keys(rows,
+                 actor: KilnCMS.SystemActor.new(:security),
+                 authorize_with: :error
+               )
+
+      assert {:error, %Ash.Error.Forbidden{}} =
+               Retention.proven_host_keys(rows,
+                 actor: BackupSchedules.site_admin(),
+                 authorize_with: :error
+               )
+
+      assert {:ok, _proven} = proven(rows)
+
+      assert {:ok, _proven} =
+               Retention.proven_host_keys(rows,
+                 actor: BackupSchedules.platform_admin(),
+                 authorize_with: :error
+               )
+    end
+  end
+
+  describe "run_on_destination/3 on two SFTP servers at the same path (#3200)" do
+    @describetag :tmp_dir
+
+    setup do
+      previous = Application.get_env(:kiln_cms, Sftp, [])
+      Application.put_env(:kiln_cms, Sftp, Keyword.put(previous, :private_hosts, ["127.0.0.1"]))
+      servers = [SftpServer.start!(), SftpServer.start!()]
+
+      on_exit(fn ->
+        Application.put_env(:kiln_cms, Sftp, previous)
+        Enum.each(servers, &SftpServer.stop/1)
+      end)
+
+      %{servers: servers}
+    end
+
+    # A stored SFTP destination at `/backups` on `server`, trusting `key`.
+    defp sftp_destination!(server, {type, fingerprint}) do
+      admin = BackupSchedules.platform_admin()
+
+      row =
+        Backups.create_backup_destination!(
+          %{
+            name: "NAS #{System.unique_integer([:positive])}",
+            kind: "sftp",
+            enabled: false,
+            settings: %{
+              "host" => "127.0.0.1",
+              "port" => server.port,
+              "username" => SftpServer.user(),
+              "path" => "/backups"
+            },
+            secrets: %{"password" => SftpServer.password()}
+          },
+          actor: admin
+        )
+
+      {:ok, row} =
+        Backups.trust_backup_destination_host_key(
+          row,
+          type,
+          fingerprint,
+          :scanned,
+          %{previous_fingerprint: nil, scanned_for: Sftp.Target.server(row.settings)},
+          actor: admin
+        )
+
+      {:ok, config} = DestinationConfig.to_config(row)
+      %{config | secrets: %{"password" => SftpServer.password()}}
+    end
+
+    # The units of `stamps`, 400 days old, in `server`'s `/backups/db`.
+    defp seed_sftp(server, stamps) do
+      db = Path.join([server.root, "backups", "db"])
+      File.mkdir_p!(db)
+      old = @now - 400 * @day
+
+      for stamp <- stamps, name <- dump_and_sidecar(stamp) do
+        path = Path.join(db, name)
+        File.write!(path, "x")
+        File.touch!(path, old)
+      end
+    end
+
+    defp remaining(server),
+      do: Path.join([server.root, "backups", "db"]) |> File.ls!() |> Enum.sort()
+
+    test "different trusted servers both prune", %{dir: dir, servers: [one, two]} do
+      a = sftp_destination!(one, {one.type, one.fingerprint})
+      b = sftp_destination!(two, {two.type, two.fingerprint})
+      assert one.type == two.type
+      refute one.fingerprint == two.fingerprint
+
+      run!(@a, [a.key, b.key])
+      run!(@b, [a.key, b.key])
+      run!(@c, [a.key, b.key], :failed)
+
+      for {server, config} <- [{one, a}, {two, b}] do
+        seed_sftp(server, [@a, @b, @c])
+        assert {:ok, %{deleted: deleted}} = prune(dir, config)
+        assert Enum.sort(deleted) == Enum.sort(dump_and_sidecar(@a))
+        assert remaining(server) == Enum.sort(dump_and_sidecar(@b) ++ dump_and_sidecar(@c))
+      end
+    end
+
+    test "one key trusted for both (one server under two ports) is skipped, nothing listed",
+         %{dir: dir, servers: [one, two]} do
+      a = sftp_destination!(one, {one.type, one.fingerprint})
+      b = sftp_destination!(two, {one.type, one.fingerprint})
+
+      run!(@a, [a.key, b.key])
+      run!(@b, [a.key, b.key])
+      seed_sftp(one, [@a, @b])
+
+      for config <- [a, b] do
+        assert {:error, :destination_overlap_possible_sftp} = prune(dir, config)
+      end
+
+      assert remaining(one) == Enum.sort(dump_and_sidecar(@a) ++ dump_and_sidecar(@b))
+    end
+
+    test "a mismatch recorded against B since it was trusted skips both", %{
+      dir: dir,
+      servers: [one, two]
+    } do
+      a = sftp_destination!(one, {one.type, one.fingerprint})
+      b = sftp_destination!(two, {two.type, two.fingerprint})
+      :ok = HostKeyAlert.mismatch(b.id, "sftp", one.fingerprint, two.fingerprint)
+
+      run!(@a, [a.key, b.key])
+      run!(@b, [a.key, b.key])
+      seed_sftp(one, [@a, @b])
+
+      for config <- [a, b] do
+        assert {:error, :destination_overlap_possible_sftp} = prune(dir, config)
+      end
+
+      assert remaining(one) == Enum.sort(dump_and_sidecar(@a) ++ dump_and_sidecar(@b))
     end
   end
 
