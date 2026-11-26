@@ -102,6 +102,10 @@ else.
   GraphQL's messages are unchanged. No migration.
   ([long form](docs/changelog/unreleased.md#custom-where-error-spelling))
 
+- **`mix kiln.gen.plugin` registers an overlay plugin in `projects/<name>/project.exs` instead of the core's tracked `config/config.exs`, and its notice covers activation and each content type's search-vector migration (#2910).**
+  The field type's commented `handle_input_event/3` example now compiles cleanly once uncommented. No migration.
+  ([long form](docs/changelog/unreleased.md#gen-plugin-overlay-config))
+
 - **Change feed: a published event is no longer lost to this node's live editor views and relay when a database connection exits mid-publish (#2938).**
   SSE streams still hide such an event. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#feed-relay-exit))
