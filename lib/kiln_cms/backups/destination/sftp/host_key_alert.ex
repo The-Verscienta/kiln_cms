@@ -9,8 +9,10 @@ defmodule KilnCMS.Backups.Destination.Sftp.HostKeyAlert do
   to see a mismatch claims it (`KilnCMS.Accounts.ThrottleStore.hit/5` with a
   limit of one, the claim-first shape of `KilnCMS.Security.ScannerGuard`),
   so a step that retries, or a retention pass on another node, doesn't
-  write the log full. The alert's own window
-  (`KilnCMS.Security.AlertGate`) keeps it to one per 15 minutes on top.
+  write the log full. The alert's window (`KilnCMS.Security.AlertGate`) is
+  claimed per destination, scope `"backup_destination:<id>"` (#3201), so a
+  second server whose key changes inside the same window raises an alert of
+  its own, naming it, instead of finding the window taken.
 
   Best-effort: the destination fails permanently whatever happens here, and
   a failure to record is logged, never raised into the call.
@@ -72,7 +74,7 @@ defmodule KilnCMS.Backups.Destination.Sftp.HostKeyAlert do
                metadata: metadata
              ) do
           {:ok, event} ->
-            alert(metadata["name"])
+            alert(id, metadata["name"])
             event
 
           {:error, error} ->
@@ -93,16 +95,27 @@ defmodule KilnCMS.Backups.Destination.Sftp.HostKeyAlert do
   # claims one: a rolled-back event leaves no alert. The event lives in the
   # instance log, which an alert's delivery doesn't read, so none is named;
   # the destination's name rides on the claim instead, and the alert links
-  # to the instance log.
-  defp alert(name) do
+  # to the instance log. Scoped to the destination (#3201): the event's own
+  # hourly claim already bounds how many one destination raises, and a
+  # shared "platform" window would swallow a second destination's alert,
+  # which no summary names either (its count reads the audit log, not the
+  # instance log).
+  defp alert(id, name) do
     if Alerts.enabled?() do
-      AlertGate.claim("platform", kind(), :platform, Accounts.default_org_id(), nil,
+      AlertGate.claim(scope(id), kind(), :platform, Accounts.default_org_id(), nil,
         details: if(is_binary(name), do: %{"destination" => Redact.text(name)}, else: %{})
       )
     end
 
     :ok
   end
+
+  @doc """
+  The alert window's scope for destination `id`: one window per destination
+  (#3201), never the shared `"platform"` one.
+  """
+  @spec scope(String.t()) :: String.t()
+  def scope(id) when is_binary(id), do: "backup_destination:" <> id
 
   # The name the admin gave it, read as the pipeline's own actor.
   defp name(id) do

@@ -91,8 +91,9 @@ defmodule KilnCMS.Security.AlertGate do
   @type channel :: :site | :platform | :notice
 
   @doc """
-  Claim the alert window for `kind` in `scope` (an org id or `"platform"`),
-  in the caller's transaction. `org_id` is the site the alert is about;
+  Claim the alert window for `kind` in `scope` (an org id, `"platform"`, or
+  `"backup_destination:<id>"` for an SFTP `backup_host_key_changed` alert,
+  one window per destination, #3201), in the caller's transaction. `org_id` is the site the alert is about;
   `event_id` the audit event raising it.
 
   Returns `{:ok, dispatch_id}` for the first claim of the window, `:exists`

@@ -12,8 +12,10 @@ defmodule KilnCMS.Security.AlertDispatch do
 
   ## Shape
 
-    * `scope` — whose alert: the org id (a site alert), `"platform"`, or
-      `"notice:<uuid>"` (a notice: never debounced, its own scope each).
+    * `scope` — whose alert: the org id (a site alert), `"platform"`,
+      `"backup_destination:<uuid>"` (a `backup_host_key_changed` alert: a
+      platform alert debounced per destination, #3201), or `"notice:<uuid>"`
+      (a notice: never debounced, its own scope each).
     * `kind` — the alert kind (`KilnCMS.Security.Alerts`), or
       `"alerts_silenced"` for a notice. A string, so a kind a newer release
       wrote still loads.

@@ -226,10 +226,13 @@ defmodule KilnCMS.Backups.Destination.SftpTest do
                "trusted_fingerprint" => trusted
              }
 
-      assert %{rows: [[1, notice]]} =
+      # One alert, in the destination's own window (#3201).
+      assert %{rows: [[1, notice, scope]]} =
                KilnCMS.Repo.query!(
-                 "SELECT count(*)::int, max(notice::text) FROM security_alert_dispatches WHERE kind = 'backup_host_key_changed' AND channel = 'platform'"
+                 "SELECT count(*)::int, max(notice::text), max(scope) FROM security_alert_dispatches WHERE kind = 'backup_host_key_changed' AND channel = 'platform'"
                )
+
+      assert scope == "backup_destination:" <> row.id
 
       # The alert names the destination, and links to the instance log,
       # where its event is.
