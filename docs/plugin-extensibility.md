@@ -154,7 +154,9 @@ policies or web layer is an overlay.
    and [Plugin system §7](plugin-system-plan.md#7-plugin-health-checks-2244).
 
 The `mix kiln.gen.plugin <Name>` scaffold produces a distribution-shaped
-skeleton in `projects/<name>/`; an overlay plugin is that directory, filled in
+skeleton in `projects/<name>/`, registered in that directory's `project.exs`
+(active once copied to `config/project.exs`, or built with
+`--build-arg PROJECT=<name>`); an overlay plugin is that directory, filled in
 and published as its own git repository. A dependency plugin is an ordinary
 Mix project depending on `kiln_plugin`: `mix kiln.gen.plugin <Name> --dep`
 scaffolds one at `../<name>` (or `--path`), and `sdk/fixtures/dep_plugin` is
@@ -168,8 +170,10 @@ has no `--domain` option. Write an overlay plugin's types by hand on
 template. The notice `mix kiln.gen.plugin` prints when it finishes lists
 every step: uncomment `domains/0` in the generated plugin, register the
 domain in `:ash_domains` and `:content_domains` in
-`projects/<name>/project.exs`, and move the migrations and snapshots
-`mix ash.codegen` writes into the overlay's `priv/`
+`projects/<name>/project.exs`, move the migrations and snapshots
+`mix ash.codegen` writes into the overlay's `priv/`, and add each type's
+search-vector migration (`KilnCMS.Migrations.add_search_vector/1`, gated by
+`mix kiln.search.check`)
 ([Plugins](extending-content.md#5-plugins-d18) has the rest).
 
 #### Plug routes: webhooks, JSON endpoints, feeds (`plug_routes/0`, #2272)

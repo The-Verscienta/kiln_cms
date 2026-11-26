@@ -3485,9 +3485,18 @@ types, spam checks, image backends), as a Hex, git or `path:` dependency
 mix kiln.gen.plugin Ratings --block star_rating --field stars
 ```
 
+It writes `projects/ratings/plugin.ex` and registers the plugin in the
+overlay's activation file, `projects/ratings/project.exs` (the core's tracked
+`config/config.exs` is left alone):
+
 ```elixir
 config :kiln_cms, :plugins, [Ratings.Plugin]
 ```
+
+The plugin goes live when the overlay is activated: copy that file to
+`config/project.exs` in dev, or build the image with
+`docker build --build-arg PROJECT=ratings`. Its `:plugins` list replaces the
+core's rather than merging, so it names every plugin the site runs.
 
 A `Kiln.Plugin` module contributes, per callback (all optional): **block
 types** (`Kiln.Block` modules — they join the storage union, editor palette,
