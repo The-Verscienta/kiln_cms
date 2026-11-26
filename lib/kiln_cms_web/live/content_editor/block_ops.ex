@@ -106,12 +106,22 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
             do: Map.put(socket.assigns.block_children, new_id, children),
             else: socket.assigns.block_children
 
-        socket = socket |> assign(:form, form) |> assign(:block_children, block_children)
+        socket =
+          socket
+          |> assign(:form, form)
+          |> assign(:block_children, block_children)
+          |> assign(:rich_bodies, copy_rich_body(socket.assigns.rich_bodies, source, new_id))
 
-        # Re-inject the copy's fresh-id children into the form params now, so a draft
-        # autosave firing before the next validate persists the duplicate's own
-        # children rather than the original's (do_autosave submits raw params).
-        socket = revalidate(socket, AshPhoenix.Form.params(socket.assigns.form))
+        # Re-inject the copy's fresh-id children and rich body into the form params
+        # now, so a draft autosave firing before the next validate persists the
+        # duplicate's own state rather than the original's (do_autosave submits raw
+        # params).
+        params =
+          socket.assigns.form
+          |> AshPhoenix.Form.params()
+          |> inject_rich_bodies(socket.assigns.rich_bodies)
+
+        socket = revalidate(socket, params)
         broadcast_preview(socket)
 
         {:halt, socket |> refresh_preview() |> mark_dirty()}
@@ -464,6 +474,16 @@ defmodule KilnCMSWeb.ContentEditor.BlockOps do
   # block's body would be replaced by the empty default on the next keystroke.
   defp put_rich_body(rich_bodies, id, [_ | _] = body), do: Map.put(rich_bodies, id, body)
   defp put_rich_body(rich_bodies, id, _body), do: Map.delete(rich_bodies, id)
+
+  # A duplicated rich-text block's body, registered under the copy's new id
+  # (#2778). The original's `rich_bodies` entry is the latest typed text (the
+  # form's value can trail it); the form's value covers a block with no entry.
+  # Without it, the copy's next validate rebuilt it from the posted, empty
+  # `legacy_html` and it saved empty while its editor still showed the text.
+  defp copy_rich_body(rich_bodies, %{"_union_type" => "rich_text"} = source, new_id),
+    do: put_rich_body(rich_bodies, new_id, rich_bodies[source["id"]] || source["body"])
+
+  defp copy_rich_body(rich_bodies, _source, _new_id), do: rich_bodies
 
   # The row/gallery helpers keep their `{:noreply, socket}` shape (the
   # LiveView's gallery multi-pick calls them too); the hook contract wants

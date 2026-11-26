@@ -63,6 +63,10 @@ else.
   A 1.13.0 known issue. Standalone images still become image blocks. No migration.
   ([long form](docs/changelog/unreleased.md#markdown-inline-image))
 
+- **Duplicating a text block in the content editor no longer saves the copy empty (#2778).**
+  The copy's text is kept by save and autosave, and is independent of the original. This was a 1.13.0 known issue.
+  ([long form](docs/changelog/unreleased.md#duplicate-rich-text-body))
+
 - **Console fixes: Edit on an automation rule another admin deleted no longer crashes; analytics names admin-defined types on every site; a refused calendar drag puts the chip back; and the field, claim-checking, billing and live-document takeover forms keep what they should (#2786).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#console-small-defects-2))
