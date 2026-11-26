@@ -33,6 +33,16 @@ defmodule KilnCMS.CMS.SitePasswordPolicy do
   who administers this site signs in with it. The outcome is this row's
   policy: `:block` sends them to choose a new password, `:warn` signs them in
   with a warning. See `KilnCMS.Accounts.PasswordPolicy.sign_in/1`.
+
+  `:save` upserts every accepted field, so a caller of
+  `KilnCMS.CMS.save_site_password_policy/2` that passes only
+  `breached_password_policy` switches `check_on_sign_in` back off. Pass both:
+
+      CMS.save_site_password_policy(
+        %{breached_password_policy: :block, check_on_sign_in: true},
+        actor: admin,
+        tenant: org
+      )
   """
   use KilnCMS.CMS.OrgSettings,
     table: "site_password_policy",
