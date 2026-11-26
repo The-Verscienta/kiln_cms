@@ -24005,6 +24005,11 @@ msgstr ""
 msgid "That rule is no longer listed."
 msgstr ""
 
+#: lib/kiln_cms_web/live/automation_live.ex
+#, elixir-autogen, elixir-format
+msgid "That rule no longer exists."
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
 msgid "That schedule no longer exists."

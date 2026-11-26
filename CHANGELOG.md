@@ -55,6 +55,14 @@ else.
   text in a section that is not part of a `- ` entry.
 -->
 
+## [Unreleased]
+
+### Fixed
+
+- **Console fixes: Edit on an automation rule another admin deleted no longer crashes; analytics names admin-defined types on every site; a refused calendar drag puts the chip back; and the field, claim-checking, billing and live-document takeover forms keep what they should (#2786).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#console-small-defects-2))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —

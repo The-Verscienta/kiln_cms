@@ -48,7 +48,10 @@ defmodule KilnCMSWeb.ComplianceLive do
 
   @impl true
   def handle_event("save", params, socket) do
-    save(socket, attrs(params), gettext("Claim checking settings saved."))
+    case save(socket, attrs(params), gettext("Claim checking settings saved.")) do
+      {:ok, socket} -> {:noreply, socket}
+      {:error, socket} -> {:noreply, keep_typed(socket, params)}
+    end
   end
 
   # The explainer's one button. It sends the site's *current* settings with
@@ -57,11 +60,14 @@ defmodule KilnCMSWeb.ComplianceLive do
   # so a partial save would clear the phrase list of a site that had configured
   # one and then switched off.
   def handle_event("enable", _params, socket) do
-    save(
-      socket,
-      %{current_attrs(socket) | enabled: true},
-      gettext("Claim checking is on. The Compliance panel now appears in the editor.")
-    )
+    {_result, socket} =
+      save(
+        socket,
+        %{current_attrs(socket) | enabled: true},
+        gettext("Claim checking is on. The Compliance panel now appears in the editor.")
+      )
+
+    {:noreply, socket}
   end
 
   def handle_event("reset", _params, socket) do
@@ -99,12 +105,21 @@ defmodule KilnCMSWeb.ComplianceLive do
            context: socket.assigns.security_context
          ) do
       {:ok, _row} ->
-        {:noreply, socket |> put_flash(:info, message) |> load_settings()}
+        {:ok, socket |> put_flash(:info, message) |> load_settings()}
 
       {:error, error} ->
-        {:noreply, socket |> put_flash(:error, error_message(error)) |> load_settings()}
+        {:error, socket |> put_flash(:error, error_message(error)) |> load_settings()}
     end
   end
+
+  # A refused save reloads what is saved, but the form keeps what the admin
+  # typed (#2786): reseeding it from the row threw away a long phrase list
+  # over one bad line. The params are the form's own, so they render back as
+  # they were sent.
+  defp keep_typed(socket, %{"compliance" => %{} = fields}),
+    do: assign(socket, :form, to_form(fields, as: :compliance))
+
+  defp keep_typed(socket, _params), do: socket
 
   # What this site does today, in the shape `:save` accepts. The three switches
   # and the disclaimer come from the *resolved* settings, so a site inheriting

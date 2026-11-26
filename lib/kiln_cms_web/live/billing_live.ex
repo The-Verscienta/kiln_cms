@@ -188,18 +188,26 @@ defmodule KilnCMSWeb.BillingLive do
 
         tier ->
           case Billing.destroy_tier(tier, actor: socket.assigns.actor, tenant: org_id(socket)) do
-            :ok ->
-              socket |> load_tiers() |> put_flash(:info, gettext("Tier deleted."))
-
-            {:ok, _tier} ->
-              socket |> load_tiers() |> put_flash(:info, gettext("Tier deleted."))
-
-            {:error, error} ->
-              put_flash(socket, :error, error_message(error))
+            :ok -> deleted_tier(socket, id)
+            {:ok, _tier} -> deleted_tier(socket, id)
+            {:error, error} -> put_flash(socket, :error, error_message(error))
           end
       end
 
     {:noreply, socket}
+  end
+
+  # The edit form bound to a tier that is now deleted would only fail on its
+  # next save (#2786), so it goes back to adding a new tier. An edit of
+  # another tier stays open.
+  defp deleted_tier(socket, id) do
+    socket =
+      case socket.assigns.editing_tier do
+        %{id: ^id} -> socket |> assign(:editing_tier, nil) |> assign_tier_form()
+        _other -> socket
+      end
+
+    socket |> load_tiers() |> put_flash(:info, gettext("Tier deleted."))
   end
 
   # --- async ------------------------------------------------------------------
