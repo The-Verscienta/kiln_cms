@@ -15,6 +15,12 @@ Releases are tagged `kiln_plugin-vX.Y.Z` in the
 
 ## Unreleased
 
+### Changed
+
+- **`c:Kiln.FieldType.graphql_kind/1`'s doc says the kind also decides how a
+  filter operand on the field compares (kiln_cms#2855).** Documentation only:
+  no callback or return shape changed.
+
 ### Fixed
 
 - **`c:Kiln.FieldType.widgets/1` documents the definition it is asked with
