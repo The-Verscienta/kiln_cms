@@ -849,8 +849,16 @@ defmodule KilnCMS.CrawlerVerification do
   # `:silent` mark on its `/64` (a transient timeout), never a `:failed` one.
   defp mark_network(ip, {:unverified, :failed}, config), do: mark_if_guarded(ip, :failed, config)
 
+  # The guard and the address are checked before `resolver_failing?/1`, which
+  # may start a canary query: the canary runs only while the 404 guard asks
+  # (ADR 0054), and an IPv4 address has no mark to write.
   defp mark_network(ip, {:unverified, :error}, config) do
-    if resolver_failing?(config), do: :ok, else: mark_if_guarded(ip, :silent, config)
+    cond do
+      not scanner_guard_on?() -> :ok
+      network_key(ip) == nil -> :ok
+      resolver_failing?(config) -> :ok
+      true -> put_mark(network_key(ip), :silent, config)
+    end
   end
 
   defp mark_network(ip, :verified, _config) do

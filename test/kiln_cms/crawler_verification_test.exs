@@ -1292,6 +1292,25 @@ defmodule KilnCMS.CrawlerVerificationTest do
       refute CrawlerVerification.network_flagged?(ip, opts)
     end
 
+    # ADR 0054: the canary runs only while the 404 guard asks. A lookup with
+    # no answer must not start one on an install with the guard off, nor for
+    # an IPv4 address, which has no mark to write.
+    test "a PTR query with no answer starts no canary with the guard off, nor for IPv4",
+         %{opts: opts, canary: canary} do
+      Application.delete_env(:kiln_cms, :scanner_blocking)
+      ip = marked_v6()
+      Stub.put_ptr(ip, {:error, :timeout})
+      assert finish(:google, ip, opts) == {:unverified, :error}
+
+      Application.put_env(:kiln_cms, :scanner_blocking, enabled: true)
+      v4_ip = v4()
+      Stub.put_ptr(v4_ip, {:error, :timeout})
+      assert finish(:google, v4_ip, opts) == {:unverified, :error}
+
+      refute_receive {Stub, :blocked, _resolver, _callers, :ptr, ^canary}, 100
+      assert Stub.calls(:ptr, canary) == 0
+    end
+
     # Cachex orders eviction by write time in milliseconds: assert the bound,
     # not which mark it dropped.
     test "the mark cache is bounded on its own, and forget_network/1 drops one" do
