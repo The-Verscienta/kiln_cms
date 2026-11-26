@@ -338,6 +338,23 @@ defmodule KilnCMSWeb.JsonApiTest do
       assert ids(page2) == [c.id]
     end
 
+    # #2934: a count over rows the caller may not read is a filter, not a raise.
+    # The API reads with Ash's default `authorize_with: :filter`, so the draft is
+    # neither listed nor counted and the answer is a 200, never a 500.
+    test "page[count] counts only what the caller may read" do
+      admin = user(:admin)
+      cat = category(admin)
+
+      live = published_post(%{title: "Live", category_id: cat.id}, admin)
+      _draft = make_post(%{title: "Draft", category_id: cat.id}, admin)
+
+      assert {200, body} =
+               api_get("/api/json/posts?filter[category_id]=#{cat.id}&page[count]=true")
+
+      assert ids(body) == [live.id]
+      assert body["meta"]["page"]["total"] == 1
+    end
+
     test "an oversized page limit is accepted (rows are capped server-side by max_page_size)" do
       admin = user(:admin)
       cat = category(admin)

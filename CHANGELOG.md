@@ -94,6 +94,10 @@ else.
   The row, the bulk Publish confirm and the release's item list name the date and what happens then. A 1.13.0 known issue.
   ([long form](docs/changelog/unreleased.md#publish-shows-unpublish-date))
 
+- **A counted read that the actor is refused now returns the refusal instead of raising an internal `Ash.Error.Framework` error (#2934).**
+  It works around an Ash defect in the count query. The JSON:API, GraphQL and MCP counts were never affected. No migration.
+  ([long form](docs/changelog/unreleased.md#counted-read-refusal))
+
 - **Fields admin: the editor input choices for a plugin field type now follow every setting of the field, so the page offers exactly the inputs the save accepts (#2883).**
   Before, the page asked the type with only a few settings and could show a choice the save refused, or hide one it took. No migration.
   ([long form](docs/changelog/unreleased.md#plugin-widgets-full-definition))

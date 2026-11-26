@@ -85,6 +85,15 @@ carries the reasoning.
   - **No migration; rolling the pin back is safe.** An older release compares such operands as text again.
 
 
+
+<a id="counted-read-refusal"></a>
+
+- **A refused count-paginated read returns `Forbidden` (#2934).** A read with `authorize_with: :error` and `page: [count: true]` raised `Ash.Error.Framework` ("Invalid value returned from AshPostgres.DataLayer.run_aggregate_query/3") for an actor the policy refused, where the same read without a count returned `{:error, %Ash.Error.Forbidden{}}`. With `:error`, Ash turns the refusal into a filter that raises inside Postgres; AshPostgres hands that back as `{:error, :no_rollback, error}`, which Ash accepts from the rows query but not from the count query (seen on ash 3.38.1 and ash_postgres 2.15.2).
+  - **What changes.** `KilnCMS.CountedRead.read/1` runs such a read with its count and, when the count fails that way, runs it again without one and returns that read's error: the refusal. The backup history's "Last scheduled run" lookup (`Backups.history_page_of/3`) counts through it. A canary test fails once Ash accepts the AshPostgres return, so the workaround can be removed then.
+  - **Unchanged.** The JSON:API `page[count]`, GraphQL and MCP reads, and the console lists, authorize with Ash's default `:filter`: refused rows are left out of the page and the count, and the answer is never a 500. No migration; rolling the pin back is safe.
+
+
+
 <a id="plugin-widgets-full-definition"></a>
 
 - **The fields admin asks a plugin field type for its editor inputs with the whole definition, as the save does (#2883).** A `Kiln.FieldType` that offers a choice of editor input lists it from `widgets/1`, which is handed the field's definition. The save asked with the whole definition the write would store. The **Editor input** cards on `/editor/fields` asked with a definition built from six posted settings (type, `multiple`, new terms, text format, options and the number bounds) laid over the stored field. A type whose list reads any other setting, such as `required`, `name` or another constraint, got a different answer on the page: the admin could pick a card the save then refused, or never see one the save would take.
