@@ -131,7 +131,7 @@ else.
 
 - **Backups: a cron backup that History recorded as Failed "Interrupted" is corrected, once, when its stamp turns out complete (#2846).**
   The importer's summary gains a `reevaluated` count, and retention's `pruned` mark now locks the row it marks. No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#reevaluate-interrupted-import))
+  ([#3447](https://github.com/The-Verscienta/kiln_cms/pull/3447) · [long form](docs/changelog/unreleased.md#reevaluate-interrupted-import))
 
 ## [1.13.0] - 2026-11-25
 
