@@ -36,6 +36,12 @@ carries the reasoning.
 
 ## Fixed
 
+<a id="field-schema-deadline"></a>
+
+- **A slow schema build no longer refuses a valid JSON field value (#3063).** A `:json` custom field with a JSON Schema checks each written value in its own process under a 1-second deadline, so a pathological `pattern` fails the save with a message instead of holding the request. The schema was built inside that deadline too. The first build on a node loads the JSV builder, every draft 2020-12 vocabulary and the embedded meta-schema (about 20 modules, tens of milliseconds when idle, where a later build takes well under a millisecond), and on a busy node that could pass the second. The save was then refused with "took too long to check against the schema" although the value was valid.
+  - **What changes.** The schema is built first, in the saving process, the same build that already runs unbounded when the field definition is saved. The deadline starts after it and covers only the check of the value.
+  - **Unchanged.** The schema limits (16 KB, 16 levels, 1,000 values, no remote references), the value limits, the deadline and its message. A value whose check runs past the deadline is still refused. No migration; rolling the pin back is safe.
+
 <a id="publish-shows-unpublish-date"></a>
 
 - **Publishing a draft without opening the editor shows its scheduled unpublish date (#2892).** This was a 1.13.0 known issue. A draft can carry a takedown date, **Scheduled unpublish at** in the editor (`unpublish_at`, with `expiry_action` saying what happens then), and [ADR 0051](../decisions/0051-taking-content-down-needs-the-same-approval-as-putting-it-up.md) leaves it ungated on a draft because whoever publishes the draft approves the date with the page. Only the editor showed it. An admin who approved a draft from the content list, the bulk bar or a release never saw the date, and the page came down at it.
