@@ -125,6 +125,43 @@ defmodule KilnCMSWeb.BackupDestinationsSftpLiveTest do
     assert has_element?(lv, "#host-key-#{row.id} [data-role=host-key-unconfirmed]")
   end
 
+  test "a path with a space in a NAS share name saves from the form (#3199)", %{
+    conn: conn,
+    server: server
+  } do
+    lv = mount(conn)
+    lv |> element("#destination-new") |> render_click()
+    lv |> element("#destination-kind-sftp") |> render_click()
+
+    submit = fn path ->
+      lv
+      |> form("#destination-form",
+        destination: %{
+          name: "NAS",
+          enabled: "false",
+          settings: %{
+            host: "127.0.0.1",
+            port: Integer.to_string(server.port),
+            username: "kiln",
+            path: path
+          },
+          secrets: %{password: SftpServer.password()}
+        }
+      )
+      |> render_submit()
+    end
+
+    # Climbing out is still refused, and nothing is saved.
+    assert submit.("/volume1/../etc") =~ "the path must be folder names"
+    assert Backups.list_backup_destinations!(actor: platform_admin()) == []
+
+    submit.("/volume1/Backup Share/kiln")
+
+    assert [row] = Backups.list_backup_destinations!(actor: platform_admin())
+    assert row.settings["path"] == "/volume1/Backup Share/kiln"
+    assert render(lv) =~ "sftp://kiln@127.0.0.1:#{server.port}/volume1/Backup Share/kiln"
+  end
+
   test "check, compare and trust the key; the destination can then be enabled", %{
     conn: conn,
     server: server
@@ -235,6 +272,111 @@ defmodule KilnCMSWeb.BackupDestinationsSftpLiveTest do
     assert {:live, :redirect, _} = denied.redirected
     assert Backups.get_backup_destination!(row.id, actor: platform_admin()).host_key == nil
     refute_received {:sftp_auth, _method, _user}
+  end
+
+  describe "the Prunes badge on two SFTP destinations at one path (#3200)" do
+    # An enabled, pruned destination at `/backups` on 127.0.0.1:`port`,
+    # trusting `fingerprint`, and a Test result of `tested_ok` (nil: none)
+    # recorded after the trust. Trusting makes no connection, and the
+    # result is recorded as the Test would record it, so no server needs to
+    # answer on `port`.
+    defp trusted!(port, type, fingerprint, tested_ok \\ true) do
+      admin = platform_admin()
+
+      row =
+        Backups.create_backup_destination!(
+          %{
+            name: "NAS #{port}",
+            kind: "sftp",
+            enabled: false,
+            settings: %{
+              "host" => "127.0.0.1",
+              "port" => port,
+              "username" => "kiln",
+              "path" => "/backups"
+            },
+            secrets: %{"password" => SftpServer.password()}
+          },
+          actor: admin
+        )
+
+      {:ok, row} =
+        Backups.trust_backup_destination_host_key(
+          row,
+          type,
+          fingerprint,
+          :scanned,
+          %{previous_fingerprint: nil, scanned_for: Sftp.Target.server(row.settings)},
+          actor: admin
+        )
+
+      row = Backups.update_backup_destination!(row, %{enabled: true}, actor: admin)
+      if is_nil(tested_ok), do: row, else: tested!(row, tested_ok)
+    end
+
+    defp tested!(row, ok),
+      do: Backups.record_backup_destination_test!(row, %{ok: ok}, actor: Backups.system())
+
+    @fp_a "SHA256:" <> String.duplicate("A", 43)
+    @fp_b "SHA256:" <> String.duplicate("B", 43)
+
+    test "different trusted servers, each tested since both trusts, both prune", %{conn: conn} do
+      [a, b] = [trusted!(2201, "ssh-ed25519", @fp_a, nil), trusted!(2202, "ssh-ed25519", @fp_b)]
+      # A's Test after B's trust.
+      rows = [tested!(a, true), b]
+      lv = mount(conn)
+
+      for row <- rows do
+        assert has_element?(
+                 lv,
+                 "#backup-destination-#{row.id} [data-role=prunes]",
+                 "Prunes its old backups"
+               )
+
+        refute has_element?(lv, "#backup-destination-#{row.id} [data-role=prune-blocked]")
+      end
+    end
+
+    test "one key trusted for both is blocked, and the badge says what would tell them apart",
+         %{conn: conn} do
+      rows = [trusted!(2201, "ssh-ed25519", @fp_a), trusted!(2202, "ssh-ed25519", @fp_a)]
+      lv = mount(conn)
+
+      for row <- rows do
+        refute has_element?(lv, "#backup-destination-#{row.id} [data-role=prunes]")
+
+        assert has_element?(
+                 lv,
+                 "#backup-destination-#{row.id} [data-role=prune-blocked]",
+                 "Not pruned: another SFTP destination uses a folder inside or around this " <>
+                   "one's; the app can't tell whether it is the same server until both trust " <>
+                   "host keys of the same type that differ, and each has passed a Test since " <>
+                   "the later of the two was trusted"
+               )
+      end
+    end
+
+    test "a row not tested since the other was trusted blocks the pair", %{conn: conn} do
+      # A was tested before B was trusted: A has not been seen since.
+      rows = [trusted!(2201, "ssh-ed25519", @fp_a), trusted!(2202, "ssh-ed25519", @fp_b)]
+      lv = mount(conn)
+
+      for row <- rows do
+        refute has_element?(lv, "#backup-destination-#{row.id} [data-role=prunes]")
+        assert has_element?(lv, "#backup-destination-#{row.id} [data-role=prune-blocked]")
+      end
+    end
+
+    test "a failed Test blocks the pair", %{conn: conn} do
+      [a, b] = [trusted!(2201, "ssh-ed25519", @fp_a, nil), trusted!(2202, "ssh-ed25519", @fp_b)]
+      rows = [tested!(a, false), b]
+      lv = mount(conn)
+
+      for row <- rows do
+        refute has_element?(lv, "#backup-destination-#{row.id} [data-role=prunes]")
+        assert has_element?(lv, "#backup-destination-#{row.id} [data-role=prune-blocked]")
+      end
+    end
   end
 
   test "an editor never gets the tab", %{conn: conn} do

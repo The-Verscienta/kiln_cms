@@ -13,10 +13,21 @@ defmodule KilnCMS.Backups.Destination.Sftp.Target do
       (`KilnCMS.Backups.Destination.HostPolicy`, ADR 0069);
     * `port` — 1 to 65535, 22 when blank;
     * `username` — no control characters, no `@`, at most 255 bytes;
-    * `path` — absolute (`/backups/kiln`), segments of `A-Z a-z 0-9 . _ -`
-      with no `.` or `..` (`KilnCMS.Backups.Destination.RemotePath`).
+    * `path` — absolute (`/backups/kiln`, `/volume1/Backup Share/kiln`),
+      segments of `A-Z a-z 0-9 . _ - + @ ,` and the space, none `.` or `..`
+      and none starting or ending with a space
+      (`KilnCMS.Backups.Destination.RemotePath.folder_segments/2`, #3199).
       Absolute only: a path relative to the login directory names the same
       place as an absolute one, which the overlap check could not see.
+
+  `parse/1` trims the path before splitting it; `location/1` splits it as
+  stored. They agree because `KilnCMS.Backups.DestinationConfig.Changes.Normalize`
+  trims every string setting before it is stored, and because `parse/1`
+  refuses a segment with a space at either end, the one other way a plain
+  split could read a path differently. `location/1` is kept a plain split on
+  purpose: `KilnCMS.Backups.Destination.target_key/2` hashes it, and a change
+  to what it answers for an existing row would orphan that row's recorded
+  sends and resume checkpoints.
 
   Files are kept as `<path>/<subdir>/<name>`, every remote path built here
   from the settings and checked segments, never from a checkpoint or a
@@ -196,7 +207,7 @@ defmodule KilnCMS.Backups.Destination.Sftp.Target do
     path = String.trim(path)
 
     if String.starts_with?(path, "/"),
-      do: RemotePath.segments(path, "the path"),
+      do: RemotePath.folder_segments(path, "the path"),
       else: {:error, "the path must be absolute, e.g. /backups/kiln"}
   end
 

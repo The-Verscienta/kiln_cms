@@ -38,12 +38,44 @@ defmodule KilnCMS.Backups.Destination.SftpTargetTest do
     end
 
     test "the path is absolute, with no climbing out and nothing but safe characters" do
-      for path <- ["backups", "~/x", "/a/../../b", "/../x", "/a/./b", "/a b", "/a\0b", "../x"] do
+      for path <- [
+            "backups",
+            "~/x",
+            "/~",
+            "/home/~kiln",
+            "/a/../../b",
+            "/../x",
+            "/a/./b",
+            "/.",
+            "/a\\..\\b",
+            "/a\\b",
+            "/a\0b",
+            "/a\nb",
+            "/a\x7fb",
+            "/a//b",
+            "/a /b",
+            "/ a/b",
+            "../x"
+          ] do
         assert {:error, _} = parse(%{"path" => path}), inspect(path)
       end
 
       assert {:error, "the path must be absolute, e.g. /backups/kiln"} =
                parse(%{"path" => "backups/kiln"})
+    end
+
+    test "a NAS share name with a space, +, @ or , is a path (#3199)" do
+      assert {:ok, %Target{segments: ["volume1", "Backup Share", "kiln"]} = target} =
+               parse(%{"path" => "/volume1/Backup Share/kiln"})
+
+      assert Target.base(target) == "/volume1/Backup Share/kiln"
+      assert Target.dir(target, "db") == "/volume1/Backup Share/kiln/db"
+
+      assert {:ok, %Target{segments: ["a+b", "me@nas", "x,y"]}} =
+               parse(%{"path" => "/a+b/me@nas/x,y"})
+
+      # Trimmed at the ends, as the stored setting is.
+      assert {:ok, %Target{segments: ["a", "kiln"]}} = parse(%{"path" => "/a/kiln "})
     end
 
     test "the username has no control characters and no @" do
@@ -204,6 +236,40 @@ defmodule KilnCMS.Backups.Destination.SftpTargetTest do
       assert Destination.location(keyed) == Destination.location(config)
       assert Destination.location_fields("sftp") == ["host", "port", "username", "path"]
       assert Sftp.describe(config) == "sftp://kiln@nas.example.com:22/backups/kiln"
+    end
+
+    test "a path with a space is located and shown as typed" do
+      settings = %{@settings | "path" => "/volume1/Backup Share/kiln"}
+      config = %Config{kind: "sftp", settings: settings}
+
+      assert Destination.location(config) ==
+               {:sftp, "nas.example.com", 22, "kiln", ["volume1", "Backup Share", "kiln"]}
+
+      assert Sftp.describe(config) == "sftp://kiln@nas.example.com:22/volume1/Backup Share/kiln"
+
+      assert Destination.overlap?(
+               Destination.location(config),
+               {:sftp, "nas.example.com", 22, "kiln", ["volume1", "Backup Share"]}
+             )
+
+      refute Destination.overlap?(
+               Destination.location(config),
+               {:sftp, "nas.example.com", 22, "kiln", ["volume1", "Backup"]}
+             )
+    end
+
+    test "an existing row's target key is unchanged by the wider path rule (#3199)" do
+      # Pinned: `target_key/2` hashes `location/1`, and recorded sends and
+      # resume checkpoints are kept under it. A change here orphans them.
+      config = %Config{
+        id: "a",
+        key: "dest:a",
+        kind: "sftp",
+        settings: %{@settings | "path" => "/Backups/Kiln_01.x"} |> Map.put("port", 2222)
+      }
+
+      assert Destination.target_key(%{"key" => "dest:a", "source" => "db"}, config) ==
+               "dest:a|5112c449f3ea1285"
     end
 
     test "overlap: same server, port and user, one path in the other" do

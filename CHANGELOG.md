@@ -74,6 +74,15 @@ else.
   `POST /api/auth/sign_in` gains a `403` `password_reset_required` and an additive `password_breach` field. Expand-only migration; rolling the pin back is safe.
   ([#3434](https://github.com/The-Verscienta/kiln_cms/pull/3434) · [long form](docs/changelog/unreleased.md#breached-password-sign-in-check))
 
+### Changed
+
+- **Backups: an SFTP destination's path may hold spaces and `+ @ ,`, so a NAS share such as `/volume1/Backup Share/kiln` can be used (#3199).**
+  ASCII only; `..`, `~`, `\`, control characters and a space at either end of a folder name are still refused. No migration; after a rollback, a destination whose path uses the new characters fails until its path is changed.
+  ([#3425](https://github.com/The-Verscienta/kiln_cms/pull/3425) · [long form](docs/changelog/unreleased.md#sftp-path-spaces))
+- **Backups: two SFTP destinations whose folders nest both prune once Kiln can tell they are different servers: both trust host keys of the same type that differ, and each has passed a Test since the later trust (#3200).**
+  Press **Test** on both rows to clear "Not pruned". No migration.
+  ([#3425](https://github.com/The-Verscienta/kiln_cms/pull/3425) · [long form](docs/changelog/unreleased.md#sftp-distinct-servers-prune))
+
 ### Fixed
 
 - **JSON fields: a valid value is no longer refused as "took too long to check against the schema" when building its JSON Schema is slow on a cold or busy node (#3063).**
@@ -120,6 +129,10 @@ else.
 - **`mix kiln.gen.plugin` registers an overlay plugin in `projects/<name>/project.exs` instead of the core's tracked `config/config.exs`, and its notice covers activation and each content type's search-vector migration (#2910).**
   The field type's commented `handle_input_event/3` example now compiles cleanly once uncommented. No migration.
   ([long form](docs/changelog/unreleased.md#gen-plugin-overlay-config))
+
+- **Backups: when two SFTP servers' host keys change in the same 15-minute window, the admins get an alert for each, not only the first (#3201).**
+  No migration; rolling the pin back is safe.
+  ([#3425](https://github.com/The-Verscienta/kiln_cms/pull/3425) · [long form](docs/changelog/unreleased.md#host-key-alert-per-destination))
 
 - **Fields admin: the editor input choices for a plugin field type now follow every setting of the field, so the page offers exactly the inputs the save accepts (#2883).**
   Before, the page asked the type with only a few settings and could show a choice the save refused, or hide one it took. No migration.
