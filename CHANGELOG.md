@@ -106,6 +106,10 @@ else.
   The field type's commented `handle_input_event/3` example now compiles cleanly once uncommented. No migration.
   ([long form](docs/changelog/unreleased.md#gen-plugin-overlay-config))
 
+- **Backups: a cron backup that History recorded as Failed "Interrupted" is corrected, once, when its stamp turns out complete (#2846).**
+  The importer's summary gains a `reevaluated` count, and retention's `pruned` mark now locks the row it marks. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#reevaluate-interrupted-import))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —

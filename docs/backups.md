@@ -5393,7 +5393,9 @@ newest file of the stamp:
    files left behind with their age ("No backup has written to this stamp for
    hours; left behind: …"). Its artifacts are the finished files (none if the
    run was killed in its first file), and its components are the kinds of all
-   its files, partial or finished. The row is never rewritten.
+   its files, partial or finished. The row is rewritten only if the stamp
+   turns out to have finished after all, once (see
+   [If the run finished after all](#if-the-run-finished-after-all) below).
 3. **After 12 hours with every file of the stamp unchanged**, `backup.sh prune`
    deletes the stamp's `.partial` files and prints the path of each. Prune runs
    at the end of every `backup.sh all` that succeeds and on its own as
@@ -5442,7 +5444,8 @@ imports as what is left of it:
 new in this release. An older copy of the script doesn't keep its files fresh,
 so a live run with a phase in which nothing is written for 3 hours (planning a
 very large media tree on NFS, or `pg_dump` waiting for a lock) can be recorded
-as Interrupted, and that row stays.
+as Interrupted. Clocks that disagree badly can do the same. If that run then
+finishes, the row is corrected, as below; if it doesn't, the row stays.
 
 What can go wrong:
 
@@ -5454,6 +5457,43 @@ What can go wrong:
 | `Removing an abandoned backup partial: <name>` | Server log | The start of an in-app backup removed a `.partial`, as above. |
 | `Partial sweep skipped db/: it can't be listed (<reason>)` | Server log | That directory's `.partial` files were left for the next in-app backup; the other directory's were still swept. |
 | `Partial sweep kept every stamped partial: <error>` | Server log | History could not be read, so no `.partial` named after a stamp was removed. |
+
+### If the run finished after all
+
+A row recorded as Interrupted is looked at again on every import (the same
+triggers as above). Once its stamp's files show the run completed, the row is
+rewritten, once, with what importing the stamp now would record. That is
+usually **Succeeded**: a History row that read Failed "Interrupted: the
+backup stopped before it finished and left .partial files behind" changes to
+the new outcome, and its log gains the line "Re-evaluated: the stamp's
+.partial files are gone and its set is complete". The row's own log, start
+time, trigger and cron `keep_days` stay as they were.
+
+The importer rewrites the row only when all of these hold for its stamp:
+
+- no `.partial` file of any kind is left in `db/` or `media/`, and every file
+  it listed is still there;
+- the newest file is at least 10 minutes old, and not dated in the future;
+- every kind the row names as a component (and any kind the stamp's files
+  add) has a finished file, and either `manifest.json` covers the stamp and
+  says it succeeded, or each kind's set is complete with its checksum sidecar
+  beside it: one dump, one media archive, or media parts 1 to N with no gap.
+
+So a cron `backup.sh all` killed during the media archive, whose media
+`.partial` files `backup.sh prune` removed later, stays Interrupted: its row
+names media, and there is no finished media file. It is never turned into
+"Succeeded, database only".
+
+The row is not rewritten if retention has marked any of its files `pruned`
+(on this host or on a destination) since it was recorded, because the
+importer's listing may predate that deletion. It is also left alone if
+another node already rewrote it. Neither case is counted as a failure.
+Nothing changes in the file layout or the schema, and no setting turns it on
+or off.
+
+The importer's summary counts each rewrite under `reevaluated`. A rewrite
+whose write fails is counted under `failed` and waits out the same backoff as
+a failed import ([When an import keeps failing](#when-an-import-keeps-failing)).
 
 ### Backup history (#2217)
 
@@ -5710,6 +5750,11 @@ and the call still returns `{:ok, _}`, so read `failed` as well. `deferred`
 counts stamps whose write failed on an earlier call and that wait out a
 backoff before the next try
 ([When an import keeps failing](#when-an-import-keeps-failing)).
+`reevaluated` counts rows recorded as Interrupted that this call rewrote
+because their stamp finished after all
+([If the run finished after all](#if-the-run-finished-after-all)); a
+rewrite whose write failed is in `failed`, and one waiting out its backoff
+in `deferred`.
 
 It scans `$BACKUP_DIR/db` and `$BACKUP_DIR/media` for `kiln-db-<stamp>` and
 `kiln-media-<stamp>` files and creates one row per stamp. The parts of one
@@ -5774,7 +5819,7 @@ once on the serving node:
 
 ```bash
 bin/kiln_cms rpc 'IO.inspect(KilnCMS.Backups.Importer.retry_failed())'
-# {:ok, %{deferred: 0, failed: 0, imported: 1, pending: 0, skipped: 0}}
+# {:ok, %{deferred: 0, failed: 0, imported: 1, pending: 0, reevaluated: 0, skipped: 0}}
 ```
 
 `failed: 1` again means the cause is still there; the warning in the log

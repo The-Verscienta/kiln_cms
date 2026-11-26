@@ -105,7 +105,7 @@ defmodule KilnCMS.Backups.Importer do
   `Backups.reevaluate_interrupted_run/3`, only when its stamp now has
 
     * no `.partial` at all, every listed file still there when stat'ed, and
-      its newest file settled (#{10} minutes old, so not in the future);
+      its newest file settled (10 minutes old, so not in the future);
     * for **every** kind in the row's components (and any kind its files
       add), a finished file: and either a covering manifest that succeeded,
       or a complete set with that kind's checksum sidecar (a dump, a single
