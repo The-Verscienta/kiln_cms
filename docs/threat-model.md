@@ -358,11 +358,14 @@ build if a resource is ever registered without that authorizer.
   `/editor/password-policy`, admin-only), then `BREACHED_PASSWORD_POLICY`, then
   warn; `block` refuses only an account whose tier is admin (the stricter of its
   global role and its tier on the request's org), and the tier is the
-  *target's*, never the actor's. `BREACHED_PASSWORD_CHECK=false` makes no call.
+  *target's*, never the actor's. An existing account is also held to the
+  strictest policy of every site it administers (#2408). `BREACHED_PASSWORD_CHECK=false` makes no call.
   The lookup runs once per submitted action (a `before_transaction` hook, so
   not per keystroke and holding no connection), after the validations and the
   registration throttle, and nothing identifying the password, hash, prefix,
-  account or org is logged or put in telemetry. See *Breached passwords* below.
+  account or org is logged or put in telemetry. A site may also have its
+  administrators checked as they sign in (#2407, off by default). See
+  *Breached passwords* below.
 - **SSRF protection on outbound calls** — `KilnCMS.Webhooks.SafeUrl`: HTTPS
   required in prod, private/loopback/link-local/metadata ranges rejected for
   both IPv4 and IPv6, DNS resolved with an all-or-nothing rule and a hard
@@ -1262,8 +1265,29 @@ password leaves the server.
 - **Where it applies.** Self-registration, change password, password reset by
   token, the first-run wizard and accepting a site invitation with a password
   (#2135; judged by the *invited* site's policy for the *invited* tier, not the
-  host the link was opened on). **Not** sign-in: a breached password that was
-  set before this shipped is not noticed. Follow-up.
+  host the link was opened on). An account that exists already (a change, a
+  reset, an existing account accepting an invitation) is held to the
+  **strictest** policy of the request's site (for its tier there) and of every
+  site it administers (#2408, `PasswordPolicy.resolve_for/3`): an active admin
+  membership, live temporary grants included, or every site for a platform
+  admin, with the operator default standing in for an administered site that
+  has saved no policy.
+- **At sign-in, where a site asks (#2407).** A site's
+  `SitePasswordPolicy.check_on_sign_in` (off by default) has its
+  administrators' passwords looked up as they sign in with them, by
+  `KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn` on
+  `:sign_in_with_password`, on every host and door (the sign-in form, the form
+  `POST`, `POST /api/auth/sign_in`). Editors and viewers never are. The outcome
+  is the strictest policy among the administered sites that have the switch
+  on (`PasswordPolicy.sign_in/1`); the request's site plays no part. Block
+  refuses with `PasswordResetRequired`, revokes the minted token and mails a
+  reset link; Warn signs in with a warning. The hook is an `after_action`
+  after the password verified and before the remember-me token is minted, so
+  one lookup per sign-in, none for a wrong password, a throttled or challenged
+  attempt or a keystroke, and before the second factor. Its deadline is
+  `sign_in_deadline` (1.5 s). The same prefix is sent at every checked
+  sign-in; nothing is cached. See
+  [ADR 0085](decisions/0085-an-administrators-password-answers-to-the-strictest-policy-of-every-site-they-administer-and-is-checked-at-sign-in-only-where-a-site-asks.md).
 - **Exempt paths, deliberately.** The admin-sent reset *mail* is checked when
   its token is used (it is `reset_password_with_token`), but these set or
   create a credential without a lookup: `AdminPasswordReset` (the admin
@@ -1278,16 +1302,46 @@ password leaves the server.
   anyone can change a password. An attacker who can block egress from the
   server (or poison its DNS, which `SafeUrl` pins against) can therefore turn
   the check off; they already hold the network position to do worse.
-- **Residual risks.** (1) Fail-open, above. (2) The policy is the *request's*
-  org and the tier is the account's tier the stricter of global role and that
-  org's membership: an admin of org A with `block`, changing their password on
-  org B's host, is judged by B's policy and B's tier for them. (3) No check at
-  sign-in. (4) The warning after register or reset is a best-effort note held
-  in a node-local cache for ten minutes; on a multi-node deployment without
-  sticky routing, or after a restart, the person may never see it. The password
-  was accepted either way. (5) `warn` is advisory; only an administrator's
-  password can be refused. (6) The check is only as complete as the public
-  corpus.
+- **Residual risks.** (1) Fail-open, above, at sign-in too: an attacker who
+  can block egress lets a breached administrator password sign in. (2)
+  *Closed by #2408:* an admin of org A with `block` is now refused on org B's
+  host too. Its cost is that a site's **Off** stops the lookup only for
+  people who administer no site that checks; `BREACHED_PASSWORD_CHECK=false`
+  is the only guarantee of no request. A failure to read the other sites'
+  rows answers `warn` for their part, so an admin of a blocking site can set a
+  breached password while that read fails. (3) *Replaced by #2407:* sign-in is
+  checked only for administrators, and only of sites that turn it on; a
+  breached password held by an editor, or by an admin of sites that do not,
+  is still not noticed until it is next set. (4) The warning after register,
+  reset or a warned sign-in is a best-effort note held in a node-local cache
+  for ten minutes; on a multi-node deployment without sticky routing, or
+  after a restart, the person may never see it. The password was accepted
+  either way. (5) `warn` is advisory; only an administrator's password can be
+  refused. (6) The check is only as complete as the public corpus.
+- **The sign-in check, as a signal.** (7) A `403 password_reset_required`, or
+  the browser's redirect to `/reset` with its flash, is only reached with the
+  correct password, so it tells a credential stuffer that the pair is valid
+  *and* that the account administers a site that checks at sign-in. It
+  issues no token, which a success would have, so it gives less than the
+  sign-in it refuses. (8) Someone holding the breached password can trigger
+  the reset mail at will. It is charged to the address's reset-mail budget
+  (`AccountThrottle.allow_mail?(:password_reset, email)`, five an hour, shared
+  with the owner's own requests and never waived), so they can spend the
+  owner's reset mails for the hour; and a blocked attempt is not forgiven by
+  the per-account sign-in throttle, so repeated ones pause the account (a
+  wrong password could already do that). The owner then also gets the
+  "Unusual sign-in activity" mail. (9) The Warn signal does not reach an API
+  client of a two-factor administrator: `password_breach` is on the one-step
+  `201` only, not on `/api/auth/sign_in/verify`'s. (10) The reset mail is
+  branded for the site the request came in on, not the site whose policy
+  refused the sign-in. (11) The provider sees the same prefix from the
+  server's IP at each checked sign-in of one administrator (nothing is
+  cached), so it can see one prefix recurring at sign-in times. The prefix is
+  still one of about a million, as at any lookup.
+- **Audit.** A refusal at sign-in is `sign_in_failed`, reason
+  `breached_password`, unsampled, in the log of each site whose policy
+  refused it, and not charged to the failed-sign-ins alert
+  ([security events](security-events.md)).
 - **Telemetry.** `[:kiln_cms, :password, :breach_check]`; see
   [observability.md](observability.md#breached-password-checks).
 - **Why on by default, and why fail open.**

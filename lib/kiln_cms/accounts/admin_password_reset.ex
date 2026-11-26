@@ -37,8 +37,7 @@ defmodule KilnCMS.Accounts.AdminPasswordReset do
 
   require Logger
 
-  alias AshAuthentication.Strategy.Password
-  alias KilnCMS.Accounts.AccountThrottle
+  alias KilnCMS.Accounts.PasswordResetMail
   alias KilnCMS.Accounts.User
 
   @impl true
@@ -46,41 +45,36 @@ defmodule KilnCMS.Accounts.AdminPasswordReset do
     user_id = Ash.ActionInput.get_argument(input, :user_id)
 
     with {:ok, user} <- fetch(user_id),
-         :ok <- resettable(user),
-         :ok <- within_budget(user),
-         {:ok, token} <- reset_token(user) do
-      deliver(user, token, context)
+         :ok <- resettable(user) do
+      send_mail(user, context)
     end
   end
 
-  # Charged before the token is minted, so a refused request leaves no unused
-  # reset token behind. `allow_mail?/2` consumes a unit whether or not it allows.
-  defp within_budget(user) do
-    if AccountThrottle.allow_mail?(:password_reset, to_string(user.email)) do
-      :ok
-    else
-      invalid(
-        :user_id,
-        "this address has been sent too many reset links in the last hour — try again later"
-      )
+  # The budget is charged, the token minted and the mail queued by
+  # `PasswordResetMail`, shared with the sign-in breach check (#2407); this
+  # reports each outcome to the operator by name.
+  defp send_mail(user, context) do
+    case PasswordResetMail.send(user, context.tenant, :requested) do
+      :sent ->
+        Logger.info("Admin-initiated password reset for user #{user.id}")
+        {:ok, :sent}
+
+      :over_budget ->
+        invalid(
+          :user_id,
+          "this address has been sent too many reset links in the last hour — try again later"
+        )
+
+      {:error, :token} ->
+        invalid(:user_id, "couldn't mint a reset token for this account")
+
+      {:error, :erased} ->
+        invalid(:user_id, "this account has been erased and cannot be reset")
+
+      {:error, {:enqueue, error}} ->
+        Logger.error("Admin-initiated password reset could not be enqueued: #{inspect(error)}")
+        invalid(:user_id, "the reset email could not be queued — check the mail settings")
     end
-  end
-
-  defp deliver(user, token, context) do
-    {sender, opts} = sender()
-    Logger.info("Admin-initiated password reset for user #{user.id}")
-
-    # The strategy's own sender opts come first, so this cannot silently drop a
-    # future DSL option. `budget_checked?: true` tells the sender the budget was
-    # charged above, so it is not charged twice.
-    :ok =
-      sender.send(user, token, Keyword.merge(opts, tenant: context.tenant, budget_checked?: true))
-
-    {:ok, :sent}
-  rescue
-    error ->
-      Logger.error("Admin-initiated password reset could not be enqueued: #{inspect(error)}")
-      invalid(:user_id, "the reset email could not be queued — check the mail settings")
   end
 
   defp fetch(user_id) do
@@ -101,17 +95,6 @@ defmodule KilnCMS.Accounts.AdminPasswordReset do
 
   defp resettable(%User{}),
     do: invalid(:user_id, "this account has been erased and cannot be reset")
-
-  defp reset_token(user) do
-    case Password.reset_token_for(strategy(), user) do
-      {:ok, token} -> {:ok, token}
-      _ -> invalid(:user_id, "couldn't mint a reset token for this account")
-    end
-  end
-
-  defp sender, do: strategy().resettable.sender
-
-  defp strategy, do: AshAuthentication.Info.strategy!(User, :password)
 
   defp invalid(field, message) do
     {:error,

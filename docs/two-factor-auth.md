@@ -69,6 +69,12 @@ no alert and sends no email.
   already-minted first-factor token across the redirect — the user is **not**
   signed in until a valid code is entered. The blob only needs signing because
   it lives in the (encrypted) session, where the client never sees it.
+- **Breached passwords come first.** Where a site
+  [checks administrators' passwords at sign-in](account-administration.md#check-administrator-passwords-at-sign-in)
+  (#2407), the lookup runs on the password, before this gate: a blocked
+  administrator is sent to reset their password and never reaches the code
+  prompt, and a warned one gets the prompt and sees the warning once the code
+  verifies.
 - **Sign-in gate (headless):** `POST /api/auth/sign_in` answers a 2FA account
   with `200 {"two_factor_required": true, "pending_token": …}` rather than the
   `201` + JWT a single-factor account gets, and `POST /api/auth/sign_in/verify`

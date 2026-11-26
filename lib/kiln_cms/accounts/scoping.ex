@@ -569,6 +569,50 @@ defmodule KilnCMS.Accounts.Scoping do
     Accounts.list_users!(authorize?: false, query: query)
   end
 
+  @doc """
+  The orgs `user` is an **admin** of (#2408): `:all` for a platform admin
+  (standing or by a live grant on the user — admin on every site, as
+  `effective_tier/2` has it), otherwise the ids of the orgs where they hold an
+  `:active` membership whose effective tier is `:admin` (standing or by a live
+  grant on the membership, `RoleGrant.expression/1`). `[]` for an erased
+  account, an account that is nobody's admin, and anything that is not an
+  account.
+
+  The inverse of `effective_tier/2` over every org at once, as one indexed
+  query. A legacy membership-less admin is a platform admin, so it is `:all`.
+  Not memoized: the breached-password check (`KilnCMS.Accounts.PasswordPolicy`)
+  asks once per password set, and a stale answer there would under-protect.
+  A read that fails raises; the caller decides which way to fail.
+  """
+  @spec admin_org_ids(map() | nil) :: :all | [String.t()]
+  def admin_org_ids(%{anonymized_at: %DateTime{}}), do: []
+
+  def admin_org_ids(%{id: user_id} = user) when is_binary(user_id) do
+    if RoleGrant.effective_role(user) == :admin,
+      do: :all,
+      else: member_admin_org_ids(user_id)
+  end
+
+  def admin_org_ids(_user), do: []
+
+  defp member_admin_org_ids(user_id) do
+    admin = RoleGrant.expression([:admin])
+
+    query =
+      Accounts.OrgMembership
+      |> Ash.Query.filter(status == :active and ^admin)
+      |> Ash.Query.select([:organization_id])
+
+    # authorize?: false — part of the tier resolution, like `any_membership?/1`:
+    # OrgMembership's read is self-only and the caller may hold no actor (a
+    # password reset), and a refused read would answer "admin of nothing" and
+    # skip the stricter policy.
+    user_id
+    |> Accounts.list_memberships_for_user!(authorize?: false, query: query)
+    |> Enum.map(& &1.organization_id)
+    |> Enum.uniq()
+  end
+
   # A membership-less account's global role applies only on the default org.
   defp legacy_tier(actor, org) do
     if org == Accounts.default_org_id(),

@@ -971,12 +971,15 @@ for what each policy does, [threat-model.md](threat-model.md) for the limits and
 [ADR 0031](decisions/0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md)
 for why it is on by default and fails open. `KILN_UPDATE_CHECK=false` does not
 turn it off; only `BREACHED_PASSWORD_CHECK=false` stops the outbound call for the
-whole deployment.
+whole deployment, including the optional lookup at an administrator's sign-in
+(#2407). That lookup's deadline is application config, not an environment
+variable: `config :kiln_cms, KilnCMS.Accounts.BreachedPassword,
+sign_in_deadline: 1_500` (milliseconds).
 
 | Variable | Default | Purpose | Where it's read |
 |----------|---------|---------|-----------------|
 | `BREACHED_PASSWORD_CHECK` | on | The deployment-wide kill switch. `false` (any off-spelling, see [On/off variables](#boolean-variables)) means **no outbound call is ever made**, whatever any site's policy says; use it for an air-gapped deployment. The Password policy page then shows that the check is switched off. Unset or unreadable leaves the check on. Read in every environment; the test and E2E configs set it off themselves. | [`config/runtime/console.exs:56`](../config/runtime/console.exs#L56) |
-| `BREACHED_PASSWORD_POLICY` | `warn` | The operator default (`off`, `warn` or `block`) for a site that has not saved its own policy at **Sign-in & access → Password policy**. A site's saved choice always wins. `block` only ever refuses an administrator's password; editors and viewers are warned. An unrecognized value is ignored with a boot warning and `warn` stays. Skipped in `:test`. | [`config/runtime/console.exs:64`](../config/runtime/console.exs#L64) |
+| `BREACHED_PASSWORD_POLICY` | `warn` | The operator default (`off`, `warn` or `block`) for a site that has not saved its own policy at **Sign-in & access → Password policy**. A site's saved choice always wins. It also counts for such a site when one of its administrators sets a password on another site, since an administrator is held to the strictest policy of every site they administer (#2408). `block` only ever refuses an administrator's password; editors and viewers are warned. An unrecognized value is ignored with a boot warning and `warn` stays. Skipped in `:test`. | [`config/runtime/console.exs:64`](../config/runtime/console.exs#L64) |
 
 ### admin allowlist (#2248)
 

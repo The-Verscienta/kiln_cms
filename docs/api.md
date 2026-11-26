@@ -219,6 +219,9 @@ Notes:
 - The endpoint accepts an optional `challenge_token`, which is read only when
   the operator has turned on [human verification](#human-verification) for
   it. By default it is not, and the endpoint behaves exactly as above.
+- An administrator of a site that checks passwords at sign-in can get a `403`
+  `password_reset_required`, or a `201` with an extra `password_breach` field
+  ([Administrators whose password is in a known breach](#administrators-whose-password-is-in-a-known-breach)).
 
 ### Human verification
 
@@ -487,6 +490,57 @@ closed at the deadline, and a document sent on an open one is answered with
 
 **API keys are never affected.** A held person's own keys keep working on
 every surface; for unattended use, switch the client to a key.
+
+### Administrators whose password is in a known breach
+
+A site can have its administrators' passwords looked up in a public breach
+corpus each time they sign in
+([Check administrator passwords at sign-in](account-administration.md#check-administrator-passwords-at-sign-in)).
+It is off by default, it never applies to editors or viewers, and a client
+that never meets it sees the responses above unchanged. When it applies, the
+site's policy decides one of two answers.
+
+**Block**: no token is issued and a reset link is emailed to the account.
+
+```jsonc
+// 403 Forbidden
+{
+  "errors": [{
+    "status": "403",
+    "code": "password_reset_required",
+    "detail": "This account's password appears in a known data breach. A reset link has been emailed; choose a new password, then sign in again."
+  }]
+}
+```
+
+The person chooses a new password from the mail, or from the password reset
+page (`/reset`) on the site's host if the mail doesn't arrive, then signs in
+again. This comes before the second factor, so a two-factor account gets the
+`403` rather than the `200` `two_factor_required` step. Retrying the same
+password gets the same answer, and counts toward the account's sign-in pause.
+
+**Warn**: the sign-in succeeds, and the one-step `201` carries one more field:
+
+```jsonc
+// 201 Created
+{
+  "token": "<JWT>",
+  "user": { "id": "…", "email": "admin@example.com", "role": "admin" },
+  "password_breach": { "status": "breached" }
+}
+```
+
+Show the person a prompt to change their password. A two-factor account's
+`201` from `/api/auth/sign_in/verify` does not carry the field.
+
+Notes:
+
+- **Branch on `code`.** `403` is also `second_factor_required` and
+  `network_not_allowed`.
+- The `403` is only reached with the correct password. A wrong one is the
+  same generic `401` `invalid_credentials` as always, and makes no lookup.
+- If the lookup service is slow (more than 1.5 seconds) or unreachable, the
+  sign-in goes ahead with neither answer.
 
 ### API keys (third-party access)
 
@@ -2299,7 +2353,7 @@ curl -s https://cms.example.com/api/security/posture \
      "summary": "A breached password is refused for administrators.",
      "fix_path": "/editor/password-policy",
      "docs_url": "https://github.com/The-Verscienta/kiln_cms/blob/main/docs/security-posture.md#breached-passwords",
-     "facts": {"admin_policy": "block", "deployment_enabled": true}, "error": null},
+     "facts": {"admin_policy": "block", "deployment_enabled": true, "sign_in_check": false}, "error": null},
     {"id": "core.idle_timeout", "scope": "site", "source": "core", "plugin": null,
      "status": "pass", "title": "Idle sign-out", "summary": "Idle browsers are signed out.",
      "fix_path": "/editor/sessions",
