@@ -27,7 +27,8 @@ defmodule KilnCMS.Backups.Importer do
   `BACKUP_KEEP_DAYS` a covering manifest of cron's (`Manifest.cron?/1`)
   recorded, only when that run succeeded (its prune ran), else `nil`;
   `KilnCMS.Backups.Presence` judges older rows by it. A row is never
-  rewritten, so runs imported before #3113 keep `nil`.
+  rewritten (one narrow exception, #2846, below, never touches `keep_days`),
+  so runs imported before #3113 keep `nil`.
 
   ## Safe to run at any time
 
@@ -83,16 +84,47 @@ defmodule KilnCMS.Backups.Importer do
   before it finished and left .partial files behind", with the finished files
   it has as artifacts (none at all when only partials are left), the kinds of
   its finished files and its partials as components, and a log entry naming
-  the partials. Such a row is never rewritten, which is
-  why the wait is long: a mislabel would be permanent, a late one only leaves
-  the stamp out of the history a little longer. A covering manifest still
-  wins, and a stamp that has a row (the application's own runs) is never
+  the partials. The wait is long because a mislabel is costly (it is
+  corrected only once the stamp completes, below), and a late one only
+  leaves the stamp out of the history a little longer. A covering manifest
+  still wins, and a stamp that has a row (the application's own runs) is never
   looked at. An mtime more than five minutes in the future reads as fresh,
   with a warning: a clock that is off must not turn a live run into a dead
   one. `backup.sh prune` removes the partials only once every file of the
   stamp is four times older than this (`ABANDONED_PARTIAL_MIN`), and the
   application's start step only once the stamp has a row, so the stamp is
   always read before its evidence goes.
+
+  ## An Interrupted row whose stamp finished after all (#2846)
+
+  An old `backup.sh` with no heartbeat, or clocks that disagree badly, can
+  get a live run recorded as Interrupted. That row is the one an import may
+  rewrite, once: each pass reads the Interrupted rows
+  (`Backups.list_interrupted_imports/1`) and looks at those whose stamp is in
+  the listing again. One is re-evaluated, through
+  `Backups.reevaluate_interrupted_run/3`, only when its stamp now has
+
+    * no `.partial` at all, every listed file still there when stat'ed, and
+      its newest file settled (#{10} minutes old, so not in the future);
+    * for **every** kind in the row's components (and any kind its files
+      add), a finished file: and either a covering manifest that succeeded,
+      or a complete set with that kind's checksum sidecar (a dump, a single
+      media archive, or parts 1..N). A cron `all` killed during media is not
+      turned into "succeeded, db only".
+
+  The new outcome is what importing the stamp now would record, minus
+  `started_at`, `keep_days` and the log (the row keeps its own, plus one
+  line). The write locks the row and refuses (`StaleRecord`, counted
+  nowhere) one that is no longer that Interrupted row, or that retention has
+  marked `pruned` anywhere since (`Run.Changes.ReevaluateInterrupted`).
+  Nothing is stat'ed while the lock is held. A file retention deletes after
+  the stat is marked on the rewritten row by retention's own locked
+  `:mark_pruned`. The one window left is a row with no artifacts (only
+  partials when it was recorded): a deletion between the stat and the lock
+  leaves nothing to mark, so the rewrite records that file as present
+  although it is gone (accepted: it takes a prune landing in the
+  milliseconds between the two). Re-evaluations count as `reevaluated`,
+  their failures as `failed`, and they share the #2417 backoff.
 
   `kiln-<kind>-<stamp>.sha256` sidecars are not artifacts and never make a run
   by themselves, but are accounted for by their stamp: a well-formed one
@@ -157,7 +189,8 @@ defmodule KilnCMS.Backups.Importer do
           pending: non_neg_integer(),
           skipped: non_neg_integer(),
           failed: non_neg_integer(),
-          deferred: non_neg_integer()
+          deferred: non_neg_integer(),
+          reevaluated: non_neg_integer()
         }
 
   @doc """
@@ -168,8 +201,10 @@ defmodule KilnCMS.Backups.Importer do
   counted), `pending` stamps waiting out the settle window, `skipped` stamps
   that cannot be represented (impossible date), `failed` rows whose write
   errored, `deferred` stamps whose write failed before and whose backoff has
-  not run out (not attempted, see the moduledoc) — or `{:error, reason}` when
-  the directory cannot be listed or the runs cannot be read.
+  not run out (not attempted, see the moduledoc), `reevaluated` Interrupted
+  rows rewritten because their stamp finished after all (#2846) — or
+  `{:error, reason}` when the directory cannot be listed or the runs cannot
+  be read.
   """
   @spec run() :: {:ok, summary()} | {:error, term()}
   def run, do: run(Backups.dir())
@@ -194,6 +229,13 @@ defmodule KilnCMS.Backups.Importer do
     run()
   end
 
+  @doc """
+  The error of an imported run recorded as killed (#2478): the one
+  `:reevaluate_interrupted` may replace (#2846).
+  """
+  @spec interrupted_message() :: String.t()
+  def interrupted_message, do: @interrupted
+
   @doc false
   # Empties the backoff table. `KilnCMS.DataCase.setup_sandbox/1` calls it for
   # every synchronous test, so a stamp one test failed on is never deferred in
@@ -207,16 +249,18 @@ defmodule KilnCMS.Backups.Importer do
   @doc false
   # Test seams, each defaulting to the real thing: `:list` (`list/1`; a test
   # passes one that changes the directory between the listing and the stat),
-  # `:import` (the write, `attrs -> {:ok, _} | {:error, _}`) and `:now_ms`
-  # (the backoff's clock, Unix milliseconds).
+  # `:import` (the write, `attrs -> {:ok, _} | {:error, _}`), `:now_ms`
+  # (the backoff's clock, Unix milliseconds) and `:reevaluate` (the
+  # re-evaluation's write, `(run, attrs) -> {:ok, _} | {:error, _}`).
   @spec run(Path.t(), keyword()) :: {:ok, summary()} | {:error, term()}
   def run(dir, opts \\ []) do
     reconcile_stale_runs()
     list = Keyword.get(opts, :list, &list/1)
 
     with {:ok, names} <- list.(dir),
-         {:ok, existing} <- existing_stamps() do
-      import_new(dir, names, existing, opts)
+         {:ok, existing} <- existing_stamps(),
+         {:ok, interrupted} <- interrupted_imports() do
+      import_new(dir, names, existing, interrupted, opts)
     end
   rescue
     error ->
@@ -244,6 +288,13 @@ defmodule KilnCMS.Backups.Importer do
     end
   end
 
+  defp interrupted_imports do
+    case Backups.list_interrupted_imports(actor: Backups.system(), authorize_with: :error) do
+      {:ok, runs} -> {:ok, runs}
+      {:error, error} -> {:error, {:read_runs, error.__struct__}}
+    end
+  end
+
   # `%{stamp => [%{kind, name, partial?}]}` from names alone — no stat yet. A
   # missing subdirectory is an empty one (S3 deployments have no `media/`); any
   # other failure aborts, since a half-seen stamp would be recorded wrong forever.
@@ -266,7 +317,7 @@ defmodule KilnCMS.Backups.Importer do
     end)
   end
 
-  defp import_new(dir, listed, existing, opts) do
+  defp import_new(dir, listed, existing, interrupted, opts) do
     manifest = Manifest.read(dir)
 
     {files, partials, sidecars} = classify(listed)
@@ -315,20 +366,105 @@ defmodule KilnCMS.Backups.Importer do
 
     results = Enum.map(due, &{&1.stamp, import_one(&1, import)})
 
-    # The stamps still waiting for a row: an entry for any other stamp of
-    # this directory (now recorded, or its files gone) is dropped.
-    live = MapSet.new(new ++ Enum.map(manifest_only, & &1.stamp))
-    save_failures(failures, update_failures(failures, dir, live, results, now_ms))
+    # #2846: the Interrupted rows whose stamp finished after all. Stat'ed
+    # and judged one at a time, each written right after its stat.
+    reevaluate = Keyword.get(opts, :reevaluate, &reevaluate_run/2)
+    context = %{dir: dir, manifest: manifest, covered: covered, sidecars: sidecars, now: now}
+
+    {re_deferred, re_due} =
+      interrupted
+      |> Enum.filter(&reevaluable?(&1, files, partials))
+      |> Enum.split_with(&deferred?(failures, dir, &1.stamp, now_ms))
+
+    re_results =
+      for run <- re_due,
+          result = reevaluate_one(run, Map.fetch!(files, run.stamp), context, reevaluate),
+          result != :skip,
+          do: {run.stamp, result}
+
+    # The stamps still waiting for a row (or a re-evaluation): an entry for
+    # any other stamp of this directory (now recorded, or its files gone) is
+    # dropped.
+    live =
+      MapSet.new(
+        new ++ Enum.map(manifest_only, & &1.stamp) ++ Enum.map(re_due ++ re_deferred, & &1.stamp)
+      )
+
+    save_failures(failures, update_failures(failures, dir, live, results ++ re_results, now_ms))
 
     {:ok,
      %{
        imported: Enum.count(results, &match?({_, :ok}, &1)),
        pending: length(pending),
        skipped: length(invalid),
-       failed: Enum.count(results, &match?({_, {:error, _}}, &1)),
-       deferred: length(deferred)
+       failed: Enum.count(results ++ re_results, &match?({_, {:error, _}}, &1)),
+       deferred: length(deferred) + length(re_deferred),
+       reevaluated: Enum.count(re_results, &match?({_, :ok}, &1))
      }}
   end
+
+  # An Interrupted row worth a stat (#2846): its stamp has finished files in
+  # the listing and no `.partial` of any kind.
+  defp reevaluable?(run, files, partials),
+    do: Map.has_key?(files, run.stamp) and not Map.has_key?(partials, run.stamp)
+
+  # `:skip` (not ready, nothing attempted), `:ok`, `:stale` (the row changed
+  # under the lock) or `{:error, cause}`.
+  defp reevaluate_one(run, names, context, reevaluate) do
+    %{dir: dir, manifest: manifest, covered: covered, sidecars: sidecars, now: now} = context
+    entry = dir |> entry(run.stamp, names, []) |> Map.put(:state, :ready)
+    manifest = if MapSet.member?(covered, run.stamp), do: manifest
+
+    if length(entry.files) == length(names) and old_enough?(entry.files, now) and
+         complete?(entry, run.components, manifest, sidecars) do
+      attrs =
+        entry
+        |> run_attrs(manifest, covered, dir, sidecars, now)
+        |> Map.take([:status, :error, :components, :finished_at, :artifacts])
+
+      case reevaluate.(run, attrs) do
+        {:ok, _run} -> :ok
+        {:error, error} -> if stale?(error), do: :stale, else: {:error, cause(error)}
+      end
+    else
+      :skip
+    end
+  end
+
+  defp reevaluate_run(run, attrs),
+    do: Backups.reevaluate_interrupted_run(run, attrs, actor: Backups.system())
+
+  defp stale?(%Ash.Error.Invalid{errors: errors}),
+    do: Enum.any?(errors, &match?(%Ash.Error.Changes.StaleRecord{}, &1))
+
+  defp stale?(_error), do: false
+
+  # Every kind the row names, and any its files add, has a finished file,
+  # and either the covering manifest succeeded or that kind's set is complete
+  # with its sidecar beside it.
+  defp complete?(entry, components, manifest, sidecars) do
+    kinds = Enum.uniq(components ++ Enum.map(entry.files, & &1.kind))
+    ok? = match?(%Manifest{ok: true}, manifest)
+
+    with_sidecar =
+      sidecars |> Map.get(entry.stamp, []) |> MapSet.new(fn {kind, _name} -> kind end)
+
+    kinds != [] and
+      Enum.all?(kinds, fn kind ->
+        of_kind = Enum.filter(entry.files, &(&1.kind == kind))
+
+        of_kind != [] and
+          (ok? or (MapSet.member?(with_sidecar, kind) and set_complete?(kind, of_kind)))
+      end)
+  end
+
+  # One dump or one single archive; or parts 1..N and nothing else.
+  defp set_complete?(_kind, [%{part: nil}]), do: true
+
+  defp set_complete?(:media, files),
+    do: Enum.all?(files, &is_integer(&1.part)) and media_problem(files, true) == nil
+
+  defp set_complete?(_kind, _files), do: false
 
   defp real_stamp?(stamp), do: match?({:ok, _}, Artifact.parse_stamp(stamp))
 
@@ -423,7 +559,7 @@ defmodule KilnCMS.Backups.Importer do
   # `:pending` (look again later). A stamp one of whose partials vanished
   # between the listing and the stat is pending this call: dated by what is
   # left, a run that just finished could be recorded as interrupted, and that
-  # row is never rewritten.
+  # row is rewritten only if its stamp later completes (#2846).
   defp settle(%{stamp: stamp} = entry, covered, now) do
     cond do
       MapSet.member?(covered, stamp) -> :ready
@@ -735,7 +871,7 @@ defmodule KilnCMS.Backups.Importer do
 
     results
     |> Enum.reduce(kept, fn
-      {stamp, :ok}, acc -> Map.delete(acc, {dir, stamp})
+      {stamp, result}, acc when result in [:ok, :stale] -> Map.delete(acc, {dir, stamp})
       {stamp, {:error, cause}}, acc -> record_failure(acc, dir, stamp, cause, now_ms)
     end)
     |> cap()
