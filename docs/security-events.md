@@ -189,7 +189,7 @@ a type may carry only the keys below; anything else is dropped.
 | Type (CSV `type`) | Label on the page | Written when | `metadata` keys |
 |---|---|---|---|
 | `sign_in` | Sign-in | A sign-in completed, every factor passed | `method` |
-| `sign_in_failed` | Failed sign-in | A wrong password, a wrong second-factor code or a passkey refused at the code prompt, or a password sign-in refused by [human verification](human-verification.md) (a token that did not pass, or the provider down past the point where sign-ins are let through). Sampled: see below | `method`, `reason` |
+| `sign_in_failed` | Failed sign-in | A wrong password, a wrong second-factor code or a passkey refused at the code prompt, or a password sign-in refused by [human verification](human-verification.md) (a token that did not pass, or the provider down past the point where sign-ins are let through). Sampled: see below. Also an administrator's correct password refused at sign-in because it is in a known breach and a site they administer [checks at sign-in](account-administration.md#check-administrator-passwords-at-sign-in) under Block (reason `breached_password`): not sampled, and written to that site's log | `method`, `reason` |
 | `sign_in_locked` | Sign-in locked out | A throttle refused an attempt. First refusal per subject and scope each 15 minutes | `method`, `scope` |
 | `second_factor_enrolled` | Second factor added | An authenticator app was confirmed | `kind`, `proof` (see below) |
 | `second_factor_removed` | Second factor removed | Two-factor sign-in was turned off, or removed when an invitation, a password reset or a magic link took over an unconfirmed account (see below) | `kind`, `via` |
@@ -238,8 +238,9 @@ a type may carry only the keys below; anything else is dropped.
 `method` is `password`, `password_reset`, `magic_link`, `sso`, `passkey`,
 `second_factor` or `other`. `reason` is `invalid_credentials`,
 `invalid_code`, `challenge_failed` (the human-verification provider refused
-the token) or `challenge_unavailable` (the provider could not be reached and
-the attempt was refused anyway). A sign-in that was merely asked for a check,
+the token), `challenge_unavailable` (the provider could not be reached and
+the attempt was refused anyway) or `breached_password` (the right password,
+refused at sign-in because it is in a known breach, #2407). A sign-in that was merely asked for a check,
 with no token, records nothing: it is not a failed attempt. `scope` is `account`, `address`, `second_factor` or
 `settings`. `change` is `created`, `updated` or `removed`; `provider` is
 `site_oidc` or `site_sso_domain`. `setting` is the settings resource's short
@@ -464,7 +465,10 @@ account refuses every attempt until its window rolls, and one event says so).
 When a site has the `failed_sign_ins` [alert](security-alerts.md#failed-sign-ins-are-counted-per-site)
 turned on, every failed sign-in is also counted on the site's alert tally
 before sampling, and the one attempt that brings the site to 10 in a window is
-written even when its address has used up its 5. Both counters live in the same database-backed store as the sign-in throttles
+written even when its address has used up its 5. A sign-in refused for a
+breached password (reason `breached_password`) is neither sampled nor counted
+on the alert tally: only the right password gets that far, so it is not a
+guess, and a flood cannot produce it. Both counters live in the same database-backed store as the sign-in throttles
 (`KilnCMS.Accounts.ThrottleStore`), so they hold across nodes and restarts.
 
 ### Which site's log
@@ -473,7 +477,10 @@ An event is written to the log of the site the request resolved to. A request
 to an unknown host has no site and records nothing. A failed sign-in or lockout
 labels the account only if it belongs to that site (a membership on it, or the
 legacy no-membership account on the default site); an account of another site
-appears as an unknown address. A role change is written to the log of the
+appears as an unknown address. The exception is a sign-in refused for a
+breached password (#2407): it goes to the log of each site whose policy
+refused it, whichever host the person signed in on, and nothing is written
+to the request's site unless it is one of them. A role change is written to the log of the
 membership's own site, whichever site the admin was viewing; a user's global
 role is written to the site the request ran on (`mix kiln.beta.round`, which
 has no request, writes its seats' role changes to the default site's).
@@ -511,6 +518,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `sign_in` | `lib/kiln_cms_web/controllers/api_auth_controller.ex`: `issue_token/2` (the headless token API, `sign_in/2` and `verify/2`) | after commit; `method: "password"` |
 | `sign_in_failed` (wrong password) | `lib/kiln_cms/security/preparations/audit_sign_in.ex`, on `User` `:sign_in_with_password` (`lib/kiln_cms/accounts/user.ex`) | sampled, after commit; `method: "password"`, `reason: "invalid_credentials"` |
 | `sign_in_failed` (human verification) | `audit_sign_in.ex`, when `ThrottleSignIn` refuses with `KilnCMS.Accounts.Errors.ChallengeRequired` (`KilnCMS.Challenge.Gate`) | sampled, after commit; `method: "password"`, `reason: "challenge_failed"` or `"challenge_unavailable"` |
+| `sign_in_failed` (breached password) | `audit_sign_in.ex`, when `KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn` refuses with `KilnCMS.Accounts.Errors.PasswordResetRequired` (#2407); written by `KilnCMS.Security.AuthEvents.sign_in_refused_breached/3` | unsampled, after commit, once in each site whose policy refused it; not charged to the failed-sign-ins alert; `method: "password"`, `reason: "breached_password"` |
 | `sign_in_failed` (wrong code) | `lib/kiln_cms/accounts/second_factor.ex`: `check/3` (`audit_failure/3`), used by `TwoFactorController.create` and `ApiAuthController.verify`; and `check_passkey/3`, used by `TwoFactorController.passkey_verify` for a passkey refused at the prompt (#2247) | sampled; `method: "second_factor"`, `reason: "invalid_code"` (a refused passkey too) |
 | `sign_in_locked` (account, address) | `audit_sign_in.ex`, via `AuthEvents.password_locked/3`, when `ThrottleSignIn` refuses | after commit; `method: "password"`, `scope: "account"` or `"address"` |
 | `sign_in_locked` (second factor at sign-in) | `lib/kiln_cms/accounts/second_factor.ex`: `check/3` or `check_passkey/3` on a denied budget | after commit; `scope: "second_factor"` |

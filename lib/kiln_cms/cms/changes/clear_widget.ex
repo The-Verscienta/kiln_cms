@@ -44,8 +44,15 @@ defmodule KilnCMS.CMS.Changes.ClearWidget do
   # The widgets the field offers once this write lands: plugin types are asked
   # with the definition they will see in the editor, not a bare changeset.
   @spec allowed(Ash.Changeset.t()) :: [String.t()]
-  def allowed(changeset) do
+  def allowed(changeset), do: changeset |> definition() |> FieldWidgets.allowed()
+
+  @doc false
+  # The whole definition this write would store, every setting in it: what
+  # a plugin type's `widgets/1` is asked with, on save and in the fields
+  # admin alike (#2883), so the cards the page offers are the ones save takes.
+  @spec definition(Ash.Changeset.t()) :: struct()
+  def definition(changeset) do
     {:ok, definition} = Ash.Changeset.apply_attributes(changeset, force?: true)
-    FieldWidgets.allowed(definition)
+    definition
   end
 end

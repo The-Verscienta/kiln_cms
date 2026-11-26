@@ -290,25 +290,33 @@ resolver from a silent reverse zone (see
 
 Every lookup the breached-password check makes (#2240) emits one event,
 `[:kiln_cms, :password, :breach_check]`, from
-`KilnCMS.Accounts.Changes.CheckBreachedPassword`. Nothing is emitted when the
-policy resolves to off (including `BREACHED_PASSWORD_CHECK=false`), and nothing
+`KilnCMS.Accounts.Changes.CheckBreachedPassword` (for an administrator's
+sign-in, called by `KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn`,
+#2407). Nothing is emitted when the policy resolves to off (including
+`BREACHED_PASSWORD_CHECK=false`) or when a sign-in is not checked, and nothing
 identifying the password, its hash, the account or the org is ever in the event.
 
 | Event | Fired by | Metadata |
 |-------|----------|----------|
-| `[:kiln_cms, :password, :breach_check]` | a register, change-password, reset or first-run-setup action, once per lookup | `result`, `action`, `policy`, `enforcement`, `reason` |
+| `[:kiln_cms, :password, :breach_check]` | a register, change-password, reset, first-run-setup or accept-invitation action, or an administrator's password sign-in on a site that checks at sign-in; once per lookup | `result`, `action`, `policy`, `enforcement`, `reason` |
 
 - **Measurements:** `:duration` (native units) and `:count` (always `1`).
 - `:result` -- `:clean`, `:breached`, or `:error` (could not tell).
-- `:action` -- `:register`, `:change`, `:reset` or `:bootstrap`.
+- `:action` -- `:register`, `:change`, `:reset`, `:bootstrap`, `:invite`
+  (accepting an invitation with a password) or `:sign_in` (an administrator
+  signing in, #2407).
 - `:policy` -- the policy applied to this account: `:warn` or `:block`.
-- `:enforcement` -- `:blocked`, `:warned`, or `:allowed` (clean, or an error: the check fails open).
+- `:enforcement` -- `:blocked`, `:warned`, or `:allowed` (clean, or an error: the check fails open). With `action: :sign_in`, `:blocked` means the sign-in was refused and the person sent to reset their password.
 - `:reason` -- on `:error` only: `:timeout`, `:http_status`, `:transport`,
   `:blocked` or `:malformed`; otherwise `nil`.
 
 A rising share of `result: :error` means the node cannot reach
 `api.pwnedpasswords.com` (egress firewall, outage) and passwords are being
-accepted unchecked. The counter `kiln_cms.password.breach_check.count`
+accepted unchecked (and, for `action: :sign_in`, administrators signed in
+unchecked). A sign-in lookup gives up sooner than one made while a password is
+set: `config :kiln_cms, KilnCMS.Accounts.BreachedPassword, sign_in_deadline:
+1_500` (milliseconds) against `deadline: 3_000`, so a slow provider shows up as
+`reason: :timeout` on `sign_in` first. The counter `kiln_cms.password.breach_check.count`
 (tags `result`, `action`, `enforcement`) is defined in
 [`KilnCMSWeb.Telemetry.metrics/0`](../lib/kiln_cms_web/telemetry.ex); alert on
 the `result="error"` share.

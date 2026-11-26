@@ -59,6 +59,31 @@ defmodule KilnCMS.Accounts.Sessions do
   end
 
   @doc """
+  Revoke a token a sign-in's first factor minted and that is being refused
+  rather than handed to anyone: a second factor the door cannot take (#2247),
+  or a breached password a site blocks at sign-in (#2407). `SignInPreparation`
+  stores every token it mints (`store_all_tokens?`), so a refused one is
+  revoked rather than left stored and unheld.
+
+  Never fails: a revocation that does not go through is logged and `:ok` is
+  returned, because the refusal stands either way and the token was never
+  given out.
+  """
+  @spec revoke_first_factor(String.t() | nil) :: :ok
+  def revoke_first_factor(token) when is_binary(token) do
+    case AshAuthentication.TokenResource.Actions.revoke(Token, token, store_all_tokens?: true) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("Could not revoke a refused first-factor token: #{inspect(reason)}")
+        :ok
+    end
+  end
+
+  def revoke_first_factor(_no_token), do: :ok
+
+  @doc """
   Sign out one of `user`'s sessions by its jti: the session, the remember-me
   cookie issued with it, and its open LiveViews.
 

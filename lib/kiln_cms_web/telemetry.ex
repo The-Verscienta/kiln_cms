@@ -175,8 +175,10 @@ defmodule KilnCMSWeb.Telemetry do
       ),
       # Breached-password lookups (#2240). Every tag is a small closed set
       # (`result` clean|breached|error, `action` register|change|reset|
-      # bootstrap, `enforcement` allowed|warned|blocked); the event carries no
-      # org, account, password or hash, so none can become a label.
+      # bootstrap|invite|sign_in, `enforcement` allowed|warned|blocked); the
+      # event carries no org, account, password or hash, so none can become a
+      # label. `action=sign_in` is an administrator's sign-in on a site that
+      # checks at sign-in (#2407); its `blocked` means sent to reset.
       counter("kiln_cms.password.breach_check.count",
         tags: [:result, :action, :enforcement],
         description:

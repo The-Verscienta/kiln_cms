@@ -253,7 +253,12 @@ defmodule KilnCMSWeb.OpenApi do
                   "of this account and its grace period is over. `meta.setup_url` " <>
                   "is the browser page to set it up, `meta.deadline` when the grace " <>
                   "period ended, and `meta.reason` is `passkey_only` when the " <>
-                  "account's only second factor is a passkey. No token is issued."
+                  "account's only second factor is a passkey. No token is issued.\n\n" <>
+                  "`password_reset_required` — the password was right, but it " <>
+                  "appears in a known data breach and a site this administrator " <>
+                  "runs blocks that at sign-in. No token is issued; a reset link " <>
+                  "has been emailed to the account. Choose a new password, then " <>
+                  "sign in again."
             },
             422 => %OpenApiSpex.Response{description: "Missing email or password"},
             429 => %OpenApiSpex.Response{
@@ -412,6 +417,17 @@ defmodule KilnCMSWeb.OpenApi do
           properties: %{
             required: %OpenApiSpex.Schema{type: :boolean, enum: [true]},
             deadline: %OpenApiSpex.Schema{type: :string, format: :"date-time"}
+          }
+        },
+        password_breach: %OpenApiSpex.Schema{
+          type: :object,
+          description:
+            "Present only on a one-step sign-in (no two-factor exchange) by an " <>
+              "administrator whose site checks passwords at sign-in and warns: the " <>
+              "password appears in a known data breach. Signing in still worked; " <>
+              "change the password soon.",
+          properties: %{
+            status: %OpenApiSpex.Schema{type: :string, enum: ["breached"]}
           }
         }
       }

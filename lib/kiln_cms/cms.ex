@@ -933,6 +933,10 @@ defmodule KilnCMS.CMS do
       define :list_site_password_policy, action: :read
       define :save_site_password_policy, action: :save
       define :reset_site_password_policy, action: :destroy
+
+      # Cross-org reads for the strictest-policy rule (#2408), system-only.
+      define :list_site_password_policies_for_orgs, action: :for_orgs, args: [:org_ids]
+      define :list_all_site_password_policies, action: :all_orgs
     end
 
     # Per-org registration approval (#2251): whether a self-registration waits
