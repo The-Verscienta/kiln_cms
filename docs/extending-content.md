@@ -3540,28 +3540,30 @@ block plugin may notice, with no code change needed:
 **Filters on a plugin field type follow its GraphQL kind.** `cast/2` runs on
 writes only. A `custom_filter` or `customWhere` operand on a plugin type's
 field is not passed through `cast/2`, because the `Kiln.FieldType` contract
-does not promise that `cast/2` is deterministic. It is cast by the kind
-`graphql_kind/1` names instead (#2855):
+does not promise that `cast/2` is deterministic. Instead, the kind
+`graphql_kind/1` names decides how it compares (#2855):
 
-- `:int`, `:float`, `:boolean` and `:date` cast the operand as KilnCMS's own
-  field of that kind does. `custom_filter[score][gt]=9` compares numbers, so
-  a stored `10` is above it, `eq` matches a stored JSON number, and
-  `custom_sort` orders `9` before `10`. An operand that is not one of those
-  (`gt=ten`) is a `400`, and `contains`, `starts_with` and `ilike` are
-  refused, as on a core `integer` field. A stored value of another JSON type
-  (text saved before the field was retyped, say) never fails the read: it
-  sorts and compares where Postgres orders it among jsonb values, as on a
-  core field.
-- `:string`, `:datetime`, `:json` or no `graphql_kind/1` compares the text the
-  client sent. A date-time is text here because a plugin's stored spelling
-  is its own: casting the operand to KilnCMS's offset-less form would miss a
-  value stored with an offset. So if `cast/2` tidies a text value
+- With `:int`, `:float`, `:boolean` or `:date`, an operand that is a value of
+  that kind (`9`, `"9"`, `"true"`, `"2026-11-05"`) compares as that value,
+  as on KilnCMS's own field of the kind. `custom_filter[score][gt]=9`
+  finds a stored `10`, and `eq` and `in` match a stored JSON number.
+- Anything else compares the text the client sent, as it always has: an
+  operand that is not a value of the kind (`gt=ten`), the text operators
+  (`contains`, `starts_with` and `ilike`, so `starts_with=1` still finds `10`),
+  and every operand on a type whose kind is `:string`, `:datetime` or
+  `:json`, or that has no `graphql_kind/1`. A date-time stays text because a
+  plugin's stored spelling is its own. If `cast/2` tidies a text value
   (lowercases it, say), a client must filter with the stored spelling.
 
-Up to 1.13, every plugin type's operand was compared as text, so a numeric
-type's `eq` never matched a stored number and its range operators put
-`"10"` below `"9"`. The built-in format types (`email`,
-`color`, `telephone`, `time`, `slug`) are the exception: their `eq`,
+No operand that was answered before is refused now. Before #2855 every
+operand was compared as text, and a jsonb string sorts below every number:
+on a numeric type `eq` and `in` never matched, `gt` and `gte` matched every
+stored number and `lt` and `lte` none. `custom_sort` compares the stored
+jsonb and always ordered numbers numerically. A stored value of another JSON
+type (text saved before the field was retyped, say) never fails a read.
+
+The built-in format types (`email`, `color`, `telephone`, `time`, `slug`)
+go further than text: their `eq`,
 `not_eq` and `in` operands also match as a save would store them
 ([json-api.md](json-api.md) → "Custom fields"). A value that is an object or
 a list reaches your `cast/2` unchanged, as before: refusing it there, with

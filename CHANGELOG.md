@@ -62,8 +62,8 @@ else.
 - **Markdown: an image that shares its line with text or another image, or sits in a list, quote or table, is kept as a link to the picture labelled with its alt text instead of vanishing (#2771).**
   A 1.13.0 known issue. Standalone images still become image blocks. No migration.
   ([long form](docs/changelog/unreleased.md#markdown-inline-image))
-- **Custom fields: a filter or sort on a plugin field type whose `graphql_kind/1` is `:int`, `:float`, `:boolean` or `:date` compares typed values, so `9` is below `10` and `eq` matches a stored number (#2855).**
-  Such an operand that isn't a number (or boolean, or date) is now a `400`. No migration.
+- **Custom fields: on a plugin field type whose `graphql_kind/1` is `:int`, `:float`, `:boolean` or `:date`, a filter operand that is a value of that kind compares as that value, so `gt=9` finds `10` and `eq` matches a stored number (#2855).**
+  Every other operand, and the text operators, compare as text as before; nothing that answered `200` is refused. No migration.
   ([long form](docs/changelog/unreleased.md#plugin-typed-filters))
 
 ## [1.13.0] - 2026-11-25

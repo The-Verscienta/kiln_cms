@@ -310,11 +310,12 @@ GET /api/json/posts?filter[locale]=en&custom_filter[price][lte]=20&custom_sort=-
     `starts_with` take the operand as sent: a time's tidy drops its seconds,
     which would move a range bound, and a pattern is not a value.
   - A `text` field compares the operand as the text sent; numbers,
-    booleans, dates and date-times are cast as above. A single field of a
-    plugin's type is cast by the GraphQL kind the type declares
-    (`graphql_kind/1`): an `int`, `float`, `boolean` or `date` kind as the
-    core type of that kind, so `custom_filter[score][gt]=9` compares numbers
-    and a non-number is a `400`; any other kind compares the text sent
+    booleans, dates and date-times are cast as above. On a single field of
+    a plugin's type whose `graphql_kind/1` is `int`, `float`, `boolean` or
+    `date`, an operand that is a value of that kind compares as that value
+    (`custom_filter[score][gt]=9` finds a stored `10`); any other operand,
+    and every operand on a plugin type of another kind, compares as the
+    text sent, never a `400`
     ([Filters on a plugin field type](extending-content.md#filters-on-a-plugin-field-type)).
     A list of a plugin's type passes each operand through the type's
     `cast/2` ([Lists of values](#lists-of-values)).

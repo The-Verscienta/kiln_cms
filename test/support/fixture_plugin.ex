@@ -481,6 +481,78 @@ defmodule KilnCMS.FixturePlugin.FieldTypes.Score do
   def cast(_value, _definition), do: {:error, "must be a whole number"}
 end
 
+defmodule KilnCMS.FixturePlugin.FieldTypes.Weight do
+  @moduledoc """
+  A plugin field type that stores a JSON number with a fraction, typed for
+  GraphQL as `:float` (test fixture, #2855).
+  """
+  use Kiln.FieldType
+
+  @impl Kiln.FieldType
+  def graphql_kind(_definition), do: :float
+
+  @impl Kiln.FieldType
+  def input_type, do: "number"
+
+  @impl Kiln.FieldType
+  def cast(value, _definition) when is_number(value), do: {:ok, value / 1}
+
+  def cast(value, _definition) when is_binary(value) do
+    case Kiln.FieldType.parse_float(String.trim(value)) do
+      {weight, ""} -> {:ok, weight}
+      _other -> {:error, "must be a number"}
+    end
+  end
+
+  def cast(_value, _definition), do: {:error, "must be a number"}
+end
+
+defmodule KilnCMS.FixturePlugin.FieldTypes.Toggle do
+  @moduledoc """
+  A plugin field type that stores a JSON boolean, typed for GraphQL as
+  `:boolean` (test fixture, #2855).
+  """
+  use Kiln.FieldType
+
+  @impl Kiln.FieldType
+  def graphql_kind(_definition), do: :boolean
+
+  @impl Kiln.FieldType
+  def input_type, do: "checkbox"
+
+  @impl Kiln.FieldType
+  def cast(value, _definition) when is_boolean(value), do: {:ok, value}
+  def cast("true", _definition), do: {:ok, true}
+  def cast("false", _definition), do: {:ok, false}
+  def cast(_value, _definition), do: {:error, "must be true or false"}
+end
+
+defmodule KilnCMS.FixturePlugin.FieldTypes.Deadline do
+  @moduledoc """
+  A plugin field type that stores an ISO 8601 date, typed for GraphQL as
+  `:date` (test fixture, #2855).
+  """
+  use Kiln.FieldType
+
+  @impl Kiln.FieldType
+  def graphql_kind(_definition), do: :date
+
+  @impl Kiln.FieldType
+  def input_type, do: "date"
+
+  @impl Kiln.FieldType
+  def cast(%Date{} = value, _definition), do: {:ok, Date.to_iso8601(value)}
+
+  def cast(value, _definition) when is_binary(value) do
+    case Date.from_iso8601(String.trim(value)) do
+      {:ok, date} -> {:ok, Date.to_iso8601(date)}
+      _error -> {:error, "must be a date (YYYY-MM-DD)"}
+    end
+  end
+
+  def cast(_value, _definition), do: {:error, "must be a date (YYYY-MM-DD)"}
+end
+
 defmodule KilnCMS.FixturePlugin.PanelLive do
   @moduledoc "A plugin admin panel (test fixture) mounted via `admin_routes/0`."
   use KilnCMSWeb, :live_view
@@ -653,7 +725,10 @@ defmodule KilnCMS.FixturePlugin do
       KilnCMS.FixturePlugin.FieldTypes.Lookup,
       KilnCMS.FixturePlugin.FieldTypes.Tag,
       KilnCMS.FixturePlugin.FieldTypes.Shapeshifter,
-      KilnCMS.FixturePlugin.FieldTypes.Score
+      KilnCMS.FixturePlugin.FieldTypes.Score,
+      KilnCMS.FixturePlugin.FieldTypes.Weight,
+      KilnCMS.FixturePlugin.FieldTypes.Toggle,
+      KilnCMS.FixturePlugin.FieldTypes.Deadline
     ]
 
   @impl true

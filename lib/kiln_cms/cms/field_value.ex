@@ -28,7 +28,9 @@ defmodule KilnCMS.CMS.FieldValue do
   # format types' canonical spellings. Not `:text` (sanitizing HTML per operand
   # is not a comparison), not the date-times (#2678), and not a plugin type,
   # whose `cast/2` the `Kiln.FieldType` contract does not promise to be
-  # deterministic: its operands are compared as the text sent.
+  # deterministic: its operands are cast by its `graphql_kind/1` where they
+  # are values of that kind, and compared as the text sent otherwise
+  # (`CustomFieldQuery.cast_operand/3`, #2855).
   @canonical_types [:string, :url, :select, :email, :color, :telephone, :time, :slug]
 
   @doc """
