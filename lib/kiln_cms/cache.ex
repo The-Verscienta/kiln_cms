@@ -95,6 +95,10 @@ defmodule KilnCMS.Cache do
   allowlist, and it exists so a clear or an eviction of `cache_name/0` cannot
   move any of them backwards.
 
+  It also holds `KilnCMS.Cache.FillGuard`'s bust marks (#2972), under tuple
+  keys that `store_for/1` never routes to and that expire on their own. Those
+  are written inside a transaction on the guarded cache, not on this one.
+
   Every write to it holds the key's lock: a first read mints through
   `Cachex.get_and_update/3`, and a put goes through `put_routed/3`, which wraps
   it in `Cachex.transaction/3`. A plain `Cachex.put/3` only checks for a lock
