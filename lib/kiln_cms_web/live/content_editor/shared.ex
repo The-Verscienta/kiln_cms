@@ -369,7 +369,7 @@ defmodule KilnCMSWeb.ContentEditor.Shared do
 
   attr :draft?, :boolean,
     required: true,
-    doc: "whether the holder's flush persists (drafts autosave)"
+    doc: "whether the holder's flush persists (a draft and a live document autosave)"
 
   # The takeover dialog: who holds the field, how active they are, and what a
   # takeover does to them — then the one button.
