@@ -200,29 +200,18 @@ defmodule KilnCMS.Backups.Destination.Sftp do
   def location(%Config{settings: settings}), do: Target.location(settings)
 
   @doc """
-  The host key `source` trusts, as `{type, fingerprint}`, or `nil` when it
-  trusts none. A `%Config{}` carries it in its settings (`algorithm_key/0`,
-  `fingerprint_key/0`); a stored row, or any map with a `:host_key`, in
-  `host_key["algorithm"]` and `["fingerprint"]`. Retention compares two
-  rows' keys (`KilnCMS.Backups.Retention.prune_blocker/4`, #3200); it is
-  kept out of `location/1`, which keys what was sent where.
+  The host key a stored row (any map with a `:host_key`) trusts, as
+  `{type, fingerprint}` from `host_key["algorithm"]` and `["fingerprint"]`,
+  or `nil` when it trusts none. Retention compares two rows' keys
+  (`KilnCMS.Backups.Retention.prune_blocker/3`, #3200); it is kept out of
+  `location/1`, which keys what was sent where.
   """
-  @spec trusted_key(Config.t() | map()) :: {String.t(), String.t()} | nil
-  def trusted_key(%Config{settings: settings}) when is_map(settings),
-    do: key_pair(settings[algorithm_key()], settings[fingerprint_key()])
+  @spec trusted_key(map()) :: {String.t(), String.t()} | nil
+  def trusted_key(%{host_key: %{"algorithm" => type, "fingerprint" => fingerprint}})
+      when is_binary(type) and type != "" and is_binary(fingerprint) and fingerprint != "",
+      do: {type, fingerprint}
 
-  def trusted_key(%Config{}), do: nil
-
-  def trusted_key(%{host_key: %{} = host_key}),
-    do: key_pair(host_key["algorithm"], host_key["fingerprint"])
-
-  def trusted_key(%{}), do: nil
-
-  defp key_pair(type, fingerprint)
-       when is_binary(type) and type != "" and is_binary(fingerprint) and fingerprint != "",
-       do: {type, fingerprint}
-
-  defp key_pair(_type, _fingerprint), do: nil
+  def trusted_key(_row), do: nil
 
   @doc """
   The host key `config` offers for `type` (or the one it prefers, with

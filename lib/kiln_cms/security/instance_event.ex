@@ -188,19 +188,6 @@ defmodule KilnCMS.Security.InstanceEvent do
       filter expr(inserted_at < ^arg(:cutoff))
     end
 
-    # Retention's read (#3200): the host-key mismatches of the given backup
-    # destinations since `since`, to tell a key a server has since replaced
-    # (`KilnCMS.Backups.Retention.proven_host_keys/2`).
-    read :host_key_mismatches do
-      argument :target_ids, {:array, :uuid}, allow_nil?: false
-      argument :since, :utc_datetime_usec, allow_nil?: false
-
-      filter expr(
-               type == :backup_destination_host_key_mismatch and
-                 target_id in ^arg(:target_ids) and inserted_at > ^arg(:since)
-             )
-    end
-
     create :record do
       primary? true
 
@@ -236,17 +223,11 @@ defmodule KilnCMS.Security.InstanceEvent do
     # Reading is a platform admin's act (the effective role, so a temporary
     # platform grant reads until it expires). A site admin, the default site's
     # included, is refused. The `:security` system actor is admitted to the
-    # two reads erasure and retention make, never to `read` / `list`; the
-    # `:backups` one only to the host-key mismatches backup retention checks
-    # before it prunes an SFTP destination (#3200).
+    # two reads erasure and retention make, never to `read` / `list`.
     policy action_type(:read) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
-      forbid_unless action([:by_actor, :older_than, :host_key_mismatches])
-
-      authorize_if {KilnCMS.Checks.SystemActor,
-                    subsystem: :security, action: [:by_actor, :older_than]}
-
-      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :backups, action: :host_key_mismatches}
+      forbid_unless action([:by_actor, :older_than])
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :security}
     end
 
     # Writes are the `:security` system actor's, by action name. No person,

@@ -59,11 +59,6 @@ defmodule KilnCMS.Security do
       define :list_instance_events, action: :list
       define :instance_events_by_actor, action: :by_actor, args: [:user_id]
       define :instance_events_older_than, action: :older_than, args: [:cutoff]
-
-      define :backup_host_key_mismatches,
-        action: :host_key_mismatches,
-        args: [:target_ids, :since]
-
       define :get_instance_event, action: :read, get_by: [:id]
     end
 

@@ -276,9 +276,11 @@ defmodule KilnCMSWeb.BackupDestinationsSftpLiveTest do
 
   describe "the Prunes badge on two SFTP destinations at one path (#3200)" do
     # An enabled, pruned destination at `/backups` on 127.0.0.1:`port`,
-    # trusting `fingerprint`. Trusting writes no connection, so no server
-    # needs to answer on `port`.
-    defp trusted!(port, type, fingerprint) do
+    # trusting `fingerprint`, and a Test result of `tested_ok` (nil: none)
+    # recorded after the trust. Trusting makes no connection, and the
+    # result is recorded as the Test would record it, so no server needs to
+    # answer on `port`.
+    defp trusted!(port, type, fingerprint, tested_ok \\ true) do
       admin = platform_admin()
 
       row =
@@ -308,14 +310,20 @@ defmodule KilnCMSWeb.BackupDestinationsSftpLiveTest do
           actor: admin
         )
 
-      Backups.update_backup_destination!(row, %{enabled: true}, actor: admin)
+      row = Backups.update_backup_destination!(row, %{enabled: true}, actor: admin)
+      if is_nil(tested_ok), do: row, else: tested!(row, tested_ok)
     end
+
+    defp tested!(row, ok),
+      do: Backups.record_backup_destination_test!(row, %{ok: ok}, actor: Backups.system())
 
     @fp_a "SHA256:" <> String.duplicate("A", 43)
     @fp_b "SHA256:" <> String.duplicate("B", 43)
 
-    test "different trusted servers both prune", %{conn: conn} do
-      rows = [trusted!(2201, "ssh-ed25519", @fp_a), trusted!(2202, "ssh-ed25519", @fp_b)]
+    test "different trusted servers, each tested since both trusts, both prune", %{conn: conn} do
+      [a, b] = [trusted!(2201, "ssh-ed25519", @fp_a, nil), trusted!(2202, "ssh-ed25519", @fp_b)]
+      # A's Test after B's trust.
+      rows = [tested!(a, true), b]
       lv = mount(conn)
 
       for row <- rows do
@@ -342,16 +350,26 @@ defmodule KilnCMSWeb.BackupDestinationsSftpLiveTest do
                  "#backup-destination-#{row.id} [data-role=prune-blocked]",
                  "Not pruned: another SFTP destination uses a folder inside or around this " <>
                    "one's; the app can't tell whether it is the same server until both trust " <>
-                   "host keys of the same type that differ, and neither key has been refused since"
+                   "host keys of the same type that differ, and each has passed a Test since " <>
+                   "the later of the two was trusted"
                )
       end
     end
 
-    test "a key refused since it was trusted blocks the pair", %{conn: conn} do
-      [_a, b] =
-        rows = [trusted!(2201, "ssh-ed25519", @fp_a), trusted!(2202, "ssh-ed25519", @fp_b)]
+    test "a row not tested since the other was trusted blocks the pair", %{conn: conn} do
+      # A was tested before B was trusted: A has not been seen since.
+      rows = [trusted!(2201, "ssh-ed25519", @fp_a), trusted!(2202, "ssh-ed25519", @fp_b)]
+      lv = mount(conn)
 
-      :ok = Sftp.HostKeyAlert.mismatch(b.id, "sftp", @fp_a, @fp_b)
+      for row <- rows do
+        refute has_element?(lv, "#backup-destination-#{row.id} [data-role=prunes]")
+        assert has_element?(lv, "#backup-destination-#{row.id} [data-role=prune-blocked]")
+      end
+    end
+
+    test "a failed Test blocks the pair", %{conn: conn} do
+      [a, b] = [trusted!(2201, "ssh-ed25519", @fp_a, nil), trusted!(2202, "ssh-ed25519", @fp_b)]
+      rows = [tested!(a, false), b]
       lv = mount(conn)
 
       for row <- rows do

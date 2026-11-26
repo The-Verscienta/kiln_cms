@@ -41,7 +41,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   backups" only when a pass would prune it; otherwise it shows why not. A
   disabled one shows neither: retention never runs there, and its Disabled
   badge says so. Both come from
-  `KilnCMS.Backups.Retention.prune_blocker/4`, worked out once per `load/1`
+  `KilnCMS.Backups.Retention.prune_blocker/3`, worked out once per `load/1`
   over every row, the rule retention applies before each pass (#2950).
 
   ## The form
@@ -841,7 +841,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
     socket
     |> assign(:destinations, rows)
     |> assign(:env, env)
-    |> assign(:blockers, prune_blockers(rows, env_location, socket.assigns.current_user))
+    |> assign(:blockers, prune_blockers(rows, env_location))
     |> assign(:env_prune, env_prune(env, rows, env_location))
     |> assign(
       :can_test_env?,
@@ -869,24 +869,16 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
 
   # Why each stored destination whose `prune` is on would not be pruned, by
   # id (#2950): the rule retention applies before every pass
-  # (`Retention.prune_blocker/4`), so the "Prunes" badge shows only where a
-  # pass would prune. The SFTP host keys nothing has refused since they were
-  # trusted are read once (#3200); a read that fails proves none, so every
-  # nested SFTP pair shows blocked, never a badge a pass wouldn't honor.
-  defp prune_blockers(rows, env_location, user) when is_list(rows) do
-    proven =
-      case Retention.proven_host_keys(rows, actor: user) do
-        {:ok, proven} -> proven
-        {:error, _error} -> MapSet.new()
-      end
-
+  # (`Retention.prune_blocker/3`), so the "Prunes" badge shows only where a
+  # pass would prune.
+  defp prune_blockers(rows, env_location) when is_list(rows) do
     Map.new(rows, fn row ->
       config = %Config{id: row.id, key: "dest:" <> row.id, kind: row.kind, settings: row.settings}
-      {row.id, Retention.prune_blocker(config, rows, env_location, proven)}
+      {row.id, Retention.prune_blocker(config, rows, env_location)}
     end)
   end
 
-  defp prune_blockers(:unreadable, _env_location, _user), do: %{}
+  defp prune_blockers(:unreadable, _env_location), do: %{}
 
   # The env destination's pruning (#2950): `:off` unless
   # BACKUP_RCLONE_REMOTE_PRUNE is on, then `:on`, or `{:blocked, reason}` by
@@ -1069,7 +1061,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
 
   defp stamp(%DateTime{} = at), do: Calendar.strftime(at, "%Y-%m-%d %H:%M UTC")
 
-  # Short: why pruning, where it is on, doesn't run (`Retention.prune_blocker/4`).
+  # Short: why pruning, where it is on, doesn't run (`Retention.prune_blocker/3`).
   defp blocker_text(:unsupported), do: gettext("its adapter can't list and delete")
   defp blocker_text(:env_overlap), do: gettext("it overlaps BACKUP_RCLONE_REMOTE")
 
@@ -1096,7 +1088,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   defp blocker_text(:destination_overlap_possible_sftp),
     do:
       gettext(
-        "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server until both trust host keys of the same type that differ, and neither key has been refused since"
+        "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server until both trust host keys of the same type that differ, and each has passed a Test since the later of the two was trusted"
       )
 
   defp blocker_text(:unreadable), do: gettext("the destinations couldn't be read")
@@ -1320,7 +1312,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
 
   attr :blocker, :atom,
     default: nil,
-    doc: "why its pruning can't run (`Retention.prune_blocker/4`)"
+    doc: "why its pruning can't run (`Retention.prune_blocker/3`)"
 
   attr :form_open?, :boolean, required: true
   attr :user, :any, required: true

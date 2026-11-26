@@ -194,7 +194,7 @@ defmodule KilnCMS.Backups.Retention do
   cron-only install.
 
     0. **Location.** Before anything is listed, where the destination writes
-       is checked again (`prune_blocker/4`, the rule the Destinations tab's
+       is checked again (`prune_blocker/3`, the rule the Destinations tab's
        badge shows too), since a row was saved before the environment or
        the other rows were what they are now. Nothing is pruned on a stored
        destination that is, contains or is inside `BACKUP_RCLONE_REMOTE`, or
@@ -266,7 +266,6 @@ defmodule KilnCMS.Backups.Retention do
 
   alias KilnCMS.Backups.Destination.Sftp
   alias KilnCMS.Backups.Destination.Sftp.HostKey
-
   alias KilnCMS.Backups.Retention.Policy
 
   require Logger
@@ -554,9 +553,6 @@ defmodule KilnCMS.Backups.Retention do
   def describe({:read_destination, reason}),
     do: "couldn't read the destination's settings (#{inspect(reason)})"
 
-  def describe({:read_host_key_events, reason}),
-    do: "couldn't read the SFTP destinations' host-key mismatches (#{inspect(reason)})"
-
   def describe({:delete, name, reason}),
     do: "couldn't delete #{name} (#{Destination.format_reason(reason)})"
 
@@ -587,7 +583,7 @@ defmodule KilnCMS.Backups.Retention do
     do:
       "another SFTP backup destination uses a folder inside or around this one's; the app " <>
         "can't tell whether it is the same server until both trust host keys of the same " <>
-        "type that differ, and neither key has been refused since"
+        "type that differ, and each has passed a Test since the later of the two was trusted"
 
   def describe({:dir_id, reason}),
     do: "couldn't read the backup directory's id (#{inspect(reason)})"
@@ -1628,7 +1624,7 @@ defmodule KilnCMS.Backups.Retention do
   if it did. `{:error, reason}`
   when it could not start, with nothing deleted: `{:error, :not_prunable}`
   for the env destination with the switch off (or any key that is neither),
-  and `prune_blocker/4`'s reason when that names one (`:unsupported` for an
+  and `prune_blocker/3`'s reason when that names one (`:unsupported` for an
   adapter that can't list and delete).
 
   Options:
@@ -1691,91 +1687,23 @@ defmodule KilnCMS.Backups.Retention do
   # sent. Every row, disabled ones too: a disabled destination's files are
   # still there. Settings are enough for `Destination.location/1`.
   defp clear_to_prune(subject, config) do
-    opts = [actor: Backups.system(), authorize_with: :error]
+    case Backups.list_backup_destinations(actor: Backups.system(), authorize_with: :error) do
+      {:ok, rows} ->
+        case prune_blocker(subject_for(subject, config), rows, Destination.env_location()) do
+          nil -> :ok
+          reason -> {:error, reason}
+        end
 
-    with {:ok, rows} <- read_rows(opts),
-         {:ok, proven} <- proven_or_error(rows, opts) do
-      case prune_blocker(subject_for(subject, config), rows, Destination.env_location(), proven) do
-        nil -> :ok
-        reason -> {:error, reason}
-      end
+      {:error, error} ->
+        {:error, {:read_destination, error.__struct__}}
     end
   end
-
-  defp read_rows(opts) do
-    case Backups.list_backup_destinations(opts) do
-      {:ok, rows} -> {:ok, rows}
-      {:error, error} -> {:error, {:read_destination, error.__struct__}}
-    end
-  end
-
-  defp proven_or_error(rows, opts) do
-    case proven_host_keys(rows, opts) do
-      {:ok, proven} -> {:ok, proven}
-      {:error, error} -> {:error, {:read_host_key_events, error.__struct__}}
-    end
-  end
-
-  @doc """
-  The ids of the SFTP destinations in `rows` whose trusted host key nothing
-  has refused since it was trusted (#3200): every row with a trusted key
-  (`Sftp.trusted_key/1`) and a readable `host_key["trusted_at"]`, except
-  one with a `backup_destination_host_key_mismatch` instance security event
-  (`KilnCMS.Backups.Destination.Sftp.HostKeyAlert`) newer than that
-  instant. Such a row's server has offered another key since; the one it
-  trusts may be a key the server dropped, and so says nothing about which
-  server it is. `prune_blocker/4` takes the result.
-
-  One read (`KilnCMS.Security.backup_host_key_mismatches/3`), as `opts`'
-  actor, and none unless at least two rows have a trusted key: with fewer,
-  no pair can be told apart by its keys. `{:error, error}` when the read
-  fails or is refused.
-  """
-  @spec proven_host_keys([map()], keyword()) :: {:ok, MapSet.t()} | {:error, term()}
-  def proven_host_keys(rows, opts) when is_list(rows) do
-    trusted =
-      for row <- rows,
-          Map.get(row, :kind) == "sftp",
-          Sftp.trusted_key(row) != nil,
-          at = trusted_at(row),
-          do: {row.id, at}
-
-    case trusted do
-      [_, _ | _] -> proven_since(trusted, opts)
-      _fewer -> {:ok, MapSet.new()}
-    end
-  end
-
-  defp proven_since(trusted, opts) do
-    ids = Enum.map(trusted, &elem(&1, 0))
-    since = trusted |> Enum.map(&elem(&1, 1)) |> Enum.min(DateTime)
-
-    with {:ok, events} <- KilnCMS.Security.backup_host_key_mismatches(ids, since, opts) do
-      refused = Enum.group_by(events, & &1.target_id, & &1.inserted_at)
-
-      {:ok,
-       MapSet.new(
-         for {id, at} <- trusted,
-             not Enum.any?(Map.get(refused, id, []), &(DateTime.compare(&1, at) == :gt)),
-             do: id
-       )}
-    end
-  end
-
-  defp trusted_at(%{host_key: %{"trusted_at" => at}}) when is_binary(at) do
-    case DateTime.from_iso8601(at) do
-      {:ok, datetime, _offset} -> datetime
-      {:error, _reason} -> nil
-    end
-  end
-
-  defp trusted_at(_row), do: nil
 
   defp subject_for(:env, _config), do: :env
   defp subject_for(%Config{}, config), do: config
 
   @typedoc """
-  Why a destination whose pruning is on is not pruned (`prune_blocker/4`).
+  Why a destination whose pruning is on is not pruned (`prune_blocker/3`).
   """
   @type prune_blocker ::
           :unsupported
@@ -1794,10 +1722,9 @@ defmodule KilnCMS.Backups.Retention do
   it can (#2950). The one rule both retention and the Destinations tab
   apply, so the tab's "Prunes" badge shows only where a pass would prune.
   Pure: the caller reads `rows`, every stored destination (enabled or not;
-  anything with `:id`, `:kind` and `:settings`, and an SFTP row's
-  `:host_key`), and passes `Destination.env_location/0` as `env` and
-  `proven_host_keys/2`'s set as `proven`. Without `proven` no host key
-  counts, so two SFTP rows are never told apart by their keys.
+  anything with `:id`, `:kind` and `:settings`; an SFTP row's `:host_key`,
+  `:last_test_ok` and `:last_tested_at` too), and passes
+  `Destination.env_location/0` as `env`.
 
   For a stored destination's `%Config{}`:
 
@@ -1815,17 +1742,21 @@ defmodule KilnCMS.Backups.Retention do
     * `:destination_overlap_possible_sftp` - another stored SFTP
       destination's path is inside or around this one's, on any host, port
       or login: it may be the same folder (`Destination.possible_overlap?/2`,
-      #2222). Unless the two are distinct servers (#3200): both trust a
-      host key (`Sftp.trusted_key/1`) of the same type, the fingerprints
-      differ, and both rows are in `proven`. Any other pair stays blocked:
-      a key not yet trusted, keys of different types (one server holds an
-      ed25519 and an RSA key), one fingerprint (one server by name and by
-      IP), or a key a mismatch has been recorded against since it was
-      trusted (the server replaced it, and the stale row may be the same
-      server as the other). The subject's key is read from its own row in
-      `rows` (fresher; the Destinations tab's config has none), else from
-      its config's settings. The exact `:destination_overlap` (same host,
-      port and login) is never narrowed.
+      #2222). Unless both rows prove they are distinct servers (#3200):
+      both trust a host key (`Sftp.trusted_key/1`) of the same type, the
+      fingerprints differ, and each row's last Test passed
+      (`last_test_ok`) after the later of the two `host_key["trusted_at"]`
+      instants. A Test connects only to a server offering the row's trusted
+      key, so it shows that key is still the server's own, after both keys
+      were in place. Every other pair stays blocked: a key not yet trusted,
+      keys of different types (one server holds an ed25519 and an RSA key),
+      one fingerprint (one server by name and by IP), and a key that hasn't
+      been seen since (a disabled row never connects, so a server
+      reinstalled with a new key would otherwise look like another
+      server; re-trusting one row of a rotated server moves the later
+      trust past the other's last Test). The subject's own row in `rows`
+      supplies its key and Test; with no row it is never proven. The exact
+      `:destination_overlap` (same host, port and login) is never narrowed.
 
   For `:env`, the env destination, which may share a place with any of them
   unseen:
@@ -1842,21 +1773,15 @@ defmodule KilnCMS.Backups.Retention do
   Whether pruning is turned on at all (a row's `prune`,
   `BACKUP_RCLONE_REMOTE_PRUNE`) is the caller's to check first.
   """
-  @spec prune_blocker(
-          Config.t() | :env,
-          [map()],
-          Destination.location() | nil,
-          MapSet.t()
-        ) :: prune_blocker() | nil
-  def prune_blocker(subject, rows, env, proven \\ MapSet.new())
+  @spec prune_blocker(Config.t() | :env, [map()], Destination.location() | nil) ::
+          prune_blocker() | nil
+  def prune_blocker(:env, _rows, nil), do: :not_prunable
 
-  def prune_blocker(:env, _rows, nil, _proven), do: :not_prunable
-
-  def prune_blocker(:env, rows, env, _proven) when is_list(rows) do
+  def prune_blocker(:env, rows, env) when is_list(rows) do
     Enum.find_value(rows, fn row -> env_row_blocker(row_location(row), env) end)
   end
 
-  def prune_blocker(%Config{} = config, rows, env, %MapSet{} = proven) when is_list(rows) do
+  def prune_blocker(%Config{} = config, rows, env) when is_list(rows) do
     location = Destination.location(config)
 
     cond do
@@ -1876,39 +1801,12 @@ defmodule KilnCMS.Backups.Retention do
 
       overlaps_another?(location, config.id, rows, fn row ->
         Destination.possible_overlap?(location, row_location(row)) and
-            not distinct_servers?(config, row, rows, proven)
+            not distinct_servers?(config.id, row, rows)
       end) ->
         possible_overlap(location)
 
       true ->
         nil
-    end
-  end
-
-  # Two SFTP rows whose paths nest are distinct servers when both trust a
-  # key of the same type with different fingerprints, and neither key has
-  # been refused since it was trusted (`proven_host_keys/2`, #3200).
-  defp distinct_servers?(
-         %Config{kind: "sftp", id: id} = config,
-         %{kind: "sftp"} = row,
-         rows,
-         proven
-       ) do
-    with true <- MapSet.member?(proven, id) and MapSet.member?(proven, row.id),
-         {type, own} <- subject_key(config, rows),
-         {^type, other} <- Sftp.trusted_key(row) do
-      not HostKey.same?(own, other)
-    else
-      _untrusted_other_type_or_unproven -> false
-    end
-  end
-
-  defp distinct_servers?(_config, _row, _rows, _proven), do: false
-
-  defp subject_key(%Config{id: id} = config, rows) do
-    case Enum.find(rows, &(&1.id == id)) do
-      nil -> Sftp.trusted_key(config)
-      row -> Sftp.trusted_key(row)
     end
   end
 
@@ -1945,6 +1843,42 @@ defmodule KilnCMS.Backups.Retention do
 
   defp overlaps_another?(_location, id, rows, overlaps?) do
     Enum.any?(rows, &(&1.id != id and overlaps?.(&1)))
+  end
+
+  # Two SFTP rows whose paths nest are distinct servers when both trust a
+  # key of the same type with different fingerprints, and each passed a
+  # Test after the later of the two trusts (#3200). Positive proof only:
+  # nothing here infers a key is good from the absence of a refusal.
+  defp distinct_servers?(id, %{kind: "sftp"} = other, rows) do
+    with %{kind: "sftp"} = own <- Enum.find(rows, &(&1.id == id)),
+         {type, own_fingerprint} <- Sftp.trusted_key(own),
+         {^type, other_fingerprint} <- Sftp.trusted_key(other),
+         false <- HostKey.same?(own_fingerprint, other_fingerprint),
+         %DateTime{} = own_trusted <- trusted_at(own),
+         %DateTime{} = other_trusted <- trusted_at(other) do
+      later = Enum.max([own_trusted, other_trusted], DateTime)
+      tested_since?(own, later) and tested_since?(other, later)
+    else
+      _missing_untrusted_or_same -> false
+    end
+  end
+
+  defp distinct_servers?(_id, _row, _rows), do: false
+
+  defp trusted_at(%{host_key: %{"trusted_at" => at}}) when is_binary(at) do
+    case DateTime.from_iso8601(at) do
+      {:ok, datetime, _offset} -> datetime
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp trusted_at(_row), do: nil
+
+  defp tested_since?(row, instant) do
+    case {Map.get(row, :last_test_ok), Map.get(row, :last_tested_at)} do
+      {true, %DateTime{} = at} -> DateTime.compare(at, instant) == :gt
+      _untested_or_failed -> false
+    end
   end
 
   # Whose units the ownership rule (step 4) accepts: in-app runs of THIS

@@ -29694,8 +29694,8 @@ msgstr "otro destino S3 usa un bucket con el mismo nombre; la aplicación no pue
 
 #: lib/kiln_cms_web/live/backup_destinations_live.ex
 #, elixir-autogen, elixir-format
-msgid "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server until both trust host keys of the same type that differ, and neither key has been refused since"
-msgstr "otro destino SFTP usa una carpeta dentro o alrededor de la de este; la aplicación no puede saber si es el mismo servidor hasta que ambos confíen en claves de host del mismo tipo que sean distintas y ninguna clave haya sido rechazada desde entonces"
+msgid "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server until both trust host keys of the same type that differ, and each has passed a Test since the later of the two was trusted"
+msgstr "otro destino SFTP usa una carpeta dentro o alrededor de la de este; la aplicación no puede saber si es el mismo servidor hasta que ambos confíen en claves de host del mismo tipo que sean distintas y cada uno haya superado una prueba desde que se confió en la más reciente de las dos"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format

@@ -29694,7 +29694,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_destinations_live.ex
 #, elixir-autogen, elixir-format
-msgid "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server until both trust host keys of the same type that differ, and neither key has been refused since"
+msgid "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server until both trust host keys of the same type that differ, and each has passed a Test since the later of the two was trusted"
 msgstr ""
 
 #: lib/kiln_cms_web/live/governance_live.ex
