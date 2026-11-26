@@ -102,6 +102,10 @@ else.
   GraphQL's messages are unchanged. No migration.
   ([long form](docs/changelog/unreleased.md#custom-where-error-spelling))
 
+- **Change feed: a published event is no longer lost to this node's live editor views and relay when a database connection exits mid-publish (#2938).**
+  SSE streams still hide such an event. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#feed-relay-exit))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —

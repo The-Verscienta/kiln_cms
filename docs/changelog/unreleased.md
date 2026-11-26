@@ -101,3 +101,11 @@ carries the reasoning.
   - **What changes.** Over MCP, JSON:API and the code interface the text names `custom_where`, `custom_filter`, `date_time`, `not_eq` and `is_null`, and reads "an int field" and "an int condition" where it read "a int". `docs/mcp.md` no longer warns that some messages use GraphQL's spelling.
   - **Unchanged.** GraphQL's messages are the same, word for word, so a client matching on them keeps working: the GraphQL schema marks a GraphQL request in the Ash context, and only then are the keys spelled in camelCase. The conditions each surface accepts are the same as before.
   - **No migration; rolling the pin back is safe.** An older release spells these messages the GraphQL way again.
+
+
+<a id="feed-relay-exit"></a>
+
+- **A change-feed event reaches this node's subscribers when the database connection exits mid-publish (#2938).** Before handing an event to the site's relay, `KilnCMS.Delivery.Feed.publish/4` decides what anonymous SSE streams see, which reads the event's exposure. The read failing with an error already hid the event from streams and delivered it anyway. Failing with an *exit* did not: a connection that went away while the read waited for it (a pool restarting, an owner process dying) skipped the hand-off, so live editor views and other in-BEAM subscribers on that node never got the event, and the log said "Feed event for … not published".
+  - **What changes.** Any failure of that decision, a raise or an exit, now hides the event from SSE streams and still hands it to the relay. It logs `Feed event <id> hidden from streams: <reason>`.
+  - **Unchanged.** Streams fail closed as before: an event whose exposure cannot be read or written is never shown to an anonymous subscriber. Delivery is still at most once.
+  - **No migration; rolling the pin back is safe.** An older release drops such an event for local subscribers again.
