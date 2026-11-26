@@ -110,6 +110,12 @@ else.
   Before, the page asked the type with only a few settings and could show a choice the save refused, or hide one it took. No migration.
   ([long form](docs/changelog/unreleased.md#plugin-widgets-full-definition))
 
+### Security
+
+- **Smart 404 blocking: a spoofed search-engine claim rotating through the addresses of one IPv6 `/64` is counted once another address there has failed its DNS check or left its reverse zone silent (#2838).**
+  Only with `KILN_SCANNER_BLOCKING` on; verified crawlers stay exempt, IPv4 is unchanged. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#scanner-guard-ipv6-rotation))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —

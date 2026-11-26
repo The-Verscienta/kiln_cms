@@ -394,6 +394,10 @@ reverse zone counts against the claim while the resolver works, and a silent
 engine zone, given its full lookup budget, does not (see
 [What counts, and what never does](ip-blocking.md#what-counts-and-what-never-does)
 and [ADR 0054](decisions/0054-in-crawler-verification-a-silence-the-claimant-controls-counts-against-it-and-one-the-vendor-controls-does-not.md)).
+It also counts a claim not proven either way from an IPv6 `/64` where
+another address recently failed its lookup (#2838,
+[ADR 0086](decisions/0086-an-ipv6-64-that-produced-claimant-controlled-negative-evidence-loses-the-404-exemption-for-unproven-claims.md)).
+The rate limiter ignores those marks: the table above is unchanged.
 
 **A request never waits for DNS.** The first request from a new address is
 judged as "not proven" while a lookup starts in the background, and later

@@ -2,7 +2,14 @@
 
 - **Status** — accepted (2026-11-13), recording the rule #2837 shipped for
   #2588. It decides how the smart 404 guard reads a DNS lookup that got no
-  answer; what the rate limiter charges for one is unchanged.
+  answer; what the rate limiter charges for one is unchanged. Partly
+  superseded by
+  [ADR 0086](0086-an-ipv6-64-that-produced-claimant-controlled-negative-evidence-loses-the-404-exemption-for-unproven-claims.md)
+  (#2838): a pending, skipped or unverifiable claim no longer keeps the
+  exemption when it comes from an IPv6 `/64` where another address recently
+  failed its lookup or went silent while the resolver answered, and a PTR
+  silence while the resolver fails no longer keeps it in a `/64` where
+  another address failed.
 - **References** — [#2588](https://github.com/The-Verscienta/kiln_cms/issues/2588)
   and [#2837](https://github.com/The-Verscienta/kiln_cms/pull/2837), which
   built it; [#2841](https://github.com/The-Verscienta/kiln_cms/issues/2841),
