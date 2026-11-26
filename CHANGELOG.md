@@ -74,6 +74,10 @@ else.
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#console-small-defects-2))
 
+- **A refused `custom_where` over MCP or JSON:API names its keys in snake_case (`custom_filter`, `date_time`, `not_eq`), not GraphQL's `customFilter`, `dateTime`, `notEq` (#2913).**
+  GraphQL's messages are unchanged. No migration.
+  ([long form](docs/changelog/unreleased.md#custom-where-error-spelling))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —

@@ -43,3 +43,10 @@ carries the reasoning.
   - **Not changed.** A `?to=9999-12-31` date filter on `/editor` was reported as a crash; it lists as expected.
   - **No migration; rolling the pin back is safe.**
 
+
+<a id="custom-where-error-spelling"></a>
+
+- **A refused `custom_where` names its keys the way the caller's surface spells them (#2913).** `KilnCMS.CMS.Preparations.CustomFieldQuery` built every `custom_where` refusal in GraphQL's camelCase: "needs exactly one of string, int, float, boolean, date, dateTime", "customWhere supports only eq, notEq, in and isNull on it", "which customWhere does not support; use customFilter". The MCP read tools, JSON:API's query string and the code interface take snake_case, so a client or model that followed the message failed again (`unknown key "dateTime"`, `unknown operator "notEq"`).
+  - **What changes.** Over MCP, JSON:API and the code interface the text names `custom_where`, `custom_filter`, `date_time`, `not_eq` and `is_null`, and reads "an int field" and "an int condition" where it read "a int". `docs/mcp.md` no longer warns that some messages use GraphQL's spelling.
+  - **Unchanged.** GraphQL's messages are the same, word for word, so a client matching on them keeps working: `KilnCMSWeb.GraphqlSchema` marks a GraphQL request in the Ash context, and only then are the keys spelled in camelCase. The conditions each surface accepts are the same as before.
+  - **No migration; rolling the pin back is safe.** An older release spells these messages the GraphQL way again.

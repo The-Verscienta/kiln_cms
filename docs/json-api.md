@@ -552,6 +552,8 @@ names a field and gives exactly one kind key (`string`, `int`, `float`,
 their operators and the limits are in
 [headless-graphql-api.md](headless-graphql-api.md#typed-filters-customwhere);
 spell them snake_case here (`date_time`, `not_eq`, `starts_with`, `is_null`).
+A refusal spells them the same way: `is a date_time field, not date; use the
+date_time condition`.
 
 A query string carries **one condition**, with as many operators as you like:
 
