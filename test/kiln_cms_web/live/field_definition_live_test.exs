@@ -2755,6 +2755,103 @@ defmodule KilnCMSWeb.FieldDefinitionLiveTest do
       assert lv |> element("label[for=new-field-widget-number]") |> render() =~ "Number"
     end
 
+    # #2883: the page asks a plugin's `widgets/1` with the whole definition
+    # the save checks, so a setting beyond the type, `multiple` and `format`
+    # (the fixture Mood offers faces on a required field only) changes the
+    # cards on the page exactly as it changes what the save takes.
+    test "a plugin's inputs follow every setting, and the save takes what the page offers", %{
+      conn: conn
+    } do
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/fields")
+
+      type_change(lv, "mood")
+      assert widget_cards(lv) == ~w(words scale)
+
+      create_change(lv, %{field_type: "mood", required: "true"})
+      assert widget_cards(lv) == ~w(words scale faces)
+      assert lv |> element("label[for=new-field-widget-faces]") |> render() =~ "Faces"
+
+      create_change(lv, %{field_type: "mood", required: "false"})
+      assert widget_cards(lv) == ~w(words scale)
+
+      lv
+      |> element("#new-field-form")
+      |> render_submit(%{
+        "field_definition" => %{
+          "scopes" => ["page"],
+          "name" => "feeling",
+          "label" => "Feeling",
+          "field_type" => "mood",
+          "required" => "true",
+          "widget" => "faces"
+        }
+      })
+
+      field =
+        :page
+        |> CMS.field_definitions_for!(authorize?: false)
+        |> Enum.find(&(&1.name == "feeling"))
+
+      assert {field.required, field.widget} == {true, "faces"}
+    end
+
+    test "editing a plugin field offers and saves the inputs its edited settings allow", %{
+      conn: conn
+    } do
+      admin = authed_user(:admin)
+
+      field =
+        CMS.create_field_definition!(
+          %{
+            content_type: :page,
+            name: "feeling",
+            label: "Feeling",
+            field_type: :mood,
+            required: true,
+            widget: "faces"
+          },
+          actor: admin
+        )
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/fields")
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+      id = "edit-field-widget-#{field.id}"
+      assert widget_cards(lv, id) == ~w(words scale faces)
+      assert has_element?(lv, "##{id}-faces[checked]")
+
+      # Made optional: the faces card leaves the page, as the save would refuse it.
+      lv
+      |> element("#edit-field-#{field.id}")
+      |> render_change(%{"field_definition" => %{"required" => "false"}})
+
+      assert widget_cards(lv, id) == ~w(words scale)
+
+      # Still posted from before the change, it is dropped, not refused.
+      lv
+      |> element("#edit-field-#{field.id}")
+      |> render_submit(%{"field_definition" => %{"required" => "false", "widget" => "faces"}})
+
+      saved = CMS.get_field_definition!(field.id, authorize?: false)
+      assert {saved.required, saved.widget} == {false, nil}
+
+      # Made required again in the same edit as the pick: offered and saved.
+      lv |> element("#field-#{field.id} button[phx-click=edit]") |> render_click()
+      assert widget_cards(lv, id) == ~w(words scale)
+
+      lv
+      |> element("#edit-field-#{field.id}")
+      |> render_change(%{"field_definition" => %{"required" => "true"}})
+
+      assert widget_cards(lv, id) == ~w(words scale faces)
+
+      lv
+      |> element("#edit-field-#{field.id}")
+      |> render_submit(%{"field_definition" => %{"required" => "true", "widget" => "faces"}})
+
+      saved = CMS.get_field_definition!(field.id, authorize?: false)
+      assert {saved.required, saved.widget} == {true, "faces"}
+    end
+
     test "a chosen input is saved, badged in the list, and reset by the default's card", %{
       conn: conn
     } do
