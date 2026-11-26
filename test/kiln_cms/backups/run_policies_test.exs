@@ -81,6 +81,19 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
     )
   end
 
+  # An imported run the importer recorded as killed (#2478).
+  defp interrupted! do
+    Backups.import_run!(
+      %{
+        stamp: stamp(),
+        trigger: "cron",
+        status: :failed,
+        error: KilnCMS.Backups.Importer.interrupted_message()
+      },
+      actor: Backups.system()
+    )
+  end
+
   # {name, fun(actor) -> result} for every write action of the pipeline.
   # `record_progress`, `finish` and `fail` get a fresh running run per call:
   # they land only on a `running` run (#2218), and a refusal by that filter
@@ -103,7 +116,18 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
 
         Backups.record_run_interrupted(failed, %{failed_at: failed.updated_at}, actor: actor)
       end,
-      mark_pruned: fn actor -> Backups.mark_run_pruned(run, %{artifacts: []}, actor: actor) end,
+      mark_pruned: fn actor ->
+        Backups.mark_run_pruned(run, %{names: [], key: "local", at: "2026-01-01T00:00:00Z"},
+          actor: actor
+        )
+      end,
+      # A fresh Interrupted import per call (#2846): the guard refuses
+      # anything else.
+      reevaluate_interrupted: fn actor ->
+        Backups.reevaluate_interrupted_run(interrupted!(), %{status: :succeeded, error: nil},
+          actor: actor
+        )
+      end,
       # A fresh failed run per call: the guard refuses anything else, and a
       # refusal by the guard would hide whether the POLICY admitted the actor.
       resume: fn actor ->
@@ -494,10 +518,33 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
     end
 
     test "mark_pruned updates a finished run's artifacts" do
-      run = Backups.finish_run!(run!(), %{}, actor: Backups.system())
+      run =
+        Backups.finish_run!(
+          run!(),
+          %{
+            artifacts: [
+              %{
+                kind: :db,
+                name: "kiln-db-x.dump",
+                bytes: 1,
+                destinations: %{"local" => %{"status" => "ok"}}
+              }
+            ]
+          },
+          actor: Backups.system()
+        )
 
-      assert {:ok, %{status: :succeeded}} =
-               Backups.mark_run_pruned(run, %{artifacts: []}, actor: Backups.system())
+      assert {:ok, %{status: :succeeded, artifacts: [artifact]}} =
+               Backups.mark_run_pruned(
+                 run,
+                 %{names: ["kiln-db-x.dump"], key: "local", at: "2026-01-01T00:00:00Z"},
+                 actor: Backups.system()
+               )
+
+      assert artifact.destinations["local"] == %{
+               "status" => "pruned",
+               "at" => "2026-01-01T00:00:00Z"
+             }
     end
   end
 
@@ -535,6 +582,19 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
 
       assert {:error, %Ash.Error.Forbidden{}} =
                Backups.run_history(actor: Backups.system(), authorize_with: :error)
+    end
+
+    test "the Interrupted imports (#2846) are the :backups system actor's alone" do
+      interrupted = interrupted!()
+      run!()
+
+      assert [%{id: id}] = Backups.list_interrupted_imports!(actor: Backups.system())
+      assert id == interrupted.id
+
+      for actor <- [user(:admin), user(:editor), org_admin(), nil, SystemActor.new(:billing)] do
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Backups.list_interrupted_imports(actor: actor, authorize_with: :error)
+      end
     end
 
     test "another subsystem's system actor reads nothing" do

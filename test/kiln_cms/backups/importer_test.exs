@@ -1022,6 +1022,251 @@ defmodule KilnCMS.Backups.ImporterTest do
     end
   end
 
+  describe "an Interrupted row whose stamp finished after all (#2846)" do
+    @late "20260801-031700"
+    @reevaluated "Re-evaluated: the stamp's .partial files are gone and its set is complete"
+
+    defp db_partial!(dir, stamp),
+      do: put_named(dir, "db", "kiln-db-#{stamp}.sha256.partial", 200)
+
+    defp db_sidecar!(dir, stamp, age \\ 60),
+      do: put_sidecar(dir, :db, stamp, "#{@hex_b}  kiln-db-#{stamp}.dump\n", age)
+
+    # A finished dump whose sidecar was still being written when the stamp
+    # went quiet: recorded as a killed, db-only run.
+    defp interrupted_db!(dir) do
+      put(dir, :db, @late, age: 200)
+      partial = db_partial!(dir, @late)
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert %{error: @interrupted, components: [:db]} = run = run!(@late)
+      {run, partial}
+    end
+
+    # A finished dump with the media marker beside it: a cron `all` killed
+    # during media, recorded as a killed run of both kinds.
+    defp interrupted_all!(dir) do
+      put(dir, :db, @late, age: 200)
+      marker = marker!(dir, @late, 200)
+
+      assert {:ok, %{imported: 1}} = Importer.run()
+      assert %{error: @interrupted, components: [:db, :media]} = run = run!(@late)
+      {run, marker}
+    end
+
+    test "with the partials gone and a covering manifest that succeeded, it is rewritten once",
+         %{dir: dir} do
+      {before, partial} = interrupted_db!(dir)
+      File.rm!(partial)
+
+      manifest!(dir, covering(@late, started_at: ~U[2026-08-01 03:17:09Z], keep_days: 7))
+
+      assert {:ok, %{reevaluated: 1, imported: 0, failed: 0}} = Importer.run()
+
+      run = run!(@late)
+      assert run.id == before.id
+      assert %{origin: :imported, status: :succeeded, error: nil, components: [:db]} = run
+      assert run.finished_at == ~U[2026-08-01 03:18:42.000000Z]
+      # Never the stamp's start, nor cron's window: only `:import` sets those.
+      assert run.started_at == before.started_at
+      assert run.keep_days == nil
+      assert [%{kind: :db, verified: true}] = run.artifacts
+
+      # The row's own log, plus one line.
+      assert Enum.map(run.log, & &1.message) ==
+               Enum.map(before.log, & &1.message) ++ [@reevaluated]
+
+      assert {:ok, %{reevaluated: 0}} = Importer.run()
+      assert run!(@late).updated_at == run.updated_at
+    end
+
+    test "with the partials gone and every kind complete with its sidecar, it is rewritten",
+         %{dir: dir} do
+      {_before, marker} = interrupted_all!(dir)
+      File.rm!(marker)
+      db_sidecar!(dir, @late)
+      for n <- 1..2, do: put_part(dir, @late, n, age: 30)
+      put_set_sidecar(dir, @late, 1..2)
+
+      assert {:ok, %{reevaluated: 1}} = Importer.run()
+
+      assert %{status: :succeeded, error: nil, components: [:db, :media]} = run = run!(@late)
+      assert [%{kind: :db, sha256: @hex_b}, %{kind: :media, parts: [_, _]}] = run.artifacts
+      assert List.last(run.log).message == @reevaluated
+    end
+
+    test "a single media archive with its sidecar is a complete media set", %{dir: dir} do
+      {_before, marker} = interrupted_all!(dir)
+      File.rm!(marker)
+      db_sidecar!(dir, @late)
+      put(dir, :media, @late, age: 30)
+      put_sidecar(dir, :media, @late, "#{@hex_a}  kiln-media-#{@late}.tar.gz\n")
+
+      assert {:ok, %{reevaluated: 1}} = Importer.run()
+      assert %{status: :succeeded, components: [:db, :media]} = run!(@late)
+    end
+
+    test "not while any .partial of the stamp remains", %{dir: dir} do
+      {before, _marker} = interrupted_all!(dir)
+      db_sidecar!(dir, @late)
+      for n <- 1..2, do: put_part(dir, @late, n, age: 30)
+      put_set_sidecar(dir, @late, 1..2)
+
+      # The marker is still there, however complete the rest looks.
+      assert {:ok, %{reevaluated: 0}} = Importer.run()
+      assert run!(@late) == before
+
+      # So is a part's, in the other directory, once the marker goes.
+      File.rm!(Path.join([dir, "media", "kiln-media-#{@late}.sha256.partial"]))
+      put_named(dir, "media", Artifact.part_name(@late, 3) <> ".partial", 30)
+
+      assert {:ok, %{reevaluated: 0}} = Importer.run()
+      assert run!(@late) == before
+    end
+
+    test "not when one of the row's components has no finished set", %{dir: dir} do
+      # A cron `all` killed during media, whose marker was swept since: the
+      # dump is complete, the media never was. Not "succeeded, db only".
+      {before, marker} = interrupted_all!(dir)
+      File.rm!(marker)
+      db_sidecar!(dir, @late)
+
+      assert {:ok, %{reevaluated: 0}} = Importer.run()
+      assert run!(@late) == before
+
+      # Parts with no sidecar are not a finished set either.
+      for n <- 1..2, do: put_part(dir, @late, n, age: 30)
+
+      assert {:ok, %{reevaluated: 0}} = Importer.run()
+      assert run!(@late) == before
+    end
+
+    test "not a part set with a gap, sidecar or not", %{dir: dir} do
+      {before, marker} = interrupted_all!(dir)
+      File.rm!(marker)
+      db_sidecar!(dir, @late)
+      for n <- [1, 3], do: put_part(dir, @late, n, age: 30)
+      put_set_sidecar(dir, @late, 1..3)
+
+      assert {:ok, %{reevaluated: 0}} = Importer.run()
+      assert run!(@late) == before
+    end
+
+    test "not a legacy set with no sidecar and no manifest", %{dir: dir} do
+      {before, partial} = interrupted_db!(dir)
+      File.rm!(partial)
+
+      assert {:ok, %{reevaluated: 0}} = Importer.run()
+      assert run!(@late) == before
+    end
+
+    test "not a covering manifest that failed", %{dir: dir} do
+      {before, partial} = interrupted_db!(dir)
+      File.rm!(partial)
+      manifest!(dir, covering(@late, ok: false, error: "media failed"))
+
+      assert {:ok, %{reevaluated: 0}} = Importer.run()
+      assert run!(@late) == before
+    end
+
+    test "not an in-app run, nor an imported run that failed for another reason", %{dir: dir} do
+      app = Backups.start_run!(%{stamp: @late, trigger: "manual"}, actor: Backups.system())
+      app = Backups.fail_run!(app, %{error: @interrupted}, actor: Backups.system())
+      put(dir, :db, @late, age: 200)
+      db_sidecar!(dir, @late)
+
+      other = "20260802-031700"
+
+      empty =
+        Backups.import_run!(
+          %{stamp: other, trigger: "cron", status: :failed, error: "empty artifact"},
+          actor: Backups.system()
+        )
+
+      put(dir, :db, other, age: 200)
+      db_sidecar!(dir, other)
+
+      assert {:ok, %{reevaluated: 0}} = Importer.run()
+      assert %{error: @interrupted, origin: :app} = run!(@late)
+      assert run!(@late).updated_at == app.updated_at
+      assert run!(other).updated_at == empty.updated_at
+
+      # The action's own guard refuses them too, not only the importer's read.
+      for run <- [app, empty] do
+        assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Changes.StaleRecord{}]}} =
+                 Backups.reevaluate_interrupted_run(run, %{status: :succeeded, error: nil},
+                   actor: Backups.system()
+                 )
+      end
+
+      assert %{error: @interrupted, origin: :app} = run!(@late)
+      assert run!(@late).updated_at == app.updated_at
+      assert run!(other).updated_at == empty.updated_at
+    end
+
+    test "not until its newest file has settled", %{dir: dir} do
+      {before, partial} = interrupted_db!(dir)
+      File.rm!(partial)
+      db_sidecar!(dir, @late)
+      dump = Path.join([dir, "db", "kiln-db-#{@late}.dump"])
+
+      File.touch!(dump, System.os_time(:second) - 9 * 60)
+      assert {:ok, %{reevaluated: 0}} = Importer.run()
+      assert run!(@late) == before
+
+      # In the future reads as fresh too.
+      File.touch!(dump, System.os_time(:second) + 3600)
+      assert {:ok, %{reevaluated: 0}} = Importer.run()
+      assert run!(@late) == before
+
+      File.touch!(dump, System.os_time(:second) - 11 * 60)
+      assert {:ok, %{reevaluated: 1}} = Importer.run()
+      assert %{status: :succeeded} = run!(@late)
+    end
+
+    test "not when a listed file is gone by the time it is stat'ed", %{dir: dir} do
+      {before, marker} = interrupted_all!(dir)
+      File.rm!(marker)
+      db_sidecar!(dir, @late)
+      for n <- 1..3, do: put_part(dir, @late, n, age: 30)
+      put_set_sidecar(dir, @late, 1..3)
+
+      # Retention deleting the last part between the listing and the stat:
+      # parts 1..2 alone would look like a complete set.
+      list_then_prune = fn dir ->
+        {:ok, listed} = Importer.list(dir)
+        File.rm!(Path.join([dir, "media", Artifact.part_name(@late, 3)]))
+        {:ok, listed}
+      end
+
+      assert {:ok, %{reevaluated: 0}} = Importer.run(dir, list: list_then_prune)
+      assert run!(@late) == before
+    end
+
+    test "a write that fails is counted, warned about and backed off like an import",
+         %{dir: dir} do
+      {before, partial} = interrupted_db!(dir)
+      File.rm!(partial)
+      db_sidecar!(dir, @late)
+      refuse = fn _run, _attrs -> {:error, :boom} end
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:ok, %{reevaluated: 0, failed: 1}} = Importer.run(dir, reevaluate: refuse)
+        end)
+
+      assert log =~ "#{@late} (attempt 1)"
+
+      assert {:ok, %{reevaluated: 0, failed: 0, deferred: 1}} =
+               Importer.run(dir, reevaluate: refuse)
+
+      assert run!(@late) == before
+
+      Importer.reset_failures()
+      assert {:ok, %{reevaluated: 1}} = Importer.run()
+    end
+  end
+
   describe "failure" do
     test "an unreadable directory is an error, not a raise", %{dir: dir} do
       File.chmod!(Path.join(dir, "db"), 0o000)
