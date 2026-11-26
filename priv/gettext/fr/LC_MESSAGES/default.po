@@ -24468,6 +24468,11 @@ msgstr "Le budget d'embeddings a refusé cette demande."
 msgid "The entry limit is deployment-wide and not configurable per site: it bounds the work a feed request costs the server, rather than expressing a publishing choice."
 msgstr "La limite d'entrées vaut pour tout le déploiement et n'est pas configurable par site : elle borne le travail qu'une requête de flux coûte au serveur, plutôt que d'exprimer un choix éditorial."
 
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "The exception is someone who also administers another site: their password is held to the strictest policy among the sites they administer, so it may still be checked here."
+msgstr "L’exception est une personne qui administre aussi un autre site : son mot de passe suit la politique la plus stricte parmi les sites qu’elle administre, il peut donc quand même être vérifié ici."
+
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "The expiry is not a valid date and time."

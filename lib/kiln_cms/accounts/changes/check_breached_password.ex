@@ -12,6 +12,11 @@ defmodule KilnCMS.Accounts.Changes.CheckBreachedPassword do
   **invited** tier — the invitation `KilnCMS.Accounts.Changes.AcceptInvitation`
   put in the changeset context — not the host the link was opened on.
 
+  An account that already exists (a change, a reset, an existing account
+  accepting an invitation) is also held to the policy of every site it
+  administers (#2408, `KilnCMS.Accounts.PasswordPolicy.resolve_for/3`); an
+  account being created has no such sites yet.
+
   ## From a `before_transaction` hook, not the change body
 
   `change/3` runs when the changeset is *built*, and `AshPhoenix.Form.validate/2`
@@ -142,7 +147,8 @@ defmodule KilnCMS.Accounts.Changes.CheckBreachedPassword do
     case Ash.Changeset.get_argument(changeset, :password) do
       password when is_binary(password) and password != "" ->
         org = target_org(changeset, action)
-        with_tier(changeset, action, org, &lookup(password, action, org, &1))
+        target = target_user(changeset)
+        with_tier(changeset, action, org, &lookup(password, action, org, &1, target))
 
       _none ->
         nil
@@ -162,6 +168,13 @@ defmodule KilnCMS.Accounts.Changes.CheckBreachedPassword do
       nil
   end
 
+  # The account whose password is being set, when it exists already: a change,
+  # a reset, or an existing account accepting an invitation (an update). A
+  # registration, the first-run setup and an invitation creating an account
+  # have none yet.
+  defp target_user(%{action_type: :update, data: %{id: id} = user}) when is_binary(id), do: user
+  defp target_user(_changeset), do: nil
+
   defp target_org(%{context: %{invitation: %{organization_id: org_id}}}, :invite), do: org_id
   defp target_org(changeset, _action), do: Accounts.org_id(changeset.tenant)
 
@@ -175,17 +188,28 @@ defmodule KilnCMS.Accounts.Changes.CheckBreachedPassword do
   up. Returns the verdict, or `nil` when the check is off. Fails open: any
   error — including an exception while resolving the tier or the setting —
   is an `:unchecked` outcome.
+
+  For an account that does not exist yet (the first-run setup): see
+  `lookup/5` for one that does.
   """
   @spec lookup(String.t(), atom(), Ash.UUID.t(), atom()) :: verdict() | nil
-  def lookup(password, action, org_id, tier) do
-    case safe_policy(org_id, tier) do
+  def lookup(password, action, org_id, tier), do: lookup(password, action, org_id, tier, nil)
+
+  @doc """
+  `lookup/4` for `target`, the account whose password is being set (`nil` if
+  it does not exist yet): the policy is also the strictest of every org it
+  administers (`KilnCMS.Accounts.PasswordPolicy.resolve_for/3`).
+  """
+  @spec lookup(String.t(), atom(), Ash.UUID.t(), atom(), map() | nil) :: verdict() | nil
+  def lookup(password, action, org_id, tier, target) do
+    case safe_policy(target, org_id, tier) do
       :off -> nil
       policy -> run(password, action, policy)
     end
   end
 
-  defp safe_policy(org_id, tier) do
-    PasswordPolicy.resolve(org_id, tier)
+  defp safe_policy(target, org_id, tier) do
+    PasswordPolicy.resolve_for(target, org_id, tier)
   rescue
     # Boundary: a failure to work out the policy must not stop a password being
     # set. Fail open to the default stance, and say nothing about who.

@@ -1,7 +1,8 @@
 defmodule KilnCMSWeb.SettingsPasswordBreachTest do
   @moduledoc """
   Changing a password on `/editor/settings` against the breached-password check
-  (#2240): the form passes the request org so that org's policy applies, a
+  (#2240): the form passes the request org so that org's policy applies (and,
+  for an account that administers other orgs, theirs too, #2408), a
   warning rides the redirect to /sign-in and is drawn there, and a `block`
   verdict is a field error on the form.
 
@@ -139,18 +140,43 @@ defmodule KilnCMSWeb.SettingsPasswordBreachTest do
                )
     end
 
-    test "only the request org's policy applies", %{conn: conn, org: org} do
+    test "another org's block does not apply to someone who does not administer it",
+         %{conn: conn, org: org} do
       pw = password()
       enable!(&ok(&1, breached_body(pw, 31)))
-      # Block is set on `org` only; the default org still warns.
+      # Block is set on `org` only; the default org still warns, and this
+      # account administers the default org alone.
       policy!(org, :block)
 
-      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/settings")
+      admin = authed_user(:viewer)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: admin.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      {:ok, lv, _html} = conn |> log_in(admin) |> live(~p"/editor/settings")
 
       change_password(lv, pw)
       flash = assert_redirect(lv, ~p"/sign-in")
 
       assert flash["error"] == PasswordNotice.message()
+    end
+
+    # #2408: a platform admin administers `org` too, so its block applies on
+    # the default org's host as well.
+    test "another org's block applies to a platform admin on any host", %{conn: conn, org: org} do
+      pw = password()
+      enable!(&ok(&1, breached_body(pw, 31)))
+      policy!(org, :block)
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/settings")
+
+      html = change_password(lv, pw)
+
+      assert html =~ "This password has appeared in a known data breach."
+      assert has_element?(lv, "#password-form", "known data breach")
     end
 
     test "an editor is warned, not blocked", %{conn: conn, org: org} do
