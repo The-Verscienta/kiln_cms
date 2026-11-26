@@ -131,6 +131,34 @@ defmodule KilnCMS.Security.AuthEvents do
   end
 
   @doc """
+  A password sign-in refused because the password is in a known breach and
+  the account's site blocks that at sign-in (#2407). Recorded as
+  `:sign_in_failed` with reason `"breached_password"`, once in each of
+  `org_ids` (the orgs whose policy refused it), not in the request's org.
+
+  Unsampled, and not charged to a site's failed-sign-in alert tally: only
+  the right password gets this far, so it is neither a guess nor something a
+  flood can produce, and an alert about guessing would mislead. The account
+  is labelled in an org it belongs to (`member_of/2`).
+  """
+  @spec sign_in_refused_breached(map(), term(), [Ash.UUID.t()]) :: :ok
+  def sign_in_refused_breached(context, email, org_ids) when is_list(org_ids) do
+    safe(:sign_in_failed, fn ->
+      user = if org_ids != [], do: account(email)
+
+      for org_id <- Enum.uniq(org_ids), is_binary(org_id) do
+        Recorder.record_after_commit(
+          :sign_in_failed,
+          user: member_of(user, org_id),
+          metadata: %{"method" => "password", "reason" => "breached_password"},
+          tenant: org_id,
+          request: context[Recorder.context_key()]
+        )
+      end
+    end)
+  end
+
+  @doc """
   A refused second factor for `user` (a TOTP or recovery code that did not
   verify). The account is known here, a signed pending token named it.
   """

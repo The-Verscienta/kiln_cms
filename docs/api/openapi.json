@@ -17556,6 +17556,18 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "password_breach": {
+                      "description": "Present only on a one-step sign-in (no two-factor exchange) by an administrator whose site checks passwords at sign-in and warns: the password appears in a known data breach. Signing in still worked; change the password soon.",
+                      "properties": {
+                        "status": {
+                          "enum": [
+                            "breached"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
                     "second_factor": {
                       "description": "Present only when the site requires two-step sign-in of this account and it has not set it up yet: from `deadline` on, the token stops working and signing in is refused until it does.",
                       "properties": {
@@ -17607,7 +17619,7 @@
             "description": "Invalid email or password (`invalid_credentials`). Where the operator has turned on human verification for this endpoint, also `challenge_required` or `challenge_failed`, whose `meta` names the provider, `site_key`, `script_url`, `global`, `onload_param`, `render_options`, `action` and `action_option`, `interactive` and `api` to draw the widget with; retry with `challenge_token`."
           },
           "403": {
-            "description": "`second_factor_required` — the site requires two-step sign-in of this account and its grace period is over. `meta.setup_url` is the browser page to set it up, `meta.deadline` when the grace period ended, and `meta.reason` is `passkey_only` when the account's only second factor is a passkey. No token is issued."
+            "description": "`second_factor_required` — the site requires two-step sign-in of this account and its grace period is over. `meta.setup_url` is the browser page to set it up, `meta.deadline` when the grace period ended, and `meta.reason` is `passkey_only` when the account's only second factor is a passkey. No token is issued.\n\n`password_reset_required` — the password was right, but it appears in a known data breach and a site this administrator runs blocks that at sign-in. No token is issued; a reset link has been emailed to the account. Choose a new password, then sign in again."
           },
           "422": {
             "description": "Missing email or password"
@@ -17663,6 +17675,18 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "password_breach": {
+                      "description": "Present only on a one-step sign-in (no two-factor exchange) by an administrator whose site checks passwords at sign-in and warns: the password appears in a known data breach. Signing in still worked; change the password soon.",
+                      "properties": {
+                        "status": {
+                          "enum": [
+                            "breached"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
                     "second_factor": {
                       "description": "Present only when the site requires two-step sign-in of this account and it has not set it up yet: from `deadline` on, the token stops working and signing in is refused until it does.",
                       "properties": {
