@@ -1,12 +1,13 @@
 defmodule Mix.Tasks.Kiln.Gen.PluginTest do
   @moduledoc false
 
-  # Not async (#2380). The generator writes `config :kiln_cms, plugins: [...]`
-  # into the test project, and Igniter evaluates that config while formatting:
-  # it puts the generated plugin list into the real `:kiln_cms` app env, then
-  # restores a snapshot of the WHOLE app env taken before. Concurrently, that
-  # swaps `:plugins` under other tests and can put back a value another test
-  # had already restored, leaking it for the rest of the run.
+  # Not async (#2380). Igniter evaluates the test project's config/config.exs
+  # while formatting: it puts what that config sets into the real app env,
+  # then restores a snapshot of the WHOLE app env taken before. Concurrently,
+  # that swaps keys under other tests and can put back a value another test
+  # had already restored, leaking it for the rest of the run. The generator
+  # wrote `:plugins` there until #2910; the compile tests below also define
+  # modules, which is no place for concurrency either.
   use ExUnit.Case, async: false
 
   import Igniter.Test
@@ -14,6 +15,35 @@ defmodule Mix.Tasks.Kiln.Gen.PluginTest do
   alias Mix.Tasks.Kiln.Gen.Plugin
 
   defp project, do: test_project(files: %{"config/config.exs" => "import Config\n"})
+
+  defp source(igniter, path) do
+    igniter.rewrite |> Rewrite.source!(path) |> Rewrite.Source.get(:content)
+  end
+
+  # Compiles the sources together and returns the warnings and errors, so a
+  # missing @impl shows up as a failure rather than noise on stderr. A block
+  # derives Inspect, and protocols are already consolidated in a test run, so
+  # that one warning is the test's doing, not the generated code's.
+  defp compile_diagnostics(sources) do
+    {_result, diagnostics} =
+      Code.with_diagnostics(fn ->
+        Enum.each(sources, &Code.compile_string/1)
+      end)
+
+    diagnostics
+    |> Enum.map(& &1.message)
+    |> Enum.reject(&(&1 =~ "protocol has already been consolidated"))
+  end
+
+  # Uncomments each `# def` example: its `# @impl` line, if it has one, and
+  # its `#   ` continuation lines. Prose comments stay comments.
+  defp uncomment_examples(source) do
+    Regex.replace(
+      ~r/^[ \t]*# (?:@impl .*\n[ \t]*# )?def .*\n(?:[ \t]*#   .*\n)*/m,
+      source,
+      &String.replace(&1, ~r/^([ \t]*)# ?/m, "\\1")
+    )
+  end
 
   describe "an overlay plugin (the default)" do
     # #2975: an overlay's tables stop the staging scrub until declared, so the
@@ -37,11 +67,108 @@ defmodule Mix.Tasks.Kiln.Gen.PluginTest do
       assert Module.concat([camel, "Plugin"]).staging_scrub() == []
     end
 
-    test "goes under projects/ and is registered in :plugins" do
+    # #2910: registering in the core's tracked config/config.exs put an overlay
+    # plugin into the reusable core. The overlay's activation file is
+    # projects/<name>/project.exs, which replaces the core's :plugins list.
+    test "goes under projects/ and is registered in the overlay's project.exs" do
       igniter = Igniter.compose_task(project(), "kiln.gen.plugin", ["Ratings"])
 
       assert_creates(igniter, "projects/ratings/plugin.ex")
-      assert diff(igniter) =~ "plugins: [Ratings.Plugin]"
+      assert_creates(igniter, "projects/ratings/project.exs")
+      assert_unchanged(igniter, "config/config.exs")
+
+      project_exs = source(igniter, "projects/ratings/project.exs")
+      assert project_exs =~ ~r/^config :kiln_cms, :plugins, \[Ratings\.Plugin\]$/m
+      assert project_exs =~ "cp projects/ratings/project.exs config/project.exs"
+      assert {:ok, _quoted} = Code.string_to_quoted(project_exs)
+    end
+
+    test "an overlay that already has a project.exs gets the plugin added to its list" do
+      igniter =
+        test_project(
+          files: %{
+            "config/config.exs" => "import Config\n",
+            "projects/ratings/project.exs" => """
+            import Config
+
+            config :kiln_cms, :plugins, [Other.Plugin]
+            """
+          }
+        )
+        |> Igniter.compose_task("kiln.gen.plugin", ["Ratings"])
+
+      assert source(igniter, "projects/ratings/project.exs") =~
+               "config :kiln_cms, :plugins, [Other.Plugin, Ratings.Plugin]"
+
+      assert_unchanged(igniter, "config/config.exs")
+    end
+
+    # #2910: a warning fails an overlay built --warnings-as-errors. Elixir
+    # warns about a callback without @impl once any callback in the module has
+    # one, unless it overrides a default that carries it (every Kiln.Plugin
+    # callback does).
+    test "the generated overlay compiles without warnings" do
+      camel = "GenCleanPluginT#{System.unique_integer([:positive])}"
+      snake = Macro.underscore(camel)
+
+      igniter =
+        Igniter.compose_task(project(), "kiln.gen.plugin", [
+          camel,
+          "--block",
+          "star_rating",
+          "--field",
+          "stars"
+        ])
+
+      sources =
+        Enum.map(
+          ["plugin.ex", "blocks/star_rating.ex", "field_types/stars.ex"],
+          &source(igniter, "projects/#{snake}/#{&1}")
+        )
+
+      assert compile_diagnostics(sources) == []
+
+      assert Module.concat([camel, "Plugin"]).blocks() == [
+               Module.concat([camel, "Blocks.StarRating"])
+             ]
+    end
+
+    # The commented examples are there to be uncommented; each one has to
+    # compile cleanly once it is (#2910). The field type's
+    # handle_input_event/3 has no default, so it was the one that warned:
+    # no @impl, and an unused variable.
+    test "every commented callback compiles without warnings once uncommented" do
+      camel = "GenUncommentT#{System.unique_integer([:positive])}"
+
+      plugin = uncomment_examples(Plugin.plugin_source(camel, nil))
+      field = uncomment_examples(Plugin.field_source(camel, "stars"))
+
+      assert plugin =~ ~r/^\s+def domains, do: \[#{camel}\.Catalog\]$/m
+      assert plugin =~ ~r/^\s+def staging_scrub,$/m
+      assert plugin =~ ~r/^\s+def oban_queues, do:/m
+      assert field =~ ~r/^\s+do: %\{hook: Kiln\.FieldType\.colocated_hook/m
+      assert field =~ ~r/^\s+def handle_input_event\(/m
+
+      assert compile_diagnostics([plugin, field]) == []
+    end
+
+    # #2910: a hand-written content type needs its search-vector migration,
+    # which ash.codegen can't write and mix kiln.search.check gates.
+    test "the notice covers activation and the search-vector migration" do
+      igniter = Igniter.compose_task(project(), "kiln.gen.plugin", ["Ratings"])
+      notice = Enum.join(igniter.notices, "\n")
+
+      assert notice =~ ~r/^config :kiln_cms, :plugins in projects\/ratings\/project\.exs, the$/m
+      assert notice =~ ~r/^\s+- dev: cp projects\/ratings\/project\.exs config\/project\.exs$/m
+      assert notice =~ ~r/^\s+- image: docker build --build-arg PROJECT=ratings$/m
+      assert notice =~ ~r/^\s+def up, do: add_search_vector\("<table>"\)$/m
+      assert notice =~ ~r/^\s+def down, do: drop_search_vector\("<table>"\)$/m
+
+      assert notice =~
+               ~r/^\s+one creating its table, in projects\/ratings\/priv\/repo\/migrations\/:$/m
+
+      assert notice =~ ~r/^\s+the template\. mix kiln\.search\.check fails without it\.$/m
+      refute notice =~ "config/config.exs"
     end
 
     # #2733: the notice used to say `mix kiln.gen.content <Type> --domain
@@ -59,12 +186,7 @@ defmodule Mix.Tasks.Kiln.Gen.PluginTest do
       # The registration lives in the overlay, not in the git-ignored
       # config/project.exs, which is only where dev activation copies it.
       assert notice =~ ~r/^\s+in projects\/ratings\/project\.exs, with$/m
-      assert notice =~ ~r/^\s+rather than merging, so keep Ratings\.Plugin in it\.$/m
-
-      assert notice =~
-               ~r/^\s+- activate it: cp projects\/ratings\/project\.exs config\/project\.exs$/m
-
-      assert notice =~ ~r/^\s+in dev; docker build --build-arg PROJECT=ratings for an image$/m
+      assert notice =~ ~r/^\s+replace the core's too, so restate the core's entries\.$/m
       assert notice =~ ~r/^\s+- mix ash\.codegen <migration_name>, then move what it wrote to$/m
       assert notice =~ ~r/^\s+priv\/ into projects\/ratings\/priv\/repo\/migrations\/ and$/m
       assert notice =~ ~r/^\s+projects\/ratings\/priv\/resource_snapshots\/repo\/\. Before the$/m

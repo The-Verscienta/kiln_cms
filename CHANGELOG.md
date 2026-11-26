@@ -102,6 +102,10 @@ else.
   GraphQL's messages are unchanged. No migration.
   ([long form](docs/changelog/unreleased.md#custom-where-error-spelling))
 
+- **`mix kiln.gen.plugin` registers an overlay plugin in `projects/<name>/project.exs` instead of the core's tracked `config/config.exs`, and its notice covers activation and each content type's search-vector migration (#2910).**
+  The field type's commented `handle_input_event/3` example now compiles cleanly once uncommented. No migration.
+  ([long form](docs/changelog/unreleased.md#gen-plugin-overlay-config))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —
