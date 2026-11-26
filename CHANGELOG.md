@@ -75,7 +75,7 @@ else.
   ([#3434](https://github.com/The-Verscienta/kiln_cms/pull/3434) · [long form](docs/changelog/unreleased.md#breached-password-sign-in-check))
 - **Backups: `bin/backup` in a release and `mix kiln.backup.*` in a checkout list backups, start one and optionally wait for it, re-check a backup's files, report what retention would delete, and import cron's backups, with `--json` output and exit codes 0, 1 and 2 (part of #2234).**
   `prune` only reports and `verify` records nothing. New image only; no migration, and rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#backup-cli))
+  ([#3455](https://github.com/The-Verscienta/kiln_cms/pull/3455) · [long form](docs/changelog/unreleased.md#backup-cli))
 
 ### Changed
 
