@@ -151,6 +151,15 @@ carries the reasoning.
   - **Unchanged.** Streams fail closed as before: an event whose exposure cannot be read or written is never shown to an anonymous subscriber. Delivery is still at most once.
   - **No migration; rolling the pin back is safe.** An older release drops such an event for local subscribers again.
 
+<a id="reevaluate-interrupted-import"></a>
+
+- **An imported backup recorded as Interrupted is rewritten once its stamp turns out complete (#2846).** The importer records a cron stamp with a `.partial` beside it, untouched for 3 hours, as **Failed** with "Interrupted: the backup stopped before it finished and left .partial files behind" (#2478). An older `backup.sh` with no heartbeat, or clocks that disagree badly, could get a run that was still going recorded that way, and the row said Failed for good, although the backup finished.
+  - **What changes.** Every import now looks again at its own Interrupted rows. When the stamp has no `.partial` left, every file is still there and settled (10 minutes), and every kind the row names is complete (a covering `manifest.json` that succeeded, or a full set with its checksum sidecar), the row is rewritten once with what importing the stamp now would record, usually **Succeeded**. Its log gains "Re-evaluated: the stamp's .partial files are gone and its set is complete"; its start time, trigger, `keep_days` and earlier log lines are kept. A cron `all` killed during media stays Interrupted: it is never turned into "Succeeded, database only". See [If the run finished after all](../backups.md#if-the-run-finished-after-all).
+  - **Refused, and not counted as a failure:** a row that retention has marked `pruned` anywhere, or one another node already rewrote. The write locks the row and checks it as locked.
+  - **Retention's `pruned` mark locks the row too.** `Run`'s `:mark_pruned` now takes `names`, `key` and `at` and computes the marks from the locked row, so a mark can't be lost to a re-evaluation that read the row first. `KilnCMS.Backups.Recorder.mark_pruned/2` is unchanged.
+  - **For operators.** `KilnCMS.Backups.Importer.run/0` and `retry_failed/0` return a `reevaluated` count beside the others; a rewrite whose write fails counts under `failed` and shares the import backoff. The two new `Backups.Run` actions (`:interrupted_imports`, `:reevaluate_interrupted`) are the `:backups` system actor's alone ([policy matrix](../policy-matrix.md)). [ADR 0033](../decisions/0033-backup-history-is-rows-only-the-backup-pipeline-writes-and-the-files-stay-the-truth.md) is amended with the exception and its one accepted gap.
+  - **No migration, no setting; rolling the pin back is safe.** During a rolling deploy a node still on the older release marks `pruned` without the lock and re-evaluates nothing, as before. A row rewritten before a rollback stays rewritten.
+
 ## Security
 
 <a id="scanner-guard-ipv6-rotation"></a>

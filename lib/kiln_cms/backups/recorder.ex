@@ -786,7 +786,7 @@ defmodule KilnCMS.Backups.Recorder do
   retention pass just deleted there (`names` are file names): `"local"` for
   this host's backup directory (the default), or a destination's key for
   retention on that destination (#2220). Best-effort per run, through the
-  run's `:mark_pruned` action.
+  run's `:mark_pruned` action, which marks the row as it locks it (#2846).
 
   A media set's parts are one artifact: each deleted part is marked, and the
   artifact itself once none of its files is left to mark. Names that are not
@@ -806,48 +806,18 @@ defmodule KilnCMS.Backups.Recorder do
     end)
   end
 
+  # The artifacts are computed from the row as locked (`Run.Changes.MarkFiles`),
+  # so the run read here only has to name it: a struct gone stale since loses
+  # nothing another writer recorded meanwhile.
   defp mark_run_pruned(stamp, names, key, at) do
     safely("prune", fn ->
       with {:ok, %{} = run} <- Backups.get_run_by_stamp(stamp, actor: Backups.system()) do
-        artifacts = Enum.map(run.artifacts, &prune_artifact(&1, names, key, at))
-        Backups.mark_run_pruned(run, %{artifacts: artifacts}, actor: Backups.system())
+        Backups.mark_run_pruned(run, %{names: names, key: key, at: at}, actor: Backups.system())
       end
     end)
 
     :ok
   end
-
-  defp prune_artifact(artifact, names, key, at) do
-    attrs = Map.take(artifact, @artifact_fields)
-    pruned = %{"status" => "pruned", "at" => at}
-
-    case attrs.parts do
-      [] ->
-        if artifact.name in names, do: put_pruned(attrs, key, pruned), else: attrs
-
-      parts ->
-        prune_parts(attrs, parts, names, key, pruned)
-    end
-  end
-
-  defp prune_parts(attrs, parts, names, key, pruned) do
-    parts =
-      Enum.map(parts, fn part ->
-        if part["name"] in names, do: put_part_pruned(part, key, pruned), else: part
-      end)
-
-    attrs = %{attrs | parts: parts}
-    if Enum.all?(parts, &part_pruned?(&1, key)), do: put_pruned(attrs, key, pruned), else: attrs
-  end
-
-  defp put_pruned(attrs, key, pruned),
-    do: %{attrs | destinations: Map.put(attrs.destinations, key, pruned)}
-
-  defp put_part_pruned(part, key, pruned) do
-    Map.update(part, "destinations", %{key => pruned}, &Map.put(&1, key, pruned))
-  end
-
-  defp part_pruned?(part, key), do: get_in(part, ["destinations", key, "status"]) == "pruned"
 
   defp write(rec, label, fun, extra \\ %{}) do
     params =
