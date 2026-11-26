@@ -116,6 +116,18 @@ carries the reasoning.
 
 
 
+
+
+<a id="plugin-widgets-full-definition"></a>
+
+- **The fields admin asks a plugin field type for its editor inputs with the whole definition, as the save does (#2883).** A `Kiln.FieldType` that offers a choice of editor input lists it from `widgets/1`, which is handed the field's definition. The save asked with the whole definition the write would store. The **Editor input** cards on `/editor/fields` asked with a definition built from six posted settings (type, `multiple`, new terms, text format, options and the number bounds) laid over the stored field. A type whose list reads any other setting, such as `required`, `name` or another constraint, got a different answer on the page: the admin could pick a card the save then refused, or never see one the save would take.
+  - **What changes.** The cards are asked with the form's own changeset, applied the way the save applies it, so the page and the save hand `widgets/1` the same definition. A card checked before a setting change that stops offering it is still dropped back to the default rather than refused; the page now decides that from the validated form instead of from the six settings. `mix kiln.plugins.doctor` asks `widgets/1` with one full sample definition in both of its checks.
+  - **For plugin authors.** The `widgets/1` doc in `kiln_plugin` now says what the definition holds. Core field types are unaffected: their inputs read only the settings the page already sent.
+  - **No migration; rolling the pin back is safe.**
+
+
+
+
 <a id="feed-relay-exit"></a>
 
 - **A change-feed event reaches this node's subscribers when the database connection exits mid-publish (#2938).** Before handing an event to the site's relay, `KilnCMS.Delivery.Feed.publish/4` decides what anonymous SSE streams see, which reads the event's exposure. The read failing with an error already hid the event from streams and delivered it anyway. Failing with an *exit* did not: a connection that went away while the read waited for it (a pool restarting, an owner process dying) skipped the hand-off, so live editor views and other in-BEAM subscribers on that node never got the event, and the log said "Feed event for … not published".

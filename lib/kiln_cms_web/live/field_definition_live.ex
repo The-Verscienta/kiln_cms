@@ -75,6 +75,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.Changes.ClearMultiple
+  alias KilnCMS.CMS.Changes.ClearWidget
   alias KilnCMS.CMS.Computed
   alias KilnCMS.CMS.ContentTypes
   alias KilnCMS.CMS.DynamicDefaults
@@ -156,7 +157,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
     form =
       socket.assigns.form
-      |> AshPhoenix.Form.validate(
+      |> validate_definition(
         params
         |> normalize(List.first(scopes), nil, socket.assigns.selection_catalog)
         |> put_rules(conds, params["field_type"], socket.assigns.cond_siblings)
@@ -196,7 +197,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
 
         assigns.actor
         |> create_form(assigns.current_org)
-        |> AshPhoenix.Form.validate(params)
+        |> validate_definition(params)
         |> refuse_duplicates(params, scopes, assigns)
       end)
 
@@ -206,7 +207,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
          socket
          |> assign(
            :form,
-           AshPhoenix.Form.validate(
+           validate_definition(
              assigns.form,
              normalize(params, nil, nil, assigns.selection_catalog)
            )
@@ -265,7 +266,7 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     edit = %{
       old
       | form:
-          AshPhoenix.Form.validate(
+          validate_definition(
             old.form,
             params
             |> normalize(nil, old.form.source.data, socket.assigns.selection_catalog)
@@ -300,7 +301,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       # (`narrowing_warning({:held, _})`). Every other update keeps it a list.
       |> Map.put("narrow_held_list?", "true")
 
-    case AshPhoenix.Form.submit(old.form, params: submitted) do
+    # Validated first so a widget the saved settings don't offer is dropped
+    # (`validate_definition/2`); the submit then writes those params.
+    form = validate_definition(old.form, submitted)
+
+    case AshPhoenix.Form.submit(form, params: nil) do
       {:ok, _definition} ->
         {:noreply,
          socket
@@ -1978,11 +1983,12 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # picked, so whatever they held is dropped here rather than saved unseen: a
   # field that is no longer a select keeps no options, and a type with no
   # default keeps none. A select's default must still be one of its options.
-  # The editor input (#2284) is held to what the posted settings offer, read
-  # over `record` — the stored definition being edited, nil for a new one.
-  # A type this form has no default input for keeps the default it already
-  # has (set through the API, say) while the type stays the same (#2786): the
-  # input was never on the page, so its absence from the params says nothing.
+  # The editor input (#2284) is held to what the settings offer after the
+  # form validates (`validate_definition/2`), not here. `record` is the
+  # stored definition being edited, nil for a new one. A type this form has
+  # no default input for keeps the default it already has (set through the
+  # API, say) while the type stays the same (#2786): the input was never on
+  # the page, so its absence from the params says nothing.
   defp normalize(params, scope \\ nil, record \\ nil, catalog \\ %{}) do
     type = params["field_type"]
     pairs = if type in [nil, "select"], do: parse_option_pairs(params["options"]), else: []
@@ -2009,97 +2015,34 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
     |> unpack_selection(catalog)
     |> unpack_sources_limit()
     |> unpack_inverse()
-    |> unpack_widget(record)
+    |> unpack_widget()
     |> unpack_scope(scope)
   end
 
-  # The widget cards (#2284) are only those the posted settings offer, and
+  # The default widget's card (#2284) posts `""`, which is no widget stored.
+  defp unpack_widget(%{"widget" => ""} = params), do: Map.put(params, "widget", nil)
+  defp unpack_widget(params), do: params
+
+  # The widget cards (#2284) are only those the field's settings offer, and
   # change with them: a card checked before a retype, a `multiple` flip or a
-  # switch to rich text leaves the page, so a widget the field no longer
-  # offers is dropped here rather than refused on save. Worked out as the
-  # save's `Validations.FieldWidget` will: the posted settings over the
-  # stored ones. The default's card posts `""`, which is no widget stored.
-  defp unpack_widget(%{"widget" => widget} = params, record) do
-    widget = if widget in [nil, ""], do: nil, else: widget
-    offered = params |> widget_subject(record) |> FieldWidgets.allowed()
+  # switch to rich text leaves the page, so a widget the validated settings no
+  # longer offer is dropped and the form validated again, rather than refused
+  # on save. Asked of the form's own changeset (`ClearWidget.allowed/1`), as
+  # the save's `Validations.FieldWidget` asks, so a plugin type's `widgets/1`
+  # sees the whole definition on the page and on save alike (#2883).
+  defp validate_definition(form, params) do
+    form = AshPhoenix.Form.validate(form, params)
+    widget = params["widget"]
 
-    Map.put(params, "widget", if(widget in offered, do: widget))
+    if is_binary(widget) and widget not in ClearWidget.allowed(form.source.source),
+      do: AshPhoenix.Form.validate(form, Map.put(params, "widget", nil)),
+      else: form
   end
 
-  defp unpack_widget(params, _record), do: params
-
-  # The definition the widget allow-list is asked about: the posted settings
-  # it reads (options already split) over the stored definition, or a new
-  # one's. A setting the form didn't post keeps its stored value, as the
-  # save's changeset does.
-  defp widget_subject(params, record) do
-    base = record || %FieldDefinition{}
-
-    struct(base,
-      field_type: posted_type(params["field_type"], base.field_type),
-      multiple: posted_bool(params, "multiple", base.multiple),
-      allow_custom: posted_bool(params, "allow_custom", base.allow_custom),
-      format: posted_format(params["format"], base.format),
-      options: if(is_list(params["options"]), do: params["options"], else: base.options),
-      widget: posted_widget(params, base.widget),
-      validation: posted_validation(params, base.validation)
-    )
-  end
-
-  # The bounds the number cards read (#2432: a slider needs both), so they
-  # follow the min and max inputs as they are typed. Posted as text until
-  # `unpack_validation/1` parses them, so a string is parsed here too; one that
-  # is no number is no bound.
-  defp posted_validation(%{"validation" => %{} = posted}, _fallback) do
-    for {key, value} <- posted, key in ["min", "max"], is_number(bound(value)), into: %{} do
-      {key, bound(value)}
-    end
-  end
-
-  defp posted_validation(_params, fallback), do: fallback
-
-  defp bound(value) when is_number(value), do: value
-
-  defp bound(value) when is_binary(value) do
-    case Float.parse(String.trim(value)) do
-      {number, ""} -> number
-      _other -> nil
-    end
-  end
-
-  defp bound(_value), do: nil
-
-  # A registered type's atom for a posted name; never a new atom.
-  defp posted_type(type, fallback) when is_binary(type),
-    do: Enum.find(FieldTypes.names(), fallback, &(Atom.to_string(&1) == type))
-
-  defp posted_type(type, _fallback) when is_atom(type) and not is_nil(type), do: type
-  defp posted_type(_type, fallback), do: fallback
-
-  defp posted_bool(params, key, fallback) do
-    case params[key] do
-      value when value in [true, "true"] -> true
-      value when value in [false, "false"] -> false
-      _absent -> fallback
-    end
-  end
-
-  defp posted_format(format, _fallback) when format in ["plain", :plain], do: :plain
-  defp posted_format(format, _fallback) when format in ["rich", :rich], do: :rich
-  defp posted_format(_format, fallback), do: fallback
-
-  defp posted_widget(params, fallback) do
-    case Map.fetch(params, "widget") do
-      {:ok, widget} when widget in [nil, ""] -> nil
-      {:ok, widget} -> widget
-      :error -> fallback
-    end
-  end
-
-  # The widget subject for a rendered form: what it last validated over the
-  # definition it edits.
+  # The widget subject for a rendered form: the whole definition its last
+  # validation would store, which is what save asks the allow-list (#2883).
   defp form_widget_subject(%Phoenix.HTML.Form{source: %AshPhoenix.Form{} = source}),
-    do: widget_subject(source.params || %{}, source.data)
+    do: ClearWidget.definition(source.source)
 
   # The Validation fieldset posts every constraint as text (#2276). Blank
   # ones are dropped, numbers parsed, and the keys that mean nothing for the
@@ -2203,7 +2146,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # The registered type (core, built-in or plugin) a posted name is, so every
   # type `FieldConstraints.allowed_keys/2` speaks about gets its constraints
   # (#2780: a hand-kept list left `:slug` out, and its `unique` with it).
-  defp type_atom(type), do: posted_type(type, :other)
+  # Never a new atom: a name no type is registered under reads as `:other`.
+  defp type_atom(type) when is_binary(type),
+    do: Enum.find(FieldTypes.names(), :other, &(Atom.to_string(&1) == type))
 
   defp format_atom("plain"), do: :plain
   defp format_atom(_other), do: :rich
@@ -3941,9 +3886,11 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # `multiple` and `format` above it. Checkboxes stay listed, disabled, while
   # editors may add terms of their own; a card drawing one input per option
   # says when the field lists too many for it. A line under the legend says
-  # the choice is editor-only (#2674). Public for its test: the page itself
-  # drops a widget the posted settings don't offer (`unpack_widget/2`), so
-  # the state with an error and no cards has no ordinary path through it.
+  # the choice is editor-only (#2674). The cards are asked of the whole
+  # definition the save checks (`form_widget_subject/1`, #2883). Public for
+  # its test: the page itself drops a widget the settings don't offer
+  # (`validate_definition/2`), so the state with an error and no cards has no
+  # ordinary path through it.
   @doc false
   def widget_field(assigns) do
     subject = form_widget_subject(assigns.form)
@@ -3957,8 +3904,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       assigns
       |> assign(:selected, FieldWidgets.resolve(subject) || default)
       |> assign(:default, default)
-      # A refused widget (a plugin's list changed between render and save)
-      # must say why, even when the field no longer offers a choice at all.
+      # A refused widget must say why, even when the field no longer offers a
+      # choice at all. The page drops one the settings don't offer
+      # (`validate_definition/2`), so only a form validated elsewhere has one.
       |> assign(:errors, Enum.map(assigns.form[:widget].errors, &translate_error/1))
       |> assign(:cap_hint, if(FieldWidgets.too_many_options?(subject), do: cap_hint(subject)))
       |> assign(

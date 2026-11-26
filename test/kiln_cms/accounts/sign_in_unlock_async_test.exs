@@ -37,7 +37,9 @@ defmodule KilnCMS.Accounts.SignInUnlockAsyncTest do
       Application.put_env(:kiln_cms, SignInUnlock, unlock)
     end)
 
-    :ok
+    # A window boundary between the pause and the hand-off's check would leave
+    # nothing paused and nothing mailed (#2937).
+    KilnCMS.ChallengeFixtures.pin_windows!([:account, :mail])
   end
 
   defp email, do: "unlock-async-#{System.unique_integer([:positive])}@example.com"

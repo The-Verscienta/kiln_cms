@@ -42,7 +42,11 @@ defmodule KilnCMS.Accounts.SignInUnlockTest do
       Application.put_env(:kiln_cms, SignInUnlock, original_unlock)
     end)
 
-    :ok
+    # Most tests pause an account and then ask for its unlock mail, and the
+    # pause holds only in the window it was spent in: a quarter hour between
+    # `pause!/1` and the request leaves nothing paused, so nothing is mailed
+    # (#2937). The mail budget's hourly window is pinned for the same reason.
+    pin_windows!([:account, :mail])
   end
 
   defp email, do: "unlock-#{System.unique_integer([:positive])}@example.com"
@@ -495,9 +499,8 @@ defmodule KilnCMS.Accounts.SignInUnlockTest do
 
     test "with adaptive challenges, a challenge is still asked for and then admits" do
       enable!()
-      # Pinned before the pause (#2649): a window boundary after the spending
-      # would make the sign-in's charge free, and nothing would be asked.
-      pin_windows!([:account])
+      # The account window is pinned in `setup` (#2649, #2937): a boundary after
+      # the spending would make the sign-in's charge free, and nothing asked.
       {_user, address, token} = paused_with_link()
       # The paused account has also spent its free attempts before a challenge.
       for _ <- 1..Challenge.threshold(:account),
