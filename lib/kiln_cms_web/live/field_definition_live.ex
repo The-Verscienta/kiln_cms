@@ -2039,13 +2039,6 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
       else: form
   end
 
-  # A registered type's atom for a posted name; never a new atom.
-  defp posted_type(type, fallback) when is_binary(type),
-    do: Enum.find(FieldTypes.names(), fallback, &(Atom.to_string(&1) == type))
-
-  defp posted_type(type, _fallback) when is_atom(type) and not is_nil(type), do: type
-  defp posted_type(_type, fallback), do: fallback
-
   # The widget subject for a rendered form: the whole definition its last
   # validation would store, which is what save asks the allow-list (#2883).
   defp form_widget_subject(%Phoenix.HTML.Form{source: %AshPhoenix.Form{} = source}),
@@ -2153,7 +2146,9 @@ defmodule KilnCMSWeb.FieldDefinitionLive do
   # The registered type (core, built-in or plugin) a posted name is, so every
   # type `FieldConstraints.allowed_keys/2` speaks about gets its constraints
   # (#2780: a hand-kept list left `:slug` out, and its `unique` with it).
-  defp type_atom(type), do: posted_type(type, :other)
+  # Never a new atom: a name no type is registered under reads as `:other`.
+  defp type_atom(type) when is_binary(type),
+    do: Enum.find(FieldTypes.names(), :other, &(Atom.to_string(&1) == type))
 
   defp format_atom("plain"), do: :plain
   defp format_atom(_other), do: :rich
