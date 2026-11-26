@@ -134,6 +134,119 @@ defmodule KilnCMSWeb.PasswordPolicyLiveTest do
     end
   end
 
+  describe "checking administrators at sign-in (#2407)" do
+    @toggle "#password-policy-form input[type=checkbox][name='password_policy[check_on_sign_in]']"
+
+    defp row!(org) do
+      {:ok, [row]} = CMS.list_site_password_policy(tenant: org, authorize?: false)
+      row
+    end
+
+    test "is off by default, and the page says who it applies to", %{conn: conn, org: org} do
+      {:ok, lv, html} = admin_live(conn, org)
+
+      assert has_element?(lv, @toggle)
+      refute has_element?(lv, @toggle <> "[checked]")
+      assert html =~ "Also check administrators&#39; passwords when they sign in"
+      assert html =~ "Applies to the people who administer this site."
+      assert html =~ "Block sends them to choose a new password"
+      refute html =~ "Signing in is never checked."
+    end
+
+    test "ticking it saves it, with the policy", %{conn: conn, org: org} do
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      lv
+      |> form("#password-policy-form",
+        password_policy: %{"breached_password_policy" => "block", "check_on_sign_in" => "true"}
+      )
+      |> render_submit()
+
+      assert %{breached_password_policy: :block, check_on_sign_in: true} = row!(org)
+      assert has_element?(lv, @toggle <> "[checked]")
+    end
+
+    test "saving the policy alone keeps the box as it is", %{conn: conn, org: org} do
+      CMS.save_site_password_policy!(%{breached_password_policy: :warn, check_on_sign_in: true},
+        authorize?: false,
+        tenant: org.id
+      )
+
+      {:ok, lv, _html} = admin_live(conn, org)
+      assert has_element?(lv, @toggle <> "[checked]")
+
+      # The form posts what the page shows, the ticked box included.
+      lv
+      |> form("#password-policy-form", password_policy: %{"breached_password_policy" => "block"})
+      |> render_submit()
+
+      assert %{breached_password_policy: :block, check_on_sign_in: true} = row!(org)
+
+      # And a submit that leaves the field out entirely keeps the row's value.
+      render_submit(lv, "save", %{"password_policy" => %{"breached_password_policy" => "warn"}})
+      assert %{breached_password_policy: :warn, check_on_sign_in: true} = row!(org)
+    end
+
+    # Why the page always sends both: `:save` upserts every accepted field, so
+    # a save naming only the policy puts the switch back to its default.
+    test "a save that names only the policy resets the switch (the upsert the page avoids)", %{
+      org: org
+    } do
+      CMS.save_site_password_policy!(%{breached_password_policy: :warn, check_on_sign_in: true},
+        authorize?: false,
+        tenant: org.id
+      )
+
+      CMS.save_site_password_policy!(%{breached_password_policy: :block},
+        authorize?: false,
+        tenant: org.id
+      )
+
+      assert %{breached_password_policy: :block, check_on_sign_in: false} = row!(org)
+    end
+
+    test "unticking it switches it off", %{conn: conn, org: org} do
+      CMS.save_site_password_policy!(%{breached_password_policy: :block, check_on_sign_in: true},
+        authorize?: false,
+        tenant: org.id
+      )
+
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      lv
+      |> form("#password-policy-form", password_policy: %{"check_on_sign_in" => "false"})
+      |> render_submit()
+
+      assert %{breached_password_policy: :block, check_on_sign_in: false} = row!(org)
+    end
+
+    test "using the default drops the policy and the switch together", %{conn: conn, org: org} do
+      CMS.save_site_password_policy!(%{breached_password_policy: :block, check_on_sign_in: true},
+        authorize?: false,
+        tenant: org.id
+      )
+
+      {:ok, lv, _html} = admin_live(conn, org)
+      lv |> element("button", "Use the default") |> render_click()
+
+      assert {:ok, []} = CMS.list_site_password_policy(tenant: org, authorize?: false)
+      refute has_element?(lv, @toggle <> "[checked]")
+    end
+
+    test "an editor or a viewer cannot switch it on", %{org: org} do
+      for role <- [:editor, :viewer] do
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 CMS.save_site_password_policy(
+                   %{breached_password_policy: :warn, check_on_sign_in: true},
+                   actor: authed_user(role),
+                   tenant: org
+                 )
+      end
+
+      assert {:ok, []} = CMS.list_site_password_policy(tenant: org, authorize?: false)
+    end
+  end
+
   test "the console nav lists the page for an admin", %{conn: conn, org: org} do
     {:ok, lv, _html} = admin_live(conn, org)
 

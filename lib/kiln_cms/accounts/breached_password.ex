@@ -53,7 +53,12 @@ defmodule KilnCMS.Accounts.BreachedPassword do
         connect_timeout: 1_500,
         receive_timeout: 2_000,
         deadline: 3_000,
+        sign_in_deadline: 1_500,
         req_options: []
+
+  `sign_in_deadline` bounds the lookup an administrator's sign-in makes when
+  their site asks for one (#2407): someone is waiting on a sign-in page, so
+  it is shorter than the 3 s a password being set may take.
 
   `BREACHED_PASSWORD_CHECK=false` turns the check off for an air-gapped
   deployment (no outbound call is ever made); `BREACHED_PASSWORD_POLICY` sets
@@ -67,6 +72,7 @@ defmodule KilnCMS.Accounts.BreachedPassword do
   @default_connect_timeout 1_500
   @default_receive_timeout 2_000
   @default_deadline 3_000
+  @default_sign_in_deadline 1_500
   @max_bytes 128 * 1024
   @policies [:off, :warn, :block]
 
@@ -87,26 +93,35 @@ defmodule KilnCMS.Accounts.BreachedPassword do
   end
 
   @doc """
-  The overall time one lookup may take, in milliseconds. One number, used
-  everywhere the check runs.
+  The overall time one lookup may take when a password is set, in
+  milliseconds. One number, used everywhere a password is set.
   """
   @spec deadline() :: pos_integer()
   def deadline, do: Keyword.get(config(), :deadline, @default_deadline)
+
+  @doc "The overall time the lookup at an administrator's sign-in may take, in milliseconds."
+  @spec sign_in_deadline() :: pos_integer()
+  def sign_in_deadline, do: Keyword.get(config(), :sign_in_deadline, @default_sign_in_deadline)
 
   @doc """
   Look `password` up. See the moduledoc for the result shapes.
 
   Runs the request in a supervised, unlinked task so the overall deadline is
   enforced even when `SafeUrl`'s DNS resolution is the slow part.
+
+  Options:
+
+    * `:deadline` - the overall time in milliseconds; `deadline/0` by default.
   """
-  @spec check(String.t()) :: result()
-  def check(password) when is_binary(password) do
+  @spec check(String.t(), keyword()) :: result()
+  def check(password, opts \\ []) when is_binary(password) do
     {prefix, suffix} = split_hash(password)
     url = Keyword.get(config(), :host, @default_host) <> "/range/" <> prefix
+    deadline = Keyword.get_lazy(opts, :deadline, &deadline/0)
 
     case start_lookup(url) do
       {:ok, task} ->
-        case Task.yield(task, deadline()) || Task.shutdown(task, :brutal_kill) do
+        case Task.yield(task, deadline) || Task.shutdown(task, :brutal_kill) do
           {:ok, {:ok, %{status: 200, body: body}}} -> match(body, suffix)
           {:ok, {:ok, %{status: _other}}} -> {:error, :http_status}
           {:ok, {:error, reason}} -> {:error, classify(reason)}

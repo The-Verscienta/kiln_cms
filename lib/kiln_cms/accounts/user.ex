@@ -593,6 +593,13 @@ defmodule KilnCMS.Accounts.User do
       # Audit log (#2241): wrong passwords and lockouts, observed only.
       prepare KilnCMS.Security.Preparations.AuditSignIn
 
+      # An administrator's password, looked up in the breach corpus where a
+      # site they administer asks for it (#2407). Its `after_action` must come
+      # after `SignInPreparation`'s (only a verified password reaches it) and
+      # before `MaybeGenerateTokenPreparation`'s (a refusal mints no
+      # remember-me token): keep it exactly here.
+      prepare KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn
+
       # Mints the remember-me token when the box is ticked. On the LiveView path
       # it deliberately does nothing here: `sign_in_tokens_enabled?` is on, so
       # the form sets `skip_remember_me_token_generation` and forwards the flag
@@ -608,6 +615,11 @@ defmodule KilnCMS.Accounts.User do
 
       metadata :remember_me, :map do
         description "The remember-me token, cookie name and lifetime, when requested."
+        allow_nil? true
+      end
+
+      metadata :password_breach, :map do
+        description "Set to `%{status: :breached}` when an administrator's password is in a known breach and their site checks it at sign-in with a warning."
         allow_nil? true
       end
     end

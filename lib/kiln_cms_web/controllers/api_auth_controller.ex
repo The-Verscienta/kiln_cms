@@ -81,6 +81,7 @@ defmodule KilnCMSWeb.ApiAuthController do
 
   alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.Errors.ChallengeRequired
+  alias KilnCMS.Accounts.Errors.PasswordResetRequired
   alias KilnCMS.Accounts.PendingSignIn
   alias KilnCMS.Accounts.Scoping
   alias KilnCMS.Accounts.SecondFactor
@@ -149,9 +150,10 @@ defmodule KilnCMSWeb.ApiAuthController do
         missing_params(conn, detail)
 
       {:error, reason} ->
-        case ChallengeRequired.find(reason) do
-          %ChallengeRequired{} = challenge -> challenge_refused(conn, challenge)
-          nil -> unauthorized(conn)
+        cond do
+          PasswordResetRequired.find(reason) -> password_reset_required(conn)
+          challenge = ChallengeRequired.find(reason) -> challenge_refused(conn, challenge)
+          true -> unauthorized(conn)
         end
 
       # `false` from the type check: a *supplied* email or password of the
@@ -159,6 +161,21 @@ defmodule KilnCMSWeb.ApiAuthController do
       _ ->
         unauthorized(conn)
     end
+  end
+
+  # The password was right, but it is in a known breach and a site the account
+  # administers blocks that at sign-in (#2407). No token: the one the action
+  # minted is already revoked, and a reset link is on its way to the account's
+  # address. Only reached with the correct password, so it tells the caller
+  # nothing a 401 would have hidden from them.
+  defp password_reset_required(conn) do
+    ApiError.send(
+      conn,
+      :forbidden,
+      "password_reset_required",
+      "This account's password appears in a known data breach. A reset link has been emailed; " <>
+        "choose a new password, then sign in again."
+    )
   end
 
   # Only a string is a token; anything else is sent on as absent, which the
@@ -302,12 +319,26 @@ defmodule KilnCMSWeb.ApiAuthController do
   # the answer is a 403 naming where to set it up, which is a browser page.
   # During the grace period the token is issued and says when that ends.
   defp first_factor_only(conn, user) do
+    breach = password_breach(user)
+
     case TwoFactorRequirement.status(user, conn.assigns.current_org.id) do
-      {:enforced, deadline} -> second_factor_refused(conn, user, "not_enrolled", deadline)
-      {:grace, deadline} -> issue_token(conn, user, %{required: true, deadline: deadline})
-      _not_required_or_enrolled -> issue_token(conn, user)
+      {:enforced, deadline} ->
+        second_factor_refused(conn, user, "not_enrolled", deadline)
+
+      {:grace, deadline} ->
+        issue_token(conn, user, %{required: true, deadline: deadline}, breach)
+
+      _not_required_or_enrolled ->
+        issue_token(conn, user, nil, breach)
     end
   end
+
+  # The sign-in check's warning (#2407): set on the record when the password
+  # is in a breach and the administrator's site checks at sign-in under
+  # `:warn`. Only the one-step `201` carries it; a two-factor sign-in does not
+  # carry it through `verify/2`.
+  defp password_breach(%{__metadata__: %{password_breach: %{status: :breached}}}), do: :breached
+  defp password_breach(_user), do: nil
 
   # `meta.reason` is `"passkey_only"` when the account does hold a factor, a
   # passkey, that this door cannot take; absent when it holds none.
@@ -346,7 +377,7 @@ defmodule KilnCMSWeb.ApiAuthController do
     })
   end
 
-  defp issue_token(conn, user, second_factor \\ nil) do
+  defp issue_token(conn, user, second_factor \\ nil, breach \\ nil) do
     # Both steps (password, or password then code) end here: the sign-in is
     # complete (#2241).
     AuthEvents.signed_in(conn, user, "password")
@@ -354,26 +385,25 @@ defmodule KilnCMSWeb.ApiAuthController do
     conn
     |> put_status(:created)
     |> json(
-      with_second_factor(
-        %{
-          token: user.__metadata__.token,
-          # One shape for both steps, so the contract cannot drift between them.
-          #
-          # `role` is the caller's EFFECTIVE TIER on the org the request resolved to,
-          # not `User.role` (the global one) — since #419 the authorization boundary
-          # on org-scoped resources is the per-org tier, so a client pre-shaping its
-          # UI (show/hide Approve) on the global role would offer actions the server
-          # then refuses on any org where the membership tier is lower (#627). The
-          # value therefore changes with the host the client dials; `SetTenant` has
-          # already put that org on the conn. `:none` when the user has no tier there.
-          user: %{
-            id: user.id,
-            email: to_string(user.email),
-            role: Scoping.effective_tier(user, conn.assigns.current_org.id)
-          }
-        },
-        second_factor
-      )
+      %{
+        token: user.__metadata__.token,
+        # One shape for both steps, so the contract cannot drift between them.
+        #
+        # `role` is the caller's EFFECTIVE TIER on the org the request resolved to,
+        # not `User.role` (the global one) — since #419 the authorization boundary
+        # on org-scoped resources is the per-org tier, so a client pre-shaping its
+        # UI (show/hide Approve) on the global role would offer actions the server
+        # then refuses on any org where the membership tier is lower (#627). The
+        # value therefore changes with the host the client dials; `SetTenant` has
+        # already put that org on the conn. `:none` when the user has no tier there.
+        user: %{
+          id: user.id,
+          email: to_string(user.email),
+          role: Scoping.effective_tier(user, conn.assigns.current_org.id)
+        }
+      }
+      |> with_second_factor(second_factor)
+      |> with_password_breach(breach)
     )
   end
 
@@ -383,6 +413,13 @@ defmodule KilnCMSWeb.ApiAuthController do
 
   defp with_second_factor(body, %{required: true, deadline: deadline}),
     do: Map.put(body, :second_factor, %{required: true, deadline: DateTime.to_iso8601(deadline)})
+
+  # Additive (#2407): only an administrator's sign-in with a breached password,
+  # on a site that checks at sign-in under `:warn`, carries it.
+  defp with_password_breach(body, nil), do: body
+
+  defp with_password_breach(body, :breached),
+    do: Map.put(body, :password_breach, %{status: "breached"})
 
   # Absent means absent. A field that was *supplied* with the wrong JSON type
   # falls through to the step that owns it, because "pending_token and code are

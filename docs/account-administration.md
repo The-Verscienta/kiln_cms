@@ -630,7 +630,9 @@ On the invitation page:
   per-network budget as registration was spent.
 - **"This password has appeared in a known data breach. Choose a different
   one."** The site's [breached-password policy](#breached-passwords) blocks it
-  for the invited tier (blocking applies to administrators).
+  for the invited tier (blocking applies to administrators), or, for an
+  existing account, a site the invitee already administers blocks it
+  ([Someone who administers several sites](#someone-who-administers-several-sites)).
 - **"You're already a member of (site) as (tier); nothing changed."** The
   invitee already held the invited tier or a higher one on the site, so the
   invitation was used up without changing anything
@@ -1404,7 +1406,9 @@ Whenever someone sets a password on your site (registers, changes it, resets
 it, or you create the first admin in `/setup`) Kiln checks whether it appears in
 a public data breach. The check sends only a short fragment of a hash of the
 password to the [Have I Been Pwned](https://haveibeenpwned.com/Passwords) range
-API; the password never leaves your server. Signing in is not checked.
+API; the password never leaves your server. Signing in is checked only if you
+ask for it, and only for administrators
+([Check administrator passwords at sign-in](#check-administrator-passwords-at-sign-in)).
 
 ### Choose what happens
 
@@ -1433,6 +1437,110 @@ operator's default (`BREACHED_PASSWORD_POLICY`, `warn` if unset) applies again.
 "Administrator" means the stricter of the account's role (a temporary role
 counts) and its membership tier on this site.
 
+### Someone who administers several sites
+
+A person who administers more than one site is held to the **strictest**
+policy among those sites, whichever site they set their password on (#2408).
+If site A blocks breached passwords and site B only warns, or is **Off**, an
+admin of both who changes or resets their password on B's address is still
+refused a breached one. A site they administer that has saved no policy counts
+with the operator's default. A platform admin administers every site, so the
+strictest policy anywhere on the server applies to them.
+
+This applies to an account that exists already: changing a password,
+resetting it, and an existing account accepting an invitation with a password.
+A new registration or the first-run setup has no sites yet and is judged by
+the site's own policy. Being an editor or viewer of a blocking site changes
+nothing: Block only ever applies to that site's administrators.
+
+So **Off** on your site does not promise that nothing is sent for someone who
+also administers a site that checks; the page says so under **Off**. Why:
+[ADR 0085](decisions/0085-an-administrators-password-answers-to-the-strictest-policy-of-every-site-they-administer-and-is-checked-at-sign-in-only-where-a-site-asks.md).
+
+### Check administrator passwords at sign-in
+
+The check above runs when a password is set, so a breached password that an
+administrator set before the check existed, or kept under **Warn**, is never
+looked at again. You can have it looked up each time one of your site's
+administrators signs in with it (#2407). It is off by default.
+
+Requires the admin role on the site.
+
+1. Open **Password policy** under **Sign-in & access** (`/editor/password-policy`).
+2. Choose the outcome in **When a new password is in a known breach**. At
+   sign-in it means:
+   - **Block** - the administrator is not signed in. They are sent to choose a
+     new password, and a reset link is emailed to them.
+   - **Warn** - they are signed in, with a warning to change their password.
+   - **Off** - nothing is looked up at sign-in either, even with the box below
+     ticked.
+3. Tick **Also check administrators' passwords when they sign in**.
+4. Click **Save**. You see "Password policy saved.", and the box stays ticked
+   when the page reloads. It applies from the next sign-in.
+
+To turn it off again, untick the box and click **Save**. **Use the default**
+removes the site's choice and unticks the box with it.
+
+Who is checked, and by which policy:
+
+- Only people who **administer** this site, signing in with a password, on any
+  site's address and from any client: the sign-in page and
+  `POST /api/auth/sign_in`. Editors, viewers and other members are never
+  checked at sign-in, and nor are magic links, single sign-on, passkeys and
+  API keys, which carry no password.
+- Someone who administers several sites that tick the box gets the strictest
+  of those sites' policies. A site they administer without the box ticked
+  plays no part, so your box never changes what another site's policy does at
+  sign-in.
+- The check runs after the password is accepted and before the second-factor
+  code, if they have one. A blocked administrator never reaches the code
+  prompt.
+
+### What an administrator sees at sign-in
+
+- **Blocked.** The password reset page (`/reset`) opens with: "Your password
+  appears in a known data breach, so it can't be used to sign in as an
+  administrator. We've emailed you a link to choose a new one. If it doesn't
+  arrive, request one below." The mail is **Choose a new password for your
+  (site) account**. It says someone signed in with their current password,
+  that it appears in a breach, and that if it wasn't them, someone else knows
+  it. The link works like any reset link. Once they choose a new password they
+  sign in with it as usual.
+- **Warned.** They are signed in, and see "Your password appears in a public
+  data breach. Change it soon from your account page." (after the
+  second-factor code, if they have one). They can change it at
+  `/editor/settings` under **Change password**. The warning appears at every
+  sign-in until they do.
+- **The breach service is slow or unreachable.** They are signed in as
+  usual. The lookup gives up after 1.5 seconds.
+
+### If a sign-in check goes wrong
+
+- **The reset mail doesn't arrive.** Each address gets at most five reset
+  mails an hour, the ones this check sends included. Someone who tried to
+  sign in several times, or anyone else holding the breached password, may
+  have used them up. Request one on `/reset` once the hour is over. **Send password
+  reset** on the account's page under **Accounts** (`/editor/accounts`) shares
+  the same budget, but says so by name when it is spent.
+- **"Paused after too many attempts".** A blocked sign-in counts toward the
+  account's sign-in pause like a failed one, so retrying the old password
+  pauses the account after 20 attempts in 15 minutes, and the owner gets the
+  usual "Unusual sign-in activity" mail. Choosing a new password through the
+  reset link lifts the pause ([Lift a sign-in pause by email](#lift-a-sign-in-pause-by-email)).
+- **"I signed in from an app and saw no warning."** An app that signs in with
+  `POST /api/auth/sign_in` gets the warning as a `password_breach` field on
+  the response, and only when the account has no second factor
+  ([API](api.md#administrators-whose-password-is-in-a-known-breach)). Whether
+  the app shows it is up to the app.
+- **The box is ticked but nobody is checked.** The policy is **Off**, the
+  operator set `BREACHED_PASSWORD_CHECK=false`, or the person is not an
+  administrator of a site with the box ticked.
+
+Your security log records each blocked sign-in as **Failed sign-in** with
+reason `breached_password`
+([security events](security-events.md#what-is-recorded)). The failed
+sign-ins alert does not count it.
+
 ### What people see
 
 - **Blocked:** an error under the password field; they pick another.
@@ -1445,9 +1553,11 @@ counts) and its membership tier on this site.
 ### When the check does nothing
 
 - The operator set `BREACHED_PASSWORD_CHECK=false` (the page says so).
-- The site's policy is **Off**: nothing is sent. (If the saved policy can't
-  be read, the site is treated as **Warn**; only the operator's
-  `BREACHED_PASSWORD_CHECK=false` guarantees no request.)
+- The site's policy is **Off**: nothing is sent, except for someone who also
+  administers a site that checks
+  ([Someone who administers several sites](#someone-who-administers-several-sites)).
+  (If the saved policy can't be read, the site is treated as **Warn**; only
+  the operator's `BREACHED_PASSWORD_CHECK=false` guarantees no request.)
 - The lookup service is slow or unreachable: the password is accepted. Operators
   can watch for this in [observability](observability.md#breached-password-checks).
 - Passwords an admin does not type: the admin-sent reset *mail* is checked when
