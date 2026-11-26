@@ -83,6 +83,10 @@ else.
   A 1.13.0 known issue. Installed plugins' public routes are reserved too; a test now keeps the list in step with the router.
   ([long form](docs/changelog/unreleased.md#reserved-route-slugs))
 
+- **A counted read that the actor is refused now returns the refusal instead of raising an internal `Ash.Error.Framework` error (#2934).**
+  It works around an Ash defect in the count query. The JSON:API, GraphQL and MCP counts were never affected. No migration.
+  ([long form](docs/changelog/unreleased.md#counted-read-refusal))
+
 ## [1.13.0] - 2026-11-25
 
 Long form: [docs/changelog/v1.13.0.md](docs/changelog/v1.13.0.md) —
