@@ -77,6 +77,15 @@ else.
   `prune` only reports and `verify` records nothing. New image only; no migration, and rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#backup-cli))
 
+### Changed
+
+- **Backups: an SFTP destination's path may hold spaces and `+ @ ,`, so a NAS share such as `/volume1/Backup Share/kiln` can be used (#3199).**
+  ASCII only; `..`, `~`, `\`, control characters and a space at either end of a folder name are still refused. No migration; after a rollback, a destination whose path uses the new characters fails until its path is changed.
+  ([#3425](https://github.com/The-Verscienta/kiln_cms/pull/3425) · [long form](docs/changelog/unreleased.md#sftp-path-spaces))
+- **Backups: two SFTP destinations whose folders nest both prune once Kiln can tell they are different servers: both trust host keys of the same type that differ, and each has passed a Test since the later trust (#3200).**
+  Press **Test** on both rows to clear "Not pruned". No migration.
+  ([#3425](https://github.com/The-Verscienta/kiln_cms/pull/3425) · [long form](docs/changelog/unreleased.md#sftp-distinct-servers-prune))
+
 ### Fixed
 
 - **JSON fields: a valid value is no longer refused as "took too long to check against the schema" when building its JSON Schema is slow on a cold or busy node (#3063).**
@@ -124,6 +133,10 @@ else.
   The field type's commented `handle_input_event/3` example now compiles cleanly once uncommented. No migration.
   ([long form](docs/changelog/unreleased.md#gen-plugin-overlay-config))
 
+- **Backups: when two SFTP servers' host keys change in the same 15-minute window, the admins get an alert for each, not only the first (#3201).**
+  No migration; rolling the pin back is safe.
+  ([#3425](https://github.com/The-Verscienta/kiln_cms/pull/3425) · [long form](docs/changelog/unreleased.md#host-key-alert-per-destination))
+
 - **Fields admin: the editor input choices for a plugin field type now follow every setting of the field, so the page offers exactly the inputs the save accepts (#2883).**
   Before, the page asked the type with only a few settings and could show a choice the save refused, or hide one it took. No migration.
   ([long form](docs/changelog/unreleased.md#plugin-widgets-full-definition))
@@ -131,6 +144,16 @@ else.
 - **Change feed: a published event is no longer lost to this node's live editor views and relay when a database connection exits mid-publish (#2938).**
   SSE streams still hide such an event. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#feed-relay-exit))
+
+- **Backups: a cron backup that History recorded as Failed "Interrupted" is corrected, once, when its stamp turns out complete (#2846).**
+  The importer's summary gains a `reevaluated` count, and retention's `pruned` mark now locks the row it marks. No migration; rolling the pin back is safe.
+  ([#3447](https://github.com/The-Verscienta/kiln_cms/pull/3447) · [long form](docs/changelog/unreleased.md#reevaluate-interrupted-import))
+
+### Security
+
+- **Smart 404 blocking: a spoofed search-engine claim rotating through the addresses of one IPv6 `/64` is counted once another address there has failed its DNS check or left its reverse zone silent (#2838).**
+  Only with `KILN_SCANNER_BLOCKING` on; verified crawlers stay exempt, IPv4 is unchanged. No migration; rolling the pin back is safe.
+  ([#3449](https://github.com/The-Verscienta/kiln_cms/pull/3449) · [long form](docs/changelog/unreleased.md#scanner-guard-ipv6-rotation))
 
 ## [1.13.0] - 2026-11-25
 

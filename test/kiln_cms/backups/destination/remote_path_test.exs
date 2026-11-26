@@ -23,6 +23,83 @@ defmodule KilnCMS.Backups.Destination.RemotePathTest do
     assert {:error, "the path must be text"} = RemotePath.segments(1, "the path")
   end
 
+  test "S3's rule still refuses what only a file server's folder may hold" do
+    for wider <- ["a b", "Backup Share", "a+b", "me@host", "a,b"] do
+      assert {:error, _} = RemotePath.segments(wider, "the prefix"), inspect(wider)
+    end
+  end
+
+  describe "folder_segments/2 (a folder on a file server, #3199)" do
+    test "spaces, +, @ and , are allowed inside a folder name" do
+      assert RemotePath.folder_segments("/volume1/Backup Share/kiln", "the path") ==
+               {:ok, ["volume1", "Backup Share", "kiln"]}
+
+      assert RemotePath.folder_segments("/a+b/me@nas/x,y/A-Z_0.9", "the path") ==
+               {:ok, ["a+b", "me@nas", "x,y", "A-Z_0.9"]}
+
+      assert RemotePath.folder_segments("  /backups/kiln/  ", "the path") ==
+               {:ok, ["backups", "kiln"]}
+
+      assert RemotePath.folder_segments("", "the path") == {:ok, []}
+      assert RemotePath.folder_segments(nil, "the path") == {:ok, []}
+    end
+
+    test "names that climb, separators and control characters are refused" do
+      for hostile <- [
+            "..",
+            ".",
+            "/a/../b",
+            "/a/./b",
+            "../x",
+            "~",
+            "~root",
+            "/a/~/b",
+            "/home/~kiln",
+            "a\\..\\b",
+            "a\\b",
+            "a\0b",
+            "a\nb",
+            "a\tb",
+            "a\rb",
+            "a\x7fb",
+            "a//b",
+            "/Backup Share//kiln",
+            "a:b",
+            "a*b",
+            "a$b",
+            "a;b",
+            "a'b",
+            "a\"b",
+            "café"
+          ] do
+        assert {:error, message} = RemotePath.folder_segments(hostile, "the path"),
+               inspect(hostile)
+
+        assert message =~ "the path"
+      end
+    end
+
+    test "a folder name may not start or end with a space" do
+      for edged <- ["/ lead/kiln", "/trail /kiln", "/a/ b ", "/a/   /b", "/a/b /c"] do
+        assert {:error, message} = RemotePath.folder_segments(edged, "the path"),
+               inspect(edged)
+
+        assert message =~ "space at the start or end"
+      end
+    end
+
+    test "the same length limits as S3's rule" do
+      assert {:ok, [_]} = RemotePath.folder_segments(String.duplicate("a", 255), "the path")
+
+      assert {:error, _} = RemotePath.folder_segments(String.duplicate("a", 256), "the path")
+
+      assert {:error, "the path is too long"} =
+               RemotePath.folder_segments(String.duplicate("a b/", 130), "the path")
+
+      assert {:error, "the path must be text"} = RemotePath.folder_segments(1, "the path")
+    end
+  end
+
   test "a call touches only a backup subdirectory and a single safe name" do
     assert :ok = RemotePath.safe_ref("db", "kiln-db-20260101-000000.dump")
 

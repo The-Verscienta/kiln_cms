@@ -26,7 +26,18 @@ defmodule KilnCMS.Backups.Run do
 
   `stamp` (`YYYYMMDD-HHMMSS`, the stamp in the artifacts' file names) is the
   identity: the importer upserts on it and a run it did not make is never
-  modified.
+  modified. The one exception is an imported row the importer recorded as
+  "Interrupted" whose stamp later turned out complete (#2846): it is
+  rewritten once, through `:reevaluate_interrupted`.
+
+  ## Rewrites of a finished row are locked (#2846)
+
+  `:mark_pruned` and `:reevaluate_interrupted` both change a row nothing else
+  is writing any more, and both lock it first (`get_and_lock_for_update()`)
+  and compute what they write from the row as locked (`Changes.MarkFiles`,
+  `Changes.ReevaluateInterrupted`). So retention's mark can't be lost to a
+  re-evaluation that read the row before it, and a re-evaluation refuses a
+  row retention has marked since.
 
   Artifacts, log entries and the per-destination outcomes are embedded
   (`KilnCMS.Backups.Artifact`, `KilnCMS.Backups.LogEntry`,
@@ -64,8 +75,10 @@ defmodule KilnCMS.Backups.Run do
     Cancel,
     CancelResend,
     CancelResume,
+    MarkFiles,
     Normalize,
     OwnChain,
+    ReevaluateInterrupted,
     Resume,
     ResumeRefused
   }
@@ -93,6 +106,16 @@ defmodule KilnCMS.Backups.Run do
       index [:started_at], name: "backup_runs_started_at_index"
     end
   end
+
+  # The error `KilnCMS.Backups.Importer` records on an import interrupted
+  # mid-backup (#2846). Kept here, not in the importer, so this resource's
+  # `:interrupted_imports` filter doesn't make Run depend on the importer at
+  # compile time.
+  @interrupted_import_error "Interrupted: the backup stopped before it finished and left .partial files behind"
+
+  @doc "The error an import interrupted mid-backup records (`KilnCMS.Backups.Importer`)."
+  @spec interrupted_import_error() :: String.t()
+  def interrupted_import_error, do: @interrupted_import_error
 
   actions do
     defaults [:read]
@@ -157,6 +180,16 @@ defmodule KilnCMS.Backups.Run do
       get? true
       argument :stamp, :string, allow_nil?: false
       filter expr(stamp == ^arg(:stamp))
+    end
+
+    # The imported rows the importer recorded as killed runs (#2478), which
+    # it looks at again each pass in case the stamp finished after all
+    # (#2846). The system actor's alone.
+    read :interrupted_imports do
+      filter expr(
+               origin == :imported and status == :failed and
+                 error == ^@interrupted_import_error
+             )
     end
 
     # The worker opens a run before any file lands.
@@ -284,10 +317,31 @@ defmodule KilnCMS.Backups.Run do
     end
 
     # Retention marking another run's deleted files `pruned`. Separate from
-    # `record_progress` because that run has finished: no status filter.
+    # `record_progress` because that run has finished: no status filter. The
+    # marks are computed from the row as locked (`MarkFiles`, after the
+    # lock), never sent by the caller, so a write that commits between
+    # retention's read and this one is kept (#2846).
     update :mark_pruned do
-      accept [:artifacts]
+      accept []
+      argument :names, {:array, :string}, allow_nil?: false
+      argument :key, :string, allow_nil?: false
+      argument :at, :string, allow_nil?: false
       require_atomic? false
+      change get_and_lock_for_update()
+      change {MarkFiles, mode: :pruned}
+      change Normalize
+    end
+
+    # An "Interrupted" import whose stamp finished after all (#2846): the
+    # importer's new outcome replaces the old one, once. Never the stamp, the
+    # origin, `started_at` or `keep_days`. The guard (still that Interrupted
+    # row, no file of it marked pruned) and the log line are
+    # `ReevaluateInterrupted`, on the row as locked.
+    update :reevaluate_interrupted do
+      accept [:status, :error, :components, :finished_at, :artifacts]
+      require_atomic? false
+      change get_and_lock_for_update()
+      change ReevaluateInterrupted
       change Normalize
     end
 
@@ -422,7 +476,15 @@ defmodule KilnCMS.Backups.Run do
     # second one that could not lift a refusal.
     policy action_type(:read) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
-      forbid_unless action([:read, :running, :by_stamp])
+      forbid_unless action([:read, :running, :by_stamp, :interrupted_imports])
+      authorize_if {KilnCMS.Checks.SystemActor, subsystem: :backups}
+    end
+
+    # The importer's second look at its Interrupted rows (#2846) is the
+    # system actor's alone: ANDed with the read policy above, so a platform
+    # admin, admitted there, is refused here. The history page has its own
+    # read.
+    policy action(:interrupted_imports) do
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :backups}
     end
 
@@ -432,6 +494,8 @@ defmodule KilnCMS.Backups.Run do
     # re-opening a failed run; the platform admin's "Resume" button requests a
     # backup, it never writes the run itself. `note_resume_refused` (#2539) is
     # the worker saying on the row that a requested resume couldn't run.
+    # `reevaluate_interrupted` (#2846) is the importer correcting its own
+    # Interrupted row.
     policy action([
              :start,
              :skip,
@@ -444,7 +508,8 @@ defmodule KilnCMS.Backups.Run do
              :begin_resend,
              :record_resend,
              :import,
-             :mark_pruned
+             :mark_pruned,
+             :reevaluate_interrupted
            ]) do
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :backups}
     end

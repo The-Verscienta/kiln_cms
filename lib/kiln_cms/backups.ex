@@ -115,6 +115,8 @@ defmodule KilnCMS.Backups do
       define :newest_imported_run, action: :newest_import, not_found_error?: false
       define :list_running_runs, action: :running
       define :mark_run_pruned, action: :mark_pruned
+      define :list_interrupted_imports, action: :interrupted_imports
+      define :reevaluate_interrupted_run, action: :reevaluate_interrupted
       define :cancel_run, action: :cancel
       define :cancel_run_resume, action: :cancel_resume
       define :begin_run_resend, action: :begin_resend

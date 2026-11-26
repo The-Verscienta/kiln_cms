@@ -4300,8 +4300,11 @@ the password in the clear.
    **SFTP server**.
 2. Fill in **Host** (a name or an IP address, nothing else), **Port** (22
    when blank), **Username** and **Path**, an absolute folder such as
-   `/backups/kiln`. Kiln keeps files in `<path>/db` and `<path>/media` and
-   creates the folders it needs.
+   `/backups/kiln` or `/volume1/Backup Share/kiln`. Kiln keeps files in
+   `<path>/db` and `<path>/media` and creates the folders it needs. A folder
+   name may hold letters, digits, spaces and `. _ - + @ ,` (#3199), since
+   NAS share names often have a space; see
+   [What a path may hold](#what-an-sftp-path-may-hold).
 3. Enter a **Password**, a **Private key**, or both. A private key is the
    whole file, `-----BEGIN … PRIVATE KEY-----` included: OpenSSH or PEM,
    Ed25519, ECDSA or RSA of 2048 bits or more, **without a passphrase**
@@ -4344,7 +4347,9 @@ trusts the new key", nothing is sent, and:
   changed", by bell and email.
 
 Both happen at most once an hour per destination, however often a backup
-retries. A key that changed can mean someone is between Kiln and the
+retries. Each destination has its own alert window (#3201), so when two
+servers' keys change within minutes of each other, the admins get one alert
+naming each. A key that changed can mean someone is between Kiln and the
 server. Find out why before trusting the new one: a reinstalled server or a
 regenerated key is routine, an unexplained change is not. When you know it
 is expected, choose **Check again** on the row, compare, and trust the new
@@ -4355,6 +4360,28 @@ A server that no longer offers its trusted key's type at all fails with
 accepts …" and raises no alert. Check and trust its key again; if the check
 fails the same way, the server is too old to share an algorithm with Kiln,
 which refuses SHA-1.
+
+<a id="what-an-sftp-path-may-hold"></a>
+
+#### What a path may hold
+
+**Path** is a list of folder names separated by `/`, and must start with
+`/`. Each folder name may hold the ASCII letters and digits, the space, and
+`.` `_` `-` `+` `@` `,` (#3199). Kiln sends the path to the server as one
+length-prefixed string, never through a shell, so only the characters that
+separate folders or climb out of them could do harm, and those are what it
+still refuses:
+
+- `.` or `..` as a folder name;
+- `~`, `\`, a NUL or any control character;
+- any letter outside ASCII (`é`, `ü`);
+- a space at the start or end of a folder name (`/backups /kiln`): the
+  name would not read back the way it was typed. Spaces at the ends of the
+  whole path are trimmed when it is saved.
+
+The whole path may be at most 512 bytes. An S3 destination's **Prefix** is
+not widened: it still takes only letters, digits, dots, hyphens and
+underscores.
 
 <a id="reach-an-sftp-server-on-your-own-network"></a>
 
@@ -4415,7 +4442,80 @@ with these limits:
   whatever its host, port or username: one server answers to many names and
   logins. The row shows **Not pruned:** "another SFTP destination uses a
   folder inside or around this one's; the app can't tell whether it is the
-  same server".
+  same server until both trust host keys of the same type that differ, and
+  each has passed a Test since the later of the two was trusted".
+- **Two servers Kiln can tell apart both prune** (#3200). A pair whose
+  paths nest is treated as two servers, and neither blocks the other, only
+  when all of these hold:
+  - both rows trust a host key, and of the same type (both `ssh-ed25519`,
+    say);
+  - the two fingerprints differ;
+  - each row's last **Test** passed, and finished after the later of the
+    two "since" times on the rows' trusted keys.
+
+  A Test connects only to a server that offers the row's trusted key, so a
+  passed Test shows the key is still that server's own after both keys were
+  in place. Any other pair stays blocked: a row with no trusted key yet,
+  keys of different types (one server has an ed25519 key and an RSA key),
+  one fingerprint on both (one server by name and by IP address), a row
+  whose last Test failed, or one not tested since the other key was
+  trusted. The last covers a server reinstalled with a new key while its
+  row was disabled: until it is tested again it could still be the other
+  server. The exact overlap above (same host, port and username) is never
+  lifted.
+
+<a id="let-two-sftp-destinations-on-different-servers-both-prune"></a>
+
+##### Let two SFTP destinations on different servers both prune
+
+**Before you start:** two SFTP destinations on different servers, with
+paths inside or around each other (both `/backups`, say), **Delete its old
+backups (retention)** ticked on both, each row showing **Not pruned:** with
+the message above. You need to be a platform admin, as for everything on
+the Destinations tab.
+
+1. On **Backups → Destinations**, read the trusted key on each row:
+   "Trusted ssh-ed25519 key SHA256:…, since …". The two must name the same
+   type and different fingerprints.
+2. If the types differ, trust a key of one type on both. On the row whose
+   type is the odd one out, run `ssh-keygen -lf` on that server for the
+   `.pub` of the other row's type (`/etc/ssh/ssh_host_ed25519_key.pub`),
+   paste the fingerprint into **Or the fingerprint you expect** and choose
+   **Look for it**, then **Trust this key**. The row's "since" time moves
+   to now.
+3. Choose **Test** on the first row. When it finishes, the row reads "Last
+   test passed … on …".
+4. Choose **Test** on the second row.
+
+Once both Tests pass, both rows show **Prunes its old backups**, and the
+next backup to each prunes it. Order doesn't matter, as long as both Tests
+run after the last trust: trusting a key again on either row (step 2, or
+after a key change) blocks the pair until both are tested again.
+
+**What it doesn't see:**
+
+- **A key that changes after both rows are proven.** The pair stays
+  unblocked until the next Test or trust on either row. A backup that
+  meets the changed key fails the destination before anything is sent or
+  deleted ([When the server's host key changes](#when-the-servers-host-key-changes)),
+  but a failed backup doesn't count as a failed Test, so the badge doesn't
+  change until someone presses **Test**.
+- **A Test that was running while the other row's key was trusted.** A Test
+  counts by when it finished, so one that started before the trust and
+  passed after it counts. A Test takes at most 30 seconds.
+- **Two servers with different keys over one disk:** two SSH daemons in
+  front of one share, or a high-availability pair with a key per node.
+  Kiln sees two servers. Untick retention on one of them.
+- **Anything but SFTP.** An SFTP destination still can't be compared with
+  an S3, rclone or directory destination, or with `BACKUP_RCLONE_REMOTE`.
+
+Whatever slips through, retention only ever deletes what this
+installation's own backup directory sent to that destination
+([Retention on a destination](#retention-on-a-destination),
+[ADR 0064](decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md)):
+two rows on one folder would prune each other's copies of this
+installation's backups sooner than either schedule asks, not another
+installation's.
 
 <a id="what-can-go-wrong-with-an-sftp-destination"></a>
 
@@ -4431,7 +4531,9 @@ When saving:
 | "the host resolves to a link-local or metadata address, which no setting allows", "the host must not be a metadata host" | No listing allows these. |
 | "the host must be a host name or an IP address, with no scheme or port" | Enter `nas.example.com`, not `sftp://nas.example.com:22`; the port has its own field. |
 | "the path must be absolute, e.g. /backups/kiln" | A path relative to the login folder could be the same folder as an absolute one, which Kiln couldn't tell. |
-| "the path must be folder names of letters, digits, dots, hyphens and underscores, separated by /" | No spaces or other characters, no `.` or `..` folder, no `~`. |
+| "the path must be folder names of letters, digits, spaces and . _ - + @ , separated by /" | No other characters (no `~`, `\`, or letters outside ASCII), and no `.` or `..` folder ([What a path may hold](#what-an-sftp-path-may-hold)). |
+| "the path must not have a space at the start or end of a folder name" | Remove the space next to the `/`: `/backups /kiln` is refused, `/backups/my kiln` is not. |
+| "the path is too long" | The path is over 512 bytes. |
 | "enter a password, a private key, or both" | As it says. |
 | "the private key has a passphrase; remove it with ssh-keygen -p -N \"\" -f <key file> (the key is stored encrypted)" | Erlang's SSH client can't open an encrypted OpenSSH key. |
 | "the private key couldn't be read; paste an OpenSSH or PEM private key", "DSA keys are not supported; …", "the RSA key is shorter than 2048 bits; …" | Paste the private key file whole, of a supported type. |
@@ -4873,7 +4975,8 @@ Destinations tab shows **Prunes its old backups** on a row only when a pass
 there would prune; a row whose retention is ticked but can't run shows
 **Not pruned:** and why (it overlaps `BACKUP_RCLONE_REMOTE` or another
 destination, another S3 destination uses a bucket of the same name,
-another SFTP destination uses a folder inside or around it, it can't be
+another SFTP destination uses a folder inside or around it and the two
+haven't been proven different servers, it can't be
 compared with `BACKUP_RCLONE_REMOTE`, or its adapter can't list and
 delete), the same check each pass makes. What it did
 is on the run's log:
@@ -4886,7 +4989,7 @@ is on the run's log:
 | "Retention on NAS skipped: it overlaps BACKUP_RCLONE_REMOTE; nothing was deleted" | The destination is, contains or is inside the env remote, which changed since the destination was added. Point the two at separate places. |
 | "Retention on NAS skipped: it overlaps another backup destination; nothing was deleted" | Two destinations share a place. Delete one. |
 | "Retention on Bucket skipped: another S3 backup destination uses a bucket of the same name; the app can't tell whether it is the same store; nothing was deleted" | Another S3 destination names a bucket of the same name on another endpoint host or port, with a prefix inside or around this one ([Retention on an S3 bucket](#retention-on-an-s3-bucket)). Give the two separate prefixes, or untick retention on both. |
-| "Retention on NAS skipped: another SFTP backup destination uses a folder inside or around this one's; the app can't tell whether it is the same server; nothing was deleted" | Another SFTP destination's path is inside or around this one's, on any host, port or login ([Retention on an SFTP server](#retention-on-an-sftp-server)). Give the two folders side by side, or untick retention on both. |
+| "Retention on NAS skipped: another SFTP backup destination uses a folder inside or around this one's; the app can't tell whether it is the same server until both trust host keys of the same type that differ, and each has passed a Test since the later of the two was trusted; nothing was deleted" | Another SFTP destination's path is inside or around this one's, on any host, port or login ([Retention on an SFTP server](#retention-on-an-sftp-server)). If they are different servers, press **Test** on both ([Let two SFTP destinations on different servers both prune](#let-two-sftp-destinations-on-different-servers-both-prune)); otherwise give the two folders side by side, or untick retention on both. |
 | "Retention on NAS skipped: can't confirm it doesn't overlap BACKUP_RCLONE_REMOTE; nothing was deleted" | A plugin's destination, whose location Kiln can't compare, or an S3 or SFTP destination, which can't be compared with an rclone remote, while `BACKUP_RCLONE_REMOTE` is set ([Retention on an S3 bucket](#retention-on-an-s3-bucket), [Retention on an SFTP server](#retention-on-an-sftp-server)). Untick retention on it and prune it yourself, or unset the env remote. |
 | "Retention on NAS skipped: couldn't list the destination (…); nothing was deleted" | The listing failed, or took longer than 10 minutes ("… timed out after 10 min"). Nothing is deleted on a guess. |
 | "Retention on NAS removed … , then stopped: couldn't delete … (…)" | A delete failed, or took longer than 60 seconds; the pass stopped there. The next backup tries again. A delete stopped at its time limit may still have removed that file at the store: the next pass no longer lists it, so nothing is lost. |
@@ -5393,7 +5496,9 @@ newest file of the stamp:
    files left behind with their age ("No backup has written to this stamp for
    hours; left behind: …"). Its artifacts are the finished files (none if the
    run was killed in its first file), and its components are the kinds of all
-   its files, partial or finished. The row is never rewritten.
+   its files, partial or finished. The row is rewritten only if the stamp
+   turns out to have finished after all, once (see
+   [If the run finished after all](#if-the-run-finished-after-all) below).
 3. **After 12 hours with every file of the stamp unchanged**, `backup.sh prune`
    deletes the stamp's `.partial` files and prints the path of each. Prune runs
    at the end of every `backup.sh all` that succeeds and on its own as
@@ -5442,7 +5547,8 @@ imports as what is left of it:
 new in this release. An older copy of the script doesn't keep its files fresh,
 so a live run with a phase in which nothing is written for 3 hours (planning a
 very large media tree on NFS, or `pg_dump` waiting for a lock) can be recorded
-as Interrupted, and that row stays.
+as Interrupted. Clocks that disagree badly can do the same. If that run then
+finishes, the row is corrected, as below; if it doesn't, the row stays.
 
 What can go wrong:
 
@@ -5454,6 +5560,43 @@ What can go wrong:
 | `Removing an abandoned backup partial: <name>` | Server log | The start of an in-app backup removed a `.partial`, as above. |
 | `Partial sweep skipped db/: it can't be listed (<reason>)` | Server log | That directory's `.partial` files were left for the next in-app backup; the other directory's were still swept. |
 | `Partial sweep kept every stamped partial: <error>` | Server log | History could not be read, so no `.partial` named after a stamp was removed. |
+
+### If the run finished after all
+
+A row recorded as Interrupted is looked at again on every import (the same
+triggers as above). Once its stamp's files show the run completed, the row is
+rewritten, once, with what importing the stamp now would record. That is
+usually **Succeeded**: a History row that read Failed "Interrupted: the
+backup stopped before it finished and left .partial files behind" changes to
+the new outcome, and its log gains the line "Re-evaluated: the stamp's
+.partial files are gone and its set is complete". The row's own log, start
+time, trigger and cron `keep_days` stay as they were.
+
+The importer rewrites the row only when all of these hold for its stamp:
+
+- no `.partial` file of any kind is left in `db/` or `media/`, and every file
+  it listed is still there;
+- the newest file is at least 10 minutes old, and not dated in the future;
+- every kind the row names as a component (and any kind the stamp's files
+  add) has a finished file, and either `manifest.json` covers the stamp and
+  says it succeeded, or each kind's set is complete with its checksum sidecar
+  beside it: one dump, one media archive, or media parts 1 to N with no gap.
+
+So a cron `backup.sh all` killed during the media archive, whose media
+`.partial` files `backup.sh prune` removed later, stays Interrupted: its row
+names media, and there is no finished media file. It is never turned into
+"Succeeded, database only".
+
+The row is not rewritten if retention has marked any of its files `pruned`
+(on this host or on a destination) since it was recorded, because the
+importer's listing may predate that deletion. It is also left alone if
+another node already rewrote it. Neither case is counted as a failure.
+Nothing changes in the file layout or the schema, and no setting turns it on
+or off.
+
+The importer's summary counts each rewrite under `reevaluated`. A rewrite
+whose write fails is counted under `failed` and waits out the same backoff as
+a failed import ([When an import keeps failing](#when-an-import-keeps-failing)).
 
 ### Backup history (#2217)
 
@@ -5699,7 +5842,7 @@ default), and on demand:
 
 ```bash
 bin/kiln_cms rpc '{:ok, r} = KilnCMS.Backups.Importer.run(); IO.inspect(r)'
-# %{deferred: 0, failed: 0, imported: 2, pending: 0, skipped: 0}
+# %{deferred: 0, failed: 0, imported: 2, pending: 0, reevaluated: 0, skipped: 0}
 ```
 
 It runs on the serving node, as the other commands on this page do; `eval`
@@ -5710,6 +5853,11 @@ and the call still returns `{:ok, _}`, so read `failed` as well. `deferred`
 counts stamps whose write failed on an earlier call and that wait out a
 backoff before the next try
 ([When an import keeps failing](#when-an-import-keeps-failing)).
+`reevaluated` counts rows recorded as Interrupted that this call rewrote
+because their stamp finished after all
+([If the run finished after all](#if-the-run-finished-after-all)); a
+rewrite whose write failed is in `failed`, and one waiting out its backoff
+in `deferred`.
 
 It scans `$BACKUP_DIR/db` and `$BACKUP_DIR/media` for `kiln-db-<stamp>` and
 `kiln-media-<stamp>` files and creates one row per stamp. The parts of one
@@ -5774,7 +5922,7 @@ once on the serving node:
 
 ```bash
 bin/kiln_cms rpc 'IO.inspect(KilnCMS.Backups.Importer.retry_failed())'
-# {:ok, %{deferred: 0, failed: 0, imported: 1, pending: 0, skipped: 0}}
+# {:ok, %{deferred: 0, failed: 0, imported: 1, pending: 0, reevaluated: 0, skipped: 0}}
 ```
 
 `failed: 1` again means the cause is still there; the warning in the log

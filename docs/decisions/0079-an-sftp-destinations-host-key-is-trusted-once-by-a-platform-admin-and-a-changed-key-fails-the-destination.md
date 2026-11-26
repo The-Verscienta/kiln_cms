@@ -85,7 +85,10 @@ log, where its event is. At most
 one event and alert per destination per hour, cluster-wide: the first call
 to see the mismatch claims it with `ThrottleStore.hit/5` and a limit of
 one, the claim-first shape `ScannerGuard` uses, so a retrying step or a
-retention pass on another node doesn't flood the log. A server that no
+retention pass on another node doesn't flood the log. The alert's window
+is claimed per destination (scope `"backup_destination:<id>"`, #3201), not
+in the shared platform window, so a second server whose key changes in the
+same window still raises an alert naming it. A server that no
 longer offers the trusted key's type at all fails permanently too ("no
 longer offers its trusted … host key, or no algorithm Kiln accepts") but
 raises nothing: that is a reconfiguration, not a different key. OTP reports
@@ -172,14 +175,37 @@ and that path is theirs.
   hour at most.
 - Two SFTP destinations whose paths nest are treated by retention as
   possibly the same folder whatever host, port or login they name, and
-  neither is pruned (as #3088 does for S3).
+  neither is pruned (as #3088 does for S3), unless they prove they are
+  different servers (#3200, below).
 
 ## When to revisit
 
 - If the SDK gains a seam for a plugin destination's server trust, this
   policy can move there.
-- Retention's "possible overlap" between SFTP destinations could narrow to
-  destinations whose trusted host keys match, since one key identifies one
-  server.
+- Retention's "possible overlap" between SFTP destinations was narrowed by
+  #3200 (`KilnCMS.Backups.Retention.prune_blocker/3`). A nesting pair is
+  two servers, and both prune, only on positive proof: both rows trust a
+  host key of the same type, the fingerprints differ, and each row's last
+  Test passed after the later of the two `trusted_at` instants. A Test
+  connects only to a server offering the trusted key, so it shows the key
+  is still the server's own once both were in place. Nothing is inferred
+  from the absence of a refusal. Keys of different types, one fingerprint
+  on both, a missing trust, a failed Test, or a Test older than the other
+  row's trust all keep the pair blocked. Known residuals, accepted because
+  ADR 0064 bounds the damage to shortened retention of this installation's
+  own units:
+  - a Test in flight across the other row's re-trust (at most 30 s) counts,
+    since `last_tested_at` is stamped when it finishes;
+  - a key that changes after both rows are proven isn't seen until the next
+    Test or trust: a backup that meets it fails the destination but doesn't
+    write `last_test_ok`;
+  - two SSH daemons with different keys in front of one disk, or an HA pair
+    with a key per node, look like two servers;
+  - SFTP still can't be compared with S3, rclone, a directory or
+    `BACKUP_RCLONE_REMOTE`.
+
+  Revisit if any of these is seen in practice: a failing send could clear
+  `last_test_ok`, or retention could re-read each server's key itself
+  before pruning.
 - If OTP's SFTP client gains an exclusive create, use it for the temporary
   file.

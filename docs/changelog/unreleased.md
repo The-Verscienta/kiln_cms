@@ -34,6 +34,23 @@ carries the reasoning.
   - **For operators.** The audit log records each refusal as `sign_in_failed` with `method: "password"` and `reason: "breached_password"`, unsampled, in the log of each site whose policy refused it (not the site the request came in on), and does not count it toward the failed-sign-ins alert. `[:kiln_cms, :password, :breach_check]` gains `action: :sign_in`. The Security posture line `core.breached_passwords` gains a `sign_in_check` fact; its status is unchanged.
   - **Upgrade.** One expand-only migration adds `site_password_policy.check_on_sign_in` (boolean, not null, default false). Rolling the pin back is safe: an older release ignores the column. During a rolling deploy an older node does not show the sign-in warning that a newer node left for it; the older "breached password" note after a register or reset still works across both.
 
+## Changed
+
+<a id="sftp-path-spaces"></a>
+
+- **An SFTP destination's path may hold spaces and `+ @ ,` (#3199).** NAS shares are often named with a space (`/volume1/Backup Share`), and the path was held to the characters an S3 prefix allows, `A-Z a-z 0-9 . _ -`, so such a share could not be used at all.
+  - **What changes.** Each folder name in **Path** may also hold the space, `+`, `@` and `,`. The path goes to the server as one length-prefixed SFTP string, never through a shell, so the characters that separate folders or climb out of them are all that could do harm, and those are still refused: `.` or `..` as a folder, `~`, `\`, NUL and control characters, and anything outside ASCII. A folder name may not start or end with a space (`/backups /kiln`): it would not read back the way it was typed, and it would let the stored path and the parsed one disagree. The form's help now gives `/volume1/Backup Share/kiln` as an example, and a refused path says "the path must be folder names of letters, digits, spaces and . _ - + @ , separated by /" or "the path must not have a space at the start or end of a folder name".
+  - **Unchanged.** An S3 destination's prefix takes the same characters as before. An existing SFTP destination's stored path and location are untouched, so its recorded sends and resume checkpoints still match it.
+  - **No migration; rolling the pin back is safe** as long as no SFTP destination has been saved with a new character in its path. An older release refuses to save such a destination again and refuses its path when it connects, so its backups fail until the path is changed. See [What a path may hold](../backups.md#what-an-sftp-path-may-hold).
+
+<a id="sftp-distinct-servers-prune"></a>
+
+- **Two SFTP destinations whose folders nest both prune once Kiln can prove they are different servers (#3200).** Since #2222, a pair of SFTP destinations with one path inside or around the other blocked retention on both, whatever host, port or login they named, because one server answers to many names. Two NAS boxes that both keep backups in `/backups` were never pruned.
+  - **The rule.** `KilnCMS.Backups.Retention.prune_blocker/3` now lets such a pair prune when both rows trust a host key of the same type (both `ssh-ed25519`, say), the fingerprints differ, and each row's last Test passed after the later of the two keys' trusted times. A Test connects only to a server that offers the row's trusted key, so a passed Test shows that key is still that server's own once both were in place. Everything else stays blocked: a row with no trusted key, keys of different types (one server holds an ed25519 key and an RSA key), one fingerprint on both (one server reached by name and by IP), a failed Test, or a Test older than the other row's trust (a disabled row's server could have been reinstalled with the other's key since). The exact overlap, same host, port and login, is never lifted. The proof is positive only: nothing is inferred from a connection that wasn't refused.
+  - **What to do.** On **Backups → Destinations**, check both rows trust keys of the same type, then press **Test** on each. Both rows then show **Prunes its old backups**. The **Not pruned:** text and the run log's skip line now say what would tell the two apart: "… the app can't tell whether it is the same server until both trust host keys of the same type that differ, and each has passed a Test since the later of the two was trusted". Steps are in [Let two SFTP destinations on different servers both prune](../backups.md#let-two-sftp-destinations-on-different-servers-both-prune).
+  - **What it can't see.** A key that changes after both rows are proven is not noticed until the next Test or trust: a backup that meets the new key fails the destination before anything is sent or deleted, but does not count as a failed Test. A Test that started before the other row's re-trust and passed after it counts (a Test takes at most 30 seconds). Two SSH daemons with different keys in front of one disk, or a high-availability pair with a key per node, look like two servers. An SFTP destination still can't be compared with an S3, rclone or directory destination, or with `BACKUP_RCLONE_REMOTE`. In each case retention still deletes only what this installation's backup directory sent there ([ADR 0064](../decisions/0064-retention-on-a-backup-destination-deletes-only-what-this-installation-sent-there.md)), so the worst outcome is this installation's own backups kept for less time than its schedules ask. The rule and these limits are recorded in [ADR 0079](../decisions/0079-an-sftp-destinations-host-key-is-trusted-once-by-a-platform-admin-and-a-changed-key-fails-the-destination.md), "When to revisit".
+  - **No migration; rolling the pin back is safe.** An older release blocks the pair again.
+
 <a id="backup-cli"></a>
 
 - **Backups have a command line: `bin/backup` in a release, `mix kiln.backup.*` in a checkout (part of #2234).** What the Backups page does used to be reachable from a shell only as hand-typed Elixir through `bin/kiln_cms rpc`, with no stable output. The guide is [Backups from the command line](../backup-cli.md).
@@ -52,6 +69,13 @@ carries the reasoning.
 - **A slow schema build no longer refuses a valid JSON field value (#3063).** A `:json` custom field with a JSON Schema checks each written value in its own process under a 1-second deadline, so a pathological `pattern` fails the save with a message instead of holding the request. The schema was built inside that deadline too. The first build on a node loads the JSV builder, every draft 2020-12 vocabulary and the embedded meta-schema (about 20 modules, tens of milliseconds when idle, where a later build takes well under a millisecond), and on a busy node that could pass the second. The save was then refused with "took too long to check against the schema" although the value was valid.
   - **What changes.** The schema is built first, in the saving process, the same build that already runs unbounded when the field definition is saved. The deadline starts after it and covers only the check of the value.
   - **Unchanged.** The schema limits (16 KB, 16 levels, 1,000 values, no remote references), the value limits, the deadline and its message. A value whose check runs past the deadline is still refused. No migration; rolling the pin back is safe.
+
+<a id="host-key-alert-per-destination"></a>
+
+- **A changed SFTP host key raises an alert for each destination, even when two change in the same alert window (#3201).** The platform alert `backup_host_key_changed` claimed the one alert window that all platform alerts of a kind share. When a second server's key changed within the same 15 minutes, its `backup_destination_host_key_mismatch` event was written to the instance security log, but the window was already taken, so no alert named that destination.
+  - **What changes.** The window is claimed per destination (scope `backup_destination:<id>`), so each destination's key change raises its own alert naming it. The event's own limit, at most one per destination per hour across nodes, still bounds how many one destination can raise. The alert can't be turned off, as before.
+  - **No migration; rolling the pin back is safe.** An older release shares one window again.
+
 
 <a id="publish-shows-unpublish-date"></a>
 
@@ -115,15 +139,12 @@ carries the reasoning.
   - **No migration; rolling the pin back is safe.** An artifact fired with the old answer on an earlier release is corrected by `mix kiln.refire_all`, or by publishing the variant.
 
 
-
-
 <a id="plugin-typed-filters"></a>
 
 - **A filter operand on a plugin field type with a typed GraphQL kind compares as a value of that kind (#2855).** A `custom_filter`, `customWhere` or MCP `custom_filter` operand on a plugin `Kiln.FieldType` was always compared as the text sent, against the stored jsonb. A type whose `graphql_kind/1` is `:int` stores a JSON number, and a jsonb string sorts below every number, so `eq` and `in` (`"42"` is not jsonb `42`) never matched, `gt` and `gte` matched every stored number and `lt` and `lte` none.
   - **What changes.** On a type whose kind is `:int`, `:float`, `:boolean` or `:date`, an operand that is a value of that kind compares as that value, as on KilnCMS's own field of the kind: `custom_filter[score][gt]=9` finds a stored `10`, `custom_filter[score]=42` a stored `42`, and a `customWhere` `int`, `float`, `boolean` or `date` condition on such a field matches what it names (a `date` one used to be refused).
   - **Unchanged.** Everything else compares as the text sent, as before, so no read that answered `200` is refused now: an operand that is not a value of the kind (`gt=ten`), `contains`, `starts_with` and `ilike` (`starts_with=1` still finds `10`), and every operand on a type whose kind is `:string`, `:datetime` or `:json` or that has no `graphql_kind/1` (a plugin's date-time spelling is its own). `custom_sort` already compared the stored jsonb. The console's list filters don't offer plugin fields, as before. See [extending-content.md](../extending-content.md#filters-on-a-plugin-field-type).
   - **No migration; rolling the pin back is safe.** An older release compares such operands as text again.
-
 
 
 <a id="counted-read-refusal"></a>
@@ -133,17 +154,12 @@ carries the reasoning.
   - **Unchanged.** The JSON:API `page[count]`, GraphQL and MCP reads, and the console lists, authorize with Ash's default `:filter`: refused rows are left out of the page and the count, and the answer is never a 500. No migration; rolling the pin back is safe.
 
 
-
-
 <a id="custom-where-error-spelling"></a>
 
 - **A refused `custom_where` names its keys the way the caller's surface spells them (#2913).** `KilnCMS.CMS.Preparations.CustomFieldQuery` built every `custom_where` refusal in GraphQL's camelCase: "needs exactly one of string, int, float, boolean, date, dateTime", "customWhere supports only eq, notEq, in and isNull on it", "which customWhere does not support; use customFilter". The MCP read tools, JSON:API's query string and the code interface take snake_case, so a client or model that followed the message failed again (`unknown key "dateTime"`, `unknown operator "notEq"`).
   - **What changes.** Over MCP, JSON:API and the code interface the text names `custom_where`, `custom_filter`, `date_time`, `not_eq` and `is_null`, and reads "an int field" and "an int condition" where it read "a int". `docs/mcp.md` no longer warns that some messages use GraphQL's spelling.
   - **Unchanged.** GraphQL's messages are the same, word for word, so a client matching on them keeps working: the GraphQL schema marks a GraphQL request in the Ash context, and only then are the keys spelled in camelCase. The conditions each surface accepts are the same as before.
   - **No migration; rolling the pin back is safe.** An older release spells these messages the GraphQL way again.
-
-
-
 
 
 <a id="gen-plugin-overlay-config"></a>
@@ -155,9 +171,6 @@ carries the reasoning.
   - **Unchanged.** `--dep` plugins still touch nothing in the checkout. A plugin generated by an earlier release keeps its `config/config.exs` line until you move it into the overlay's `project.exs`. No migration.
 
 
-
-
-
 <a id="plugin-widgets-full-definition"></a>
 
 - **The fields admin asks a plugin field type for its editor inputs with the whole definition, as the save does (#2883).** A `Kiln.FieldType` that offers a choice of editor input lists it from `widgets/1`, which is handed the field's definition. The save asked with the whole definition the write would store. The **Editor input** cards on `/editor/fields` asked with a definition built from six posted settings (type, `multiple`, new terms, text format, options and the number bounds) laid over the stored field. A type whose list reads any other setting, such as `required`, `name` or another constraint, got a different answer on the page: the admin could pick a card the save then refused, or never see one the save would take.
@@ -166,11 +179,29 @@ carries the reasoning.
   - **No migration; rolling the pin back is safe.**
 
 
-
-
 <a id="feed-relay-exit"></a>
 
 - **A change-feed event reaches this node's subscribers when the database connection exits mid-publish (#2938).** Before handing an event to the site's relay, `KilnCMS.Delivery.Feed.publish/4` decides what anonymous SSE streams see, which reads the event's exposure. The read failing with an error already hid the event from streams and delivered it anyway. Failing with an *exit* did not: a connection that went away while the read waited for it (a pool restarting, an owner process dying) skipped the hand-off, so live editor views and other in-BEAM subscribers on that node never got the event, and the log said "Feed event for … not published".
   - **What changes.** Any failure of that decision, a raise or an exit, now hides the event from SSE streams and still hands it to the relay. It logs `Feed event <id> hidden from streams: <reason>`.
   - **Unchanged.** Streams fail closed as before: an event whose exposure cannot be read or written is never shown to an anonymous subscriber. Delivery is still at most once.
   - **No migration; rolling the pin back is safe.** An older release drops such an event for local subscribers again.
+
+<a id="reevaluate-interrupted-import"></a>
+
+- **An imported backup recorded as Interrupted is rewritten once its stamp turns out complete (#2846).** The importer records a cron stamp with a `.partial` beside it, untouched for 3 hours, as **Failed** with "Interrupted: the backup stopped before it finished and left .partial files behind" (#2478). An older `backup.sh` with no heartbeat, or clocks that disagree badly, could get a run that was still going recorded that way, and the row said Failed for good, although the backup finished.
+  - **What changes.** Every import now looks again at its own Interrupted rows. When the stamp has no `.partial` left, every file is still there and settled (10 minutes), and every kind the row names is complete (a covering `manifest.json` that succeeded, or a full set with its checksum sidecar), the row is rewritten once with what importing the stamp now would record, usually **Succeeded**. Its log gains "Re-evaluated: the stamp's .partial files are gone and its set is complete"; its start time, trigger, `keep_days` and earlier log lines are kept. A cron `all` killed during media stays Interrupted: it is never turned into "Succeeded, database only". See [If the run finished after all](../backups.md#if-the-run-finished-after-all).
+  - **Refused, and not counted as a failure:** a row that retention has marked `pruned` anywhere, or one another node already rewrote. The write locks the row and checks it as locked.
+  - **Retention's `pruned` mark locks the row too.** `Run`'s `:mark_pruned` now takes `names`, `key` and `at` and computes the marks from the locked row, so a mark can't be lost to a re-evaluation that read the row first. `KilnCMS.Backups.Recorder.mark_pruned/2` is unchanged.
+  - **For operators.** `KilnCMS.Backups.Importer.run/0` and `retry_failed/0` return a `reevaluated` count beside the others; a rewrite whose write fails counts under `failed` and shares the import backoff. The two new `Backups.Run` actions (`:interrupted_imports`, `:reevaluate_interrupted`) are the `:backups` system actor's alone ([policy matrix](../policy-matrix.md)). [ADR 0033](../decisions/0033-backup-history-is-rows-only-the-backup-pipeline-writes-and-the-files-stay-the-truth.md) is amended with the exception and its one accepted gap.
+  - **No migration, no setting; rolling the pin back is safe.** During a rolling deploy a node still on the older release marks `pruned` without the lock and re-evaluates nothing, as before. A row rewritten before a rollback stays rewritten.
+
+## Security
+
+<a id="scanner-guard-ipv6-rotation"></a>
+
+- **A spoofed search-engine claim can no longer dodge the smart 404 guard by rotating through its IPv6 `/64` (#2838).** With `KILN_SCANNER_BLOCKING` on, `KilnCMS.Security.ScannerGuard` counts an IPv6 client as its `/64`, but a claim to be Googlebot (or another search engine) is checked per address, and a claim whose lookup was still running or had not started kept the exemption from the miss threshold. A scanner sending each request from a fresh address in its `/64` was therefore always judged before its own lookup finished, and its misses were never counted.
+  - **What changes.** When a lookup of a request's own address finishes with the claim proven false, or with its reverse (PTR) query unanswered while this node's resolver answers others, the node marks the address's `/64` for an hour. In a marked `/64`, a claim DNS has not proven either way (pending, skipped, DuckDuckBot over IPv6, which has no DNS check) counts like any other client; so does a PTR silence during a resolver outage, when another address in the `/64` was proven false. A lookup that verifies an address clears a mark left by an unanswered PTR query, never one left by a proven-false claim.
+  - **Unchanged.** A verified claim is exempt in any `/64`, and bait paths count for everyone as before. A forward query left unanswered in the engine's own zone keeps the exemption, as [ADR 0054](../decisions/0054-in-crawler-verification-a-silence-the-claimant-controls-counts-against-it-and-one-the-vendor-controls-does-not.md) decided. IPv4 is counted per address and has no marks. A lookup turned away by a cap or a busy slot marks nothing, since an attacker can spend those from other networks. The rate limiter's charges are unchanged, and there is no new telemetry. A DuckDuckBot claim outside DuckDuckGo's fresh list is still proven false and counted (#2852 is not part of this change).
+  - **Who notices.** Only sites with the 404 guard on: nothing is marked while it is off. A real crawler sharing a `/64` with a liar (a hosting provider's customers) has its unverified first requests counted there for the hour; its verified addresses stay exempt. Such a block expires, and an admin can remove it on `/editor/ip-blocks`.
+  - **For operators.** Marks are per node, in memory: a bounded Cachex of its own (`:kiln_cms_crawler_verification_networks`, 10,000 networks), never a database write. Two new code-config keys on `config :kiln_cms, KilnCMS.CrawlerVerification`, with no environment variable: `:network_mark_ttl_ms` (1 hour, restarted by each new mark) and `:max_network_marks` (10,000). The residuals, such as the first lookup deadline of exempt misses on each node and a `/64` whose lookups are all refused, are in the [threat model](../threat-model.md#bot-budgets). [ADR 0086](../decisions/0086-an-ipv6-64-that-produced-claimant-controlled-negative-evidence-loses-the-404-exemption-for-unproven-claims.md) records the decision.
+  - **No migration; rolling the pin back is safe.** An older release has no marks and goes back to exempting every unproven claim.

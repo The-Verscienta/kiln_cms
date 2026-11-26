@@ -18,7 +18,8 @@ defmodule KilnCMS.Backups.Destination.SftpTest do
   alias KilnCMS.Backups
   alias KilnCMS.Backups.Destination
   alias KilnCMS.Backups.Destination.Sftp
-  alias KilnCMS.Backups.Destination.Sftp.{Credentials, Files, Session, Target}
+  alias KilnCMS.Backups.Destination.Sftp.{Credentials, Files, Session, Target, Upload}
+  alias KilnCMS.Backups.DestinationConfig
   alias KilnCMS.Security
   alias KilnCMS.Test.{BackupSchedules, SftpServer}
 
@@ -226,10 +227,13 @@ defmodule KilnCMS.Backups.Destination.SftpTest do
                "trusted_fingerprint" => trusted
              }
 
-      assert %{rows: [[1, notice]]} =
+      # One alert, in the destination's own window (#3201).
+      assert %{rows: [[1, notice, scope]]} =
                KilnCMS.Repo.query!(
-                 "SELECT count(*)::int, max(notice::text) FROM security_alert_dispatches WHERE kind = 'backup_host_key_changed' AND channel = 'platform'"
+                 "SELECT count(*)::int, max(notice::text), max(scope) FROM security_alert_dispatches WHERE kind = 'backup_host_key_changed' AND channel = 'platform'"
                )
+
+      assert scope == "backup_destination:" <> row.id
 
       # The alert names the destination, and links to the instance log,
       # where its event is.
@@ -513,6 +517,93 @@ defmodule KilnCMS.Backups.Destination.SftpTest do
     end
   end
 
+  describe "a NAS share name with a space in the path (#3199)" do
+    test "saves, then copies, lists, reads back, deletes and resumes there", %{
+      server: server,
+      tmp_dir: tmp
+    } do
+      admin = BackupSchedules.platform_admin()
+      row = stored_destination(server, "/volume1/Backup Share/kiln")
+      assert row.settings["path"] == "/volume1/Backup Share/kiln"
+
+      {:ok, row} =
+        Backups.trust_backup_destination_host_key(
+          row,
+          server.type,
+          server.fingerprint,
+          :scanned,
+          %{previous_fingerprint: nil, scanned_for: Target.server(row.settings)},
+          actor: admin
+        )
+
+      {:ok, config} = DestinationConfig.to_config(row)
+      config = %{config | secrets: %{"password" => SftpServer.password()}}
+      dir = Path.join([server.root, "volume1", "Backup Share", "kiln", "db"])
+
+      file = local_file(tmp, @db, 300_000)
+      assert :ok = Sftp.put(config, file, [])
+      assert File.dir?(Path.join(server.root, "volume1/Backup Share"))
+      assert File.read!(Path.join(dir, @db)) == File.read!(file.path)
+
+      assert {:ok, [%{subdir: "db", name: @db, bytes: 300_000}]} = Sftp.list(config)
+
+      to = Path.join(tmp, "back")
+      assert :ok = Sftp.get(config, %{subdir: "db", name: @db}, to)
+      assert File.read!(to) == File.read!(file.path)
+
+      assert :ok = Sftp.delete(config, %{subdir: "db", name: @db})
+      assert {:ok, []} = Sftp.list(config)
+
+      # A resumed upload finds its partial under the spaced path and sends
+      # only the rest.
+      big = local_file(tmp, @db, 3 * 1024 * 1024 + 99)
+      token = "0123456789abcdef"
+      partial = Path.join(dir, Upload.token_partial(@db, token))
+      File.write!(partial, binary_part(File.read!(big.path), 0, 2 * 1024 * 1024 + 7))
+      _ = writes()
+
+      resume = %Kiln.BackupDestination.Resume{
+        checkpoint: %{"token" => token, "bytes_done" => 2 * 1024 * 1024 + 7},
+        attempt: 2,
+        save: fn _saved -> :ok end
+      }
+
+      assert :ok = Sftp.put(config, big, resume: resume)
+      assert File.read!(Path.join(dir, @db)) == File.read!(big.path)
+      refute File.exists?(partial)
+      assert Enum.sum(writes()) == big.bytes - 2 * 1024 * 1024
+    end
+
+    test "a path saved with a trailing space is located without it", %{server: server} do
+      row = stored_destination(server, "/a/kiln ")
+
+      assert row.settings["path"] == "/a/kiln"
+      assert {:sftp, "127.0.0.1", _port, "kiln", ["a", "kiln"]} = Target.location(row.settings)
+    end
+
+    test "climbing out of the path is still refused on save", %{server: server} do
+      for path <- [
+            "/backups/../etc",
+            "/backups/./kiln",
+            "/~/kiln",
+            "/~root/kiln",
+            "/backups\\..\\etc",
+            "/backups/a\0b",
+            "/backups/a\nb",
+            "/backups/ lead",
+            "/backups//kiln"
+          ] do
+        assert {:error, error} =
+                 Backups.create_backup_destination(destination_attrs(server, path),
+                   actor: BackupSchedules.platform_admin()
+                 ),
+               inspect(path)
+
+        assert Exception.message(error) =~ "the path", inspect(path)
+      end
+    end
+  end
+
   # A raw row's timestamps are naive UTC.
   defp utc(%NaiveDateTime{} = at), do: DateTime.from_naive!(at, "Etc/UTC")
 
@@ -526,22 +617,26 @@ defmodule KilnCMS.Backups.Destination.SftpTest do
     end
   end
 
-  defp stored_destination(server) do
+  defp stored_destination(server, path \\ nil) do
     Backups.create_backup_destination!(
-      %{
-        name: "NAS #{System.unique_integer([:positive])}",
-        kind: "sftp",
-        enabled: false,
-        settings: %{
-          "host" => "127.0.0.1",
-          "port" => server.port,
-          "username" => "kiln",
-          "path" => "/backups/#{System.unique_integer([:positive])}"
-        },
-        secrets: %{"password" => SftpServer.password()}
-      },
+      destination_attrs(server, path || "/backups/#{System.unique_integer([:positive])}"),
       actor: BackupSchedules.platform_admin()
     )
+  end
+
+  defp destination_attrs(server, path) do
+    %{
+      name: "NAS #{System.unique_integer([:positive])}",
+      kind: "sftp",
+      enabled: false,
+      settings: %{
+        "host" => "127.0.0.1",
+        "port" => server.port,
+        "username" => "kiln",
+        "path" => path
+      },
+      secrets: %{"password" => SftpServer.password()}
+    }
   end
 
   defp events(type) do

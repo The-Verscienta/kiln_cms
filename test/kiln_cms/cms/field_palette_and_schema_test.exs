@@ -177,18 +177,20 @@ defmodule KilnCMS.CMS.FieldPaletteAndSchemaTest do
     # #3063: a cold or busy node can take longer than the deadline to build a
     # schema. The deadline is for the value check, so a slow build must not
     # refuse a valid value. The stand-in builder sleeps four times the
-    # deadline, so a build inside the deadline could not pass.
+    # deadline, so a build inside the deadline could not pass. The deadline is
+    # 250 ms, not tighter: the value check itself has to fit in it on a loaded
+    # CI runner, where 50 ms was missed (#3425, twice in a row).
     test "a slow schema build does not count against the deadline" do
       slow_build = fn schema ->
-        Process.sleep(200)
+        Process.sleep(1_000)
         JSV.build(schema, default_meta: FieldSchema.draft())
       end
 
-      assert FieldSchema.validate(%{"id" => 5}, @schema, build: slow_build, deadline_ms: 50) ==
+      assert FieldSchema.validate(%{"id" => 5}, @schema, build: slow_build, deadline_ms: 250) ==
                :ok
 
       assert {:error, [message]} =
-               FieldSchema.validate(%{"id" => 1}, @schema, build: slow_build, deadline_ms: 50)
+               FieldSchema.validate(%{"id" => 1}, @schema, build: slow_build, deadline_ms: 250)
 
       assert message =~ "minimum"
     end

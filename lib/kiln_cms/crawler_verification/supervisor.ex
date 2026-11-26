@@ -13,17 +13,23 @@ defmodule KilnCMS.CrawlerVerification.Supervisor do
        like `KilnCMS.Cache`: a flood of new addresses claiming to be Googlebot
        cannot grow either without bound, and cannot evict anything another
        cache holds.
-    3. `KilnCMS.CrawlerVerification.InFlight`, the single-flight table.
-    4. a `Task.Supervisor` capped at `:max_concurrency` (16) lookups. A
+    3. the network-mark cache (#2838): IPv6 `/64`s whose finished lookups
+       produced negative evidence, bounded to `:max_network_marks` (10,000)
+       networks the same way, so a flood of marks cannot evict a result.
+    4. `KilnCMS.CrawlerVerification.InFlight`, the single-flight table.
+    5. a `Task.Supervisor` capped at `:max_concurrency` (16) lookups. A
        request whose lookup would be the 17th is not queued: it goes
        unchecked (`{:unverified, :skipped}`) and a later request retries.
-    5. a one-slot `Task.Supervisor` for the resolver-health canary
+    6. a one-slot `Task.Supervisor` for the resolver-health canary
        (`KilnCMS.CrawlerVerification.resolver_failing?/1`), apart from the
        lookups so a node whose lookup slots are all busy can still tell a
        failing resolver from a silent reverse zone.
 
   If a cache restarts, the claims and lookups after it restart with it, so a
-  lookup never writes into a cache that is not the one being read.
+  lookup never writes into a cache that is not the one being read. A restart
+  of either result cache also restarts the network-mark cache, so it wipes
+  every mark: the networks it named are exempt again until their next
+  finished lookup.
 
   The caps come from `config :kiln_cms, KilnCMS.CrawlerVerification` at
   start, or from the child's options.
@@ -37,6 +43,7 @@ defmodule KilnCMS.CrawlerVerification.Supervisor do
 
   @default_max_entries 50_000
   @default_max_verified_entries 10_000
+  @default_max_network_marks 10_000
   @default_max_concurrency 16
 
   @doc false
@@ -54,11 +61,13 @@ defmodule KilnCMS.CrawlerVerification.Supervisor do
     max_verified_entries =
       Keyword.get(config, :max_verified_entries, @default_max_verified_entries)
 
+    max_network_marks = Keyword.get(config, :max_network_marks, @default_max_network_marks)
     max_concurrency = Keyword.get(config, :max_concurrency, @default_max_concurrency)
 
     children = [
       cache(CrawlerVerification.verified_cache_name(), max_verified_entries),
       cache(CrawlerVerification.cache_name(), max_entries),
+      cache(CrawlerVerification.network_cache_name(), max_network_marks),
       {InFlight, Keyword.take(config, [:sweep_interval_ms])},
       {Task.Supervisor,
        name: CrawlerVerification.task_supervisor(), max_children: max_concurrency},

@@ -1088,7 +1088,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   defp blocker_text(:destination_overlap_possible_sftp),
     do:
       gettext(
-        "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server"
+        "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server until both trust host keys of the same type that differ, and each has passed a Test since the later of the two was trusted"
       )
 
   defp blocker_text(:unreadable), do: gettext("the destinations couldn't be read")
