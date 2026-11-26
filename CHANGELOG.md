@@ -63,7 +63,7 @@ else.
   ([long form](docs/changelog/unreleased.md#reserved-route-slugs-upgrade))
 - **Collaborative editing: a collab token minted before this release names no session, and is still accepted with its old per-account behavior for this release only, at most 24 hours after the last old node stops (#2490).**
   Nothing to do; the next release refuses such tokens. No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#session-bound-sockets-upgrade))
+  ([#3460](https://github.com/The-Verscienta/kiln_cms/pull/3460) · [long form](docs/changelog/unreleased.md#session-bound-sockets-upgrade))
 
 ### Breaking
 
@@ -157,7 +157,7 @@ else.
 
 - **Signing out one session now also closes that session's collaborative-editing rooms (`/ws/collab`) and a `/ws/gql` socket opened with its token, which before stayed open after idle expiry, "Sign out everyone", the browser's own Sign out or a sign-out from Active sessions (#2490).**
   A `/ws/gql` document sent after a sign-out the socket missed is refused with `extensions.code: "unauthenticated"`. No migration, no setting.
-  ([long form](docs/changelog/unreleased.md#session-bound-sockets))
+  ([#3460](https://github.com/The-Verscienta/kiln_cms/pull/3460) · [long form](docs/changelog/unreleased.md#session-bound-sockets))
 
 ## [1.13.0] - 2026-11-25
 
