@@ -1,0 +1,38 @@
+#!/bin/sh
+# The backup command line of a release (#2234; KilnCMS.Backups.CLI, docs/backup-cli.md).
+#
+# Arguments travel newline-joined and base64-encoded inside a string literal,
+# never as part of the Elixir expression: the base64 alphabet holds no quote,
+# backslash, `#{` or `$`, so nothing typed here is evaluated. list, verify and
+# help run beside the node (eval, repo only); run, rescan and prune run inside
+# it (rpc). Exit codes pass through: 0, 1 (failed), 2 (usage).
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+
+for arg in "$@"; do
+  case $arg in
+    *'
+'*)
+      echo "bin/backup: an argument holds a line break; no command takes one" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if ! command -v base64 >/dev/null 2>&1; then
+  echo "bin/backup: base64 is not installed" >&2
+  exit 1
+fi
+
+encoded=""
+if [ "$#" -gt 0 ]; then
+  encoded=$(printf '%s\n' "$@" | base64 | tr -d '\n\r')
+fi
+
+expr="KilnCMS.Release.backup(\"$encoded\")"
+
+case "${1:-}" in
+  run | rescan | prune) exec ./kiln_cms rpc "$expr" ;;
+  *) exec ./kiln_cms eval "$expr" ;;
+esac
