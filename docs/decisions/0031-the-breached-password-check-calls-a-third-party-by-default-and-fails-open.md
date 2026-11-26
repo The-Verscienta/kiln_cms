@@ -1,7 +1,12 @@
 # 0031. The breached-password check calls a third party by default, and fails open
 
 - **Status** — accepted (2026-11-13), recording the choice that shipped with
-  #2240 in 1.9.0.
+  #2240 in 1.9.0. Amended 2026-11-26 by
+  [ADR 0085](0085-an-administrators-password-answers-to-the-strictest-policy-of-every-site-they-administer-and-is-checked-at-sign-in-only-where-a-site-asks.md)
+  (#2408, #2407): an account is held to the strictest policy of every site it
+  administers, so a site's Off no longer stops the lookup for someone who also
+  administers a site that checks; and checking at sign-in, rejected below, is
+  built as a per-site opt-in for administrators only.
 - **References** — [#2240](https://github.com/The-Verscienta/kiln_cms/issues/2240)
   and [#2403](https://github.com/The-Verscienta/kiln_cms/pull/2403), which
   built it; [#2409](https://github.com/The-Verscienta/kiln_cms/issues/2409),

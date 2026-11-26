@@ -255,11 +255,212 @@ defmodule KilnCMS.Accounts.Changes.CheckBreachedPasswordTest do
       assert breached?(record)
     end
 
-    test "an :off row makes no call", %{org: org} do
+    # An admin of this org alone: a platform admin administers every org, and
+    # the others' policies (the operator default, where they have no row) take
+    # part since #2408.
+    test "an :off row makes no call for an account that administers only this org", %{org: org} do
       save_policy!(org, :off)
       enable!(&ok(&1, ""))
-      assert {:ok, _} = run(:change, password(), :admin, tenant: org)
+      member = account(:viewer)
+      member_of!(org, member, :admin)
+      assert {:ok, _} = change(member, password(), org)
       refute_received {:hibp_request, _, _}
+    end
+
+    test "an :off row still calls out for a platform admin while another org would warn",
+         %{org: org} do
+      save_policy!(org, :off)
+      password = password()
+      enable!(&ok(&1, breached_body(password, 3)))
+      assert {:ok, record} = run(:change, password, :admin, tenant: org)
+      assert breached?(record)
+      assert_received {:hibp_request, _, _}
+    end
+  end
+
+  defp member_of!(org, user, role, extra \\ %{}) do
+    Ash.Seed.seed!(
+      Accounts.OrgMembership,
+      Map.merge(%{organization_id: org.id, user_id: user.id, role: role}, extra)
+    )
+  end
+
+  defp change(user, password, org) do
+    user
+    |> Ash.Changeset.for_update(
+      :change_password,
+      %{current_password: @old_password, password: password, password_confirmation: password},
+      actor: user,
+      tenant: org
+    )
+    |> Ash.update()
+  end
+
+  describe "every org the account administers (#2408)" do
+    setup do
+      %{a: org("hibp-a"), b: org("hibp-b")}
+    end
+
+    # An account that administers `a` and is a viewer of `b`.
+    defp admin_of_a_viewer_of_b(a, b) do
+      member = account(:viewer)
+      member_of!(a, member, :admin)
+      member_of!(b, member, :viewer)
+      member
+    end
+
+    test "changing a password on b is refused by a's :block", %{a: a, b: b} do
+      save_policy!(a, :block)
+      save_policy!(b, :warn)
+      member = admin_of_a_viewer_of_b(a, b)
+      password = password()
+      enable!(&ok(&1, breached_body(password, 3)))
+
+      assert blocked?(change(member, password, b))
+      assert_received {:hibp_request, _, _}
+    end
+
+    test "b being :off still looks the password up and refuses it", %{a: a, b: b} do
+      save_policy!(a, :block)
+      save_policy!(b, :off)
+      member = admin_of_a_viewer_of_b(a, b)
+      password = password()
+      enable!(&ok(&1, breached_body(password, 3)))
+
+      assert blocked?(change(member, password, b))
+      assert_received {:hibp_request, _, _}
+    end
+
+    test "a's :warn on b's :off looks the password up and warns", %{a: a, b: b} do
+      save_policy!(a, :warn)
+      save_policy!(b, :off)
+      member = admin_of_a_viewer_of_b(a, b)
+      password = password()
+      enable!(&ok(&1, breached_body(password, 3)))
+      ref = :telemetry_test.attach_event_handlers(self(), [@event])
+
+      assert {:ok, record} = change(member, password, b)
+      assert breached?(record)
+      assert_received {:hibp_request, _, _}
+      assert_receive {@event, ^ref, _, %{policy: :warn, enforcement: :warned, action: :change}}
+    end
+
+    test "a reset on b's host is refused by a's :block", %{a: a, b: b} do
+      save_policy!(a, :block)
+      save_policy!(b, :warn)
+      member = admin_of_a_viewer_of_b(a, b)
+      password = password()
+      enable!(&ok(&1, breached_body(password, 3)))
+      {:ok, token} = AshAuthentication.Strategy.Password.reset_token_for(strategy(), member)
+
+      result =
+        AshAuthentication.Strategy.action(
+          strategy(),
+          :reset,
+          %{"reset_token" => token, "password" => password, "password_confirmation" => password},
+          tenant: b
+        )
+
+      assert blocked?(result)
+    end
+
+    test "an editor of a's :block org is only warned on b", %{a: a, b: b} do
+      save_policy!(a, :block)
+      save_policy!(b, :warn)
+      editor = account(:viewer)
+      member_of!(a, editor, :editor)
+      password = password()
+      enable!(&ok(&1, breached_body(password, 3)))
+
+      assert {:ok, record} = change(editor, password, b)
+      assert breached?(record)
+    end
+
+    test "a pending admin membership and an expired grant do not escalate; a live grant does",
+         %{a: a, b: b} do
+      save_policy!(a, :block)
+      save_policy!(b, :off)
+      enable!(&ok(&1, ""))
+
+      pending = account(:viewer)
+      member_of!(a, pending, :admin, %{status: :pending})
+      assert {:ok, _} = change(pending, password(), b)
+
+      expired = account(:viewer)
+      past = DateTime.add(DateTime.utc_now(), -3600)
+      member_of!(a, expired, :viewer, %{granted_role: :admin, granted_role_expires_at: past})
+      assert {:ok, _} = change(expired, password(), b)
+
+      refute_received {:hibp_request, _, _}
+
+      live = account(:viewer)
+      future = DateTime.add(DateTime.utc_now(), 3600)
+      member_of!(a, live, :viewer, %{granted_role: :admin, granted_role_expires_at: future})
+      password = password()
+      enable!(&ok(&1, breached_body(password, 3)))
+      assert blocked?(change(live, password, b))
+    end
+
+    test "a registration (no account yet) is b's policy alone", %{a: a, b: b} do
+      save_policy!(a, :block)
+      save_policy!(b, :off)
+      enable!(&ok(&1, ""))
+
+      assert {:ok, _} = run(:register, password(), :viewer, tenant: b)
+      refute_received {:hibp_request, _, _}
+    end
+
+    test "an existing admin of a accepting an invitation to a :warn site is held to a's :block",
+         %{a: a, b: b} do
+      save_policy!(a, :block)
+      save_policy!(b, :warn)
+
+      invitation =
+        Accounts.invite_to_org!(%{organization_id: b.id, email: email(), role: :editor},
+          actor: account(:admin)
+        )
+
+      token = invitation.__metadata__.token
+
+      # An unconfirmed account at the invited address that administers a.
+      invitee =
+        Ash.Seed.seed!(User, %{
+          email: to_string(invitation.email),
+          hashed_password: Bcrypt.hash_pwd_salt(@old_password),
+          role: :viewer
+        })
+
+      member_of!(a, invitee, :admin)
+      password = password()
+      enable!(&ok(&1, breached_body(password, 3)))
+
+      result =
+        Accounts.accept_invitation_with_password(
+          invitee,
+          %{token: token, password: password, password_confirmation: password},
+          authorize?: false
+        )
+
+      assert blocked?(result)
+    end
+
+    test "a failed cross-org read fails open to :warn and logs nothing about the account",
+         %{a: a, b: b} do
+      save_policy!(a, :block)
+      save_policy!(b, :warn)
+      member = admin_of_a_viewer_of_b(a, b)
+      password = password()
+      enable!(&ok(&1, breached_body(password, 3)))
+
+      log =
+        capture_log(fn ->
+          result = KilnCMS.OrgSettings.with_actor(nil, fn -> change(member, password, b) end)
+          assert {:ok, record} = result
+          assert breached?(record)
+        end)
+
+      assert log =~ "other sites could not be read; treating as warn"
+      for secret <- [member.id, to_string(member.email), password], do: refute(log =~ secret)
     end
   end
 

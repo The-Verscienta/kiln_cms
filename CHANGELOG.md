@@ -62,6 +62,18 @@ else.
 - **Run `mix kiln.reserved_paths` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) to list pages slugged `developers`, `ready`, `setup`, `sign-in`, `sign-out`, `actor`, `ap`, `mcp` or `password-reset`, and path aliases under them: their built-in routes already served those URLs instead (#2898). Give each a new slug or alias.** No migration; read-only.
   ([long form](docs/changelog/unreleased.md#reserved-route-slugs-upgrade))
 
+### Breaking
+
+- **Breached passwords: an account that administers several sites is held to the strictest policy among them whenever its password is set, on any site's host, so a site's Off no longer stops the lookup (or a Block refusal) for someone who also administers a site that checks (#2408).**
+  A platform admin answers to every site, the operator default standing in for a site with no saved policy. No migration.
+  ([#3434](https://github.com/The-Verscienta/kiln_cms/pull/3434) · [long form](docs/changelog/unreleased.md#breached-password-strictest-admin-sites))
+
+### Added
+
+- **Password policy: a site can also check its administrators' passwords against known breaches as they sign in, off by default; under Block a breached one is sent to reset by email, under Warn the admin signs in with a warning (#2407).**
+  `POST /api/auth/sign_in` gains a `403` `password_reset_required` and an additive `password_breach` field. Expand-only migration; rolling the pin back is safe.
+  ([#3434](https://github.com/The-Verscienta/kiln_cms/pull/3434) · [long form](docs/changelog/unreleased.md#breached-password-sign-in-check))
+
 ### Fixed
 
 - **Markdown: an image that shares its line with text or another image, or sits in a list, quote or table, is kept as a link to the picture labelled with its alt text instead of vanishing (#2771).**

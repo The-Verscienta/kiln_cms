@@ -977,6 +977,15 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
     end
   end
 
+  # What shows a file was not written or replaced: not `atime`, which reading
+  # it moves, so a second boundary between two stats would differ (#3189).
+  defp unwritten(path) do
+    %File.Stat{mtime: mtime, ctime: ctime, size: size, inode: inode} =
+      File.stat!(path, time: :posix)
+
+    {mtime, ctime, size, inode}
+  end
+
   describe "the heartbeat's backup-directory id (#2789)" do
     defp tick_log(dir, state) do
       {state, log} = with_log([level: :warning], fn -> tick_as(dir, state) end)
@@ -1050,12 +1059,12 @@ defmodule KilnCMS.Backups.MarkerSyncTest do
 
     test "a hybrid host: the in-app backup's id is left as it is", %{dir: dir} do
       {:ok, id} = DirId.local(dir)
-      before = File.stat!(DirId.path(dir), time: :posix)
+      before = unwritten(DirId.path(dir))
 
       tick_as(dir, "this@node")
 
       assert DirId.current(dir) == {:ok, id}
-      assert File.stat!(DirId.path(dir), time: :posix) == before
+      assert unwritten(DirId.path(dir)) == before
       assert beat_of("this@node").dir_id == id
     end
 

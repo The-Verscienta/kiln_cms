@@ -167,7 +167,10 @@ in. Silencing notices are never grouped: each one is sent.
 
 When `failed_sign_ins` is on, every failed sign-in on the site is counted:
 a wrong password, a wrong second-factor code, a sign-in refused by
-[human verification](human-verification.md). The count is per site, not per
+[human verification](human-verification.md). An administrator's correct
+password refused because it is in a known breach is not counted
+([Check administrator passwords at sign-in](account-administration.md#check-administrator-passwords-at-sign-in)):
+it is not a guess. The count is per site, not per
 address or account, which an attacker chooses: 40 attempts from 40 addresses
 count the same as 40 from one.
 

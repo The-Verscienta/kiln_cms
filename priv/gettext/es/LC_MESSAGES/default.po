@@ -3795,6 +3795,11 @@ msgstr "Ya despublicado — se omitirá"
 msgid "Also attached"
 msgstr "También adjuntadas"
 
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Also check administrators' passwords when they sign in"
+msgstr "Comprobar también las contraseñas de los administradores al iniciar sesión"
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "Also deliver as Portable Text"
@@ -4273,6 +4278,11 @@ msgstr "Solo se aplica si este sitio tiene su propio inicio de sesión único. Q
 #, elixir-autogen, elixir-format
 msgid "Applies to people who sign up with a password on this site. Invitations and existing accounts are not affected, and this site's single sign-on has its own switch below. Turning it off doesn't approve anyone already waiting."
 msgstr "Se aplica a quienes se registran con una contraseña en este sitio. Las invitaciones y las cuentas existentes no se ven afectadas, y el inicio de sesión único de este sitio tiene su propio ajuste más abajo. Desactivarlo no aprueba a nadie que ya esté esperando."
+
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Applies to the people who administer this site. When one of them signs in, their password is looked up too, and this site's policy decides what happens: Block sends them to choose a new password (a reset link is emailed), Warn signs them in with a warning, and Off does nothing. Editors and other members are never checked at sign-in."
+msgstr "Se aplica a quienes administran este sitio. Cuando uno de ellos inicia sesión, también se comprueba su contraseña, y la política de este sitio decide qué ocurre: Bloquear le pide elegir una contraseña nueva (se le envía un enlace de restablecimiento por correo), Advertir inicia la sesión con una advertencia y Desactivado no hace nada. A los editores y demás miembros nunca se les comprueba al iniciar sesión."
 
 #: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/organize_live.ex
@@ -12294,8 +12304,8 @@ msgstr "Si la cuenta tiene la autenticación de dos factores activada, el inicio
 
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
-msgid "If the breach service can't be reached the password is accepted, so an outage never stops anyone setting one. Signing in is never checked. This applies to registering, changing or resetting a password, and the first-run setup."
-msgstr "Si no se puede contactar con el servicio de filtraciones, la contraseña se acepta, de modo que una caída nunca impide establecer una. El inicio de sesión nunca se comprueba. Se aplica al registro, al cambio o restablecimiento de contraseña y a la configuración inicial."
+msgid "If the breach service can't be reached the password is accepted, so an outage never stops anyone setting one or signing in. This applies to registering, changing or resetting a password, the first-run setup, and administrators signing in when the box above is ticked."
+msgstr "Si no se puede contactar con el servicio de filtraciones, la contraseña se acepta, de modo que una caída nunca impide establecer una ni iniciar sesión. Se aplica al registro, al cambio o restablecimiento de contraseña, a la configuración inicial y al inicio de sesión de los administradores cuando la casilla de arriba está marcada."
 
 #: lib/kiln_cms_web/components/challenge_components.ex
 #, elixir-autogen, elixir-format
@@ -24468,6 +24478,11 @@ msgstr "El presupuesto de embeddings rechazó esa solicitud."
 msgid "The entry limit is deployment-wide and not configurable per site: it bounds the work a feed request costs the server, rather than expressing a publishing choice."
 msgstr "El límite de entradas es para todo el despliegue y no se configura por sitio: acota el trabajo que una petición de feed le cuesta al servidor, en lugar de expresar una decisión editorial."
 
+#: lib/kiln_cms_web/live/password_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "The exception is someone who also administers another site: their password is held to the strictest policy among the sites they administer, so it may still be checked here."
+msgstr "La excepción es quien también administra otro sitio: su contraseña se rige por la política más estricta de los sitios que administra, así que aquí puede comprobarse igualmente."
+
 #: lib/kiln_cms_web/live/ip_block_live.ex
 #, elixir-autogen, elixir-format
 msgid "The expiry is not a valid date and time."
@@ -29394,6 +29409,16 @@ msgstr "Tu propio proveedor de identidad en la página de inicio de sesión de e
 #, elixir-autogen, elixir-format
 msgid "Your passkey counts, but it has no recovery codes. Add an authenticator app too, so losing the device doesn't lock you out."
 msgstr "Tu clave de acceso cuenta, pero no tiene códigos de recuperación. Añade también una aplicación de autenticación para no quedarte fuera si pierdes el dispositivo."
+
+#: lib/kiln_cms_web/controllers/auth_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Your password appears in a known data breach, so it can't be used to sign in as an administrator. We've emailed you a link to choose a new one. If it doesn't arrive, request one below."
+msgstr "Tu contraseña aparece en una filtración de datos conocida, así que no puede usarse para iniciar sesión como administrador. Te hemos enviado por correo un enlace para elegir una nueva. Si no llega, solicita otro a continuación."
+
+#: lib/kiln_cms/accounts/password_notice.ex
+#, elixir-autogen, elixir-format
+msgid "Your password appears in a public data breach. Change it soon from your account page."
+msgstr "Tu contraseña aparece en una filtración de datos pública. Cámbiala pronto desde la página de tu cuenta."
 
 #: lib/kiln_cms_web/controllers/auth_controller.ex
 #, elixir-autogen, elixir-format

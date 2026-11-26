@@ -207,5 +207,59 @@ defmodule KilnCMSWeb.AuthPasswordNoticeTest do
     end
   end
 
+  describe "the sign-in kind (#2407)" do
+    defp complete_with(session, user \\ token_user()) do
+      build_conn()
+      |> Plug.Test.init_test_session(session)
+      |> Phoenix.Controller.fetch_flash([])
+      |> AuthController.complete_sign_in(user, "You are now signed in")
+    end
+
+    # An account holding the stored first-factor token a completion stores.
+    defp token_user do
+      {user, _secret} = KilnCMS.TwoFactorFixtures.enabled_user()
+      {user, _token} = KilnCMS.TwoFactorFixtures.with_first_factor_token(user)
+      user
+    end
+
+    test "a :sign_in note shows the sign-in warning, once" do
+      user = register(password() |> tap(&enable_clean/1))
+      PasswordNotice.put(user.id, :sign_in)
+
+      assert error_flash(sign_in_success(user, {:password, :sign_in_with_token})) ==
+               PasswordNotice.message(:sign_in)
+
+      assert error_flash(sign_in_success(user, {:password, :sign_in})) == nil
+    end
+
+    test "it rides the session to the second factor as its own marker" do
+      {user, _secret} = KilnCMS.TwoFactorFixtures.enabled_user()
+      {user, _token} = KilnCMS.TwoFactorFixtures.with_first_factor_token(user)
+      PasswordNotice.put(user.id, :sign_in)
+
+      held = sign_in_success(user, {:password, :sign_in})
+      assert redirected_to(held) == "/sign-in/verify"
+      assert get_session(held, :password_breach_notice) == "sign_in"
+
+      done = complete_with(%{password_breach_notice: "sign_in"}, user)
+      assert error_flash(done) == PasswordNotice.message(:sign_in)
+      assert get_session(done, :password_breach_notice) == nil
+    end
+
+    # A rolling deploy: a node on the previous release wrote `true`, and a node
+    # on this one completes the sign-in. And a `:set` note is still written as
+    # `true`, so the previous release can read what this one writes.
+    test "a bare true marker is the :set warning, and a :set note is still written as true" do
+      assert error_flash(complete_with(%{password_breach_notice: true})) == warning()
+      assert error_flash(complete_with(%{password_breach_notice: "something-else"})) == nil
+
+      user = token_user()
+      PasswordNotice.put(user.id)
+
+      held = sign_in_success(user, {:password, :sign_in})
+      assert get_session(held, :password_breach_notice) == true
+    end
+  end
+
   defp enable_clean(pw), do: enable!(&ok(&1, clean_body(pw)))
 end
