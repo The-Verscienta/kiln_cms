@@ -999,6 +999,11 @@ defmodule KilnCMSWeb.AccountsLive do
           {gettext("Delete account…")}
         </button>
       </div>
+      <p id="sign-out-everywhere-hint" class="text-xs text-base-content/70">
+        {gettext(
+          "“Sign out everywhere” also closes the collaborative-editing rooms this account has open on any device."
+        )}
+      </p>
 
       <p :if={@account.anonymized_at} class="text-sm text-base-content/60">
         {gettext("This account was erased on %{when}. Nothing personal remains on it.",

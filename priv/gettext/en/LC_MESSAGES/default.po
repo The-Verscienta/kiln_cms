@@ -21606,6 +21606,11 @@ msgstr ""
 msgid "Sessions"
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sessions from before this was available are signed out the next time they're used here. Collaborative-editing rooms open on the signed-out devices close too."
+msgstr ""
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set KILN_CONSOLE_HOST to a host no organization controls, such as console under your main host, point it and every subdomain of it at Kiln in DNS and TLS, and restart. Each organization's console then gets its own host, its slug followed by the console host. Otherwise, grant organization admin only to people you would trust with the console."
@@ -22246,6 +22251,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Signing key generated. New publishes are signed; re-fire existing content to sign it too."
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signing other sessions out, one at a time or all at once, also closes the collaborative-editing rooms open on those devices."
 msgstr ""
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
@@ -32060,6 +32070,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/experiment_live.ex
 #, elixir-autogen, elixir-format
 msgid "“Leading” means the highest rate so far over at least %{floor} impressions per arm — a comparison, not a significance test."
+msgstr ""
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "“Sign out everywhere” also closes the collaborative-editing rooms this account has open on any device."
 msgstr ""
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
