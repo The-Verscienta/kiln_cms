@@ -73,7 +73,20 @@ defmodule KilnCMS.Automation.RuleWorker do
   provider outage, an exhausted budget bucket or an unconfigured generator is
   logged and dropped, not retried. Retrying a nice-to-have suggestion five
   times per document costs real tokens to tell an editor something they can ask
-  for directly.
+  for directly. The one failure that does retry is a suppression list that
+  cannot be read when the findings go by email (#3051, below): it is asked
+  before the document is loaded, so the retry happens before any generation.
+
+  ## Suppressed recipients (#3051)
+
+  `:send_email` and the intelligence reactions delivering by email ask the
+  instance-wide suppression list and the rule's site's own
+  (`KilnCMS.Mail.check_suppression/2`) about `config["to"]` before sending; an
+  intelligence reaction asks before it loads the document or generates
+  anything. A suppressed address is a skip: the job completes, its payload is
+  dropped as on any finish, and a warning names the rule and the site, never
+  the address. A list that cannot be read raises, so the job retries.
+  Findings delivered as a comment or a task are not checked: there is no mail.
 
   ## How this worker is authorized (#1309, #1402)
 
@@ -161,15 +174,21 @@ defmodule KilnCMS.Automation.RuleWorker do
     end
   end
 
-  defp run(%{action: :send_email, config: config, org_id: org_id}, event, payload) do
-    # Subject is a header: render it as plain text with CR/LF stripped so a
-    # content title can't inject extra headers. Body is HTML: escape markup.
-    send_rule_email(
-      config,
-      org_id,
-      email_subject(config, event, payload),
-      email_body(config, event, payload)
-    )
+  defp run(%{action: :send_email, config: config, org_id: org_id, id: rule_id}, event, payload) do
+    case check_rule_recipient(config, org_id) do
+      :ok ->
+        # Subject is a header: render it as plain text with CR/LF stripped so a
+        # content title can't inject extra headers. Body is HTML: escape markup.
+        send_rule_email(
+          config,
+          org_id,
+          email_subject(config, event, payload),
+          email_body(config, event, payload)
+        )
+
+      {:skip, :suppressed} ->
+        suppressed_recipient(rule_id, org_id)
+    end
   end
 
   defp run(%{action: :broadcast, config: config}, event, payload) do
@@ -559,7 +578,21 @@ defmodule KilnCMS.Automation.RuleWorker do
   # Load the live document, run the finder, and email the findings (if any).
   # A transient read failure returns the error so Oban retries; a vanished
   # type/document or empty findings is a clean no-op.
+  #
+  # A findings email to a suppressed `to` is skipped before the document is
+  # even loaded (#3051): nothing would be delivered, so nothing is generated.
+  # An unreadable suppression list raises here, before any tokens are spent,
+  # so the retry it causes cannot bill a second generation
+  # (`deliver_as_email/3` explains why a failure after generation is
+  # swallowed instead).
   defp intelligence(%{config: config, org_id: org_id, id: rule_id}, event, payload, finder) do
+    case check_findings_recipient(config, org_id) do
+      :ok -> find_and_deliver(config, org_id, rule_id, event, payload, finder)
+      {:skip, :suppressed} -> suppressed_recipient(rule_id, org_id)
+    end
+  end
+
+  defp find_and_deliver(config, org_id, rule_id, event, payload, finder) do
     case load_document(event, payload, org_id) do
       {:ok, record} ->
         context = %{
@@ -655,6 +688,39 @@ defmodule KilnCMS.Automation.RuleWorker do
       )
 
       :ok
+  end
+
+  # The suppression lists (#3051) for a rule's `to`: the instance-wide one and
+  # the rule's own site's (`KilnCMS.Mail.check_suppression/2`). A list that
+  # cannot be read raises, which retries the job. No `to` is `:ok` here:
+  # `send_rule_email/4` is what logs a missing address and skips.
+  defp check_rule_recipient(config, org_id) do
+    case config["to"] do
+      to when is_binary(to) and to != "" -> KilnCMS.Mail.check_suppression(to, org_id: org_id)
+      _ -> :ok
+    end
+  end
+
+  # Only findings delivered by email have a recipient to check; a comment or a
+  # task lands in the editor whatever the `to` says.
+  defp check_findings_recipient(config, org_id) do
+    case Map.get(config, "deliver_as") || "email" do
+      "email" -> check_rule_recipient(config, org_id)
+      _other -> :ok
+    end
+  end
+
+  # Completed, not cancelled or retried: the list is doing its job, and a
+  # cancelled job would read as a failure. A warning, because an admin typed
+  # this address and the rule now delivers nothing. The rule and the site,
+  # never the address.
+  defp suppressed_recipient(rule_id, org_id) do
+    Logger.warning(
+      "Automation rule #{rule_id} sent nothing: its `to` address is suppressed " <>
+        "(org #{org_id}); clear it on /editor/mail or /editor/site-mail"
+    )
+
+    :ok
   end
 
   # One delivery skeleton for every emailing reaction, so header/policy

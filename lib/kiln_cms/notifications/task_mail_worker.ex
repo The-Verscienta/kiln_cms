@@ -240,9 +240,7 @@ defmodule KilnCMS.Notifications.TaskMailWorker do
   # The suppression lists (#3036), as `WorkflowMailWorker` asks them: an
   # address on the instance-wide list or the site's own is a skip, and a list
   # that cannot be read raises, which retries the job.
-  defp not_suppressed(address, tenant) do
-    if Mail.suppressed?(address, org_id: tenant), do: {:skip, :suppressed}, else: :ok
-  end
+  defp not_suppressed(address, tenant), do: Mail.check_suppression(address, org_id: tenant)
 
   # A fixed reason and the job id: never the address.
   defp skip(%Oban.Job{id: id}, reason) do

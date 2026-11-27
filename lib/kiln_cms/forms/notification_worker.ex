@@ -13,6 +13,15 @@ defmodule KilnCMS.Forms.NotificationWorker do
   A job queued by a release before that carries the `data` itself. It is
   still delivered, and the `data` is dropped from its row once it finishes
   (`KilnCMS.Jobs.PrivateArgs`).
+
+  ## Suppressed addresses (#3051)
+
+  A `notify_email` on the instance-wide suppression list, or on the site's
+  own (`KilnCMS.Mail.check_suppression/2`), is sent nothing: the job
+  completes (it is not a delivery failure on /editor/mail) and logs a warning
+  naming the job, the form and the site, never the address. A list that
+  cannot be read raises, so the job retries rather than sending past it. Both
+  job shapes are checked.
   """
   require Logger
 
@@ -30,10 +39,12 @@ defmodule KilnCMS.Forms.NotificationWorker do
     tenant = tenant(args)
 
     with {:ok, form} <- notifying_form(form_id, tenant),
-         {:ok, submission} <- Forms.delivery_submission(submission_id, tenant) do
+         {:ok, submission} <- Forms.delivery_submission(submission_id, tenant),
+         :ok <- Mail.check_suppression(form.notify_email, org_id: tenant) do
       deliver(job, form, submission.data, tenant)
     else
       :skip -> :ok
+      {:skip, :suppressed} -> suppressed(job, form_id, tenant)
       {:error, error} -> {:error, error}
     end
   end
@@ -46,9 +57,12 @@ defmodule KilnCMS.Forms.NotificationWorker do
     PrivateArgs.finishing(job, PrivateArgs.keys(__MODULE__), fn ->
       tenant = tenant(args)
 
-      case notifying_form(form_id, tenant) do
-        {:ok, form} -> deliver(job, form, data, tenant)
+      with {:ok, form} <- notifying_form(form_id, tenant),
+           :ok <- Mail.check_suppression(form.notify_email, org_id: tenant) do
+        deliver(job, form, data, tenant)
+      else
         :skip -> :ok
+        {:skip, :suppressed} -> suppressed(job, form_id, tenant)
         {:error, error} -> {:error, error}
       end
     end)
@@ -83,6 +97,20 @@ defmodule KilnCMS.Forms.NotificationWorker do
       # Form deleted or notifications switched off since — nothing to send.
       _ -> :skip
     end
+  end
+
+  # `notify_email` is on the instance-wide suppression list or the site's own
+  # (#3051). Completed, not cancelled: a cancelled `mail` job is listed as a
+  # delivery failure on /editor/mail, and this is the list doing its job. A
+  # warning, not info: an admin typed this address and is no longer told about
+  # submissions. Never the address itself.
+  defp suppressed(%Oban.Job{id: id}, form_id, tenant) do
+    Logger.warning(
+      "form notification job #{id} not sent: form #{form_id}'s notify address is " <>
+        "suppressed (org #{tenant}); clear it on /editor/mail or /editor/site-mail"
+    )
+
+    :ok
   end
 
   defp deliver(%Oban.Job{id: id}, form, data, tenant) do
