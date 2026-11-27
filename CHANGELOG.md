@@ -165,6 +165,10 @@ else.
   The importer's summary gains a `reevaluated` count, and retention's `pruned` mark now locks the row it marks. No migration; rolling the pin back is safe.
   ([#3447](https://github.com/The-Verscienta/kiln_cms/pull/3447) · [long form](docs/changelog/unreleased.md#reevaluate-interrupted-import))
 
+- **Mentions: on any site but the default one, an account with no site membership (someone removed from their only site included) is no longer suggested, resolved or mailed by an `@` mention; a platform admin still is (#3047). A roster that can't be read is now logged and shown in the comment box (#3052).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#mention-roster-scoping))
+
 ### Security
 
 - **Smart 404 blocking: a spoofed search-engine claim rotating through the addresses of one IPv6 `/64` is counted once another address there has failed its DNS check or left its reverse zone silent (#2838).**
