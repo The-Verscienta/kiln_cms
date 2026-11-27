@@ -439,7 +439,7 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
       <p
         :if={@mentions_unavailable?}
         id={"mentions-unavailable-#{@block_id}"}
-        class="mt-1 text-xs text-base-content/60"
+        class="mt-1 text-xs text-base-content/70"
       >
         {gettext(
           "Mention suggestions couldn't be loaded. Reload to try again; an @mention sent now may notify no one."
