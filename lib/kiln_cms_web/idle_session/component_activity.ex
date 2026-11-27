@@ -16,6 +16,11 @@ defmodule KilnCMSWeb.IdleSession.ComponentActivity do
   component goes through `use KilnCMSWeb, :live_component`, never
   `use Phoenix.LiveComponent` directly; `KilnCMSWeb.IdleSession.ComponentActivityTest`
   fails on one that doesn't.
+
+  The wrapper carries `@impl Phoenix.LiveComponent`, so a component must mark
+  its own callbacks with `@impl` too: once one clause of a module has `@impl`,
+  Elixir warns about every callback without it, and `--warnings-as-errors`
+  fails the build. Every Kiln component already does.
   """
 
   @doc false
