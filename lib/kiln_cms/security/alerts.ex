@@ -32,7 +32,7 @@ defmodule KilnCMS.Security.Alerts do
   | `api_key_abuse` | platform | a rotated API key presented again |
   | `api_key_rate_limited` | platform | a verified API key over a rate limit |
   | `blocked_ip` | site | a request from an address on the site's block list refused |
-  | `backup_host_key_changed` | platform | an SFTP backup server offered a host key other than the one trusted (#2222); raised from the instance log, not by `classify/2` |
+  | `backup_host_key_changed` | platform | an SFTP backup server offered a host key other than the one trusted (#2222); raised from the instance log, not by `classify/2`, with one alert window per destination (#3201) |
 
   `api_key_rate_limited` is its own kind, not part of `api_key_abuse`: an
   alert window is claimed per kind, so a key over a rate limit must not use up

@@ -90,6 +90,35 @@ defmodule KilnCMS.Accounts.SignInAlert do
   (`AccountThrottle.forget_second_factor_alert/1`), so a wedged queue costs one
   mail rather than six hours of them.
 
+  ## A pause made of breached-password refusals (#3437)
+
+  An administrator's sign-in refused because the password is in a known breach
+  (`KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn`) is charged to
+  the sign-in counter like any attempt, so it can fill the budget. Those
+  attempts used the *right* password, and the usual copy below ("have not
+  succeeded", an unlock link) would send the owner the wrong way. So the
+  refusal notes itself (`AccountThrottle.note_sign_in_block/1`), and
+  `account_locked/2` takes the cause `AccountThrottle.sign_in_pause_cause/1`
+  reads:
+
+    * `:none` - the usual mail, unchanged;
+    * `:blocks_only` - every counted attempt was such a refusal: the mail says
+      the attempts used the current password, which is in a known breach, and
+      that choosing a new one lifts the pause;
+    * `:some_blocks` - some were: the same, and that the others did not
+      complete a sign-in.
+
+  Both breached wordings link `/reset` bare and carry no unlock link, no IP and
+  no count, and both spend the alert window like the usual mail. Neither is
+  withheld for its cause: each refusal's own reset mail shares the reset-mail budget
+  with the anonymous `/reset` form, so someone who spends that budget first
+  would otherwise leave the owner with no word that their current password is
+  in someone else's hands.
+
+  The tally and the counter are separate rows on the same window, so a
+  forgiveness or a window boundary between the two reads can move the answer
+  between the breached wordings, or to the usual mail; never to silence.
+
   ## Why `account_locked/1`'s copy says "attempts", never "your password"
 
   It used to be able to say the password had not been used successfully, because
@@ -127,15 +156,21 @@ defmodule KilnCMS.Accounts.SignInAlert do
   alias KilnCMS.Accounts.User
   alias KilnCMS.Mail
 
+  @pause_causes [:none, :some_blocks, :blocks_only]
+
   @doc """
   Mail the owner of `identifier` that their account is being guessed at, unless
   one already went out this window. Always returns `:ok`.
+
+  `cause` is what filled the sign-in counter
+  (`AccountThrottle.sign_in_pause_cause/1`, #3437) and picks the wording; see
+  the moduledoc. Every cause sends a mail and spends the window alike.
   """
-  @spec account_locked(String.t()) :: :ok
-  def account_locked(identifier) do
+  @spec account_locked(String.t(), AccountThrottle.pause_cause()) :: :ok
+  def account_locked(identifier, cause \\ :none) when cause in @pause_causes do
     with %User{} = user <- lookup(identifier),
          true <- AccountThrottle.alert_allowed?(identifier) do
-      deliver(user)
+      deliver(user, cause)
     end
 
     :ok
@@ -352,9 +387,19 @@ defmodule KilnCMS.Accounts.SignInAlert do
   # the operator's own branding, like the reset mail on the read-based path.
   defp site_name, do: KilnCMS.Branding.for_org(nil).site_name
 
-  defp deliver(user) do
+  defp deliver(user, :none) do
     site = site_name()
     deliver(user, "Unusual sign-in activity on your #{site} account", body(site))
+  end
+
+  defp deliver(user, cause) when cause in [:some_blocks, :blocks_only] do
+    site = site_name()
+
+    deliver(
+      user,
+      "Sign-in paused on your #{site} account: choose a new password",
+      breached_pause_body(escape(site), cause)
+    )
   end
 
   # The unlock page (#2250) is linked bare, never with a token: this mail goes
@@ -375,6 +420,41 @@ defmodule KilnCMS.Accounts.SignInAlert do
     password, and turning on two-factor authentication or a passkey, will end them.</p>
     """
   end
+
+  # The pause filled, at least in part, with sign-ins refused because the
+  # password is breached (#3437). Those attempts used the right password, so
+  # "have not succeeded" and the unlock link would both mislead: lifting the
+  # pause gets the owner nowhere while the password is refused. The fix is a
+  # new password, which lifts the pause too. `/reset` is linked bare, never
+  # with a token, for the same reason as the unlock page above.
+  defp breached_pause_body(site, :blocks_only) do
+    reset = url(~p"/reset")
+
+    """
+    <p>Sign-in to your #{site} account is paused briefly after repeated attempts that
+    used your current password, which appears in a known data breach, so administrators
+    can't sign in with it any more.</p>
+    <p>Choose a new password; this also lifts the pause:</p>
+    <p><a href="#{reset}">#{reset}</a></p>
+    <p>If this wasn't you, someone else knows your password: change it now.</p>
+    """
+  end
+
+  defp breached_pause_body(site, :some_blocks) do
+    reset = url(~p"/reset")
+
+    """
+    <p>Sign-in to your #{site} account is paused briefly after repeated attempts.</p>
+    <p>Some of them used your current password, which appears in a known data breach, so
+    administrators can't sign in with it any more.</p>
+    <p>Choose a new password; this also lifts the pause:</p>
+    <p><a href="#{reset}">#{reset}</a></p>
+    <p>The others did not complete a sign-in. If none of this was you, someone else knows
+    your password: change it now.</p>
+    """
+  end
+
+  defp escape(text), do: text |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
 
   defp deliver_second_factor(user) do
     site = site_name()

@@ -222,6 +222,33 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
     end
   end
 
+  describe "the breached-password refusal tally (#3437)" do
+    test "reads the pause's cause and is cleared by reset/1 and forget_all/0" do
+      address = email()
+      on_exit(fn -> AccountThrottle.reset(address) end)
+
+      assert AccountThrottle.sign_in_pause_cause(address) == :none
+      AccountThrottle.note_sign_in_block(address)
+      assert AccountThrottle.sign_in_pause_cause(address) == :some_blocks
+      for _ <- 2..@budget, do: AccountThrottle.note_sign_in_block(address)
+      assert AccountThrottle.sign_in_pause_cause(address) == :blocks_only
+
+      # Keyed like the sign-in counter: trimmed and case-folded.
+      assert AccountThrottle.sign_in_pause_cause("  " <> String.upcase(address)) ==
+               :blocks_only
+
+      # A tally, never a charge against the sign-in budget.
+      assert AccountThrottle.sign_in_attempts(address) == 0
+
+      AccountThrottle.reset(address)
+      assert AccountThrottle.sign_in_pause_cause(address) == :none
+
+      AccountThrottle.note_sign_in_block(address)
+      assert AccountThrottle.forget_all() == :ok
+      assert AccountThrottle.sign_in_pause_cause(address) == :none
+    end
+  end
+
   describe "the owner alert" do
     test "one mail when an attempt is first refused, and not again in the window" do
       address = email()

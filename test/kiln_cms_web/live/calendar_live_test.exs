@@ -81,6 +81,20 @@ defmodule KilnCMSWeb.CalendarLiveTest do
 
   defp calendar_at(%Date{} = at), do: ~p"/editor/calendar?at=#{Date.to_iso8601(at)}"
 
+  # The calendar's broadcast topic is per-org, and most of this suite writes
+  # to the shared default org — mounted there, every concurrent async test's
+  # lifecycle write lands another `:calendar_changed` in the LiveView's
+  # mailbox, and each one can re-query the grid at a moment the test does not
+  # choose. A freshly-seeded org has a topic nothing else publishes on, so the
+  # only messages in play are the ones the test itself causes.
+  defp quiet_org do
+    Ash.Seed.seed!(Organization, %{
+      name: "Calendar Quiet",
+      slug: "cal-quiet-#{System.unique_integer([:positive])}",
+      status: :active
+    })
+  end
+
   # The distinct revisions the grid's drop lists carry.
   defp drop_revs(html) do
     html
@@ -510,18 +524,9 @@ defmodule KilnCMSWeb.CalendarLiveTest do
     defp burst_calendar(conn) do
       admin = authed_admin()
 
-      # The calendar's broadcast topic is per-org, and most of this suite
-      # writes to the shared default org — mounted there, every concurrent
-      # async test's lifecycle write would land another `:calendar_changed`
-      # in this LiveView's mailbox mid-measurement. A freshly-seeded org has a
-      # topic nothing else publishes on, so the only messages in play are the
-      # ones each test sends.
-      org =
-        Ash.Seed.seed!(Organization, %{
-          name: "Calendar Burst",
-          slug: "cal-burst-#{System.unique_integer([:positive])}",
-          status: :active
-        })
+      # Mid-measurement, another test's `:calendar_changed` would be counted
+      # as one of this test's; see `quiet_org/0`.
+      org = quiet_org()
 
       {:ok, lv, _html} = conn |> org_conn(org) |> log_in(admin) |> live(~p"/editor/calendar")
 
@@ -622,7 +627,7 @@ defmodule KilnCMSWeb.CalendarLiveTest do
   end
 
   describe "reschedule" do
-    defp scheduled_page(admin, at, attrs \\ %{}) do
+    defp scheduled_page(admin, at, attrs \\ %{}, org \\ nil) do
       CMS.create_page!(
         Map.merge(
           %{
@@ -632,7 +637,7 @@ defmodule KilnCMSWeb.CalendarLiveTest do
           },
           attrs
         ),
-        actor: admin
+        if(org, do: [actor: admin, tenant: org], else: [actor: admin])
       )
     end
 
@@ -686,20 +691,27 @@ defmodule KilnCMSWeb.CalendarLiveTest do
     # `:schedule` is a compare-and-swap (#2745): a go-live claimed after the
     # grid loaded is refused, and said as that, not as the state machine's
     # "Attempted to change state …" text.
+    #
+    # In a quiet org (#3111): a claimed release has no go-live chip, so any
+    # re-query between the claim and the hook (set off, in the default org, by
+    # another async test's write) empties the grid of it, and `find_event/3`
+    # refuses the hook before the compare-and-swap is ever tried.
     test "a release claimed since the grid loaded is not rescheduled", %{conn: conn} do
       admin = authed_admin()
+      org = quiet_org()
       day = soon()
       at = DateTime.new!(day, ~T[09:00:00])
 
       release =
         CMS.create_release!(%{name: "Claimed launch #{System.unique_integer([:positive])}"},
-          actor: admin
+          actor: admin,
+          tenant: org
         )
-        |> CMS.schedule_release!(%{scheduled_at: at}, actor: admin)
+        |> CMS.schedule_release!(%{scheduled_at: at}, actor: admin, tenant: org)
 
-      {:ok, lv, _html} = open_calendar_on(conn, admin, day, %{title: release.name})
+      {:ok, lv, _html} = open_calendar_on(org_conn(conn, org), admin, day, %{title: release.name})
 
-      {:ok, _} = CMS.start_release(release, %{}, actor: admin)
+      {:ok, _} = CMS.start_release(release, %{}, actor: admin, tenant: org)
 
       html =
         render_hook(lv, "reschedule", %{
@@ -818,23 +830,37 @@ defmodule KilnCMSWeb.CalendarLiveTest do
 
     # A record that left the actor's reach after the window loaded is gone from
     # their view: the refused read is not a refused publish (#2473).
+    #
+    # In a quiet org (#3111), so the chip is still in the window when the hook
+    # arrives: a re-query in between would refuse the move in `find_event/3`,
+    # in the same words, and the fetch this test is about would never run.
     test "says an item trashed since the window loaded is gone, not that an admin moves it",
          %{conn: conn} do
       admin = authed_admin()
       editor = authed_user(:editor)
+      org = quiet_org()
+
+      # `User.role` is a tier on the default org only; anywhere else it takes
+      # a membership.
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: editor.id,
+        organization_id: org.id,
+        role: :editor
+      })
+
       day = soon()
       at = DateTime.new!(day, ~T[09:30:00])
-      page = scheduled_page(admin, at)
+      page = scheduled_page(admin, at, %{}, org)
 
-      {:ok, lv, _html} = open_calendar_on(conn, editor, day, page)
+      {:ok, lv, _html} = open_calendar_on(org_conn(conn, org), editor, day, page)
 
-      CMS.destroy_page!(page, actor: admin)
+      CMS.destroy_page!(page, actor: admin, tenant: org)
 
       # What the calendar's fetch now gets back: the read filters the row out.
       assert {:error, %Ash.Error.Invalid{errors: [%Ash.Error.Query.NotFound{}]}} =
                KilnCMS.CMS.ContentTypes.get_record("page", page.id,
                  actor: editor,
-                 tenant: KilnCMS.Accounts.default_org_id()
+                 tenant: org.id
                )
 
       html =

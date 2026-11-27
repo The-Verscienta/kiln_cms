@@ -660,6 +660,30 @@ after it is answered with
 and nothing else runs. Changing the site's requirement so that it holds the
 account at once drops its sockets.
 
+A socket opened with a JWT lives no longer than that token (#2490). Signing
+that one token out closes the socket at once, and leaves the account's sockets
+opened with other tokens connected: the **Sign out** buttons under **Active
+sessions** on the account's settings page (which lists headless tokens as
+well as browsers), and, for a token lifted from a browser session, that
+browser's own **Sign out**, the site's idle timeout and its **Sign out
+everyone**. *Sign out everywhere*, a password change or reset close every
+socket of the account, as before. The socket applies no site rule of its own
+to the token, as `POST /gql` applies none: a headless token from
+`POST /api/auth/sign_in` is bound to no site, so a site's idle timeout and
+**Sign out everyone** do not reach it. If the close never arrives (it was lost
+between nodes, or sent by a node on an older release), the next document sent
+on the socket is refused instead, and nothing else runs:
+
+```json
+{"errors":[{"message":"The bearer token this connection was opened with is no longer valid. Reconnect with a valid token.","extensions":{"code":"unauthenticated"}}]}
+```
+
+The same answer comes when the token has expired since the connect. Treat it
+as you treat a `401` on `/gql`: sign in again and reconnect with the new token.
+A socket that only holds subscriptions and sends no documents keeps receiving
+pushes in that case until it reconnects, so a long-lived subscriber should
+reconnect when its token expires rather than rely on the server to close it.
+
 ## Mutations (writing)
 
 > **Reverses D7 (#330).** Writes require an API key; a read-only key or an

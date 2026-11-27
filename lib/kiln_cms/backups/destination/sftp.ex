@@ -88,7 +88,9 @@ defmodule KilnCMS.Backups.Destination.Sftp do
         name: "path",
         type: :string,
         required?: true,
-        help: "An absolute folder on the server to keep backups in, e.g. /backups/kiln."
+        help:
+          "An absolute folder on the server to keep backups in, e.g. /backups/kiln or " <>
+            "/volume1/Backup Share/kiln."
       },
       %{name: "password", type: :secret, required?: false, help: nil},
       %{
@@ -196,6 +198,20 @@ defmodule KilnCMS.Backups.Destination.Sftp do
   """
   @spec location(Config.t()) :: {:sftp, String.t(), non_neg_integer(), String.t(), [String.t()]}
   def location(%Config{settings: settings}), do: Target.location(settings)
+
+  @doc """
+  The host key a stored row (any map with a `:host_key`) trusts, as
+  `{type, fingerprint}` from `host_key["algorithm"]` and `["fingerprint"]`,
+  or `nil` when it trusts none. Retention compares two rows' keys
+  (`KilnCMS.Backups.Retention.prune_blocker/3`, #3200); it is kept out of
+  `location/1`, which keys what was sent where.
+  """
+  @spec trusted_key(map()) :: {String.t(), String.t()} | nil
+  def trusted_key(%{host_key: %{"algorithm" => type, "fingerprint" => fingerprint}})
+      when is_binary(type) and type != "" and is_binary(fingerprint) and fingerprint != "",
+      do: {type, fingerprint}
+
+  def trusted_key(_row), do: nil
 
   @doc """
   The host key `config` offers for `type` (or the one it prefers, with

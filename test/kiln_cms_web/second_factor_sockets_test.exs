@@ -186,7 +186,7 @@ defmodule KilnCMSWeb.SecondFactorSocketsTest do
       :ok
     end
 
-    defp collab_token(user), do: Phoenix.Token.sign(@endpoint, "collab", user.id)
+    defp collab_token(user), do: KilnCMS.CollabTokenFixtures.collab_token(user)
 
     defp collab_connect(user, site),
       do:
@@ -211,8 +211,12 @@ defmodule KilnCMSWeb.SecondFactorSocketsTest do
       end
 
       assert :error = connect.(collab_token(user))
-      assert :error = connect.(CollabSocket.token(user, false))
-      assert {:ok, _socket} = connect.(CollabSocket.token(user, true))
+
+      assert :error =
+               connect.(KilnCMS.CollabTokenFixtures.collab_token(user, verified?: false))
+
+      assert {:ok, _socket} =
+               connect.(KilnCMS.CollabTokenFixtures.collab_token(user, verified?: true))
     end
 
     test "a held account is refused at connect" do

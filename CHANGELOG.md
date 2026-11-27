@@ -61,6 +61,9 @@ else.
 
 - **Run `mix kiln.reserved_paths` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) to list pages slugged `developers`, `ready`, `setup`, `sign-in`, `sign-out`, `actor`, `ap`, `mcp` or `password-reset`, and path aliases under them: their built-in routes already served those URLs instead (#2898). Give each a new slug or alias.** No migration; read-only.
   ([long form](docs/changelog/unreleased.md#reserved-route-slugs-upgrade))
+- **Collaborative editing: a collab token minted before this release names no session, and is still accepted with its old per-account behavior for this release only, at most 24 hours after the last old node stops (#2490).**
+  Nothing to do; the next release refuses such tokens. No migration; rolling the pin back is safe.
+  ([#3460](https://github.com/The-Verscienta/kiln_cms/pull/3460) · [long form](docs/changelog/unreleased.md#session-bound-sockets-upgrade))
 
 ### Breaking
 
@@ -71,11 +74,39 @@ else.
 ### Added
 
 - **Password policy: a site can also check its administrators' passwords against known breaches as they sign in, off by default; under Block a breached one is sent to reset by email, under Warn the admin signs in with a warning (#2407).**
-  `POST /api/auth/sign_in` gains a `403` `password_reset_required` and an additive `password_breach` field. Expand-only migration; rolling the pin back is safe.
+  `POST /api/auth/sign_in` gains a `403` `password_reset_required` and an additive `password_breach` field. A sign-in pause that blocked attempts fill mails the owner to choose a new password. Expand-only migration; rolling the pin back is safe.
   ([#3434](https://github.com/The-Verscienta/kiln_cms/pull/3434) · [long form](docs/changelog/unreleased.md#breached-password-sign-in-check))
+- **Backups: `bin/backup` in a release and `mix kiln.backup.*` in a checkout list backups, start one and optionally wait for it, re-check a backup's files, report what retention would delete, and import cron's backups, with `--json` output and exit codes 0, 1 and 2 (part of #2234).**
+  `prune` only reports and `verify` records nothing. New image only; no migration, and rolling the pin back is safe.
+  ([#3455](https://github.com/The-Verscienta/kiln_cms/pull/3455) · [long form](docs/changelog/unreleased.md#backup-cli))
+
+- **Backups: a platform admin can download a backup's local files (each dump, media part and checksum file) from History, one file per click, through a one-minute link bound to their session and recorded in the instance security log as `backup_downloaded` before any byte is sent (part of #2225).**
+  Refused while `KILN_CONSOLE_HOST` is unset and there is more than one organization. Shares the `:export` limit of 10 a minute. No migration; rolling the pin back is safe.
+  ([#3471](https://github.com/The-Verscienta/kiln_cms/pull/3471) · [long form](docs/changelog/unreleased.md#backup-download))
+
+### Changed
+
+- **Bot budgets: SeznamBot, MojeekBot and Storebot-Google count as search engines, checked by DNS; GoogleOther, AdsBot-Google, Naver's Yeti, Qwantbot, Sogou and a browser-shaped `(compatible; …bot)` crawler count as other bots, and Google-CloudVertexBot as an AI crawler (#2468).**
+  No migration; rolling the pin back is safe.
+  ([#3477](https://github.com/The-Verscienta/kiln_cms/pull/3477) · [long form](docs/changelog/unreleased.md#bot-classes-regional-engines))
+- **Backups: two SFTP destinations held back only by a missing Test now say so on the Destinations tab, "Press Test on both destinations to let them prune.", with a link to the how-to (#3428).**
+  Shown only when a Test would clear the block. No migration.
+  ([#3466](https://github.com/The-Verscienta/kiln_cms/pull/3466) · [long form](docs/changelog/unreleased.md#sftp-prune-test-hint))
+- **Backups: an SFTP destination's path may hold spaces and `+ @ ,`, so a NAS share such as `/volume1/Backup Share/kiln` can be used (#3199).**
+  ASCII only; `..`, `~`, `\`, control characters and a space at either end of a folder name are still refused. No migration; after a rollback, a destination whose path uses the new characters fails until its path is changed.
+  ([#3425](https://github.com/The-Verscienta/kiln_cms/pull/3425) · [long form](docs/changelog/unreleased.md#sftp-path-spaces))
+- **Backups: two SFTP destinations whose folders nest both prune once Kiln can tell they are different servers: both trust host keys of the same type that differ, and each has passed a Test since the later trust (#3200).**
+  Press **Test** on both rows to clear "Not pruned". No migration.
+  ([#3425](https://github.com/The-Verscienta/kiln_cms/pull/3425) · [long form](docs/changelog/unreleased.md#sftp-distinct-servers-prune))
 
 ### Fixed
 
+- **Sessions: clicks inside a component (the notification bell, reference pickers) now count as activity for a site's idle timeout, and the sign-out buttons say they also close open collaborative-editing rooms (#3464, part of #2491).**
+  The "sign out everyone" watermark now lasts the longest sign-in lifetime (30 days today). No migration.
+  ([#3476](https://github.com/The-Verscienta/kiln_cms/pull/3476) · [long form](docs/changelog/unreleased.md#idle-component-activity))
+- **JSON fields: a valid value is no longer refused as "took too long to check against the schema" when building its JSON Schema is slow on a cold or busy node (#3063).**
+  The 1-second deadline now covers only checking the value. No migration.
+  ([long form](docs/changelog/unreleased.md#field-schema-deadline))
 - **Markdown: an image that shares its line with text or another image, or sits in a list, quote or table, is kept as a link to the picture labelled with its alt text instead of vanishing (#2771).**
   A 1.13.0 known issue. Standalone images still become image blocks. No migration.
   ([long form](docs/changelog/unreleased.md#markdown-inline-image))
@@ -118,6 +149,10 @@ else.
   The field type's commented `handle_input_event/3` example now compiles cleanly once uncommented. No migration.
   ([long form](docs/changelog/unreleased.md#gen-plugin-overlay-config))
 
+- **Backups: when two SFTP servers' host keys change in the same 15-minute window, the admins get an alert for each, not only the first (#3201).**
+  No migration; rolling the pin back is safe.
+  ([#3425](https://github.com/The-Verscienta/kiln_cms/pull/3425) · [long form](docs/changelog/unreleased.md#host-key-alert-per-destination))
+
 - **Fields admin: the editor input choices for a plugin field type now follow every setting of the field, so the page offers exactly the inputs the save accepts (#2883).**
   Before, the page asked the type with only a few settings and could show a choice the save refused, or hide one it took. No migration.
   ([long form](docs/changelog/unreleased.md#plugin-widgets-full-definition))
@@ -126,9 +161,23 @@ else.
   SSE streams still hide such an event. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#feed-relay-exit))
 
+- **Backups: a cron backup that History recorded as Failed "Interrupted" is corrected, once, when its stamp turns out complete (#2846).**
+  The importer's summary gains a `reevaluated` count, and retention's `pruned` mark now locks the row it marks. No migration; rolling the pin back is safe.
+  ([#3447](https://github.com/The-Verscienta/kiln_cms/pull/3447) · [long form](docs/changelog/unreleased.md#reevaluate-interrupted-import))
+
 - **An IP block rule added or removed, or a site's new slug or custom domain, takes effect on a node's next request, instead of the old answer being cached for up to a minute (five for an old host) when a lookup straddled the save (#2972).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#cache-fill-after-bust))
+
+### Security
+
+- **Smart 404 blocking: a spoofed search-engine claim rotating through the addresses of one IPv6 `/64` is counted once another address there has failed its DNS check or left its reverse zone silent (#2838).**
+  Only with `KILN_SCANNER_BLOCKING` on; verified crawlers stay exempt, IPv4 is unchanged. No migration; rolling the pin back is safe.
+  ([#3449](https://github.com/The-Verscienta/kiln_cms/pull/3449) · [long form](docs/changelog/unreleased.md#scanner-guard-ipv6-rotation))
+
+- **Signing out one session now also closes that session's collaborative-editing rooms (`/ws/collab`) and a `/ws/gql` socket opened with its token, which before stayed open after idle expiry, "Sign out everyone", the browser's own Sign out or a sign-out from Active sessions (#2490).**
+  A `/ws/gql` document sent after a sign-out the socket missed is refused with `extensions.code: "unauthenticated"`. No migration, no setting.
+  ([#3460](https://github.com/The-Verscienta/kiln_cms/pull/3460) · [long form](docs/changelog/unreleased.md#session-bound-sockets))
 
 ## [1.13.0] - 2026-11-25
 

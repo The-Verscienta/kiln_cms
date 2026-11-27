@@ -702,7 +702,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
     |> assign(:select_terms, KilnCMS.CMS.SelectTerms.used(field_definitions))
     # CRDT collab prototype: when enabled, rich-text blocks sync live
     # between editors over the collab channel (see KilnCMS.Collab.Crdt).
-    |> assign(:collab_token, collab_token(actor, socket.assigns[:second_factor_verified?]))
+    |> assign(
+      :collab_token,
+      collab_token(
+        actor,
+        socket.assigns[:second_factor_verified?],
+        socket.assigns[:current_session_jti]
+      )
+    )
     # Set when this tab's rich-text blocks could not join the room and edit on
     # their own (#2772): the session then saves its own text, as with
     # collaboration off (`Session.collab_active?/1`).
@@ -1932,9 +1939,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
   # Socket token for the CRDT collab prototype; nil (and thus no data-collab
   # attributes, no channel) when the flag is off. Mount is editor/admin-gated,
   # so a token only ever reaches an authorized editor.
-  defp collab_token(actor, second_factor_verified?) do
-    if KilnCMS.Collab.Crdt.enabled?() do
-      KilnCMSWeb.CollabSocket.token(actor, second_factor_verified? == true)
+  #
+  # Bound to this browser session (#2490), whose jti `SessionTracking` put in
+  # `:current_session_jti`: the socket lives no longer than the session. A
+  # mount that cannot name its session gets no token and edits on its own,
+  # rather than a token no sign-out could reach.
+  defp collab_token(actor, second_factor_verified?, session_jti) do
+    if KilnCMS.Collab.Crdt.enabled?() and is_binary(session_jti) do
+      KilnCMSWeb.CollabSocket.token(actor, second_factor_verified? == true, session_jti)
     end
   end
 

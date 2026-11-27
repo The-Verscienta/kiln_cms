@@ -329,9 +329,14 @@ build if a resource is ever registered without that authorizer.
   but the current, through `KilnCMS.Accounts.Sessions`. That revokes the
   session's token, the remember-me cookie issued to the same browser (its jti
   is recorded on the session row at sign-in), and closes that session's open
-  LiveViews (`SessionEviction.evict_session/2`). It does not reach a
-  `/ws/collab` or `/ws/gql` socket already connected from that browser: those
-  are keyed per user, and close at their next reconnect or re-check.
+  LiveViews (`SessionEviction.evict_session/2`). Since #2490 it also closes
+  that session's `/ws/collab` rooms, whose token names the session, and a
+  `/ws/gql` socket opened with that session's own JWT: both subscribe to
+  `SessionEviction.session_socket_topic/1` at connect. The browser's own
+  **Sign out** closes its session's sockets the same way
+  (`SessionEviction.disconnect_sockets/2`); its other tabs follow the revoked
+  token on their next request. What is left is listed under
+  [Idle timeout and sign out everyone](#idle-timeout-and-sign-out-everyone-2246).
   Since #2246 a site admin can also end sessions on one site: after a
   configurable idle time, or all at once with *Sign out everyone*; see
   [Idle timeout and sign out everyone](#idle-timeout-and-sign-out-everyone-2246).
@@ -858,7 +863,10 @@ probes bait paths. Off unless `KILN_SCANNER_BLOCKING` is on; see
   engine (`KilnCMS.BotClass.search_engine/1`) skips the miss threshold only,
   never the bait threshold, and only until crawler verification (#2254, below)
   proves the claim false. A claim not yet checked or skipped keeps the
-  exemption, so a real crawler's first misses from a new address never count.
+  exemption, so a real crawler's first misses from a new address never count,
+  unless the address's IPv6 `/64` is marked by another address's failed or
+  silent lookup (#2838; see "Rotation inside an IPv6 `/64`" under Bot
+  budgets below).
   A scanner claiming to be Googlebot is therefore counted once its address
   fails the reverse-DNS check. A claim whose PTR query got no answer (a
   timeout, SERVFAIL) keeps the exemption only while this node's resolver is
@@ -955,12 +963,56 @@ see [bot-budgets.md](bot-budgets.md).
   lookups go unanswered and the 404 guard asks; it runs on a one-slot
   supervisor of its own and charges no cap. No address, hostname, user agent
   or org is in any verification event or log line.
-- **Residual: pending and skipped claims keep the 404 exemption.** A claim
-  whose lookup is running, or was not started because the node is busy or the
-  network used its lookup budget, skips the miss threshold. A spoofer rotating
-  through the addresses of one IPv6 `/64` gets 30 lookups a minute; every
-  further new address is skipped and its misses are not counted. Bait paths
-  still count. This predates #2588 and is not fixed by it.
+- **Rotation inside an IPv6 `/64` (#2838).** The 404 guard counts IPv6 per
+  `/64`, but a claim is checked per address, so a spoofer sending each request
+  from a fresh address was always judged pending or skipped, and exempt. Now a
+  finished lookup of the request's own address marks its `/64`: `:failed`
+  when it proved the claim false, `:silent` when its PTR query got no answer
+  while the resolver answered (`CrawlerVerification.network_flagged?/2`). In
+  a marked `/64` a pending, skipped or unverifiable claim is counted, and so
+  is a PTR silence during a resolver outage when the mark is `:failed`; a
+  `:silent` mark is not read while the resolver fails. A verified claim is
+  exempt in any `/64`, and a verified lookup clears a `:silent` mark, never a
+  `:failed` one. Marks are IPv6 only, keyed by the `/64` alone (never engine,
+  user agent or org), kept an hour from their last write in a bounded cache
+  of their own (10,000 networks per node), and written only while the guard
+  is on. A refused lookup (a cap, the node cap, a busy slot) writes none.
+  [ADR 0086](decisions/0086-an-ipv6-64-that-produced-claimant-controlled-negative-evidence-loses-the-404-exemption-for-unproven-claims.md)
+  records why.
+- **Residual: marks are per node.** The guard's counters are shared through
+  Postgres, but each node marks a `/64` only from its own lookups, so a
+  spoofer spread across nodes is exempt on each node until that node's first
+  lookup for the `/64` finishes: about one lookup deadline (3 seconds) of
+  exempt misses per node. A restart of either result cache wipes the node's
+  marks.
+- **Residual: the first claims from an unmarked `/64` are exempt** until one
+  of its lookups finishes. This is what keeps a real crawler's first misses
+  from a new address uncounted.
+- **Residual: a `/64` whose lookups are all refused is never marked.** A
+  lookup turned away by the node cap or a busy slot produces no evidence, so
+  it writes no mark, and its claim is skipped and exempt. An attacker holding
+  about three IPv4 `/16`s can keep the 16 lookup slots full, and then rotate
+  through a `/64` unmarked. Refusals do not mark on purpose: the shared caps
+  can be spent from other networks, which would mark a real crawler's `/64`.
+- **Residual: the first silent lookup of an outage can still mark.** Until a
+  canary has found the resolver failing, it is taken as healthy, so the
+  lookup that meets the start of an outage can write a `:silent` mark. It is
+  not read while the resolver fails, and the `/64`'s next verified lookup
+  clears it.
+- **Residual: claims that never run a DNS lookup never mark.** DuckDuckBot
+  has no DNS check, so over IPv6 (`:unverifiable`) it stays exempt in an
+  unmarked `/64`, and a spoofer rotating as DuckDuckBot through one is never
+  counted. It is counted in a `/64` another claim has marked. A DuckDuckBot
+  claim outside a fresh published list is proven false without a lookup and
+  counted anyway.
+- **Residual: a forward error keeps the exemption in any `/64`.** A claim
+  whose PTR names a host under the engine's domain and whose forward query got
+  no answer, with its full budget, is `{:unverified, :forward_error}`; it
+  writes no mark and a mark never overrides it. A PTR pointing at a lame
+  sub-delegation under a broad engine suffix (`yandex.net`, `baidu.com`)
+  therefore stays exempt.
+- **Out of scope: rotation across `/64`s.** The guard counts per `/64`, so a
+  holder of a `/48` or wider gets a fresh counter, and a fresh mark, in each.
 - **Residual: lookup starvation, narrowed.** An attacker who controls a slow or
   silent reverse zone can still hold lookup slots until the deadline, and an
   attacker who rents several networks (five `/16`s or `/32`s at their
@@ -1280,21 +1332,42 @@ password leaves the server.
   the reset mail at will. It is charged to the address's reset-mail budget
   (`AccountThrottle.allow_mail?(:password_reset, email)`, five an hour, shared
   with the owner's own requests and never waived), so they can spend the
-  owner's reset mails for the hour; and a blocked attempt is not forgiven by
-  the per-account sign-in throttle, so repeated ones pause the account (a
-  wrong password could already do that). The owner then also gets the
-  "Unusual sign-in activity" mail. (9) The Warn signal does not reach an API
-  client of a two-factor administrator: `password_breach` is on the one-step
-  `201` only, not on `/api/auth/sign_in/verify`'s. (10) The reset mail is
-  branded for the site the request came in on, not the site whose policy
-  refused the sign-in. (11) The provider sees the same prefix from the
+  owner's reset mails for the hour, through these sign-ins or the anonymous
+  `/reset` form, after which a blocked sign-in mails the owner nothing. So a
+  block does *not* always mail the owner. A blocked attempt is not forgiven
+  by the per-account sign-in throttle, so repeated ones pause the account (a
+  wrong password could already do that), and the pause mail is the notice
+  the reset-mail budget cannot silence (#3437): when the counter holds
+  blocked sign-ins, `KilnCMS.Accounts.SignInAlert` sends "Sign-in paused on
+  your (site) account: choose a new password", saying the attempts, or some
+  of them, used the current password and that it appears in a known breach,
+  with a bare `/reset` link and no unlock link, IP or count. It is never
+  withheld for its cause, so making a window all blocks does not hide the
+  guessing mail; it changes the wording. It shares the six-hour alert window
+  with the "Unusual sign-in activity" mail, so at most one of the two goes
+  out per address in that time, and a window already spent by a pause of
+  wrong guesses holds back a later breached one until it rolls. The block
+  tally (`AccountThrottle.note_sign_in_block/1`) and the sign-in counter are
+  separate rows on the same window, so timing can move the mail between its
+  breached wordings, or to the usual one, never to silence. (9) The Warn
+  signal does not reach an API client of a two-factor administrator:
+  `password_breach` is on the one-step `201` only, not on
+  `/api/auth/sign_in/verify`'s. (10) *Closed by #3436:* the reset mail is
+  branded for a site whose policy refused the sign-in (the request's site
+  when it is one, else the one with the smallest id), so it names a site the
+  recipient administers; for a platform admin, who administers every site,
+  the request's site. (11) The provider sees the same prefix from the
   server's IP at each checked sign-in of one administrator (nothing is
   cached), so it can see one prefix recurring at sign-in times. The prefix is
   still one of about a million, as at any lookup.
 - **Audit.** A refusal at sign-in is `sign_in_failed`, reason
   `breached_password`, unsampled, in the log of each site whose policy
   refused it, and not charged to the failed-sign-ins alert
-  ([security events](security-events.md)).
+  ([security events](security-events.md)). When those sites cannot be read
+  (only a platform admin's are read at refusal time, and that read can fail), the refusal stands
+  and the event is written once in the request's site instead (#3438),
+  naming no other site, the account unlabelled unless it is a member there.
+  With no request site nothing is recorded.
 - **Telemetry.** `[:kiln_cms, :password, :breach_check]`; see
   [observability.md](observability.md#breached-password-checks).
 - **Why on by default, and why fail open.**
@@ -1564,7 +1637,8 @@ Configured at `/editor/sessions`.
   signed out on B and nothing is written to it, so it can neither be used on B
   nor kept awake from B. A remember-me cookie's signature is verified before
   its row is looked at, and every write is also filtered on the account
-  (`subject`), so a forged or foreign jti changes no one's row.
+  (`subject`), so a forged or foreign jti changes no one's row. Why a session
+  is bound this way, and what the binding does not cover: [ADR 0090](decisions/0090-a-browser-session-is-bound-to-the-site-it-signed-in-on-and-is-signed-out-on-another-sites-host.md).
 - **Last activity is the database's clock.** `last_used_at` is written by and
   compared with Postgres `now()`, never a node's clock, and the expiring
   UPDATE repeats the idle test in its `WHERE`, so a tab that kept the session
@@ -1580,7 +1654,11 @@ Configured at `/editor/sessions`.
   two-factor hold row bound to the site, writes a watermark
   (`SiteSessionPolicy.sessions_revoked_at`) and records `all_sessions_revoked`.
   A row bound to no site that predates the watermark is revoked the next time
-  it is used on this site's host, for 30 days (the remember-me lifetime). The
+  it is used on this site's host, for as long as such a row could still be
+  alive: the longest of the session token's lifetime, the remember-me
+  token's and a two-factor hold's (30 days today), derived from the sign-in
+  configuration (`IdleTimeout.watermark_horizon_seconds/0`), so raising one
+  widens it. The
   token writes that bind a row to a site read the watermark in the same
   statement, so such a row cannot escape by being used first. Other sites are
   never reached.
@@ -1590,23 +1668,65 @@ Configured at `/editor/sessions`.
   The site decides the timeout; there is no operator ceiling
   ([ADR 0018](decisions/0018-a-site-may-only-lower-a-deployment-ceiling-refused-on-write-clamped-on-read.md)
   constrains a site only against one).
+- **Sockets go with their session (#2490).** Every per-session sign-out (one
+  session or all others from *Active sessions*, idle expiry, sign out
+  everyone, an unbound row revoked against the watermark, and the browser's
+  own **Sign out**) also broadcasts a `"disconnect"` on
+  `SessionEviction.session_socket_topic/1`. A `/ws/collab` socket subscribes
+  to it because its token now names the session (`"j"`, the jti); a `/ws/gql`
+  socket subscribes for the jti of the bearer JWT it was opened with. A collab
+  connect is refused for a session that is idle, revoked, bound to another
+  site, older than the watermark, expired, not a `"user"` row (a remember-me
+  or held two-factor row) or another account's
+  (`KilnCMSWeb.CollabSocket.session_refused?/3`), and `CollabChannel`'s
+  30-second re-check repeats that check, so a revocation no broadcast reached
+  still closes the room, and a session that went idle with no page left open
+  is expired from the room (`session_idle_expired`, `surface: "collab"`).
+  `/ws/gql` applies no site rule to its bearer, as `/gql` applies none; each
+  document re-reads the bearer's row and is refused with
+  `extensions.code: "unauthenticated"` once it is revoked, expired or gone
+  (`GraphqlLimits.SocketSession`). A headless JWT, bound to no site, is
+  untouched by idle expiry and sign out everyone, as before. Why:
+  [ADR 0087](decisions/0087-a-socket-opened-from-a-sign-in-lives-no-longer-than-that-sign-in.md).
 - **Cost.** Every signed-in browser request and LiveView mount reads the
   session's token row by primary key, whether or not the site has a timeout,
-  because the cross-site rule needs it.
+  because the cross-site rule needs it. Each collab re-check (every 30
+  seconds, and every 200th update) and each `/ws/gql` document from a signed-in
+  socket adds one more such read; the collab check also reads the site's
+  cached policy.
 - **Residual risks.** (1) Not covered: API keys and headless bearer tokens,
   including a token minted with a phished password. A breach response needs a
-  password reset or *Sign out everywhere* as well. (2) `/ws/collab` (a 24-hour
-  per-account token, behind a flag that is off by default) and `/ws/gql`
-  sockets are keyed per account and survive both idle expiry and sign out
-  everyone until their next reconnect or re-check. (3) Events a LiveComponent
-  handles itself (`phx-target={@myself}`) do not count as activity on their
-  own. (4) A node holding a cached policy from before a sign out everyone may,
+  password reset or *Sign out everywhere* as well. (2) Sockets, after #2490:
+  (a) a collab token minted by a node on the release before #2490 names no
+  session; it is still accepted, per account as before, for this release only,
+  and lives at most 24 hours after the last such node stops; (b) a `/ws/gql`
+  socket that only holds subscriptions sends no documents, so after a
+  revocation whose broadcast never arrived it keeps receiving pushes until it
+  sends one or reconnects; (c) during a rolling deploy, a node still on the
+  older release revokes a session without the socket broadcast, which leaves
+  collab to its 30-second re-check and `/ws/gql` to (b); (d) a token row that
+  cannot be read fails open on both sockets, as on every other door; (e) a
+  collab connect refused by the admin allowlist has already run the session
+  check, so it can expire an idle session, as a page load from the same
+  address would. (3) A LiveView that rejoins after a network drop or a deploy
+  replays each recoverable form's `phx-change`, to the page or to the
+  component it targets, and the first replayed event counts as activity, so a
+  tab that reconnects just before its deadline can keep an idle session awake
+  ([#3474](https://github.com/The-Verscienta/kiln_cms/issues/3474)). Only the
+  cookie's holder can send it. Since #2491, events a LiveComponent handles
+  itself (`phx-target={@myself}`) count as activity like a page's own
+  (`KilnCMSWeb.IdleSession.ComponentActivity`), which widens this to component
+  forms. (4) A node holding a cached policy from before a sign out everyone may,
   for up to the cache's minute and until the cluster-wide bust lands, let an
   unbound pre-watermark session through on a request; binding still refuses
   it, and the next check catches it. (5) Activity is written at most once per
   tenth of the timeout (30 seconds to 5 minutes), so a session can end after
   as little as 90% of the timeout since its real last use. (6) Fail-open,
-  above.
+  above. (7) A collab room counts as activity only through the page: the rich
+  text editor pushes its body to the page on each change, and by reading of
+  the editor code (not verified in a browser) that includes changes arriving
+  from other peers, so a passive collaborator in a room where others type is
+  kept awake.
 
 ### Two-step sign-in requirement (#2247)
 
@@ -2437,6 +2557,100 @@ and [ADR 0029](decisions/0029-security-alert-email-stays-english-until-accounts-
   that recently verified the key
   ([Running more than one server](security-alerts.md#running-more-than-one-server)).
 
+### Backup download (part of #2225)
+
+`POST /editor/backups/download`. `KilnCMS.Backups.Run.Actions.Download`
+(`Backups.Run` `:check_download` and `:download`),
+`KilnCMSWeb.BackupDownloadToken`,
+`KilnCMSWeb.BackupDownloadController` and the History rows of
+`KilnCMSWeb.BackupLive`. A platform admin downloads one local file of a
+backup; the guide is
+[Download the files of a backup](backups.md#download-the-files-of-a-backup)
+and the decision is
+[ADR 0089](decisions/0089-a-platform-admin-downloads-a-local-backup-file-through-a-one-minute-link-and-never-while-the-console-shares-an-origin.md).
+
+The asset is the largest one Kiln holds: a database dump is every
+organization's content, accounts and password hashes, and a media set is
+every upload.
+
+- **Who.** A platform admin only: the actions' one policy is
+  `authorize_if Accounts.Checks.PlatformAdmin`, so the `:backups` system
+  actor, org admins (the default org's included), editors, viewers and
+  anonymous callers are refused. The page's handler re-checks
+  `platform_admin?` at the click, and the controller re-checks it before
+  anything else, so an admin demoted or a grant expired since the click is
+  `403`.
+- **The link.** Minted at the click, never at render: a `Phoenix.Token` under
+  its own salt, good for 60 seconds, naming the run, the file, the user, the
+  browser session's jti (#2490) and the click node's backup-directory id.
+  Another user's, another session's, a forged or an expired one is refused.
+  It travels in a CSRF-protected `POST` body, so `:filter_parameters` keeps it
+  out of every log line (an older node's included) and it never enters the
+  browser's history or downloads list. `GET` and `HEAD` answer `405` and touch
+  nothing.
+- **The path never comes from the client.** The token's file name is
+  compared byte for byte with the names `Artifact.checked_files/2` derives
+  from the run's own row (the files and sidecar of each artifact), after a
+  shape check (at most 255 bytes, no `/`, `\` or NUL). The path is built from
+  `Backups.dir/0`, the kind's subdirectory and the matched name, and must
+  stay under that subdirectory. `File.lstat` must find a regular file, so a
+  symlink is refused; `.partial` files, markers, `manifest.json` and files
+  marked pruned here are never served; only `:app` and `:imported` rows are
+  (an origin a later release adds is refused until it has its own decision).
+  Every file refusal is the same `404`.
+- **Audited before bytes.** `:download` records `backup_downloaded` in the
+  instance security log as its last check, after the file opened for
+  reading, and returns the path only once the event is written. An event that
+  can't be written is `503` and nothing is sent. The page's click runs
+  `:check_download`, which writes nothing.
+- **Re-checked at the send.** The controller `lstat`s the path again right
+  before `send_file` and sends only the same regular file (inode, device,
+  size, mtime) the checks saw.
+- **Bounded.** The `:export` budget, 10 a minute per account per node, shared
+  with the content-list and security-log exports, charged before the token is
+  verified so guessing tokens costs too. The response is an
+  `application/octet-stream` attachment with `cache-control: no-store`,
+  `x-content-type-options: nosniff` and `x-robots-tag: noindex`.
+- **Refused while the console shares an origin.** Both actions refuse while
+  `KILN_CONSOLE_HOST` is unset and there is more than one organization, or
+  while that can't be told: an organization count that can't be read, or a
+  `KilnCMSWeb.Tenant.OrgCount` verdict other than `:single`. That fails
+  closed, unlike the boot warning `Tenant.console_shares_origin?/1`. The
+  count is read by `Tenant.org_count/0`, an advisory probe that reads with
+  `authorize?: false`; it decides only whether to refuse, and fails toward
+  refusing. See residual risk 16 below for what this does and does not close.
+- **Several nodes.** A row pinned to a backup directory (#2539) is served only
+  from that directory, and a directory id that can't be read refuses. A
+  request that reaches a node whose directory id differs from the click
+  node's is `409`, not a bare `404`.
+
+Residual risks:
+
+- **A link can be replayed within its minute by the same session.** It is not
+  single-use. Each request is checked again, charged against `:export` and
+  recorded again, and it works only with that browser session's cookie.
+- **A file that changes in the last moment leaves an event for bytes not
+  sent.** The event is written before the send. A file replaced, removed or
+  swapped for a symlink between the checks and the send answers `404` with
+  nothing sent, and the server log has a warning saying the event was
+  recorded for bytes that were not sent. A swap between the second `lstat`
+  and `send_file`'s own open needs write access to `BACKUP_DIR`, which is
+  already total compromise.
+- **A single-organization install with `KILN_CONSOLE_HOST` unset can
+  download.** Following residual 16's verdict, the org admin and the operator
+  are then one party, so an org admin's code injection can reach a platform
+  admin's download. This is an open question for the owner (ADR 0089).
+- **A stolen platform-admin session on an isolated console can download.**
+  The event names the admin, the address and the user agent, and the server
+  logs each sent file, but `backup_downloaded` raises no security alert.
+  Whether to add an optional, off-by-default platform alert kind is an open
+  question for the owner (ADR 0089).
+- **Unpinned rows on nodes with no directory id.** For an imported or
+  pre-#2539 row, when neither the click node nor the answering node has a
+  `.kiln-dir-id`, the `409` can't fire, and the answering node serves its own
+  file of that name: the same name, checked against the same row, possibly
+  another node's copy.
+
 ### Other outbound calls
 `Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;
 admin-triggered from System, or from Security posture when no answer is
@@ -2539,8 +2753,11 @@ the provider. See [sso.md](sso.md#per-site-providers).
   access anywhere else: a platform admin (standing or temporary), a member of
   any other organization at any tier, or a membership-less account whose global
   role reaches beyond the site. Checked at every sign-in, in
-  `KilnCMS.Accounts.SiteSso.Admission`. Kiln has no site-scoped session, so the
-  guarantee is made at admission. **Accepted:** a session such a provider
+  `KilnCMS.Accounts.SiteSso.Admission`. Since #2489 a browser session is bound
+  to the site it signed in on and is signed out on another site's host
+  ([ADR 0090](decisions/0090-a-browser-session-is-bound-to-the-site-it-signed-in-on-and-is-signed-out-on-another-sites-host.md)), but the binding stops a cookie replayed on
+  another site, not an account that later gains access elsewhere, so the
+  guarantee is still made at admission. **Accepted:** a session such a provider
   minted before the account later gained access elsewhere keeps working until
   it ends — no wider than the mail-control concession above.
 - **Pre-registered accounts** — an unconfirmed account is never handed to a
@@ -3407,8 +3624,9 @@ because other files cite them by number.
     signing everyone out would need dual-key session verification. That is a
     feature for after 1.0, not a fix.
 14. ~~**The collaborative-editing socket is scoped by topic, not by
-    tenancy.**~~ **Closed by #655.** The socket token still names only a user,
-    so it establishes *who* and nothing more; `CollabChannel.join/3` now
+    tenancy.**~~ **Closed by #655.** The socket token names a user and, since
+    #2490, the browser session it was minted for (below), so it establishes
+    *who* and nothing more; `CollabChannel.join/3` now
     resolves the topic to a real document, loads it as that user under the
     connection's org, and authorizes the `:autosave` **write** — not the read,
     which is the wider scope and would have let a reader author, since the
@@ -3457,6 +3675,27 @@ because other files cite them by number.
     reload is the mechanism: re-running the policies against the actor struct
     the socket connected with would answer from the same stale role, scopes and
     audiences forever.
+
+    **The session is re-checked too — *#2490.*** The token carries the jti of
+    the browser session whose editor minted it (`"j"`;
+    `ContentEditorLive` mints none when it cannot name its session, and the
+    page edits on its own). The connect and every re-check read that session's
+    token row (`CollabSocket.session_refused?/3`) and refuse a row that is not
+    a live, unexpired `"user"` sign-in of the connecting account, or that
+    `IdleTimeout` signs out on this site: idle, revoked, bound to another
+    site, or older than the site's last *Sign out everyone*. A connection that
+    passes subscribes to `SessionEviction.session_socket_topic/1` after its
+    last refusal, so every per-session sign-out closes it at once (a refused
+    upgrade leaves the HTTP/1 process alive for keep-alive, which is why the
+    subscription waits). The re-check is for what no broadcast reached: a
+    message lost between nodes, a revocation by a node on an older release, a
+    path that broadcasts nothing, and a session that went idle while no page
+    of it was open (expired from the room, `session_idle_expired` with
+    `surface: "collab"`). It adds one primary-key read and a cached policy
+    lookup to each re-check. A token minted before #2490 has no `"j"` and
+    skips both, per account as before; it is accepted for this release only
+    and lives a day. Decision:
+    [ADR 0087](decisions/0087-a-socket-opened-from-a-sign-in-lives-no-longer-than-that-sign-in.md).
 
     **The exposure window an operator can rely on is 30 seconds** — the
     interval in `KilnCMSWeb.SocketReauth` — plus the in-flight message. Both
@@ -3609,6 +3848,21 @@ because other files cite them by number.
     same-origin with that org's code injection. It reaches the shared routes
     only, never a console route, and it is a separate session from the
     one on any console host.
+
+    **Backup downloads (part of #2225).** Since #2225 a platform admin can
+    download a backup's files, a full dump of every organization, so on an
+    unconfigured multi-org deployment that is the most direct thing a
+    same-origin script could take with a platform admin's session. The
+    download is therefore refused while `KILN_CONSOLE_HOST` is unset and
+    there is more than one organization, or while the count can't be told
+    ([Backup download](#backup-download-part-of-2225)).
+    That closes the **direct** download path only, not the residual: other
+    console actions a same-origin script could take with a platform admin's
+    session stay open until the console has its own origin. The answer is
+    still `KILN_CONSOLE_HOST`. A single-org install with it unset can download,
+    following this residual's verdict that the org admin and the operator
+    are one party (an open question for the owner in
+    [ADR 0089](decisions/0089-a-platform-admin-downloads-a-local-backup-file-through-a-one-minute-link-and-never-while-the-console-shares-an-origin.md)).
 
 17. **Queued mail carries sign-in links, sealed under `SECRET_KEY_BASE`
     (#1843).** Account confirmations, password resets, magic links and

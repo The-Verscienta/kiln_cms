@@ -124,6 +124,24 @@ defmodule KilnCMS.Security.InstanceEventTest do
       assert event.metadata == %{"stamp" => "20261110-120000", "step" => "dump"}
     end
 
+    # Part of #2225: a download names its file, never a path.
+    test "a backup_downloaded event keeps stamp, file, kind, bytes and node only" do
+      event =
+        record!(%{
+          type: :backup_downloaded,
+          metadata: %{
+            "stamp" => "20261118-031700",
+            "file" => "kiln-db-20261118-031700.dump",
+            "kind" => "db",
+            "bytes" => 10,
+            "node" => "kiln@a",
+            "path" => "/var/backups/kiln/db/kiln-db-20261118-031700.dump"
+          }
+        })
+
+      assert Map.keys(event.metadata) |> Enum.sort() == ~w(bytes file kind node stamp)
+    end
+
     test "a site log no longer takes backup_canceled" do
       assert {:error, %Ash.Error.Invalid{}} =
                Security.record(%{type: :backup_canceled},

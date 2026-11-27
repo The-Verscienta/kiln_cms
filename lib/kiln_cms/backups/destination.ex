@@ -465,7 +465,10 @@ defmodule KilnCMS.Backups.Destination do
   can't tell those from two stores that each hold a bucket of that name.
   Retention treats such a pair as overlapping; creating one is still
   allowed, since only an exact `overlap?/2` is refused. True of every pair
-  `overlap?/2` is true of, too.
+  `overlap?/2` is true of, too. Pure on locations: retention itself tells
+  two SFTP servers apart by their rows' trusted host keys and Tests
+  (`KilnCMS.Backups.Retention.prune_blocker/3`, #3200), which no location
+  carries.
   """
   @spec possible_overlap?(location(), location()) :: boolean()
   def possible_overlap?({:s3, _host_a, _port_a, bucket, a}, {:s3, _host_b, _port_b, bucket, b}),

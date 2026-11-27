@@ -427,6 +427,17 @@ defmodule KilnCMSWeb.AccountsLiveTest do
 
       assert html =~ "Signed out of every session"
     end
+
+    test "says sign-out-everywhere also closes open editing rooms",
+         %{conn: conn, subject: subject} do
+      {:ok, view, _html} = live(conn, ~p"/editor/accounts/#{subject.id}")
+
+      assert has_element?(
+               view,
+               "#sign-out-everywhere-hint",
+               "also closes the collaborative-editing rooms this account has open"
+             )
+    end
   end
 
   # The audience checkboxes write the account's membership on the site the page

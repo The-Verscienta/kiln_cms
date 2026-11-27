@@ -120,8 +120,9 @@ a destination's retention delete another backup directory's backups
 an SFTP backup server's host key (`backup_destination_host_key_trusted`;
 #2222), an SFTP backup server presenting a key other than the trusted one
 (`backup_destination_host_key_mismatch`; #2222, the one instance event with
-no person behind it and the one that raises a security alert), and a
-platform admin changing the platform's security alerts
+no person behind it and the one that raises a security alert), a platform
+admin downloading one of a backup's files (`backup_downloaded`; part of
+#2225), and a platform admin changing the platform's security alerts
 (`platform_alerts_changed`). A site's log is readable by that
 site's admins, who need not be platform admins, so these go to a separate
 **instance security log** instead (#2541).
@@ -175,8 +176,8 @@ No instance event raises a [security alert](security-alerts.md).
 ## What is recorded
 
 Every type below goes to a site's log except `backup_canceled`, the three
-`backup_schedule_*` types, the four `backup_destination_*` types and
-`platform_alerts_changed`, which go to the
+`backup_schedule_*` types, the `backup_destination_*` types,
+`backup_downloaded` and `platform_alerts_changed`, which go to the
 [instance log](#the-instance-log).
 
 Every event has a time, a type, the person who acted (an email snapshot and
@@ -189,7 +190,7 @@ a type may carry only the keys below; anything else is dropped.
 | Type (CSV `type`) | Label on the page | Written when | `metadata` keys |
 |---|---|---|---|
 | `sign_in` | Sign-in | A sign-in completed, every factor passed | `method` |
-| `sign_in_failed` | Failed sign-in | A wrong password, a wrong second-factor code or a passkey refused at the code prompt, or a password sign-in refused by [human verification](human-verification.md) (a token that did not pass, or the provider down past the point where sign-ins are let through). Sampled: see below. Also an administrator's correct password refused at sign-in because it is in a known breach and a site they administer [checks at sign-in](account-administration.md#check-administrator-passwords-at-sign-in) under Block (reason `breached_password`): not sampled, and written to that site's log | `method`, `reason` |
+| `sign_in_failed` | Failed sign-in | A wrong password, a wrong second-factor code or a passkey refused at the code prompt, or a password sign-in refused by [human verification](human-verification.md) (a token that did not pass, or the provider down past the point where sign-ins are let through). Sampled: see below. Also an administrator's correct password refused at sign-in because it is in a known breach and a site they administer [checks at sign-in](account-administration.md#check-administrator-passwords-at-sign-in) under Block (reason `breached_password`): not sampled, and written to that site's log, or to the request's site when the deciding sites can't be read (#3438) | `method`, `reason` |
 | `sign_in_locked` | Sign-in locked out | A throttle refused an attempt. First refusal per subject and scope each 15 minutes | `method`, `scope` |
 | `second_factor_enrolled` | Second factor added | An authenticator app was confirmed | `kind`, `proof` (see below) |
 | `second_factor_removed` | Second factor removed | Two-factor sign-in was turned off, or removed when an invitation, a password reset or a magic link took over an unconfirmed account (see below) | `kind`, `via` |
@@ -231,6 +232,7 @@ a type may carry only the keys below; anything else is dropped.
 | `api_key_reuse_detected` | Rotated API key used again | A draft-write key that had been rotated away was presented to `POST /api/keys/rotate` more than 120 seconds after its rotation, so two parties held it, and the live key of its lineage was revoked ([self-rotation](headless-consumer-guide.md#keeping-the-key-alive-self-rotation)). No person; the target is the presented key (target type `api_key`), the IP the request's. Raises the platform's `api_key_abuse` [alert](security-alerts.md) | `name`, `revoked` |
 | `ip_block_refused` | Blocked address refused | A request or socket connect from an address on the site's [block list](ip-blocking.md) was refused. **No IP address and no user agent**, and no person: nothing records a blocked address. Sampled: see below. Raises the site's `blocked_ip` [alert](security-alerts.md#blocked-addresses-raise-one-alert-per-window), and is written even when the site turned that alert off | `rule`, `surface` |
 | `api_key_rate_limited` | API key hit a rate limit | An API key this server verified recently (it forgets a key 2.5 to 5 minutes after the key's last successful request there) went over a rate limit an API key can reach. No person (whoever presented it is not known to be the owner); the target is the key (target type `api_key`), the IP the request's. Sampled: see below. Raises the platform's `api_key_rate_limited` [alert](security-alerts.md#api-keys-over-a-rate-limit) | `name`, `bucket` |
+| `backup_downloaded` | Backup downloaded | A platform admin [downloaded one of a backup's local files](backups.md#download-the-files-of-a-backup) (part of #2225). Recorded once every check passed and before any byte is sent, once per download request, so a link used twice in its minute records two. A file that changed or went just before the send is not sent, and its event stays. In the instance log. The person is the admin; the target is the backup run (target type `backup_run`) | `stamp`, `file` (the file's name), `kind` (`db` or `media`), `bytes`, `node` (the node that served it) |
 | `platform_alerts_changed` | Platform security alerts changed | A platform admin saved the platform's [security alert settings](security-alerts.md#turn-off-rate-limit-alerts-for-api-keys). In the [instance log](#the-instance-log), never a site's. The person is the admin; the target is the settings row (target type `platform_security_alerts`) | `disabled_kinds` |
 | `second_factor_policy_changed` | Two-step sign-in requirement changed | A site's two-step sign-in requirement (who must hold a second factor, and the grace period) was saved, including turned off, or was turned off from the server with `KilnCMS.Release.second_factor_requirement_off/1` ([Turn the requirement off from the server](two-factor-auth.md#turn-the-requirement-off-from-the-server)). An admin's save names the admin; the server's names no person and has no IP address. The target is the setting (target type `site_second_factor_policy`). Saved at `/editor/two-factor` (#2247) | `required_for`, `grace_days`, `previous_required_for`, `change`, `via` |
 | `second_factor_required` | Held for two-step sign-in setup | A sign-in was held, or refused, because the site requires a second factor of the account (#2247): sent to set one up, or a passkey-only account's password refused where its passkey cannot be used. Recorded once per sign-in, at the sign-in doors only, never for each request a held session or token makes afterwards. The person is the account | `tier`, `surface`, `reason` |
@@ -300,8 +302,10 @@ comma-separated, or `none`.
 For `session_idle_expired`, `timeout_minutes` is the timeout that applied,
 `tier` is `admin` when it was the administrators' own timeout and `member` when
 it was everyone's, and `surface` is where it was noticed: `http` (a request),
-`live` (an open page) or `remember_me` (a remember-me cookie that sat unused too
-long). For `all_sessions_revoked`, `count` is the number of browser sessions
+`live` (an open page), `remember_me` (a remember-me cookie that sat unused too
+long) or `collab` (a collaborative-editing connection, at its connect or its
+30-second re-check, which can notice an idle session with no page of it left
+open). A `collab` event carries no IP address or user agent. For `all_sessions_revoked`, `count` is the number of browser sessions
 signed out (remember-me cookies and two-factor holds are not counted) and
 `except_self` is `true` when the admin kept their own browser. Saving the idle
 timeout itself is `org_setting_changed` with `setting` `site_session_policy`.
@@ -480,7 +484,11 @@ legacy no-membership account on the default site); an account of another site
 appears as an unknown address. The exception is a sign-in refused for a
 breached password (#2407): it goes to the log of each site whose policy
 refused it, whichever host the person signed in on, and nothing is written
-to the request's site unless it is one of them. A role change is written to the log of the
+to the request's site unless it is one of them. If those sites can't be read
+(only a platform admin's are read at that point, and the read can fail), the
+event is written once to the request's site instead (#3438), so the refusal
+is never lost; it names no other site, and the account is labelled only if
+it is a member there. A role change is written to the log of the
 membership's own site, whichever site the admin was viewing; a user's global
 role is written to the site the request ran on (`mix kiln.beta.round`, which
 has no request, writes its seats' role changes to the default site's).
@@ -496,7 +504,8 @@ since whoever presents the key chooses it. A key over a rate limit
 (`api_key_rate_limited`) follows the same rule. A blocked address
 (`ip_block_refused`) goes to the log of the site whose block list refused it.
 A change to the platform's alert settings (`platform_alerts_changed`) goes to
-the [instance log](#the-instance-log).
+the [instance log](#the-instance-log). So does a downloaded backup file (`backup_downloaded`):
+the dump holds every site.
 
 ## Event matrix: where each event comes from
 
@@ -518,7 +527,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `sign_in` | `lib/kiln_cms_web/controllers/api_auth_controller.ex`: `issue_token/2` (the headless token API, `sign_in/2` and `verify/2`) | after commit; `method: "password"` |
 | `sign_in_failed` (wrong password) | `lib/kiln_cms/security/preparations/audit_sign_in.ex`, on `User` `:sign_in_with_password` (`lib/kiln_cms/accounts/user.ex`) | sampled, after commit; `method: "password"`, `reason: "invalid_credentials"` |
 | `sign_in_failed` (human verification) | `audit_sign_in.ex`, when `ThrottleSignIn` refuses with `KilnCMS.Accounts.Errors.ChallengeRequired` (`KilnCMS.Challenge.Gate`) | sampled, after commit; `method: "password"`, `reason: "challenge_failed"` or `"challenge_unavailable"` |
-| `sign_in_failed` (breached password) | `audit_sign_in.ex`, when `KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn` refuses with `KilnCMS.Accounts.Errors.PasswordResetRequired` (#2407); written by `KilnCMS.Security.AuthEvents.sign_in_refused_breached/3` | unsampled, after commit, once in each site whose policy refused it; not charged to the failed-sign-ins alert; `method: "password"`, `reason: "breached_password"` |
+| `sign_in_failed` (breached password) | `audit_sign_in.ex`, when `KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn` refuses with `KilnCMS.Accounts.Errors.PasswordResetRequired` (#2407); written by `KilnCMS.Security.AuthEvents.sign_in_refused_breached/3` | unsampled, after commit, once in each site whose policy refused it, or once in the request's site when those can't be read (an empty `org_ids`, #3438); not charged to the failed-sign-ins alert; `method: "password"`, `reason: "breached_password"` |
 | `sign_in_failed` (wrong code) | `lib/kiln_cms/accounts/second_factor.ex`: `check/3` (`audit_failure/3`), used by `TwoFactorController.create` and `ApiAuthController.verify`; and `check_passkey/3`, used by `TwoFactorController.passkey_verify` for a passkey refused at the prompt (#2247) | sampled; `method: "second_factor"`, `reason: "invalid_code"` (a refused passkey too) |
 | `sign_in_locked` (account, address) | `audit_sign_in.ex`, via `AuthEvents.password_locked/3`, when `ThrottleSignIn` refuses | after commit; `method: "password"`, `scope: "account"` or `"address"` |
 | `sign_in_locked` (second factor at sign-in) | `lib/kiln_cms/accounts/second_factor.ex`: `check/3` or `check_passkey/3` on a denied budget | after commit; `scope: "second_factor"` |
@@ -537,7 +546,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `sso_config_changed` | `CMS.SiteSsoProvider` (every write, via the `audit: :sso_config` option of `use KilnCMS.CMS.OrgSettings`, `lib/kiln_cms/cms/site_sso_provider.ex`), and `CMS.SiteSsoDomain` `:add`, `:verify`, `:remove` (`lib/kiln_cms/cms/site_sso_domain.ex`) | in txn; never the issuer, client id, secret or domain |
 | `org_setting_changed` | `lib/kiln_cms/cms/org_settings.ex`: the `use KilnCMS.CMS.OrgSettings` macro adds `Changes.RecordOrgSetting` to every write of every settings resource, and `CMS.IpBlockRule` `:create`, `:destroy` (`lib/kiln_cms/cms/ip_block_rule.ex`) | in txn; names the setting, never a value. The retention setting itself is one of them |
 | `ip_auto_blocked` | `lib/kiln_cms/security/scanner_guard.ex`, after the guard's `CMS.IpBlockRule` `:create` succeeds, via `Recorder.record_after_commit/2` | outside the transaction, off the request path; skipped when the guard is off, the cap is reached or a recent sign-in from the address exists |
-| `session_idle_expired` | `lib/kiln_cms/accounts/idle_timeout.ex`: `check/3`, once the expiring UPDATE matched the row (a racing tab that kept the session awake records nothing). Reached from `KilnCMSWeb.Plugs.IdleTimeout` (requests, remember-me) and `KilnCMSWeb.IdleSession` (open pages) | after commit; tenant is the site the request was on; target type `session`, no target id |
+| `session_idle_expired` | `lib/kiln_cms/accounts/idle_timeout.ex`: `check/3`, once the expiring UPDATE matched the row (a racing tab that kept the session awake records nothing). Reached from `KilnCMSWeb.Plugs.IdleTimeout` (requests, remember-me), `KilnCMSWeb.IdleSession` (open pages) and, through `check_row/3`, `KilnCMSWeb.CollabSocket.session_refused?/3` (the collab connect and `KilnCMSWeb.CollabChannel`'s re-check) | after commit; tenant is the site the request was on; target type `session`, no target id |
 | `all_sessions_revoked` | `lib/kiln_cms/accounts/sign_out_all.ex`: `run/3`, the `:sign_out_all` action of `CMS.SiteSessionPolicy` | in txn, with the revocation and the watermark: if the event cannot be written nothing is signed out |
 | `admin_access_refused` | `KilnCMSWeb.AdminAllowlist.record_refusal/4`, called from `lib/kiln_cms_web/plugs/admin_allowlist.ex` (`surface` `http` or `api`) and from `lib/kiln_cms_web/admin_allowlist.ex`: the LiveView `on_mount` (`live`) and `check_connect/2`, from the collab socket's `connect/3` in `lib/kiln_cms_web/channels/collab_socket.ex` (`collab`) | sampled, after commit; only for an address not on the list, never for a list that could not be read |
 | `admin_allowlist_changed` | `lib/kiln_cms/cms/changes/record_admin_allowlist_change.ex`, on `CMS.SiteAdminAllowlist` `:save` and `:update` (the `audit: {:change, ...}` option of `use KilnCMS.CMS.OrgSettings`) | in txn; only when the actor is a user. The previous list is read in the same transaction; if it cannot be read the save fails |
@@ -551,6 +560,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `backup_destination_created`, `backup_destination_changed`, `backup_destination_deleted`, `backup_destination_tested`, `backup_destination_adoptions_changed` | `KilnCMS.Security.Changes.Record` on `Backups.DestinationConfig` `:create`, `:update`, `:reorder` (as `backup_destination_changed`), `:destroy`, `:record_test_result` and `:adopt_directories` (`lib/kiln_cms/backups/destination_config.ex`; metadata from `KilnCMS.Backups.DestinationConfig.Audit`), called from the Backups page's Destinations tab and a release console | in txn, with the write: if the event cannot be written the destination does not change; `scope: :instance`; `backup_destination_changed` only when something changed. `backup_destination_tested` is written with the test's result once the adapter call has returned; the write runs as the `:backups` system actor, and the admin who pressed **Test** is the event's person |
 | `backup_destination_host_key_trusted` | `KilnCMS.Security.Changes.Record` on `Backups.DestinationConfig` `:trust_host_key` (`lib/kiln_cms/backups/destination_config.ex`; metadata from `DestinationConfig.Audit`'s `host_key_trusted`), called from the Destinations tab's **Trust this key** and a release console | in txn, with the write: if the event cannot be written the key is not trusted; `scope: :instance` |
 | `backup_destination_host_key_mismatch` | `lib/kiln_cms/backups/destination/sftp/host_key_alert.ex`: `mismatch/4`, called by `KilnCMS.Backups.Destination.Sftp` when a connection's host key check fails | best-effort, outside the adapter's call result: claimed first with `ThrottleStore.hit/5` (one per destination per hour, cluster-wide), then `Recorder.record/2` and the `backup_host_key_changed` alert claim in one transaction; a failure is logged and the destination fails all the same; `scope: :instance` |
+| `backup_downloaded` | `KilnCMS.Backups.Run.Actions.Download` on `Backups.Run` `:download` (`lib/kiln_cms/backups/run/actions/download.ex`, through `KilnCMS.Backups.download/4`), called only by `KilnCMSWeb.BackupDownloadController` immediately before it sends the file; the page's click runs `:check_download`, which records nothing | `Recorder.record/2` outside any transaction, as the last check: the controller gets the file's path only once the event is written, and anything else (an error, or `:skipped` while the admin's erasure runs) is `503` `audit_failed` with nothing sent. Written before the send, so a file that fails the re-check just before `send_file` leaves an event for bytes not sent, with a warning in the server log; `scope: :instance` |
 | `api_key_reuse_detected` | `lib/kiln_cms/accounts/api_key_reuse.ex`: `check/2`, called by `KilnCMSWeb.ApiKeyRotationController` with the request context, after the lineage's live keys are revoked | `Recorder.record/2` outside any transaction, with `alert_required: true`: if its `api_key_abuse` alert cannot be claimed the event is not written either, and when the event is not written the platform admins get the plain reuse email instead |
 | `ip_block_refused` | `lib/kiln_cms/security/blocked_ip_alert.ex`: `note/4`, called by `KilnCMSWeb.Plugs.IpBlock` (`surface` `http`) and by `KilnCMSWeb.IpBlock.check_connect/2`, from its LiveView `on_mount` (`live`) and the `/ws/gql`, `/ws/collab` and `/ws/bridge` connects (`gql`, `collab`, `bridge`), with the rule `IpBlocklist.match/2` returned. Never by `IpBlocklist.blocked?/2`, which the scanner guard also asks | sampled, after commit, off the request path (a task under `KilnCMS.TaskSupervisor`); in-memory gates first; `request: nil`, so no IP or user agent |
 | `api_key_rate_limited` | `lib/kiln_cms/security/api_key_trip.ex`: `note/2`, called from the refusal branch of `KilnCMSWeb.Plugs.RateLimit` and `KilnCMSWeb.Plugs.GraphqlBatchLimit` for the `api`, `gql`, `media_upload`, `media_transform` and `plugin_endpoint` buckets | sampled, after commit, off the request path; only for a key in the node's verified-key cache (filled by `KilnCMSWeb.Plugs.ApiKeyAuth` and, on `/mcp`, by `KilnCMSWeb.Plugs.RememberApiKey` after `KilnCMSWeb.Plugs.RequireApiKey` verified the key), reloaded and still valid; tenant from `ApiKeyTrip.owner_org_id/1`; `user: nil` |

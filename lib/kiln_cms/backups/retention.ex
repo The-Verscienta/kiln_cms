@@ -264,6 +264,8 @@ defmodule KilnCMS.Backups.Retention do
     WorkState
   }
 
+  alias KilnCMS.Backups.Destination.Sftp
+  alias KilnCMS.Backups.Destination.Sftp.HostKey
   alias KilnCMS.Backups.Retention.Policy
 
   require Logger
@@ -580,7 +582,8 @@ defmodule KilnCMS.Backups.Retention do
   def describe(:destination_overlap_possible_sftp),
     do:
       "another SFTP backup destination uses a folder inside or around this one's; the app " <>
-        "can't tell whether it is the same server"
+        "can't tell whether it is the same server until both trust host keys of the same " <>
+        "type that differ, and each has passed a Test since the later of the two was trusted"
 
   def describe({:dir_id, reason}),
     do: "couldn't read the backup directory's id (#{inspect(reason)})"
@@ -1719,7 +1722,8 @@ defmodule KilnCMS.Backups.Retention do
   it can (#2950). The one rule both retention and the Destinations tab
   apply, so the tab's "Prunes" badge shows only where a pass would prune.
   Pure: the caller reads `rows`, every stored destination (enabled or not;
-  anything with `:id`, `:kind` and `:settings`), and passes
+  anything with `:id`, `:kind` and `:settings`; an SFTP row's `:host_key`,
+  `:last_test_ok` and `:last_tested_at` too), and passes
   `Destination.env_location/0` as `env`.
 
   For a stored destination's `%Config{}`:
@@ -1738,7 +1742,21 @@ defmodule KilnCMS.Backups.Retention do
     * `:destination_overlap_possible_sftp` - another stored SFTP
       destination's path is inside or around this one's, on any host, port
       or login: it may be the same folder (`Destination.possible_overlap?/2`,
-      #2222).
+      #2222). Unless both rows prove they are distinct servers (#3200):
+      both trust a host key (`Sftp.trusted_key/1`) of the same type, the
+      fingerprints differ, and each row's last Test passed
+      (`last_test_ok`) after the later of the two `host_key["trusted_at"]`
+      instants. A Test connects only to a server offering the row's trusted
+      key, so it shows that key is still the server's own, after both keys
+      were in place. Every other pair stays blocked: a key not yet trusted,
+      keys of different types (one server holds an ed25519 and an RSA key),
+      one fingerprint (one server by name and by IP), and a key that hasn't
+      been seen since (a disabled row never connects, so a server
+      reinstalled with a new key would otherwise look like another
+      server; re-trusting one row of a rotated server moves the later
+      trust past the other's last Test). The subject's own row in `rows`
+      supplies its key and Test; with no row it is never proven. The exact
+      `:destination_overlap` (same host, port and login) is never narrowed.
 
   For `:env`, the env destination, which may share a place with any of them
   unseen:
@@ -1773,10 +1791,18 @@ defmodule KilnCMS.Backups.Retention do
       blocker = env_blocker(location, env) ->
         blocker
 
-      overlaps_another?(location, config.id, rows, &Destination.overlap?/2) ->
+      overlaps_another?(
+        location,
+        config.id,
+        rows,
+        &Destination.overlap?(location, row_location(&1))
+      ) ->
         :destination_overlap
 
-      overlaps_another?(location, config.id, rows, &Destination.possible_overlap?/2) ->
+      overlaps_another?(location, config.id, rows, fn row ->
+        Destination.possible_overlap?(location, row_location(row)) and
+            not distinct_servers?(config.id, row, rows)
+      end) ->
         possible_overlap(location)
 
       true ->
@@ -1813,10 +1839,83 @@ defmodule KilnCMS.Backups.Retention do
   defp env_blocker(location, env),
     do: if(Destination.overlap?(location, env), do: :env_overlap)
 
-  defp overlaps_another?(:unknown, _id, _rows, _overlap?), do: false
+  defp overlaps_another?(:unknown, _id, _rows, _overlaps?), do: false
 
-  defp overlaps_another?(location, id, rows, overlap?) do
-    Enum.any?(rows, &(&1.id != id and overlap?.(location, row_location(&1))))
+  defp overlaps_another?(_location, id, rows, overlaps?) do
+    Enum.any?(rows, &(&1.id != id and overlaps?.(&1)))
+  end
+
+  @doc """
+  Whether pressing **Test** on the SFTP rows involved would clear
+  `config`'s `:destination_overlap_possible_sftp` (#3428), so the
+  Destinations tab can say so. Pure, on the same `rows` and `env` as
+  `prune_blocker/3`, whose rule it reuses rather than restates.
+
+  True only when `prune_blocker/3` gives `:destination_overlap_possible_sftp`
+  and every SFTP row whose path may overlap this one's lacks nothing but
+  the Tests (#3200): both rows trust a key of the same type, the
+  fingerprints differ, both trust times can be read, and one row or both
+  hasn't passed a Test since the later trust. One partner that a Test
+  can't clear (no trusted key, keys of different types, one fingerprint)
+  makes it false, since the row stays blocked whatever is tested.
+  """
+  @spec cleared_by_test?(Config.t() | :env, [map()], Destination.location() | nil) ::
+          boolean()
+  def cleared_by_test?(%Config{} = config, rows, env) when is_list(rows) do
+    location = Destination.location(config)
+
+    prune_blocker(config, rows, env) == :destination_overlap_possible_sftp and
+      rows
+      |> Enum.filter(
+        &(&1.id != config.id and Destination.possible_overlap?(location, row_location(&1)))
+      )
+      |> Enum.all?(&(server_proof(config.id, &1, rows) in [:proven, :untested]))
+  end
+
+  def cleared_by_test?(:env, _rows, _env), do: false
+
+  # Two SFTP rows whose paths nest are distinct servers when both trust a
+  # key of the same type with different fingerprints, and each passed a
+  # Test after the later of the two trusts (#3200). Positive proof only:
+  # nothing here infers a key is good from the absence of a refusal.
+  defp distinct_servers?(id, other, rows), do: server_proof(id, other, rows) == :proven
+
+  # `:proven` (distinct servers), `:untested` (the keys would prove it, but
+  # one row or both hasn't passed a Test since the later trust, #3428), or
+  # `:unproven` (no Test can prove it).
+  defp server_proof(id, %{kind: "sftp"} = other, rows) do
+    with %{kind: "sftp"} = own <- Enum.find(rows, &(&1.id == id)),
+         {type, own_fingerprint} <- Sftp.trusted_key(own),
+         {^type, other_fingerprint} <- Sftp.trusted_key(other),
+         false <- HostKey.same?(own_fingerprint, other_fingerprint),
+         %DateTime{} = own_trusted <- trusted_at(own),
+         %DateTime{} = other_trusted <- trusted_at(other) do
+      later = Enum.max([own_trusted, other_trusted], DateTime)
+
+      if tested_since?(own, later) and tested_since?(other, later),
+        do: :proven,
+        else: :untested
+    else
+      _missing_untrusted_or_same -> :unproven
+    end
+  end
+
+  defp server_proof(_id, _row, _rows), do: :unproven
+
+  defp trusted_at(%{host_key: %{"trusted_at" => at}}) when is_binary(at) do
+    case DateTime.from_iso8601(at) do
+      {:ok, datetime, _offset} -> datetime
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp trusted_at(_row), do: nil
+
+  defp tested_since?(row, instant) do
+    case {Map.get(row, :last_test_ok), Map.get(row, :last_tested_at)} do
+      {true, %DateTime{} = at} -> DateTime.compare(at, instant) == :gt
+      _untested_or_failed -> false
+    end
   end
 
   # Whose units the ownership rule (step 4) accepts: in-app runs of THIS

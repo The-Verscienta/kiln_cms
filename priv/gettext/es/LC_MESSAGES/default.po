@@ -1121,6 +1121,11 @@ msgstr "%{name} %{version} está retirado en Hex (%{reason})."
 msgid "%{name} %{version}: security notice %{id} (%{severity})."
 msgstr "%{name} %{version}: aviso de seguridad %{id} (%{severity})."
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "%{name} (%{size})"
+msgstr "%{name} (%{size})"
+
 #: lib/kiln_cms_web/live/form_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{name} (copy)"
@@ -4907,6 +4912,11 @@ msgstr "Directorios de copias adoptados de un destino modificados"
 msgid "Backup destinations"
 msgstr "Destinos de copias de seguridad"
 
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Backup downloaded"
+msgstr "Copia de seguridad descargada"
+
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
 msgid "Backup pages"
@@ -5896,6 +5906,11 @@ msgstr "Pago cancelado: no se te ha cobrado."
 #, elixir-autogen, elixir-format
 msgid "Checkpointing is switched off, so no checkpoints are being minted and nothing is published to a witness."
 msgstr "Los puntos de control están desactivados, así que no se emite ninguno ni se publica nada en un testigo."
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "Checksum file"
+msgstr "Archivo de sumas de verificación"
 
 #: lib/kiln_cms_web/components/content_editor/flexible_components.ex
 #, elixir-autogen, elixir-format
@@ -7373,6 +7388,11 @@ msgstr "No se pudo mover a la papelera. Puede que ya no exista."
 #, elixir-autogen, elixir-format
 msgid "Couldn't ping that webhook."
 msgstr "No se pudo probar ese webhook."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't prepare that download."
+msgstr "No se pudo preparar esa descarga."
 
 #: lib/kiln_cms_web/live/mail_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -9007,6 +9027,11 @@ msgstr "Hecho:"
 msgid "Done: %{changed} renamed, %{pinned} hand-picked skipped, %{scanned} scanned."
 msgstr "Listo: %{changed} renombrados, %{pinned} definidos manualmente omitidos, %{scanned} analizados."
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "Download"
+msgstr "Descargar"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/instance_security_log_live.ex
 #: lib/kiln_cms_web/live/security_log_live.ex
@@ -9019,10 +9044,20 @@ msgstr "Descargar CSV"
 msgid "Download JSON"
 msgstr "Descargar JSON"
 
+#: lib/kiln_cms_web/controllers/backup_download_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Download a backup's files from the Backups page in the editor."
+msgstr "Descarga los archivos de una copia de seguridad desde la página Copias de seguridad del editor."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Download a copy of your account profile and notification preferences as JSON."
 msgstr "Descargue una copia del perfil de su cuenta y sus preferencias de notificación en formato JSON."
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "Download a file of this backup"
+msgstr "Descargar un archivo de esta copia de seguridad"
 
 #: lib/kiln_cms_web/live/account_live.ex
 #, elixir-autogen, elixir-format
@@ -9038,6 +9073,21 @@ msgstr "Descargar las definiciones de este sitio"
 #, elixir-autogen, elixir-format
 msgid "Downloadable document, e.g. a PDF"
 msgstr "Documento descargable, p. ej. un PDF"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Downloads are off while the console shares its address with your organizations' sites."
+msgstr "Las descargas están desactivadas mientras la consola comparta su dirección con los sitios de tus organizaciones."
+
+#: lib/kiln_cms_web/controllers/backup_download_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Downloads are off while the console shares its address with your organizations' sites. Set KILN_CONSOLE_HOST, or copy the files from the server."
+msgstr "Las descargas están desactivadas mientras la consola comparta su dirección con los sitios de tus organizaciones. Define KILN_CONSOLE_HOST o copia los archivos desde el servidor."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Downloads are off: the console shares its address with your organizations' sites (KILN_CONSOLE_HOST is unset and there is more than one organization), so a site's injected code could take a download. Set KILN_CONSOLE_HOST, or copy the files from the server."
+msgstr "Las descargas están desactivadas: la consola comparte su dirección con los sitios de tus organizaciones (KILN_CONSOLE_HOST no está definido y hay más de una organización), así que el código inyectado en un sitio podría hacer una descarga. Define KILN_CONSOLE_HOST o copia los archivos desde el servidor."
 
 #: lib/kiln_cms_web/components/content_editor/advisory_panel_components.ex
 #: lib/kiln_cms_web/components/content_editor/reference_picker.ex
@@ -11588,8 +11638,8 @@ msgstr "Bien"
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
-msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot and Applebot, when the address checks out as theirs. A claim proven false counts as No user agent."
-msgstr "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot y Applebot, cuando se comprueba que la dirección es suya. Una identificación que resulta falsa cuenta como Sin agente de usuario."
+msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot, Applebot, SeznamBot and MojeekBot, when the address checks out as theirs. A claim proven false counts as No user agent."
+msgstr "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot, Applebot, SeznamBot y MojeekBot, cuando se comprueba que la dirección es suya. Una identificación que resulta falsa cuenta como Sin agente de usuario."
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/governance_live.ex
@@ -12201,6 +12251,11 @@ msgstr "Cómo crear la fórmula"
 msgid "How to restore a media backup written in several parts"
 msgstr "Cómo restaurar una copia de seguridad de medios escrita en varias partes"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "How two SFTP servers both prune"
+msgstr "Cómo depuran ambos servidores SFTP"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "How your name appears to readers and to the people you work with."
@@ -12573,6 +12628,11 @@ msgstr "Incluido en las salidas legibles por IA (Markdown y datos estructurados)
 #, elixir-autogen, elixir-format
 msgid "Incompatible with this Kiln"
 msgstr "Incompatible con este Kiln"
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "Incomplete set"
+msgstr "Conjunto incompleto"
 
 #: lib/kiln_cms_web/controllers/auth_controller.ex
 #, elixir-autogen, elixir-format
@@ -13444,6 +13504,7 @@ msgid "Layout"
 msgstr "Diseño"
 
 #: lib/kiln_cms_web/components/core_components.ex
+#: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
@@ -16778,6 +16839,12 @@ msgstr "Solo un administrador de la plataforma puede cambiar los destinos de cop
 msgid "Only a platform admin can change backup schedules."
 msgstr "Solo un administrador de la plataforma puede cambiar las programaciones de copias de seguridad."
 
+#: lib/kiln_cms_web/controllers/backup_download_controller.ex
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only a platform admin can download backup files."
+msgstr "Solo un administrador de la plataforma puede descargar archivos de copias de seguridad."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Only a platform admin can re-send a backup."
@@ -17445,6 +17512,11 @@ msgstr "Parte"
 msgid "Partly off-site"
 msgstr "Parcialmente fuera del servidor"
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "Parts download one at a time; at most 10 downloads a minute."
+msgstr "Las partes se descargan de una en una; como máximo 10 descargas por minuto."
+
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Passed the human-verification check."
@@ -18103,6 +18175,11 @@ msgstr "Pulse Intro para añadir. Pegue varias líneas para añadir un elemento 
 #, elixir-autogen, elixir-format
 msgid "Press Publish in the editor. Until then, only people signed in to the console can see it."
 msgstr "Pulsa Publicar en el editor. Hasta entonces, solo las personas con sesión iniciada en la consola pueden verla."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Press Test on both destinations to let them prune."
+msgstr "Pulsa Prueba en ambos destinos para que puedan depurar."
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
@@ -21606,6 +21683,11 @@ msgstr "Ajustes de sesión guardados."
 msgid "Sessions"
 msgstr "Sesiones"
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sessions from before this was available are signed out the next time they're used here. Collaborative-editing rooms open on the signed-out devices close too."
+msgstr "Las sesiones anteriores a esta función se cierran la próxima vez que se usan aquí. Las salas de edición colaborativa abiertas en los dispositivos desconectados también se cierran."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set KILN_CONSOLE_HOST to a host no organization controls, such as console under your main host, point it and every subdomain of it at Kiln in DNS and TLS, and restart. Each organization's console then gets its own host, its slug followed by the console host. Otherwise, grant organization admin only to people you would trust with the console."
@@ -22049,6 +22131,11 @@ msgstr "Barra lateral"
 msgid "Sign in"
 msgstr "Iniciar sesión"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sign in again to download backup files: this page has no session to bind the link to."
+msgstr "Vuelve a iniciar sesión para descargar archivos de copias de seguridad: esta página no tiene una sesión a la que vincular el enlace."
+
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
 msgid "Sign in to edit"
@@ -22247,6 +22334,11 @@ msgstr "Clave de firma"
 #, elixir-autogen, elixir-format
 msgid "Signing key generated. New publishes are signed; re-fire existing content to sign it too."
 msgstr "Clave de firma generada. Las nuevas publicaciones se firman; vuelve a generar el contenido existente para firmarlo también."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signing other sessions out, one at a time or all at once, also closes the collaborative-editing rooms open on those devices."
+msgstr "Cerrar otras sesiones, de una en una o todas a la vez, también cierra las salas de edición colaborativa abiertas en esos dispositivos."
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -23716,6 +23808,11 @@ msgstr "Esa copia de seguridad no se puede reanudar: solo se puede reanudar una 
 msgid "That backup can't be resumed: the files it had written are gone."
 msgstr "Esa copia no se puede reanudar: los archivos que había escrito ya no están."
 
+#: lib/kiln_cms_web/controllers/backup_download_controller.ex
+#, elixir-autogen, elixir-format
+msgid "That backup file isn't available for download."
+msgstr "Ese archivo de copia de seguridad no está disponible para descargar."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "That backup is running right now."
@@ -23878,6 +23975,11 @@ msgstr "Ese archivo supera los 2 MB."
 msgid "That file is larger than the %{max} MB limit."
 msgstr "Ese archivo supera el límite de %{max} MB."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That file is no longer on this server."
+msgstr "Ese archivo ya no está en este servidor."
+
 #: lib/kiln_cms_web/live/field_sync_live.ex
 #, elixir-autogen, elixir-format
 msgid "That file is not a JSON object. Upload a file made by Export."
@@ -23892,6 +23994,21 @@ msgstr "Ese archivo es demasiado grande para importarlo (el límite es %{size} M
 #, elixir-autogen, elixir-format
 msgid "That file isn't UTF-8 text, so it can't be imported."
 msgstr "Ese archivo no es texto UTF-8, así que no se puede importar."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That file isn't a regular file on this server, so it isn't offered."
+msgstr "Ese archivo no es un archivo normal en este servidor, así que no se ofrece."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That file isn't one of this backup's."
+msgstr "Ese archivo no es de esta copia de seguridad."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "That file was removed from this server by retention."
+msgstr "La retención eliminó ese archivo de este servidor."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -24457,6 +24574,11 @@ msgstr "El tipo de contenido del documento ya no está en este sitio."
 #, elixir-autogen, elixir-format
 msgid "The domain could not be saved."
 msgstr "No se pudo guardar el dominio."
+
+#: lib/kiln_cms_web/controllers/backup_download_controller.ex
+#, elixir-autogen, elixir-format
+msgid "The download wasn't recorded in the security log, so nothing was sent. Try again in a moment."
+msgstr "La descarga no se registró en el registro de seguridad, así que no se envió nada. Inténtalo de nuevo en un momento."
 
 #: lib/kiln_cms_web/controllers/page_html/home.html.heex
 #, elixir-autogen, elixir-format
@@ -25392,6 +25514,11 @@ msgstr "Estos campos cambiaron en la página publicada desde entonces. Para cada
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "These files are in another server's backup directory; download them on that server."
+msgstr "Estos archivos están en el directorio de copias de seguridad de otro servidor; descárgalos en ese servidor."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "These files aren't in this server's backup directory, and nothing recorded why: they were deleted outside the app, or the backup was taken on another server. Each server has its own backup directory."
 msgstr "Estos archivos no están en el directorio de copias de seguridad de este servidor, y nada registró por qué: se eliminaron fuera de la aplicación, o la copia se hizo en otro servidor. Cada servidor tiene su propio directorio de copias de seguridad."
 
@@ -25514,6 +25641,12 @@ msgstr "Este servicio no puede comprobar su conexión."
 #, elixir-autogen, elixir-format
 msgid "This backup is being re-sent right now."
 msgstr "Esta copia de seguridad se está reenviando ahora mismo."
+
+#: lib/kiln_cms_web/controllers/backup_download_controller.ex
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "This backup is still being written. Download it once it has finished."
+msgstr "Esta copia de seguridad todavía se está escribiendo. Descárgala cuando haya terminado."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -25698,6 +25831,16 @@ msgstr "La cadena de este documento se ancló antes de que se asignara el orden 
 #, elixir-autogen, elixir-format
 msgid "This document's checkpoint entry could not be read — it cannot be verified"
 msgstr "No se ha podido leer la entrada del punto de control de este documento: no se puede verificar"
+
+#: lib/kiln_cms_web/controllers/backup_download_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This download link has expired: it works for one minute. Go back to Backups and click Download again."
+msgstr "Este enlace de descarga ha caducado: funciona durante un minuto. Vuelve a Copias de seguridad y haz clic en Descargar otra vez."
+
+#: lib/kiln_cms_web/controllers/backup_download_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This download link isn't valid for you. Go back to Backups and click Download again."
+msgstr "Este enlace de descarga no es válido para ti. Vuelve a Copias de seguridad y haz clic en Descargar otra vez."
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -25908,6 +26051,11 @@ msgstr "Este enlace ya se ha usado o ya no es válido. Si sigues sin poder inici
 #, elixir-autogen, elixir-format
 msgid "This link is no longer valid"
 msgstr "Este enlace ya no es válido"
+
+#: lib/kiln_cms_web/controllers/backup_download_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This link reached a different server than the page that made it. Download the file on the server that has it, or route /editor/backups to one server."
+msgstr "Este enlace llegó a un servidor distinto del de la página que lo creó. Descarga el archivo en el servidor que lo tiene, o dirige /editor/backups a un solo servidor."
 
 #: lib/kiln_cms_web/live/admin_allowlist_live.ex
 #, elixir-autogen, elixir-format
@@ -26129,6 +26277,11 @@ msgstr "Este security.txt ha caducado."
 msgid "This segment has no confirmed subscribers. Pick another segment, or add and confirm subscribers first."
 msgstr "Este segmento no tiene suscriptores confirmados. Elige otro segmento, o añade y confirma suscriptores primero."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "This server can't read that file."
+msgstr "Este servidor no puede leer ese archivo."
+
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
 msgid "This server does not check search-engine claims, so any client naming one gets this budget."
@@ -26162,6 +26315,11 @@ msgid "This server's backup directory didn't answer within %{count} second, so t
 msgid_plural "This server's backup directory didn't answer within %{count} seconds, so the files on disk, the markers and Resume aren't shown. Reload the page to check again."
 msgstr[0] "El directorio de copias de seguridad de este servidor no respondió en %{count} segundo, así que no se muestran los archivos en disco, las marcas ni Reanudar. Recarga la página para volver a comprobarlo."
 msgstr[1] "El directorio de copias de seguridad de este servidor no respondió en %{count} segundos, así que no se muestran los archivos en disco, las marcas ni Reanudar. Recarga la página para volver a comprobarlo."
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "This server's backup directory id couldn't be read, so whether these are its files can't be told."
+msgstr "No se pudo leer el id del directorio de copias de seguridad de este servidor, así que no se puede saber si estos archivos son suyos."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
@@ -28392,6 +28550,11 @@ msgstr "Si el texto contiene part, sin distinguir mayúsculas."
 msgid "Whether the value is empty."
 msgstr "Si el valor está vacío."
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Whether this backup is still being written couldn't be told. Try again in a moment."
+msgstr "No se pudo saber si esta copia de seguridad todavía se está escribiendo. Inténtalo de nuevo en un momento."
+
 #: lib/kiln_cms/security/posture/checks/second_factor_required.ex
 #, elixir-autogen, elixir-format
 msgid "Whether this site makes people set up two-step sign-in, and who it covers that hasn't yet."
@@ -29350,6 +29513,11 @@ msgstr "No se pudo guardar tu elección."
 msgid "Your data"
 msgstr "Sus datos"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Your download is starting. The link works for one minute."
+msgstr "Tu descarga está empezando. El enlace funciona durante un minuto."
+
 #: lib/kiln_cms_web/controllers/auth_controller.ex
 #, elixir-autogen, elixir-format
 msgid "Your email address has now been confirmed"
@@ -29719,8 +29887,8 @@ msgstr "otro destino S3 usa un bucket con el mismo nombre; la aplicación no pue
 
 #: lib/kiln_cms_web/live/backup_destinations_live.ex
 #, elixir-autogen, elixir-format
-msgid "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server"
-msgstr "otro destino SFTP usa una carpeta dentro o alrededor de la de este; la aplicación no puede saber si es el mismo servidor"
+msgid "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server until both trust host keys of the same type that differ, and each has passed a Test since the later of the two was trusted"
+msgstr "otro destino SFTP usa una carpeta dentro o alrededor de la de este; la aplicación no puede saber si es el mismo servidor hasta que ambos confíen en claves de host del mismo tipo que sean distintas y cada uno haya superado una prueba desde que se confió en la más reciente de las dos"
 
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -32061,6 +32229,11 @@ msgstr "«%{value}» no es un valor que una fórmula pueda usar."
 #, elixir-autogen, elixir-format
 msgid "“Leading” means the highest rate so far over at least %{floor} impressions per arm — a comparison, not a significance test."
 msgstr "«En cabeza» significa la tasa más alta hasta ahora con al menos %{floor} impresiones por variante: una comparación, no una prueba de significancia."
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "“Sign out everywhere” also closes the collaborative-editing rooms this account has open on any device."
+msgstr "«Cerrar sesión en todas partes» también cierra las salas de edición colaborativa que esta cuenta tenga abiertas en cualquier dispositivo."
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format

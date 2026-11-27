@@ -77,7 +77,16 @@ defmodule KilnCMS.Docs.BackupsCommandsTest do
     {actual, _} = Code.eval_string(String.trim(printed))
 
     assert Map.keys(actual) == Map.keys(expected)
-    assert actual == %{deferred: 0, failed: 0, imported: 1, pending: 0, skipped: 0}
+
+    assert actual == %{
+             deferred: 0,
+             failed: 0,
+             imported: 1,
+             pending: 0,
+             reevaluated: 0,
+             skipped: 0
+           }
+
     assert String.trim(printed) == inspect(actual)
   end
 

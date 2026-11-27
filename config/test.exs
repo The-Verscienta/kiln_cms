@@ -502,14 +502,16 @@ config :kiln_cms, KilnCMS.Search, query_budget: 10_000, cut_grace: 1_000
 # need a settled result without a lookup plant it with
 # `KilnCMS.CrawlerVerification.put_result/4`.
 #
-# Both caches are scaled down from 50,000 and 10,000 so a test can write more
+# The caches are scaled down from 50,000 and 10,000 so a test can write more
 # entries than a cache holds in well under a second and show that the bound
-# evicts, and that a flood of rejections never evicts a verified result (#2588).
+# evicts, and that a flood of rejections never evicts a verified result (#2588);
+# the network-mark cache likewise (#2838).
 config :kiln_cms, KilnCMS.CrawlerVerification,
   enabled: true,
   resolver: KilnCMS.Test.StubCrawlerResolver,
   max_entries: 2_000,
-  max_verified_entries: 200
+  max_verified_entries: 200,
+  max_network_marks: 200
 
 # Published crawler IP ranges (#2586): on, like production, but nothing
 # fetches a list unless a test does, and every fetch goes to a Req.Test stub.

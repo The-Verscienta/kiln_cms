@@ -135,6 +135,20 @@ defmodule KilnCMSWeb.SettingsSessionsTest do
       refute has_element?(lv, ~s(button[phx-value-id="#{jti_of(here)}"]))
       assert has_element?(lv, ~s(button[phx-value-id="#{jti_of(elsewhere)}"]), "Sign out")
       assert has_element?(lv, "#sign-out-other-sessions")
+
+      assert has_element?(
+               lv,
+               "#sessions-sign-out-hint",
+               "also closes the collaborative-editing rooms open on those devices"
+             )
+    end
+
+    test "has no sign-out hint when this is the only session" do
+      here = sign_in(account(), @firefox_mac)
+      {:ok, lv, _html} = settings(session_of(here))
+
+      assert has_element?(lv, "#sessions-only-this")
+      refute has_element?(lv, "#sessions-sign-out-hint")
     end
 
     test "lists only this account's sessions" do

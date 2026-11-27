@@ -199,8 +199,8 @@ it. None carries an address, a hostname, a user agent or an org.
 | `[:kiln_cms, :crawler_verification, :skipped]` | once per lookup that was not started | `count` (always `1`) | `engine`, `reason` |
 | `[:kiln_cms, :crawler_verification, :ranges_fetch]` | by `KilnCMS.CrawlerVerification.RangesWorker`, once per vendor per fetch of the published IP lists | `count` (always `1`) | `engine`, `result` |
 
-- `engine` -- `:google`, `:bing`, `:duckduckgo`, `:baidu`, `:yandex` or
-  `:apple`: what the user agent claims.
+- `engine` -- `:google`, `:bing`, `:duckduckgo`, `:baidu`, `:yandex`,
+  `:apple`, `:seznam` or `:mojeek`: what the user agent claims.
 - `reason` on `unverified_crawler` -- `:failed` (proven false: charged as
   `empty`; for DuckDuckBot, an address outside DuckDuckGo's fresh published
   list), `:pending` (a lookup is running or was just started), `:error` (the

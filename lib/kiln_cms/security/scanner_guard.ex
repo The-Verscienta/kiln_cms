@@ -50,8 +50,8 @@ defmodule KilnCMS.Security.ScannerGuard do
     * an address the block list already matches
     * a search-engine claim (`KilnCMS.BotClass.search_engine/1`: Googlebot,
       bingbot, ...) is exempt from the miss threshold only, and only until
-      `KilnCMS.CrawlerVerification` proves it false (#2254): verified, pending
-      and skipped claims keep the exemption, a claim whose address fails the
+      `KilnCMS.CrawlerVerification` proves it false (#2254). A verified claim
+      keeps the exemption, always. A claim whose address fails the
       reverse-DNS check, or a DuckDuckBot claim from an address outside
       DuckDuckGo's fresh published list (#2586), counts like any other
       client. A claim whose PTR query
@@ -61,7 +61,15 @@ defmodule KilnCMS.Security.ScannerGuard do
       own reverse zone, which a scanner can choose, and its misses count. A
       claim whose PTR named a host under the engine's domain and whose
       forward query for that host got no answer, with its full time budget,
-      keeps it: that silence is the engine's own zone. With
+      keeps it: that silence is the engine's own zone. A claim not proven
+      either way (a lookup pending or skipped, a resolver error while the
+      resolver is failing, an engine with nothing to check it against) keeps
+      it unless the address's IPv6 `/64` is marked
+      (`CrawlerVerification.network_flagged?/2`, #2838): another address in
+      it recently failed its own lookup, or went silent while the resolver
+      answered. The guard counts a `/64` as one client, so a scanner rotating
+      through it would otherwise never meet its own failures. IPv4 has no
+      mark: it is counted per address, which its own verdict covers. With
       verification off (`KILN_CRAWLER_VERIFICATION=false`) the engine's name
       in the user agent is enough. Link-preview fetchers (facebookexternalhit,
       Twitterbot, LinkedInBot) and Slurp are not exempt. **Bait paths count
@@ -122,7 +130,8 @@ defmodule KilnCMS.Security.ScannerGuard do
   # The search engines whose name in a user agent exempts a request from the
   # miss threshold while crawler verification is off. With it on, the claim is
   # read by `BotClass.search_engine/1` and checked instead (`good_bot?/2`).
-  @search_bots ~w(googlebot bingbot duckduckbot applebot yandexbot baiduspider)
+  @search_bots ~w(googlebot storebot-google bingbot duckduckbot applebot yandexbot baiduspider
+                   seznambot mojeekbot)
 
   @defaults [
     enabled: false,
@@ -235,10 +244,10 @@ defmodule KilnCMS.Security.ScannerGuard do
   # A search-engine claim is exempt from the miss threshold unless DNS has
   # proven it false (#2254): a lookup still pending or skipped keeps the
   # exemption, so a real crawler's first misses from a new address never
-  # count. An unanswered PTR query keeps it only while the resolver itself is
-  # failing (#2588); otherwise the silence is the address's own reverse zone.
-  # An unanswered forward query for an engine-domain name, given its full
-  # budget, keeps it.
+  # count, unless its /64 is marked (#2838). An unanswered PTR query keeps it
+  # only while the resolver itself is failing (#2588); otherwise the silence
+  # is the address's own reverse zone. An unanswered forward query for an
+  # engine-domain name, given its full budget, keeps it.
   # `context/2` has already turned away untrusted forwarding and non-public
   # addresses, so the check sees the client's own address. With verification
   # off, the name in the user agent is enough, as before.
@@ -248,7 +257,7 @@ defmodule KilnCMS.Security.ScannerGuard do
     if CrawlerVerification.enabled?() do
       case BotClass.search_engine(ua) do
         nil -> false
-        engine -> exempt_claim?(CrawlerVerification.check(engine, ip))
+        engine -> exempt_claim?(CrawlerVerification.check(engine, ip), ip)
       end
     else
       lowered = String.downcase(ua)
@@ -259,11 +268,22 @@ defmodule KilnCMS.Security.ScannerGuard do
   # A forward query that got no answer for a name under the engine's own
   # domain, with its full time budget, is silence in the engine's zone, which
   # a scanner cannot cause from its own reverse zone, so it keeps the
-  # exemption like a pending one. One a slow PTR answer starved is `:error`.
-  defp exempt_claim?({:unverified, :failed}), do: false
-  defp exempt_claim?({:unverified, :forward_error}), do: true
-  defp exempt_claim?({:unverified, :error}), do: CrawlerVerification.resolver_failing?()
-  defp exempt_claim?(_verified_or_unproven), do: true
+  # exemption, and no mark takes it away. One a slow PTR answer starved is
+  # `:error`. A claim nothing has proven either way loses the exemption in a
+  # marked /64 (#2838); the mark is read only for those, never against a
+  # verified claim.
+  defp exempt_claim?(:verified, _ip), do: true
+  defp exempt_claim?(:disabled, _ip), do: true
+  defp exempt_claim?({:unverified, :failed}, _ip), do: false
+  defp exempt_claim?({:unverified, :forward_error}, _ip), do: true
+  defp exempt_claim?({:unverified, :not_public}, _ip), do: true
+
+  defp exempt_claim?({:unverified, :error}, ip),
+    do: CrawlerVerification.resolver_failing?() and not CrawlerVerification.network_flagged?(ip)
+
+  defp exempt_claim?({:unverified, reason}, ip)
+       when reason in [:pending, :skipped, :unverifiable],
+       do: not CrawlerVerification.network_flagged?(ip)
 
   defp bait?(path) do
     normalized = path |> String.downcase() |> String.trim_trailing("/")

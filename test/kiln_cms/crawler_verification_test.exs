@@ -4,8 +4,9 @@ defmodule KilnCMS.CrawlerVerificationTest do
   (`KilnCMS.Test.StubCrawlerResolver`).
   """
   # Not async: telemetry handlers see every process's events, the warning
-  # latches and the consecutive-failure counter are node-wide, and one test
-  # sets `:trusted_proxies` with `Application.put_env/3`.
+  # latches and the consecutive-failure counter are node-wide, one test sets
+  # `:trusted_proxies` and the network-mark tests set `:scanner_blocking` with
+  # `Application.put_env/3`.
   use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
@@ -52,7 +53,9 @@ defmodule KilnCMS.CrawlerVerificationTest do
           yandex: "spider-1-1.yandex.ru",
           yandex: "spider-1-1.yandex.net",
           baidu: "baiduspider-1-1.crawl.baidu.com",
-          baidu: "baiduspider-1-1.crawl.baidu.jp"
+          baidu: "baiduspider-1-1.crawl.baidu.jp",
+          seznam: "fulltextrobot-77-75-77-1.seznam.cz",
+          mojeek: "crawl-5-102-173-71.mojeek.com"
         ] do
       test "#{engine} via #{host} is verified, asking only for A records", %{opts: opts} do
         engine = unquote(engine)
@@ -1093,6 +1096,279 @@ defmodule KilnCMS.CrawlerVerificationTest do
     end
   end
 
+  # #2838: a finished lookup's own negative evidence marks the address's IPv6
+  # /64, which `KilnCMS.Security.ScannerGuard` reads for the claims nothing
+  # has proven either way.
+  describe "network marks (#2838)" do
+    setup %{opts: opts} do
+      # Marks are written only while the 404 guard, their one reader, is on.
+      previous = Application.get_env(:kiln_cms, :scanner_blocking)
+      Application.put_env(:kiln_cms, :scanner_blocking, enabled: true)
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:kiln_cms, :scanner_blocking, previous),
+          else: Application.delete_env(:kiln_cms, :scanner_blocking)
+      end)
+
+      # A canary of the test's own, so whether the resolver is failing is
+      # decided here and not by whatever an earlier test left behind.
+      CrawlerVerification.reset_health()
+      on_exit(&CrawlerVerification.reset_health/0)
+      canary = v4()
+
+      %{opts: Keyword.put(opts, :canary_address, canary), canary: canary}
+    end
+
+    test "a failed IPv6 lookup flags its /64, and only its /64", %{opts: opts} do
+      ip = marked_v6()
+
+      assert finish(:google, ip, opts) == {:unverified, :failed}
+
+      assert CrawlerVerification.network_flagged?(ip, opts)
+      assert CrawlerVerification.network_flagged?(neighbor(ip), opts)
+      refute CrawlerVerification.network_flagged?(next_64(ip), opts)
+    end
+
+    test "a PTR query with no answer marks it silent: flagged while the resolver answers, " <>
+           "not while it fails",
+         %{opts: opts, canary: canary} do
+      ip = marked_v6()
+      Stub.put_ptr(ip, {:error, :timeout})
+
+      assert finish(:google, ip, opts) == {:unverified, :error}
+
+      # Another lookup got an answer: the resolver works.
+      assert settle(:google, v4(), opts) == {:unverified, :failed}
+      refute CrawlerVerification.resolver_failing?(opts)
+      assert CrawlerVerification.network_flagged?(neighbor(ip), opts)
+
+      failing = failing_resolver(opts, canary)
+      refute CrawlerVerification.network_flagged?(neighbor(ip), failing)
+    end
+
+    test "a PTR query with no answer while the resolver fails marks nothing, " <>
+           "so the outage leaves no mark behind",
+         %{opts: opts, canary: canary} do
+      failing = failing_resolver(opts, canary)
+      ip = marked_v6()
+      Stub.put_ptr(ip, {:error, :timeout})
+
+      assert finish(:google, ip, failing) == {:unverified, :error}
+      assert network_mark(ip) == nil
+
+      # The resolver recovers: nothing marked during the outage is read now.
+      Stub.put_ptr(canary, [])
+      eventually(fn -> not CrawlerVerification.resolver_failing?(failing) end)
+      refute CrawlerVerification.network_flagged?(neighbor(ip), opts)
+    end
+
+    test "a silent mark never replaces a failed one", %{opts: opts, canary: canary} do
+      ip = marked_v6()
+      CrawlerVerification.put_network_mark(ip, :failed)
+
+      sibling = neighbor(ip)
+      Stub.put_ptr(sibling, {:error, :timeout})
+      assert finish(:google, sibling, opts) == {:unverified, :error}
+
+      # A `:silent` mark would not be read while the resolver fails.
+      failing = failing_resolver(opts, canary)
+      assert CrawlerVerification.network_flagged?(ip, failing)
+    end
+
+    test "a forward error in the engine's own zone marks nothing", %{opts: opts} do
+      ip = marked_v6()
+      host = unique_host("crawl.googlebot.com")
+      Stub.put_ptr(ip, [host])
+      Stub.put_addresses(host, {:error, :timeout})
+
+      assert finish(:google, ip, opts) == {:unverified, :forward_error}
+      refute CrawlerVerification.network_flagged?(ip, opts)
+    end
+
+    test "a verified lookup marks nothing, clears a silent mark, and keeps a failed one",
+         %{opts: opts} do
+      ip = marked_v6()
+      host = unique_host("crawl.googlebot.com")
+      Stub.put_ptr(ip, [host])
+      Stub.put_addresses(host, [ip])
+
+      assert finish(:google, ip, opts) == :verified
+      refute CrawlerVerification.network_flagged?(ip, opts)
+
+      CrawlerVerification.put_network_mark(ip, :silent)
+      assert CrawlerVerification.network_flagged?(ip, opts)
+      silent_sibling = neighbor(ip)
+      Stub.put_ptr(silent_sibling, [host])
+      Stub.put_addresses(host, [silent_sibling])
+
+      assert finish(:google, silent_sibling, opts) == :verified
+      assert network_mark(ip) == nil
+      refute CrawlerVerification.network_flagged?(ip, opts)
+
+      CrawlerVerification.put_network_mark(ip, :failed)
+      failed_sibling = neighbor(ip)
+      Stub.put_ptr(failed_sibling, [host])
+      Stub.put_addresses(host, [failed_sibling])
+
+      assert finish(:google, failed_sibling, opts) == :verified
+      assert network_mark(ip) == :failed
+      assert CrawlerVerification.network_flagged?(ip, opts)
+    end
+
+    test "a verified lookup with the guard off clears nothing", %{opts: opts} do
+      Application.put_env(:kiln_cms, :scanner_blocking, enabled: false)
+      ip = marked_v6()
+      CrawlerVerification.put_network_mark(ip, :silent)
+      host = unique_host("crawl.googlebot.com")
+      Stub.put_ptr(ip, [host])
+      Stub.put_addresses(host, [ip])
+
+      assert finish(:google, ip, opts) == :verified
+      assert network_mark(ip) == :silent
+    end
+
+    test "a lookup turned away by a network cap marks nothing", %{opts: opts} do
+      opts = Keyword.put(opts, :prefix_lookups_per_minute, inet6: [{64, 1}, {48, 100}])
+      first = marked_v6()
+      Stub.put_ptr(first, {:block, self()})
+
+      assert CrawlerVerification.check(:google, first, opts) == {:unverified, :pending}
+      assert_receive {Stub, :blocked, resolver, _callers, :ptr, ^first}, 2_000
+
+      second = neighbor(first)
+      assert CrawlerVerification.check(:google, second, opts) == {:unverified, :skipped}
+      refute CrawlerVerification.network_flagged?(second, opts)
+
+      Stub.release(resolver)
+      assert settle(:google, first, opts) == {:unverified, :failed}
+    end
+
+    for refusal <- [:node_cap, :busy] do
+      test "a lookup turned away by #{refusal} marks nothing", %{opts: opts} do
+        supervisor = start_supervised!({Task.Supervisor, max_children: 1})
+
+        opts =
+          case unquote(refusal) do
+            :node_cap -> Keyword.put(opts, :lookups_per_minute, 1)
+            :busy -> Keyword.put(opts, :task_supervisor, supervisor)
+          end
+
+        blocker = v4()
+        Stub.put_ptr(blocker, {:block, self()})
+        assert CrawlerVerification.check(:google, blocker, opts) == {:unverified, :pending}
+        assert_receive {Stub, :blocked, resolver, _callers, :ptr, ^blocker}, 2_000
+
+        ip = marked_v6()
+
+        capture_log(fn ->
+          assert CrawlerVerification.check(:google, ip, opts) == {:unverified, :skipped}
+        end)
+
+        refute CrawlerVerification.network_flagged?(ip, opts)
+
+        Stub.release(resolver)
+        assert settle(:google, blocker, opts) == {:unverified, :failed}
+      end
+    end
+
+    test "IPv4 is never marked, nor an IPv4-mapped address", %{opts: opts} do
+      {a, b, c, d} = ip = v4()
+
+      assert finish(:google, ip, opts) == {:unverified, :failed}
+      refute CrawlerVerification.network_flagged?(ip, opts)
+      refute CrawlerVerification.network_flagged?(neighbor(ip), opts)
+
+      assert CrawlerVerification.put_network_mark(ip, :failed) == :ok
+      refute CrawlerVerification.network_flagged?(ip, opts)
+
+      mapped = {0, 0, 0, 0, 0, 0xFFFF, a * 256 + b, c * 256 + d}
+      refute CrawlerVerification.network_flagged?(mapped, opts)
+    end
+
+    test "with the 404 guard off, a failed lookup marks nothing", %{opts: opts} do
+      Application.delete_env(:kiln_cms, :scanner_blocking)
+      ip = marked_v6()
+
+      assert finish(:google, ip, opts) == {:unverified, :failed}
+      refute CrawlerVerification.network_flagged?(ip, opts)
+    end
+
+    # ADR 0054: the canary runs only while the 404 guard asks. A lookup with
+    # no answer must not start one on an install with the guard off, nor for
+    # an IPv4 address, which has no mark to write.
+    test "a PTR query with no answer starts no canary with the guard off, nor for IPv4",
+         %{opts: opts, canary: canary} do
+      Application.delete_env(:kiln_cms, :scanner_blocking)
+      ip = marked_v6()
+      Stub.put_ptr(ip, {:error, :timeout})
+      assert finish(:google, ip, opts) == {:unverified, :error}
+
+      Application.put_env(:kiln_cms, :scanner_blocking, enabled: true)
+      v4_ip = v4()
+      Stub.put_ptr(v4_ip, {:error, :timeout})
+      assert finish(:google, v4_ip, opts) == {:unverified, :error}
+
+      refute_receive {Stub, :blocked, _resolver, _callers, :ptr, ^canary}, 100
+      assert Stub.calls(:ptr, canary) == 0
+    end
+
+    # Cachex orders eviction by write time in milliseconds: assert the bound,
+    # not which mark it dropped.
+    test "the mark cache is bounded on its own, and forget_network/1 drops one" do
+      max = Application.fetch_env!(:kiln_cms, CrawlerVerification)[:max_network_marks]
+
+      for _ <- 1..(max * 2), do: CrawlerVerification.put_network_mark(PublicAddress.v6(), :failed)
+
+      eventually(fn -> cache_size(CrawlerVerification.network_cache_name()) <= max end)
+
+      ip = marked_v6()
+      CrawlerVerification.put_network_mark(ip, :silent)
+      assert CrawlerVerification.network_flagged?(ip)
+      CrawlerVerification.forget_network(neighbor(ip))
+      refute CrawlerVerification.network_flagged?(ip)
+    end
+
+    test "a mark is kept for :network_mark_ttl_ms, refreshed by each write" do
+      ip = marked_v6()
+      CrawlerVerification.put_network_mark(ip, :failed, network_mark_ttl_ms: 1_000)
+      assert mark_ttl(ip) <= 1_000
+
+      CrawlerVerification.put_network_mark(ip, :silent)
+      assert mark_ttl(ip) > :timer.minutes(59)
+      assert CrawlerVerification.network_flagged?(ip)
+    end
+
+    test "with verification off, a mark is not read" do
+      ip = marked_v6()
+      CrawlerVerification.put_network_mark(ip, :failed)
+
+      refute CrawlerVerification.network_flagged?(ip, enabled: false)
+    end
+
+    test "with the mark cache down, nothing raises and a lookup still finishes",
+         %{opts: opts} do
+      attach(@lookup)
+      supervisor = KilnCMS.CrawlerVerification.Supervisor
+      cache = CrawlerVerification.network_cache_name()
+      ip = marked_v6()
+      CrawlerVerification.put_network_mark(ip, :failed)
+
+      :ok = Supervisor.terminate_child(supervisor, cache)
+      on_exit(fn -> Supervisor.restart_child(supervisor, cache) end)
+
+      refute CrawlerVerification.network_flagged?(ip, opts)
+      assert CrawlerVerification.put_network_mark(ip, :failed) == :ok
+      assert CrawlerVerification.forget_network(ip) == :ok
+
+      sibling = neighbor(ip)
+      assert finish(:google, sibling, opts) == {:unverified, :failed}
+      assert_receive {:telemetry, @lookup, _, %{engine: :google, result: :rejected}}, 2_000
+
+      {:ok, _pid} = Supervisor.restart_child(supervisor, cache)
+    end
+  end
+
   describe "Engines" do
     test "every engine BotClass can name has a row" do
       assert Engines.engines() == BotClass.engines()
@@ -1107,6 +1383,15 @@ defmodule KilnCMS.CrawlerVerificationTest do
       refute Engines.matches?(:google, "x.googleusercontent.com")
       refute Engines.matches?(:google, "x.google.com")
       assert Engines.matches?(:google, "crawl-1.geo.googlebot.com")
+    end
+
+    test "a regional engine's domain must end the name (#2468)" do
+      for {engine, suffix} <- [seznam: "seznam.cz", mojeek: "mojeek.com"] do
+        assert Engines.matches?(engine, "crawl-1." <> suffix)
+        refute Engines.matches?(engine, "crawl-1.evil" <> suffix)
+        refute Engines.matches?(engine, "crawl-1." <> suffix <> ".example.net")
+        refute Engines.matches?(:google, "crawl-1." <> suffix)
+      end
     end
 
     test "normalize_host/1 reads plain hostnames only" do
@@ -1197,6 +1482,53 @@ defmodule KilnCMS.CrawlerVerificationTest do
   # Another address in `ip`'s /24 (IPv4) or /64 (IPv6), never used before.
   defp neighbor({a, b, c, d}), do: fresh({a, b, c, rem(d + 128, 254) + 1})
   defp neighbor({a, b, c, d, e, f, g, h}), do: fresh({a, b, c, d, e, f, g, h + 0x8000})
+
+  # A fresh IPv6 address whose /64 holds no mark, and none after the test.
+  defp marked_v6 do
+    ip = v6()
+    CrawlerVerification.forget_network(ip)
+    on_exit(fn -> CrawlerVerification.forget_network(ip) end)
+    ip
+  end
+
+  # The first address of the /64 after `ip`'s, inside the same /48.
+  defp next_64({a, b, c, d, _e, _f, _g, _h}) do
+    ip = fresh({a, b, c, rem(d + 1, 0x10000), 0, 0, 0, 1})
+    CrawlerVerification.forget_network(ip)
+    ip
+  end
+
+  # Settles the claim, then waits for its lookup to release its claim, which
+  # it does last: after the result, and after any network mark.
+  defp finish(engine, ip, opts) do
+    status = settle(engine, ip, opts)
+    eventually(fn -> :ets.lookup(InFlight.table(), ip) == [] end)
+    status
+  end
+
+  # `opts` under which the resolver is failing: no recent answer, and a
+  # canary whose PTR query gets none. Starts from no health state: a silent
+  # lookup may already have claimed the canary for a 1-minute window, and a
+  # window number at 50 ms is not later than that one (monotonic time is
+  # negative), so no 50 ms canary would ever start.
+  defp failing_resolver(opts, canary) do
+    CrawlerVerification.reset_health()
+    Stub.put_ptr(canary, {:error, :timeout})
+    failing = Keyword.put(opts, :health_window_ms, 50)
+    eventually(fn -> CrawlerVerification.resolver_failing?(failing) end)
+    failing
+  end
+
+  # The raw mark on `ip`'s /64, whether or not `network_flagged?/2` reads it.
+  defp network_mark({a, b, c, d, _e, _f, _g, _h}) do
+    {:ok, kind} = Cachex.get(CrawlerVerification.network_cache_name(), {:inet6, a, b, c, d})
+    kind
+  end
+
+  defp mark_ttl({a, b, c, d, _e, _f, _g, _h}) do
+    {:ok, ttl} = Cachex.ttl(CrawlerVerification.network_cache_name(), {:inet6, a, b, c, d})
+    ttl
+  end
 
   defp assert_error_ttl(ip) do
     assert ttl(ip) <= :timer.minutes(5)

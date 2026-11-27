@@ -72,21 +72,36 @@ defmodule KilnCMSWeb.BearerAuth do
   def token_from_params(_), do: nil
 
   @doc "Verify a JWT and return the user, or `:error`."
-  def user_from_token(token) when is_binary(token) do
+  @spec user_from_token(term()) :: {:ok, KilnCMS.Accounts.User.t()} | :error
+  def user_from_token(token) do
+    case verify_token(token) do
+      {:ok, user, _jti} -> {:ok, user}
+      :error -> :error
+    end
+  end
+
+  @doc """
+  Verify a JWT and return the user and the token's jti, or `:error`. The jti
+  names the stored token row the verification found, which is what
+  `KilnCMSWeb.GraphqlSocket` binds a connection to (#2490).
+  """
+  @spec verify_token(term()) :: {:ok, KilnCMS.Accounts.User.t(), String.t()} | :error
+  def verify_token(token) when is_binary(token) do
     token = String.trim(token)
     opts = []
 
     with {:ok, %{"sub" => subject, "jti" => jti} = claims, @user}
-         when not is_map_key(claims, "act") <- Jwt.verify(token, :kiln_cms, opts),
+         when not is_map_key(claims, "act") and is_binary(jti) <-
+           Jwt.verify(token, :kiln_cms, opts),
          {:ok, _} <- validate_jti(@user, jti, opts),
          {:ok, user} <- AshAuthentication.subject_to_user(subject, @user, opts) do
-      {:ok, user}
+      {:ok, user, jti}
     else
       _ -> :error
     end
   end
 
-  def user_from_token(_), do: :error
+  def verify_token(_), do: :error
 
   @doc "Absinthe context map matching `AshGraphql.Plug`."
   # `tenant: nil` here is a PLACEHOLDER, never served as-is: both socket

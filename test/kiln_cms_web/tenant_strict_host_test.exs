@@ -498,7 +498,7 @@ defmodule KilnCMSWeb.TenantStrictHostTest do
           role: :editor
         })
 
-      token = Phoenix.Token.sign(KilnCMSWeb.Endpoint, "collab", user.id)
+      token = KilnCMS.CollabTokenFixtures.collab_token(user)
       info = %{uri: URI.parse("wss://#{unknown_host()}/ws/collab")}
 
       assert :error =

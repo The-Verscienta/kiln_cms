@@ -43,6 +43,9 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   badge says so. Both come from
   `KilnCMS.Backups.Retention.prune_blocker/3`, worked out once per `load/1`
   over every row, the rule retention applies before each pass (#2950).
+  Where only a Test on the SFTP rows involved stands between a row and
+  pruning (`Retention.cleared_by_test?/3`, #3428), the row says to press
+  Test on both and links the guide's steps.
 
   ## The form
 
@@ -842,6 +845,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
     |> assign(:destinations, rows)
     |> assign(:env, env)
     |> assign(:blockers, prune_blockers(rows, env_location))
+    |> assign(:cleared_by_test, cleared_by_test(rows, env_location))
     |> assign(:env_prune, env_prune(env, rows, env_location))
     |> assign(
       :can_test_env?,
@@ -872,13 +876,24 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   # (`Retention.prune_blocker/3`), so the "Prunes" badge shows only where a
   # pass would prune.
   defp prune_blockers(rows, env_location) when is_list(rows) do
-    Map.new(rows, fn row ->
-      config = %Config{id: row.id, key: "dest:" <> row.id, kind: row.kind, settings: row.settings}
-      {row.id, Retention.prune_blocker(config, rows, env_location)}
-    end)
+    Map.new(rows, &{&1.id, Retention.prune_blocker(row_config(&1), rows, env_location)})
   end
 
   defp prune_blockers(:unreadable, _env_location), do: %{}
+
+  # The ids of the rows whose blocker a Test on the SFTP rows involved would
+  # clear (`Retention.cleared_by_test?/3`, #3428), so the row can say so.
+  defp cleared_by_test(rows, env_location) when is_list(rows) do
+    for row <- rows,
+        Retention.cleared_by_test?(row_config(row), rows, env_location),
+        into: MapSet.new(),
+        do: row.id
+  end
+
+  defp cleared_by_test(:unreadable, _env_location), do: MapSet.new()
+
+  defp row_config(row),
+    do: %Config{id: row.id, key: "dest:" <> row.id, kind: row.kind, settings: row.settings}
 
   # The env destination's pruning (#2950): `:off` unless
   # BACKUP_RCLONE_REMOTE_PRUNE is on, then `:on`, or `{:blocked, reason}` by
@@ -1088,7 +1103,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   defp blocker_text(:destination_overlap_possible_sftp),
     do:
       gettext(
-        "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server"
+        "another SFTP destination uses a folder inside or around this one's; the app can't tell whether it is the same server until both trust host keys of the same type that differ, and each has passed a Test since the later of the two was trusted"
       )
 
   defp blocker_text(:unreadable), do: gettext("the destinations couldn't be read")
@@ -1288,6 +1303,7 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
               testing?={MapSet.member?(@testing, row.id)}
               host_key_state={Map.get(@host_keys, row.id)}
               blocker={Map.get(@blockers, row.id)}
+              cleared_by_test?={MapSet.member?(@cleared_by_test, row.id)}
               form_open?={@editing != nil}
               user={@current_user}
             />
@@ -1313,6 +1329,10 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
   attr :blocker, :atom,
     default: nil,
     doc: "why its pruning can't run (`Retention.prune_blocker/3`)"
+
+  attr :cleared_by_test?, :boolean,
+    default: false,
+    doc: "whether a Test on the SFTP rows involved would clear `blocker` (#3428)"
 
   attr :form_open?, :boolean, required: true
   attr :user, :any, required: true
@@ -1355,6 +1375,24 @@ defmodule KilnCMSWeb.BackupDestinationsLive do
           </span>
         </.badge>
       </div>
+
+      <p
+        :if={@row.enabled and @row.prune and @cleared_by_test? and @blocker}
+        data-role="prune-test-hint"
+        class="text-xs text-base-content/70"
+      >
+        {gettext("Press Test on both destinations to let them prune.")}
+        <a
+          id={"backup-destination-#{@row.id}-prune-docs"}
+          href={docs_url("backups.md#let-two-sftp-destinations-on-different-servers-both-prune")}
+          target="_blank"
+          rel="noopener"
+          class="link inline-flex items-center gap-1 text-primary-ink"
+        >
+          {gettext("How two SFTP servers both prune")}
+          <.icon name="hero-arrow-top-right-on-square" class="size-3" />
+        </a>
+      </p>
 
       <p :if={@location} data-role="location" class="font-mono text-xs text-base-content/70">
         {@location}

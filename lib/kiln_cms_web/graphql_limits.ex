@@ -123,6 +123,8 @@ defmodule KilnCMSWeb.GraphqlLimits do
     #
     # After the budget, an account its site now holds for a second factor is
     # refused (`SocketSecondFactor`, #2247): the actor was fixed at connect.
+    # Then a socket whose bearer JWT has since been signed out
+    # (`SocketSession`, #2490): its eviction broadcast may never have arrived.
     context = Keyword.get(pipeline_opts, :context, %{})
 
     schema
@@ -130,7 +132,8 @@ defmodule KilnCMSWeb.GraphqlLimits do
     |> add_phases()
     |> Absinthe.Pipeline.insert_before(Phase.Init, [
       {SocketDocumentBudget, context: context},
-      {KilnCMSWeb.GraphqlLimits.SocketSecondFactor, context: context}
+      {KilnCMSWeb.GraphqlLimits.SocketSecondFactor, context: context},
+      {KilnCMSWeb.GraphqlLimits.SocketSession, context: context}
     ])
   end
 

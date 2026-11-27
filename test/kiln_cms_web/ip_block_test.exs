@@ -167,7 +167,7 @@ defmodule KilnCMSWeb.IpBlockTest do
 
     test "/ws/collab refuses a blocked address even with a valid token" do
       user = admin()
-      token = Phoenix.Token.sign(KilnCMSWeb.Endpoint, "collab", user.id)
+      token = KilnCMS.CollabTokenFixtures.collab_token(user)
       ip = address()
       block!(ip)
 

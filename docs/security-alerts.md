@@ -45,7 +45,7 @@ Platform alerts:
 | `new_api_key` | An API key is minted. Rotating a key into its successor is not an alert | No |
 | `api_key_abuse` | A rotated-away API key is presented to `POST /api/keys/rotate` again more than 120 seconds after its rotation: two parties held the key, and Kiln revoked the whole chain ([self-rotation](headless-consumer-guide.md#keeping-the-key-alive-self-rotation)) | No |
 | `api_key_rate_limited` | A verified API key goes over a rate limit (see [API keys over a rate limit](#api-keys-over-a-rate-limit)) | Yes, by a platform admin. On by default |
-| `backup_host_key_changed` | An SFTP backup destination's server presented a host key other than the one a platform admin trusted, so the destination failed (#2222). Names the destination and links to the instance security log. At most once an hour per destination, and once per alert window across destinations. Its event is in the instance security log (`backup_destination_host_key_mismatch`); see [backups.md](backups.md#when-the-servers-host-key-changes) | No |
+| `backup_host_key_changed` | An SFTP backup destination's server presented a host key other than the one a platform admin trusted, so the destination failed (#2222). Names the destination and links to the instance security log. At most once an hour per destination. Each destination has an alert window of its own (#3201), so a second server whose key changes in the same 15-minute window raises its own alert, naming it. Its event is in the instance security log (`backup_destination_host_key_mismatch`); see [backups.md](backups.md#when-the-servers-host-key-changes) | No |
 
 ### What does not raise an alert
 
@@ -159,7 +159,8 @@ only when there was more than the alert already said: more than one event,
 or for failed sign-ins more than the count the alert carried (see below).
 
 Windows are per site for site alerts, and one for the whole installation for
-platform alerts. Each kind has its own window, so an API key going over a rate
+platform alerts, except `backup_host_key_changed`, which has one per backup
+destination (#3201). Each kind has its own window, so an API key going over a rate
 limit never uses up the window a stolen key's `api_key_abuse` alert is sent
 in. Silencing notices are never grouped: each one is sent.
 

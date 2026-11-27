@@ -8,6 +8,10 @@
   (#2940, 2026-11-18): presence is judged per artifact, adds `:mixed`,
   `:probably_expired` and `:unknown`, and `:expired` follows cron's prune
   rules instead of an age heuristic; the disk is read off the page process.
+  Amended 2026-11-26 by
+  [#2846](https://github.com/The-Verscienta/kiln_cms/issues/2846): the
+  importer may rewrite its own Interrupted row once, and the rewrites of a
+  finished row are locked (see "Amendment").
 - **References** — [#2415](https://github.com/The-Verscienta/kiln_cms/issues/2415),
   [#2217](https://github.com/The-Verscienta/kiln_cms/issues/2217) and its pull
   request [#2414](https://github.com/The-Verscienta/kiln_cms/pull/2414);
@@ -55,7 +59,7 @@ history can be trusted:
     the chain's own `:resume` and `:note_resume_refused`;
   - `KilnCMS.Backups.Importer.run/0` (`:import`);
   - retention, which marks another run's deleted files through
-    `KilnCMS.Backups.Recorder.mark_pruned/1` (`:mark_pruned`);
+    `KilnCMS.Backups.Recorder.mark_pruned/2` (`:mark_pruned`);
   - `KilnCMS.Backups.reconcile_stale_runs/1`, which fails a `running` run
     nothing has touched for longer than a step's timeout plus 15 minutes
     (`:fail`).
@@ -140,3 +144,58 @@ history can be trusted:
 - **A directory per host makes `missing` common.** Runs now carry the
   `dir_id` of their directory (#2539); presence could say "on another host"
   instead of `missing` once it reads it.
+
+## Amendment (2026-11-26, #2846): an Interrupted import is rewritten once, under a row lock
+
+"An earlier import is never modified" had one costly case. The importer
+records a stamp with a `.partial` beside it, untouched for 3 hours, as a
+failed run with the error "Interrupted: the backup stopped before it finished
+and left .partial files behind" (#2478). An old `backup.sh` with no heartbeat,
+or clocks that disagree badly, can get a live run recorded that way, and the
+row then said Failed for a backup that had finished.
+
+**The exception is narrow.** `Run`'s `:reevaluate_interrupted` action is the
+`:backups` system actor's alone, in the same policy as the other pipeline
+writes. It accepts only `status`, `error`, `components`, `finished_at` and
+`artifacts`; the stamp, the origin, `started_at`, `keep_days` and the trigger
+are never written, and the log keeps its entries and gains one line. The
+importer finds the rows through the `:interrupted_imports` read (also the
+system actor's alone; a platform admin is refused it) and calls the action
+only when the stamp has no `.partial` left, every listed file is still
+there, its newest file has settled, and every kind the row names is complete
+(a covering manifest that succeeded, or a complete set with its sidecar). The
+import upsert is unchanged: its `upsert_fields` are still empty, and it still
+cannot modify a row.
+
+**It happens once.** The action locks the row
+(`get_and_lock_for_update()`) and `Run.Changes.ReevaluateInterrupted`
+judges the row as locked: it must still be `origin: :imported`, `failed`,
+with that exact Interrupted error, and carry no `pruned` mark on any artifact
+or part under any key. Otherwise the write is refused with `StaleRecord` and
+nothing changes. The rewritten row no longer carries the Interrupted error,
+so a second importer on another node, or a later pass, is refused.
+
+**`:mark_pruned` takes the same lock.** Retention used to read a run, compute
+its new `artifacts` and send them; a re-evaluation committing between that
+read and the write would have been overwritten with the old artifacts. Now
+`:mark_pruned` takes `names`, `key` and `at` instead of `artifacts`, locks
+the row, and `Run.Changes.MarkFiles` computes the marks from the row as
+locked. Whichever of the two writes commits second sees the first one's
+row: a mark is never lost to a re-evaluation, and a re-evaluation never
+records files retention has marked deleted. The pattern is the one to reuse
+for any later write to a finished row (a delete or a rescan, #2225): lock,
+then compute from the locked row, never from the caller's struct.
+
+**The accepted gap.** A row recorded with only `.partial` files has no
+artifacts, so retention has nothing to mark on it. If retention deletes one
+of the stamp's files after the importer stat'ed it and before the
+re-evaluation takes the lock, the rewrite records that file as present
+although it is gone. It needs a prune to land in the milliseconds between the
+two. Presence is judged from the disk when the page is shown (see
+"Decision"), so History does not show that file as on disk; only the stored
+artifact is wrong.
+
+**Mixed versions.** A node still on the previous release runs its own,
+unlocked `:mark_pruned` and never re-evaluates. Nothing in the schema
+changed, so a rolling deploy and a rollback are both safe; a row rewritten
+before a rollback stays as rewritten.

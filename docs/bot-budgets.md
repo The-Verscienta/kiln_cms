@@ -28,13 +28,14 @@ that matches decides:
 
 | Order | The user agent | Class |
 |---|---|---|
-| 1 | names an AI crawler: `GPTBot`, `ChatGPT-User`, `OAI-SearchBot`, `ClaudeBot`, `Claude-User`, `Claude-SearchBot`, `anthropic-ai`, `CCBot`, `PerplexityBot`, `Perplexity-User`, `Bytespider`, `Amazonbot`, `meta-externalagent` | AI crawler |
-| 2 | names a search engine: `Googlebot` (and `Googlebot-Image`, `-News`, `-Video`), `Google-InspectionTool`, `bingbot`, `DuckDuckBot`, `Baiduspider`, `YandexBot`, `Applebot` | Search engine |
+| 1 | names an AI crawler: `GPTBot`, `ChatGPT-User`, `OAI-SearchBot`, `ClaudeBot`, `Claude-User`, `Claude-SearchBot`, `anthropic-ai`, `CCBot`, `PerplexityBot`, `Perplexity-User`, `Bytespider`, `Amazonbot`, `meta-externalagent`, `Google-CloudVertexBot` | AI crawler |
+| 2 | names a search engine: `Googlebot` (and `Googlebot-Image`, `-News`, `-Video`), `Google-InspectionTool`, `Storebot-Google`, `bingbot`, `DuckDuckBot`, `Baiduspider`, `YandexBot`, `Applebot`, `SeznamBot`, `MojeekBot` | Search engine |
 | 3 | names both an AI crawler and a search engine | Other bot (it gets neither ceiling) |
-| 4 | is a scripting tool or headless browser (`curl/`, `Wget/`, `python-requests/`, `Python-urllib/`, `python-httpx/`, `aiohttp/`, `Go-http-client/`, `Java/`, `libwww-perl/`, `Scrapy/`, `axios/`, `node-fetch/`, `PostmanRuntime/`, `Apache-HttpClient/`, `req/`, `HeadlessChrome`, `PhantomJS`), a link-preview fetcher (`facebookexternalhit`, `Twitterbot`, `Slackbot`, `LinkedInBot`, `Discordbot`) or an SEO crawler (`PetalBot`, `AhrefsBot`, `SemrushBot`) | Other bot |
-| 5 | looks like a browser: starts `Mozilla/5.0 (` and contains `AppleWebKit/`, `Gecko/` or `Trident/` | Browser |
-| 6 | has a product name ending in `bot`, `crawler`, `spider` or `scraper` (`UptimeRobot/2.0`, `MyCrawler;`) | Other bot |
-| 7 | is anything else that is not empty | Browser |
+| 4 | is a scripting tool or headless browser (`curl/`, `Wget/`, `python-requests/`, `Python-urllib/`, `python-httpx/`, `aiohttp/`, `Go-http-client/`, `Java/`, `libwww-perl/`, `Scrapy/`, `axios/`, `node-fetch/`, `PostmanRuntime/`, `Apache-HttpClient/`, `req/`, `HeadlessChrome`, `PhantomJS`), a link-preview fetcher (`facebookexternalhit`, `Twitterbot`, `Slackbot`, `LinkedInBot`, `Discordbot`) an SEO crawler (`PetalBot`, `AhrefsBot`, `SemrushBot`), a Google fetcher that is not search (`GoogleOther`, `AdsBot-Google`), or a search engine Kiln cannot verify (`Yeti`, Naver's; `Qwantbot`; `Sogou web spider` and Sogou's other spiders) | Other bot |
+| 5 | has `compatible;` followed by a product name ending in `bot`, `crawler`, `spider` or `scraper`, even inside a browser's string (`(compatible; ExampleBot/1.0; …)`, `(compatible; ExampleBot-Mobile)`) | Other bot |
+| 6 | looks like a browser: starts `Mozilla/5.0 (` and contains `AppleWebKit/`, `Gecko/` or `Trident/` | Browser |
+| 7 | has a product name ending in `bot`, `crawler`, `spider` or `scraper` (`UptimeRobot/2.0`, `MyCrawler;`) | Other bot |
+| 8 | is anything else that is not empty | Browser |
 
 A missing, empty or all-whitespace user agent is **No user agent**.
 
@@ -42,7 +43,11 @@ A request put in **Search engine** is then checked against the engine's
 published IP ranges and DNS before it is charged, and charged as **No user agent** if the address is proven not to be
 the engine's. See [Verified search engines](#verified-search-engines).
 
-Rule 7 is deliberate. Media players (`AppleCoreMedia`, `stagefright`,
+Rule 5 is how a crawler that borrows a browser's user agent still declares itself. A phone model inside a real browser's string (`CUBOT_X30`) never follows `compatible;`, so it stays a browser.
+
+A search engine is in rule 2 only when Kiln can check its claim (see [Verified search engines](#verified-search-engines)). Naver's Yeti and Sogou publish no domain or address list to check against, and an unprovable claim would keep the 404 guard's exemption for anyone who typed the name, so they count as other bots. Qwantbot counts as another bot too until its verification domain is confirmed from Qwant's own documentation: a wrong domain would prove the real crawler's claims false, and charge it as **No user agent**.
+
+Rule 8 is deliberate. Media players (`AppleCoreMedia`, `stagefright`,
 `ExoPlayerLib`, VLC, Roku), the native HTTP stacks of mobile apps (`CFNetwork`,
 `Dalvik`, `okhttp`) and old browsers send user agents no list can keep up with,
 and they are far more often a person than a scraper. A scraper that wants
@@ -282,11 +287,13 @@ resolve to that address.
 
 | Engine (user agent) | The PTR name must end in | Engine's own instructions |
 |---|---|---|
-| Google (`Googlebot`, `Google-InspectionTool`) | `googlebot.com` | [Verify requests from Google crawlers](https://developers.google.com/crawling/docs/crawlers-fetchers/verify-google-requests) |
+| Google (`Googlebot`, `Google-InspectionTool`, `Storebot-Google`) | `googlebot.com` | [Verify requests from Google crawlers](https://developers.google.com/crawling/docs/crawlers-fetchers/verify-google-requests) |
 | Bing (`bingbot`) | `search.msn.com` | [How to verify that Bingbot is Bingbot](https://blogs.bing.com/webmaster/2012/8/How-to-Verify-that-Bingbot-is-Bingbot/) |
 | Apple (`Applebot`) | `applebot.apple.com` | [About Applebot](https://support.apple.com/en-us/119829) |
 | Yandex (`YandexBot`) | `yandex.ru`, `yandex.net` or `yandex.com` | [How to check that a robot belongs to Yandex](https://yandex.com/support/webmaster/en/robot-workings/check-yandex-robots.html) |
 | Baidu (`Baiduspider`) | `baidu.com` or `baidu.jp` | [Baiduspider help](https://help.baidu.com/question?prod_id=99&class=0&id=3001) |
+| Seznam (`SeznamBot`) | `seznam.cz` | [SeznamBot crawler](https://o-seznam.cz/napoveda/vyhledavani/en/seznambot-crawler/) |
+| Mojeek (`MojeekBot`) | `mojeek.com` | [MojeekBot](https://www.mojeek.com/bot.html) |
 | DuckDuckGo (`DuckDuckBot`) | no DNS check: DuckDuckGo publishes IP addresses only, and its claims are checked against that list | [DuckDuckBot](https://duckduckgo.com/duckduckgo-help-pages/results/duckduckbot) |
 
 Google also lists `google.com` and `googleusercontent.com` names, but those are
@@ -301,7 +308,8 @@ Google, Bing, Apple and DuckDuckGo each publish a JSON list of the addresses
 their crawlers use. Kiln fetches the four lists and checks a claim against the
 claimed engine's list before it asks DNS (#2586,
 `KilnCMS.CrawlerVerification.Ranges`). Yandex and Baidu publish no list and
-are checked by DNS only.
+are checked by DNS only. Seznam and Mojeek publish one, but Kiln does
+not fetch it yet, so they are checked by DNS only too.
 
 | Engine | List Kiln fetches |
 |---|---|
@@ -394,6 +402,10 @@ reverse zone counts against the claim while the resolver works, and a silent
 engine zone, given its full lookup budget, does not (see
 [What counts, and what never does](ip-blocking.md#what-counts-and-what-never-does)
 and [ADR 0054](decisions/0054-in-crawler-verification-a-silence-the-claimant-controls-counts-against-it-and-one-the-vendor-controls-does-not.md)).
+It also counts a claim not proven either way from an IPv6 `/64` where
+another address recently failed its lookup (#2838,
+[ADR 0086](decisions/0086-an-ipv6-64-that-produced-claimant-controlled-negative-evidence-loses-the-404-exemption-for-unproven-claims.md)).
+The rate limiter ignores those marks: the table above is unchanged.
 
 **A request never waits for DNS.** The first request from a new address is
 judged as "not proven" while a lookup starts in the background, and later
@@ -683,10 +695,10 @@ a search engine.
   robots.txt product tokens only: Google and Apple crawl with their ordinary user
   agents and read those tokens to decide how the content may be used. There is
   nothing to classify.
-- **Not complete.** Some crawlers that send a browser-shaped user agent without a
-  listed name count as browsers (for example `GoogleOther` and `AdsBot-Google`),
-  and some search engines not on the list count as other bots (for example
-  `SeznamBot` and `Qwantbot`).
+- **Not complete.** A crawler that sends a browser-shaped user agent with no
+  listed name and no `compatible;` bot token counts as a browser, and a search
+  engine Kiln cannot verify (for example `Yeti` and `Qwantbot`) counts as
+  another bot, so raising **Search engines (%)** does not help it.
 - **Not in the API.** The settings are not on JSON:API, GraphQL or MCP. Only a
   site admin, in the console, and the delivery limiter (as a read-only system
   actor, see the [policy matrix](policy-matrix.md)) can read them.

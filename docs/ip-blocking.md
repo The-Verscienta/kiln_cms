@@ -172,11 +172,13 @@ Never counted, so a person or a service is not blocked by mistake:
   proxy is trusted: the address is then the proxy's.
 - An address already on the block list.
 - For the **miss threshold only**, a client whose `User-Agent` names a search
-  engine (Googlebot, Google-InspectionTool, Bingbot, DuckDuckBot, Applebot,
-  YandexBot, Baiduspider) and no AI crawler, unless crawler verification has proven the claim false (see
+  engine (Googlebot, Google-InspectionTool, Storebot-Google, Bingbot,
+  DuckDuckBot, Applebot, YandexBot, Baiduspider, SeznamBot, MojeekBot)
+  and no AI crawler, unless crawler verification has proven the claim false (see
   [Verified search engines](bot-budgets.md#verified-search-engines)). A claim
   still being checked, or whose lookup could not start, keeps the exemption,
-  so a real crawler's first misses from a new address never count. An
+  so a real crawler's first misses from a new address never count, except
+  from an IPv6 `/64` that has recently given itself away (below). An
   address inside the engine's fresh
   [published IP list](bot-budgets.md#published-ip-ranges) is verified and
   exempt.
@@ -207,9 +209,29 @@ Never counted, so a person or a service is not blocked by mistake:
     silence is in the engine's zone, which the address's owner does not
     control.
 
-  With `KILN_CRAWLER_VERIFICATION=false` the six names Googlebot, Bingbot,
-  DuckDuckBot, Applebot, YandexBot and Baiduspider in the user agent are
-  enough. **Bait paths count for everyone**: no crawler has a reason to ask
+  **Over IPv6, one address's failed lookup ends the exemption for the whole
+  `/64` (#2838).** The guard counts an IPv6 client as its `/64`, so a scanner
+  could otherwise send each request from a new address in it and be judged,
+  every time, before that address's lookup had finished. When a lookup
+  proves an address's claim false, or its reverse query gets no answer while
+  this node's resolver answers others, the node marks the address's `/64`
+  for an hour. From then on, a claim from that `/64` that DNS has not proven
+  (still being checked, not started, or DuckDuckBot, which has no DNS check)
+  counts like any other client. A claim DNS has verified stays exempt in a
+  marked `/64`. A verified lookup clears a mark left by an unanswered
+  reverse query, so one timeout for a real crawler does not outlast its next
+  verified address; a mark left by a proven-false claim stays until it
+  expires. A lookup that could not start (the node is busy, the network
+  used its lookup budget) marks nothing. Each node keeps its own marks, and
+  only while the guard is on; IPv4 is unchanged. The hour is
+  `:network_mark_ttl_ms` in `config :kiln_cms, KilnCMS.CrawlerVerification`
+  (code config only, no environment variable; each new mark restarts it).
+  [ADR 0086](decisions/0086-an-ipv6-64-that-produced-claimant-controlled-negative-evidence-loses-the-404-exemption-for-unproven-claims.md)
+  records why.
+
+  With `KILN_CRAWLER_VERIFICATION=false` the names Googlebot,
+  Storebot-Google, Bingbot, DuckDuckBot, Applebot, YandexBot, Baiduspider,
+  SeznamBot and MojeekBot in the user agent are enough. **Bait paths count for everyone**: no crawler has a reason to ask
   for one.
 
 Link-preview fetchers (`facebookexternalhit`, `Twitterbot`, `LinkedInBot`) and
@@ -219,7 +241,9 @@ point at pages that 404 can see a preview fetcher's address blocked; remove the
 block on `/editor/ip-blocks` and fix or redirect the links.
 
 An IPv6 client is counted and blocked as its `/64`, because a host can rotate
-through its whole prefix. IPv4 is blocked as a single address.
+through its whole prefix. For the same reason, a search-engine claim from a
+`/64` where another address recently failed its lookup is counted until DNS
+verifies it (above). IPv4 is blocked as a single address.
 
 At the moment of a trip the block is skipped if the address has a successful
 sign-in on this site in the last 24 hours: someone behind a shared address who
@@ -265,6 +289,7 @@ refuses raise `blocked_ip` like any rule's (see
 | A visitor reports an empty `403` | They tripped the limit (a crawler gone wrong, a link checker, a browser extension). Find the rule on `/editor/ip-blocks` by its note and **Remove** it, or wait for the expiry. Consider raising `KILN_SCANNER_BLOCKING_THRESHOLD`. |
 | A search engine's address is blocked (most often Baiduspider or YandexBot) | Its claim was proven false, or its reverse zone was slow to answer while this node's resolver answered others, so its misses counted (#2588). Check the address against [Verified search engines](bot-budgets.md#verified-search-engines); if it is the engine's, **Remove** the rule or wait for the expiry. |
 | A DuckDuckBot address is blocked | The address was not in DuckDuckGo's published list when this node last fetched it (#2586). If [duckduckbot.json](https://duckduckgo.com/duckduckbot.json) lists it now, the next fetch (within 6 hours) stops it happening again; **Remove** the rule or wait for the expiry. |
+| An IPv6 crawler's new addresses are counted | Another address in the same `/64` failed its lookup, or its reverse query went unanswered while this node's resolver worked, in the last hour (#2838). The crawler's verified addresses stay exempt; only its requests from addresses DNS has not verified yet count. On a `/64` shared with others (a hosting provider's), that may be another customer's doing. If the blocked range is the engine's, **Remove** the rule or wait for the expiry; the mark itself expires an hour after the last failed or unanswered lookup in the `/64`. |
 | An address you expected is not blocked | It is exempt (see above), the trip was skipped (cap, recent sign-in) and the window has not rolled over, or the count straddled two windows. |
 | A warning `ScannerGuard: block skipped, at the automatic rule cap` | 300 automatic rules are active on the site. Wait for expiry, remove rules, or raise `max_auto_rules`. |
 | A warning `ScannerGuard: block skipped, could not store the rule` | The rule could not be saved (a database fault, or the range was refused). The request was served normally. |

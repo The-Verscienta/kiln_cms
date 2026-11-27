@@ -20,10 +20,12 @@ defmodule KilnCMS.Accounts.Sessions do
       straight back in by it. The sign-in records the cookie's jti on the
       session row (`remember_me_jti`, by `KilnCMSWeb.Plugs.SessionTracking`),
       and signing the session out revokes both.
-    * **The LiveViews already mounted.** They authorized at mount. Each one
-      listens on its session's topic (`KilnCMSWeb.SessionTracking`), and
+    * **The LiveViews and sockets already connected.** They authorized at
+      connect. Each LiveView listens on its session's topic
+      (`KilnCMSWeb.SessionTracking`), and
       `KilnCMS.Accounts.SessionEviction.evict_session/2` sends them to sign-in;
-      the rejoin finds the token gone.
+      the rejoin finds the token gone. The same call closes the session's
+      collab sockets and a `/ws/gql` socket opened with its token (#2490).
 
   ## Authorization
 

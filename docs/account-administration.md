@@ -1316,7 +1316,10 @@ Anyone can follow these steps; they need access to the account's mailbox.
 The "Unusual sign-in activity on your (site) account" mail that Kiln sends
 the owner when the pause starts also links to the page in step 1. It never
 carries an unlock link itself: that mail goes out on a pause anyone can
-cause, so it would be a link minted whenever an attacker liked.
+cause, so it would be a link minted whenever an attacker liked. A pause that
+sign-ins blocked for a breached password helped fill gets a different mail,
+which links to `/reset` instead
+([If a sign-in check goes wrong](#if-a-sign-in-check-goes-wrong)).
 
 ### Why the sign-in page never says an account is paused
 
@@ -1502,9 +1505,12 @@ Who is checked, and by which policy:
   appears in a known data breach, so it can't be used to sign in as an
   administrator. We've emailed you a link to choose a new one. If it doesn't
   arrive, request one below." The mail is **Choose a new password for your
-  (site) account**. It says someone signed in with their current password,
-  that it appears in a breach, and that if it wasn't them, someone else knows
-  it. The link works like any reset link. Once they choose a new password they
+  (site) account**, where (site) is a site whose policy blocked them: the
+  site whose address they used, when it is one of those, and otherwise
+  another of those sites, the same one each time. For a platform admin it is
+  always the site whose address they used. It says someone signed in with
+  their current password, that it appears in a breach, and that if it wasn't
+  them, someone else knows it. The link works like any reset link. Once they choose a new password they
   sign in with it as usual.
 - **Warned.** They are signed in, and see "Your password appears in a public
   data breach. Change it soon from your account page." (after the
@@ -1517,16 +1523,24 @@ Who is checked, and by which policy:
 ### If a sign-in check goes wrong
 
 - **The reset mail doesn't arrive.** Each address gets at most five reset
-  mails an hour, the ones this check sends included. Someone who tried to
-  sign in several times, or anyone else holding the breached password, may
-  have used them up. Request one on `/reset` once the hour is over. **Send password
+  mails an hour, the ones this check sends and the ones anyone can ask for
+  on `/reset` included. Someone who tried to sign in several times, or anyone
+  else holding the breached password, may have used them up. Request one on `/reset` once the hour is over. **Send password
   reset** on the account's page under **Accounts** (`/editor/accounts`) shares
   the same budget, but says so by name when it is spent.
 - **"Paused after too many attempts".** A blocked sign-in counts toward the
   account's sign-in pause like a failed one, so retrying the old password
-  pauses the account after 20 attempts in 15 minutes, and the owner gets the
-  usual "Unusual sign-in activity" mail. Choosing a new password through the
-  reset link lifts the pause ([Lift a sign-in pause by email](#lift-a-sign-in-pause-by-email)).
+  pauses the account after 20 attempts in 15 minutes. The owner then gets
+  **Sign-in paused on your (site) account: choose a new password** instead
+  of the usual "Unusual sign-in activity" mail. It says the attempts used
+  their current password, which appears in a known data breach, or, when
+  only some did, that the others did not complete a sign-in. It links to
+  `/reset` and has no unlock link, because lifting the pause would not help:
+  the old password is still refused. This mail does not count against the
+  five reset mails, so it arrives even when those are used up; like the
+  usual pause mail, at most one goes out every six hours. Choosing a new
+  password, through the reset link or `/reset`, lifts the pause
+  ([Lift a sign-in pause by email](#lift-a-sign-in-pause-by-email)).
 - **"I signed in from an app and saw no warning."** An app that signs in with
   `POST /api/auth/sign_in` gets the warning as a `password_breach` field on
   the response, and only when the account has no second factor
@@ -1539,7 +1553,9 @@ Who is checked, and by which policy:
 Your security log records each blocked sign-in as **Failed sign-in** with
 reason `breached_password`
 ([security events](security-events.md#what-is-recorded)). The failed
-sign-ins alert does not count it.
+sign-ins alert does not count it. For a platform admin, if the sites that
+blocked them can't be read at that moment, the sign-in is still refused and
+the event goes to the log of the site whose address they used instead.
 
 ### What people see
 
@@ -1582,10 +1598,30 @@ password when the lookup fails is in
 
 Either alone leaves the account signed in somewhere.
 
+Signing out one session is narrower and reaches its sockets too: the
+**Sign out** button beside a browser under **Active sessions** on **Your
+settings**, **Sign out of all other sessions** there, the browser's own
+**Sign out**, the site's idle timeout and [Sign everyone out](#sign-everyone-out)
+each close that session's open collaborative-editing rooms (`/ws/collab`) and
+any GraphQL socket opened with its token (`/ws/gql`), at once. The account's
+other sessions stay connected. The browser's own **Sign out** leaves that
+browser's other open tabs as they are until they next load a page or
+reconnect, which finds the session gone and goes to sign-in.
+
+The pages say so where you click. Under **Active sessions**, when another
+session is listed: "Signing other sessions out, one at a time or all at once,
+also closes the collaborative-editing rooms open on those devices." On an
+account's page in `/editor/accounts`, under **Credentials and removal**:
+"“Sign out everywhere” also closes the collaborative-editing rooms this
+account has open on any device."
+
 That is one account, on every site. A site admin can also act on one site:
 sign browsers out after a stretch of inactivity
 ([Sign people out when idle](#sign-people-out-when-idle)), or end every browser
-session there at once ([Sign everyone out](#sign-everyone-out)).
+session there at once ([Sign everyone out](#sign-everyone-out)). Those reach
+only the site because a browser session belongs to the site it signed in on,
+and a session cookie presented on another site's host is signed out there; why:
+[ADR 0090](decisions/0090-a-browser-session-is-bound-to-the-site-it-signed-in-on-and-is-signed-out-on-another-sites-host.md).
 
 ## Sign people out when idle
 
@@ -1620,7 +1656,7 @@ minutes without activity."
 | Counts | Does not count |
 |---|---|
 | Loading any page of this site while signed in, public pages included | A tab left open with nobody using it |
-| Clicking, typing or submitting on a console page | A page reconnecting after a network drop or a deploy |
+| Clicking, typing or submitting on a console page, including inside a part of the page that handles its own clicks (the notification bell, and the content editor's reference pickers and reference fields) | A page reconnecting after a network drop or a deploy (but see below) |
 | Moving within a console page (a LiveView patch, such as a tab or filter change) | Replies a page sends on its own (`body_flushed`, `push_state`, `push_unsupported`) |
 | | Requests with an API key or a bearer token, and image transforms (`/media/:id/t/…`) |
 | | Activity on another site |
@@ -1629,6 +1665,12 @@ Activity is written down at most once per tenth of the timeout, clamped to
 between 30 seconds and 5 minutes, so a browser is signed out after between 90% and 100% of the timeout without
 activity. An open page checks a few seconds after its deadline; a closed one is
 checked at its next request.
+
+One gap: when a page reconnects, the browser re-sends the contents of its open
+forms, and that counts as activity. A tab left idle that reconnects after a
+deploy just before its deadline can therefore stay signed in for another full
+timeout. This is tracked in
+[#3474](https://github.com/The-Verscienta/kiln_cms/issues/3474).
 
 The timeout wins over "remember me". A browser that goes idle loses its
 remember-me cookie with its session, and a remember-me cookie that sat unused
@@ -1652,13 +1694,10 @@ and the person signs in again.
 - **The setting cannot be read** (a database fault): the timeout is off for
   that minute and a warning is logged. It fails open rather than signing every
   account out during an outage. There is no operator ceiling and no
-  environment variable: the site decides.
+  environment variable: the site decides
+  ([ADR 0090](decisions/0090-a-browser-session-is-bound-to-the-site-it-signed-in-on-and-is-signed-out-on-another-sites-host.md) says why).
 - **API keys, bearer tokens and headless app tokens** are not browser sessions
   and never expire for idleness.
-- **Clicks inside some components** (a LiveComponent handling its own events)
-  do not count on their own. Every page that has them also sends page-level
-  events, but a page driven only by such clicks can sign out the person using
-  it.
 
 ### Errors you can hit
 
@@ -1681,6 +1720,10 @@ For a suspected breach on one site. Requires the admin role on the site.
 3. Click **Sign out everyone** and confirm "Sign out everyone on this site
    now?". You see "Signed out 12 sessions on this site."
 
+The section says, above the button: "Sessions from before this was available
+are signed out the next time they're used here. Collaborative-editing rooms
+open on the signed-out devices close too."
+
 What it ends, on this site only:
 
 - every browser session, including platform admins' sessions on this site;
@@ -1689,14 +1732,20 @@ What it ends, on this site only:
   afterwards is signed out again on their next page.
 
 Every open page of those sessions goes to `/sign-in` with "An administrator
-signed everyone out of this site. Sign in again to continue." Sessions on other
+signed everyone out of this site. Sign in again to continue." Their open
+collaborative-editing rooms close too, and so does a GraphQL subscription
+socket opened with one of those browser sessions' own tokens. Sessions on other
 sites, including the same people's, are not affected. **Keep me signed in on
 this browser** spares only the browser you clicked from (and its remember-me
 cookie), not your sessions on other devices.
 
 The count covers sessions known to belong to this site. Sessions signed in
 before the upgrade that added this page record no site yet; they are not
-counted, and each is signed out the first time it is used on this site again.
+counted, and each is signed out the first time it is used on this site again,
+so right after the upgrade the page can say "Signed out 0 sessions on this
+site." and still sign people out. That holds for as long as such a session
+could still be alive: the longest sign-in lifetime, 30 days today (the
+"remember me" cookie). Why a session belongs to one site: [ADR 0090](decisions/0090-a-browser-session-is-bound-to-the-site-it-signed-in-on-and-is-signed-out-on-another-sites-host.md).
 
 What it does **not** end:
 
@@ -1705,9 +1754,6 @@ What it does **not** end:
   with a stolen password. Reset the account's password, or have a platform
   admin use **Sign out everywhere** on the account in `/editor/accounts`
   ([Signing an account out](#signing-an-account-out)).
-- **Already-connected collaborative-editing and GraphQL subscription sockets**
-  (`/ws/collab`, `/ws/gql`). They are keyed per account rather than per
-  browser, and close at their next reconnect or re-check.
 
 The site's security log records **Everyone signed out**
 (`all_sessions_revoked`) with the number of sessions and whether you kept your

@@ -32,7 +32,8 @@ defmodule KilnCMS.Accounts.PasswordResetMail do
 
   @doc """
   Send `user` a reset link of `kind`, on behalf of `tenant` (an org id, an
-  organization or `nil`, for the mail's branding).
+  organization or `nil`, for the mail's branding). For `:breached_sign_in`
+  the caller passes a site whose policy refused the sign-in (#3436).
 
     * `:sent` - a token was minted and the mail queued;
     * `:over_budget` - the address has had its reset mail for the hour;

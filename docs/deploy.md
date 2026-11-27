@@ -216,6 +216,11 @@ The image's `CMD` is:
    cold-boot; the image's healthcheck allows a generous start period for it
    (below).
 
+The image also ships **`bin/backup`**, which boot doesn't run: it lists,
+starts, verifies and reports on backups from a shell in the running container
+(`docker compose -f docker-compose.prod.yml --env-file .env.prod exec app bin/backup list`).
+See [Backups from the command line](backup-cli.md).
+
 A boot failure is loud. The three required variables raise with a message
 naming the variable; a `:prod` release with `dev_routes` enabled refuses to
 boot (it would expose `/admin`, LiveDashboard and the mailbox unauthenticated);
