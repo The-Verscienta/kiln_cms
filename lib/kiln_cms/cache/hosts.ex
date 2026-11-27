@@ -30,6 +30,12 @@ defmodule KilnCMS.Cache.Hosts do
   side already has at five minutes, and an order of magnitude shorter, so the
   negative TTL is deliberately the tighter of the two.
 
+  A lookup that ran before an organization's slug or `custom_domain` change
+  committed, and stores after that change's bust, would cache the old answer:
+  the new domain unresolvable for a minute, or the old one still resolving for
+  five. Lookups and busts go through `KilnCMS.Cache.FillGuard`, which discards
+  such a lookup's answer instead of storing it (#2972).
+
   What it does **not** do is refuse anything the database would have resolved:
   an entry is only ever written from a real lookup that really found nothing.
   That distinguishes it from bounding the work by rate limit, which cannot tell
@@ -51,6 +57,8 @@ defmodule KilnCMS.Cache.Hosts do
   # enough that real traffic never evicts itself, small enough that a flood of
   # negatives is a bounded amount of memory.
   import Cachex.Spec, only: [hook: 1]
+
+  alias KilnCMS.Cache.FillGuard
 
   @max_entries 5_000
 
@@ -76,9 +84,12 @@ defmodule KilnCMS.Cache.Hosts do
   evented least-recently-written policy the content cache uses.
   """
   def child_spec(_arg) do
+    # `transactions: true`: `KilnCMS.Cache.FillGuard` orders fills and busts
+    # by transaction.
     Supervisor.child_spec(
       {Cachex,
        name: @cache,
+       transactions: true,
        hooks: [hook(module: Cachex.Limit.Evented, args: {@max_entries, [reclaim: 0.1]})]},
       id: __MODULE__
     )
@@ -106,17 +117,22 @@ defmodule KilnCMS.Cache.Hosts do
     end
   end
 
+  # `began` is taken before the lookup, so a bust that lands while it runs
+  # (`KilnCMS.Accounts.Changes.BustSiteUrls`) keeps its answer, found or not,
+  # out of the cache (`KilnCMS.Cache.FillGuard`).
   defp resolve_and_store(host, fun) do
+    began = FillGuard.begin()
+
     case fun.() do
       nil ->
-        Cachex.put(@cache, host, @miss, expire: @negative_ttl)
+        FillGuard.put(@cache, host, @miss, [expire: @negative_ttl], began)
         nil
 
       :error ->
         :error
 
       org ->
-        Cachex.put(@cache, host, org, expire: @positive_ttl)
+        FillGuard.put(@cache, host, org, [expire: @positive_ttl], began)
         org
     end
   end
@@ -124,7 +140,7 @@ defmodule KilnCMS.Cache.Hosts do
   @doc "Drop every cached resolution. For tests, and for an operator's reset."
   @spec clear() :: :ok
   def clear do
-    if enabled?(), do: Cachex.clear(@cache)
+    if enabled?(), do: FillGuard.clear(@cache)
     :ok
   end
 

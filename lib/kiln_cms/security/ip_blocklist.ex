@@ -22,6 +22,11 @@ defmodule KilnCMS.Security.IpBlocklist do
   removed by hand in SQL (the documented recovery path) is picked up when the TTL
   runs out, which is why the TTL is a minute and not five.
 
+  A fill that read the rules before a write committed, and stores after that
+  write's bust, would put the old list back for the TTL. Fills and busts go
+  through `KilnCMS.Cache.FillGuard`, which discards such a fill (#2972): the
+  request that ran it is answered from what it read, and nothing is stored.
+
   ## It fails open
 
   The list is read as `KilnCMS.SystemActor.new(:ip_block)` with
@@ -37,6 +42,7 @@ defmodule KilnCMS.Security.IpBlocklist do
   import Cachex.Spec, only: [hook: 1]
 
   alias KilnCMS.Cache.ClusterBust
+  alias KilnCMS.Cache.FillGuard
   alias KilnCMS.CMS
   alias KilnCMS.Security.Cidr
 
@@ -54,9 +60,12 @@ defmodule KilnCMS.Security.IpBlocklist do
 
   @doc false
   def child_spec(_arg) do
+    # `transactions: true`: `KilnCMS.Cache.FillGuard` orders fills and busts
+    # by transaction.
     Supervisor.child_spec(
       {Cachex,
        name: @cache,
+       transactions: true,
        hooks: [hook(module: Cachex.Limit.Evented, args: {@max_entries, [reclaim: 0.1]})]},
       id: __MODULE__
     )
@@ -124,10 +133,7 @@ defmodule KilnCMS.Security.IpBlocklist do
 
   @doc "Drop every cached entry on this node. For tests."
   @spec clear() :: :ok
-  def clear do
-    Cachex.clear(@cache)
-    :ok
-  end
+  def clear, do: FillGuard.clear(@cache)
 
   defp key(org_id), do: "rules:#{org_id}"
 
@@ -144,10 +150,14 @@ defmodule KilnCMS.Security.IpBlocklist do
     end
   end
 
+  # `began` is taken before the read, so a bust that lands while it runs keeps
+  # its answer out of the cache (`KilnCMS.Cache.FillGuard`).
   defp fill(org_id) do
+    began = FillGuard.begin()
+
     case load(org_id) do
       {:ok, rules} ->
-        Cachex.put(@cache, key(org_id), rules, expire: @ttl)
+        FillGuard.put(@cache, key(org_id), rules, [expire: @ttl], began)
         rules
 
       {:error, rules} ->

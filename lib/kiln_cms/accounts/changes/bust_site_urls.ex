@@ -49,10 +49,12 @@ defmodule KilnCMS.Accounts.Changes.BustSiteUrls do
         KilnCMSWeb.Tenant.host_cache_keys(previous) ++ KilnCMSWeb.Tenant.host_cache_keys(org)
       )
 
-    # Every node re-resolves the org from the next request. The page ETag names
-    # the rendered base URL itself (ContentController), so a refill that races
-    # this, or a node that misses it, can serve old URLs only under their own
-    # old tag, for at most the host cache's TTL.
+    # Every node re-resolves the org from the next request. A lookup that read
+    # before the commit cannot store its answer after this (FillGuard, #2972);
+    # it serves that one request. A node that misses the message keeps its
+    # entry for at most the host cache's TTL, and the page ETag names the
+    # rendered base URL itself (ContentController), so the old URLs it serves
+    # go out only under their own old tag.
     Cache.ClusterBust.broadcast_in(Cache.Hosts.cache_name(), hosts)
     Cache.bump_head_generation(org_id)
 

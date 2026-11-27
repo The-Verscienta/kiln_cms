@@ -297,9 +297,16 @@ refuses raise `blocked_ip` like any rule's (see
 ## How fast a change takes effect
 
 Each node keeps a site's rules in a small cache for **one minute**. Adding or
-removing a rule in the console clears that cache on every node at once. An
-expiry takes effect at the second it passes, not at the next refresh. A rule
-changed directly in the database is seen when the minute is up.
+removing a rule (in the console, by the scanner guard, or with
+`KilnCMS.Release.remove_ip_blocks`) clears that cache on every node once the
+save commits. An expiry takes effect at the second it passes, not at the next
+refresh. A rule changed directly in the database is seen when the minute is up.
+
+A request that read the rules just before the save is answered from what it
+read, once, and its copy is not stored, so the next request on that node reads
+the new rules (#2972). Before, that copy could land in the cache just after it
+was cleared and keep the old rules in force for the rest of the minute. A node
+that misses the cluster message still waits out the minute.
 
 There is no environment variable for this: the behavior is fixed. (Automatic
 blocking, above, has its own variables.)

@@ -221,6 +221,18 @@ defmodule KilnCMSWeb.Telemetry do
             "into another caller's in-flight read, #1377) / error (the fetch failed and " <>
             "the caller recomputed outside the stampede guard, #1376)"
       ),
+      counter("kiln_cms.cache.fill_discarded.count",
+        tags: [:cache, :reason],
+        description:
+          "Cache fills served but not stored because a bust landed while they ran " <>
+            "(reason busted) or they ran longer than the guard's window (too_old), #2972"
+      ),
+      counter("kiln_cms.cache.bust_unmarked.count",
+        tags: [:cache, :reason],
+        description:
+          "Cache busts that deleted but could not record their mark (mark_failed / " <>
+            "queue_unavailable), so a fill already in flight may still store, #2972"
+      ),
       distribution("kiln_cms.firing.fire.duration",
         unit: {:native, :millisecond},
         tags: [:type, :mode],
