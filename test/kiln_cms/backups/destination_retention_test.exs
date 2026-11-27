@@ -1206,6 +1206,135 @@ defmodule KilnCMS.Backups.DestinationRetentionTest do
     end
   end
 
+  # -- whether a Test would clear the SFTP blocker (#3428) ---------------------
+
+  describe "cleared_by_test?/3 (#3428)" do
+    # `sftp_row/4`, `blockers/1`, `@ed`, `@fp_a`, `@fp_b` and `@blocked` are
+    # the #3200 block's above.
+    @fp_c "SHA256:" <> String.duplicate("C", 43)
+
+    defp cleared(rows),
+      do: Enum.map(rows, &Retention.cleared_by_test?(stored_config(&1), rows, nil))
+
+    # A trusted after B's last Test: only the Tests are missing.
+    defp untested_pair do
+      [
+        sftp_row("nas-a.test", "/backups", {@ed, @fp_a}, trusted: 600, tested: 900),
+        sftp_row("nas-b.test", "/backups", {@ed, @fp_b}, trusted: 3600, tested: 1800)
+      ]
+    end
+
+    test "trusted keys of one type that differ, not tested since: a Test would clear both" do
+      rows = untested_pair()
+
+      assert blockers(rows) == @blocked
+      assert cleared(rows) == [true, true]
+
+      # Never tested at all, the same.
+      untested = Enum.map(rows, &%{&1 | last_test_ok: nil, last_tested_at: nil})
+      assert cleared(untested) == [true, true]
+    end
+
+    test "after both Tests pass the pair prunes, and no hint is left" do
+      [a, b] = untested_pair()
+      now = DateTime.utc_now()
+
+      rows = [
+        %{a | last_test_ok: true, last_tested_at: now},
+        %{b | last_test_ok: true, last_tested_at: now}
+      ]
+
+      assert blockers(rows) == [nil, nil]
+      assert cleared(rows) == [false, false]
+    end
+
+    test "one fingerprint on both: no Test tells them apart" do
+      rows = [
+        sftp_row("nas.test", "/backups", {@ed, @fp_a}, tested: nil),
+        sftp_row("10.0.0.5", "/backups", {@ed, @fp_a}, tested: nil)
+      ]
+
+      assert blockers(rows) == @blocked
+      assert cleared(rows) == [false, false]
+    end
+
+    test "a key not yet trusted: false" do
+      rows = [
+        sftp_row("nas-a.test", "/backups", {@ed, @fp_a}, tested: nil),
+        sftp_row("nas-b.test", "/backups", nil, tested: nil)
+      ]
+
+      assert blockers(rows) == @blocked
+      assert cleared(rows) == [false, false]
+    end
+
+    test "keys of different types: false" do
+      rows = [
+        sftp_row("nas.test", "/backups", {@ed, @fp_a}, tested: nil),
+        sftp_row("10.0.0.5", "/backups", {"ssh-rsa", @fp_b}, tested: nil)
+      ]
+
+      assert blockers(rows) == @blocked
+      assert cleared(rows) == [false, false]
+    end
+
+    test "an unreadable trust time: false" do
+      [a, b] = untested_pair()
+      b = %{b | host_key: %{b.host_key | "trusted_at" => "yesterday"}}
+
+      assert cleared([a, b]) == [false, false]
+    end
+
+    test "three rows: one partner a Test would clear and one it can't, false" do
+      # B differs from A and only needs the Tests; C shares A's fingerprint,
+      # which no Test changes. A stays blocked whatever is tested.
+      [a, b] = untested_pair()
+      c = sftp_row("10.0.0.5", "/backups", {@ed, @fp_a}, trusted: 600, tested: nil)
+      rows = [a, b, c]
+
+      assert blockers(rows) == [
+               :destination_overlap_possible_sftp,
+               :destination_overlap_possible_sftp,
+               :destination_overlap_possible_sftp
+             ]
+
+      [cleared_a, _b, cleared_c] = cleared(rows)
+      refute cleared_a
+      refute cleared_c
+    end
+
+    test "three rows all told apart by key, not tested since: true for each" do
+      [a, b] = untested_pair()
+      c = sftp_row("nas-c.test", "/backups", {@ed, @fp_c}, trusted: 600, tested: nil)
+
+      assert cleared([a, b, c]) == [true, true, true]
+    end
+
+    test "an exact overlap or any other blocker: false" do
+      rows = [
+        sftp_row("nas.test", "/backups", {@ed, @fp_a}, trusted: 600, tested: nil),
+        sftp_row("nas.test", "/backups/site", {@ed, @fp_b}, trusted: 600, tested: nil)
+      ]
+
+      assert blockers(rows) == [:destination_overlap, :destination_overlap]
+      assert cleared(rows) == [false, false]
+
+      [a, b] = untested_pair()
+      env = {:rclone, "r2", ["kiln"]}
+      refute Retention.cleared_by_test?(stored_config(a), [a, b], env)
+      refute Retention.cleared_by_test?(:env, [a, b], env)
+    end
+
+    test "prune_blocker/3 is unchanged by it: the subject with no row is never cleared" do
+      [a, b] = untested_pair()
+
+      assert Retention.prune_blocker(stored_config(a), [b], nil) ==
+               :destination_overlap_possible_sftp
+
+      refute Retention.cleared_by_test?(stored_config(a), [b], nil)
+    end
+  end
+
   describe "run_on_destination/3 on two SFTP servers at the same path (#3200)" do
     @describetag :tmp_dir
 

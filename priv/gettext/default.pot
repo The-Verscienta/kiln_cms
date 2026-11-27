@@ -12201,6 +12201,11 @@ msgstr ""
 msgid "How to restore a media backup written in several parts"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "How two SFTP servers both prune"
+msgstr ""
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "How your name appears to readers and to the people you work with."
@@ -18102,6 +18107,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "Press Publish in the editor. Until then, only people signed in to the console can see it."
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Press Test on both destinations to let them prune."
 msgstr ""
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex

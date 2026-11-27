@@ -1845,11 +1845,45 @@ defmodule KilnCMS.Backups.Retention do
     Enum.any?(rows, &(&1.id != id and overlaps?.(&1)))
   end
 
+  @doc """
+  Whether pressing **Test** on the SFTP rows involved would clear
+  `config`'s `:destination_overlap_possible_sftp` (#3428), so the
+  Destinations tab can say so. Pure, on the same `rows` and `env` as
+  `prune_blocker/3`, whose rule it reuses rather than restates.
+
+  True only when `prune_blocker/3` gives `:destination_overlap_possible_sftp`
+  and every SFTP row whose path may overlap this one's lacks nothing but
+  the Tests (#3200): both rows trust a key of the same type, the
+  fingerprints differ, both trust times can be read, and one row or both
+  hasn't passed a Test since the later trust. One partner that a Test
+  can't clear (no trusted key, keys of different types, one fingerprint)
+  makes it false, since the row stays blocked whatever is tested.
+  """
+  @spec cleared_by_test?(Config.t() | :env, [map()], Destination.location() | nil) ::
+          boolean()
+  def cleared_by_test?(%Config{} = config, rows, env) when is_list(rows) do
+    location = Destination.location(config)
+
+    prune_blocker(config, rows, env) == :destination_overlap_possible_sftp and
+      rows
+      |> Enum.filter(
+        &(&1.id != config.id and Destination.possible_overlap?(location, row_location(&1)))
+      )
+      |> Enum.all?(&(server_proof(config.id, &1, rows) in [:proven, :untested]))
+  end
+
+  def cleared_by_test?(:env, _rows, _env), do: false
+
   # Two SFTP rows whose paths nest are distinct servers when both trust a
   # key of the same type with different fingerprints, and each passed a
   # Test after the later of the two trusts (#3200). Positive proof only:
   # nothing here infers a key is good from the absence of a refusal.
-  defp distinct_servers?(id, %{kind: "sftp"} = other, rows) do
+  defp distinct_servers?(id, other, rows), do: server_proof(id, other, rows) == :proven
+
+  # `:proven` (distinct servers), `:untested` (the keys would prove it, but
+  # one row or both hasn't passed a Test since the later trust, #3428), or
+  # `:unproven` (no Test can prove it).
+  defp server_proof(id, %{kind: "sftp"} = other, rows) do
     with %{kind: "sftp"} = own <- Enum.find(rows, &(&1.id == id)),
          {type, own_fingerprint} <- Sftp.trusted_key(own),
          {^type, other_fingerprint} <- Sftp.trusted_key(other),
@@ -1857,13 +1891,16 @@ defmodule KilnCMS.Backups.Retention do
          %DateTime{} = own_trusted <- trusted_at(own),
          %DateTime{} = other_trusted <- trusted_at(other) do
       later = Enum.max([own_trusted, other_trusted], DateTime)
-      tested_since?(own, later) and tested_since?(other, later)
+
+      if tested_since?(own, later) and tested_since?(other, later),
+        do: :proven,
+        else: :untested
     else
-      _missing_untrusted_or_same -> false
+      _missing_untrusted_or_same -> :unproven
     end
   end
 
-  defp distinct_servers?(_id, _row, _rows), do: false
+  defp server_proof(_id, _row, _rows), do: :unproven
 
   defp trusted_at(%{host_key: %{"trusted_at" => at}}) when is_binary(at) do
     case DateTime.from_iso8601(at) do
