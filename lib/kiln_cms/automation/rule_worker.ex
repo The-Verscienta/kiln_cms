@@ -702,11 +702,14 @@ defmodule KilnCMS.Automation.RuleWorker do
   end
 
   # Only findings delivered by email have a recipient to check; a comment or a
-  # task lands in the editor whatever the `to` says.
+  # task lands in the editor whatever the `to` says. Mirrors
+  # `deliver_findings/2`'s fan-out exactly: anything that isn't a comment or a
+  # task (an unknown `deliver_as` included) is emailed, so it is checked.
   defp check_findings_recipient(config, org_id) do
     case Map.get(config, "deliver_as") || "email" do
-      "email" -> check_rule_recipient(config, org_id)
-      _other -> :ok
+      "comment" -> :ok
+      "task" -> :ok
+      _email -> check_rule_recipient(config, org_id)
     end
   end
 

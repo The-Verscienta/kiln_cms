@@ -898,10 +898,11 @@ defmodule KilnCMS.AutomationIntelligenceTest do
           config: %{"to" => "eds@example.com"}
         })
 
-      KilnCMS.Mail.suppress_site_recipient!(%{email: "eds@example.com"},
-        tenant: r.org_id,
-        authorize?: false
-      )
+      entry =
+        KilnCMS.Mail.suppress_site_recipient!(%{email: "eds@example.com"},
+          tenant: r.org_id,
+          authorize?: false
+        )
 
       anchor = indexed_post(actor, "the exact same passage", "Same")
       _dup = indexed_post(actor, "the exact same passage", "Same")
@@ -909,6 +910,41 @@ defmodule KilnCMS.AutomationIntelligenceTest do
       ExUnit.CaptureLog.capture_log(fn -> assert :ok = run_rule(r, anchor, "post.published") end)
 
       refute_email_sent()
+
+      # Control: with the site's row cleared, the same run finds the duplicate
+      # and mails it, so the refute above is the list, not an empty finding.
+      KilnCMS.Mail.unsuppress_site_recipient!(entry, tenant: r.org_id, authorize?: false)
+
+      assert :ok = run_rule(r, anchor, "post.published")
+      assert_email_sent(fn email -> assert email.to == [{"", "eds@example.com"}] end)
+    end
+
+    test "an unknown deliver_as is emailed, so it is checked too" do
+      actor = admin()
+
+      # Seeded, so `ActionConfig` never sees the value; `deliver_findings/2`
+      # emails anything that is not a comment or a task.
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :flag_duplicates,
+          config: %{"deliver_as" => "fax", "to" => "eds@example.com"}
+        })
+
+      entry = KilnCMS.Mail.suppress_recipient!(%{email: "eds@example.com"}, authorize?: false)
+
+      anchor = indexed_post(actor, "a passage the fax rule finds twice", "Fax")
+      _dup = indexed_post(actor, "a passage the fax rule finds twice", "Fax")
+
+      ExUnit.CaptureLog.capture_log(fn -> assert :ok = run_rule(r, anchor, "post.published") end)
+
+      refute_email_sent()
+
+      # Control: unsuppressed, the same rule does email its findings.
+      KilnCMS.Mail.unsuppress_recipient!(entry, authorize?: false)
+
+      assert :ok = run_rule(r, anchor, "post.published")
+      assert_email_sent(fn email -> assert email.to == [{"", "eds@example.com"}] end)
     end
 
     test "an unreadable list raises before anything is generated" do
