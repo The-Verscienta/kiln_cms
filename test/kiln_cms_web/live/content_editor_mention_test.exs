@@ -191,7 +191,8 @@ defmodule KilnCMSWeb.ContentEditorMentionTest do
   end
 
   # The roster is the notifier's (`Notifications.mention_roster/1`): the
-  # content org's members, any global role, plus membership-less accounts —
+  # content org's members, any global role, plus membership-less accounts on
+  # the default org only, as `Scoping.effective_tier/2` reads them (#3047) —
   # not everyone whose GLOBAL role is editor or admin.
   describe "on a second org" do
     setup do
@@ -199,9 +200,21 @@ defmodule KilnCMSWeb.ContentEditorMentionTest do
       other = KilnCMS.OrgFixtures.org("mention-other")
       family = surname()
 
+      # A member of this org only, then removed from it: removal deletes the
+      # row, so the account is left with no membership anywhere.
+      removed = authed_user(:editor, "Alina #{family}")
+
+      KilnCMS.Accounts.OrgMembership
+      |> Ash.Seed.seed!(%{user_id: removed.id, organization_id: site.id, role: :editor})
+      |> KilnCMS.Accounts.remove_org_membership!(authorize?: false)
+
       %{
         site: site,
+        other: other,
         family: family,
+        removed: removed,
+        # Never a member of any org: a global editor from before sites.
+        unaffiliated: authed_user(:editor, "Alison #{family}"),
         editor: member(authed_user(:viewer, "Opener #{surname()}"), site, :editor),
         # Global :viewer — reachable here through the membership alone.
         site_viewer: member(authed_user(:viewer, "Alice #{family}"), site, :viewer),
@@ -264,6 +277,41 @@ defmodule KilnCMSWeb.ContentEditorMentionTest do
       refute html =~ "Alicia #{ctx.family}"
       refute ctx.outsider.id in Enum.map(KilnCMS.Notifications.mention_roster(ctx.site), & &1.id)
     end
+
+    test "does not suggest someone removed from this org, their only one", ctx do
+      html = ctx |> open_org_composer() |> write("@ali")
+
+      # Not vacuous: the dropdown is open, on this org's member.
+      assert html =~ "Alice #{ctx.family}"
+      refute html =~ "Alina #{ctx.family}"
+
+      for org <- [ctx.site, ctx.other] do
+        refute ctx.removed.id in Enum.map(KilnCMS.Notifications.mention_roster(org), & &1.id)
+      end
+    end
+
+    test "does not suggest an account with no membership anywhere", ctx do
+      html = ctx |> open_org_composer() |> write("@ali")
+
+      assert html =~ "Alice #{ctx.family}"
+      refute html =~ "Alison #{ctx.family}"
+
+      refute ctx.unaffiliated.id in Enum.map(
+               KilnCMS.Notifications.mention_roster(ctx.site),
+               & &1.id
+             )
+    end
+
+    # Scoping's legacy rule: a membership-less account keeps its global role
+    # on the default org, so it is mentionable there.
+    test "on the default org, does suggest an account with no membership anywhere", ctx do
+      {lv, _page} = open_composer(ctx.conn, authed_user(:editor, "Opener #{surname()}"))
+      html = write(lv, "@ali")
+
+      assert html =~ "Alison #{ctx.family}"
+      assert html =~ "Alina #{ctx.family}"
+      refute html =~ "Alicia #{ctx.family}"
+    end
   end
 
   describe "picking one" do
@@ -309,6 +357,51 @@ defmodule KilnCMSWeb.ContentEditorMentionTest do
     test "a pick with no handle is ignored", ctx do
       {lv, _page} = open_composer(ctx.conn, ctx.editor)
       assert render_click(lv, "mention_pick", %{}) =~ "Mentions spec"
+    end
+  end
+
+  # An empty dropdown and a roster that could not be read look alike; only one
+  # of them means nobody is there to mention.
+  describe "when the roster cannot be read (#3052)" do
+    @unavailable "Mention suggestions couldn&#39;t be loaded"
+
+    defp discussion(unavailable?) do
+      render_component(&KilnCMSWeb.BlockDiscussionComponents.block_discussion/1,
+        block_id: "b1",
+        comments: [],
+        open?: true,
+        mentions_unavailable?: unavailable?
+      )
+    end
+
+    test "the composer says suggestions couldn't be loaded" do
+      html = discussion(true)
+
+      assert html =~ @unavailable
+      assert html =~ ~s(aria-describedby="mentions-unavailable-b1")
+      assert html =~ ~s(id="mentions-unavailable-b1")
+    end
+
+    test "a roster that was read says nothing" do
+      html = discussion(false)
+
+      refute html =~ @unavailable
+      refute html =~ "aria-describedby"
+    end
+
+    test "the mount maps a failed read to no suggestions and the notice" do
+      assert KilnCMSWeb.ContentEditorLive.mention_roster_assigns(:error) ==
+               [mention_roster: [], mentions_unavailable?: true]
+
+      roster = [%{id: "someone"}]
+
+      assert KilnCMSWeb.ContentEditorLive.mention_roster_assigns({:ok, roster}) ==
+               [mention_roster: roster, mentions_unavailable?: false]
+    end
+
+    test "an editor whose roster was read shows no notice", ctx do
+      {lv, _page} = open_composer(ctx.conn, ctx.editor)
+      refute render(lv) =~ @unavailable
     end
   end
 end

@@ -26,6 +26,7 @@ defmodule KilnCMS.Notifications.SendTimeEntitlementTest do
   use Oban.Testing, repo: KilnCMS.Repo
 
   import Ecto.Query, only: [from: 2]
+  import ExUnit.CaptureLog
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.OrgMembership
@@ -68,6 +69,8 @@ defmodule KilnCMS.Notifications.SendTimeEntitlementTest do
 
   defp tenant, do: Accounts.default_org_id()
 
+  defp later(seconds), do: DateTime.add(DateTime.utc_now(), seconds, :second)
+
   defp address(user), do: to_string(user.email)
 
   defp drain, do: KilnCMS.DataCase.drain_oban()
@@ -109,6 +112,33 @@ defmodule KilnCMS.Notifications.SendTimeEntitlementTest do
     CMS.add_comment!(
       %{content_type: "page", content_id: page.id, block_id: block_id(page), body: body},
       actor: actor
+    )
+  end
+
+  # `page!/1` and `comment!/3` on another site: unpublished, so its title and
+  # excerpt are the site's own.
+  defp site_page!(author, org_id) do
+    CMS.create_page!(
+      %{
+        title: "Entitled #{unique()}",
+        slug: "entitled-#{unique()}",
+        blocks:
+          KilnCMS.TypedFixtures.typed_blocks([
+            %{type: :heading, content: "Body", data: %{"level" => 2}, order: 0}
+          ])
+      },
+      actor: author,
+      tenant: org_id
+    )
+  end
+
+  defp site_comment!(page, org_id, body, actor) do
+    block_id = page.blocks |> hd() |> Map.get(:value) |> Map.get(:id)
+
+    CMS.add_comment!(
+      %{content_type: "page", content_id: page.id, block_id: block_id, body: body},
+      actor: actor,
+      tenant: org_id
     )
   end
 
@@ -339,6 +369,93 @@ defmodule KilnCMS.Notifications.SendTimeEntitlementTest do
       assert mention.subject =~ "mentioned you"
       assert to(sent, address(bystander)) == []
     end
+
+    # #3047: removal deletes the row, which used to leave the account with no
+    # membership anywhere and so on every site's roster. `removed` is neither
+    # the content's author nor on the thread, so only the roster could send it.
+    test "someone removed from the site, their only one, is not sent it" do
+      site = KilnCMS.OrgFixtures.org("entitled-removed")
+      author = user(:viewer)
+      membership!(author, site.id, :editor)
+      removed = user(:editor)
+      membership = membership!(removed, site.id, :editor)
+      still = user(:viewer)
+      membership!(still, site.id, :editor)
+
+      page = site_page!(author, site.id)
+      site_comment!(page, site.id, "see #{handle(removed)} and #{handle(still)}", author)
+      assert [job] = jobs_for(WorkflowMailWorker, removed)
+      assert job.args["event"] == "comment_mention"
+
+      remove!(membership)
+      drain()
+
+      sent = emails()
+      assert [_mention] = to(sent, address(still))
+      assert to(sent, address(removed)) == []
+      # A skip, not a cancel: a cancelled mail job reads as a delivery failure.
+      assert row(job.id).state == "completed"
+    end
+
+    # Pinned, not endorsed (#3048): a participant is still sent the mention as
+    # the thread notice it stands in for, after removal from the site too.
+    test "a participant removed from the site, their only one, is still sent it" do
+      site = KilnCMS.OrgFixtures.org("entitled-removed-participant")
+      author = user(:viewer)
+      membership!(author, site.id, :editor)
+      participant = user(:editor)
+      membership = membership!(participant, site.id, :editor)
+
+      page = site_page!(author, site.id)
+      site_comment!(page, site.id, "first", participant)
+      drain()
+      emails()
+
+      site_comment!(page, site.id, "see #{handle(participant)}", author)
+
+      assert [%{args: %{"event" => "comment_mention"}}] =
+               jobs_for(WorkflowMailWorker, participant)
+
+      remove!(membership)
+      drain()
+
+      assert [_mention] = to(emails(), address(participant))
+    end
+
+    # The single-site install: nobody holds a membership row, and the default
+    # site's roster is every such account.
+    test "an account with no membership row is sent it on the default site" do
+      mentioned = user(:editor)
+      page = page!(user(:editor))
+      comment!(page, "see #{handle(mentioned)}", user(:editor))
+      drain()
+
+      assert [_mention] = to(emails(), address(mentioned))
+      assert mentioned.id in Enum.map(Notifications.mention_roster(nil), & &1.id)
+      assert Notifications.mention_roster_member?(nil, mentioned)
+    end
+  end
+
+  describe "a mention roster that cannot be read (#3052)" do
+    test "is :error from fetch_mention_roster/1 and [] from mention_roster/1, with a warning" do
+      seeded = user(:editor)
+
+      log =
+        capture_log(fn ->
+          assert Notifications.fetch_mention_roster("not-a-uuid") == :error
+          assert Notifications.mention_roster("not-a-uuid") == []
+        end)
+
+      assert log =~ "mention roster could not be read"
+      # Names no one: the exception's module only, never its message.
+      refute log =~ seeded.id
+      refute log =~ address(seeded)
+      refute log =~ "not-a-uuid"
+
+      # Not vacuous: the same reads on a real org answer.
+      assert {:ok, roster} = Notifications.fetch_mention_roster(nil)
+      assert seeded.id in Enum.map(roster, & &1.id)
+    end
   end
 
   describe "a task digest" do
@@ -566,8 +683,27 @@ defmodule KilnCMS.Notifications.SendTimeEntitlementTest do
       # Removed from the only site they belonged to: removal deletes the row.
       removed = user(:editor)
       removed |> membership!(elsewhere.id, :editor) |> remove!()
+      # Platform admins with no membership row: `:admin` on every org.
+      platform_admin = user(:admin)
+      granted_admin = user(:editor, %{granted_role: :admin, granted_role_expires_at: later(3600)})
+      lapsed_admin = user(:editor, %{granted_role: :admin, granted_role_expires_at: later(-1)})
+      # A platform admin who holds a row is reachable only where it names.
+      member_platform_admin = user(:admin)
+      membership!(member_platform_admin, elsewhere.id, :editor)
 
-      people = [unscoped, member, pending, foreign, muted, erased, removed]
+      people = [
+        unscoped,
+        member,
+        pending,
+        foreign,
+        muted,
+        erased,
+        removed,
+        platform_admin,
+        granted_admin,
+        lapsed_admin,
+        member_platform_admin
+      ]
 
       for org <- [site.id, elsewhere.id, tenant()] do
         roster = org |> Notifications.mention_roster() |> MapSet.new(& &1.id)
@@ -580,7 +716,6 @@ defmodule KilnCMS.Notifications.SendTimeEntitlementTest do
       end
 
       assert Notifications.mention_roster_member?(site.id, member)
-      assert Notifications.mention_roster_member?(site.id, unscoped)
       # A pending registration is not a member, and its row scopes the account.
       refute Notifications.mention_roster_member?(site.id, pending)
       refute Notifications.mention_roster_member?(tenant(), pending)
@@ -588,11 +723,74 @@ defmodule KilnCMS.Notifications.SendTimeEntitlementTest do
       refute Notifications.mention_roster_member?(site.id, muted)
       refute Notifications.mention_roster_member?(site.id, erased)
 
-      # Pinned, not endorsed: with no membership row left, an account removed
-      # from its only site reads as unscoped, so it is on every org's roster,
-      # the site it was removed from included. A follow-up decides the rule.
-      assert Notifications.mention_roster_member?(site.id, removed)
-      assert Notifications.mention_roster_member?(elsewhere.id, removed)
+      # Scoping's legacy rule (#3047): an account with no membership row counts
+      # on the default site only, an account removed from its only site
+      # (removal deletes the row) included.
+      refute Notifications.mention_roster_member?(site.id, unscoped)
+      refute Notifications.mention_roster_member?(elsewhere.id, unscoped)
+      assert Notifications.mention_roster_member?(tenant(), unscoped)
+      refute Notifications.mention_roster_member?(site.id, removed)
+      refute Notifications.mention_roster_member?(elsewhere.id, removed)
+      assert Notifications.mention_roster_member?(tenant(), removed)
+      # A pre-org-id job's nil is the default site.
+      assert Notifications.mention_roster_member?(nil, unscoped)
+
+      # A membership-less platform admin, standing or by a live grant, is on
+      # every roster; a lapsed grant is the standing editor again.
+      for org <- [site.id, elsewhere.id, tenant()] do
+        assert Notifications.mention_roster_member?(org, platform_admin)
+        assert Notifications.mention_roster_member?(org, granted_admin)
+      end
+
+      refute Notifications.mention_roster_member?(site.id, lapsed_admin)
+      assert Notifications.mention_roster_member?(tenant(), lapsed_admin)
+      refute Notifications.mention_roster_member?(site.id, member_platform_admin)
+      assert Notifications.mention_roster_member?(elsewhere.id, member_platform_admin)
+    end
+
+    # The roster is Scoping's tier, less muted comment mail: anyone with a tier
+    # on the org is mentionable there and no one else. The one place they part
+    # is a platform admin who holds a membership row: Scoping makes them
+    # `:admin` everywhere, the roster keeps them to the orgs their rows name.
+    test "follows Scoping.effective_tier/2 on every org" do
+      site = KilnCMS.OrgFixtures.org("entitled-tier-roster")
+      elsewhere = KilnCMS.OrgFixtures.org("entitled-tier-roster-elsewhere")
+
+      member_viewer = user(:viewer)
+      membership!(member_viewer, site.id, :viewer)
+      member_admin = user(:editor)
+      membership!(member_admin, site.id, :admin)
+      pending = user(:editor)
+      membership!(pending, site.id, :editor, :pending)
+      foreign = user(:editor)
+      membership!(foreign, elsewhere.id, :editor)
+      removed = user(:editor)
+      removed |> membership!(site.id, :editor) |> remove!()
+
+      people = [
+        user(:editor),
+        user(:viewer),
+        member_viewer,
+        member_admin,
+        pending,
+        foreign,
+        removed,
+        user(:editor, %{notify_on_comment: false}),
+        user(:editor, %{anonymized_at: DateTime.utc_now()}),
+        user(:admin),
+        user(:admin, %{notify_on_comment: false}),
+        user(:editor, %{granted_role: :admin, granted_role_expires_at: later(3600)}),
+        user(:editor, %{granted_role: :admin, granted_role_expires_at: later(-1)})
+      ]
+
+      for org <- [site.id, elsewhere.id, tenant(), nil], person <- people do
+        expected =
+          Scoping.effective_tier(person, org) != :none and person.notify_on_comment and
+            is_nil(person.anonymized_at)
+
+        assert Notifications.mention_roster_member?(org, person) == expected,
+               "mention roster disagrees with Scoping for #{person.email} on #{inspect(org)}"
+      end
     end
   end
 

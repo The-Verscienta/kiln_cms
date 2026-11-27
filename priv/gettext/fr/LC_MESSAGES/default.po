@@ -14269,6 +14269,11 @@ msgstr "Les abonnements ne sont pas configurés sur ce site. Revenez plus tard."
 msgid "Mention a teammate"
 msgstr "Mentionner un collègue"
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Mention suggestions couldn't be loaded. Reload to try again; an @mention sent now may notify no one."
+msgstr "Impossible de charger les suggestions de mentions. Rechargez la page pour réessayer ; une @mention envoyée maintenant risque de ne notifier personne."
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Menu"

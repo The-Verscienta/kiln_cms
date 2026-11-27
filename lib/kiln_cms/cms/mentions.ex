@@ -29,8 +29,10 @@ defmodule KilnCMS.CMS.Mentions do
   ## Scope
 
   This module matches; it does not choose who is matchable. Candidates come
-  from `KilnCMS.Notifications.mention_roster/1` — the org's members plus
-  membership-less users — for both the notifier and the editor's autocomplete,
+  from `KilnCMS.Notifications.mention_roster/1` — the org's members, plus
+  membership-less accounts on the default site only (and membership-less
+  platform admins everywhere), as `KilnCMS.Accounts.Scoping.effective_tier/2`
+  reads them — for both the notifier and the editor's autocomplete,
   so a mention can never reach a user outside the org the comment was written
   in, whatever the body says.
   """
