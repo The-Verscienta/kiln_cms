@@ -6143,11 +6143,13 @@ origin" below).
 What you see on the tab:
 
 - **A dropped-lines marker.** A log keeps at most 200 lines: the first 50,
-  the last 149, and one marker between them. The marker reads "Some lines
-  were dropped to keep the log small" and is shown at every level, so a
-  filtered view never hides that lines are missing. The download keeps the
-  stored line, which says how many: `WARN  truncated 37 log entries were
-  dropped to bound the log`.
+  the last 149, and one marker between them. The marker says how many, as
+  "37 lines were dropped to keep the log small", and is shown at every
+  level, so a filtered view never hides that lines are missing. The
+  download keeps the stored line, with the same count: `WARN  truncated 37
+  log entries were dropped to bound the log`. The count is every line the
+  backup's log has lost, including lines dropped before a resumed or
+  re-sent backup added more.
 - **Lines arrive at step boundaries.** A step writes the run when it
   finishes, so a long media archive or upload adds its lines in one go at
   the end, not as it works. While the backup runs the page says "Live: new
@@ -6224,16 +6226,18 @@ hidden by this.
 
 A refusal is a short plain-text page that ends `error: <code>` (the `429` is
 the usual rate-limit page instead). The checks run in the order of the
-table, and only a request that passes the first three is charged against the
-limit, so a `404` counts and a `403` doesn't.
+table, and only a download of a backup that is found counts against the
+limit: a `403` or a `404` spends nothing, so a mistyped or stale link
+doesn't use up your downloads. A `403` answers the same whether the id is
+a backup's or not.
 
 | Status | `error` | Meaning |
 |---|---|---|
 | `403` | `admin_required` | You are not a platform admin now, or not signed in. |
 | `403` | `console_shares_origin` | Backup logs are off (above). The page says "Backup logs are off while the console shares its address with your organizations' sites. Set KILN_CONSOLE_HOST to read them." |
 | `403` | `cross_site_request` | The browser said the request came from another site, or as an image, script or frame rather than a page or a same-origin `fetch` (`Sec-Fetch-Site` other than `same-origin` or `none`, or `Sec-Fetch-Dest` other than `document` or `empty`). Download it from the **Log** tab. A request without those headers, from `curl` or an older browser, is let through. |
-| `429` | | Over 10 downloads and exports a minute. Wait for `retry-after`. |
 | `404` | `not_found` | The id isn't a run's, or isn't a UUID: "That backup isn't in the history." |
+| `429` | | Over 10 downloads and exports a minute. Wait for `retry-after`. |
 | `200` | | The log. |
 
 On the tab itself, a `?run=` that isn't a backup's shows the same "That
