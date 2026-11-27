@@ -17,7 +17,10 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn do
       counter is not forgiven, so an owner who keeps trying ends up paused
       like anyone else. The doors send the person to `/reset`. The refusal
       is audited in the orgs whose policy decided it, or in the request's
-      site when those cannot be read (#3438).
+      site when those cannot be read (#3438). The mail wears the branding
+      of a site whose policy refused it (#3436): the request's site when it
+      is one of them, else the one with the smallest id; for a platform
+      admin, the request's site.
     * breached under `:warn`: the sign-in goes ahead and the record carries
       `__metadata__.password_breach == %{status: :breached}`. On a browser
       door a `:sign_in` note is left (`KilnCMS.Accounts.PasswordNotice`) for
@@ -59,6 +62,7 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn do
   alias KilnCMS.Accounts.PasswordNotice
   alias KilnCMS.Accounts.PasswordPolicy
   alias KilnCMS.Accounts.PasswordResetMail
+  alias KilnCMS.Accounts.Scoping
   alias KilnCMS.Accounts.Sessions
   alias KilnCMS.Challenge
   alias KilnCMS.Security.Recorder
@@ -89,9 +93,11 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn do
 
   defp apply_verdict(%{outcome: :breached, policy: :block}, query, record, token, deciding) do
     Sessions.revoke_first_factor(token)
-    send_reset_mail(record, Map.get(query.context, Recorder.tenant_key()))
+    # One read serves the mail's branding and the audit.
+    ids = resolve_deciding(deciding)
+    send_reset_mail(record, brand_org(record, ids, Map.get(query.context, Recorder.tenant_key())))
 
-    {:error, PasswordResetRequired.exception(org_ids: resolve_deciding(deciding))}
+    {:error, PasswordResetRequired.exception(org_ids: ids)}
   end
 
   defp apply_verdict(%{outcome: :breached}, query, record, _token, _deciding) do
@@ -107,10 +113,29 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn do
     match?(%{surface: :browser}, Map.get(query.context, Challenge.context_key()))
   end
 
+  # Whose branding the reset mail wears (#3436): a site whose policy refused
+  # the sign-in, so the mail names a site the recipient administers, not the
+  # one whose host they happened to use. The request's site when it is one of
+  # them, else the smallest id (stable across attempts, and no extra read);
+  # the request's site when none is known. A platform admin answers to every
+  # site, so for them no deciding site is "theirs" more than another: the
+  # request's site. No request site is the default org's branding.
+  defp brand_org(record, ids, request) do
+    cond do
+      Scoping.platform_admin?(record) -> request
+      request in ids -> request
+      ids != [] -> Enum.min(ids)
+      true -> request
+    end
+  end
+
   # Best effort: the refusal stands whether or not the mail goes, and the
   # reset page lets the person ask for another. Nothing identifying is logged.
-  defp send_reset_mail(record, tenant) do
-    case PasswordResetMail.send(record, tenant, :breached_sign_in) do
+  # The branding read reaches a Cachex `GenServer.call`, which exits rather
+  # than raising when the cache is saturated, and an exit here would 500 the
+  # sign-in instead of refusing it.
+  defp send_reset_mail(record, org) do
+    case PasswordResetMail.send(record, org, :breached_sign_in) do
       :sent ->
         :ok
 
@@ -120,6 +145,10 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn do
       {:error, reason} ->
         Logger.warning("breached-password reset mail not sent (#{reason_class(reason)})")
     end
+  rescue
+    _error -> Logger.warning("breached-password reset mail not sent (raised)")
+  catch
+    :exit, _reason -> Logger.warning("breached-password reset mail not sent (exit)")
   end
 
   defp reason_class({:enqueue, _error}), do: :enqueue

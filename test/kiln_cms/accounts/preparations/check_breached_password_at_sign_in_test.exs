@@ -313,6 +313,125 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignInTest do
     end
   end
 
+  describe "the reset mail's branding (#3436)" do
+    setup do
+      tighten_throttle!(mail_budget: 50)
+      :ok
+    end
+
+    defp brand!(org, name) do
+      CMS.save_site_branding!(%{site_name: name}, authorize?: false, tenant: org.id)
+      KilnCMS.Cache.bust_branding(org.id)
+      on_exit(fn -> KilnCMS.Cache.bust_branding(org.id) end)
+      org
+    end
+
+    # The subject of the one reset mail the refused sign-in queued.
+    defp refused_mail_subject(person, pw, org) do
+      assert {:error, error} = sign_in(person, pw, org: org)
+      assert reset_required?(error)
+      drain_oban()
+
+      assert_email_sent(fn mail ->
+        send(self(), {:reset_mail, mail.subject, mail.html_body})
+        true
+      end)
+
+      assert_received {:reset_mail, subject, body}
+      refute_email_sent()
+      {subject, body}
+    end
+
+    test "names the site whose policy refused it, not the host's", %{a: a, b: b} do
+      pw = password()
+      breached(pw)
+      brand!(a, "Alpha Press")
+      brand!(b, "Beta Works")
+      save!(a, :block, true)
+      admin = member_of(a, :admin, pw)
+      member!(b, admin, :viewer)
+      on_exit(fn -> AccountThrottle.reset(to_string(admin.email)) end)
+
+      {subject, body} = refused_mail_subject(admin, pw, b)
+      assert subject == "Choose a new password for your Alpha Press account"
+      assert body =~ "Alpha Press"
+      refute subject =~ "Beta Works"
+      refute body =~ "Beta Works"
+    end
+
+    test "the host's site when it is one of the deciding sites", %{a: a, b: b} do
+      pw = password()
+      breached(pw)
+      brand!(a, "Alpha Press")
+      brand!(b, "Beta Works")
+      save!(a, :block, true)
+      save!(b, :block, true)
+      admin = member_of(a, :admin, pw)
+      member!(b, admin, :admin)
+      on_exit(fn -> AccountThrottle.reset(to_string(admin.email)) end)
+
+      assert {"Choose a new password for your Beta Works account", _body} =
+               refused_mail_subject(admin, pw, b)
+
+      assert {"Choose a new password for your Alpha Press account", _body} =
+               refused_mail_subject(admin, pw, a)
+    end
+
+    test "on an unrelated host, the deciding site with the smallest id, every time" do
+      pw = password()
+      breached(pw)
+      one = brand!(org("bp-brand-one"), "Site One")
+      two = brand!(org("bp-brand-two"), "Site Two")
+      host = brand!(org("bp-brand-host"), "Host Site")
+      save!(one, :block, true)
+      save!(two, :block, true)
+      admin = member_of(one, :admin, pw)
+      member!(two, admin, :admin)
+      member!(host, admin, :viewer)
+      on_exit(fn -> AccountThrottle.reset(to_string(admin.email)) end)
+
+      expected = if one.id < two.id, do: "Site One", else: "Site Two"
+
+      for _ <- 1..3 do
+        {subject, _body} = refused_mail_subject(admin, pw, host)
+        assert subject == "Choose a new password for your #{expected} account"
+      end
+    end
+
+    test "a platform admin's mail names the host's site, never a deciding one", %{a: a, b: b} do
+      pw = password()
+      breached(pw)
+      brand!(a, "Alpha Press")
+      brand!(b, "Beta Works")
+      save!(b, :block, true)
+      admin = user(:admin, pw)
+      on_exit(fn -> AccountThrottle.reset(to_string(admin.email)) end)
+
+      assert {"Choose a new password for your Alpha Press account", _body} =
+               refused_mail_subject(admin, pw, a)
+
+      # The same when the deciding sites cannot be read.
+      PasswordPolicy.with_deciding_reader(fn _policy -> raise "boom" end, fn ->
+        assert {"Choose a new password for your Alpha Press account", _body} =
+                 refused_mail_subject(admin, pw, a)
+      end)
+    end
+
+    test "the site name is escaped in the body", %{a: a, b: b} do
+      pw = password()
+      breached(pw)
+      brand!(a, "<b>Alpha</b> & Co")
+      save!(a, :block, true)
+      admin = member_of(a, :admin, pw)
+      member!(b, admin, :viewer)
+      on_exit(fn -> AccountThrottle.reset(to_string(admin.email)) end)
+
+      {_subject, body} = refused_mail_subject(admin, pw, b)
+      assert body =~ "&lt;b&gt;Alpha&lt;/b&gt; &amp; Co"
+      refute body =~ "<b>Alpha</b>"
+    end
+  end
+
   describe "breached, under :warn" do
     setup %{a: a} do
       pw = password()
