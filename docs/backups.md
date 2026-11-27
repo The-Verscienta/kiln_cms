@@ -284,6 +284,10 @@ against the live app with `rpc` (as in [deploy.md](deploy.md)), since it reads
 History. It imports cron-made backups into History first, as every retention
 run does.
 
+In a release, `bin/backup prune` runs this same dry run and prints the plan,
+with `--json` for scripts ([Backups from the command line](backup-cli.md)).
+The raw form:
+
 ```bash
 bin/kiln_cms rpc 'KilnCMS.Backups.Retention.run(KilnCMS.Backups.dir(), dry_run: true) |> IO.inspect()'
 ```
@@ -925,6 +929,9 @@ outcome directly, as its own line, so neither prune clears the other's. A
 its write and its rename is removed by the next prune once it is an hour old.
 
 ## In-app backups (#484)
+
+> From a shell, `bin/backup` lists, starts and re-checks these backups:
+> see [Backups from the command line](backup-cli.md).
 
 The console has a **Backups** page (`/editor/backups`, platform admins only:
 a backup covers every site on the deployment, so a site admin cannot open it)
@@ -2494,7 +2501,9 @@ start on a directory with no id creates one inside it.
 
 `KilnCMS.Backups.request/2` is how every in-app backup starts: the page's
 buttons call it as the signed-in platform admin, and a console calls it as the
-backup system actor. Run it on a running node with `rpc`:
+backup system actor. `bin/backup run [--components db,media] [--wait]` does
+this for you, with exit codes and `--json` ([Backups from the command
+line](backup-cli.md)). The raw call, on a running node with `rpc`:
 
 ```bash
 bin/kiln_cms rpc '{:ok, result} = KilnCMS.Backups.request([trigger: "console"], KilnCMS.Backups.system()); IO.inspect(result)'
