@@ -91,7 +91,7 @@ else.
   ([#3471](https://github.com/The-Verscienta/kiln_cms/pull/3471) · [long form](docs/changelog/unreleased.md#backup-download))
 - **Backups: a Log tab shows what each step of a backup recorded, filtered by level and redacted again when shown, with "View log" on each History row and a text download of the log (part of #2230).**
   Platform admins only; refused while `KILN_CONSOLE_HOST` is unset and there is more than one organization. The download shares the `:export` limit and is logged, not audited. No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#backup-log-viewer))
+  ([#3488](https://github.com/The-Verscienta/kiln_cms/pull/3488) · [long form](docs/changelog/unreleased.md#backup-log-viewer))
 
 ### Changed
 
