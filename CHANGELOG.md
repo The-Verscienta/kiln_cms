@@ -83,6 +83,9 @@ else.
 - **Backups: a platform admin can download a backup's local files (each dump, media part and checksum file) from History, one file per click, through a one-minute link bound to their session and recorded in the instance security log as `backup_downloaded` before any byte is sent (part of #2225).**
   Refused while `KILN_CONSOLE_HOST` is unset and there is more than one organization. Shares the `:export` limit of 10 a minute. No migration; rolling the pin back is safe.
   ([#3471](https://github.com/The-Verscienta/kiln_cms/pull/3471) · [long form](docs/changelog/unreleased.md#backup-download))
+- **Sessions: a platform admin can sign out every session on every site at once from `/editor/sessions`, confirmed by typing the server's host name and recorded in the instance security log; API keys keep working (#2491).**
+  Browser sessions, remember-me, two-factor holds and app tokens all end. A site's own "Sign out everyone" now waits for sessions in use and gives up after two minutes. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#sign-out-everyone-every-site))
 
 ### Changed
 

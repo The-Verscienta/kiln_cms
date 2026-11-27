@@ -1623,6 +1623,10 @@ only the site because a browser session belongs to the site it signed in on,
 and a session cookie presented on another site's host is signed out there; why:
 [ADR 0090](decisions/0090-a-browser-session-is-bound-to-the-site-it-signed-in-on-and-is-signed-out-on-another-sites-host.md).
 
+For an incident that may reach every account, a platform admin can end every
+session of every account on every site in one step:
+[Sign everyone out on every site](#sign-everyone-out-on-every-site).
+
 ## Sign people out when idle
 
 Requires the admin role on the site (an org admin, or a platform admin). The
@@ -1753,12 +1757,19 @@ What it does **not** end:
 - **Headless app tokens** (`POST /api/auth/sign_in`), including any minted
   with a stolen password. Reset the account's password, or have a platform
   admin use **Sign out everywhere** on the account in `/editor/accounts`
-  ([Signing an account out](#signing-an-account-out)).
+  ([Signing an account out](#signing-an-account-out)), or
+  [Sign everyone out on every site](#sign-everyone-out-on-every-site) when you
+  can't tell which accounts are affected.
 
 The site's security log records **Everyone signed out**
 (`all_sessions_revoked`) with the number of sessions and whether you kept your
 own. If the log entry cannot be written, nothing is signed out and the page says
 "Nobody was signed out. Try again."
+
+On a large site the sign-out can take a while: it waits for any session that is
+being used at that moment rather than failing. If it runs for more than two
+minutes it is undone, nobody is signed out, and the page shows an error. Try
+again at a quieter moment.
 
 ### From code
 
@@ -1781,6 +1792,113 @@ refused. The idle timeouts are saved with
 `KilnCMS.CMS.save_site_session_policy/2`
 (`%{idle_timeout_minutes: 60, admin_idle_timeout_minutes: 15}`, each `nil` or
 10 to 1440); `KilnCMS.Accounts.IdleTimeout` enforces them.
+
+## Sign everyone out on every site
+
+For an incident that may reach every account on the server, when you can't
+tell which sessions were taken: one step ends every session on every site at
+once. Requires the platform admin role, a standing one or a temporary
+grant that has not expired. Site admins who are not platform admins never see
+the section, and the action refuses them.
+
+1. Open **Sessions** under **Configure → Sign-in & access** (`/editor/sessions`)
+   on any site and scroll past **Sign out everyone** to **Sign out everyone on
+   every site**.
+2. Read the field's label, **Type `cms.example.com` to confirm**: the name in it
+   is this server's host name (`PHX_HOST`). Type it into the field. Case and
+   spaces around it don't matter. The **Sign out everyone on every site**
+   button stays disabled until what you typed matches.
+3. Leave **Keep this session signed in** ticked to stay signed in in this
+   browser, or untick it to be signed out too.
+4. Click **Sign out everyone on every site**. There is no second prompt: the
+   typed name is the confirmation. You see "Signed out 240 sessions on every
+   site."
+
+The phrase is the host name, not a fixed word, so that typing it on a staging
+server cannot sign out production. It is not translated. Two installations that
+share a `PHX_HOST` value share the phrase too: one left unset is `example.com`
+(or a one-click platform's own hostname), and in development it is
+`localhost`.
+
+What it ends, for every account on every site, and for sessions bound to no
+site (signed in before sessions recorded one):
+
+- every browser session, platform admins' included;
+- every "remember me" cookie;
+- every sign-in waiting at the two-factor prompt;
+- every headless app token (`POST /api/auth/sign_in`).
+
+The count is the browser sessions and app tokens; "remember me" cookies and
+two-factor holds are ended but not counted. Expired sessions are left as they
+are.
+
+What it does **not** end:
+
+- **API keys.** Revoke them on the **API keys** page.
+- **Password-reset, confirmation and magic-link sign-in links** already sent.
+  They still work.
+
+Every open page of a signed-out session goes to `/sign-in` with "An
+administrator signed everyone out. Sign in again to continue." The next click
+on a sign-in or console page shows the same message. Its open
+collaborative-editing rooms close, and so does any GraphQL socket (`/ws/gql`)
+opened with its token. Pages and sockets are closed in the background once the
+sign-out has finished, so your own page answers without waiting for them.
+
+**Keep this session signed in** keeps only the browser you clicked from, on
+this host, and its "remember me" cookie. Cookies belong to one host, so your
+sessions on other sites' hosts end too, as do your other devices.
+
+The [instance security log](security-events.md#the-instance-log) records
+**Everyone signed out on every site** (`all_sessions_revoked_everywhere`) with
+the number of sessions and whether you kept your own. If that entry cannot be
+written, nothing is signed out. No site's own security log records anything, so
+a site admin reading their log sees no sign of it, and no security alert is
+sent.
+
+### When nobody is signed out
+
+The page says why, and in each case nothing has changed:
+
+- "Nobody was signed out: type the server's host name exactly to confirm."
+  What you sent doesn't match the host name.
+- "Nobody was signed out: this browser's session has already ended. Reload the
+  page and try again." **Keep this session signed in** was ticked, but the
+  session it names is no longer one of yours.
+- "Nobody was signed out: the instance security log could not record it. Try
+  again." The audit entry was not written, so the sign-out was rolled back.
+- "Nobody was signed out: it took too long and was undone. Try again." The
+  sign-out locks every live session row and then rewrites them. It waits for
+  sessions being used at that moment rather than failing, and each of those
+  two steps may take up to two minutes; past that the whole sign-out is undone.
+- "You don't have permission to sign everyone out on every site." Your platform
+  admin role, or its temporary grant, ended after you opened the page.
+- "Nobody was signed out. Try again." Anything else.
+
+### From code
+
+`KilnCMS.Accounts.sign_out_everyone_on_every_site/2` is the same action. It
+needs a platform admin as the actor (an API key's owner, a site admin and a
+system actor are refused), takes no tenant, and returns the number of browser
+sessions and app tokens it ended:
+
+```elixir
+{:ok, count} =
+  KilnCMS.Accounts.sign_out_everyone_on_every_site(
+    %{confirmation: KilnCMS.Accounts.SignOutEveryone.phrase()},
+    actor: platform_admin
+  )
+```
+
+`confirmation` is required and is compared with
+`KilnCMS.Accounts.SignOutEveryone.phrase/0` after the permission check, so a
+caller who is refused is refused whatever they typed; a mismatch is an
+`Ash.Error.Invalid` on `confirmation` ("does not match the instance's host
+name"). Pass `except_session_jti:` to keep one browser session and its
+"remember me" cookie. It must be one of the actor's own live sessions, on any
+site; anything else is refused with "is not one of your sessions" and nothing
+is signed out. A run past the time limit returns `{:error, %Ash.Error.Invalid{}}`
+holding an `Ash.Error.Invalid.Timeout`. It is not on JSON:API, GraphQL or MCP.
 
 ## Restrict sign-in to your networks
 
