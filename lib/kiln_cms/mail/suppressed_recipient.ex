@@ -51,7 +51,13 @@ defmodule KilnCMS.Mail.SuppressedRecipient do
 
     # Erasure's (#3036): the rows for an erased account's address. A destroy
     # of its own so that the policy below can keep it the system's alone.
-    destroy :forget_erased
+    # The address is required and bounds the delete in the action itself, so
+    # a caller whose query forgot its filter still deletes only that
+    # address's rows, never the whole list.
+    destroy :forget_erased do
+      argument :email, :ci_string, allow_nil?: false
+      change filter(expr(email == ^arg(:email)))
+    end
   end
 
   policies do

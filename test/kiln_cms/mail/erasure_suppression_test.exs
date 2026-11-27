@@ -174,7 +174,7 @@ defmodule KilnCMS.Mail.ErasureSuppressionTest do
          %{entry: entry} do
       for actor <- [user(:admin), Mail.system()] do
         assert {:error, %Ash.Error.Forbidden{}} =
-                 Mail.forget_erased_suppressions(entry, actor: actor)
+                 Mail.forget_erased_suppressions(entry, entry.email, actor: actor)
       end
 
       assert instance_list() == [to_string(entry.email)]
@@ -184,7 +184,10 @@ defmodule KilnCMS.Mail.ErasureSuppressionTest do
          %{site: site, site_entry: entry} do
       for actor <- [member(site, :admin), user(:admin), Mail.system()] do
         assert {:error, %Ash.Error.Forbidden{}} =
-                 Mail.forget_erased_site_suppressions(entry, actor: actor, tenant: site)
+                 Mail.forget_erased_site_suppressions(entry, entry.email,
+                   actor: actor,
+                   tenant: site
+                 )
       end
 
       assert site_list(site) == [to_string(entry.email)]
@@ -197,12 +200,15 @@ defmodule KilnCMS.Mail.ErasureSuppressionTest do
       assert %Ash.BulkResult{status: :error} =
                KilnCMS.Mail.SuppressedRecipient
                |> Ash.Query.filter(email == ^entry.email)
-               |> Mail.forget_erased_suppressions(actor: user(:admin), bulk_options: bulk)
+               |> Mail.forget_erased_suppressions(entry.email,
+                 actor: user(:admin),
+                 bulk_options: bulk
+               )
 
       assert %Ash.BulkResult{status: :error} =
                SiteSuppressedRecipient
                |> Ash.Query.filter(email == ^site_entry.email)
-               |> Mail.forget_erased_site_suppressions(
+               |> Mail.forget_erased_site_suppressions(site_entry.email,
                  actor: member(site, :admin),
                  tenant: site,
                  bulk_options: bulk
@@ -210,6 +216,69 @@ defmodule KilnCMS.Mail.ErasureSuppressionTest do
 
       assert instance_list() == [to_string(entry.email)]
       assert site_list(site) == [to_string(site_entry.email)]
+    end
+  end
+
+  # The address bounds the delete in the action, not only in the caller's
+  # query: a sweep whose filter went missing must not empty a list.
+  describe ":forget_erased is bounded by the address it is given" do
+    @bulk [
+      authorize_query?: false,
+      strategy: [:atomic, :atomic_batches, :stream],
+      return_records?: false,
+      return_errors?: true
+    ]
+
+    test "an unfiltered query deletes only that address's rows, on either list" do
+      site = org("supp-erase-bound")
+      n = unique()
+      gone = "bound-#{n}@example.com"
+      kept = "bound-kept-#{n}@example.com"
+
+      for email <- [gone, kept] do
+        suppress!(email)
+        suppress!(email, site)
+      end
+
+      assert %Ash.BulkResult{status: :success} =
+               Mail.forget_erased_suppressions(
+                 Ash.Query.new(KilnCMS.Mail.SuppressedRecipient),
+                 "BOUND-#{n}@Example.com",
+                 bulk_options: @bulk
+               )
+
+      assert %Ash.BulkResult{status: :success} =
+               Mail.forget_erased_site_suppressions(
+                 Ash.Query.new(SiteSuppressedRecipient),
+                 "BOUND-#{n}@Example.com",
+                 tenant: site,
+                 bulk_options: @bulk
+               )
+
+      assert instance_list() == [kept]
+      assert site_list(site) == [kept]
+    end
+
+    test "with no address the delete is invalid and deletes nothing" do
+      site = org("supp-erase-no-address")
+      suppress!("kept@example.com")
+      suppress!("kept@example.com", site)
+
+      assert %Ash.BulkResult{status: :error, errors: [%Ash.Error.Invalid{} | _]} =
+               Mail.forget_erased_suppressions(
+                 Ash.Query.new(KilnCMS.Mail.SuppressedRecipient),
+                 nil,
+                 bulk_options: @bulk
+               )
+
+      assert %Ash.BulkResult{status: :error, errors: [%Ash.Error.Invalid{} | _]} =
+               Mail.forget_erased_site_suppressions(Ash.Query.new(SiteSuppressedRecipient), nil,
+                 tenant: site,
+                 bulk_options: @bulk
+               )
+
+      assert instance_list() == ["kept@example.com"]
+      assert site_list(site) == ["kept@example.com"]
     end
   end
 

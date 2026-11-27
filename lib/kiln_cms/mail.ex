@@ -63,7 +63,7 @@ defmodule KilnCMS.Mail do
       define :get_suppressed_recipient, action: :read, get_by: [:email]
       define :unsuppress_recipient, action: :destroy
       # Erasure's (#3036): `forget_suppressions/2`, with no actor.
-      define :forget_erased_suppressions, action: :forget_erased
+      define :forget_erased_suppressions, action: :forget_erased, args: [:email]
     end
 
     # Per-site (#1562): written from a site's own relay's rejects, consulted
@@ -74,7 +74,7 @@ defmodule KilnCMS.Mail do
       define :get_site_suppressed_recipient, action: :read, get_by: [:email]
       define :unsuppress_site_recipient, action: :destroy
       # Erasure's (#3036): `forget_suppressions/2`, with no actor.
-      define :forget_erased_site_suppressions, action: :forget_erased
+      define :forget_erased_site_suppressions, action: :forget_erased, args: [:email]
     end
   end
 
@@ -1158,7 +1158,8 @@ defmodule KilnCMS.Mail do
   Both lists match case insensitively (`ci_string`). The deletes run with no
   actor, through `:forget_erased`, which refuses any request that carries
   one; the query is not authorized as a read, which no actor-less caller
-  passes, so the address filter alone bounds what goes. Site lists are
+  passes, so the address bounds what goes: `:forget_erased` requires it and
+  filters on it in the action, whatever the query passed to it says. Site lists are
   tenant-scoped, so they are visited one org at a time.
 
   A failure is logged with the list it happened in (never the address), then
@@ -1198,11 +1199,11 @@ defmodule KilnCMS.Mail do
     if org_id do
       KilnCMS.Mail.SiteSuppressedRecipient
       |> Ash.Query.filter(email == ^address)
-      |> forget_erased_site_suppressions!(tenant: org_id, bulk_options: bulk_options)
+      |> forget_erased_site_suppressions!(address, tenant: org_id, bulk_options: bulk_options)
     else
       KilnCMS.Mail.SuppressedRecipient
       |> Ash.Query.filter(email == ^address)
-      |> forget_erased_suppressions!(bulk_options: bulk_options)
+      |> forget_erased_suppressions!(address, bulk_options: bulk_options)
     end
 
     :ok
