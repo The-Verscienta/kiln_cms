@@ -71,7 +71,7 @@ else.
 ### Added
 
 - **Password policy: a site can also check its administrators' passwords against known breaches as they sign in, off by default; under Block a breached one is sent to reset by email, under Warn the admin signs in with a warning (#2407).**
-  `POST /api/auth/sign_in` gains a `403` `password_reset_required` and an additive `password_breach` field. Expand-only migration; rolling the pin back is safe.
+  `POST /api/auth/sign_in` gains a `403` `password_reset_required` and an additive `password_breach` field. A sign-in pause that blocked attempts fill mails the owner to choose a new password. Expand-only migration; rolling the pin back is safe.
   ([#3434](https://github.com/The-Verscienta/kiln_cms/pull/3434) · [long form](docs/changelog/unreleased.md#breached-password-sign-in-check))
 
 ### Changed
