@@ -165,6 +165,10 @@ else.
   The importer's summary gains a `reevaluated` count, and retention's `pruned` mark now locks the row it marks. No migration; rolling the pin back is safe.
   ([#3447](https://github.com/The-Verscienta/kiln_cms/pull/3447) · [long form](docs/changelog/unreleased.md#reevaluate-interrupted-import))
 
+- **Erasing an account now takes its address off the instance mail suppression list and every site's list, whatever its case (#3036).**
+  Before, an erased person's hard-bounced address stayed listed until an admin removed it. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#erasure-drops-suppressions))
+
 ### Security
 
 - **Smart 404 blocking: a spoofed search-engine claim rotating through the addresses of one IPv6 `/64` is counted once another address there has failed its DNS check or left its reverse zone silent (#2838).**

@@ -1844,7 +1844,11 @@ saved views (shared views are the team's and stay), the notifications
 addressed to them, and the newsletter subscriptions linked to the account on
 every site, so the address stops receiving newsletters (a subscription at the
 same address that was never linked to the account stays; see
-[Newsletter](newsletter.md#when-a-member-account-is-erased)). Nothing personal remains and nothing can sign in
+[Newsletter](newsletter.md#when-a-member-account-is-erased)). It takes the
+account's address off the mail suppression lists too, the instance list on
+`/editor/mail` and every site's on `/editor/site-mail`, whatever its case
+(#3036); an account erased by an earlier release keeps its rows there, which
+you remove by hand. Nothing personal remains and nothing can sign in
 again. What remains is a referenced id, and the console says so rather than
 claiming a delete it did not do.
 

@@ -209,7 +209,7 @@ everyone, the anonymous visitor included (published `:public` content, a
 | `CMS.Propagation` | `read`, `completed_since`, `open_since`, `open`, `settle_cdn`, `complete` **only** | `read`, `settle_cdn`: `:webhooks`, `:cdn` · `completed_since`, `open_since`, `open`, `complete`: `:webhooks` | Propagation records (#1927): the fan-out opens one per publish or withdrawal, the delivery worker settles it, and the CDN purge worker records the purge half. Settling stays with `:webhooks` because it counts the record's deliveries, and a count under an actor the ledger refuses reads zero. Reads pass `authorize_with: :error`. `destroy` is not admitted; the prune trigger runs under its own `AshObanInteraction` bypass. |
 | `CMS.WebhookDelivery` | `read`, `create`, `record_attempt`, `mark_recovered` **only** | `read`, `create`, `record_attempt`, `mark_recovered`: `:webhooks` | The delivery ledger: dispatch writes the row, the worker re-reads it (failing closed: a refused read is retried, not taken for "pruned"), records each attempt, and stamps a lost retraction recovered once a later one reaches the endpoint (#1926). `destroy` is not admitted; the prune trigger runs under its own `AshObanInteraction` bypass. |
 | `Mail.Settings` | `read`, `init` **only** | `read`, `init`: `:mail` | The DKIM signer and DNS checks read the singleton with no actor of their own, and `ensure_settings!/0` inserts the empty row (`Mail.system/0`, #1659). The read fails closed: `nil` would read as "no DKIM key" and send unsigned. Changing the key or the server IP stays platform-admin. |
-| `Mail.SuppressedRecipient`, `Mail.SiteSuppressedRecipient` | `read`, `suppress` **only** | `read`, `suppress`: `:mail` | The pipeline looks every recipient up before queuing and records a hard bounce on the list of the relay that reported it (`Mail.system/0`, #1659). The lookup passes `authorize_with: :error`: a refused read would otherwise be "not suppressed" and resume mail to dead addresses, so `enqueue!/2` drops the recipient and logs, and the workers that build their own mail and call `Mail.suppressed?/2` when they run (the newsletter worker, `Notifications.WorkflowMailWorker` and `Notifications.TaskMailWorker`, #3036) let the raise retry the job. Clearing a suppression (`destroy`) stays an admin act. |
+| `Mail.SuppressedRecipient`, `Mail.SiteSuppressedRecipient` | `read`, `suppress` **only** | `read`, `suppress`: `:mail` | The pipeline looks every recipient up before queuing and records a hard bounce on the list of the relay that reported it (`Mail.system/0`, #1659). The lookup passes `authorize_with: :error`: a refused read would otherwise be "not suppressed" and resume mail to dead addresses, so `enqueue!/2` drops the recipient and logs, and the workers that build their own mail and call `Mail.suppressed?/2` when they run (the newsletter worker, `Notifications.WorkflowMailWorker` and `Notifications.TaskMailWorker`, #3036) let the raise retry the job. Clearing a suppression (`destroy`) stays an admin act. Erasure's `forget_erased` (#3036) is not admitted: it is actor-less only, and the system actor is refused it like everyone else (see the two suppression sections below). |
 | `CMS.Comment` | `add`, every read | `read`, `for_content`, `unresolved_for_content`, `for_document`, `unresolved`, `for_block`: `:automation`, `:notifications` · `add`: `:automation` | An editorial-intelligence reaction posts its findings as a document-level comment (#946) on a thread it must be able to read. No `author_id` is stamped — the actor has no `:id` — so `created_by_rule_id` carries the provenance. `update` is **not** admitted: automation posts, it does not edit what anyone said. The workflow mail worker (`Notifications.WorkflowMailWorker`, as `Notifications.system/0`, #3019) reads the one comment its job names, by id, to quote it when the mail is sent, with `authorize_with: :error`, so a refused read fails the job (which retries) instead of reading as "comment deleted" and sending nothing. For a comment notice it then reads that comment's thread, the same way, to check the recipient is still on it (`Notifications.comment_audience_ids/2`, #3037). |
 | `CMS.Task` | `assign`, every read, and of the updates `complete` and `mark_overdue_notified` **only** | `read`, `open_for_content_kind`, `for_content`, `for_block`, `open_for_content`, `for_assignee`, `open_due_between`, `due_within`, `newly_overdue`: `:automation`, `:cms_bookkeeping`, `:notifications` · `assign`: `:automation` · `complete`: `:cms_bookkeeping` · `mark_overdue_notified`: `:notifications` | The same reaction assigns findings as a task, and the lifecycle sweep probes for an open review before opening another. `AssigneeIsEditor` still vets the assignee (validations run whatever the actor is) and `creator_id` stays unstamped. A publish completes the record's open tasks (`Changes.AutoCompleteTasks`, as `CMS.Bookkeeping.system/0`, #1659) — a scheduled publish has no person to do it as — reading them with `authorize_with: :error`, so a refused read fails the publish instead of leaving them open. The task digest (`Notifications.TaskDigestWorker`, as `Notifications.system/0`, #1659) reads due and newly overdue tasks with `authorize_with: :error`, since a refused read would read as "nothing due" and the digest would stop without a word, and it writes the "`task.overdue` already fired" stamp in the same transaction as the event's dispatch, as an atomic claim that refuses a row another run already stamped. Both updates are named inside the `action_type(:update)` policy with `forbid_unless`: assigning, editing or reopening a task stays an editor's. The notifier also reads a comment thread's participants from `CMS.Comment`'s existing `read` grant, with `authorize_with: :error`. The task mail worker (`Notifications.TaskMailWorker`, as `Notifications.system/0`, #3019) reads the one task its job names, by id, when the assignment mail is sent, for its note and due date and to skip a task completed, deleted or reassigned since, with `authorize_with: :error`, so a refused read fails the job instead of reading as "task deleted". For a digest it reads the assignee's open tasks once (`for_assignee`, #3037), with `authorize_with: :error`, and keeps only the lines whose task is among them, so a refused read fails the job rather than reading as "nothing left to send". Each update goes to its own caller only (#1747): automation, which opens tasks, cannot complete one — the refusal #1659 had to relax while the check matched any system actor. |
 | `Accounts.PushSubscription` | `read`, `for_users`, `for_user`, `touch_delivered`, `destroy`, `forget_on_takeover` **only** | `destroy`, `read`, `for_users`, `touch_delivered`: `:push` · `for_user`, `forget_on_takeover`: `:account_takeover` | Web Push delivery (#628, #1659) as `Push.system/0`: the sender's lookup (`for_users`), the worker's reload by id (`read`), the "last delivered" stamp, and pruning a device its push service reported gone. The two reads fail closed with `authorize_with: :error`, because a refused read would filter to "no devices" and drop every push without a word; the sender logs the refusal and the worker returns an error for Oban to retry. `for_user` (the settings list) and `bound_to_key` (the site-key rotation sweep) are not admitted for `:push`. Accepting an invitation over an unconfirmed account (#2453, `Changes.ForgetPriorCredentials`) lists that account's devices with `for_user` and removes each with `forget_on_takeover`, as `:account_takeover`, and so does a password reset finished on one (#2594); `forget_on_takeover` is declared above the platform-admin bypass too, so no person may call it. `subscribe` is authorized against the device's own user (`relating_to_actor(:user)`) rather than bypassed, so no actor other than a platform admin (the resource's top-of-stack bypass) can register a device for somebody else. The key-rotation sweep (`CMS.Changes.DropVapidSubscriptions`) deletes the rotated key's rows through the same `destroy` grant. |
@@ -678,6 +678,7 @@ Not exposed through GraphQL, JSON:API or MCP. The reasoning is in
 | Action | admin | editor | viewer | anonymous |
 |--------|:-----:|:------:|:------:|:---------:|
 | read, `suppress`, `destroy` | ✅ | ❌ | ❌ | ❌ |
+| `forget_erased` (erasure: delete the erased account's address, #3036) | ❌ | ❌ | ❌ | ⚙️ actor-less only |
 
 Managed from `/editor/mail` (admin-only). The delivery pipeline writes
 suppressions on a hard bounce and consults them before queuing as the
@@ -686,6 +687,18 @@ the recipient is not mailed). The newsletter, workflow and task mail workers
 consult them the same way when they send (#3036); a refused lookup fails the
 job, which retries. As with reads elsewhere, a non-admin read is
 filtered to nothing rather than erroring, so the list never leaks.
+
+`forget_erased` is erasure's step (`KilnCMS.Mail.forget_suppressions/2`, run
+inside `User.:anonymize`). It takes the address as a required `email`
+argument and filters on it in the action, so it deletes that address's rows
+and no others, whatever query it is given. It is gated `forbid_if
+actor_present()` + `authorize_if always()`, like `Notification.notify`: the
+platform admin and the mail system actor are refused it too, and an admin
+removes one row with `destroy`. The other policy names its actions (`read`,
+`suppress`, `destroy`) rather than `always()`, so `forget_erased` answers to
+its own policy alone and an action added later matches no policy and is
+refused. Why erasure drops the rows:
+[ADR 0091](decisions/0091-erasure-drops-the-erased-address-from-the-suppression-lists.md).
 
 ## Custom fields — `FieldDefinition`
 
@@ -1160,6 +1173,7 @@ own list instead (next section).
 | read | ✅ | ❌ | ❌ | ❌ | ✅ |
 | `destroy` | ✅ | ❌ | ❌ | ❌ | ❌ |
 | `suppress` | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `forget_erased` (erasure, #3036) | ❌ | ❌ | ❌ | ⚙️ actor-less only | ❌ |
 
 The addresses one site's own relay rejected as dead, per site
 (`org_id`, `email`). Org admin reads and clears it from `/editor/site-mail`; a
@@ -1171,6 +1185,14 @@ would stop the site's mail to an address without a bounce ever happening.
 It is consulted only for mail sent for that site (`KilnCMS.Mail.suppressed?/2`
 with `org_id:`), workflow and task mail included (#3036). Account mail carries no site and never reads it, and no site
 reads another's, so a hostile relay can stop only its own site's mail.
+
+Erasure deletes the erased account's address from every site's list through
+`forget_erased`, one site at a time, on the same terms as the instance
+list's (*Bounce suppression* above): actor-less only, bounded by its required
+`email` argument, refused to the site's admin, the platform admin and the
+mail system actor. The read and `destroy` policy names those two actions
+rather than `action_type([:read, :destroy])`, so `forget_erased` answers to
+its own policy alone.
 
 ## Push notification key — `SiteVapidKey` (#1560)
 

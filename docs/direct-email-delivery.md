@@ -277,6 +277,13 @@ If an address was suppressed in error (or the mailbox is fixed), click
 case-insensitive; the admin test-send is *not* suppressed, so you can always
 re-test a fixed address.
 
+Erasing an account removes its address from this list and from every site's
+list (#3036). If the address is mailed again by anything that checks the
+lists, at most one more hard bounce per relay follows, which suppresses it
+again. An account erased before that release keeps its rows;
+click **Remove** to clear one by hand. Why erasure drops the rows:
+[ADR 0091](decisions/0091-erasure-drops-the-erased-address-from-the-suppression-lists.md).
+
 #### Sites on their own relay
 
 A site that sends through its own SMTP relay (`/editor/site-mail`) keeps its
