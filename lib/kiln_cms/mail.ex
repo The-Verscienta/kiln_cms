@@ -62,6 +62,8 @@ defmodule KilnCMS.Mail do
       define :list_suppressed_recipients, action: :read
       define :get_suppressed_recipient, action: :read, get_by: [:email]
       define :unsuppress_recipient, action: :destroy
+      # Erasure's (#3036): `forget_suppressions/2`, with no actor.
+      define :forget_erased_suppressions, action: :forget_erased, args: [:email]
     end
 
     # Per-site (#1562): written from a site's own relay's rejects, consulted
@@ -71,6 +73,8 @@ defmodule KilnCMS.Mail do
       define :list_site_suppressed_recipients, action: :read
       define :get_site_suppressed_recipient, action: :read, get_by: [:email]
       define :unsuppress_site_recipient, action: :destroy
+      # Erasure's (#3036): `forget_suppressions/2`, with no actor.
+      define :forget_erased_site_suppressions, action: :forget_erased, args: [:email]
     end
   end
 
@@ -1156,6 +1160,90 @@ defmodule KilnCMS.Mail do
       {by_address, by_account} -> Ecto.Query.dynamic(^by_address or ^by_account)
     end
   end
+
+  @doc """
+  Delete `address` from the instance-wide suppression list and from the list
+  of every site in `org_ids` (#3036) — a step of erasure
+  (`KilnCMS.Accounts.Changes.AnonymizeUser`), run in its transaction.
+
+  Every row is a hard bounce the pipeline recorded; none says "do not contact"
+  on anyone's behalf. Once the account is erased its address is a tombstone,
+  so nothing of the account's can be mailed, and keeping the rows would only
+  keep the address. If the address is mailed again (typed in fresh, or a
+  newsletter row added by hand), the relay that bounced it can bounce it once
+  more, and that suppresses it again.
+
+  Both lists match case insensitively (`ci_string`). The deletes run with no
+  actor, through `:forget_erased`, which refuses any request that carries
+  one; the query is not authorized as a read, which no actor-less caller
+  passes, so the address bounds what goes: `:forget_erased` requires it and
+  filters on it in the action, whatever the query passed to it says. Site lists are
+  tenant-scoped, so they are visited one org at a time.
+
+  A failure is logged with the list it happened in (never the address), then
+  raised unchanged, so the erasure rolls back and can be run again. A failed
+  statement aborts the Postgres transaction, so the sweep stops there.
+
+  `nil` (an account with no address left) is a no-op.
+  """
+  @spec forget_suppressions(String.t() | nil, [Ash.UUID.t()]) :: :ok
+  def forget_suppressions(address, org_ids \\ KilnCMS.Accounts.list_org_ids())
+
+  def forget_suppressions(nil, _org_ids), do: :ok
+
+  def forget_suppressions(address, org_ids) when is_binary(address) and is_list(org_ids) do
+    forget_suppressions_in!(address, nil)
+    Enum.each(org_ids, &forget_suppressions_in!(address, &1))
+  end
+
+  # `nil` is the instance-wide list; an org id, that site's.
+  #
+  # Logs a failure with the list it happened in, then re-raises it unchanged.
+  # Inside a transaction Ash reports a failed bulk write by rolling back (a
+  # throw, not an exception), and that has to keep travelling up to the
+  # transaction it unwinds; catching it here is only to say where it began.
+  # The log names the error's module and never its message, which can quote
+  # the filter and so the address.
+  defp forget_suppressions_in!(address, org_id) do
+    require Ash.Query
+
+    bulk_options = [
+      authorize_query?: false,
+      strategy: [:atomic, :atomic_batches, :stream],
+      return_records?: false,
+      return_errors?: true
+    ]
+
+    if org_id do
+      KilnCMS.Mail.SiteSuppressedRecipient
+      |> Ash.Query.filter(email == ^address)
+      |> forget_erased_site_suppressions!(address, tenant: org_id, bulk_options: bulk_options)
+    else
+      KilnCMS.Mail.SuppressedRecipient
+      |> Ash.Query.filter(email == ^address)
+      |> forget_erased_suppressions!(address, bulk_options: bulk_options)
+    end
+
+    :ok
+  catch
+    kind, reason ->
+      Logger.error(
+        "mail forget_suppressions failed for #{suppression_list(org_id)}: " <>
+          describe_forget_failure(kind, reason)
+      )
+
+      :erlang.raise(kind, reason, __STACKTRACE__)
+  end
+
+  defp suppression_list(nil), do: "the instance list"
+  defp suppression_list(org_id), do: "org #{org_id}"
+
+  defp describe_forget_failure(:error, %{__struct__: module}), do: inspect(module)
+
+  defp describe_forget_failure(:throw, {_conn, _ref, %{__struct__: module}}),
+    do: "rolled back (#{inspect(module)})"
+
+  defp describe_forget_failure(kind, _reason), do: Atom.to_string(kind)
 
   @doc false
   # The keys `forget_body/1` drops, shared with `KilnCMS.Mail.Scrub`.

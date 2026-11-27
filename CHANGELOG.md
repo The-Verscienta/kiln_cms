@@ -182,6 +182,10 @@ else.
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#mention-roster-scoping))
 
+- **Erasing an account now takes its address off the instance mail suppression list and every site's list, whatever its case (#3036).**
+  Before, an erased person's hard-bounced address stayed listed until an admin removed it. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#erasure-drops-suppressions))
+
 ### Security
 
 - **Smart 404 blocking: a spoofed search-engine claim rotating through the addresses of one IPv6 `/64` is counted once another address there has failed its DNS check or left its reverse zone silent (#2838).**
