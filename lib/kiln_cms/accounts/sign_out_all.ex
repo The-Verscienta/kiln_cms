@@ -83,7 +83,7 @@ defmodule KilnCMS.Accounts.SignOutAll do
   defp sign_out(org_id, keep, except, context) do
     result =
       AfterCommit.deferring(fn ->
-        Repo.transaction(fn -> in_transaction(org_id, keep, except, context) end)
+        Sessions.revoke_transaction(fn -> in_transaction(org_id, keep, except, context) end)
       end)
 
     case result do
@@ -98,12 +98,11 @@ defmodule KilnCMS.Accounts.SignOutAll do
     if keep != [],
       do: Sessions.bind_to_site(keep, org_id, AshAuthentication.user_to_subject(context.actor))
 
-    with {:ok, sessions, _others} <- Sessions.revoke_org(org_id, keep),
+    with {:ok, jtis} <- Sessions.revoke_org(org_id, keep),
          {:ok, _row} <- stamp_watermark(org_id),
-         {:ok, _event} <- record(org_id, length(sessions), except, context) do
-      jtis = Enum.map(sessions, & &1.jti)
+         {:ok, _event} <- record(org_id, length(jtis), except, context) do
       AfterCommit.run(fn -> SessionEviction.evict_sessions(jtis, :admin_sign_out_all) end)
-      length(sessions)
+      length(jtis)
     else
       {:error, error} -> Repo.rollback(error)
       :skipped -> Repo.rollback(:not_recorded)

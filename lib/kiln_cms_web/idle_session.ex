@@ -292,6 +292,9 @@ defmodule KilnCMSWeb.IdleSession do
   def reason_message(:admin_sign_out_all),
     do: gettext("An administrator signed everyone out of this site. Sign in again to continue.")
 
+  def reason_message(:instance_sign_out_all),
+    do: gettext("An administrator signed everyone out. Sign in again to continue.")
+
   def reason_message(_other), do: nil
 
   defp put_reason_flash(socket, why) do

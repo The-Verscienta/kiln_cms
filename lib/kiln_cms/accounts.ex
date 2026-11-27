@@ -53,7 +53,20 @@ defmodule KilnCMS.Accounts do
       define :get_session_activity, action: :session_activity, args: [:jti]
       define :expire_idle_sessions, action: :expire_idle_session
       define :revoke_stale_sessions, action: :revoke_stale_session
+      define :lock_org_sessions, action: :lock_org_sessions
       define :revoke_org_sessions, action: :revoke_org_session
+      # "Sign out everyone on every site" (#2491), system bookkeeping likewise:
+      # `KilnCMS.Accounts.Sessions.revoke_everywhere/1` passes
+      # `authorize?: false` after `InstanceSessions` authorized the caller.
+      define :lock_all_sessions, action: :lock_all_sessions
+      define :revoke_all_sessions, action: :revoke_all_sessions
+    end
+
+    # "Sign out everyone on every site" (#2491): platform admins only, by
+    # policy, confirmed with `KilnCMS.Accounts.SignOutEveryone.phrase/0`.
+    # Pass `actor:`. No data layer and no tenant.
+    resource KilnCMS.Accounts.InstanceSessions do
+      define :sign_out_everyone_on_every_site, action: :sign_out_everyone
     end
 
     # External IdP links for OIDC SSO (#331) — managed by AshAuthentication.

@@ -99,7 +99,8 @@ defmodule KilnCMS.Accounts.IdleTimeout do
              idle: integer() | nil,
              jtis: [String.t()]
            }}
-          | {:signed_out, :idle | :admin_sign_out_all | :revoked | :foreign | :missing}
+          | {:signed_out,
+             :idle | :admin_sign_out_all | :instance_sign_out_all | :revoked | :foreign | :missing}
           | :error
 
   @doc "The PubSub topic a site's open signed-in pages hear policy changes on."
@@ -332,11 +333,13 @@ defmodule KilnCMS.Accounts.IdleTimeout do
   end
 
   @doc "Why a revoked row was revoked, as `check/3` reports it."
-  @spec revoked_reason(Token.t() | nil) :: :idle | :admin_sign_out_all | :revoked
+  @spec revoked_reason(Token.t() | nil) ::
+          :idle | :admin_sign_out_all | :instance_sign_out_all | :revoked
   def revoked_reason(%Token{revoked_reason: reason}) do
     cond do
       reason == Token.idle_reason() -> :idle
       reason == Token.sign_out_all_reason() -> :admin_sign_out_all
+      reason == Token.instance_sign_out_all_reason() -> :instance_sign_out_all
       true -> :revoked
     end
   end

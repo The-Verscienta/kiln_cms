@@ -11,12 +11,20 @@ defmodule KilnCMSWeb.SessionPolicyLive do
   `KilnCMS.Accounts.IdleTimeout` decides, `KilnCMSWeb.Plugs.IdleTimeout` and
   `KilnCMSWeb.IdleSession` act.
 
+  A platform admin also sees "Sign out everyone on every site" (#2491),
+  `KilnCMS.Accounts.InstanceSessions`: hidden from everyone else, enabled once
+  the typed phrase matches. Neither is the control — the action is
+  platform-admin-only by policy and compares the phrase itself.
+
   "Off" saves no timeout rather than deleting the row: the row also holds the
   watermark of the last "sign out everyone", which must outlive a change of
   mind about the timeout.
   """
   use KilnCMSWeb, :live_view
 
+  alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Errors.SignOutNotRecorded
+  alias KilnCMS.Accounts.SignOutEveryone
   alias KilnCMS.CMS
   alias KilnCMS.CMS.SiteSessionPolicy
 
@@ -30,6 +38,7 @@ defmodule KilnCMSWeb.SessionPolicyLive do
      socket
      |> assign(:page_title, gettext("Sessions"))
      |> assign(:sign_out_form, to_form(%{"keep_me" => "true"}, as: :sign_out_all))
+     |> reset_everyone_form()
      |> load_settings()}
   end
 
@@ -87,11 +96,135 @@ defmodule KilnCMSWeb.SessionPolicyLive do
          put_flash(
            socket,
            :error,
-           ash_error_message(error,
-             forbidden: gettext("You don't have permission to sign everyone out of this site."),
-             fallback: gettext("Nobody was signed out. Try again.")
-           )
+           site_error(error)
          )}
+    end
+  end
+
+  # Only reports whether the phrase matches, to enable the button; it writes
+  # nothing, and the action compares the phrase again.
+  def handle_event("check_everyone_phrase", %{"sign_out_everyone" => params}, socket)
+      when is_map(params) do
+    if socket.assigns.can_sign_out_everyone? do
+      {:noreply,
+       socket
+       |> assign(:everyone_form, to_form(everyone_params(params), as: :sign_out_everyone))
+       |> assign(:phrase_matches?, SignOutEveryone.phrase_matches?(params["confirmation"]))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("check_everyone_phrase", _params, socket), do: {:noreply, socket}
+
+  def handle_event("sign_out_everyone", params, socket) when is_map(params) do
+    {confirmation, keep_me?} =
+      case params do
+        %{"sign_out_everyone" => %{} = form} ->
+          {binary_or_nil(form["confirmation"]), form["keep_me"] == "true"}
+
+        _malformed ->
+          {nil, false}
+      end
+
+    except = if keep_me?, do: socket.assigns[:current_session_jti]
+
+    # The action re-checks that the caller is a platform admin, the phrase,
+    # and that the kept session is the caller's own.
+    case Accounts.sign_out_everyone_on_every_site(
+           %{confirmation: confirmation, except_session_jti: except},
+           actor: socket.assigns.current_user,
+           context: socket.assigns.security_context
+         ) do
+      {:ok, count} ->
+        {:noreply,
+         socket
+         |> put_flash(
+           :info,
+           ngettext(
+             "Signed out %{count} session on every site.",
+             "Signed out %{count} sessions on every site.",
+             count
+           )
+         )
+         |> reset_everyone_form()}
+
+      {:error, error} ->
+        {:noreply, put_flash(socket, :error, everyone_error(error))}
+    end
+  end
+
+  defp binary_or_nil(value) when is_binary(value), do: value
+  defp binary_or_nil(_value), do: nil
+
+  defp everyone_params(params) do
+    %{
+      "confirmation" => binary_or_nil(params["confirmation"]) || "",
+      "keep_me" => if(params["keep_me"] == "true", do: "true", else: "false")
+    }
+  end
+
+  defp reset_everyone_form(socket) do
+    socket
+    |> assign(
+      :everyone_form,
+      to_form(%{"confirmation" => "", "keep_me" => "true"}, as: :sign_out_everyone)
+    )
+    |> assign(:phrase_matches?, false)
+  end
+
+  # Every refusal and failure in words the admin can act on — never the
+  # error's own text, which is English and can be a database's.
+  # The per-site sign-out's refusals (#2491): a timeout or an audit write that
+  # was skipped reaches the flash as a sentence, never as Ash's own text; any
+  # other refusal keeps the messages it had.
+  defp site_error(error) do
+    errors = error |> Ash.Error.to_error_class() |> Map.get(:errors, [])
+
+    cond do
+      Enum.any?(errors, &match?(%Ash.Error.Invalid.Timeout{}, &1)) ->
+        gettext("Nobody was signed out: it took too long and was undone. Try again.")
+
+      Enum.any?(errors, &not_recorded?/1) ->
+        gettext("Nobody was signed out: this site's security log could not record it. Try again.")
+
+      true ->
+        ash_error_message(error,
+          forbidden: gettext("You don't have permission to sign everyone out of this site."),
+          fallback: gettext("Nobody was signed out. Try again.")
+        )
+    end
+  end
+
+  defp not_recorded?(%{error: :not_recorded}), do: true
+  defp not_recorded?(%{error: error}) when is_binary(error), do: error =~ "not_recorded"
+  defp not_recorded?(_other), do: false
+
+  defp everyone_error(%Ash.Error.Forbidden{}),
+    do: gettext("You don't have permission to sign everyone out on every site.")
+
+  defp everyone_error(error) do
+    errors = error |> Ash.Error.to_error_class() |> Map.get(:errors, [])
+
+    cond do
+      Enum.any?(errors, &match?(%{field: :confirmation}, &1)) ->
+        gettext("Nobody was signed out: type the server's host name exactly to confirm.")
+
+      Enum.any?(errors, &match?(%{field: :except_session_jti}, &1)) ->
+        gettext(
+          "Nobody was signed out: this browser's session has already ended. Reload the page and try again."
+        )
+
+      Enum.any?(errors, &match?(%SignOutNotRecorded{}, &1)) ->
+        gettext(
+          "Nobody was signed out: the instance security log could not record it. Try again."
+        )
+
+      Enum.any?(errors, &match?(%Ash.Error.Invalid.Timeout{}, &1)) ->
+        gettext("Nobody was signed out: it took too long and was undone. Try again.")
+
+      true ->
+        gettext("Nobody was signed out. Try again.")
     end
   end
 
@@ -105,6 +238,12 @@ defmodule KilnCMSWeb.SessionPolicyLive do
     |> assign(:idle_minutes, idle)
     |> assign(:admin_minutes, admin)
     |> assign(:can_sign_out_all?, can_sign_out_all?(socket))
+    |> assign(
+      :can_sign_out_everyone?,
+      Accounts.can_sign_out_everyone_on_every_site?(socket.assigns.current_user, %{
+        confirmation: SignOutEveryone.phrase()
+      })
+    )
     |> assign(
       :form,
       to_form(
@@ -191,6 +330,7 @@ defmodule KilnCMSWeb.SessionPolicyLive do
         options(assigns.admin_minutes, gettext("Same as everyone"))
       )
       |> assign(:min_minutes, SiteSessionPolicy.min_minutes())
+      |> assign(:everyone_phrase, SignOutEveryone.phrase())
 
     ~H"""
     <Layouts.console
@@ -263,7 +403,7 @@ defmodule KilnCMSWeb.SessionPolicyLive do
         </p>
         <p class="mt-2 text-sm text-base-content/70">
           {gettext(
-            "API keys and app tokens keep working. If an account may be compromised, reset its password; a platform admin can also use “Sign out everywhere” on the Accounts page."
+            "API keys and app tokens keep working. If an account may be compromised, reset its password; a platform admin can also use “Sign out everywhere” on the Accounts page for that account, or “Sign out everyone on every site” on this page."
           )}
         </p>
         <p id="sign-out-all-hint" class="mt-2 text-sm text-base-content/70">
@@ -292,6 +432,57 @@ defmodule KilnCMSWeb.SessionPolicyLive do
             class="btn btn-danger"
           >
             {gettext("Sign out everyone")}
+          </button>
+        </.form>
+      </section>
+
+      <section
+        :if={@can_sign_out_everyone?}
+        id="session-sign-out-everyone"
+        class="mt-10 max-w-2xl rounded-lg border border-error/40 p-5"
+      >
+        <h2 class="flex items-center gap-2 text-lg font-medium">
+          <.icon name="hero-globe-alt" class="size-5" />
+          {gettext("Sign out everyone on every site")}
+        </h2>
+        <p class="mt-1 text-sm text-base-content/70">
+          {gettext(
+            "For platform admins. Every account on every site on this server is signed out now: every browser session, “remember me”, sign-in waiting for a two-factor code and app token. Open pages go to the sign-in page and collaborative-editing rooms close."
+          )}
+        </p>
+        <p class="mt-2 text-sm text-base-content/70">
+          {gettext(
+            "API keys keep working, and password-reset, confirmation and sign-in links already sent still work. It is recorded in the instance security log."
+          )}
+        </p>
+
+        <.form
+          for={@everyone_form}
+          id="sign-out-everyone-form"
+          phx-change="check_everyone_phrase"
+          phx-submit="sign_out_everyone"
+          class="mt-4 space-y-4"
+        >
+          <.input
+            field={@everyone_form[:confirmation]}
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            label={gettext("Type %{phrase} to confirm", phrase: @everyone_phrase)}
+          />
+          <.input
+            field={@everyone_form[:keep_me]}
+            type="checkbox"
+            label={gettext("Keep this session signed in")}
+          />
+          <button
+            id="sign-out-everyone"
+            type="submit"
+            disabled={!@phrase_matches?}
+            phx-disable-with={gettext("Signing out…")}
+            class="btn btn-danger"
+          >
+            {gettext("Sign out everyone on every site")}
           </button>
         </.form>
       </section>

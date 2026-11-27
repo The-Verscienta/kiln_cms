@@ -2720,7 +2720,12 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
-msgid "API keys and app tokens keep working. If an account may be compromised, reset its password; a platform admin can also use “Sign out everywhere” on the Accounts page."
+msgid "API keys and app tokens keep working. If an account may be compromised, reset its password; a platform admin can also use “Sign out everywhere” on the Accounts page for that account, or “Sign out everyone on every site” on this page."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "API keys keep working, and password-reset, confirmation and sign-in links already sent still work. It is recorded in the instance security log."
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
@@ -3969,6 +3974,11 @@ msgstr ""
 #: lib/kiln_cms_web/idle_session.ex
 #, elixir-autogen, elixir-format
 msgid "An administrator signed everyone out of this site. Sign in again to continue."
+msgstr ""
+
+#: lib/kiln_cms_web/idle_session.ex
+#, elixir-autogen, elixir-format
+msgid "An administrator signed everyone out. Sign in again to continue."
 msgstr ""
 
 #: lib/kiln_cms/security/alert_text.ex
@@ -10468,6 +10478,11 @@ msgstr ""
 msgid "Everyone signed out"
 msgstr ""
 
+#: lib/kiln_cms_web/security_log.ex
+#, elixir-autogen, elixir-format
+msgid "Everyone signed out on every site"
+msgstr ""
+
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Everyone who can edit content, and the administrators."
@@ -11258,6 +11273,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "For example: dose corrected to match the cited source"
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "For platform admins. Every account on every site on this server is signed out now: every browser session, “remember me”, sign-in waiting for a two-factor code and app token. Open pages go to the sign-in page and collaborative-editing rooms close."
 msgstr ""
 
 #: lib/kiln_cms_web/live/field_definition_live.ex
@@ -13198,6 +13218,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/automation_live/wording.ex
 #, elixir-autogen, elixir-format
 msgid "Keep the site fresh"
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Keep this session signed in"
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
@@ -16038,6 +16063,31 @@ msgstr ""
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "Nobody was signed out. Try again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody was signed out: it took too long and was undone. Try again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody was signed out: the instance security log could not record it. Try again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody was signed out: this browser's session has already ended. Reload the page and try again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody was signed out: this site's security log could not record it. Try again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody was signed out: type the server's host name exactly to confirm."
 msgstr ""
 
 #: lib/kiln_cms_web/live/newsletter_live.ex
@@ -22271,6 +22321,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
+msgid "Sign out everyone on every site"
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
 msgid "Sign out everyone on this site now?"
 msgstr ""
 
@@ -22379,6 +22434,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Signed in with a passkey."
 msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signed out %{count} session on every site."
+msgid_plural "Signed out %{count} sessions on every site."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -27283,6 +27345,11 @@ msgstr ""
 msgid "Type"
 msgstr ""
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Type %{phrase} to confirm"
+msgstr ""
+
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "Type / to format this text or insert a block below."
@@ -29337,6 +29404,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
 msgid "You don't have permission to sign everyone out of this site."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "You don't have permission to sign everyone out on every site."
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_log_live.ex

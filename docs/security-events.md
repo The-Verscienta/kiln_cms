@@ -122,8 +122,9 @@ an SFTP backup server's host key (`backup_destination_host_key_trusted`;
 (`backup_destination_host_key_mismatch`; #2222, the one instance event with
 no person behind it and the one that raises a security alert), a platform
 admin downloading one of a backup's files (`backup_downloaded`; part of
-#2225), and a platform admin changing the platform's security alerts
-(`platform_alerts_changed`). A site's log is readable by that
+#2225), a platform admin changing the platform's security alerts
+(`platform_alerts_changed`), and a platform admin signing everyone out on
+every site (`all_sessions_revoked_everywhere`; #2491). A site's log is readable by that
 site's admins, who need not be platform admins, so these go to a separate
 **instance security log** instead (#2541).
 
@@ -177,7 +178,8 @@ No instance event raises a [security alert](security-alerts.md).
 
 Every type below goes to a site's log except `backup_canceled`, the three
 `backup_schedule_*` types, the `backup_destination_*` types,
-`backup_downloaded` and `platform_alerts_changed`, which go to the
+`backup_downloaded`, `platform_alerts_changed` and
+`all_sessions_revoked_everywhere`, which go to the
 [instance log](#the-instance-log).
 
 Every event has a time, a type, the person who acted (an email snapshot and
@@ -234,6 +236,7 @@ a type may carry only the keys below; anything else is dropped.
 | `api_key_rate_limited` | API key hit a rate limit | An API key this server verified recently (it forgets a key 2.5 to 5 minutes after the key's last successful request there) went over a rate limit an API key can reach. No person (whoever presented it is not known to be the owner); the target is the key (target type `api_key`), the IP the request's. Sampled: see below. Raises the platform's `api_key_rate_limited` [alert](security-alerts.md#api-keys-over-a-rate-limit) | `name`, `bucket` |
 | `backup_downloaded` | Backup downloaded | A platform admin [downloaded one of a backup's local files](backups.md#download-the-files-of-a-backup) (part of #2225). Recorded once every check passed and before any byte is sent, once per download request, so a link used twice in its minute records two. A file that changed or went just before the send is not sent, and its event stays. In the instance log. The person is the admin; the target is the backup run (target type `backup_run`) | `stamp`, `file` (the file's name), `kind` (`db` or `media`), `bytes`, `node` (the node that served it) |
 | `platform_alerts_changed` | Platform security alerts changed | A platform admin saved the platform's [security alert settings](security-alerts.md#turn-off-rate-limit-alerts-for-api-keys). In the [instance log](#the-instance-log), never a site's. The person is the admin; the target is the settings row (target type `platform_security_alerts`) | `disabled_kinds` |
+| `all_sessions_revoked_everywhere` | Everyone signed out on every site | A platform admin used [Sign everyone out on every site](account-administration.md#sign-everyone-out-on-every-site) (#2491). In the [instance log](#the-instance-log), never a site's: the sites whose people were signed out record nothing. Raises no security alert. The person is the admin; the target type is `instance`, with no target id | `count`, `except_self` |
 | `second_factor_policy_changed` | Two-step sign-in requirement changed | A site's two-step sign-in requirement (who must hold a second factor, and the grace period) was saved, including turned off, or was turned off from the server with `KilnCMS.Release.second_factor_requirement_off/1` ([Turn the requirement off from the server](two-factor-auth.md#turn-the-requirement-off-from-the-server)). An admin's save names the admin; the server's names no person and has no IP address. The target is the setting (target type `site_second_factor_policy`). Saved at `/editor/two-factor` (#2247) | `required_for`, `grace_days`, `previous_required_for`, `change`, `via` |
 | `second_factor_required` | Held for two-step sign-in setup | A sign-in was held, or refused, because the site requires a second factor of the account (#2247): sent to set one up, or a passkey-only account's password refused where its passkey cannot be used. Recorded once per sign-in, at the sign-in doors only, never for each request a held session or token makes afterwards. The person is the account | `tier`, `surface`, `reason` |
 
@@ -309,6 +312,10 @@ open). A `collab` event carries no IP address or user agent. For `all_sessions_r
 signed out (remember-me cookies and two-factor holds are not counted) and
 `except_self` is `true` when the admin kept their own browser. Saving the idle
 timeout itself is `org_setting_changed` with `setting` `site_session_policy`.
+For `all_sessions_revoked_everywhere`, `count` is the number of browser
+sessions and headless app tokens signed out on every site (remember-me cookies
+and two-factor holds are not counted) and `except_self` is `true` when the
+platform admin kept their own browser.
 
 For `admin_access_refused`, `surface` is where the refusal happened: `http`
 (a console, `/setup` or sign-in page), `api` (`POST /api/auth/sign_in` or
@@ -505,7 +512,9 @@ since whoever presents the key chooses it. A key over a rate limit
 (`ip_block_refused`) goes to the log of the site whose block list refused it.
 A change to the platform's alert settings (`platform_alerts_changed`) goes to
 the [instance log](#the-instance-log). So does a downloaded backup file (`backup_downloaded`):
-the dump holds every site.
+the dump holds every site. So does signing everyone out on every site
+(`all_sessions_revoked_everywhere`): it reaches every site at once, and a site's
+log is readable by admins who are not platform admins.
 
 ## Event matrix: where each event comes from
 
@@ -565,6 +574,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `ip_block_refused` | `lib/kiln_cms/security/blocked_ip_alert.ex`: `note/4`, called by `KilnCMSWeb.Plugs.IpBlock` (`surface` `http`) and by `KilnCMSWeb.IpBlock.check_connect/2`, from its LiveView `on_mount` (`live`) and the `/ws/gql`, `/ws/collab` and `/ws/bridge` connects (`gql`, `collab`, `bridge`), with the rule `IpBlocklist.match/2` returned. Never by `IpBlocklist.blocked?/2`, which the scanner guard also asks | sampled, after commit, off the request path (a task under `KilnCMS.TaskSupervisor`); in-memory gates first; `request: nil`, so no IP or user agent |
 | `api_key_rate_limited` | `lib/kiln_cms/security/api_key_trip.ex`: `note/2`, called from the refusal branch of `KilnCMSWeb.Plugs.RateLimit` and `KilnCMSWeb.Plugs.GraphqlBatchLimit` for the `api`, `gql`, `media_upload`, `media_transform` and `plugin_endpoint` buckets | sampled, after commit, off the request path; only for a key in the node's verified-key cache (filled by `KilnCMSWeb.Plugs.ApiKeyAuth` and, on `/mcp`, by `KilnCMSWeb.Plugs.RememberApiKey` after `KilnCMSWeb.Plugs.RequireApiKey` verified the key), reloaded and still valid; tenant from `ApiKeyTrip.owner_org_id/1`; `user: nil` |
 | `platform_alerts_changed` | `KilnCMS.Security.Changes.Record` on `Security.PlatformAlertSettings` `:save` (`lib/kiln_cms/security/platform_alert_settings.ex`), called from the Security alerts page | in txn, with the save: if the event cannot be written the setting does not change; `scope: :instance` |
+| `all_sessions_revoked_everywhere` | `lib/kiln_cms/accounts/sign_out_everyone.ex`: `run/3`, the `:sign_out_everyone` action of `Accounts.InstanceSessions`, called from `/editor/sessions` | in txn, with the revocation: if the event cannot be written, or `Recorder.record/2` returns `:skipped`, nothing is signed out (`Accounts.Errors.SignOutNotRecorded`); `scope: :instance` |
 | `second_factor_policy_changed` | `lib/kiln_cms/cms/changes/record_second_factor_policy_change.ex`, on `CMS.SiteSecondFactorPolicy` `:save` and `:update` (the `audit: {:change, ...}` option of `use KilnCMS.CMS.OrgSettings`) and on `:operator_override`, run by `KilnCMS.Release.second_factor_requirement_off/1` | in txn: if the event cannot be written the setting does not change. Only for a user actor (`via: "admin"`) or the override (`via: "console"`, no person); the row as it stood is read in the same transaction (`Changes.StampSecondFactorRequirement`), and if it cannot be read the write fails |
 | `second_factor_required` | `lib/kiln_cms/security/auth_events.ex`: `second_factor_required/4`, called by `KilnCMSWeb.SecondFactorGate.sign_in_destination/3` (every completed browser sign-in, `browser`, `not_enrolled`), `KilnCMSWeb.AuthController` (`passkey_host`) and `KilnCMSWeb.ApiAuthController.sign_in/2` (`api`) | after commit, once per sign-in; only when the request resolved a site |
 
@@ -603,6 +613,7 @@ recorded as long as it names a user actor and a tenant.
 | Changing a member's audiences or type scopes | Not recorded | Only a changed role is. `SiteAudiences.set/4` and an `OrgMembership` `:update` that leaves `role` alone write nothing. |
 | An invitation used up, or pruned | Not recorded | Accepting destroys the row through `Invitation` `:consume`; the `role_granted` of the membership it became or raised is the record. An accept by someone who already held the invited tier or higher changes nothing and records nothing. (An invitation retired by a membership change is recorded, as `invitation_revoked`.) The daily `:prune_expired` sweep removes rows long past expiry, which no one decided. |
 | A session signed out by an earlier "sign out everyone" when it is next used | Not recorded | A session that recorded no site (signed in before #2246) is caught later, on its next use on the site. `all_sessions_revoked` already records the decision; the late catch is its consequence. |
+| A site's people signed out by **Sign out everyone on every site** | Not recorded in the site's log | `all_sessions_revoked_everywhere` in the instance log, which only platform admins read, is the record. A site admin sees no trace of it in their own log. |
 | A session used on another site's host | Not recorded | The cookie was copied; it is served signed out there and nothing is written to it. |
 | Identity-provider links and push devices removed when an invitation takes over an unconfirmed account | Not recorded | There is no event type for either, and none is recorded when one is made. The second factor, passkeys and API keys removed by the same takeover are recorded (#2453). |
 | An unlock request that mails nothing, or opening an unlock link | Not recorded | A request for an unknown, unpaused or non-member address is answered like any other and leaves no trace, so the log names no address that was not mailed. Opening the link only shows a button; mail scanners do it too. |

@@ -338,7 +338,8 @@ build if a resource is ever registered without that authorizer.
   token on their next request. What is left is listed under
   [Idle timeout and sign out everyone](#idle-timeout-and-sign-out-everyone-2246).
   Since #2246 a site admin can also end sessions on one site: after a
-  configurable idle time, or all at once with *Sign out everyone*; see
+  configurable idle time, or all at once with *Sign out everyone*; since #2491
+  a platform admin can end every session on every site at once; see
   [Idle timeout and sign out everyone](#idle-timeout-and-sign-out-everyone-2246).
 
   **Remember-me and the second factor.** The cookie is a completed sign-in in a
@@ -1677,6 +1678,40 @@ Configured at `/editor/sessions`.
   token writes that bind a row to a site read the watermark in the same
   statement, so such a row cannot escape by being used first. Other sites are
   never reached.
+- **Sign out everyone on every site (#2491).** `KilnCMS.Accounts.InstanceSessions`
+  `:sign_out_everyone`, run by `KilnCMS.Accounts.SignOutEveryone`. Platform
+  admins only, by effective role (a live temporary grant counts), enforced by
+  the action's policy: a site admin, an API-key actor (whoever owns the key), a
+  system actor and an anonymous caller are refused, and the console section is
+  hidden from them, which is not the control. The typed confirmation is the
+  instance host (`KilnCMSWeb.Endpoint.host()`, `PHX_HOST`), trimmed and
+  case-folded, and is compared inside the action after the policy, so the code
+  interface cannot skip it. One transaction revokes every unexpired `"user"`
+  row (browser sessions and headless bearer JWTs), remember-me row and
+  two-factor hold of every account, bound to a site or not, minus the caller's
+  own session and its remember-me row when asked (`except_session_jti` must be
+  the caller's own live session), and records `all_sessions_revoked_everywhere`
+  in the instance security log; a failed or skipped write rolls it back. No
+  watermark is needed: every row is named. API keys and reset, confirmation
+  and magic-link tokens are not reached. The rows are first locked `FOR UPDATE`
+  in jti order (`Token` `:lock_all_sessions`), the order `Sessions.record_use/3`
+  locks a session and its remember-me row in, so a session in use waits rather
+  than deadlocking the sign-out; each statement runs under a `SET LOCAL
+  statement_timeout` of two minutes (`Sessions.revoke_timeout/0`), past which
+  the whole sign-out rolls back and the page says nobody was signed out. The
+  per-site *Sign out everyone* takes the same lock pass
+  (`:lock_org_sessions`) and the same bound. After commit, eviction
+  (`SessionEviction.evict_sessions/2`, `:instance_sign_out_all`) runs in a task
+  under `KilnCMS.TaskSupervisor`; a task that cannot be started is logged, and
+  the revoked rows still refuse each page and socket on its next request,
+  rejoin or re-check. Residual: (a) two installations with the same `PHX_HOST`
+  (both left at `example.com`, say) share the phrase, so the phrase does not
+  tell them apart; (b) no site's own security log records it and no security
+  alert is raised, so a site admin sees their people signed out with no entry
+  in their log; (c) a session row committed between the lock pass and the
+  update is revoked by the update but is not counted and gets no eviction
+  broadcast: its open pages and sockets close on their next request or
+  re-check instead.
 - **Fails open.** An unreadable `SiteSessionPolicy` row is logged and treated as
   "no timeout, no watermark" for that request, uncached; an unreadable token
   row leaves the request as it was, and an open page looks again in a minute.
@@ -1709,9 +1744,11 @@ Configured at `/editor/sessions`.
   seconds, and every 200th update) and each `/ws/gql` document from a signed-in
   socket adds one more such read; the collab check also reads the site's
   cached policy.
-- **Residual risks.** (1) Not covered: API keys and headless bearer tokens,
-  including a token minted with a phished password. A breach response needs a
-  password reset or *Sign out everywhere* as well. (2) Sockets, after #2490:
+- **Residual risks.** (1) Not covered by a site's idle timeout or *Sign out
+  everyone*: API keys and headless bearer tokens, including a token minted
+  with a phished password. A breach response needs a password reset or *Sign
+  out everywhere* as well, or the instance-wide sign-out above, which ends
+  bearer tokens but not API keys. (2) Sockets, after #2490:
   (a) a collab token minted by a node on the release before #2490 names no
   session; it is still accepted, per account as before, for this release only,
   and lives at most 24 hours after the last such node stops; (b) a `/ws/gql`
