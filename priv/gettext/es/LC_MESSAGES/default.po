@@ -1657,6 +1657,7 @@ msgstr "(no encontrado)"
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -1926,6 +1927,11 @@ msgstr "Hay una copia de seguridad en curso y otra ya en cola; la copia en cola 
 msgid "A backup is running; this one starts when it finishes."
 msgstr "Hay una copia de seguridad en curso; esta empezará cuando termine."
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup made by scripts/backup.sh. Its full output is in the host's cron log."
+msgstr "Una copia de seguridad hecha por scripts/backup.sh. Su salida completa está en el registro de cron del servidor."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "A backup or another re-send is running. Re-send this backup once it finishes: a re-send is never queued."
@@ -1935,6 +1941,11 @@ msgstr "Hay una copia de seguridad u otro reenvío en curso. Reenvía esta copia
 #, elixir-autogen, elixir-format
 msgid "A backup server's host key changed"
 msgstr "La clave de host de un servidor de copias de seguridad ha cambiado"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup's log appears here once one has run."
+msgstr "El registro de una copia de seguridad aparece aquí en cuanto se haya ejecutado una."
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
@@ -3655,6 +3666,7 @@ msgstr "Umbrales de alerta"
 msgid "Alerts"
 msgstr "Alertas"
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/inbox_live.ex
@@ -4889,6 +4901,11 @@ msgstr "Copia creada hace %{ago}"
 msgid "Background queues"
 msgstr "Colas en segundo plano"
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backup"
+msgstr "Copia de seguridad"
+
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Backup canceled"
@@ -4933,6 +4950,21 @@ msgstr "Destinos de copias de seguridad"
 #, elixir-autogen, elixir-format
 msgid "Backup downloaded"
 msgstr "Copia de seguridad descargada"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backup log"
+msgstr "Registro de la copia de seguridad"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backup logs are hidden: the console shares its address with your organizations' sites (KILN_CONSOLE_HOST is unset and there is more than one organization), so a site's injected code could read them. Set KILN_CONSOLE_HOST to see them here."
+msgstr "Los registros de las copias de seguridad están ocultos: la consola comparte su dirección con los sitios de tus organizaciones (KILN_CONSOLE_HOST no está definido y hay más de una organización), así que el código inyectado en un sitio podría leerlos. Define KILN_CONSOLE_HOST para verlos aquí."
+
+#: lib/kiln_cms_web/controllers/backup_log_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Backup logs are off while the console shares its address with your organizations' sites. Set KILN_CONSOLE_HOST to read them."
+msgstr "Los registros de las copias de seguridad están desactivados mientras la consola comparta su dirección con los sitios de tus organizaciones. Define KILN_CONSOLE_HOST para leerlos."
 
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
@@ -6793,6 +6825,7 @@ msgid "Consent records"
 msgstr "Registros de consentimiento"
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Console"
 msgstr "Consola"
@@ -7471,6 +7504,11 @@ msgstr "No se pudo leer %{name}: %{reason}."
 msgid "Couldn't read the backup destinations. Try again in a moment."
 msgstr "No se pudieron leer los destinos de las copias de seguridad. Inténtalo de nuevo en un momento."
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't read this backup's log again. The page shows what it read last."
+msgstr "No se pudo volver a leer el registro de esta copia de seguridad. La página muestra lo último que leyó."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
@@ -8005,6 +8043,7 @@ msgid "Critical"
 msgstr "Crítico"
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Cron"
 msgstr "Cron"
@@ -9116,6 +9155,11 @@ msgstr "Descargar un archivo de esta copia de seguridad"
 msgid "Download everything this site stores about your account."
 msgstr "Descarga todo lo que este sitio guarda sobre tu cuenta."
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Download log"
+msgstr "Descargar el registro"
+
 #: lib/kiln_cms_web/live/field_sync_live.ex
 #, elixir-autogen, elixir-format
 msgid "Download this site's definitions"
@@ -10185,6 +10229,7 @@ msgid "Erasing can't be undone. Only accounts whose address was never confirmed 
 msgstr "El borrado no se puede deshacer. Solo se borran las cuentas cuya dirección nunca se confirmó y que no se usan para nada más que esta solicitud de registro; un solicitante rechazado que confirmó su dirección siempre se conserva. Una dirección borrada puede volver a registrarse; una conservada no puede volver a registrarse aquí."
 
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Error"
@@ -10209,6 +10254,11 @@ msgstr "Error 500"
 #, elixir-autogen, elixir-format
 msgid "Error:"
 msgstr "Error:"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Errors"
+msgstr "Errores"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
@@ -11088,6 +11138,11 @@ msgstr "Buscar páginas relacionadas"
 #, elixir-autogen, elixir-format
 msgid "Finish"
 msgstr "Finalizar"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Finished"
+msgstr "Terminada"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -12772,6 +12827,7 @@ msgstr "Indexando…"
 msgid "Individual custom fields"
 msgstr "Campos personalizados individuales"
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Info"
@@ -13118,6 +13174,11 @@ msgstr "julio"
 #, elixir-autogen, elixir-format
 msgid "Jump back into the console to write and publish."
 msgstr "Vuelva a la consola para escribir y publicar."
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Jump to latest"
+msgstr "Ir a lo más reciente"
 
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
@@ -13568,6 +13629,7 @@ msgstr "Diseño"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
@@ -13912,6 +13974,11 @@ msgstr "Publicado — publica los cambios guardados"
 msgid "Live, no unpublished changes — nothing to publish"
 msgstr "Publicado, sin cambios sin publicar — nada que publicar"
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Live: new lines appear as each step finishes."
+msgstr "En directo: las líneas nuevas aparecen al terminar cada paso."
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/instance_security_log_live.ex
@@ -13998,6 +14065,16 @@ msgstr "¿Te has quedado fuera? Un operador puede ampliar o vaciar la lista desd
 #, elixir-autogen, elixir-format
 msgid "Locked yourself out? An operator can lift blocks from the server: see docs/ip-blocking.md, \"Recovering from a lock-out\"."
 msgstr "¿Se ha bloqueado a sí mismo? Un operador puede levantar los bloqueos desde el servidor: consulte docs/ip-blocking.md, \"Recovering from a lock-out\"."
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "Log"
+msgstr "Registro"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Log level"
+msgstr "Nivel del registro"
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -14125,6 +14202,7 @@ msgid "Manage your profile, password, and notification preferences."
 msgstr "Gestione su perfil, contraseña y preferencias de notificación."
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Manual"
 msgstr "Manual"
@@ -15267,6 +15345,11 @@ msgstr "No se ha registrado ninguna copia de seguridad"
 msgid "No backups have been recorded yet."
 msgstr "Todavía no se ha registrado ninguna copia de seguridad."
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "No backups yet"
+msgstr "Aún no hay copias de seguridad"
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "No blocks match."
@@ -15562,6 +15645,11 @@ msgstr "Aún no hay elementos."
 #, elixir-autogen, elixir-format
 msgid "No limit"
 msgstr "Sin límite"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "No lines at this level."
+msgstr "No hay líneas en este nivel."
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #, elixir-autogen, elixir-format
@@ -16907,6 +16995,11 @@ msgstr "Solo un administrador de la plataforma puede cambiar las programaciones 
 #, elixir-autogen, elixir-format
 msgid "Only a platform admin can download backup files."
 msgstr "Solo un administrador de la plataforma puede descargar archivos de copias de seguridad."
+
+#: lib/kiln_cms_web/controllers/backup_log_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Only a platform admin can download backup logs."
+msgstr "Solo un administrador de la plataforma puede descargar los registros de las copias de seguridad."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -20993,6 +21086,7 @@ msgid "Schedule saved."
 msgstr "Programación guardada."
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
 #: lib/kiln_cms_web/live/release_live.ex
@@ -22702,6 +22796,11 @@ msgstr "Parte del contenido no se pudo leer y no se procesó: %{types}."
 msgid "Some keys are over 180 days old (their age stands in for last use, which keys don't record yet) or expire more than a year from now."
 msgstr "Algunas claves tienen más de 180 días (su antigüedad sustituye al último uso, que las claves aún no registran) o caducan dentro de más de un año."
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Some lines were dropped to keep the log small"
+msgstr "Se descartaron algunas líneas para que el registro no creciera demasiado"
+
 #: lib/kiln_cms_web/live/inbox_live.ex
 #, elixir-autogen, elixir-format
 msgid "Some notifications could not be marked read."
@@ -22936,6 +23035,11 @@ msgstr "Empezar de nuevo"
 #, elixir-autogen, elixir-format
 msgid "Start sending newsletters to %{email}?"
 msgstr "¿Empezar a enviar boletines a %{email}?"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Started"
+msgstr "Iniciada"
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
@@ -23903,7 +24007,9 @@ msgstr "Esa copia de seguridad está en curso ahora mismo."
 msgid "That backup isn't being re-sent any more."
 msgstr "Esa copia de seguridad ya no se está reenviando."
 
+#: lib/kiln_cms_web/controllers/backup_log_controller.ex
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "That backup isn't in the history."
 msgstr "Esa copia de seguridad no está en el historial."
@@ -25727,6 +25833,11 @@ msgstr "Esta copia de seguridad se está reenviando ahora mismo."
 #, elixir-autogen, elixir-format
 msgid "This backup is still being written. Download it once it has finished."
 msgstr "Esta copia de seguridad todavía se está escribiendo. Descárgala cuando haya terminado."
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "This backup recorded no log lines."
+msgstr "Esta copia de seguridad no registró ninguna línea."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -28087,6 +28198,11 @@ msgstr "Ver detalles de %{name}"
 msgid "View drafts"
 msgstr "Ver borradores"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "View log"
+msgstr "Ver el registro"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "View name"
@@ -28247,10 +28363,16 @@ msgstr "Avisar"
 msgid "Warn - allow it, with a warning"
 msgstr "Avisar: permitirla, con una advertencia"
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Warning"
 msgstr "Advertencia"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Warnings and errors"
+msgstr "Avisos y errores"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
@@ -28406,6 +28528,11 @@ msgstr "Lo que un editor rellena en cada fila: una cantidad, una unidad, una not
 #, elixir-autogen, elixir-format
 msgid "What each side calls it"
 msgstr "Cómo lo llama cada lado"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "What each step of a backup recorded. Secrets are removed when a line is stored, and again when it is shown."
+msgstr "Lo que registró cada paso de una copia de seguridad. Los secretos se eliminan cuando se guarda una línea y de nuevo cuando se muestra."
 
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format

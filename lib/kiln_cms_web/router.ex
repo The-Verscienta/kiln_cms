@@ -724,6 +724,10 @@ defmodule KilnCMSWeb.Router do
       # Where in-app backups are copied (#2220): platform admins only, checked
       # in the LiveView as for `/editor/backups`.
       live "/editor/backups/destinations", BackupDestinationsLive, :index
+      # A backup run's log (part of #2230): platform admins only, checked in
+      # the LiveView as for `/editor/backups`, and hidden while the console
+      # shares an origin. The download is the controller route below.
+      live "/editor/backups/log", BackupLogLive, :index
       live "/editor/mail", MailSettingsLive, :index
       # A site's own object storage (#1559). Org-scoped; the operator's `S3_*`
       # storage stays underneath for every site without one.
@@ -812,6 +816,12 @@ defmodule KilnCMSWeb.Router do
     # one-minute token in its body, never in the path; a GET or HEAD is 405.
     post "/editor/backups/download", BackupDownloadController, :create
     get "/editor/backups/download", BackupDownloadController, :method_not_allowed
+
+    # One backup run's log as text (part of #2230): platform-admin-gated in
+    # the controller, refused while the console shares an origin, and charged
+    # to the `:export` budget. A GET: it changes nothing, and the path names
+    # only the run's id.
+    get "/editor/backups/runs/:id/log.txt", BackupLogController, :show
 
     # Form entries export (#477) — file download, admin-gated in the
     # controller (submissions are visitor-provided data, frequently PII;

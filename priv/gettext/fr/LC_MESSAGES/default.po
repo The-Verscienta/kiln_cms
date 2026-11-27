@@ -1657,6 +1657,7 @@ msgstr "(introuvable)"
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/components/layouts.ex
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #: lib/kiln_cms_web/live/content_editor/inspector_settings_component.ex
 #: lib/kiln_cms_web/live/content_editor_live.ex
@@ -1926,6 +1927,11 @@ msgstr "Une sauvegarde est en cours et une autre est déjà en attente ; la sauv
 msgid "A backup is running; this one starts when it finishes."
 msgstr "Une sauvegarde est en cours ; celle-ci démarrera quand elle sera terminée."
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup made by scripts/backup.sh. Its full output is in the host's cron log."
+msgstr "Une sauvegarde faite par scripts/backup.sh. Sa sortie complète se trouve dans le journal cron de l’hôte."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "A backup or another re-send is running. Re-send this backup once it finishes: a re-send is never queued."
@@ -1935,6 +1941,11 @@ msgstr "Une sauvegarde ou un autre renvoi est en cours. Renvoyez cette sauvegard
 #, elixir-autogen, elixir-format
 msgid "A backup server's host key changed"
 msgstr "La clé d'hôte d'un serveur de sauvegarde a changé"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "A backup's log appears here once one has run."
+msgstr "Le journal d’une sauvegarde apparaît ici dès qu’une sauvegarde a été faite."
 
 #: lib/kiln_cms_web/controllers/page_html/developers.html.heex
 #, elixir-autogen, elixir-format
@@ -3655,6 +3666,7 @@ msgstr "Seuils d'alerte"
 msgid "Alerts"
 msgstr "Alertes"
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/inbox_live.ex
@@ -4889,6 +4901,11 @@ msgstr "Sauvegardé il y a %{ago}"
 msgid "Background queues"
 msgstr "Files d'attente en arrière-plan"
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backup"
+msgstr "Sauvegarde"
+
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Backup canceled"
@@ -4933,6 +4950,21 @@ msgstr "Destinations de sauvegarde"
 #, elixir-autogen, elixir-format
 msgid "Backup downloaded"
 msgstr "Sauvegarde téléchargée"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backup log"
+msgstr "Journal de sauvegarde"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backup logs are hidden: the console shares its address with your organizations' sites (KILN_CONSOLE_HOST is unset and there is more than one organization), so a site's injected code could read them. Set KILN_CONSOLE_HOST to see them here."
+msgstr "Les journaux de sauvegarde sont masqués : la console partage son adresse avec les sites de vos organisations (KILN_CONSOLE_HOST n’est pas défini et il y a plus d’une organisation), si bien que le code injecté dans un site pourrait les lire. Définissez KILN_CONSOLE_HOST pour les voir ici."
+
+#: lib/kiln_cms_web/controllers/backup_log_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Backup logs are off while the console shares its address with your organizations' sites. Set KILN_CONSOLE_HOST to read them."
+msgstr "Les journaux de sauvegarde sont désactivés tant que la console partage son adresse avec les sites de vos organisations. Définissez KILN_CONSOLE_HOST pour les lire."
 
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
@@ -6793,6 +6825,7 @@ msgid "Consent records"
 msgstr "Registres de consentement"
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Console"
 msgstr "Console"
@@ -7471,6 +7504,11 @@ msgstr "Impossible de lire %{name} : %{reason}."
 msgid "Couldn't read the backup destinations. Try again in a moment."
 msgstr "Impossible de lire les destinations des sauvegardes. Réessayez dans un instant."
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Couldn't read this backup's log again. The page shows what it read last."
+msgstr "Impossible de relire le journal de cette sauvegarde. La page affiche ce qu’elle a lu en dernier."
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #, elixir-autogen, elixir-format
@@ -8005,6 +8043,7 @@ msgid "Critical"
 msgstr "Critique"
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Cron"
 msgstr "Cron"
@@ -9116,6 +9155,11 @@ msgstr "Télécharger un fichier de cette sauvegarde"
 msgid "Download everything this site stores about your account."
 msgstr "Téléchargez toutes les données que ce site conserve sur votre compte."
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Download log"
+msgstr "Télécharger le journal"
+
 #: lib/kiln_cms_web/live/field_sync_live.ex
 #, elixir-autogen, elixir-format
 msgid "Download this site's definitions"
@@ -10185,6 +10229,7 @@ msgid "Erasing can't be undone. Only accounts whose address was never confirmed 
 msgstr "L’effacement est irréversible. Seuls les comptes dont l’adresse n’a jamais été confirmée et qui ne servent à rien d’autre qu’à cette inscription sont effacés ; un candidat refusé qui a confirmé son adresse est toujours conservé. Une adresse effacée peut s’inscrire à nouveau, alors qu’une adresse conservée ne peut plus s’inscrire ici."
 
 #: lib/kiln_cms_web/components/content_editor/reference_inline.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Error"
@@ -10209,6 +10254,11 @@ msgstr "Erreur 500"
 #, elixir-autogen, elixir-format
 msgid "Error:"
 msgstr "Erreur :"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Errors"
+msgstr "Erreurs"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
@@ -11088,6 +11138,11 @@ msgstr "Trouver des pages connexes"
 #, elixir-autogen, elixir-format
 msgid "Finish"
 msgstr "Terminer"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Finished"
+msgstr "Terminée"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -12772,6 +12827,7 @@ msgstr "Indexation…"
 msgid "Individual custom fields"
 msgstr "Champs personnalisés individuels"
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Info"
@@ -13118,6 +13174,11 @@ msgstr "juillet"
 #, elixir-autogen, elixir-format
 msgid "Jump back into the console to write and publish."
 msgstr "Retournez dans la console pour rédiger et publier."
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Jump to latest"
+msgstr "Aller au plus récent"
 
 #: lib/kiln_cms_web/controllers/content_html.ex
 #, elixir-autogen, elixir-format
@@ -13568,6 +13629,7 @@ msgstr "Disposition"
 
 #: lib/kiln_cms_web/components/core_components.ex
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
@@ -13912,6 +13974,11 @@ msgstr "En ligne — publie les modifications enregistrées"
 msgid "Live, no unpublished changes — nothing to publish"
 msgstr "En ligne, aucune modification non publiée — rien à publier"
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Live: new lines appear as each step finishes."
+msgstr "En direct : les nouvelles lignes apparaissent à la fin de chaque étape."
+
 #: lib/kiln_cms_web/components/content_editor/media_picker_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/instance_security_log_live.ex
@@ -13998,6 +14065,16 @@ msgstr "Bloqué ? Un opérateur peut élargir ou vider la liste depuis le serveu
 #, elixir-autogen, elixir-format
 msgid "Locked yourself out? An operator can lift blocks from the server: see docs/ip-blocking.md, \"Recovering from a lock-out\"."
 msgstr "Vous vous êtes bloqué ? Un opérateur peut lever les blocages depuis le serveur : voir docs/ip-blocking.md, \"Recovering from a lock-out\"."
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "Log"
+msgstr "Journal"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Log level"
+msgstr "Niveau du journal"
 
 #: lib/kiln_cms_web/live/branding_live.ex
 #, elixir-autogen, elixir-format
@@ -14125,6 +14202,7 @@ msgid "Manage your profile, password, and notification preferences."
 msgstr "Gérez votre profil, votre mot de passe et vos préférences de notification."
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "Manual"
 msgstr "Manuelle"
@@ -15267,6 +15345,11 @@ msgstr "Aucune sauvegarde n'a jamais été enregistrée"
 msgid "No backups have been recorded yet."
 msgstr "Aucune sauvegarde n’a encore été enregistrée."
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "No backups yet"
+msgstr "Aucune sauvegarde pour l’instant"
+
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
 msgid "No blocks match."
@@ -15562,6 +15645,11 @@ msgstr "Aucun élément pour l'instant."
 #, elixir-autogen, elixir-format
 msgid "No limit"
 msgstr "Sans limite"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "No lines at this level."
+msgstr "Aucune ligne à ce niveau."
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #, elixir-autogen, elixir-format
@@ -16907,6 +16995,11 @@ msgstr "Seul un administrateur de la plateforme peut modifier les planifications
 #, elixir-autogen, elixir-format
 msgid "Only a platform admin can download backup files."
 msgstr "Seul un administrateur de la plateforme peut télécharger les fichiers de sauvegarde."
+
+#: lib/kiln_cms_web/controllers/backup_log_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Only a platform admin can download backup logs."
+msgstr "Seul un administrateur de la plateforme peut télécharger les journaux de sauvegarde."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -20993,6 +21086,7 @@ msgid "Schedule saved."
 msgstr "Planification enregistrée."
 
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/editor_live/filters.ex
 #: lib/kiln_cms_web/live/release_live.ex
@@ -22702,6 +22796,11 @@ msgstr "Une partie du contenu n'a pas pu être lue et n'a pas été traitée : %
 msgid "Some keys are over 180 days old (their age stands in for last use, which keys don't record yet) or expire more than a year from now."
 msgstr "Certaines clés ont plus de 180 jours (leur âge tient lieu de dernière utilisation, que les clés n'enregistrent pas encore) ou expirent dans plus d'un an."
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Some lines were dropped to keep the log small"
+msgstr "Certaines lignes ont été supprimées pour garder le journal compact"
+
 #: lib/kiln_cms_web/live/inbox_live.ex
 #, elixir-autogen, elixir-format
 msgid "Some notifications could not be marked read."
@@ -22936,6 +23035,11 @@ msgstr "Recommencer"
 #, elixir-autogen, elixir-format
 msgid "Start sending newsletters to %{email}?"
 msgstr "Commencer à envoyer des newsletters à %{email} ?"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Started"
+msgstr "Démarrée"
 
 #: lib/kiln_cms_web/live/automation_live.ex
 #, elixir-autogen, elixir-format
@@ -23903,7 +24007,9 @@ msgstr "Cette sauvegarde est en cours en ce moment."
 msgid "That backup isn't being re-sent any more."
 msgstr "Cette sauvegarde n’est plus en cours de renvoi."
 
+#: lib/kiln_cms_web/controllers/backup_log_controller.ex
 #: lib/kiln_cms_web/live/backup_live.ex
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #, elixir-autogen, elixir-format
 msgid "That backup isn't in the history."
 msgstr "Cette sauvegarde ne figure pas dans l'historique."
@@ -25727,6 +25833,11 @@ msgstr "Cette sauvegarde est en cours de renvoi."
 #, elixir-autogen, elixir-format
 msgid "This backup is still being written. Download it once it has finished."
 msgstr "Cette sauvegarde est encore en cours d'écriture. Téléchargez-la une fois terminée."
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "This backup recorded no log lines."
+msgstr "Cette sauvegarde n’a enregistré aucune ligne de journal."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -28087,6 +28198,11 @@ msgstr "Voir les détails de %{name}"
 msgid "View drafts"
 msgstr "Voir les brouillons"
 
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "View log"
+msgstr "Voir le journal"
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
 msgid "View name"
@@ -28247,10 +28363,16 @@ msgstr "Avertir"
 msgid "Warn - allow it, with a warning"
 msgstr "Avertir : l’autoriser, avec un avertissement"
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/compliance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Warning"
 msgstr "Avertissement"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "Warnings and errors"
+msgstr "Avertissements et erreurs"
 
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
@@ -28406,6 +28528,11 @@ msgstr "Ce qu’un éditeur remplit sur chaque ligne — une quantité, une unit
 #, elixir-autogen, elixir-format
 msgid "What each side calls it"
 msgstr "Comment chaque côté le nomme"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "What each step of a backup recorded. Secrets are removed when a line is stored, and again when it is shown."
+msgstr "Ce que chaque étape d’une sauvegarde a enregistré. Les secrets sont retirés quand une ligne est enregistrée, puis de nouveau quand elle est affichée."
 
 #: lib/kiln_cms_web/live/password_policy_live.ex
 #, elixir-autogen, elixir-format
