@@ -57,7 +57,9 @@ defmodule KilnCMSWeb.FormEntriesExportController do
     submissions =
       CMS.export_form_submissions!(form.id, %{status: status}, actor: actor, tenant: org)
 
-    field_names = Enum.map(form.fields, & &1.name)
+    # A field whose type this release doesn't know has no column of its own
+    # (#2262); a value stored under it is still exported, as an orphan key.
+    field_names = form.fields |> KilnCMS.Forms.known_fields() |> Enum.map(& &1.name)
     orphan_keys = orphan_keys(submissions, field_names)
     keys = field_names ++ orphan_keys
 

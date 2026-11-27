@@ -273,4 +273,76 @@ defmodule KilnCMS.Automation.JobArgsTest do
       assert error =~ "no longer available"
     end
   end
+
+  describe "a send_email rule and the suppression lists (#3051)" do
+    defp email_rule(config \\ %{"to" => "team@example.com", "subject" => "Live: {{title}}"}) do
+      rule(%{trigger_event: :published, action: :send_email, config: config})
+    end
+
+    defp sealed_job!(rule), do: rule_job!(rule, %{"sealed" => PrivateArgs.seal(payload())})
+
+    test "a `to` on the instance-wide list sends nothing, completes, and forgets the payload" do
+      r = email_rule()
+      job = sealed_job!(r)
+      # Case-insensitive, as every lookup of the list is.
+      KilnCMS.Mail.suppress_recipient!(%{email: "TEAM@EXAMPLE.COM"}, authorize?: false)
+
+      log = capture_log(fn -> drain() end)
+
+      assert_no_email_sent()
+      row = Repo.get!(Oban.Job, job.id)
+      assert row.state == "completed"
+      refute Map.has_key?(row.args, "sealed")
+      assert log =~ "[warning]"
+      assert log =~ "Automation rule #{r.id} sent nothing"
+      refute String.downcase(log) =~ "team@example.com"
+    end
+
+    test "the rule's own site's list stops it; another site's does not" do
+      r = email_rule()
+
+      KilnCMS.Mail.suppress_site_recipient!(%{email: "team@example.com"},
+        tenant: org_id(),
+        authorize?: false
+      )
+
+      sealed_job!(r)
+      capture_log(fn -> drain() end)
+      assert_no_email_sent()
+
+      other = KilnCMS.OrgFixtures.org("rule-supp")
+      elsewhere = email_rule(%{"to" => "elsewhere@example.com", "subject" => "Live"})
+
+      KilnCMS.Mail.suppress_site_recipient!(%{email: "elsewhere@example.com"},
+        tenant: other.id,
+        authorize?: false
+      )
+
+      sealed_job!(elsewhere)
+      drain()
+      assert_email_sent(fn email -> assert email.to == [{"", "elsewhere@example.com"}] end)
+    end
+
+    test "a list that cannot be read retries the job, keeping the payload, and sends nothing" do
+      job = sealed_job!(email_rule())
+
+      KilnCMS.Mail.with_actor(nil, fn -> capture_log(fn -> drain() end) end)
+
+      assert_no_email_sent()
+      row = Repo.get!(Oban.Job, job.id)
+      assert row.state == "retryable"
+      assert Map.has_key?(row.args, "sealed")
+      refute String.downcase(inspect(row.errors)) =~ "team@example.com"
+    end
+
+    test "a rule with no `to` still logs the missing address and completes" do
+      job = sealed_job!(email_rule(%{"subject" => "Live"}))
+
+      log = capture_log(fn -> drain() end)
+
+      assert_no_email_sent()
+      assert Repo.get!(Oban.Job, job.id).state == "completed"
+      assert log =~ "missing a `to` address"
+    end
+  end
 end

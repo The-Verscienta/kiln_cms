@@ -137,6 +137,16 @@ tagged `kiln_client-vX.Y.Z` in the
   configured key is sent. The delivery reads (`list/2`, `one/3`, the searches
   and the rest) still take no `:api_key`.
 
+- **`form/2` documents each field's `"condition"`; `submit_form/3` documents
+  the `"discarded"` key a newer server returns when it drops values sent for
+  hidden fields (kiln_cms#2262).** A field's `"condition"` is `nil` (always
+  shown) or `%{"action" => "show" | "hide", "rule" => rule}`; evaluate the
+  fields in order, and a field its condition hides has no value for the
+  rules after it. `submit_form/3` still returns `{:ok, _}` when the server
+  drops a value sent for a hidden field; `"discarded"` lists those fields,
+  and is absent when there are none or from an older server. Documentation
+  only: no code change.
+
 ### Fixed
 
 - **A 2xx answer that isn't JSON is an error (kiln_cms#2735).** A captive

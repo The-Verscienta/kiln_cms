@@ -17,6 +17,17 @@ defmodule KilnCMS.Forms.AutoresponderWorker do
   A job queued by a release before that carries the `data` and the `to`
   address itself. It is still delivered to that address, and both are dropped
   from its row once it finishes (`KilnCMS.Jobs.PrivateArgs`).
+
+  ## Suppressed addresses (#3051)
+
+  Visitors type this address, so it is the mail most likely to reach a dead or
+  complaining mailbox. An address on the instance-wide suppression list, or on
+  the site's own (`KilnCMS.Mail.check_suppression/2`), is sent nothing: the
+  job completes (it is not a delivery failure on /editor/mail) and logs at
+  info level, naming the job, the form and the site, never the address. A
+  list that cannot be read raises, so the job retries rather than sending past
+  it. Both job shapes are checked; a legacy job's `data` and `to` are dropped
+  on a skip as on a send.
   """
   require Logger
 
@@ -37,11 +48,13 @@ defmodule KilnCMS.Forms.AutoresponderWorker do
 
     with {:ok, form, fields} <- responding_form(form_id, tenant),
          {:ok, submission} <- Forms.delivery_submission(submission_id, tenant),
-         {true, to} <- Autoresponder.eligible?(form, submission.data, fields) do
+         {true, to} <- Autoresponder.eligible?(form, submission.data, fields),
+         :ok <- Mail.check_suppression(to, org_id: tenant) do
       deliver(job, form, fields, to, submission.data, tenant)
     else
       :skip -> :ok
       false -> :ok
+      {:skip, :suppressed} -> suppressed(job, form_id, tenant)
       {:error, error} -> {:error, error}
     end
   end
@@ -52,9 +65,12 @@ defmodule KilnCMS.Forms.AutoresponderWorker do
     PrivateArgs.finishing(job, PrivateArgs.keys(__MODULE__), fn ->
       tenant = tenant(args)
 
-      case responding_form(form_id, tenant) do
-        {:ok, form, fields} -> deliver(job, form, fields, to, data, tenant)
+      with {:ok, form, fields} <- responding_form(form_id, tenant),
+           :ok <- Mail.check_suppression(to, org_id: tenant) do
+        deliver(job, form, fields, to, data, tenant)
+      else
         :skip -> :ok
+        {:skip, :suppressed} -> suppressed(job, form_id, tenant)
         {:error, error} -> {:error, error}
       end
     end)
@@ -87,7 +103,8 @@ defmodule KilnCMS.Forms.AutoresponderWorker do
 
     case CMS.get_form(form_id, opts) do
       {:ok, %{autoresponder_enabled: true} = form} ->
-        {:ok, form, CMS.form_fields_for!(form_id, opts)}
+        # A field whose type this release doesn't know is skipped (#2262).
+        {:ok, form, form_id |> CMS.form_fields_for!(opts) |> Forms.known_fields()}
 
       {:error, %Ash.Error.Forbidden{} = error} ->
         {:error, error}
@@ -98,6 +115,20 @@ defmodule KilnCMS.Forms.AutoresponderWorker do
       _ ->
         :skip
     end
+  end
+
+  # The submitter's address is on the instance-wide suppression list or the
+  # site's own (#3051). Completed, not cancelled: a cancelled `mail` job is
+  # listed as a delivery failure on /editor/mail. Info, not a warning: the
+  # visitor typed this address, and a bounced one is the list working. Never
+  # the address itself.
+  defp suppressed(%Oban.Job{id: id}, form_id, tenant) do
+    Logger.info(
+      "form autoresponder job #{id} not sent: the submitter's address is suppressed " <>
+        "(form #{form_id}, org #{tenant})"
+    )
+
+    :ok
   end
 
   defp deliver(%Oban.Job{id: id}, form, fields, to, data, tenant) do

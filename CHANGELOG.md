@@ -64,6 +64,9 @@ else.
 - **Collaborative editing: a collab token minted before this release names no session, and is still accepted with its old per-account behavior for this release only, at most 24 hours after the last old node stops (#2490).**
   Nothing to do; the next release refuses such tokens. No migration; rolling the pin back is safe.
   ([#3460](https://github.com/The-Verscienta/kiln_cms/pull/3460) · [long form](docs/changelog/unreleased.md#session-bound-sockets-upgrade))
+- **Forms: add a field condition only once every node runs this release, and before rolling back untick Required on conditional fields that not every visitor should be asked (#2262).**
+  An older node ignores conditions, so it shows every field and refuses a submission that left a required hidden field blank. Expand-only migration.
+  ([#3480](https://github.com/The-Verscienta/kiln_cms/pull/3480) · [long form](docs/changelog/unreleased.md#form-field-conditions-upgrade))
 
 ### Breaking
 
@@ -79,6 +82,9 @@ else.
 - **Backups: `bin/backup` in a release and `mix kiln.backup.*` in a checkout list backups, start one and optionally wait for it, re-check a backup's files, report what retention would delete, and import cron's backups, with `--json` output and exit codes 0, 1 and 2 (part of #2234).**
   `prune` only reports and `verify` records nothing. New image only; no migration, and rolling the pin back is safe.
   ([#3455](https://github.com/The-Verscienta/kiln_cms/pull/3455) · [long form](docs/changelog/unreleased.md#backup-cli))
+- **Forms: a field can be shown or hidden based on earlier answers, set under Conditional logic in the builder; a hidden field is never required and the server drops whatever was sent for it (#2262).**
+  `GET /api/forms/:slug` gains `fields[].condition` and a JSON submission's answer an additive `discarded` list. Condition values are public. Expand-only migration.
+  ([#3480](https://github.com/The-Verscienta/kiln_cms/pull/3480) · [long form](docs/changelog/unreleased.md#form-field-conditions))
 
 - **Backups: a platform admin can download a backup's local files (each dump, media part and checksum file) from History, one file per click, through a one-minute link bound to their session and recorded in the instance security log as `backup_downloaded` before any byte is sent (part of #2225).**
   Refused while `KILN_CONSOLE_HOST` is unset and there is more than one organization. Shares the `:export` limit of 10 a minute. No migration; rolling the pin back is safe.
@@ -89,6 +95,9 @@ else.
 - **Bot budgets: SeznamBot, MojeekBot and Storebot-Google count as search engines, checked by DNS; GoogleOther, AdsBot-Google, Naver's Yeti, Qwantbot, Sogou and a browser-shaped `(compatible; …bot)` crawler count as other bots, and Google-CloudVertexBot as an AI crawler (#2468).**
   No migration; rolling the pin back is safe.
   ([#3477](https://github.com/The-Verscienta/kiln_cms/pull/3477) · [long form](docs/changelog/unreleased.md#bot-classes-regional-engines))
+- **Forms: the autoresponder writes to the first email field, in form order, that the submission filled in; before, a blank first email field meant no confirmation even when a later one was filled (#2262).**
+  A field its condition hid is passed over, and its `[field:…]` token is blank. No migration.
+  ([#3480](https://github.com/The-Verscienta/kiln_cms/pull/3480) · [long form](docs/changelog/unreleased.md#autoresponder-first-filled-email))
 - **Backups: two SFTP destinations held back only by a missing Test now say so on the Destinations tab, "Press Test on both destinations to let them prune.", with a link to the how-to (#3428).**
   Shown only when a Test would clear the block. No migration.
   ([#3466](https://github.com/The-Verscienta/kiln_cms/pull/3466) · [long form](docs/changelog/unreleased.md#sftp-prune-test-hint))
@@ -164,6 +173,10 @@ else.
 - **Backups: a cron backup that History recorded as Failed "Interrupted" is corrected, once, when its stamp turns out complete (#2846).**
   The importer's summary gains a `reevaluated` count, and retention's `pruned` mark now locks the row it marks. No migration; rolling the pin back is safe.
   ([#3447](https://github.com/The-Verscienta/kiln_cms/pull/3447) · [long form](docs/changelog/unreleased.md#reevaluate-interrupted-import))
+
+- **Form notifications, form autoresponders and automation email skip an address on the instance-wide or the site's suppression list when they send (#3051).**
+  The job completes unsent and logs why, never the address; an unreadable list retries it. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#send-time-suppression-forms-automation))
 
 - **An IP block rule added or removed, or a site's new slug or custom domain, takes effect on a node's next request, instead of the old answer being cached for up to a minute (five for an old host) when a lookup straddled the save (#2972).**
   No migration; rolling the pin back is safe.

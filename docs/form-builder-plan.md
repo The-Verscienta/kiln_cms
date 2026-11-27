@@ -1,10 +1,15 @@
 # Form Builder Redesign Plan
 
-**Status: Phase 1 shipped; Phases 2–5 not built; Phase 6 partial.** The visual
+**Status: Phase 1 shipped; Phases 2 and 4 partial; Phases 3 and 5 not built; Phase 6 partial.** The visual
 builder (`KilnCMSWeb.FormBuilderLive`, `/editor/forms/:id`) with its
 Notifications / Confirmations / Embed / Entries tabs and the autoresponder are
-live. The field taxonomy is still the baseline seven types, and templates,
-conditional logic and multi-page forms don't exist yet.
+live. Phase 2's standard types (`radio`, `checkboxes`, `phone`, `url`,
+`number`, `hidden`) and `rating` shipped in #2261; the layout and composite
+types did not. Phase 4's per-field show/hide shipped in #2262 (see
+[Show or hide a field based on an earlier answer](forms.md#show-or-hide-a-field-based-on-an-earlier-answer));
+conditional confirmations and notifications did not. Templates and
+multi-page forms don't exist yet: `page_break` (#2266) can ship no earlier
+than the release after #2262, which made `field_type` a `KnownAtom`.
 
 Goal: evolve Kiln's form editor from the current flat "add a field row" admin page into a
 visual form builder modeled on **WPForms** and **Formidable Forms** — the two strongest
@@ -115,6 +120,13 @@ email table and submissions view must render lists.
 - Plugin seam later: `Kiln.Plugin` can contribute templates.
 
 ## Phase 4 — Conditional logic
+
+> **As shipped (#2262)** the attribute is `FormField.condition`
+> (`KilnCMS.CMS.FormFieldCondition`): an `action` (`:show` or `:hide`) and a
+> `rule` in the custom fields' `KilnCMS.CMS.Conditions` shape, not the
+> `conditions` map sketched below. The builder section is **Conditional
+> logic**, and the server-side re-evaluation is as planned. Conditional
+> confirmations and notifications are not built.
 
 - `FormField.conditions` embedded attribute:
   `%{logic: :all | :any, rules: [%{field: name, operator: op, value: v}]}` with

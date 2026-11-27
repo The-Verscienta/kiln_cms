@@ -86,16 +86,17 @@ defmodule KilnCMS.Forms.FieldTypesTest do
       end
     end
 
-    test "a field type with no cast clause raises rather than storing anything" do
-      assert_raise FunctionClauseError, fn ->
-        Forms.submit(
-          %{
-            active: true,
-            id: nil,
-            fields: [%KilnCMS.CMS.FormField{name: "f", field_type: :nope}]
-          },
-          %{"f" => "x"}
-        )
+    # It used to raise (no `cast/2` clause). Since #2262 a type this release
+    # doesn't know (a newer release's, loaded as an `UnknownAtom`) is skipped
+    # by every reader, so its value is never cast, required or stored.
+    test "a field type this release doesn't know never stores anything" do
+      form = form!(%{field_type: :string})
+      unknown = %{hd(form.fields) | field_type: %KilnCMS.Types.UnknownAtom{value: "nope"}}
+      nope = %{hd(form.fields) | field_type: :nope, required: true}
+
+      for field <- [unknown, nope] do
+        assert {:ok, submission} = Forms.submit(%{form | fields: [field]}, %{"f" => "x"})
+        assert submission.data == %{}
       end
     end
   end
