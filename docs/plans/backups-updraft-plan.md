@@ -13,6 +13,9 @@ must set their own keep days) built;
 and Rclone destinations, one step per destination with a "partly off-site"
 outcome, and retention on each destination) is built, with S3 (#2221) still
 to come;
+#2230 has its log viewer (a Log tab on the Backups page, with a redacted
+text download) built, with live progress still to come, and #2231's tabbed
+page has its Log tab but not yet its Settings tab;
 the rest is proposed.
 Builds on #484 (in-app status + "Back up now"), `scripts/backup.sh`,
 `scripts/restore.sh` and `docs/backups.md`.
