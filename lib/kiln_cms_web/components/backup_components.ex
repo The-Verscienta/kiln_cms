@@ -10,15 +10,15 @@ defmodule KilnCMSWeb.BackupComponents do
   `KilnCMSWeb.OverviewLive` all say these things, so they say them from here.
 
   The tabs are links to separate pages, each its own LiveView at
-  `/editor/backups/<tab>`, so the tabs #2231 adds later (Settings, Log) slot
-  in as one more entry each, as Destinations (`KilnCMSWeb.BackupDestinationsLive`,
-  #2220) did.
+  `/editor/backups/<tab>`, so the tabs #2231 adds slot in as one more entry
+  each, as Destinations (`KilnCMSWeb.BackupDestinationsLive`, #2220) and Log
+  (`KilnCMSWeb.BackupLogLive`, part of #2230) did. Settings is still to come.
   """
   use KilnCMSWeb, :html
 
   alias KilnCMS.Types.UnknownAtom
 
-  @tabs [:history, :schedule] ++ [:destinations]
+  @tabs [:history, :schedule] ++ [:destinations, :log]
 
   @doc "The tab keys, in the order they are shown."
   @spec tab_keys() :: [atom()]
@@ -56,6 +56,8 @@ defmodule KilnCMSWeb.BackupComponents do
       path: ~p"/editor/backups/destinations",
       label: gettext("Destinations")
     }
+
+  defp tab(:log), do: %{key: :log, path: ~p"/editor/backups/log", label: gettext("Log")}
 
   @doc """
   The off-site alarm line for `Backups.status/0`'s `offsite`, or nil when

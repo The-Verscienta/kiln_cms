@@ -46,6 +46,8 @@ defmodule KilnCMSWeb.BackupLive do
   the rows themselves page with the `:history` read's own offset pagination.
   `?run=<id>` (the Schedule tab's "Last scheduled run" link, #2875) opens the
   page that holds that run (`Backups.history_page_of/3`) and marks its row.
+  Each row links to its log on the Log tab (`KilnCMSWeb.BackupLogLive`, part
+  of #2230), a navigate link rather than an event.
   Whether each run's files are still on disk is computed for the visible page
   only, artifact by artifact (`Backups.Presence`, #2416). An imported row's
   absent file is judged by the cron prunes recorded after it (#3113): the
@@ -2149,6 +2151,16 @@ defmodule KilnCMSWeb.BackupLive do
               presence={Map.get(@presence, run.id)}
               disk={@disk}
             />
+            <%!-- Part of #2230: the run's log on the Log tab, which decides
+                  what it may show. A link, not an event. --%>
+            <.link
+              navigate={~p"/editor/backups/log?#{%{run: run.id}}"}
+              data-role="view-log"
+              class="link inline-flex items-center gap-1 text-primary-ink"
+            >
+              <.icon name="hero-document-text" class="size-3" />
+              {gettext("View log")}
+            </.link>
             <%!-- Part of #2225: this server's local files of the run. Hidden
                   while the console shares an origin (the page-level note
                   says why), and for a run whose files are in another

@@ -92,6 +92,9 @@ else.
 - **Sessions: a platform admin can sign out every session on every site at once from `/editor/sessions`, confirmed by typing the server's host name and recorded in the instance security log; API keys keep working (#2491).**
   Browser sessions, remember-me, two-factor holds and app tokens all end. A site's own "Sign out everyone" now waits for sessions in use and gives up after two minutes. No migration; rolling the pin back is safe.
   ([#3486](https://github.com/The-Verscienta/kiln_cms/pull/3486) · [long form](docs/changelog/unreleased.md#sign-out-everyone-every-site))
+- **Backups: a Log tab shows what each step of a backup recorded, filtered by level and redacted again when shown, with "View log" on each History row and a text download of the log (part of #2230).**
+  Platform admins only; refused while `KILN_CONSOLE_HOST` is unset and there is more than one organization. The download shares the `:export` limit and is logged, not audited. No migration; rolling the pin back is safe.
+  ([#3488](https://github.com/The-Verscienta/kiln_cms/pull/3488) · [long form](docs/changelog/unreleased.md#backup-log-viewer))
 
 ### Changed
 

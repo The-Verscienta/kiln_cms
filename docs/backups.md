@@ -5651,6 +5651,8 @@ admins only, like the rest of the page.
    ([Re-send a partly off-site backup](#re-send-a-partly-off-site-backup)),
    with a `?` (**About Re-send**) beside it.
 3. Use **Previous** / **Next** to page ("Page 1 of 3").
+4. To read what a backup's steps recorded, click **View log** on its row
+   ([Read and download the log of a backup](#read-and-download-the-log-of-a-backup)).
 
 To open one run's row directly, use `/editor/backups?run=<run id>`, which is
 what the Schedule tab's "Last scheduled run" links to: the page that holds the
@@ -6103,6 +6105,142 @@ replaces the Backups page in that tab: go back to it.
 | `410` | `link_expired` | Older than one minute. Click **Download** again. |
 | `429` | | Over 10 downloads and exports a minute. Wait for `retry-after`. |
 | `503` | `audit_failed` | The `backup_downloaded` event couldn't be written (or erasure of your account is in progress), so nothing was sent. Try again. |
+
+### Read and download the log of a backup
+
+Each backup run keeps a log: one line per thing a step recorded, with its
+time, level (Info, Warning or Error) and step. History shows a run's outcome
+and its error; the **Log** tab shows every line, which is where to look when
+a backup failed, retried an upload or skipped a destination's retention
+(part of #2230). The reasoning is in
+[ADR 0092](decisions/0092-a-backup-runs-log-is-shown-and-downloaded-redacted-refused-while-the-console-shares-an-origin-without-an-audit-event.md).
+
+Starting point: you are a platform admin, and `KILN_CONSOLE_HOST` is set or
+there is only one organization (see "Refused while the console shares an
+origin" below).
+
+1. Open **Backups** (`/editor/backups`) and scroll to **History**. Each row
+   has **View log**.
+2. Click **View log** on the backup you want. The **Log** tab opens
+   (`/editor/backups/log?run=<run id>`) with that backup chosen in the
+   **Backup** picker. Opening the tab itself, from the tab bar, shows the
+   backup that is running now (the one holding the backup lock), else the
+   newest.
+3. Read the summary card: the stamp, the status, the trigger, the
+   **Database** and **Media** badges, **Started** and **Finished** (UTC), and
+   the run's error when it has one. Below it, one row per log line, oldest
+   first.
+4. To see only what went wrong, click **Warnings and errors** or **Errors**
+   (each shows its count); **All** goes back. The level is kept in the URL
+   (`&level=warn`, `&level=error`), so a link to it opens the same view.
+5. To look at another backup, choose it in **Backup**. The picker lists the
+   newest 25 as "2026-11-07 03:17 UTC · Scheduled · Succeeded", plus the one
+   shown when it is older.
+6. To keep a copy, click **Download log**. The browser saves
+   `kiln-backup-log-<stamp>.txt`, every level, whatever level the page
+   shows.
+
+What you see on the tab:
+
+- **A dropped-lines marker.** A log keeps at most 200 lines: the first 50,
+  the last 149, and one marker between them. The marker reads "Some lines
+  were dropped to keep the log small" and is shown at every level, so a
+  filtered view never hides that lines are missing. The download keeps the
+  stored line, which says how many: `WARN  truncated 37 log entries were
+  dropped to bound the log`.
+- **Lines arrive at step boundaries.** A step writes the run when it
+  finishes, so a long media archive or upload adds its lines in one go at
+  the end, not as it works. While the backup runs the page says "Live: new
+  lines appear as each step finishes." and reads it again every 3 seconds.
+  It stops by itself when the run finishes, and after an hour it stops and
+  says "This page stopped checking for new lines. Reload it to follow the
+  backup again."
+- **A long log** has **Jump to latest** above it (more than 10 lines). The
+  newest line is at the bottom, and the page does not scroll on its own.
+- **Cron's backups** carry only what the importer recorded: a line saying
+  the run was found in the backup directory, and one more if it was left
+  half-written. The card says "A backup made by scripts/backup.sh. Its full
+  output is in the host's cron log."
+- **No backups yet** when History is empty, and "This backup recorded no log
+  lines." for a run with none.
+
+**Redacted twice.** Every line was redacted when it was stored
+([Secrets in history](#secrets-in-history)). It is redacted again each time
+it is shown or downloaded, with what this server knows now: the password in
+`DATABASE_URL`, the values of `PGPASSWORD`, `RCLONE_CONFIG_PASS`,
+`AWS_SECRET_ACCESS_KEY` and `AWS_SESSION_TOKEN` when they are set (each at
+least six characters), and the patterns (URL userinfo, `key=value`
+credentials, rclone connection strings). A secret
+set or rotated after the line was written, or a pattern a later release
+adds, so applies to old lines too. A destination's credentials are removed
+by those patterns, not by value, and a password `DATABASE_URL` no longer
+carries isn't known at all. The trigger and the step names go through the
+same redaction. Control characters (escape sequences in rclone or pg_dump
+output above all), C1 controls and bidirectional overrides are shown as
+`�` (U+FFFD), on the page and in the file, so the download is safe to `cat`
+in a terminal.
+
+**The download.** `GET /editor/backups/runs/<run id>/log.txt`, a
+`text/plain` attachment that is never cached. A few `#` lines describe the
+run, then a blank line, then one line per entry, `<time> <LEVEL> <step>
+<message>`, with a message's further lines indented by two spaces:
+
+```text
+# Kiln backup log
+# Backup: 20261107-031700 (schedule, failed)
+# Started: 2026-11-07T03:17:00Z
+# Finished: 2026-11-07T03:24:41Z
+# Components: db, media
+# Origin: app
+# Error: off-site copy failed
+
+2026-11-07T03:17:00Z INFO  start Backup started (schedule)
+2026-11-07T03:18:12Z INFO  dump Database dump verified (48213520 bytes)
+2026-11-07T03:24:40Z ERROR offsite Copy of kiln-db-20261107-031700.dump to NAS failed: exit 1
+  Failed to copy: dial tcp 10.0.0.5:22: i/o timeout
+```
+
+A running backup's log downloads as far as it has been written. Downloads
+share the `:export` budget with backup file downloads and the content-list
+and security-log exports: 10 a minute per account, counted on each server.
+A download is not written to the instance security log; each one is logged
+by the server at info, as `backup log download user_id=… run_id=… stamp=…
+entries=…`.
+
+**Refused while the console shares an origin.** A log names destinations,
+hosts, paths and timings across every organization's backups. With
+`KILN_CONSOLE_HOST` unset and more than one organization, or while a server
+can't tell how many organizations there are, the tab shows no backup at
+all, only "Backup logs are hidden: the console shares its address with your
+organizations' sites (KILN_CONSOLE_HOST is unset and there is more than one
+organization), so a site's injected code could read them. Set
+KILN_CONSOLE_HOST to see them here.", and the download is refused. It asks
+again each time the page changes and at every 3-second read, so a second
+organization created while the tab is open hides the log at the next one.
+**View log** stays on History and leads to that note. History itself is not
+hidden by this.
+
+#### What the log download answers
+
+A refusal is a short plain-text page that ends `error: <code>` (the `429` is
+the usual rate-limit page instead). The checks run in the order of the
+table, and only a request that passes the first three is charged against the
+limit, so a `404` counts and a `403` doesn't.
+
+| Status | `error` | Meaning |
+|---|---|---|
+| `403` | `admin_required` | You are not a platform admin now, or not signed in. |
+| `403` | `console_shares_origin` | Backup logs are off (above). The page says "Backup logs are off while the console shares its address with your organizations' sites. Set KILN_CONSOLE_HOST to read them." |
+| `403` | `cross_site_request` | The browser said the request came from another site, or as an image, script or frame rather than a page or a same-origin `fetch` (`Sec-Fetch-Site` other than `same-origin` or `none`, or `Sec-Fetch-Dest` other than `document` or `empty`). Download it from the **Log** tab. A request without those headers, from `curl` or an older browser, is let through. |
+| `429` | | Over 10 downloads and exports a minute. Wait for `retry-after`. |
+| `404` | `not_found` | The id isn't a run's, or isn't a UUID: "That backup isn't in the history." |
+| `200` | | The log. |
+
+On the tab itself, a `?run=` that isn't a backup's shows the same "That
+backup isn't in the history." as a flash and opens the default backup. If a
+3-second read fails, the page keeps what it read last, stops following, and
+says "Couldn't read this backup's log again. The page shows what it read
+last."
 
 ### It needs the client tools in the image
 

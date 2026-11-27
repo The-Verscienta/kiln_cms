@@ -42,6 +42,17 @@ defmodule KilnCMS.Backups.Log do
 
   defp marker(dropped), do: "#{dropped} log entries were dropped to bound the log"
 
+  @doc """
+  Whether `entry` is the marker `cap/1` writes where it dropped entries: the
+  `truncated` step, at `:warn`, with exactly the marker's message. A line
+  that only calls its step `truncated` (an imported log's, say) is not.
+  """
+  @spec marker?(LogEntry.t() | map()) :: boolean()
+  def marker?(%{step: "truncated", level: :warn, message: message}) when is_binary(message),
+    do: Regex.match?(~r/\A\d+ log entries were dropped to bound the log\z/, message)
+
+  def marker?(_entry), do: false
+
   defp sanitize(%LogEntry{} = entry) do
     %{entry | message: Redact.text(entry.message, [], @max_message)}
   end
