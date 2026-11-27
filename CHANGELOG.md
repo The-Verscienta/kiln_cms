@@ -97,7 +97,7 @@ else.
   ([#3488](https://github.com/The-Verscienta/kiln_cms/pull/3488) · [long form](docs/changelog/unreleased.md#backup-log-viewer))
 - **Backups: the Backups page and the Log tab follow a running backup about half a second after each change on clustered nodes, and the in-flight strip shows an approximate percent by steps (#3489, completes #2230).**
   The 3-second poll stays the source of truth and the fallback on unclustered nodes. No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#backup-live-progress))
+  ([#3492](https://github.com/The-Verscienta/kiln_cms/pull/3492) · [long form](docs/changelog/unreleased.md#backup-live-progress))
 
 ### Changed
 
