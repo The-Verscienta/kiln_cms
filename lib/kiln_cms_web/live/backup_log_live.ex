@@ -38,7 +38,11 @@ defmodule KilnCMSWeb.BackupLogLive do
   on, and the `truncated` marker is shown at every level. Lines appear at
   step boundaries, when the step writes the run. While the run is running
   (or the lock holds its stamp) the page re-reads it every 3 s, one timer at
-  a time, at most 1 200 times, and stops once it has finished.
+  a time, and stops once it has finished; the picker is read again with it,
+  so a run that finished meanwhile isn't still labelled Running. After 1 200
+  polls (an hour) it stops and says so, and a reload starts it again. A run's
+  trigger is operator text, so it is redacted again and sanitized wherever
+  it is shown (`LogText.trigger/2`).
   """
   use KilnCMSWeb, :live_view
 
@@ -68,6 +72,8 @@ defmodule KilnCMSWeb.BackupLogLive do
        |> assign(:counts, %{all: 0, warn: 0, error: 0})
        |> assign(:error, nil)
        |> assign(:live?, false)
+       |> assign(:stopped?, false)
+       |> assign(:trigger, nil)
        |> assign(:poll_ref, nil)
        |> assign(:polls_left, @max_polls)}
     else
@@ -138,6 +144,8 @@ defmodule KilnCMSWeb.BackupLogLive do
     |> assign(:counts, %{all: 0, warn: 0, error: 0})
     |> assign(:error, nil)
     |> assign(:live?, false)
+    |> assign(:stopped?, false)
+    |> assign(:trigger, nil)
     |> assign(:poll_ref, nil)
   end
 
@@ -194,9 +202,10 @@ defmodule KilnCMSWeb.BackupLogLive do
     end
   end
 
-  # The newest runs, with only what an option says, and the shown run
-  # added when it is older than they are.
+  # The newest runs as `%{id, label}`, read with only what a label says, and
+  # the shown run added when it is older than they are.
   defp options(user, run) do
+    env = LogText.read_env()
     query = Ash.Query.select(Run, [:id, :stamp, :trigger, :status, :started_at])
 
     newest =
@@ -210,15 +219,20 @@ defmodule KilnCMSWeb.BackupLogLive do
         {:error, _error} -> []
       end
 
-    if is_nil(run) or Enum.any?(newest, &(&1.id == run.id)),
-      do: newest,
-      else: newest ++ [run]
+    runs =
+      if is_nil(run) or Enum.any?(newest, &(&1.id == run.id)),
+        do: newest,
+        else: newest ++ [run]
+
+    Enum.map(runs, &%{id: &1.id, label: option_label(&1, env)})
   end
 
   defp reread(%{assigns: %{run: %Run{id: id}}} = socket) do
     case read_run(id, socket.assigns.current_user) do
       {:ok, run} ->
-        show(socket, run, held_stamp())
+        socket
+        |> assign(:options, options(socket.assigns.current_user, run))
+        |> show(run, held_stamp())
 
       :error ->
         socket
@@ -238,7 +252,9 @@ defmodule KilnCMSWeb.BackupLogLive do
     |> assign(:entries, [])
     |> assign(:counts, %{all: 0, warn: 0, error: 0})
     |> assign(:error, nil)
+    |> assign(:trigger, nil)
     |> assign(:live?, false)
+    |> assign(:stopped?, false)
   end
 
   defp show(socket, %Run{} = run, held) do
@@ -249,7 +265,9 @@ defmodule KilnCMSWeb.BackupLogLive do
     |> assign(:entries, LogText.entries(run, socket.assigns.level, env))
     |> assign(:counts, LogText.counts(run))
     |> assign(:error, LogText.error(run, env))
+    |> assign(:trigger, trigger_label(run.trigger, env))
     |> assign(:live?, run.status == :running or (is_binary(held) and held == run.stamp))
+    |> assign(:stopped?, false)
   end
 
   defp held_stamp do
@@ -269,6 +287,15 @@ defmodule KilnCMSWeb.BackupLogLive do
     else
       socket
     end
+  end
+
+  # Out of polls while the run still runs: the page no longer follows it,
+  # and says so rather than calling itself live.
+  defp poll(%{assigns: %{live?: true}} = socket) do
+    socket
+    |> assign(:live?, false)
+    |> assign(:stopped?, true)
+    |> assign(:poll_ref, nil)
   end
 
   defp poll(socket), do: assign(socket, :poll_ref, nil)
@@ -338,7 +365,9 @@ defmodule KilnCMSWeb.BackupLogLive do
           entries={@entries}
           counts={@counts}
           error={@error}
+          trigger={@trigger}
           live?={@live?}
+          stopped?={@stopped?}
         />
       </div>
     </Layouts.console>
@@ -351,7 +380,9 @@ defmodule KilnCMSWeb.BackupLogLive do
   attr :entries, :list, required: true
   attr :counts, :map, required: true
   attr :error, :string, default: nil
+  attr :trigger, :string, required: true, doc: "the run's trigger as shown (`trigger_label/2`)"
   attr :live?, :boolean, required: true
+  attr :stopped?, :boolean, required: true, doc: "the poll ran out while the run still ran"
 
   defp run_log(assigns) do
     ~H"""
@@ -363,7 +394,7 @@ defmodule KilnCMSWeb.BackupLogLive do
           name="run"
           label={gettext("Backup")}
           value={@run.id}
-          options={Enum.map(@options, &{option_label(&1), &1.id})}
+          options={Enum.map(@options, &{&1.label, &1.id})}
         />
       </form>
       <.link
@@ -389,7 +420,7 @@ defmodule KilnCMSWeb.BackupLogLive do
           {run_status_label(@run.status)}
         </span>
         <span data-role="trigger" class="text-xs text-base-content/70">
-          {trigger_label(@run.trigger)}
+          {@trigger}
         </span>
         <span
           :for={component <- @run.components}
@@ -432,6 +463,15 @@ defmodule KilnCMSWeb.BackupLogLive do
       >
         <.icon name="hero-arrow-path" class="size-4 motion-safe:animate-spin" />
         {gettext("Live: new lines appear as each step finishes.")}
+      </p>
+      <p
+        :if={@stopped?}
+        id="backup-log-stopped"
+        role="status"
+        class="inline-flex items-center gap-1.5 text-xs text-warning-ink"
+      >
+        <.icon name="hero-pause-circle" class="size-4" />
+        {gettext("This page stopped checking for new lines. Reload it to follow the backup again.")}
       </p>
     </section>
 
@@ -521,11 +561,11 @@ defmodule KilnCMSWeb.BackupLogLive do
     """
   end
 
-  defp option_label(run) do
+  defp option_label(run, env) do
     Enum.join(
       [
         Calendar.strftime(run.started_at, "%Y-%m-%d %H:%M UTC"),
-        trigger_label(run.trigger),
+        trigger_label(run.trigger, env),
         run_status_label(run.status)
       ],
       " · "
@@ -550,11 +590,12 @@ defmodule KilnCMSWeb.BackupLogLive do
   defp level_class(_info), do: "text-base-content/70"
 
   # As on the Backups tab: who asked, and the status badge's tone.
-  defp trigger_label("manual"), do: gettext("Manual")
-  defp trigger_label("cron"), do: gettext("Cron")
-  defp trigger_label("console"), do: gettext("Console")
-  defp trigger_label("schedule"), do: gettext("Scheduled")
-  defp trigger_label(other), do: other
+  defp trigger_label("manual", _env), do: gettext("Manual")
+  defp trigger_label("cron", _env), do: gettext("Cron")
+  defp trigger_label("console", _env), do: gettext("Console")
+  defp trigger_label("schedule", _env), do: gettext("Scheduled")
+  # Anything else is operator text, shown only redacted and sanitized.
+  defp trigger_label(other, env), do: LogText.trigger(other, env)
 
   defp status_class(:succeeded), do: "bg-success/15 text-success-ink"
   defp status_class(:failed), do: "bg-error/15 text-error-ink"

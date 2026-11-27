@@ -9140,6 +9140,11 @@ msgstr "Télécharger le JSON"
 msgid "Download a backup's files from the Backups page in the editor."
 msgstr "Téléchargez les fichiers d'une sauvegarde depuis la page Sauvegardes de l'éditeur."
 
+#: lib/kiln_cms_web/controllers/backup_log_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Download a backup's log from its Log tab in the console."
+msgstr "Téléchargez le journal d’une sauvegarde depuis son onglet Journal dans la console."
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "Download a copy of your account profile and notification preferences as JSON."
@@ -26324,6 +26329,11 @@ msgstr "Cette page nécessite une connexion. Votre travail n'est pas perdu : rec
 #, elixir-autogen, elixir-format
 msgid "This page needs a passphrase"
 msgstr "Cette page nécessite une phrase secrète"
+
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "This page stopped checking for new lines. Reload it to follow the backup again."
+msgstr "Cette page a cessé de vérifier les nouvelles lignes. Rechargez-la pour suivre à nouveau la sauvegarde."
 
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex
 #, elixir-autogen, elixir-format

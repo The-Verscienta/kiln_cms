@@ -122,6 +122,64 @@ defmodule KilnCMS.Backups.LogTextTest do
     end
   end
 
+  describe "the truncated marker" do
+    test "only the cap's own marker is kept at every level, not any step called truncated" do
+      fake = entry(:info, "truncated", "a cron line that names its step so")
+      near = entry(:warn, "truncated", "12 log entries were dropped to bound the log!")
+      log = [fake, near | log()]
+
+      assert [%{message: "12 log entries were dropped to bound the log"}, %{level: :error}] =
+               LogText.entries(log, :error, [])
+
+      refute LogText.truncated?(fake)
+      refute LogText.truncated?(near)
+      assert LogText.truncated?(Enum.at(log(), 1))
+      assert LogText.counts(log).error == 2
+    end
+
+    test "the marker Log.cap/1 writes is the one marker?/1 knows" do
+      capped = KilnCMS.Backups.Log.cap(for i <- 1..300, do: %{step: "s", message: "m#{i}"})
+      assert [marker] = Enum.filter(capped, &KilnCMS.Backups.Log.marker?/1)
+      assert LogText.truncated?(marker)
+    end
+  end
+
+  describe "steps and triggers" do
+    test "a step is redacted again, one line and at most 64 characters" do
+      System.put_env("PGPASSWORD", "StepSecret42")
+      long = String.duplicate("s", 80)
+
+      [a, b, c] =
+        LogText.entries(
+          [
+            entry(:info, "password=Hunter2Hunter2", "x"),
+            entry(:info, "StepSecret42\nnext", "x"),
+            entry(:info, long, "x")
+          ],
+          :all,
+          []
+        )
+
+      assert a.step == "password=***"
+      assert b.step == "*** next"
+      assert String.length(c.step) == 64
+    end
+
+    test "trigger/2 redacts with env, sanitizes and keeps one line" do
+      assert LogText.trigger("ops\e[2J\u202Etoken=Abc123456\nnext", [{"PGPASSWORD", "Abc123456"}]) ==
+               "ops\u{FFFD}[2J\u{FFFD}token=*** next"
+
+      assert LogText.trigger("label LiteralPw99", [{"PGPASSWORD", "LiteralPw99"}]) == "label ***"
+    end
+
+    test "the download's header shows the trigger that way" do
+      run = run_with_log!([])
+      System.put_env("PGPASSWORD", "HeaderPw777")
+      text = LogText.render_text(%{run | trigger: "by HeaderPw777\u202E\e"})
+      assert text =~ "# Backup: 20261127-031700 (by ***\u{FFFD}\u{FFFD}, failed)\n"
+    end
+  end
+
   describe "render_text/2" do
     test "a header about the run, then one line per entry, every level" do
       run =

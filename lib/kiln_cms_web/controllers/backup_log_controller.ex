@@ -13,10 +13,20 @@ defmodule KilnCMSWeb.BackupLogController do
        sites (`Backups.download_refusal/0`, which fails closed), else 403:
        a run's log names destinations, hosts, paths and timings across every
        organization's backups, so it follows the backup download's rule.
-    3. The `:export` rate bucket of that admin, the one the backup file
+    3. A request the admin made here (Fetch Metadata, `fetch_ok/1`), else
+       403 `cross_site_request`: a browser that says `Sec-Fetch-Site` must
+       say `same-origin` or `none` (a typed URL or a bookmark), and one that
+       says `Sec-Fetch-Dest` must say `document` (the Download link) or
+       `empty` (a same-origin `fetch`). Otherwise an `<img>` on an
+       organization's site under the same registrable domain, which the
+       Lax session cookie still reaches, would spend the bucket below for
+       the admin. A request without the headers (an older browser, curl)
+       is let through: they are a browser's, and a client that omits them
+       is spending its own bucket on purpose.
+    4. The `:export` rate bucket of that admin, the one the backup file
        download and the security-log exports charge, else 429. A request
        refused above charges nothing.
-    4. The run, read as the admin (`Backups.get_run/2`): an id that isn't a
+    5. The run, read as the admin (`Backups.get_run/2`): an id that isn't a
        UUID, an unknown run and a refused read are the same 404.
 
   A GET with no token: it changes nothing, and the path carries only the
@@ -41,6 +51,7 @@ defmodule KilnCMSWeb.BackupLogController do
   def show(conn, %{"id" => id}) do
     with :ok <- require_admin(conn),
          :ok <- origin_ok(),
+         :ok <- fetch_ok(conn),
          :ok <- charge(conn),
          {:ok, run} <- read(conn, id) do
       send_log(conn, run)
@@ -60,6 +71,20 @@ defmodule KilnCMSWeb.BackupLogController do
       reason -> {:error, reason}
     end
   end
+
+  @fetch_sites ["same-origin", "none"]
+  @fetch_dests ["document", "empty"]
+
+  defp fetch_ok(conn) do
+    if allowed?(conn, "sec-fetch-site", @fetch_sites) and
+         allowed?(conn, "sec-fetch-dest", @fetch_dests),
+       do: :ok,
+       else: {:error, :cross_site_request}
+  end
+
+  # Absent is allowed; present, every value must be one of `allowed`.
+  defp allowed?(conn, header, allowed),
+    do: conn |> get_req_header(header) |> Enum.all?(&(String.downcase(&1) in allowed))
 
   defp charge(conn) do
     case RateLimit.check(:export, "actor:" <> conn.assigns.current_user.id) do
@@ -124,6 +149,11 @@ defmodule KilnCMSWeb.BackupLogController do
        gettext(
          "Backup logs are off while the console shares its address with your organizations' sites. Set KILN_CONSOLE_HOST to read them."
        )}
+
+  defp answer(:cross_site_request),
+    do:
+      {403, "cross_site_request",
+       gettext("Download a backup's log from its Log tab in the console.")}
 
   defp answer(_not_found),
     do: {404, "not_found", gettext("That backup isn't in the history.")}

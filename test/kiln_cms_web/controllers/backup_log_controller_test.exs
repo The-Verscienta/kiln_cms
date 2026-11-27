@@ -210,6 +210,88 @@ defmodule KilnCMSWeb.BackupLogControllerTest do
     end
   end
 
+  describe "Fetch Metadata" do
+    defp with_fetch(conn, site, dest) do
+      conn
+      |> then(&if(site, do: put_req_header(&1, "sec-fetch-site", site), else: &1))
+      |> then(&if(dest, do: put_req_header(&1, "sec-fetch-dest", dest), else: &1))
+    end
+
+    test "a subresource from another site, or from a sibling subdomain, is refused uncharged",
+         %{conn: conn, run: run} do
+      admin = authed_user(:admin)
+
+      for {site, dest} <- [
+            {"same-site", "image"},
+            {"same-site", "document"},
+            {"cross-site", "document"},
+            {"cross-site", "empty"},
+            {"same-origin", "image"},
+            {"same-origin", "iframe"},
+            {"none", "script"},
+            {"same-site", nil},
+            {nil, "image"}
+          ] do
+        refused = conn |> log_in(admin) |> with_fetch(site, dest) |> fetch(run.id)
+        assert refused.status == 403, inspect({site, dest})
+        assert error_code(refused) == "cross_site_request"
+        refute refused.resp_body =~ "rclone failed"
+      end
+
+      # Nothing charged, and an unknown id answers the same: no read either.
+      assert spent(admin) == 0
+
+      assert conn
+             |> log_in(admin)
+             |> with_fetch("same-site", "image")
+             |> fetch(Ash.UUID.generate())
+             |> error_code() == "cross_site_request"
+    end
+
+    test "the Download link, a typed URL, a same-origin fetch and no headers at all work", %{
+      conn: conn,
+      run: run
+    } do
+      admin = authed_user(:admin)
+
+      for {site, dest} <- [
+            {"same-origin", "document"},
+            {"none", "document"},
+            {"same-origin", "empty"},
+            {"Same-Origin", "Document"},
+            {nil, nil}
+          ] do
+        ok = conn |> log_in(admin) |> with_fetch(site, dest) |> fetch(run.id)
+        assert ok.status == 200, inspect({site, dest})
+        assert ok.resp_body =~ "rclone failed"
+      end
+
+      assert spent(admin) == 5
+    end
+  end
+
+  describe "the trigger" do
+    test "is redacted again and sanitized in the header", %{conn: conn} do
+      run =
+        Backups.fail_run!(
+          Backups.start_run!(
+            %{stamp: unique_stamp(), trigger: "ops TrigPw8888\u202E\e[2J"},
+            actor: Backups.system()
+          ),
+          %{error: "x"},
+          actor: Backups.system()
+        )
+
+      System.put_env("PGPASSWORD", "TrigPw8888")
+      body = conn |> log_in(authed_user(:admin)) |> fetch(run.id) |> response(200)
+
+      refute body =~ "TrigPw8888"
+      refute body =~ "\u202E"
+      refute body =~ "\e"
+      assert body =~ "(ops ***\u{FFFD}\u{FFFD}[2J, failed)"
+    end
+  end
+
   describe "the run" do
     test "an id that isn't a UUID, and an unknown one, are the same 404", %{conn: conn} do
       conn = log_in(conn, authed_user(:admin))

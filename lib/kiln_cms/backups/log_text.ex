@@ -36,12 +36,13 @@ defmodule KilnCMS.Backups.LogText do
   every level, so a filtered view never hides that lines were dropped.
   """
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{LogEntry, Redact, Run}
+  alias KilnCMS.Backups.{Log, LogEntry, Redact, Run}
 
   @filters [:all, :warn, :error]
   @max_message 500
   @max_error 4_000
-  @truncated "truncated"
+  @max_step 64
+  @max_trigger 64
 
   # C0 but tab and newline, DEL, C1, and the bidi overrides and isolates.
   @unsafe ~r/[\x{0000}-\x{0008}\x{000B}-\x{001F}\x{007F}-\x{009F}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u
@@ -65,9 +66,10 @@ defmodule KilnCMS.Backups.LogText do
   end
 
   @doc """
-  The run's log entries at or above `filter` (`filters/0`), each message
-  redacted again with `env` and sanitized. The `truncated` marker is kept at
-  every level.
+  The run's log entries at or above `filter` (`filters/0`), each step and
+  message redacted again with `env` and sanitized (a step is one line, at
+  most #{@max_step} characters). The `truncated` marker is kept at every
+  level.
   """
   @spec entries(Run.t() | [LogEntry.t()], :all | :warn | :error, [{String.t(), String.t()}]) ::
           [LogEntry.t()]
@@ -79,7 +81,7 @@ defmodule KilnCMS.Backups.LogText do
     for entry <- log, shown?(entry, filter) do
       %{
         entry
-        | step: entry.step |> sanitize_display() |> one_line(),
+        | step: entry.step |> Redact.text(env, @max_step) |> sanitize_display() |> one_line(),
           message: message(entry, env)
       }
     end
@@ -92,9 +94,23 @@ defmodule KilnCMS.Backups.LogText do
   def counts(log) when is_list(log),
     do: Map.new(@filters, fn filter -> {filter, Enum.count(log, &shown?(&1, filter))} end)
 
-  @doc "Whether `entry` is the marker `KilnCMS.Backups.Log.cap/1` writes where it dropped lines."
+  @doc """
+  Whether `entry` is the marker `KilnCMS.Backups.Log.cap/1` writes where it
+  dropped lines (`KilnCMS.Backups.Log.marker?/1`), not just any line whose
+  step is called `truncated`.
+  """
   @spec truncated?(LogEntry.t()) :: boolean()
-  def truncated?(%{step: step}), do: step == @truncated
+  def truncated?(entry), do: Log.marker?(entry)
+
+  @doc """
+  A run's trigger as shown: operator-supplied text (`BACKUP_TRIGGER`, a cron
+  manifest's), so redacted again with `env`, sanitized, one line and at most
+  #{@max_trigger} characters.
+  """
+  @spec trigger(term(), [{String.t(), String.t()}]) :: String.t()
+  def trigger(trigger, env \\ read_env()),
+    do:
+      trigger |> to_string() |> Redact.text(env, @max_trigger) |> sanitize_display() |> one_line()
 
   @doc "The run's `error`, redacted again with `env` and sanitized; nil when it has none."
   @spec error(Run.t(), [{String.t(), String.t()}]) :: String.t() | nil
@@ -129,7 +145,7 @@ defmodule KilnCMS.Backups.LogText do
     header =
       [
         "# Kiln backup log",
-        "# Backup: #{run.stamp} (#{header_field(run.trigger)}, #{run.status})",
+        "# Backup: #{run.stamp} (#{trigger(run.trigger, env)}, #{run.status})",
         "# Started: #{iso(run.started_at)}",
         "# Finished: #{iso(run.finished_at)}",
         "# Components: #{components(run.components)}",
@@ -141,10 +157,11 @@ defmodule KilnCMS.Backups.LogText do
     Enum.join(header ++ [""] ++ lines, "\n") <> "\n"
   end
 
-  defp shown?(%{step: @truncated}, _filter), do: true
   defp shown?(_entry, :all), do: true
-  defp shown?(%{level: level}, :warn), do: level in [:warn, :error]
-  defp shown?(%{level: level}, :error), do: level == :error
+  defp shown?(entry, filter), do: Log.marker?(entry) or level_shown?(entry.level, filter)
+
+  defp level_shown?(level, :warn), do: level in [:warn, :error]
+  defp level_shown?(level, :error), do: level == :error
 
   defp message(%{message: message}, env),
     do: message |> Redact.text(env, @max_message) |> sanitize_display()
@@ -158,10 +175,6 @@ defmodule KilnCMS.Backups.LogText do
   defp error_lines(error), do: ["# Error: " <> indent(error, "#   ")]
 
   defp indent(text, prefix), do: String.replace(text, "\n", "\n" <> prefix)
-
-  # A header field is one line: an operator-supplied trigger can't start a
-  # line of its own.
-  defp header_field(value), do: value |> to_string() |> sanitize_display() |> one_line()
 
   defp one_line(text), do: String.replace(text, "\n", " ")
 

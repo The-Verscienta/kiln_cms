@@ -350,6 +350,33 @@ defmodule KilnCMSWeb.BackupLogLiveTest do
       assert has_element?(lv, "#backup-log-error", "bad ***")
     end
 
+    test "an operator's trigger is redacted again and sanitized in the summary and picker", %{
+      conn: conn
+    } do
+      run = run!(1, :failed, lines(), %{})
+      # Stored as the worker would, then shown after the secret is known.
+      {1, _} =
+        KilnCMS.Repo.update_all(
+          from(r in "backup_runs", where: r.id == type(^run.id, :binary_id)),
+          set: [trigger: "ops TrigPw8888\u202E\e[2J"]
+        )
+
+      System.put_env("PGPASSWORD", "TrigPw8888")
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups/log?#{%{run: run.id}}")
+
+      summary = lv |> element("#backup-log-summary [data-role=trigger]") |> render()
+      option = lv |> element("#backup-log-run option[value='#{run.id}']") |> render()
+
+      for html <- [summary, option, render(lv)] do
+        refute html =~ "TrigPw8888"
+        refute html =~ "\u202E"
+        refute html =~ "\e"
+      end
+
+      assert summary =~ "ops ***\u{FFFD}\u{FFFD}[2J"
+      assert option =~ "ops ***\u{FFFD}\u{FFFD}[2J"
+    end
+
     test "control and bidi characters are replaced", %{conn: conn} do
       run = run!(1, :failed, [{:error, "dump", "\e[31mred\u202Etxt.exe"}])
       {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups/log?#{%{run: run.id}}")
@@ -390,6 +417,42 @@ defmodule KilnCMSWeb.BackupLogLiveTest do
       send(lv.pid, {:log_poll, next})
       refute has_element?(lv, "#backup-log-live")
       assert poll_ref(lv) == nil
+    end
+
+    test "the picker is read again, so a run that finished isn't still labelled Running", %{
+      conn: conn
+    } do
+      run = run!(1, :running, lines())
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups/log?#{%{run: run.id}}")
+      option = "#backup-log-run option[value='#{run.id}']"
+      assert has_element?(lv, option, "Running")
+
+      Backups.finish_run!(run, %{}, actor: Backups.system())
+      send(lv.pid, {:log_poll, poll_ref(lv)})
+
+      assert has_element?(lv, option, "Succeeded")
+      refute has_element?(lv, option, "Running")
+    end
+
+    test "out of polls, the page stops calling itself live and says so", %{conn: conn} do
+      run = run!(1, :running, lines())
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups/log?#{%{run: run.id}}")
+      refute has_element?(lv, "#backup-log-stopped")
+
+      :sys.replace_state(lv.pid, fn state ->
+        put_in(state.socket.assigns.polls_left, 1)
+      end)
+
+      send(lv.pid, {:log_poll, poll_ref(lv)})
+
+      assert has_element?(lv, "#backup-log-stopped", "Reload it")
+      refute has_element?(lv, "#backup-log-live")
+      assert poll_ref(lv) == nil
+
+      # A reload follows it again.
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups/log?#{%{run: run.id}}")
+      assert has_element?(lv, "#backup-log-live")
+      refute has_element?(lv, "#backup-log-stopped")
     end
 
     test "a finished run sets no timer", %{conn: conn} do
