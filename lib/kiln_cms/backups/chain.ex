@@ -141,6 +141,7 @@ defmodule KilnCMS.Backups.Chain do
     Lock,
     Manifest,
     Markers,
+    Progress,
     Recorder,
     Resend,
     Retention,
@@ -192,12 +193,17 @@ defmodule KilnCMS.Backups.Chain do
   @spec with_lock((Lock.t() -> {:ok, term()} | {:error, term()})) ::
           {:ok, term()} | {:error, term()}
   def with_lock(fun) do
-    Repo.transaction(fn ->
-      case fun.(locked_row()) do
-        {:ok, value} -> value
-        {:error, reason} -> Repo.rollback(reason)
-      end
-    end)
+    # Held until the commit (#3489): the progress messages every Lock write
+    # queues (`write!/3`), and anything else `fun` sends through
+    # `AfterCommit.run/1`. A rollback drops them.
+    AfterCommit.deferring(fn -> Repo.transaction(fn -> locked(fun) end) end)
+  end
+
+  defp locked(fun) do
+    case fun.(locked_row()) do
+      {:ok, value} -> value
+      {:error, reason} -> Repo.rollback(reason)
+    end
   end
 
   @doc """
@@ -1043,10 +1049,14 @@ defmodule KilnCMS.Backups.Chain do
 
   # Every Lock write: as the `:backups` system actor, explicitly, and inside the
   # lock transaction, so its notifications (the Lock has no notifiers) are
-  # returned rather than reported as missed.
+  # returned rather than reported as missed. Each queues a progress message
+  # (#3489) for after the commit: `with_lock/1` holds it, and a rollback
+  # drops it. Inside a transaction nobody wrapped (a Run's `:cancel`), it is
+  # dropped (`Progress.broadcast/1`).
   defp write!(fun, row, params) do
-    {row, _notifications} = fun.(row, params, write_opts())
-    row
+    {written, _notifications} = fun.(row, params, write_opts())
+    Progress.after_commit(Progress.lock(written, row))
+    written
   end
 
   defp write_opts, do: [actor: Backups.system(), return_notifications?: true]

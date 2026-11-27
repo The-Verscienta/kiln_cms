@@ -40,14 +40,18 @@ defmodule KilnCMSWeb.BackupLogLive do
   (or the lock holds its stamp) the page re-reads it every 3 s, one timer at
   a time, and stops once it has finished; the picker is read again with it,
   so a run that finished meanwhile isn't still labelled Running. After 1 200
-  polls (an hour) it stops and says so, and a reload starts it again. A run's
+  polls (an hour) it stops and says so, and a reload starts it again, as does
+  a `KilnCMS.Backups.Progress` message about the run (#3489). Such a
+  message only makes the page re-read sooner, throttled to one re-read at a
+  time and never a second poll timer; it reaches only nodes clustered with
+  the one that sent it, so the poll stays the source of truth. A run's
   trigger is operator text, so it is redacted again and sanitized wherever
   it is shown (`LogText.trigger/2`).
   """
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, LogText, Run}
+  alias KilnCMS.Backups.{Chain, LogText, Progress, Run}
   alias KilnCMSWeb.Params
 
   import KilnCMSWeb.BackupComponents,
@@ -55,12 +59,16 @@ defmodule KilnCMSWeb.BackupLogLive do
 
   @poll_interval_ms 3_000
   @max_polls 1_200
+  # At most one re-read per this long for a burst of progress messages.
+  @progress_throttle_ms 500
   @picker_size 25
   @levels %{"all" => :all, "warn" => :warn, "error" => :error}
 
   @impl true
   def mount(_params, _session, socket) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      if connected?(socket), do: Progress.subscribe()
+
       {:ok,
        socket
        |> assign(:page_title, gettext("Backup log"))
@@ -75,6 +83,7 @@ defmodule KilnCMSWeb.BackupLogLive do
        |> assign(:stopped?, false)
        |> assign(:trigger, nil)
        |> assign(:poll_ref, nil)
+       |> assign(:progress_ref, nil)
        |> assign(:polls_left, @max_polls)}
     else
       {:ok, push_navigate(socket, to: KilnCMSWeb.AccessDenied.path(:platform))}
@@ -134,6 +143,70 @@ defmodule KilnCMSWeb.BackupLogLive do
 
   def handle_info({:log_poll, _stale}, socket), do: {:noreply, socket}
 
+  # A backup's progress message (#3489, `KilnCMS.Backups.Progress`): a nudge
+  # to re-read the shown run sooner, never what the page shows. Only one
+  # about the shown run (its id, stamp or chain) asks for a re-read, at most
+  # one pending however many come in. The admin is asked on every message;
+  # the console-origin refusal (which may count organizations) when the
+  # throttled re-read runs, before it reads anything, so a burst of messages
+  # about other runs costs no query.
+  def handle_info({:kiln_backup_progress, 1, %{} = payload}, socket) do
+    cond do
+      not KilnCMSWeb.LiveUserAuth.platform_admin?(socket) ->
+        deny(socket)
+
+      progress_for_run?(payload, socket.assigns.run) ->
+        {:noreply, schedule_progress_refresh(socket)}
+
+      true ->
+        {:noreply, socket}
+    end
+  end
+
+  # A version this node doesn't know: the poll still follows the run.
+  def handle_info({:kiln_backup_progress, _version, _payload}, socket), do: {:noreply, socket}
+
+  # The throttled re-read. An armed poll timer is left as it is, the only
+  # one; with none armed (the run had finished, or the polls ran out and the
+  # tab stopped) the poll starts again with a fresh budget while the run is
+  # live, so a stopped tab follows its run again.
+  def handle_info({:progress_refresh, ref}, %{assigns: %{progress_ref: ref}} = socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      socket = assign(socket, :progress_ref, nil)
+
+      case Backups.download_refusal() do
+        nil -> {:noreply, socket |> reread() |> revive_poll()}
+        refusal -> {:noreply, refuse(socket, refusal)}
+      end
+    else
+      socket |> assign(:progress_ref, nil) |> deny()
+    end
+  end
+
+  def handle_info({:progress_refresh, _stale}, socket), do: {:noreply, socket}
+
+  defp progress_for_run?(_payload, nil), do: false
+
+  defp progress_for_run?(payload, %Run{} = run) do
+    (is_binary(payload[:run]) and payload[:run] == run.id) or
+      (is_binary(payload[:stamp]) and payload[:stamp] == run.stamp) or
+      (is_binary(payload[:chain]) and payload[:chain] == run.chain_id)
+  end
+
+  defp schedule_progress_refresh(%{assigns: %{progress_ref: ref}} = socket)
+       when is_reference(ref),
+       do: socket
+
+  defp schedule_progress_refresh(socket) do
+    ref = make_ref()
+    Process.send_after(self(), {:progress_refresh, ref}, @progress_throttle_ms)
+    assign(socket, :progress_ref, ref)
+  end
+
+  defp revive_poll(%{assigns: %{poll_ref: ref}} = socket) when is_reference(ref), do: socket
+
+  defp revive_poll(socket), do: socket |> assign(:polls_left, @max_polls) |> poll()
+
   # Refused: nothing about any run stays on the page, and the poll stops.
   defp refuse(socket, refusal) do
     socket
@@ -147,6 +220,7 @@ defmodule KilnCMSWeb.BackupLogLive do
     |> assign(:stopped?, false)
     |> assign(:trigger, nil)
     |> assign(:poll_ref, nil)
+    |> assign(:progress_ref, nil)
   end
 
   defp load(socket, requested) do

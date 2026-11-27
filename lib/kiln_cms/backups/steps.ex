@@ -163,6 +163,7 @@ defmodule KilnCMS.Backups.Steps do
     Notices,
     PgUrl,
     Preflight,
+    Progress,
     RcloneRemote,
     Recorder,
     Redact,
@@ -1355,7 +1356,10 @@ defmodule KilnCMS.Backups.Steps do
   end
 
   @doc false
-  # The chain settled; tests and `Backups.await/2` listen for this.
+  # The chain settled; tests and `Backups.await/2` listen for this, and an
+  # open Backups page or Log tab hears of it (#3489). Every caller is past
+  # its commit; the three cancel changes call it from `after_transaction`,
+  # whose own Lock writes went unannounced (`KilnCMS.Backups.Progress`).
   @spec settled(map(), :ok | {:error, term()}) :: :ok
   def settled(lease, outcome) do
     :telemetry.execute([:kiln_cms, :backups, :chain, :settled], %{count: 1}, %{
@@ -1363,6 +1367,8 @@ defmodule KilnCMS.Backups.Steps do
       stamp: lease.stamp,
       outcome: outcome
     })
+
+    Progress.after_commit(Progress.payload(%{chain: lease.chain, stamp: lease.stamp}))
   end
 
   defp outputs(nil), do: []

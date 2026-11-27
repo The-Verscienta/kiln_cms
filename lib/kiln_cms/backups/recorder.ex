@@ -33,9 +33,16 @@ defmodule KilnCMS.Backups.Recorder do
   `put_run_destination/3`. Like `artifacts`, every Run write re-sends it whole
   and it travels in `state.json`. `finish/1` and `fail/2` record the
   `offsite_status` that `offsite_outcome/1` derives from it.
+
+  ## Live progress (#3489)
+
+  Each Run write that lands (a progress, finish or fail write, the open, a
+  skip, a re-open, a re-send's write and a refused resume's note) sends a
+  `KilnCMS.Backups.Progress` message naming the run, so an open Backups page
+  or Log tab re-reads it without waiting for its poll.
   """
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Artifact, Redact, RunDestination}
+  alias KilnCMS.Backups.{Artifact, Progress, Redact, RunDestination}
 
   require Logger
 
@@ -139,7 +146,7 @@ defmodule KilnCMS.Backups.Recorder do
 
   defp start_run(rec, attrs) do
     case safely("open", fn -> Backups.start_run(attrs, actor: Backups.system()) end) do
-      {:ok, run} -> %{rec | run: run}
+      {:ok, run} -> %{rec | run: announced(run)}
       _ -> rec
     end
   end
@@ -360,7 +367,9 @@ defmodule KilnCMS.Backups.Recorder do
     |> reopened_result(chain_id)
   end
 
-  defp reopened_result({:ok, %{} = run}, chain_id), do: {:ok, resumed(run, chain_id)}
+  defp reopened_result({:ok, %{} = run}, chain_id),
+    do: {:ok, resumed(announced(run), chain_id)}
+
   defp reopened_result(_result, _chain_id), do: {:error, :not_resumable}
 
   # A nil `dir_id` keeps the run's own: it is not evidence of anything.
@@ -403,13 +412,13 @@ defmodule KilnCMS.Backups.Recorder do
   """
   @spec resume_refused(String.t(), String.t()) :: :ok
   def resume_refused(stamp, message) do
-    safely("resume refused", fn ->
+    "resume refused"
+    |> safely(fn ->
       with {:ok, %{} = run} <- Backups.get_run_by_stamp(stamp, actor: Backups.system()) do
         Backups.note_run_resume_refused(run, message, actor: Backups.system())
       end
     end)
-
-    :ok
+    |> announce()
   end
 
   @doc """
@@ -427,8 +436,9 @@ defmodule KilnCMS.Backups.Recorder do
         error: reason
       })
 
-    safely("skip", fn -> Backups.skip_run(attrs, actor: Backups.system()) end)
-    :ok
+    "skip"
+    |> safely(fn -> Backups.skip_run(attrs, actor: Backups.system()) end)
+    |> announce()
   end
 
   @doc "Append a log line. Redaction and the length bound happen when it is written."
@@ -688,7 +698,7 @@ defmodule KilnCMS.Backups.Recorder do
     case safely("resend", fn ->
            Backups.record_run_resend(rec.run, params, actor: Backups.system())
          end) do
-      {:ok, run} -> {:ok, %{rec | run: run}}
+      {:ok, run} -> {:ok, %{rec | run: announced(run)}}
       _ -> {:error, rec}
     end
   end
@@ -832,10 +842,28 @@ defmodule KilnCMS.Backups.Recorder do
       )
 
     case safely(label, fn -> fun.(rec.run, params, actor: Backups.system()) end) do
-      {:ok, run} -> %{rec | run: run}
+      {:ok, run} -> %{rec | run: announced(run)}
       _ -> rec
     end
   end
+
+  # A Run write that landed tells an open Backups page or Log tab to re-read
+  # (#3489): its chain, stamp and id only (`Progress.run/1`), after the
+  # commit. Run writes happen outside the lock transaction, so this is
+  # normally at once.
+  defp announced(%Backups.Run{} = run) do
+    Progress.after_commit(Progress.run(run))
+    run
+  end
+
+  defp announced(other), do: other
+
+  defp announce({:ok, %Backups.Run{} = run}) do
+    announced(run)
+    :ok
+  end
+
+  defp announce(_not_written), do: :ok
 
   # The boundary: a write that is refused, errors or raises is a warning, and
   # the caller carries on. Returns the write's result, or `{:error, _}`.
