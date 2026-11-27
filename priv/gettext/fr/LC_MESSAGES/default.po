@@ -869,6 +869,11 @@ msgstr "%{create} créés, %{update} mis à jour, %{delete} supprimés."
 msgid "%{create} to create, %{update} to update, %{delete} to delete, %{unchanged} unchanged."
 msgstr "%{create} à créer, %{update} à mettre à jour, %{delete} à supprimer, %{unchanged} inchangés."
 
+#: lib/kiln_cms/cms/validations/form_field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "%{dependent} is shown based on %{target}, which would come after it: conditions can only use earlier answers"
+msgstr "%{dependent} s’affiche selon %{target}, qui viendrait après : les conditions ne peuvent utiliser que des réponses précédentes"
+
 #: lib/kiln_cms_web/live/site_sso_live.ex
 #, elixir-autogen, elixir-format
 msgid "%{domain} is verified."
@@ -2056,6 +2061,11 @@ msgstr "Un flux est récupéré par des lecteurs anonymes, des agrégateurs et d
 msgid "A few things stay with the operator"
 msgstr "Certaines choses restent du ressort de l'opérateur"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "A field its condition hid leaves its token blank. The confirmation goes to the first email field that was shown and filled in."
+msgstr "Un champ masqué par sa condition laisse son jeton vide. La confirmation part vers le premier champ e-mail affiché et rempli."
+
 #: lib/kiln_cms_web/live/field_definition_live.ex
 #, elixir-autogen, elixir-format
 msgid "A fixed value"
@@ -2948,6 +2958,7 @@ msgstr "URL des remerciements"
 msgid "Across locales"
 msgstr "Entre les langues"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
 msgid "Action"
@@ -3037,6 +3048,7 @@ msgid "Add a block here"
 msgstr "Ajouter un bloc ici"
 
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Add a condition"
 msgstr "Ajouter une condition"
@@ -3179,6 +3191,11 @@ msgstr "Ajouter un type d'élément"
 #, elixir-autogen, elixir-format
 msgid "Add an item…"
 msgstr "Ajouter un élément…"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Add another"
+msgstr "En ajouter une autre"
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/form_settings_live.ex
@@ -5823,6 +5840,11 @@ msgstr "Cases à cocher"
 msgid "Checkboxes show only the options. Pick Tags as the editor input to allow new terms."
 msgstr "Les cases à cocher n'affichent que les options. Choisissez Étiquettes comme saisie d'éditeur pour autoriser de nouveaux termes."
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Checked"
+msgstr "Cochée"
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Checked %{time}."
@@ -6552,11 +6574,36 @@ msgstr "Condense ce bloc en un seul court paragraphe."
 msgid "Condition"
 msgstr "Condition"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Condition %{n}"
+msgstr "Condition %{n}"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Condition names a removed field"
+msgstr "La condition cite un champ supprimé"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Conditional logic"
+msgstr "Logique conditionnelle"
+
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
 #, elixir-autogen, elixir-format
 msgid "Conditions"
 msgstr "Conditions"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Conditions on %{fields} now use %{name}."
+msgstr "Les conditions de %{fields} utilisent maintenant %{name}."
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Conditions use the answers to earlier fields. Add a field above this one first."
+msgstr "Les conditions utilisent les réponses aux champs précédents. Ajoutez d’abord un champ au-dessus de celui-ci."
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/configure_live.ex
@@ -8662,6 +8709,11 @@ msgstr "Test d'envoi"
 #, elixir-autogen, elixir-format
 msgid "Department"
 msgstr "Département"
+
+#: lib/kiln_cms_web/components/block_components.ex
+#, elixir-autogen, elixir-format
+msgid "Depends on an earlier answer; leave it blank if it doesn't apply."
+msgstr "Dépend d’une réponse précédente ; laissez vide si cela ne s’applique pas."
 
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
@@ -10775,6 +10827,7 @@ msgstr "Flux"
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
 #: lib/kiln_cms_web/live/backup_schedule_live.ex
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Field"
 msgstr "Champ"
@@ -11966,6 +12019,11 @@ msgstr "Champ masqué"
 msgid "Hidden field — %{label}"
 msgstr "Champ masqué — %{label}"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hidden when…"
+msgstr "Masqué quand…"
+
 #: lib/kiln_cms_web/live/webhook_live.ex
 #, elixir-autogen, elixir-format
 msgid "Hide"
@@ -12002,6 +12060,11 @@ msgstr "Masquer l'enregistrement"
 #, elixir-autogen, elixir-format
 msgid "Hide the record: %{title}"
 msgstr "Masquer l'enregistrement : %{title}"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hide this field"
+msgstr "Masquer ce champ"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -19378,9 +19441,15 @@ msgid "Remove column"
 msgstr "Supprimer la colonne"
 
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Remove condition"
 msgstr "Supprimer la condition"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove condition %{n}"
+msgstr "Retirer la condition %{n}"
 
 #: lib/kiln_cms_web/live/editor_live.ex
 #, elixir-autogen, elixir-format
@@ -21972,6 +22041,11 @@ msgstr "Afficher le panneau Conformité dans l'éditeur"
 msgid "Show the full IP address in alerts"
 msgstr "Afficher l'adresse IP complète dans les alertes"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Show this field"
+msgstr "Afficher ce champ"
+
 #: lib/kiln_cms_web/components/advisory_components.ex
 #, elixir-autogen, elixir-format
 msgid "Show this in the editor"
@@ -22107,6 +22181,11 @@ msgstr "Affiché aux éditeurs. Laissez vide pour le message standard."
 #, elixir-autogen, elixir-format
 msgid "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log."
 msgstr "Visible par les administrateurs de la plateforme uniquement. Ces alertes vont à chaque administrateur de la plateforme, pour toute l'installation. La désactivation d'une alerte est consignée dans le journal de sécurité de l’instance."
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Shown when…"
+msgstr "Affiché quand…"
 
 #: lib/kiln_cms_web/live/content_editor_live.ex
 #, elixir-autogen, elixir-format
@@ -23579,6 +23658,7 @@ msgstr "Termes"
 
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
 #: lib/kiln_cms_web/live/backup_destinations_live.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Test"
 msgstr "Test"
@@ -25730,10 +25810,20 @@ msgstr "Cette vérification n'a pas pu s'exécuter : le serveur était occupé."
 msgid "This check needs JavaScript."
 msgstr "Cette vérification nécessite JavaScript."
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "This condition names a field that isn't before this one any more, so the field is always shown."
+msgstr "Cette condition cite un champ qui n’est plus avant celui-ci : le champ est donc toujours affiché."
+
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
 #, elixir-autogen, elixir-format
 msgid "This condition reads a field of a type this version of Kiln doesn't know. It can't be edited here; it stays as it is until you remove it."
 msgstr "Cette condition lit un champ d’un type que cette version de Kiln ne connaît pas. Elle ne peut pas être modifiée ici ; elle reste telle quelle jusqu’à ce que vous la retiriez."
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "This condition was set up outside the builder and can't be edited here."
+msgstr "Cette condition a été définie hors de l’éditeur et ne peut pas être modifiée ici."
 
 #: lib/kiln_cms_web/controllers/newsletter_html/confirm.html.heex
 #, elixir-autogen, elixir-format
@@ -27309,6 +27399,11 @@ msgstr "Débloqué."
 msgid "Unchanged"
 msgstr "Inchangé"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Unchecked"
+msgstr "Non cochée"
+
 #: lib/kiln_cms_web/live/organize_live.ex
 #, elixir-autogen, elixir-format
 msgid "Under-organized"
@@ -27859,6 +27954,7 @@ msgstr "Validation"
 #: lib/kiln_cms/cms/computed/recipes.ex
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "Value"
 msgstr "Valeur"
@@ -28383,6 +28479,7 @@ msgstr "À l'affiche, du plus proche au plus lointain."
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #: lib/kiln_cms_web/live/federation_live.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/newsletter_live.ex
 #: lib/kiln_cms_web/live/webhook_live.ex
@@ -29720,6 +29817,11 @@ msgstr "un champ qui n’existe plus"
 msgid "a hidden field can't be required"
 msgstr "un champ masqué ne peut pas être obligatoire"
 
+#: lib/kiln_cms/cms/validations/form_field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "a hidden field can't have a condition"
+msgstr "un champ caché ne peut pas avoir de condition"
+
 #: lib/kiln_cms/cms/computed.ex
 #, elixir-autogen, elixir-format
 msgid "a minus b."
@@ -29820,6 +29922,11 @@ msgstr "administrateurs"
 msgid "all confirmed subscribers"
 msgstr "tous les abonnés confirmés"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "all of these match"
+msgstr "toutes sont remplies"
+
 #: lib/kiln_cms_web/live/search_synonym_live.ex
 #, elixir-autogen, elixir-format
 msgid "also searches"
@@ -29904,6 +30011,11 @@ msgstr "un contenu quelconque"
 #, elixir-autogen, elixir-format
 msgid "any number"
 msgstr "nombre libre"
+
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "any of these match"
+msgstr "l’une d’elles est remplie"
 
 #: lib/kiln_cms_web/live/translations_live.ex
 #, elixir-autogen, elixir-format
@@ -30038,6 +30150,7 @@ msgid "can't depend on %{field}: a %{type} field has no simple value to test"
 msgstr "ne peut pas dépendre de %{field} : un champ %{type} n'a pas de valeur simple à tester"
 
 #: lib/kiln_cms/cms/validations/field_condition.ex
+#: lib/kiln_cms/cms/validations/form_field_condition.ex
 #, elixir-autogen, elixir-format
 msgid "can't depend on the field itself"
 msgstr "ne peut pas dépendre du champ lui-même"
@@ -30086,6 +30199,11 @@ msgstr "ne peut pas lire %{refs} : le titre est construit à partir de ce modèl
 #, elixir-autogen, elixir-format
 msgid "can't read the private field %{names}: a title is public"
 msgstr "ne peut pas lire le champ privé %{names} : un titre est public"
+
+#: lib/kiln_cms/cms/validations/form_field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "can't test %{field} with %{op}"
+msgstr "ne peut pas tester %{field} avec %{op}"
 
 #: lib/kiln_cms/cms/field_schema.ex
 #, elixir-autogen, elixir-format
@@ -30160,6 +30278,7 @@ msgstr "confirmé"
 #: lib/kiln_cms/cms/computed/recipes.ex
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "contains"
 msgstr "contient"
@@ -30361,6 +30480,11 @@ msgstr "désactivée — toutes les routes de fédération répondent 404 tant q
 msgid "does not contain"
 msgstr "ne contient pas"
 
+#: lib/kiln_cms_web/live/form_builder_live.ex
+#, elixir-autogen, elixir-format
+msgid "doesn't contain"
+msgstr "ne contient pas"
+
 #: lib/kiln_cms/cms/field_schema.ex
 #, elixir-autogen, elixir-format
 msgid "doesn't match the schema"
@@ -30443,6 +30567,11 @@ msgstr[1] "chaque %{type} peut être lié depuis %{count} enregistrements %{sour
 #, elixir-autogen, elixir-format
 msgid "each option must be at most %{max} characters"
 msgstr "chaque option doit comporter au plus %{max} caractères"
+
+#: lib/kiln_cms/cms/validations/form_field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "each value must be at most %{max} characters"
+msgstr "chaque valeur doit faire au plus %{max} caractères"
 
 #: lib/kiln_cms_web/live/content_editor/inspector_history_component.ex
 #: lib/kiln_cms_web/live/team_live.ex
@@ -30598,6 +30727,11 @@ msgstr "en ligne quand « %{title} » sera publié"
 msgid "hard bounce"
 msgstr "rejet définitif"
 
+#: lib/kiln_cms/cms/validations/form_field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "has a condition: remove it before moving the field to another form"
+msgstr "a une condition : retirez-la avant de déplacer le champ vers un autre formulaire"
+
 #: lib/kiln_cms/cms/validations/reference_selection.ex
 #, elixir-autogen, elixir-format
 msgid "has a value for %{field} that it does not accept: it %{reason}"
@@ -30689,6 +30823,7 @@ msgstr "invalide"
 #: lib/kiln_cms/cms/computed/recipes.ex
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
 #: lib/kiln_cms_web/live/editor_live.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "is"
 msgstr "est"
@@ -30720,17 +30855,20 @@ msgstr "est attribuée"
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "is empty"
 msgstr "est vide"
 
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "is greater than"
 msgstr "est supérieur à"
 
 #: lib/kiln_cms/cms/computed/recipes.ex
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "is less than"
 msgstr "est inférieur à"
@@ -30747,6 +30885,7 @@ msgstr "est imbriqué sur plus de %{max} niveaux"
 
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
 #: lib/kiln_cms_web/components/field_selection_components.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "is not"
 msgstr "n'est pas"
@@ -30771,6 +30910,11 @@ msgstr "n’est une section d’aucun champ de premier niveau de ce type"
 msgid "is not a valid JSON Schema"
 msgstr "n'est pas un schéma JSON valide"
 
+#: lib/kiln_cms/cms/validations/form_field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "is not a valid condition: %{reason}"
+msgstr "n’est pas une condition valide : %{reason}"
+
 #: lib/kiln_cms/cms/validations/field_condition.ex
 #, elixir-autogen, elixir-format
 msgid "is not a valid condition: it %{reason}"
@@ -30787,6 +30931,7 @@ msgid "is not available for a link field"
 msgstr "n'est pas disponible pour un champ de lien"
 
 #: lib/kiln_cms_web/components/conditions_builder_components.ex
+#: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
 msgid "is not empty"
 msgstr "n'est pas vide"
@@ -30877,6 +31022,11 @@ msgstr "est mis à jour"
 msgid "is used by the selection of %{fields}; remove it from there first"
 msgstr "est utilisé par la sélection de %{fields} ; retirez-le d'abord de là"
 
+#: lib/kiln_cms/cms/validations/form_field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "is used in the conditions of %{fields}: remove those conditions first"
+msgstr "est utilisé dans les conditions de %{fields} : retirez d’abord ces conditions"
+
 #: lib/kiln_cms/cms/validations/field_condition.ex
 #, elixir-autogen, elixir-format
 msgid "is used in the conditions of %{fields}; remove those conditions first"
@@ -30916,6 +31066,11 @@ msgstr "éléments dans la bibliothèque"
 #, elixir-autogen, elixir-format
 msgid "its adapter can't list and delete"
 msgstr "son adaptateur ne sait pas lister et supprimer"
+
+#: lib/kiln_cms/cms/validations/form_field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "its condition already names this field"
+msgstr "sa condition cite déjà ce champ"
 
 #: lib/kiln_cms_web/experiment_phrases.ex
 #, elixir-autogen, elixir-format
@@ -31111,6 +31266,11 @@ msgstr "doit être supérieur à zéro"
 msgid "must use draft 2020-12 (\"$schema\": \"%{draft}\")"
 msgstr "doit utiliser le draft 2020-12 (« $schema » : « %{draft} »)"
 
+#: lib/kiln_cms/cms/validations/form_field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "names %{field}, which comes after this field: conditions can only use earlier answers"
+msgstr "cite %{field}, qui vient après ce champ : les conditions ne peuvent utiliser que des réponses précédentes"
+
 #: lib/kiln_cms/cms/validations/field_condition.ex
 #, elixir-autogen, elixir-format
 msgid "names %{field}, which is not a field beside this one"
@@ -31120,6 +31280,11 @@ msgstr "nomme %{field}, qui n'est pas un champ voisin de celui-ci"
 #, elixir-autogen, elixir-format
 msgid "names %{field}, which is not a field of %{type}"
 msgstr "nomme %{field}, qui n'est pas un champ de %{type}"
+
+#: lib/kiln_cms/cms/validations/form_field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "names %{field}, which is not a field on this form"
+msgstr "cite %{field}, qui n’est pas un champ de ce formulaire"
 
 #: lib/kiln_cms/cms/validations/reference_selection.ex
 #, elixir-autogen, elixir-format
@@ -31832,6 +31997,11 @@ msgstr "ce répertoire de sauvegarde appartient à un serveur en marche, qui sup
 msgid "the XML could not be parsed"
 msgstr "le XML n'a pas pu être analysé"
 
+#: lib/kiln_cms/cms/validations/form_field_condition.ex
+#, elixir-autogen, elixir-format
+msgid "the conditions of %{fields} test this field in a way this type can't answer: change those conditions first"
+msgstr "les conditions de %{fields} testent ce champ d’une façon que ce type ne permet pas : modifiez d’abord ces conditions"
+
 #: lib/kiln_cms_web/live/backup_destinations_live.ex
 #, elixir-autogen, elixir-format
 msgid "the destinations couldn't be read"
@@ -32114,6 +32284,7 @@ msgid "winner"
 msgstr "gagnante"
 
 #: lib/kiln_cms/cms/validations/field_condition.ex
+#: lib/kiln_cms/cms/validations/form_field_condition.ex
 #, elixir-autogen, elixir-format
 msgid "would depend on itself through other conditions"
 msgstr "dépendrait de lui-même via d'autres conditions"

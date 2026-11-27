@@ -1115,6 +1115,21 @@ see [bot-budgets.md](bot-budgets.md).
   overlay would harvest — and grants nothing across the tenant boundary.
 - **Submission contents** — treat as untrusted PII; retention is covered in
   [`data-flows.md`](data-flows.md).
+- **Smuggling through a hidden field** (#2262) — a field's condition can hide
+  it, and the browser's form script disables a hidden field's inputs, but a
+  visitor can re-enable them and a script can post anything. So the server
+  decides: `KilnCMS.Forms.submit/3` evaluates every condition again, in form
+  order, from what was sent, and drops the value of each field its condition
+  hides before storage, the spam checks, the mails and the
+  `form.submitted` webhook. Hidden fields are never required, so a value
+  cannot be forced in that way either. A JSON submitter is told which names
+  were dropped (`discarded`); that list holds only names from the form's
+  public schema.
+- **Condition values are public** — a condition's rule, values included, is
+  in the public form's markup (`data-kiln-condition`) and in
+  `GET /api/forms/:slug`. It reveals what answer shows a field, so it must
+  never hold a secret (an access code, an internal address); a field that
+  should only reach some visitors is not protected by a condition.
 - **Scripted submissions** — a site admin can make a form ask for a
   human-verification check (#2249). A submission without a pass is held in
   Spam rather than refused, so a script gets nothing acted on; see

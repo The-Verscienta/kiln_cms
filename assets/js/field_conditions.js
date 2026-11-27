@@ -21,7 +21,7 @@
 // (a select's radios or buttons widget, #2284) is required the way a browser
 // requires one: `required` on its first option radio, and `aria-required` on
 // the group (`role=radiogroup`) rather than on each radio.
-import {holds, references} from "./conditions"
+import {holds, references} from "./conditions.js"
 
 const parse = (json) => {
   if (!json) return null
@@ -33,7 +33,13 @@ const parse = (json) => {
 // (false when its hidden "false" companion is there, missing otherwise).
 export function readValue(form, prefix, name) {
   const single = `${prefix}[${name}]`
-  const multi = `${single}[]`
+  return readControlValue(form, single, `${single}[]`)
+}
+
+// The same, for the controls named `single` or `multi` (`single[]`). Public
+// forms (#2262, `form_enhance.js`) name their controls without a prefix.
+// Disabled controls count: a field is read before it is shown again.
+export function readControlValue(form, single, multi) {
   const els = Array.from(form.elements).filter((el) => el.name === single || el.name === multi)
   if (els.length === 0) return undefined
 

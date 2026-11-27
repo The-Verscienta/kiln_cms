@@ -2,7 +2,9 @@ defmodule KilnCMS.CMS.FormField do
   @moduledoc """
   One typed field on an admin-defined `Form` (`/editor/forms`): machine name
   (the key in each submission's `data` map), label, value type, whether it's
-  required, select options, help text, and display order. Validated + coerced
+  required, select options, help text, display order, and an optional
+  `condition` that shows or hides it based on earlier answers
+  (`KilnCMS.CMS.FormFieldCondition`, #2262). Validated + coerced
   on every submission by `KilnCMS.Forms` — the form cousin of
   `FieldDefinition`, kept separate so public form rendering never loosens the
   content-schema policies.
@@ -18,8 +20,12 @@ defmodule KilnCMS.CMS.FormField do
   #
   # `:radio`/`:checkboxes`/`:phone`/`:url`/`:hidden`/`:number`/`:rating` were
   # added in #2261. `field_type` is stored as text, so a new value needs no
-  # enum migration — but a node still running the previous release cannot
-  # load a row that uses one (see `docs/forms.md`).
+  # enum migration. It is a `KilnCMS.Types.KnownAtom` (#2262), so a value a
+  # newer release adds loads here as a `KilnCMS.Types.UnknownAtom` instead of
+  # failing every read of the form; every reader skips such a row
+  # (`KilnCMS.Forms.known_fields/1`). A new value still ships at least one
+  # release after this switch (docs/releasing.md, "New values in an atom
+  # column").
   @field_types [
     :string,
     :text,
@@ -73,7 +79,8 @@ defmodule KilnCMS.CMS.FormField do
       :width,
       :min_value,
       :max_value,
-      :step
+      :step,
+      :condition
     ]
 
     create :create, primary?: true
@@ -82,8 +89,10 @@ defmodule KilnCMS.CMS.FormField do
       primary? true
       require_atomic? false
 
-      # A rename carries the form's autoresponder template along (#2343).
+      # A rename carries the form's autoresponder template along (#2343),
+      # and the conditions of the fields that name it (#2262).
       change KilnCMS.CMS.Changes.RewriteAutoresponderTokens
+      change KilnCMS.CMS.Changes.RewriteConditionReferences
     end
 
     destroy :destroy do
@@ -159,6 +168,12 @@ defmodule KilnCMS.CMS.FormField do
     # autoresponder still names would blank that token in every
     # confirmation (#2343).
     validate KilnCMS.CMS.Validations.AutoresponderFieldInUse, on: [:update, :destroy]
+
+    # A condition names only earlier fields of the same form, with an
+    # operator that fits each one's type; and a field another field's
+    # condition names can't be deleted, moved away, retyped out from under
+    # that operator, or put after it (#2262). See the module.
+    validate KilnCMS.CMS.Validations.FormFieldCondition, on: [:create, :update, :destroy]
   end
 
   # Multi-tenancy (epic #336): a field belongs to the same site as its form.
@@ -192,7 +207,8 @@ defmodule KilnCMS.CMS.FormField do
       public?: true,
       constraints: [max_length: KilnCMS.Limits.line()]
 
-    attribute :field_type, :atom do
+    # `KnownAtom`, not `:atom`: see `@field_types` above.
+    attribute :field_type, KilnCMS.Types.KnownAtom do
       constraints one_of: @field_types
       default :string
       allow_nil? false
@@ -233,6 +249,11 @@ defmodule KilnCMS.CMS.FormField do
     attribute :min_value, :float, public?: true
     attribute :max_value, :float, public?: true
     attribute :step, :float, public?: true
+
+    # When the field is shown (#2262): show or hide it while a rule on
+    # earlier answers holds. `nil` is always shown. Public on an active form,
+    # like the rest of the field: the headless schema hands it to front ends.
+    attribute :condition, KilnCMS.CMS.FormFieldCondition, public?: true
 
     timestamps()
   end
