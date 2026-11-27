@@ -29,9 +29,11 @@ four artifacts:
   `NODE_PATH`/`assets/node_modules`.
 - **esbuild**, a second profile, `kiln_challenge_embed` (#2249), bundles
   `assets/js/challenge_static.js` → `priv/static/assets/js/challenge_static.js`
-  with no splitting. Only the embedded form iframe (`/forms/:slug/embed`)
-  loads it, to mount a human-verification widget; the embed never loads
-  `app.js`. Config: the `config :esbuild, kiln_challenge_embed:` block in
+  with no splitting. The embedded form iframe (`/forms/:slug/embed`) loads
+  it to mount a human-verification widget, since the embed never loads
+  `app.js`, and a form with a field condition loads it wherever it is drawn,
+  to show and hide its fields (#2262, `assets/js/form_enhance.js`). Config:
+  the `config :esbuild, kiln_challenge_embed:` block in
   [`config/config.exs`](../config/config.exs).
 - **esbuild**, a third profile, `kiln_public` (#2402), bundles
   `assets/js/public.js` → `priv/static/assets/js/public.js`, one file with no
@@ -58,7 +60,8 @@ Mix aliases tie it together (the `aliases/0` list in [`mix.exs`](../mix.exs)):
   - `mix esbuild kiln_challenge_embed --minify`. Without
     `challenge_static.js`, an embedded form that asks for a
     human-verification check has no widget, so every submission from it is
-    held in Spam.
+    held in Spam, and a form with a field condition shows every field (the
+    server still drops what a hidden one sent).
   - `mix esbuild kiln_public --minify`. Without `public.js`, signed-out
     pages load `app.js` instead: they keep working, without the saving.
     Outside dev, whether `public.js` exists is checked once per VM, so a
@@ -79,9 +82,20 @@ The root layout links one digested script and the stylesheet, both with
 [`lib/kiln_cms_web/components/layouts/root.html.heex`](../lib/kiln_cms_web/components/layouts/root.html.heex).
 The script is `app.js` or `public.js`, never both; see
 [Which script a page loads](#which-script-a-page-loads). The one other
-script, `challenge_static.js`, is loaded only by the embedded form iframe,
-which does not use the root layout, and only when the form asks for a
-human-verification check.
+script, `challenge_static.js`, is loaded in two places, and nowhere else:
+
+- by the embedded form iframe, which does not use the root layout, when the
+  form asks for a human-verification check;
+- by any form with a field condition (#2262), on its own page, in a form
+  block on a delivered page and in the embed. The `<script type="module">`
+  sits inside the form's markup (`KilnCMSWeb.BlockComponents.public_form/1`),
+  next to the form's first conditional field, so a page without such a form
+  loads nothing more, and `public.js` did not grow. It runs beside
+  `public.js` or `app.js`: both of its mounts are idempotent, and the URL is
+  the one the challenge widget uses, so a page with both loads the module
+  once. The bundle is about 10.5 KB minified, 4 KB gzipped (it was 4.6 KB
+  and 1.8 KB before the form script joined it). It leaves a form inside a
+  LiveView alone, so previews show every field.
 
 CDN delivery was considered and **rejected**:
 
