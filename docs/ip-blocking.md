@@ -229,9 +229,9 @@ Never counted, so a person or a service is not blocked by mistake:
   [ADR 0086](decisions/0086-an-ipv6-64-that-produced-claimant-controlled-negative-evidence-loses-the-404-exemption-for-unproven-claims.md)
   records why.
 
-  With `KILN_CRAWLER_VERIFICATION=false` the six names Googlebot, Bingbot,
-  DuckDuckBot, Applebot, YandexBot and Baiduspider in the user agent are
-  enough. **Bait paths count for everyone**: no crawler has a reason to ask
+  With `KILN_CRAWLER_VERIFICATION=false` the names Googlebot,
+  Storebot-Google, Bingbot, DuckDuckBot, Applebot, YandexBot, Baiduspider,
+  SeznamBot and MojeekBot in the user agent are enough. **Bait paths count for everyone**: no crawler has a reason to ask
   for one.
 
 Link-preview fetchers (`facebookexternalhit`, `Twitterbot`, `LinkedInBot`) and

@@ -130,7 +130,8 @@ defmodule KilnCMS.Security.ScannerGuard do
   # The search engines whose name in a user agent exempts a request from the
   # miss threshold while crawler verification is off. With it on, the claim is
   # read by `BotClass.search_engine/1` and checked instead (`good_bot?/2`).
-  @search_bots ~w(googlebot bingbot duckduckbot applebot yandexbot baiduspider)
+  @search_bots ~w(googlebot storebot-google bingbot duckduckbot applebot yandexbot baiduspider
+                   seznambot mojeekbot)
 
   @defaults [
     enabled: false,

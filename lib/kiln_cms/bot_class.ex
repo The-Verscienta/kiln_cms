@@ -31,8 +31,10 @@ defmodule KilnCMS.BotClass do
     5. **A `compatible;` product token ending in bot, crawler, spider or
        scraper** (`(compatible; ExampleBot/1.0; …)`, also `ExampleBot-Mobile`)
        → `:declared_bot`, browser-shaped or not. This is how a crawler that
-       borrows a browser's string still declares itself; a phone model
-       (`CUBOT_X30`) never follows `compatible;`, so it is not caught.
+       borrows a browser's string still declares itself. Real phone user
+       agents put the model in the platform parentheses without `compatible;`
+       (`CUBOT_X30`), so they are not caught; a string that placed a model
+       right after `compatible;` would be read as a bot.
     6. **Browser-shaped** (`Mozilla/5.0 (` with `AppleWebKit/`, `Gecko/` or
        `Trident/`) → `:browser`.
     7. A generic **product token ending in bot, crawler, spider or scraper**,
@@ -142,7 +144,8 @@ defmodule KilnCMS.BotClass do
   # bot/crawler/spider/scraper, followed by `/`, `;`, `)`, `+`, `-`, a space
   # or the end. Read before the browser shape, so a crawler that wraps its name
   # in a browser's string is still a bot. A device model sits in the platform
-  # parentheses without `compatible;`, so `CUBOT_X30` is never read here.
+  # parentheses without `compatible;`, so a real `CUBOT_X30` string is not read
+  # here (one that put the model right after `compatible;` would be).
   @compatible_bot ~r/[(;]\s*compatible;\s*[a-z0-9._\-]*(?:bot|crawler|spider|scraper)(?:[\/;)+\s\-]|\z)/i
 
   @browser_shaped ~r/\AMozilla\/5\.0 \(.*(?:AppleWebKit\/|Gecko\/|Trident\/)/i
