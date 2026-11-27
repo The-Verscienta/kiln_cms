@@ -517,6 +517,162 @@ defmodule KilnCMSWeb.BackupLogLiveTest do
     end
   end
 
+  # #3489: a `KilnCMS.Backups.Progress` message makes the tab re-read its run
+  # sooner. Every assertion is about this test's own run: the topic is
+  # instance-wide.
+  describe "live progress (#3489)" do
+    alias KilnCMS.Backups.{Progress, Recorder}
+
+    defp progress_ref(lv), do: :sys.get_state(lv.pid).socket.assigns.progress_ref
+
+    defp running_with_chain!(n, message) do
+      chain = Ash.UUID.generate()
+
+      run =
+        %{
+          stamp: stamp(n),
+          trigger: "manual",
+          components: [:db],
+          started_at: started(n),
+          chain_id: chain
+        }
+        |> Backups.start_run!(actor: Backups.system())
+        |> Backups.record_run_progress!(%{log: [line({:info, "dump", message})]},
+          actor: Backups.system()
+        )
+
+      {run, chain}
+    end
+
+    test "a Run write re-reads the shown run without waiting for the poll", %{conn: conn} do
+      {run, chain} = running_with_chain!(1, "first")
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups/log?#{%{run: run.id}}")
+      poll = poll_ref(lv)
+      assert is_reference(poll)
+
+      # Through the Recorder, as a step writes it: its write announces itself.
+      run.stamp
+      |> Recorder.from_run(chain)
+      |> Recorder.log(:info, "plan", "second, live")
+      |> Recorder.progress()
+
+      eventually(lv, "second, live", true, 2_000)
+      # The poll timer is the one it had: never canceled, never a second.
+      assert poll_ref(lv) == poll
+      assert progress_ref(lv) == nil
+    end
+
+    test "a message about another run asks for nothing", %{conn: conn} do
+      {run, _chain} = running_with_chain!(1, "first")
+      {other, _other_chain} = running_with_chain!(2, "elsewhere")
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups/log?#{%{run: run.id}}")
+
+      Progress.broadcast(Progress.run(other))
+      Progress.broadcast(%{chain: Ash.UUID.generate(), stamp: stamp(99)})
+
+      assert progress_ref(lv) == nil
+    end
+
+    test "a burst of messages asks for one re-read, and leaves the poll timer alone", %{
+      conn: conn
+    } do
+      {run, _chain} = running_with_chain!(1, "first")
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups/log?#{%{run: run.id}}")
+      poll = poll_ref(lv)
+
+      for _ <- 1..20, do: Progress.broadcast(Progress.run(run))
+      pending = progress_ref(lv)
+      assert is_reference(pending)
+      for _ <- 1..5, do: Progress.broadcast(Progress.run(run))
+      assert progress_ref(lv) == pending
+      assert poll_ref(lv) == poll
+
+      KilnCMS.Test.Eventually.eventually(fn -> progress_ref(lv) == nil end)
+      assert poll_ref(lv) == poll
+    end
+
+    test "a message for its stamp revives a tab that ran out of polls", %{conn: conn} do
+      {run, chain} = running_with_chain!(1, "first")
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups/log?#{%{run: run.id}}")
+
+      :sys.replace_state(lv.pid, fn state -> put_in(state.socket.assigns.polls_left, 1) end)
+      send(lv.pid, {:log_poll, poll_ref(lv)})
+      assert has_element?(lv, "#backup-log-stopped")
+      assert poll_ref(lv) == nil
+
+      Progress.broadcast(%{chain: chain, stamp: run.stamp, step: :plan})
+
+      KilnCMS.Test.Eventually.eventually(fn -> has_element?(lv, "#backup-log-live") end)
+      refute has_element?(lv, "#backup-log-stopped")
+      assert is_reference(poll_ref(lv))
+      assert :sys.get_state(lv.pid).socket.assigns.polls_left > 1
+    end
+
+    test "a platform admin demoted mid-session gets nothing new" do
+      run = run!(1, :running, lines())
+
+      for user <- [%{role: :editor}, expired_grant_user()] do
+        ref = make_ref()
+
+        socket = %Phoenix.LiveView.Socket{
+          assigns: %{
+            __changed__: %{},
+            current_user: user,
+            run: run,
+            poll_ref: nil,
+            progress_ref: ref,
+            level: :all
+          }
+        }
+
+        assert_denied(
+          BackupLogLive.handle_info({:kiln_backup_progress, 1, Progress.run(run)}, socket)
+        )
+
+        assert_denied(BackupLogLive.handle_info({:progress_refresh, ref}, socket))
+      end
+    end
+
+    test "a message the node doesn't know the version of is ignored" do
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{__changed__: %{}, current_user: %{role: :admin}}
+      }
+
+      assert {:noreply, ^socket} =
+               BackupLogLive.handle_info({:kiln_backup_progress, 2, %{}}, socket)
+    end
+
+    test "a non-admin's mount never subscribes" do
+      socket = %Phoenix.LiveView.Socket{
+        transport_pid: self(),
+        assigns: %{__changed__: %{}, current_user: %{role: :editor}}
+      }
+
+      assert {:ok, _mounted} = BackupLogLive.mount(%{}, %{}, socket)
+      refute self() in subscribers()
+    end
+
+    test "while the console shares an origin, a message hides the log", %{conn: conn} do
+      Application.delete_env(:kiln_cms, :console_host)
+      {run, _chain} = running_with_chain!(1, "rclone failed")
+      {:ok, lv, _html} = conn |> admin_conn() |> live(~p"/editor/backups/log?#{%{run: run.id}}")
+      assert has_element?(lv, "[data-role=message]", "rclone failed")
+
+      second_org!()
+      Progress.broadcast(Progress.run(run))
+
+      # Asked when the throttled re-read runs, before it reads anything.
+      KilnCMS.Test.Eventually.eventually(fn -> has_element?(lv, "#backup-log-refused") end)
+      refute render(lv) =~ "rclone failed"
+      assert progress_ref(lv) == nil
+      assert poll_ref(lv) == nil
+    end
+  end
+
+  defp subscribers do
+    KilnCMS.PubSub |> Registry.lookup(KilnCMS.Backups.Progress.topic()) |> Enum.map(&elem(&1, 0))
+  end
+
   describe "the History page" do
     test "each row links to its log", %{conn: conn} do
       dir = Path.join(System.tmp_dir!(), "kiln_bll_#{System.unique_integer([:positive])}")

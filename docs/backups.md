@@ -1630,6 +1630,94 @@ The in-app schedules emit their own events,
 `[:kiln_cms, :backups, :status, :schedules_unreadable]`
 ([The scheduler job](#the-scheduler-job)).
 
+### Follow a running backup
+
+The **Backups** page and the **Log** tab follow a running backup without a
+reload. Each re-reads the database every 3 seconds while a backup runs, and,
+on a node clustered with the one running the step, also about half a second
+after the backup records something (#3489, part of #2230). Platform admins
+only, like the rest of the page.
+
+1. Open **Backups** (`/editor/backups`) while a backup runs. The strip below
+   **Back up now** names the step and the stamp
+   ([Back up while another backup runs](#back-up-while-another-backup-runs)),
+   with a thin bar under them that screen readers announce as "Backup
+   progress", "About 28% done".
+2. Leave the page open. The strip changes as each step starts, and when the
+   backup ends it goes and the backup's row in **History** shows how it
+   ended. A page opened before the backup started picks it up too, on a
+   clustered node: a backup started by a schedule or another admin appears
+   on the strip without a reload.
+3. Click **View log** on the backup's `Running` row (or open the **Log** tab).
+   New lines appear as each step finishes
+   ([Read and download the log of a backup](#read-and-download-the-log-of-a-backup)).
+
+**What the bar measures.** Steps, not bytes or time. Each step of a fresh
+backup after **start** is an equal seventh of the bar, so it reads 0 while
+the database is dumped, 14 while the media archive is planned, from 28 toward 42
+across the media parts, 42 while they are checked, 57 for retention, 71
+while copying off-site and 85 while finishing. A backup of the database
+only goes from 0 straight to 57, since it has no media steps. The media parts split their seventh only on a node that knows how
+many parts there are (the one that has the backup's directory, as with
+"part 2 of 5"); elsewhere the bar stays at 28 through the parts. A re-send
+goes by destinations: the first of two reads 0, the second 50. The bar
+never reads 100, since a backup still holding the lock hasn't finished,
+and there is none while a resume waits to start. One slow step (a large
+dump, a long upload) holds the bar where it is for as long as it takes.
+
+**The database is what the page shows.** The half-second re-read is
+prompted by a `Phoenix.PubSub` message, and a message only reaches the nodes
+clustered with the one that sent it ([Optional infrastructure](deploy.md#optional-infrastructure)).
+The page never shows what a message says; it re-reads what it shows, as its
+3-second read does, so a lost message costs at most those 3 seconds.
+Several messages close together make one re-read. Some changes are not
+announced and reach the page only at its 3-second read:
+
+- the lock changes a **Cancel** makes. The end of the canceled backup is
+  announced instead, once the cancel has committed;
+- run changes made outside a running step: an import of cron's backups,
+  the canceled run's own status, and retention marking older runs pruned;
+- anything at all, on a node not clustered with the one that made the
+  change.
+
+A message names only the backup (its chain, stamp and run id) and where it
+is (its step, part and phase, and the percent). It never carries a log
+line, an error, a file name or path (a path can carry personal data), a
+setting or a destination's configuration. A restore reports nothing this
+way.
+
+**Each page stops on its own.** The Backups page stops its 3-second read
+after an hour of one backup; the **Log** tab stops and says "This page
+stopped checking for new lines. Reload it to follow the backup again." A
+message about the backup starts either one again, on a clustered node.
+
+**For overlay and plugin developers.** The message is
+`{:kiln_backup_progress, 1, payload}` on the topic `"backups:progress"`
+(`KilnCMS.Backups.Progress.topic/0`, subscribe with
+`KilnCMS.Backups.Progress.subscribe/0`). `payload` always has the keys
+`chain`, `stamp`, `run`, `step`, `part`, `phase` and `percent`, any of
+them `nil`: an announcement of a run change carries only `chain`, `stamp`
+and `run`, and that of a backup's end only `chain` and `stamp`. Every
+message is sent after the write it announces commits, and a rolled-back
+write sends none. Treat it as a hint to re-read through
+`KilnCMS.Backups.in_flight/1` or the run, and ignore a version other than
+`1`: a later release adds keys or bumps it. The topic is instance-wide,
+so filter by the chain or run you care about.
+
+**What can go wrong.**
+
+- **The page lags by up to 3 seconds on one node and not another.** That
+  node is not clustered with the one running the step. Check that the nodes
+  use long names and see each other
+  ([Optional infrastructure](deploy.md#optional-infrastructure)); nothing else is
+  wrong, and the page still follows the backup.
+- **An open Backups page never shows a backup that started elsewhere.** The
+  page reads nothing while no backup runs, so on an unclustered node it
+  finds out only when it is reloaded.
+- **The bar sits still.** One step is taking a long time; the strip's step
+  label says which. The server log and the **Log** tab say what happened
+  once that step ends.
+
 ### Back up while another backup runs
 
 **Back up now** stays enabled while a backup runs. Platform admins only, like
@@ -1646,8 +1734,9 @@ queue clears."
    "Finishing", with the backup's stamp. A re-send reads "Re-sending
    off-site (1 of 2: NAS)"
    ([Re-send a partly off-site backup](#re-send-a-partly-off-site-backup)). ("part 2 of 5" shows the total only on
-   a node that has the backup's directory.) The page refreshes every 3 seconds
-   while a backup runs, for up to an hour.
+   a node that has the backup's directory.) A bar under the stamp shows
+   roughly how far it has got. The page follows the backup as it runs
+   ([Follow a running backup](#follow-a-running-backup)).
 2. Click **Back up now**. The page says "A backup is running; this one starts
    when it finishes." and the strip adds "1 queued (requested 2026-11-09 03:17
    UTC) · Database + Media", ending with what the queued backup covers (a
@@ -6153,10 +6242,12 @@ What you see on the tab:
 - **Lines arrive at step boundaries.** A step writes the run when it
   finishes, so a long media archive or upload adds its lines in one go at
   the end, not as it works. While the backup runs the page says "Live: new
-  lines appear as each step finishes." and reads it again every 3 seconds.
+  lines appear as each step finishes." and reads it again every 3 seconds,
+  and about half a second after each step's write on a node clustered with
+  the one that ran it ([Follow a running backup](#follow-a-running-backup)).
   It stops by itself when the run finishes, and after an hour it stops and
   says "This page stopped checking for new lines. Reload it to follow the
-  backup again."
+  backup again." The backup's next step starts it again on a clustered node.
 - **A long log** has **Jump to latest** above it (more than 10 lines). The
   newest line is at the bottom, and the page does not scroll on its own.
 - **Cron's backups** carry only what the importer recorded: a line saying
@@ -6217,7 +6308,7 @@ all, only "Backup logs are hidden: the console shares its address with your
 organizations' sites (KILN_CONSOLE_HOST is unset and there is more than one
 organization), so a site's injected code could read them. Set
 KILN_CONSOLE_HOST to see them here.", and the download is refused. It asks
-again each time the page changes and at every 3-second read, so a second
+again each time the page changes and at every re-read, so a second
 organization created while the tab is open hides the log at the next one.
 **View log** stays on History and leads to that note. History itself is not
 hidden by this.

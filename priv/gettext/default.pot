@@ -2771,6 +2771,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "About %{percent}% done"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "About Re-send"
 msgstr ""
 
@@ -4979,6 +4984,11 @@ msgstr ""
 #: lib/kiln_cms_web/components/backup_components.ex
 #, elixir-autogen, elixir-format
 msgid "Backup pages"
+msgstr ""
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backup progress"
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_live.ex

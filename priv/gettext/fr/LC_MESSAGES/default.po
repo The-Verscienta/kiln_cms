@@ -2771,6 +2771,11 @@ msgstr "Environ %{percentage}% des phrases semblent passives (recommandation : %
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "About %{percent}% done"
+msgstr "Environ %{percent}% effectué"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "About Re-send"
 msgstr "À propos de Renvoyer"
 
@@ -4980,6 +4985,11 @@ msgstr "Les journaux de sauvegarde sont désactivés tant que la console partage
 #, elixir-autogen, elixir-format
 msgid "Backup pages"
 msgstr "Pages des sauvegardes"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backup progress"
+msgstr "Progression de la sauvegarde"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format

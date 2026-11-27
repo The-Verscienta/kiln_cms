@@ -4527,4 +4527,135 @@ defmodule KilnCMSWeb.BackupLiveTest do
       assert Backups.in_flight() == nil
     end
   end
+
+  # #3489: a `KilnCMS.Backups.Progress` message makes the page re-read sooner,
+  # on top of the 3 s poll. Every assertion is about this test's own chain:
+  # the topic is instance-wide.
+  describe "live progress (#3489)" do
+    alias KilnCMS.Backups.{Chain, Progress}
+    alias KilnCMSWeb.BackupLive
+
+    defp assigns(lv), do: :sys.get_state(lv.pid).socket.assigns
+
+    @tag :pg_tools
+    test "an idle page picks up a chain that started elsewhere, without a poll" do
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+      refute has_element?(lv, "#backup-in-flight")
+      # Nothing is running: no poll timer is armed, so only the message can
+      # show the strip.
+      assert assigns(lv).poll_timer == nil
+
+      {:ok, %{status: :started, chain: chain}} = Chain.request(%{trigger: "manual"})
+
+      KilnCMS.Test.Eventually.eventually(fn -> has_element?(lv, "#backup-in-flight") end)
+      assert %{chain: ^chain} = assigns(lv).in_flight
+      assert is_reference(assigns(lv).poll_timer)
+      assert assigns(lv).polls_left == 1_200
+    end
+
+    @tag :pg_tools
+    test "a message about the strip's chain updates it before the poll; another chain's " <>
+           "does nothing" do
+      {:ok, %{status: :started, chain: chain}} = Chain.request(%{trigger: "manual"})
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+      refute has_element?(lv, ~s|#backup-in-flight [data-role="step"]|, "Dumping the database")
+      poll = assigns(lv).poll_timer
+      assert is_reference(poll)
+
+      # The step moves on with no message (a write on another node), so only
+      # a re-read can show it.
+      {1, _} =
+        KilnCMS.Repo.update_all(Ecto.Query.from(l in "backup_locks"), set: [step: "dump"])
+
+      Progress.broadcast(%{chain: Ash.UUID.generate(), step: :dump})
+      assert assigns(lv).progress_ref == nil
+
+      Progress.broadcast(%{chain: chain, step: :dump})
+
+      KilnCMS.Test.Eventually.eventually(
+        fn ->
+          has_element?(lv, ~s|#backup-in-flight [data-role="step"]|, "Dumping the database")
+        end,
+        timeout_ms: 2_000
+      )
+
+      assert assigns(lv).poll_timer == poll
+    end
+
+    @tag :pg_tools
+    test "a burst of messages leaves exactly one poll timer and one pending re-read" do
+      {:ok, %{status: :started, chain: chain}} = Chain.request(%{trigger: "manual"})
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+      poll = assigns(lv).poll_timer
+      assert is_reference(poll)
+
+      for _ <- 1..25, do: Progress.broadcast(%{chain: chain})
+      pending = assigns(lv).progress_ref
+      assert is_reference(pending)
+      for _ <- 1..5, do: Progress.broadcast(%{chain: chain})
+      assert assigns(lv).progress_ref == pending
+
+      KilnCMS.Test.Eventually.eventually(fn -> assigns(lv).progress_ref == nil end)
+      assert assigns(lv).poll_timer == poll
+      assert is_integer(Process.read_timer(poll))
+    end
+
+    @tag :pg_tools
+    test "the strip shows an approximate percent as a progressbar" do
+      %{stamp: stamp} = started!()
+      {:ok, lv, _html} = build_conn() |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      percent = Progress.percent(:dump, nil, nil)
+
+      assert has_element?(
+               lv,
+               ~s|#backup-in-flight [role="progressbar"][aria-valuenow="#{percent}"]| <>
+                 ~s|[aria-valuemin="0"][aria-valuemax="100"][aria-label="Backup progress"]|
+             )
+
+      assert has_element?(lv, ~s|[data-role="progress"][aria-valuetext="About #{percent}% done"]|)
+      assert has_element?(lv, "#backup-in-flight", stamp)
+    end
+
+    test "a platform admin demoted mid-session gets nothing new" do
+      for user <- [%{role: :editor}, expired_grant_user()] do
+        ref = make_ref()
+
+        socket = %Phoenix.LiveView.Socket{
+          assigns: %{
+            __changed__: %{},
+            current_user: user,
+            in_flight: nil,
+            poll_timer: nil,
+            progress_ref: ref
+          }
+        }
+
+        assert_denied(BackupLive.handle_info({:kiln_backup_progress, 1, %{chain: "c"}}, socket))
+        assert_denied(BackupLive.handle_info({:progress_refresh, ref}, socket))
+      end
+    end
+
+    test "a message of a version this node doesn't know is ignored" do
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{__changed__: %{}, current_user: %{role: :admin}}
+      }
+
+      assert {:noreply, ^socket} = BackupLive.handle_info({:kiln_backup_progress, 2, %{}}, socket)
+    end
+
+    test "a non-admin's mount never subscribes" do
+      socket = %Phoenix.LiveView.Socket{
+        transport_pid: self(),
+        assigns: %{__changed__: %{}, current_user: %{role: :editor}}
+      }
+
+      assert {:ok, _mounted} = BackupLive.mount(%{}, %{}, socket)
+
+      subscribers =
+        KilnCMS.PubSub |> Registry.lookup(Progress.topic()) |> Enum.map(&elem(&1, 0))
+
+      refute self() in subscribers
+    end
+  end
 end
