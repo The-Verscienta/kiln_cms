@@ -271,11 +271,26 @@ and outlives the message, so a wrong entry quietly stops someone's mail:
   status to say whose fault it is — cancels that one message and suppresses
   nobody.
 
+Mail queued through the pipeline is checked when it is queued. The workers
+that build their own mail check when they send instead: newsletters, workflow
+and task mail (#3036), form notifications and autoresponders, and automation
+email (#3051). A suppressed address there is skipped and not listed as a
+delivery failure under **Delivery health**: a newsletter job is canceled,
+the others complete without sending. A suppression list that cannot be read
+retries the job instead of sending past it.
+
 Suppressed addresses are listed on `/editor/mail` under **Delivery health**.
 If an address was suppressed in error (or the mailbox is fixed), click
 **Remove** and it can receive mail again. Suppression is by address and
 case-insensitive; the admin test-send is *not* suppressed, so you can always
 re-test a fixed address.
+
+Erasing an account removes its address from this list and from every site's
+list (#3036). If the address is mailed again by anything that checks the
+lists, at most one more hard bounce per relay follows, which suppresses it
+again. An account erased before that release keeps its rows;
+click **Remove** to clear one by hand. Why erasure drops the rows:
+[ADR 0091](decisions/0091-erasure-drops-the-erased-address-from-the-suppression-lists.md).
 
 #### Sites on their own relay
 
@@ -294,9 +309,10 @@ A site's relay is a server the site chose, and it may answer 550 to any
 address. If it could write the instance-wide list, one site could stop an
 address getting anything from any site, password resets included. So a site's
 list is consulted only for mail sent for that site: its newsletters and their
-confirmations. Account mail (sign-in links, password resets, confirmations,
-sign-in alerts) carries no site and never reads a site's list, and no site
-reads another's. The same rule decides what suppresses: only a reject naming
+confirmations, its workflow and task mail (#3036), its form notifications and
+autoresponders, and its automation email (#3051). Account mail (sign-in
+links, password resets, confirmations, sign-in alerts) carries no site and
+never reads a site's list, and no site reads another's. The same rule decides what suppresses: only a reject naming
 the recipient.
 
 The site's admins see its list, and its recent bounces by recipient domain,

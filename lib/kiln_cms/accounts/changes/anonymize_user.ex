@@ -45,9 +45,11 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   completed unsent, and a job queued with the old address after this ran is
   caught when it runs (`KilnCMS.Mail.DeliveryWorker` checks the account
   again). Finished jobs on the `mail` queue lose the address they were sent
-  to (#3019, `KilnCMS.Mail.forget_recipient/2`). The address is read from the
-  row before the tombstone replaces it. Workflow and task mail still waiting
-  to run carry no address and check the recipient again when they run.
+  to (#3019, `KilnCMS.Mail.forget_recipient/2`), and the address comes off the
+  instance-wide suppression list and every site's (#3036,
+  `KilnCMS.Mail.forget_suppressions/2`). The address is read from the row
+  before the tombstone replaces it. Workflow and task mail still waiting to
+  run carry no address and check the recipient again when they run.
   """
   use Ash.Resource.Change
 
@@ -116,7 +118,8 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
       :ok = KilnCMS.CMS.SavedViews.forget_private_views(user.id, Accounts.list_org_ids())
       :ok = KilnCMS.Notifications.forget_recipient(user.id)
       # Account mail still waiting to run is withheld (#3035), and finished
-      # mail jobs lose the address they were sent to (#3019).
+      # mail jobs lose the address they were sent to (#3019); the address
+      # comes off the suppression lists (#3036).
       :ok = forget_mail(changeset, user)
       :ok = History.anonymize_actor(user.id)
       :ok = KilnCMS.Billing.anonymize_actor(user.id)
@@ -251,7 +254,9 @@ defmodule KilnCMS.Accounts.Changes.AnonymizeUser do
   defp forget_mail(changeset, user) do
     address = changeset.context[:erased_address]
     :ok = KilnCMS.Mail.withhold_pending(address, user.id)
-    KilnCMS.Mail.forget_recipient(address, user.id)
+    :ok = KilnCMS.Mail.forget_recipient(address, user.id)
+    # The address, off every suppression list (#3036).
+    KilnCMS.Mail.forget_suppressions(address, Accounts.list_org_ids())
   end
 
   # Clear the account's own temporary grant. `role: :viewer` alone did nothing

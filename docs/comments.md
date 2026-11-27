@@ -208,8 +208,17 @@ close it.
   called Alice, and `@alice` reaches neither, because guessing would send
   someone's review feedback to the wrong person.
 
-  Candidates are the org's members plus any user belonging to no org, so a
+  Candidates are the org's active members; on the default org, any account
+  belonging to no org; and on every org, a platform admin belonging to none.
+  That is the rule every other permission follows
+  (`KilnCMS.Accounts.Scoping.effective_tier/2`), so someone removed from the
+  only site they belonged to is not mentionable on another site (#3047), and a
   mention cannot carry another tenant's content title into an outsider's inbox.
+  The same roster feeds the editor's `@` suggestions and the notifier
+  (`KilnCMS.Notifications.mention_roster/1`). If it can't be read, a mention
+  notifies no one, a warning is logged, and the comment box says "Mention
+  suggestions couldn't be loaded. Reload to try again; an @mention sent now
+  may notify no one." (#3052).
 
   One switch covers all of it — **Comments** under notification preferences —
   and the email links straight to the thread (`?comment=<block_id>`), the same

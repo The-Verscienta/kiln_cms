@@ -9,9 +9,12 @@ defmodule KilnCMS.Mail.SuppressedRecipient do
   `KilnCMS.Mail.enqueue!/1`, which drops suppressed recipients before queuing,
   and by the workers that build their own mail when they run (the newsletter
   worker, `KilnCMS.Notifications.WorkflowMailWorker` and
-  `KilnCMS.Notifications.TaskMailWorker`, #3036) — so a dead address isn't re-attempted on every future send, which wastes
-  retries and signals spamminess to receivers. Admin-managed (viewable and
-  removable from `/editor/mail`).
+  `KilnCMS.Notifications.TaskMailWorker`, #3036; `KilnCMS.Forms.NotificationWorker`,
+  `KilnCMS.Forms.AutoresponderWorker` and the email reactions of
+  `KilnCMS.Automation.RuleWorker`, #3051) — so a dead address isn't
+  re-attempted on every future send, which wastes retries and signals
+  spamminess to receivers. Admin-managed (viewable and removable from
+  `/editor/mail`).
 
   The address is a `ci_string`, so suppression and lookup are
   case-insensitive.
@@ -20,6 +23,11 @@ defmodule KilnCMS.Mail.SuppressedRecipient do
   the address for every site and for account mail. A reject from a site's own
   relay goes on that site's list instead (`KilnCMS.Mail.SiteSuppressedRecipient`,
   #1562).
+
+  Erasing an account deletes the rows for the address it held (#3036,
+  `KilnCMS.Mail.forget_suppressions/2`, run by
+  `KilnCMS.Accounts.Changes.AnonymizeUser` through `:forget_erased`). If the
+  address is mailed again and still bounces, the bounce suppresses it again.
   """
   use Ash.Resource,
     domain: KilnCMS.Mail,
@@ -43,6 +51,16 @@ defmodule KilnCMS.Mail.SuppressedRecipient do
       upsert_fields [:reason, :last_failure_at]
       change set_attribute(:last_failure_at, &DateTime.utc_now/0)
     end
+
+    # Erasure's (#3036): the rows for an erased account's address. A destroy
+    # of its own so that the policy below can keep it the system's alone.
+    # The address is required and bounds the delete in the action itself, so
+    # a caller whose query forgot its filter still deletes only that
+    # address's rows, never the whole list.
+    destroy :forget_erased do
+      argument :email, :ci_string, allow_nil?: false
+      change filter(expr(email == ^arg(:email)))
+    end
   end
 
   policies do
@@ -55,11 +73,24 @@ defmodule KilnCMS.Mail.SuppressedRecipient do
     # up before every send and records a hard bounce. It may not `destroy` a
     # row: clearing a suppression resumes mail to that address, which is the
     # operator's call. The lookup fails closed (`authorize_with: :error`).
-    policy always() do
+    #
+    # Named rather than `always()` so that `:forget_erased` below is held to
+    # its own policy alone; an action added later matches no policy and is
+    # refused until it is given one.
+    policy action([:read, :suppress, :destroy]) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
 
       forbid_unless action([:read, :suppress])
       authorize_if {KilnCMS.Checks.SystemActor, subsystem: :mail}
+    end
+
+    # Erasure (`KilnCMS.Mail.forget_suppressions/2`, #3036) runs with no
+    # actor, inside the `:anonymize` action that authorized it. A request
+    # carrying any actor is refused, the platform admin and the mail system
+    # actor included: an admin clears one row with `:destroy`.
+    policy action(:forget_erased) do
+      forbid_if actor_present()
+      authorize_if always()
     end
   end
 

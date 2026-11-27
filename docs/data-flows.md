@@ -74,11 +74,11 @@ your deployment.
 | Paid memberships | `billing_memberships` | Pseudonymous | Status, period end, and the payment provider's customer/subscription ids. See [Paid memberships](memberships.md). |
 | Newsletter subscribers | `newsletter_subscribers`, `newsletter_segment_memberships` | Yes | One row per address on a site's list: the **email address**, an optional name, the opt-in status and when it was confirmed or unsubscribed, the tokens behind the confirm and unsubscribe links, and the segments it is on. A paying member's row is linked to their account (`user_id`) by the billing sync. Linked rows are in the account's self-export (without the tokens) and are deleted, with their segment memberships, when the account is erased (#2991). A row at the same address that was never linked is not the account's and stays. No retention purge: an unsubscribed row is kept, with its status, so the address is not mailed again, and a pending row that was never confirmed is kept too. A site admin deletes a row on **Newsletter** (`/editor/newsletter`). Purged by the staging scrub. See [Newsletter](newsletter.md#when-a-member-account-is-erased). |
 | Form submissions | `form_submissions` | Yes | One row per accepted submission: what the visitor typed (`data`, keyed by field name, so whatever the form asked for, names and addresses included), the page's locale, the moderation status and spam score, the human-verification outcome and when it arrived. No IP address or user agent: rate limiting uses the IP in memory only. A submission with status spam is deleted 30 days after it arrived (nightly, see the retention table below). Others (new, reviewed) are kept until an admin deletes them (**Delete submission** on the form's **Entries** tab) or deletes the form, which deletes its submissions; there is no retention setting for them yet ([#2265](https://github.com/The-Verscienta/kiln_cms/issues/2265)). Copies leave in the staff notification and the autoresponder mail, and in the webhook delivery log of an endpoint subscribed to `form.submitted`. Not touched by erasure: a submission is not linked to an account. Purged by the staging scrub. See [Forms](forms.md#spam-moderation-477). |
-| Mail suppression lists | `suppressed_recipients`, `site_suppressed_recipients` | Yes | One row per address a relay hard-bounced: the **email address**, the bounce reason with addresses redacted, and when it last failed; a site's list also names the site. The instance list (the operator's relay) stops the address for every site and for account mail; a site's list (its own relay) stops only that site's mail. Consulted when mail is queued through the mail pipeline (account mail and site mail), by the newsletter worker, and by workflow and task mail when it is sent (#3036); form mail and automation email do not consult them. No retention: a row stays until an admin removes it, on `/editor/mail` for the instance list or on the site's `/editor/site-mail`. Not touched by erasure, so an erased person's bounced address stays listed ([#3036](https://github.com/The-Verscienta/kiln_cms/issues/3036)). Purged by the staging scrub. |
+| Mail suppression lists | `suppressed_recipients`, `site_suppressed_recipients` | Yes | One row per address a relay hard-bounced: the **email address**, the bounce reason with addresses redacted, and when it last failed; a site's list also names the site. The instance list (the operator's relay) stops the address for every site and for account mail; a site's list (its own relay) stops only that site's mail. Consulted when mail is queued through the mail pipeline (account mail and site mail), and when it is sent by the newsletter worker, by workflow and task mail (#3036), and by form notifications, form autoresponders and automation email (#3051). A job whose recipient is listed completes without sending. No retention: a row stays until an admin removes it, on `/editor/mail` for the instance list or on the site's `/editor/site-mail`. Erasing an account deletes the rows for the address it held, on both lists and every site, matched case-insensitively (#3036; step 17 of erasure under [Subject-rights workflows](#subject-rights-workflows)). An account erased before that release keeps its rows, which an admin removes by hand. Purged by the staging scrub. |
 | Fediverse followers | `federation_followers` | Yes | One row per remote account following a site (#491): its actor URI, its inbox and shared inbox URIs, when it followed and its delivery counters. An actor URI names a person on another server. Removed when that account sends `Undo{Follow}`, when an admin blocks it or its instance, and after 12 deliveries to it fail in a row; at most 50,000 per site. Published only as a count (`GET /actor/followers`). Not touched by erasure: a follower is not an account here. Purged by the staging scrub. The block list (`federation_blocks`: an actor URI or a host, and a reason) is moderation data and is kept by the scrub. See [ActivityPub federation](federation.md#delivery). |
 | Fediverse delivery log | `federation_deliveries` | Pseudonymous | One row per activity per distinct inbox (#2753; followers on an instance with a shared inbox share one row): the inbox URI, the follower it was for when only one follower used that inbox, the activity as sent (published content), the document's id, the state, the attempts and the last error. Deleted 30 days after it was written (fixed). Not touched by erasure. Purged by the staging scrub. |
 | Webhook delivery log | `webhook_deliveries` | Yes | One row per delivery: the event, a snapshot of the endpoint URL, and the **payload as sent**, which for `form.submitted` is the submission, for `membership.*` the member's email address and user id, and for `security.*` user ids and an IP network or address (see [Webhooks](#webhooks-opt-in-per-endpoint)). Deleted 30 days after it was written; the window is `config :kiln_cms, :webhooks, delivery_retention_days:`, read at compile time, so changing it needs a rebuild. A failed retraction (#1926) is kept, and its payload is cut to the document's identity at the same age. No row can be deleted before then ([#2994](https://github.com/The-Verscienta/kiln_cms/issues/2994)), and erasure does not rewrite the log. Purged by the staging scrub. |
-| Queued jobs | `oban_jobs` | Yes (transient) | A background job's args, mostly ids. Account mail (sign-in links, password resets, second-factor and security notices, registration mail) carries the recipient's address in the clear, the id of the account it is for, and the message sealed until the job finishes. Form mail and workflow and task mail queued by this release carry ids only; jobs queued by an earlier release can carry the form data, or the address, title, actor name and excerpt or note. Automation jobs carry the event's document. Oban's Pruner deletes a row 7 days after the job finishes. Private keys are dropped when the job finishes and by a daily scrub, and erasure withholds the account's mail still waiting to run (its address and message removed) and strips the address from finished mail jobs. Purged by the staging scrub. See [Job args retention](#job-args-retention). |
+| Queued jobs | `oban_jobs` | Yes (transient) | A background job's args, mostly ids. Account mail (sign-in links, password resets, second-factor and security notices, registration mail) carries the recipient's address in the clear, the id of the account it is for, and the message sealed until the job finishes. Form mail and workflow and task mail queued by this release carry ids only; jobs queued by an earlier release can carry the form data, or the address, title, actor name and excerpt or note. Automation jobs carry the event's document, sealed. Oban's Pruner deletes a row 7 days after the job finishes. Private keys are dropped when the job finishes and by a daily scrub, and erasure withholds the account's mail still waiting to run (its address and message removed) and strips the address from finished mail jobs. Purged by the staging scrub. See [Job args retention](#job-args-retention). |
 | Entitlement audit trail | `billing_membership_events` | Pseudonymous | Status transitions and the audience delta, with the causing provider event id. `actor_id` nulled on erasure. |
 | Recorded payment webhooks | `billing_webhook_events` | Yes (transient) | The provider's full event payload, which can carry a customer email and amounts. Deleted by the staging scrub; nothing else deletes these rows yet, so they are kept until removed by hand. |
 | Idempotency keys | `idempotent_requests` | Pseudonymous (transient) | One row per `Idempotency-Key` a caller used on a write ([api.md](api.md)), holding the key, the acting user's id, a hash of the request and **the response that was sent** — so it carries whatever that response did. Pruned hourly, 24-hour lifetime. Purged by the staging scrub. |
@@ -239,7 +239,7 @@ that chose the recipient, and sends nothing if the rule no longer holds
 | Review requested | an admin of the site: a member admin, a platform admin, or someone with a live temporary admin grant |
 | Published, returned to draft | the content's author |
 | Comment added, comment resolved | someone with a comment on the comment's thread, or the content's author |
-| Mentioned | on the site's mention roster (an active member, or an account with no site memberships at all), or on the comment's thread, or the content's author |
+| Mentioned | on the site's mention roster (an active member; on the default site, an account with no site memberships at all; on any site, a platform admin with none), or on the comment's thread, or the content's author |
 | Task assigned | the task's assignee, with the task still open |
 | Task digest | sent with only the lines whose task is still open and still theirs, each with the task's due date now; not sent if no line is left |
 
@@ -253,10 +253,13 @@ Each event re-checks its own rule and no other. Being removed from a site
 stops a review request, but not a comment notice to someone still on the
 thread, a notice to the content's author, or task mail to the assignee
 ([#3048](https://github.com/The-Verscienta/kiln_cms/issues/3048)). Someone
-removed from the only site they belonged to has no membership left, which
-the mention roster reads as belonging to every site, so they can still be
-mentioned and mailed
-([#3047](https://github.com/The-Verscienta/kiln_cms/issues/3047)).
+removed from the only site they belonged to has no membership left. The
+mention roster reads such an account the way every other permission does
+(`KilnCMS.Accounts.Scoping.effective_tier/2`): it counts on the default site
+only, so on any other site a queued mention to them is not sent, unless they
+wrote the content or are on its thread
+([#3047](https://github.com/The-Verscienta/kiln_cms/issues/3047)). A platform
+admin with no membership is on every site's roster.
 
 A job queued by v1.10.1 (it carries the address, not an id) is checked
 against the rules its args still allow: review requests and mentions by the
@@ -406,6 +409,9 @@ variables of every stack frame, which can quote the same data (or, for a
 workflow or task mail job, the recipient's account it read).
 
 "Finishes" means completed, canceled, discarded or failed for the last time.
+A form or automation mail job skipped because its recipient is on a
+suppression list (#3051) completes, so it drops these keys too; one that
+retries because a list could not be read keeps them until its last attempt.
 A job that fails with attempts left keeps its args, because it runs again. A
 job killed mid-run (past the shutdown grace period, or by its timeout) runs
 none of its own code when `Oban.Lifeline` later discards it, so it keeps its
@@ -736,6 +742,17 @@ Either way, it:
     invitation, a newsletter confirmation) that has not run yet is left
     alone; see
     [What erasure does not reach](#what-erasure-does-not-reach).
+17. **Takes its address off the mail suppression lists** (#3036): the rows
+    for the address it held before step 1 are deleted from the instance list
+    and from every site's list, matched case-insensitively. A row there is a
+    recorded hard bounce, not a request not to be contacted, and nothing of
+    the account's can be mailed once it is erased. If the address is mailed
+    again by anything that checks the lists, a relay that still rejects it
+    bounces it at most once more, and that bounce lists it again. If any
+    list's delete fails, the erasure raises so it can be retried; the log
+    names the list, never the address. Why the rows are deleted rather than
+    kept or hashed:
+    [ADR 0091](decisions/0091-erasure-drops-the-erased-address-from-the-suppression-lists.md).
 
 Once erased, the account is on no site's roster and has no tier or audience
 anywhere, whatever a row it left still holds: it is not offered as a task
@@ -791,6 +808,11 @@ before #3035 that is still waiting to run carries no account id and is not
 checked when it runs. A finished workflow or task mail job
 of the previous release loses it to the job args scrub
 ([Job args retention](#job-args-retention)).
+Step 17 has no backfill either: an account erased before it existed holds
+a tombstone, so nothing ties its suppression rows to it. An admin removes
+such a row on `/editor/mail` (instance list) or on the site's
+`/editor/site-mail`. An erasure run on a node of the previous release during
+a rolling deploy keeps the rows too.
 
 The account **row is retained** (with no personal data) so authorship links and
 referential integrity in content/version history are preserved. Paid
@@ -822,9 +844,6 @@ data about the person that it leaves as it is:
 - **Form submissions.** A submission is not linked to an account, so one the
   person sent stays until an admin deletes it on the form's **Entries** tab,
   or, if it was marked spam, until the 30-day prune.
-- **Suppression list entries.** An address of theirs that hard-bounced stays
-  on the instance list or a site's list until an admin removes it
-  ([#3036](https://github.com/The-Verscienta/kiln_cms/issues/3036)).
 - **Webhook delivery payloads.** A `form.submitted` or `membership.*`
   payload that named them stays in the delivery log until it is pruned, 30
   days by default, and no single row can be deleted before then
