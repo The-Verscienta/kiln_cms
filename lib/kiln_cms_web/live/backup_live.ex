@@ -1139,13 +1139,21 @@ defmodule KilnCMSWeb.BackupLive do
   defp status_reader, do: Keyword.get(live_config(), :status_reader, &Backups.status/0)
   defp live_config, do: Application.get_env(:kiln_cms, __MODULE__, [])
 
-  # Part of #2225: a run pinned to a backup directory (#2539) that isn't the
-  # one this server's disk read found. Nothing is said before the read lands.
-  defp other_server?(%{state: :ready}, dir_id, %{dir_id: pinned, artifacts: [_ | _]})
-       when is_binary(pinned),
-       do: dir_id != {:ok, pinned}
+  # Part of #2225: how a run pinned to a backup directory (#2539) relates to
+  # this server's, as the disk read found it: `:other` when this server's id
+  # is another one, `:unreadable` when it couldn't be read (which says
+  # nothing about where the files are), else nil (unpinned, the same
+  # directory, or nothing read yet). Either answer hides the Download menu.
+  defp pin_note(%{state: :ready}, dir_id, %{dir_id: pinned, artifacts: [_ | _]})
+       when is_binary(pinned) do
+    case dir_id do
+      {:ok, ^pinned} -> nil
+      {:ok, _other} -> :other
+      _unread_or_error -> :unreadable
+    end
+  end
 
-  defp other_server?(_disk, _dir_id, _run), do: false
+  defp pin_note(_disk, _dir_id, _run), do: nil
 
   # What a row's Download menu offers (part of #2225), from the disk read on
   # the page: per artifact whose names `Artifact.checked_files/2` accepts and
@@ -2146,17 +2154,22 @@ defmodule KilnCMSWeb.BackupLive do
                   says why), and for a run whose files are in another
                   server's backup directory, which says so instead. --%>
             <span
-              :if={is_nil(@downloads) and other_server?(@disk, @dir_id, run)}
+              :if={is_nil(@downloads) and pin_note(@disk, @dir_id, run) == :other}
               data-role="download-other-server"
               class="text-base-content/70"
             >
-              {gettext(
-                "These files are in another server's backup directory; download them on that server."
-              )}
+              {download_message({:other_directory, run.dir_id})}
+            </span>
+            <span
+              :if={is_nil(@downloads) and pin_note(@disk, @dir_id, run) == :unreadable}
+              data-role="download-dir-id-unreadable"
+              class="text-warning-ink"
+            >
+              {download_message({:dir_id_unreadable, nil})}
             </span>
             <.download_menu
               :if={
-                is_nil(@downloads) and not other_server?(@disk, @dir_id, run) and
+                is_nil(@downloads) and is_nil(pin_note(@disk, @dir_id, run)) and
                   download_offers(@disk, run, Map.get(@presence, run.id)) != []
               }
               run_id={run.id}

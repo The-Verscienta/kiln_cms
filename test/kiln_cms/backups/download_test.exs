@@ -156,14 +156,28 @@ defmodule KilnCMS.Backups.DownloadTest do
 
       assert {:ok, download} = Backups.check_download(run.id, file.name, admin)
 
+      path = Path.join([dir, "db", file.name])
+      stat = File.lstat!(path, time: :posix)
+
       assert download == %{
-               path: Path.join([dir, "db", file.name]),
+               path: path,
                name: file.name,
                kind: :db,
                bytes: file.bytes,
                stamp: @stamp,
-               dir_id: id
+               dir_id: id,
+               identity: %{
+                 inode: stat.inode,
+                 major_device: stat.major_device,
+                 minor_device: stat.minor_device,
+                 size: file.bytes,
+                 mtime: stat.mtime
+               }
              }
+
+      assert Download.identity(path) == {:ok, download.identity}
+      File.write!(path, "changed")
+      refute Download.identity(path) == {:ok, download.identity}
 
       assert events(admin) == []
     end

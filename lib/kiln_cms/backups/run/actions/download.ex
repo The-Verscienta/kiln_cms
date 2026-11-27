@@ -81,15 +81,16 @@ defmodule KilnCMS.Backups.Run.Actions.Download do
          :ok <- not_pruned(match),
          {:ok, dir, dir_id} <- dir_pin(run),
          {:ok, path} <- path(dir, match),
-         {:ok, bytes} <- regular(path),
+         {:ok, identity} <- regular(path),
          :ok <- readable(path),
          download = %{
            path: path,
            name: match.name,
            kind: match.kind,
-           bytes: bytes,
+           bytes: identity.size,
            stamp: run.stamp,
-           dir_id: dir_id
+           dir_id: dir_id,
+           identity: identity
          },
          :ok <- audit(Keyword.get(opts, :audit, false), download, run, actor, input) do
       {:ok, download}
@@ -265,16 +266,45 @@ defmodule KilnCMS.Backups.Run.Actions.Download do
       else: {:error, :not_found}
   end
 
+  defp regular(path) do
+    case identity(path) do
+      {:ok, identity} -> {:ok, identity}
+      {:error, :enoent} -> {:error, :missing}
+      {:error, :not_regular} -> {:error, :not_regular}
+      {:error, _reason} -> {:error, :unreadable}
+    end
+  end
+
+  @doc """
+  What a downloaded file is, by `lstat`: `%{inode, major_device,
+  minor_device, size, mtime}` of a regular file, or `{:error, :not_regular}`
+  for a symlink or anything else, or the `lstat` error. The download map
+  carries it as `identity`, so the sender can lstat the path again right
+  before `send_file` and refuse a file swapped since the checks (part of
+  #2225).
+  """
   # `lstat`, never `stat`: a symlink named like the file is not it. The path
   # is `Backups.dir/0`, `Artifact.subdir/1` and a name matched against the
   # row, never the client's string.
   # sobelow_skip ["Traversal.FileModule"]
-  defp regular(path) do
-    case File.lstat(path) do
-      {:ok, %File.Stat{type: :regular, size: size}} -> {:ok, size}
-      {:ok, %File.Stat{}} -> {:error, :not_regular}
-      {:error, :enoent} -> {:error, :missing}
-      {:error, _reason} -> {:error, :unreadable}
+  @spec identity(Path.t()) :: {:ok, map()} | {:error, term()}
+  def identity(path) do
+    case File.lstat(path, time: :posix) do
+      {:ok, %File.Stat{type: :regular} = stat} ->
+        {:ok,
+         %{
+           inode: stat.inode,
+           major_device: stat.major_device,
+           minor_device: stat.minor_device,
+           size: stat.size,
+           mtime: stat.mtime
+         }}
+
+      {:ok, %File.Stat{}} ->
+        {:error, :not_regular}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

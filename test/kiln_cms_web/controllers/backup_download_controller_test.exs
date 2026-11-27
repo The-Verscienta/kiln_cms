@@ -35,6 +35,7 @@ defmodule KilnCMSWeb.BackupDownloadControllerTest do
     original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
     Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.put(original, :dir, dir))
     seams = Application.get_env(:kiln_cms, Download)
+    sender = Application.get_env(:kiln_cms, KilnCMSWeb.BackupDownloadController)
     RateLimitHelpers.restore_limits_on_exit()
 
     on_exit(fn ->
@@ -43,6 +44,10 @@ defmodule KilnCMSWeb.BackupDownloadControllerTest do
       if seams,
         do: Application.put_env(:kiln_cms, Download, seams),
         else: Application.delete_env(:kiln_cms, Download)
+
+      if sender,
+        do: Application.put_env(:kiln_cms, KilnCMSWeb.BackupDownloadController, sender),
+        else: Application.delete_env(:kiln_cms, KilnCMSWeb.BackupDownloadController)
 
       File.rm_rf!(dir)
     end)
@@ -199,6 +204,90 @@ defmodule KilnCMSWeb.BackupDownloadControllerTest do
       end
 
       assert events() == []
+    end
+  end
+
+  # The checks lstat the file and `send_file` opens the path again: a file
+  # swapped or removed in between is never sent.
+  describe "a file that changes after the checks" do
+    defp sender_seam(key, fun) do
+      Application.put_env(
+        :kiln_cms,
+        KilnCMSWeb.BackupDownloadController,
+        Keyword.put(
+          Application.get_env(:kiln_cms, KilnCMSWeb.BackupDownloadController, []),
+          key,
+          fun
+        )
+      )
+    end
+
+    defp swap_for_symlink(path, target) do
+      File.write!(target, "not the backup")
+      File.rm!(path)
+      File.ln_s!(target, path)
+    end
+
+    test "swapped for a symlink after the event: 404, nothing sent, and logged", %{
+      conn: conn,
+      dir: dir,
+      run: run,
+      name: name
+    } do
+      sender_seam(:before_send, fn download ->
+        swap_for_symlink(download.path, Path.join(dir, "elsewhere"))
+      end)
+
+      admin = authed_user(:admin)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          conn = conn |> log_in(admin) |> download(token(admin, run, name))
+
+          assert response(conn, 404)
+          assert error_code(conn) == "not_found"
+          assert get_resp_header(conn, "content-disposition") == []
+          refute conn.resp_body =~ "not the backup"
+        end)
+
+      assert log =~ "backup download not sent"
+      assert log =~ "was already recorded"
+      # The event says it was downloaded: the log line is the correction.
+      assert [_event] = events()
+    end
+
+    test "rewritten or removed after the event: 404", %{run: run, name: name} do
+      admin = authed_user(:admin)
+
+      for change <- [&File.write!(&1, "rewritten"), &File.rm!/1] do
+        sender_seam(:before_send, fn download -> change.(download.path) end)
+        conn = build_conn() |> log_in(admin) |> download(token(admin, run, name))
+
+        assert response(conn, 404)
+        assert get_resp_header(conn, "content-disposition") == []
+        File.write!(Path.join([Backups.dir(), "db", name]), :crypto.strong_rand_bytes(4_096))
+      end
+    end
+
+    test "a send that fails after the second lstat answers 404, not a 500", %{
+      conn: conn,
+      run: run,
+      name: name
+    } do
+      sender_seam(:at_send, fn download -> File.rm!(download.path) end)
+      admin = authed_user(:admin)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          conn = conn |> log_in(admin) |> download(token(admin, run, name))
+
+          assert response(conn, 404)
+          assert error_code(conn) == "not_found"
+          assert get_resp_header(conn, "content-disposition") == []
+        end)
+
+      assert log =~ "backup download not sent"
+      assert log =~ ":enoent"
     end
   end
 

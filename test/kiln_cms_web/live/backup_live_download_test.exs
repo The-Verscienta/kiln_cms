@@ -201,7 +201,40 @@ defmodule KilnCMSWeb.BackupLiveDownloadTest do
                "another server's backup directory"
              )
 
+      refute has_element?(lv, ~s|#backup-run-#{run.id} [data-role="download-dir-id-unreadable"]|)
       refute has_element?(lv, "#download-#{run.id}")
+    end
+
+    test "a pinned run on a server whose directory id can't be read says that, not another server",
+         %{conn: conn, dir: dir} do
+      # No `.kiln-dir-id` here: this server's id can't be read, which says
+      # nothing about where the run's files are.
+      run = seeded_run!(dir, dir_id: Ash.UUID.generate())
+      lv = conn |> log_in(authed_user(:admin)) |> live_ready()
+
+      assert has_element?(
+               lv,
+               ~s|#backup-run-#{run.id} [data-role="download-dir-id-unreadable"]|,
+               "directory id couldn"
+             )
+
+      refute has_element?(lv, ~s|#backup-run-#{run.id} [data-role="download-other-server"]|)
+      refute has_element?(lv, "#download-#{run.id}")
+    end
+
+    test "a run pinned to this server's own directory offers its files", %{conn: conn, dir: dir} do
+      {:ok, here} = DirId.local(dir)
+      run = seeded_run!(dir, dir_id: here)
+      lv = conn |> log_in(authed_user(:admin)) |> live_ready()
+
+      assert has_element?(lv, file_button(run, "kiln-db-#{@stamp}.dump"))
+
+      refute has_element?(
+               lv,
+               ~s|#backup-run-#{run.id} [data-role^="download-"][data-role$="-unreadable"]|
+             )
+
+      refute has_element?(lv, ~s|#backup-run-#{run.id} [data-role="download-other-server"]|)
     end
 
     test "while the console shares an origin, one note replaces every Download", %{

@@ -2230,8 +2230,10 @@ defmodule KilnCMS.Backups do
   (part of #2225), and where it is: the History page's click, which writes
   nothing. `KilnCMS.Backups.Run.Actions.Download` lists the checks.
 
-  `{:ok, %{path, name, kind, bytes, stamp, dir_id}}`, where `dir_id` is this
-  node's backup-directory id (nil when it has none), or `{:error, reason}`:
+  `{:ok, %{path, name, kind, bytes, stamp, dir_id, identity}}`, where `dir_id` is
+  this node's backup-directory id (nil when it has none) and `identity` the
+  file's `lstat` identity
+  (`KilnCMS.Backups.Run.Actions.Download.identity/1`), or `{:error, reason}`:
   `:forbidden` (only a platform admin may), `:console_shares_origin`,
   `:not_found` (no such run or file of it, an origin that isn't served, or a
   name that isn't one of the row's), `:in_progress`, `{:lock_unreadable,

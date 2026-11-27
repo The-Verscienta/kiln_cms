@@ -26,7 +26,8 @@ defmodule KilnCMSWeb.BackupDownloadController do
        row, the origin refusal, the lock, the pin, `lstat`), then the
        `backup_downloaded` instance event. The path comes back only once the
        event is written.
-    6. `send_file`.
+    6. `lstat` again: the same regular file the checks saw (inode, device,
+       size, mtime), else 404 and nothing sent; then `send_file`.
 
   Every refusal is `text/plain`: a message, then `error: <code>`. Every
   refusal about the file itself is the same 404 (`not_found`), so nothing is
@@ -38,6 +39,7 @@ defmodule KilnCMSWeb.BackupDownloadController do
 
   alias KilnCMS.Accounts.Token
   alias KilnCMS.Backups
+  alias KilnCMS.Backups.Run.Actions.Download
   alias KilnCMS.Security.Recorder
   alias KilnCMSWeb.BackupDownloadToken
   alias KilnCMSWeb.LiveUserAuth
@@ -58,6 +60,7 @@ defmodule KilnCMSWeb.BackupDownloadController do
              conn.assigns.current_user,
              Recorder.context(conn)
            ) do
+      seam(:before_send).(download)
       send_backup_file(conn, download)
     else
       {:deny, retry_after_ms} -> RateLimitPlug.deny(conn, retry_after_ms)
@@ -106,22 +109,69 @@ defmodule KilnCMSWeb.BackupDownloadController do
   # The path is `Backups.dir/0`, `Artifact.subdir/1` and a name matched against
   # the run's own row (`Run.Actions.Download`), never the client's string; the
   # body is an octet-stream attachment, never a document.
+  #
+  # The checks `lstat`ed the file; `send_file` opens the path again. So the
+  # path is `lstat`ed once more right before the send, and anything but the
+  # same regular file (another inode, size or mtime, a symlink swapped in, a
+  # file removed since) is the 404 every other file refusal is, with nothing
+  # sent. A file that goes between this and the send itself fails the send,
+  # which answers the same. Either way the event was already written for bytes
+  # that weren't sent, which is logged.
   # sobelow_skip ["Traversal.SendFile"]
-  defp send_backup_file(conn, download) do
-    Logger.info(
-      "backup download user_id=#{conn.assigns.current_user.id} stamp=#{download.stamp} " <>
-        "file=#{download.name} bytes=#{download.bytes}"
+  defp send_backup_file(conn, %{path: path, identity: identity} = download) do
+    case Download.identity(path) do
+      {:ok, ^identity} ->
+        ready =
+          conn
+          |> put_resp_content_type("application/octet-stream", nil)
+          # The name is one of the row's, held by `Artifact.checked_files/2`
+          # to `[a-z0-9.-]`, so it needs no quoting.
+          |> put_resp_header("content-disposition", ~s(attachment; filename="#{download.name}"))
+          |> put_resp_header("cache-control", "no-store")
+          |> put_resp_header("x-content-type-options", "nosniff")
+          |> put_resp_header("x-robots-tag", "noindex")
+
+        try do
+          seam(:at_send).(download)
+          sent = send_file(ready, 200, path, 0, download.bytes)
+
+          Logger.info(
+            "backup download user_id=#{conn.assigns.current_user.id} stamp=#{download.stamp} " <>
+              "file=#{download.name} bytes=#{download.bytes}"
+          )
+
+          sent
+        rescue
+          error in File.Error -> unsent(conn, download, error.reason)
+        end
+
+      {:ok, _other_identity} ->
+        unsent(conn, download, :changed)
+
+      {:error, reason} ->
+        unsent(conn, download, reason)
+    end
+  end
+
+  defp unsent(conn, download, reason) do
+    Logger.warning(
+      "backup download not sent: #{download.name} (stamp=#{download.stamp}) changed or went " <>
+        "between its checks and the send (#{inspect(reason)}); its backup_downloaded event " <>
+        "was already recorded for bytes that were not sent. user_id=#{conn.assigns.current_user.id}"
     )
 
-    conn
-    |> put_resp_content_type("application/octet-stream", nil)
-    # The name is one of the row's, held by `Artifact.checked_files/2` to
-    # `[a-z0-9.-]`, so it needs no quoting.
-    |> put_resp_header("content-disposition", ~s(attachment; filename="#{download.name}"))
-    |> put_resp_header("cache-control", "no-store")
-    |> put_resp_header("x-content-type-options", "nosniff")
-    |> put_resp_header("x-robots-tag", "noindex")
-    |> send_file(200, download.path, 0, download.bytes)
+    refuse(conn, :not_found)
+  end
+
+  # `config :kiln_cms, KilnCMSWeb.BackupDownloadController, before_send: fn
+  # download -> ... end, at_send: ...`: seams for the tests, run between the
+  # action and the second `lstat` (`:before_send`) and between that and
+  # `send_file` (`:at_send`), where a file can be swapped or removed. Never
+  # set outside them.
+  defp seam(key) do
+    :kiln_cms
+    |> Application.get_env(__MODULE__, [])
+    |> Keyword.get(key, fn _download -> :ok end)
   end
 
   # A plain-text refusal: the message, then the code a script can branch on.
