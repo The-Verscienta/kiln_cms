@@ -690,6 +690,10 @@ defmodule KilnCMS.Notifications.SendTimeEntitlementTest do
       # A platform admin who holds a row is reachable only where it names.
       member_platform_admin = user(:admin)
       membership!(member_platform_admin, elsewhere.id, :editor)
+      pending_platform_admin = user(:admin)
+      membership!(pending_platform_admin, site.id, :editor, :pending)
+      rejected_platform_admin = user(:admin)
+      membership!(rejected_platform_admin, elsewhere.id, :editor, :rejected)
 
       people = [
         unscoped,
@@ -702,7 +706,9 @@ defmodule KilnCMS.Notifications.SendTimeEntitlementTest do
         platform_admin,
         granted_admin,
         lapsed_admin,
-        member_platform_admin
+        member_platform_admin,
+        pending_platform_admin,
+        rejected_platform_admin
       ]
 
       for org <- [site.id, elsewhere.id, tenant()] do
@@ -746,12 +752,20 @@ defmodule KilnCMS.Notifications.SendTimeEntitlementTest do
       assert Notifications.mention_roster_member?(tenant(), lapsed_admin)
       refute Notifications.mention_roster_member?(site.id, member_platform_admin)
       assert Notifications.mention_roster_member?(elsewhere.id, member_platform_admin)
+
+      # Pinned: a platform admin holding only a pending/rejected row is on no
+      # roster — the roster reads rows, Scoping reads the role.
+      for org <- [site.id, elsewhere.id, tenant()],
+          admin <- [pending_platform_admin, rejected_platform_admin] do
+        refute Notifications.mention_roster_member?(org, admin)
+      end
     end
 
     # The roster is Scoping's tier, less muted comment mail: anyone with a tier
     # on the org is mentionable there and no one else. The one place they part
-    # is a platform admin who holds a membership row: Scoping makes them
-    # `:admin` everywhere, the roster keeps them to the orgs their rows name.
+    # is a platform admin who holds a membership row of any status (active,
+    # pending or rejected): Scoping makes them `:admin` everywhere, the roster
+    # keeps them to the orgs where a row is active, which may be none.
     test "follows Scoping.effective_tier/2 on every org" do
       site = KilnCMS.OrgFixtures.org("entitled-tier-roster")
       elsewhere = KilnCMS.OrgFixtures.org("entitled-tier-roster-elsewhere")
