@@ -360,13 +360,31 @@ defmodule KilnCMS.Mail do
     not is_nil(instance) or site_suppressed?(address, Keyword.get(opts, :org_id))
   end
 
+  @doc """
+  `suppressed?/2` as a `with` step for a mail worker that sends through
+  `deliver_for_worker/2` rather than `enqueue!/2`: `:ok` when `address` may be
+  mailed, `{:skip, :suppressed}` when it is on the instance-wide list or (with
+  `org_id:`) on that site's own.
+
+  A list that cannot be read raises, as `suppressed?/2` does, so the job
+  fails and retries: that is the closed side for a job. The worker decides
+  what a skip means (it completes, so it is not listed as a delivery failure
+  on /editor/mail) and logs it without the address.
+  """
+  @spec check_suppression(String.t(), keyword()) :: :ok | {:skip, :suppressed}
+  def check_suppression(address, opts \\ []) do
+    if suppressed?(address, opts), do: {:skip, :suppressed}, else: :ok
+  end
+
   # `enqueue!/2`'s filter. A suppression list that cannot be read is treated
   # as naming the address: the recipient is dropped and the drop is LOGGED.
   # Not sending is the closed side (#1659); raising instead would fail the
   # caller's own action (a registration, a password reset) over a mail-side
-  # fault. `KilnCMS.Newsletter.MailWorker`, `KilnCMS.Notifications.WorkflowMailWorker`
-  # and `KilnCMS.Notifications.TaskMailWorker` call `suppressed?/2` directly
-  # and let the raise retry the job, which is the closed side there.
+  # fault. The mail workers that send through `deliver_for_worker/2` (form
+  # notifications and autoresponders, automation email, workflow and task
+  # mail) ask `check_suppression/2`, and `KilnCMS.Newsletter.MailWorker` asks
+  # `suppressed?/2`, letting the raise retry the job, which is the closed side
+  # there.
   defp suppressed_or_unreadable?(address, org_id) do
     suppressed?(address, org_id: org_id)
   rescue
