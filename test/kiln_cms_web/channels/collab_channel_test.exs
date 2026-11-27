@@ -58,7 +58,8 @@ defmodule KilnCMSWeb.CollabChannelTest do
     )
   end
 
-  defp token(actor), do: Phoenix.Token.sign(@endpoint, "collab", actor.id)
+  # Bound to a stored session row, as the editor mints it (#2490).
+  defp token(actor), do: KilnCMS.CollabTokenFixtures.collab_token(actor)
 
   defp topic(page), do: "collab:page:#{page.id}"
 
@@ -89,7 +90,13 @@ defmodule KilnCMSWeb.CollabChannelTest do
     test "a token naming no live account is refused" do
       # Tokens outlive the accounts they name by up to a day, so resolving the
       # user at connect is what stops a removed editor collaborating on one.
-      stale = Phoenix.Token.sign(@endpoint, "collab", Ash.UUID.generate())
+      stale =
+        Phoenix.Token.sign(@endpoint, "collab", %{
+          "u" => Ash.UUID.generate(),
+          "sf" => false,
+          "j" => "collab-session-nobody"
+        })
+
       assert :error = connect(CollabSocket, %{"token" => stale})
     end
   end

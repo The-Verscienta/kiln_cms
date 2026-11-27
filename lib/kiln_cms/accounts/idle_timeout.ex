@@ -239,7 +239,8 @@ defmodule KilnCMS.Accounts.IdleTimeout do
     * `:labels` — `%{browser:, platform:}` for the session list;
     * `:user` — the account, or a zero-arity function returning it, for the
       audit event;
-    * `:surface` — `"http"`, `"live"` or `"remember_me"`, for the audit event;
+    * `:surface` — `"http"`, `"live"`, `"remember_me"` or `"collab"`, for
+      the audit event;
     * `:request` — a `KilnCMS.Security.Recorder.request_context/1` map.
 
   Returns `{:active, %{timeout:, remaining:, idle:, jtis:}}` (`jtis`: the
@@ -253,8 +254,23 @@ defmodule KilnCMS.Accounts.IdleTimeout do
     opts = Keyword.put(opts, :policy, policy)
 
     with {:ok, row} <- read(jti, policy) do
-      act(verdict(row, policy, org_id, opts), row, policy, org_id, opts)
+      check_row(row, org_id, opts)
     end
+  end
+
+  @doc """
+  `check/3` on a row the caller has already read with `read/2`, for a caller
+  that has to look at the row itself as well — the collab socket refuses a row
+  of the wrong purpose or past its expiry, which the verdict does not judge
+  (#2490). Takes the same options; `:policy` must be the one the row was read
+  with, when given.
+  """
+  @spec check_row(Token.t() | nil, Ash.UUID.t(), keyword()) :: verdict()
+  def check_row(row, org_id, opts) when is_binary(org_id) do
+    policy = Keyword.get_lazy(opts, :policy, fn -> policy(org_id) end)
+    opts = Keyword.put(opts, :policy, policy)
+
+    act(verdict(row, policy, org_id, opts), row, policy, org_id, opts)
   end
 
   @doc """

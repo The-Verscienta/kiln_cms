@@ -1582,6 +1582,16 @@ password when the lookup fails is in
 
 Either alone leaves the account signed in somewhere.
 
+Signing out one session is narrower and reaches its sockets too: the
+**Sign out** button beside a browser under **Active sessions** on **Your
+settings**, **Sign out of all other sessions** there, the browser's own
+**Sign out**, the site's idle timeout and [Sign everyone out](#sign-everyone-out)
+each close that session's open collaborative-editing rooms (`/ws/collab`) and
+any GraphQL socket opened with its token (`/ws/gql`), at once. The account's
+other sessions stay connected. The browser's own **Sign out** leaves that
+browser's other open tabs as they are until they next load a page or
+reconnect, which finds the session gone and goes to sign-in.
+
 That is one account, on every site. A site admin can also act on one site:
 sign browsers out after a stretch of inactivity
 ([Sign people out when idle](#sign-people-out-when-idle)), or end every browser
@@ -1689,7 +1699,9 @@ What it ends, on this site only:
   afterwards is signed out again on their next page.
 
 Every open page of those sessions goes to `/sign-in` with "An administrator
-signed everyone out of this site. Sign in again to continue." Sessions on other
+signed everyone out of this site. Sign in again to continue." Their open
+collaborative-editing rooms close too, and so does a GraphQL subscription
+socket opened with one of those browser sessions' own tokens. Sessions on other
 sites, including the same people's, are not affected. **Keep me signed in on
 this browser** spares only the browser you clicked from (and its remember-me
 cookie), not your sessions on other devices.
@@ -1705,9 +1717,6 @@ What it does **not** end:
   with a stolen password. Reset the account's password, or have a platform
   admin use **Sign out everywhere** on the account in `/editor/accounts`
   ([Signing an account out](#signing-an-account-out)).
-- **Already-connected collaborative-editing and GraphQL subscription sockets**
-  (`/ws/collab`, `/ws/gql`). They are keyed per account rather than per
-  browser, and close at their next reconnect or re-check.
 
 The site's security log records **Everyone signed out**
 (`all_sessions_revoked`) with the number of sessions and whether you kept your

@@ -12,9 +12,11 @@ defmodule KilnCMSWeb.GraphqlSocket do
     schema: KilnCMSWeb.GraphqlSchema,
     pipeline: {KilnCMSWeb.GraphqlLimits, :socket_pipeline}
 
+  alias KilnCMS.Accounts.SessionEviction
   alias KilnCMS.Accounts.TwoFactorRequirement
   alias KilnCMSWeb.BearerAuth
   alias KilnCMSWeb.GraphqlLimits.SocketDocumentBudget
+  alias KilnCMSWeb.GraphqlLimits.SocketSession
   alias KilnCMSWeb.Plugs.ApiKeyAuth
 
   @impl true
@@ -108,8 +110,8 @@ defmodule KilnCMSWeb.GraphqlSocket do
         {:ok, BearerAuth.graphql_context(nil)}
 
       token ->
-        case BearerAuth.user_from_token(token) do
-          {:ok, user} -> signed_in_context(user, org_id)
+        case BearerAuth.verify_token(token) do
+          {:ok, user, jti} -> signed_in_context(user, jti, org_id)
           :error -> unverified_bearer(token)
         end
     end
@@ -121,18 +123,37 @@ defmodule KilnCMSWeb.GraphqlSocket do
       else: {:ok, BearerAuth.graphql_context(nil)}
   end
 
-  defp signed_in_context(user, org_id) do
+  defp signed_in_context(user, jti, org_id) do
     case bearer_status(user, org_id) do
       :refused ->
         :error
 
       {:grace, deadline} ->
         close_at(deadline)
-        {:ok, BearerAuth.graphql_context(user)}
+        {:ok, session_context(user, jti)}
 
       _not_held ->
-        {:ok, BearerAuth.graphql_context(user)}
+        {:ok, session_context(user, jti)}
     end
+  end
+
+  # Bound to the bearer's own token row (#2490): signing that one token out —
+  # `KilnCMS.Accounts.Sessions.revoke/2`, or a lifted browser session's
+  # per-site sign-out — closes this socket at once, through the subscription,
+  # and `KilnCMSWeb.GraphqlLimits.SocketSession` refuses every later document
+  # in case the broadcast never arrives. No site rule (idle timeout, site
+  # binding, "sign out everyone" watermark) is applied: `/gql` applies none
+  # to a bearer either, and a headless sign-in is bound to no site.
+  #
+  # Reached only once every refusal is behind us — see `close_at/1` on why
+  # subscribing here makes the subscription the socket's own, and
+  # `KilnCMSWeb.CollabSocket` on why a refused connect must leave none.
+  defp session_context(user, jti) do
+    KilnCMSWeb.Endpoint.subscribe(SessionEviction.session_socket_topic(jti))
+
+    user
+    |> BearerAuth.graphql_context()
+    |> Map.put(SocketSession.context_key(), jti)
   end
 
   # Held, or a passkey-only account past its deadline, whose JWT never passed
