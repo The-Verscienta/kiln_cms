@@ -3883,7 +3883,7 @@ because other files cite them by number.
     hosts, paths and timings across every organization's backups, so the Log
     tab and the log download are refused under the same rule; History itself
     is not, and stays part of this residual
-    ([ADR 0091](decisions/0091-a-backup-runs-log-is-shown-and-downloaded-redacted-refused-while-the-console-shares-an-origin-without-an-audit-event.md)).
+    ([ADR 0092](decisions/0092-a-backup-runs-log-is-shown-and-downloaded-redacted-refused-while-the-console-shares-an-origin-without-an-audit-event.md)).
 
 17. **Queued mail carries sign-in links, sealed under `SECRET_KEY_BASE`
     (#1843).** Account confirmations, password resets, magic links and

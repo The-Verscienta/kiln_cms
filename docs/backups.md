@@ -6113,7 +6113,7 @@ time, level (Info, Warning or Error) and step. History shows a run's outcome
 and its error; the **Log** tab shows every line, which is where to look when
 a backup failed, retried an upload or skipped a destination's retention
 (part of #2230). The reasoning is in
-[ADR 0091](decisions/0091-a-backup-runs-log-is-shown-and-downloaded-redacted-refused-while-the-console-shares-an-origin-without-an-audit-event.md).
+[ADR 0092](decisions/0092-a-backup-runs-log-is-shown-and-downloaded-redacted-refused-while-the-console-shares-an-origin-without-an-audit-event.md).
 
 Starting point: you are a platform admin, and `KILN_CONSOLE_HOST` is set or
 there is only one organization (see "Refused while the console shares an

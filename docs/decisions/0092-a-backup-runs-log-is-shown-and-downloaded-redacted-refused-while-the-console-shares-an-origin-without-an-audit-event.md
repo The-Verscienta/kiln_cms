@@ -1,4 +1,4 @@
-# 0091. A backup run's log is shown and downloaded redacted, refused while the console shares an origin, without an audit event
+# 0092. A backup run's log is shown and downloaded redacted, refused while the console shares an origin, without an audit event
 
 - **Status** — accepted (2026-11-27).
 - **References** — [#2230](https://github.com/The-Verscienta/kiln_cms/issues/2230)
