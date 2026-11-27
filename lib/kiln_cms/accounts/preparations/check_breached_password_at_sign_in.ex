@@ -15,7 +15,9 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn do
       and a reset link is mailed (`KilnCMS.Accounts.PasswordResetMail`, best
       effort, within the address's reset-mail budget). The per-account sign-in
       counter is not forgiven, so an owner who keeps trying ends up paused
-      like anyone else. The doors send the person to `/reset`. The refusal
+      like anyone else; the refusal is noted
+      (`AccountThrottle.note_sign_in_block/1`) so the pause mail says the
+      attempts used a breached password (#3437). The doors send the person to `/reset`. The refusal
       is audited in the orgs whose policy decided it, or in the request's
       site when those cannot be read (#3438). The mail wears the branding
       of a site whose policy refused it (#3436): the request's site when it
@@ -57,6 +59,7 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn do
 
   require Logger
 
+  alias KilnCMS.Accounts.AccountThrottle
   alias KilnCMS.Accounts.Changes.CheckBreachedPassword
   alias KilnCMS.Accounts.Errors.PasswordResetRequired
   alias KilnCMS.Accounts.PasswordNotice
@@ -95,6 +98,7 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn do
     Sessions.revoke_first_factor(token)
     # One read serves the mail's branding and the audit.
     ids = resolve_deciding(deciding)
+    note_block(query)
     send_reset_mail(record, brand_org(record, ids, Map.get(query.context, Recorder.tenant_key())))
 
     {:error, PasswordResetRequired.exception(org_ids: ids)}
@@ -111,6 +115,22 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn do
   # note; the API answers with the record's metadata instead.
   defp browser?(query) do
     match?(%{surface: :browser}, Map.get(query.context, Challenge.context_key()))
+  end
+
+  # The pause mail says why the counter filled (#3437,
+  # `AccountThrottle.sign_in_pause_cause/1`), keyed on the identifier
+  # `ThrottleSignIn` charges. Best effort: a tally that cannot be written only
+  # costs the pause mail its breached wording, so the refusal stands and
+  # nothing is logged about whom.
+  defp note_block(query) do
+    case Ash.Query.get_argument(query, :email) do
+      nil -> :ok
+      email -> AccountThrottle.note_sign_in_block(to_string(email))
+    end
+  rescue
+    _error -> :ok
+  catch
+    :exit, _reason -> :ok
   end
 
   # Whose branding the reset mail wears (#3436): a site whose policy refused

@@ -432,6 +432,244 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignInTest do
     end
   end
 
+  describe "the pause mail after breached-password refusals (#3437)" do
+    setup %{a: a} do
+      pw = password()
+      breached(pw)
+      save!(a, :block, true)
+      admin = member_of(a, :admin, pw)
+      address = to_string(admin.email)
+      tighten_throttle!(budget: 3, mail_budget: 50)
+      on_exit(fn -> AccountThrottle.reset(address) end)
+      %{pw: pw, admin: admin, address: address}
+    end
+
+    # Every mail queued so far, drained and taken from the mailbox.
+    defp mails do
+      drain_oban()
+      collect_mails([])
+    end
+
+    defp collect_mails(acc) do
+      receive do
+        {:email, mail} -> collect_mails([mail | acc])
+      after
+        0 -> Enum.reverse(acc)
+      end
+    end
+
+    defp pause_mails(mails), do: Enum.reject(mails, &(&1.subject =~ "Choose a new password"))
+
+    defp block!(admin, pw, a) do
+      assert {:error, error} = sign_in(admin, pw, org: a)
+      assert reset_required?(error)
+    end
+
+    defp wrong!(admin, pw, a) do
+      assert {:error, %AuthenticationFailed{} = error} = sign_in(admin, pw <> "x", org: a)
+      refute reset_required?(error)
+    end
+
+    defp paused!(admin, pw, a, ip \\ unique_ip()) do
+      assert {:error, error} = sign_in(admin, pw, org: a, ip: ip)
+      assert throttled?(error)
+      refute reset_required?(error)
+    end
+
+    defp throttled?(%AuthenticationFailed{caused_by: %{module: ThrottleSignIn}}), do: true
+    defp throttled?(%{caused_by: %{} = cause}), do: throttled?(cause)
+    defp throttled?(%{errors: errors}) when is_list(errors), do: Enum.any?(errors, &throttled?/1)
+    defp throttled?(_other), do: false
+
+    defp assert_breached_pause!(mail, ip) do
+      assert mail.subject =~ "Sign-in paused"
+      assert mail.html_body =~ "known data breach"
+      assert mail.html_body =~ ~s(href="#{KilnCMSWeb.Endpoint.url()}/reset")
+      refute mail.html_body =~ "/password-reset/"
+      refute mail.html_body =~ "/sign-in/unlock"
+      refute mail.html_body =~ "have not succeeded"
+      refute mail.html_body =~ ip
+      refute mail.html_body =~ ~r/\b3\b/
+    end
+
+    test "a pause made only of refusals mails the breached wording, spending the window", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      for _ <- 1..3, do: block!(admin, pw, a)
+      assert AccountThrottle.sign_in_pause_cause(address) == :blocks_only
+      ip = unique_ip()
+      paused!(admin, pw, a, ip)
+
+      all = mails()
+      # Each refusal mailed its reset link; the pause mailed once more.
+      assert length(all) == 4
+      assert [mail] = pause_mails(all)
+      assert {_name, ^address} = hd(mail.to)
+      assert_breached_pause!(mail, ip)
+      assert mail.html_body =~ "attempts that\nused your current password"
+      refute mail.html_body =~ "The others did not complete"
+
+      # The window is spent like the usual mail's.
+      refute AccountThrottle.alert_allowed?(address)
+    end
+
+    test "with the reset-mail budget spent first, the pause mail still names the breach", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      tighten_throttle!(budget: 3, mail_budget: 5)
+      for _ <- 1..5, do: AccountThrottle.allow_mail?(:password_reset, address)
+
+      for _ <- 1..3, do: block!(admin, pw, a)
+      ip = unique_ip()
+      paused!(admin, pw, a, ip)
+
+      # No reset link got out; the pause mail is the owner's only word.
+      assert [mail] = mails()
+      assert_breached_pause!(mail, ip)
+    end
+
+    test "a pause of guesses and refusals mails the mixed wording", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      wrong!(admin, pw, a)
+      wrong!(admin, pw, a)
+      block!(admin, pw, a)
+      assert AccountThrottle.sign_in_pause_cause(address) == :some_blocks
+      ip = unique_ip()
+      paused!(admin, pw, a, ip)
+
+      assert [mail] = pause_mails(mails())
+      assert_breached_pause!(mail, ip)
+      assert mail.html_body =~ "Some of them used your current password"
+      assert mail.html_body =~ "The others did not complete a sign-in"
+    end
+
+    test "a pause of guesses alone is the usual mail, unchanged", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      for _ <- 1..3, do: wrong!(admin, pw, a)
+      assert AccountThrottle.sign_in_pause_cause(address) == :none
+      paused!(admin, pw, a)
+
+      assert [mail] = mails()
+      assert mail.subject =~ "Unusual sign-in activity on your"
+      assert mail.html_body =~ "have not succeeded"
+      assert mail.html_body =~ "/sign-in/unlock"
+      refute mail.html_body =~ "known data breach"
+    end
+
+    test "a completed sign-in clears the tally with the counter", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      block!(admin, pw, a)
+      save!(a, :warn, true)
+      assert {:ok, _user} = sign_in(admin, pw, org: a)
+      assert AccountThrottle.sign_in_pause_cause(address) == :none
+      _ = mails()
+
+      for _ <- 1..3, do: wrong!(admin, pw, a)
+      paused!(admin, pw, a)
+      assert [mail] = mails()
+      assert mail.subject =~ "Unusual sign-in activity on your"
+    end
+
+    test "an unlock clears the tally with the counter", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      block!(admin, pw, a)
+      AccountThrottle.unlock(address)
+      assert AccountThrottle.sign_in_pause_cause(address) == :none
+      _ = mails()
+
+      for _ <- 1..3, do: wrong!(admin, pw, a)
+      paused!(admin, pw, a)
+      assert [mail] = mails()
+      assert mail.subject =~ "Unusual sign-in activity on your"
+    end
+
+    test "completing the reset the mail links to clears the tally and lifts the pause", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      for _ <- 1..3, do: block!(admin, pw, a)
+      paused!(admin, pw, a)
+
+      strategy = AshAuthentication.Info.strategy!(User, :password)
+      {:ok, token} = AshAuthentication.Strategy.Password.reset_token_for(strategy, admin)
+      new_pw = password()
+
+      assert {:ok, _user} =
+               admin
+               |> Ash.Changeset.for_update(
+                 :reset_password_with_token,
+                 %{reset_token: token, password: new_pw, password_confirmation: new_pw},
+                 authorize?: false
+               )
+               |> Ash.update()
+
+      assert AccountThrottle.sign_in_pause_cause(address) == :none
+      assert AccountThrottle.sign_in_attempts(address) == 0
+    end
+
+    test "the throttle itself is unchanged: same count, same refusal, same lock audit", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      other = member_of(a, :admin, pw)
+      on_exit(fn -> AccountThrottle.reset(to_string(other.email)) end)
+
+      for _ <- 1..2, do: block!(admin, pw, a)
+      for _ <- 1..2, do: wrong!(other, pw, a)
+      assert AccountThrottle.sign_in_attempts(address) == 2
+      assert AccountThrottle.sign_in_attempts(to_string(other.email)) == 2
+
+      block!(admin, pw, a)
+      paused!(admin, pw, a)
+
+      locks =
+        Event
+        |> Ash.read!(authorize?: false, tenant: a.id)
+        |> Enum.filter(&(&1.type == :sign_in_locked))
+
+      assert [lock] = locks
+      assert lock.actor_id == admin.id
+      assert lock.metadata["scope"] == "account"
+    end
+
+    test "an unknown address keeps no tally and is mailed nothing", %{a: a, pw: pw} do
+      unknown = "bp-nobody-#{uniq()}@example.com"
+      on_exit(fn -> AccountThrottle.reset(unknown) end)
+
+      for _ <- 1..4,
+          do: assert({:error, %AuthenticationFailed{}} = sign_in(unknown, pw, org: a))
+
+      assert AccountThrottle.sign_in_pause_cause(unknown) == :none
+      assert mails() == []
+    end
+  end
+
   describe "breached, under :warn" do
     setup %{a: a} do
       pw = password()
