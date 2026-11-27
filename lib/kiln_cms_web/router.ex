@@ -807,6 +807,12 @@ defmodule KilnCMSWeb.Router do
         SecurityLogExportController,
         :export_instance_csv
 
+    # One local file of a backup (part of #2225): platform-admin-gated in the
+    # controller, which also charges the `:export` budget. A POST carrying a
+    # one-minute token in its body, never in the path; a GET or HEAD is 405.
+    post "/editor/backups/download", BackupDownloadController, :create
+    get "/editor/backups/download", BackupDownloadController, :method_not_allowed
+
     # Form entries export (#477) — file download, admin-gated in the
     # controller (submissions are visitor-provided data, frequently PII;
     # FormSubmission's own policy is admin-only).

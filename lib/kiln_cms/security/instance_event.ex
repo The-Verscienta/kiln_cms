@@ -2,7 +2,7 @@ defmodule KilnCMS.Security.InstanceEvent do
   @moduledoc """
   One entry of the **instance** security log (#2541): an event about the
   installation as a whole rather than one site, such as a platform admin
-  canceling a backup.
+  canceling a backup or downloading one of its files.
 
   The per-site log (`KilnCMS.Security.Event`) is readable by each site's
   admins. An instance-wide event written there would have to pick a site (it
@@ -73,6 +73,9 @@ defmodule KilnCMS.Security.InstanceEvent do
     # No actor: the server's act. Written at most once per destination per
     # hour, and raises the platform alert `backup_host_key_changed`.
     :backup_destination_host_key_mismatch,
+    # A platform admin downloaded one local file of a backup (part of #2225):
+    # recorded before any byte is sent. The target is the run.
+    :backup_downloaded,
     # A platform admin saved the platform's security alert settings (#2245):
     # which platform alert kinds are off (`KilnCMS.Security.PlatformAlertSettings`).
     :platform_alerts_changed
@@ -98,6 +101,9 @@ defmodule KilnCMS.Security.InstanceEvent do
     backup_destination_host_key_trusted:
       ~w(name kind algorithm fingerprint previous_fingerprint how),
     backup_destination_host_key_mismatch: ~w(name kind offered_fingerprint trusted_fingerprint),
+    # `file`: the file's name; `node`: the node that served it (a backup
+    # directory may be one node's disk).
+    backup_downloaded: ~w(stamp file kind bytes node),
     # `disabled_kinds`: the platform kinds off after the save, comma-joined,
     # or "none".
     platform_alerts_changed: ~w(disabled_kinds)

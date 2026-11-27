@@ -181,85 +181,14 @@ defmodule KilnCMS.Backups.Verify do
 
   ## One artifact
 
+  # The row's names are checked by `Artifact.checked_files/2` (shared with a
+  # download, #2225): only names that pass are ever joined to a path.
   defp artifact(%Artifact{} = artifact, state, ctx) do
-    case files(artifact, ctx.run.stamp) do
+    case Artifact.checked_files(artifact, ctx.run.stamp) do
       {:ok, files} -> check_files(artifact, files, state, ctx)
       {:error, detail} -> [check(artifact, artifact.name, :name, :failed, :unsafe_name, detail)]
     end
   end
-
-  # `[%{name, sha256, bytes, destinations}]` in order, once every name on the
-  # row is a bare file name of this run's stamp and this artifact's kind, not
-  # a `.partial`, with part numbers in list order. Only names that pass are
-  # ever joined to a path.
-  defp files(%Artifact{parts: [_ | _] = parts} = artifact, stamp) do
-    total = length(parts)
-
-    parts
-    |> Enum.with_index(1)
-    |> Enum.reduce_while({:ok, []}, fn {part, index}, {:ok, acc} ->
-      name = if is_map(part), do: field(part, "name")
-
-      case safe_name(name, stamp, artifact.kind, index, total) do
-        :ok -> {:cont, {:ok, [part_file(part, name, artifact) | acc]}}
-        {:error, _detail} = error -> {:halt, error}
-      end
-    end)
-    |> case do
-      {:ok, files} -> {:ok, Enum.reverse(files)}
-      error -> error
-    end
-  end
-
-  defp files(%Artifact{} = artifact, stamp) do
-    with :ok <- safe_name(artifact.name, stamp, artifact.kind, nil, 1) do
-      {:ok,
-       [
-         %{
-           name: artifact.name,
-           sha256: digest(artifact.sha256),
-           bytes: artifact.bytes,
-           destinations: artifact.destinations
-         }
-       ]}
-    end
-  end
-
-  defp part_file(part, name, artifact) do
-    %{
-      name: name,
-      sha256: digest(field(part, "sha256")),
-      bytes: field(part, "bytes"),
-      destinations: field(part, "destinations") || artifact.destinations
-    }
-  end
-
-  # A part map's field, string-keyed as stored, atom-keyed as built in code.
-  defp field(part, "name"), do: part["name"] || part[:name]
-  defp field(part, "sha256"), do: part["sha256"] || part[:sha256]
-  defp field(part, "bytes"), do: part["bytes"] || part[:bytes]
-  defp field(part, "destinations"), do: part["destinations"] || part[:destinations]
-
-  defp safe_name(name, stamp, kind, index, total) when is_binary(name) do
-    with true <- Path.basename(name) == name,
-         {:ok, %{stamp: ^stamp, kind: ^kind, partial?: false, part: part}} <-
-           Artifact.parse_file(name),
-         true <- part_in_order?(part, index, total) do
-      :ok
-    else
-      _ -> {:error, "#{inspect(name)} is not a file name of this backup; nothing was read"}
-    end
-  end
-
-  defp safe_name(name, _stamp, _kind, _index, _total),
-    do: {:error, "a file of this backup has no usable name (#{inspect(name)}); nothing was read"}
-
-  # A single file has no part number; a set's parts count 1..n in list order,
-  # and a set of one may keep the legacy single-file name.
-  defp part_in_order?(nil, nil, 1), do: true
-  defp part_in_order?(nil, 1, 1), do: true
-  defp part_in_order?(part, index, _total) when is_integer(index), do: part == index
-  defp part_in_order?(_part, _index, _total), do: false
 
   defp digest(hex) when is_binary(hex) do
     if hex =~ ~r/\A[0-9a-fA-F]{64}\z/, do: String.downcase(hex)
@@ -389,7 +318,7 @@ defmodule KilnCMS.Backups.Verify do
   end
 
   # The stamp a validated file name carries (every file of an artifact has
-  # the run's stamp, `files/2` checked).
+  # the run's stamp, `Artifact.checked_files/2` checked).
   defp artifact_stamp(artifact) do
     [name | _] = Artifact.files(artifact)
     {:ok, %{stamp: stamp}} = Artifact.parse_file(name)

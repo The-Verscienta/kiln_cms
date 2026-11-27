@@ -175,8 +175,12 @@ defmodule KilnCMSWeb.Tenant.OrgCount do
   def recount_interval(:multi), do: nil
   def recount_interval(_single_or_unknown), do: @recount_interval
 
-  # Off only in `config/test.exs` — see "Tests" in the moduledoc.
-  defp tracking?, do: Application.get_env(:kiln_cms, :tenant_org_tracking, true)
+  @doc false
+  # Off only in `config/test.exs` — see "Tests" in the moduledoc. Public so a
+  # reader of `verdict/0` can tell an untracked `:unknown` (nothing ever
+  # counts) from a node that hasn't managed to count yet.
+  @spec tracking?() :: as_boolean(term())
+  def tracking?, do: Application.get_env(:kiln_cms, :tenant_org_tracking, true)
 
   @doc false
   @spec verdict_for(non_neg_integer() | :unknown) :: verdict()

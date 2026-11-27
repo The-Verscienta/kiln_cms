@@ -551,4 +551,90 @@ defmodule KilnCMSWeb.BackupComponents do
     |> Enum.filter(&is_binary/1)
     |> Enum.uniq()
   end
+
+  attr :run_id, :string, required: true
+
+  attr :offers, :list,
+    required: true,
+    doc:
+      "`[%{kind, files: [%{name, size}], sidecar, parts?, incomplete?}]`, one per artifact with a file to offer"
+
+  @doc """
+  A History row's Download menu (part of #2225): each local file of the run
+  that is here and not pruned, with its size, and each artifact's checksum
+  file. One button per file; the click asks the page for a one-minute link
+  (`KilnCMSWeb.BackupLive`'s `"download"` event), never a URL rendered here.
+  """
+  def download_menu(assigns) do
+    ~H"""
+    <details
+      id={"download-#{@run_id}"}
+      data-role="download"
+      phx-mounted={JS.ignore_attributes(["open"])}
+      class="group relative"
+    >
+      <summary class="btn btn-sm btn-default cursor-pointer list-none">
+        <.icon name="hero-arrow-down-tray" class="mr-1 size-4" />
+        {gettext("Download")}
+        <.icon
+          name="hero-chevron-down-mini"
+          class="ml-1 size-4 transition-transform group-open:rotate-180"
+        />
+      </summary>
+      <div class="mt-2 w-full space-y-3 rounded-md border border-base-content/10 p-3 text-xs sm:w-96">
+        <p class="font-medium">{gettext("Download a file of this backup")}</p>
+        <div
+          :for={offer <- @offers}
+          data-role="download-artifact"
+          data-kind={offer.kind}
+          class="space-y-1"
+        >
+          <p class="flex flex-wrap items-center gap-2 text-base-content/70">
+            <span>{component_label(offer.kind)}</span>
+            <span
+              :if={offer.incomplete?}
+              data-role="download-incomplete"
+              class="rounded bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-warning-ink"
+            >
+              {gettext("Incomplete set")}
+            </span>
+          </p>
+          <div role="list" class="space-y-1">
+            <div :for={file <- offer.files} role="listitem">
+              <button
+                type="button"
+                phx-click="download"
+                phx-value-id={@run_id}
+                phx-value-file={file.name}
+                data-role="download-file"
+                data-file={file.name}
+                class="link inline-flex items-center gap-1 text-left font-mono text-primary-ink"
+              >
+                <.icon name="hero-arrow-down-tray-mini" class="size-3.5 shrink-0" />
+                {gettext("%{name} (%{size})", name: file.name, size: file.size)}
+              </button>
+            </div>
+            <div role="listitem">
+              <button
+                type="button"
+                phx-click="download"
+                phx-value-id={@run_id}
+                phx-value-file={offer.sidecar}
+                data-role="download-file"
+                data-file={offer.sidecar}
+                class="link inline-flex items-center gap-1 text-left font-mono text-primary-ink"
+              >
+                <.icon name="hero-check-badge-mini" class="size-3.5 shrink-0" />
+                {gettext("Checksum file")} · {offer.sidecar}
+              </button>
+            </div>
+          </div>
+          <p :if={offer.parts?} class="text-base-content/70">
+            {gettext("Parts download one at a time; at most 10 downloads a minute.")}
+          </p>
+        </div>
+      </div>
+    </details>
+    """
+  end
 end
