@@ -1,0 +1,279 @@
+<form phx-r method="post" action="/forms/golden" class="kiln-form space-y-4 rounded-lg border border-base-300 p-4">
+  
+  
+
+  <p class="text-sm text-base-content/70">Tell us about it</p>
+
+  
+  
+
+  
+  <input type="hidden" name="_kiln_rendered_at" value="tok">
+
+  
+  
+
+  
+  <div style="position:absolute;left:-9999px" aria-hidden="true">
+    <label>
+      Leave this field empty
+      <input type="text" name="website" tabindex="-1" autocomplete="off">
+    </label>
+  </div>
+
+  <div class="grid grid-cols-1 gap-4 sm:grid-cols-6">
+    <div class="sm:col-span-3">
+      <label phx-r for="kiln-form-golden-name" class="field-label mb-1 block text-sm font-medium">
+  Label name
+  <span class="text-error">
+    <span aria-hidden="true">*</span>
+    <span class="sr-only">required</span>
+  </span>
+</label>
+
+
+    <input phx-r id="kiln-form-golden-name" type="text" name="name" required placeholder="Your name" class="field-input w-full">
+
+
+
+
+    </div><div class="sm:col-span-3">
+      <label phx-r for="kiln-form-golden-email" class="field-label mb-1 block text-sm font-medium">
+  Label email
+  <span class="text-error">
+    <span aria-hidden="true">*</span>
+    <span class="sr-only">required</span>
+  </span>
+</label>
+
+
+    <input phx-r id="kiln-form-golden-email" type="email" name="email" required aria-describedby="kiln-form-golden-email-help" class="field-input w-full">
+
+
+
+<p phx-r id="kiln-form-golden-email-help" class="mt-1 text-xs text-base-content/70">
+  We reply here
+</p>
+    </div><div class="sm:col-span-6">
+      <label phx-r for="kiln-form-golden-message" class="field-label mb-1 block text-sm font-medium">
+  Label message
+  
+</label>
+
+
+    <textarea phx-r id="kiln-form-golden-message" name="message" class="field-input w-full">Hello</textarea>
+  
+
+
+
+    </div><div class="sm:col-span-2">
+      <label phx-r for="kiln-form-golden-count" class="field-label mb-1 block text-sm font-medium">
+  Label count
+  
+</label>
+
+
+    <input phx-r id="kiln-form-golden-count" type="number" name="count" class="field-input w-full">
+
+
+
+
+    </div><div class="sm:col-span-6">
+      
+
+
+    <label phx-r class="flex items-center gap-2 text-sm">
+      <input type="hidden" name="agree" value="false">
+      <input id="kiln-form-golden-agree" type="checkbox" name="agree" value="true">
+      <span class="font-medium">
+        Label agree
+        <span class="text-error">
+          <span aria-hidden="true">*</span>
+          <span class="sr-only">required</span>
+        </span>
+      </span>
+    </label>
+  
+
+
+
+    </div><div class="sm:col-span-6">
+      <label phx-r for="kiln-form-golden-day" class="field-label mb-1 block text-sm font-medium">
+  Label day
+  
+</label>
+
+
+    <input phx-r id="kiln-form-golden-day" type="date" name="day" class="field-input w-full">
+
+
+
+
+    </div><div class="sm:col-span-6">
+      <label phx-r for="kiln-form-golden-topic" class="field-label mb-1 block text-sm font-medium">
+  Label topic
+  <span class="text-error">
+    <span aria-hidden="true">*</span>
+    <span class="sr-only">required</span>
+  </span>
+</label>
+
+
+    <select phx-r id="kiln-form-golden-topic" name="topic" required class="field-select w-full">
+      <option value="">Select…</option>
+      <option value="Sales">
+        Sales
+      </option><option value="Support">
+        Support
+      </option>
+    </select>
+  
+
+
+
+    </div><div class="sm:col-span-6">
+      
+
+
+    <fieldset phx-r id="kiln-form-golden-size" class="min-w-0 border-0 p-0">
+      <legend phx-r class="field-label mb-1 block text-sm font-medium">
+  Label size
+  <span class="text-error">
+    <span aria-hidden="true">*</span>
+    <span class="sr-only">required</span>
+  </span>
+</legend>
+      <div class="space-y-1">
+        <label class="flex items-center gap-2 text-sm">
+          <input id="kiln-form-golden-size-0" type="radio" name="size" value="S" required class="scroll-mt-12">
+          <span>S</span>
+        </label><label class="flex items-center gap-2 text-sm">
+          <input id="kiln-form-golden-size-1" type="radio" name="size" value="M" required class="">
+          <span>M</span>
+        </label>
+      </div>
+    </fieldset>
+  
+
+
+
+    </div><div class="sm:col-span-6">
+      
+
+
+    
+    <fieldset phx-r id="kiln-form-golden-colours" aria-required="true" class="min-w-0 border-0 p-0">
+      <legend phx-r class="field-label mb-1 block text-sm font-medium">
+  Label colours
+  <span class="text-error">
+    <span aria-hidden="true">*</span>
+    <span class="sr-only">required</span>
+  </span>
+</legend>
+      <div class="space-y-1">
+        <label class="flex items-center gap-2 text-sm">
+          <input id="kiln-form-golden-colours-0" type="checkbox" name="colours[]" value="Red" class="scroll-mt-12">
+          <span>Red</span>
+        </label><label class="flex items-center gap-2 text-sm">
+          <input id="kiln-form-golden-colours-1" type="checkbox" name="colours[]" value="Blue" class="">
+          <span>Blue</span>
+        </label>
+      </div>
+    </fieldset>
+  
+
+
+
+    </div><div class="sm:col-span-6">
+      <label phx-r for="kiln-form-golden-phone" class="field-label mb-1 block text-sm font-medium">
+  Label phone
+  
+</label>
+
+
+    <input phx-r id="kiln-form-golden-phone" type="tel" name="phone" class="field-input w-full">
+
+
+
+
+    </div><div class="sm:col-span-6">
+      <label phx-r for="kiln-form-golden-site" class="field-label mb-1 block text-sm font-medium">
+  Label site
+  
+</label>
+
+
+    <input phx-r id="kiln-form-golden-site" type="url" name="site" class="field-input w-full">
+
+
+
+
+    </div><div class="sm:col-span-6 hidden">
+      
+
+
+    <input phx-r id="kiln-form-golden-utm" type="hidden" name="utm" value="spring">
+  
+
+
+
+    </div><div class="sm:col-span-6">
+      <label phx-r for="kiln-form-golden-amount" class="field-label mb-1 block text-sm font-medium">
+  Label amount
+  
+</label>
+
+
+    <input phx-r id="kiln-form-golden-amount" type="number" name="amount" min="1.0" max="10.0" step="0.5" class="field-input w-full">
+  
+
+
+
+    </div><div class="sm:col-span-6">
+      
+
+
+    <fieldset phx-r id="kiln-form-golden-stars" class="min-w-0 border-0 p-0">
+      <legend phx-r class="field-label mb-1 block text-sm font-medium">
+  Label stars
+  <span class="text-error">
+    <span aria-hidden="true">*</span>
+    <span class="sr-only">required</span>
+  </span>
+</legend>
+      <div class="flex flex-wrap gap-3">
+        <label class="flex items-center gap-1 text-sm">
+          <input id="kiln-form-golden-stars-1" type="radio" name="stars" value="1" required class="scroll-mt-12">
+          <span aria-hidden="true">1 ★</span>
+          <span class="sr-only">
+            1 of 3
+          </span>
+        </label><label class="flex items-center gap-1 text-sm">
+          <input id="kiln-form-golden-stars-2" type="radio" name="stars" value="2" required class="">
+          <span aria-hidden="true">2 ★</span>
+          <span class="sr-only">
+            2 of 3
+          </span>
+        </label><label class="flex items-center gap-1 text-sm">
+          <input id="kiln-form-golden-stars-3" type="radio" name="stars" value="3" required class="">
+          <span aria-hidden="true">3 ★</span>
+          <span class="sr-only">
+            3 of 3
+          </span>
+        </label>
+      </div>
+    </fieldset>
+  
+
+
+
+    </div>
+  </div>
+
+  
+  
+
+  <button type="submit" class="btn btn-primary">
+    Submit
+  </button>
+</form>

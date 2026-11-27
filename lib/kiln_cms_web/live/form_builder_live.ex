@@ -7,7 +7,10 @@ defmodule KilnCMSWeb.FormBuilderLive do
   (see `docs/form-builder-plan.md`, phase 1).
 
   Fields are added from the palette, reordered by drag (the shared `Sortable`
-  hook persists `position`), and edited live via the options panel. Form-level
+  hook persists `position`), and edited live via the options panel, which
+  also builds a field's conditional logic (#2262, `KilnCMSWeb.FormConditionsBuilder`).
+  A field whose type this release doesn't know (a newer release's) is left
+  off the canvas; its name stays taken. Form-level
   settings live in tabs alongside the canvas: General, Notifications,
   Confirmations, Embed, and Entries (recent submissions).
   """
@@ -18,6 +21,8 @@ defmodule KilnCMSWeb.FormBuilderLive do
   alias KilnCMS.Forms.Autoresponder
   alias KilnCMS.Forms.EmbedPolicy
   alias KilnCMS.Forms.FieldOrder
+  alias KilnCMS.Forms.Logic
+  alias KilnCMSWeb.FormConditionsBuilder
 
   import KilnCMSWeb.BlockComponents, only: [public_form_field: 1, field_width_class: 1]
 
@@ -132,7 +137,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
   # --- fields ------------------------------------------------------------------
 
   def handle_event("add_field", %{"type" => type}, socket) when is_binary(type) do
-    fields = socket.assigns.fields
+    fields = socket.assigns.all_fields
     entry = Enum.find(palette(), &(Atom.to_string(&1.type) == type))
 
     if entry do
@@ -181,12 +186,45 @@ defmodule KilnCMSWeb.FormBuilderLive do
     end
   end
 
+  # --- conditional logic (#2262) -------------------------------------------------
+
+  # Each edit saves at once, like the panel's other inputs, as the acting
+  # admin: `FormField` writes are admin-only, so the policy decides.
+  def handle_event("add_condition", %{"id" => id}, socket) when is_binary(id) do
+    with_condition_field(socket, id, fn state, targets ->
+      FormConditionsBuilder.add(state, targets)
+    end)
+  end
+
+  def handle_event("update_condition", %{"field_id" => id} = params, socket) when is_binary(id) do
+    with_condition_field(socket, id, fn state, targets ->
+      FormConditionsBuilder.apply_params(state, params["condition"], targets)
+    end)
+  end
+
+  def handle_event("remove_condition_row", %{"id" => id, "index" => index}, socket)
+      when is_binary(id) and is_binary(index) do
+    case Integer.parse(index) do
+      {index, ""} ->
+        with_condition_field(socket, id, fn state, _targets ->
+          FormConditionsBuilder.remove(state, index)
+        end)
+
+      _other ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("clear_condition", %{"id" => id}, socket) when is_binary(id) do
+    with_condition_field(socket, id, fn _state, _targets -> FormConditionsBuilder.new(nil) end)
+  end
+
   def handle_event("duplicate_field", %{"id" => id}, socket) when is_binary(id) do
     fields = socket.assigns.fields
 
     case Enum.find(fields, &(&1.id == id)) do
       nil -> {:noreply, socket}
-      field -> copy_field(socket, field, fields)
+      field -> copy_field(socket, field, fields, socket.assigns.all_fields)
     end
   end
 
@@ -474,13 +512,13 @@ defmodule KilnCMSWeb.FormBuilderLive do
 
   # --- data --------------------------------------------------------------------
 
-  defp copy_field(socket, field, fields) do
+  defp copy_field(socket, field, fields, all_fields) do
     attrs =
       field
       |> KilnCMS.Forms.copyable_field_attrs()
       |> Map.merge(%{
         form_id: field.form_id,
-        name: KilnCMS.Forms.unique_field_name(field.name, fields),
+        name: KilnCMS.Forms.unique_field_name(field.name, all_fields),
         position: field.position
       })
 
@@ -506,18 +544,71 @@ defmodule KilnCMSWeb.FormBuilderLive do
     end
   end
 
+  # The selected field `id`, its condition state changed by `fun`, saved.
+  defp with_condition_field(socket, id, fun) do
+    case Enum.find(socket.assigns.fields, &(&1.id == id)) do
+      %FormField{} = field when id == socket.assigns.selected_id ->
+        targets = condition_targets(field, socket.assigns.fields)
+        state = fun.(socket.assigns.condition_state, targets)
+        {:noreply, save_condition(socket, field, state, targets)}
+
+      _unknown_or_not_selected ->
+        {:noreply, socket}
+    end
+  end
+
+  defp save_condition(socket, field, state, targets) do
+    case FormConditionsBuilder.condition_params(state, targets) do
+      :keep -> assign(socket, :condition_state, state)
+      condition -> persist_condition(socket, field, state, condition)
+    end
+  end
+
+  defp persist_condition(socket, field, state, condition) do
+    case CMS.update_form_field(field, %{condition: condition}, actor_opts(socket)) do
+      {:ok, _updated} ->
+        socket
+        |> reload_fields()
+        |> assign_condition(field.id)
+        |> assign(:field_errors, Map.delete(socket.assigns.field_errors, "condition"))
+        |> assign(:condition_status, gettext("Saved."))
+
+      {:error, error} ->
+        {slotted, unslotted} = Map.split(input_errors(error), ["condition"])
+
+        socket =
+          socket
+          |> assign(:condition_state, state)
+          |> assign(:condition_status, nil)
+          |> assign(:field_errors, Map.merge(socket.assigns.field_errors, slotted))
+
+        if slotted == %{} or unslotted != %{},
+          do: put_flash(socket, :error, error_message(error)),
+          else: socket
+    end
+  end
+
+  # The fields a condition on `field` may name: the known ones before it in
+  # form order (#2262).
+  defp condition_targets(field, fields) do
+    fields |> Logic.sort() |> Enum.take_while(&(&1.id != field.id))
+  end
+
   defp insert_after(ids, target, new_id),
     do: Enum.flat_map(ids, &if(&1 == target, do: [&1, new_id], else: [&1]))
 
   defp actor_opts(socket),
     do: [actor: socket.assigns.actor, tenant: socket.assigns.current_org]
 
+  # `all_fields` keeps every row, a type this release doesn't know included,
+  # so a new or copied field never takes its name or position; `fields` is
+  # what the builder shows and edits (#2262).
   defp reload_fields(socket) do
-    assign(
-      socket,
-      :fields,
-      CMS.form_fields_for!(socket.assigns.form.id, actor_opts(socket))
-    )
+    all = CMS.form_fields_for!(socket.assigns.form.id, actor_opts(socket))
+
+    socket
+    |> assign(:all_fields, all)
+    |> assign(:fields, KilnCMS.Forms.known_fields(all))
   end
 
   defp reload_submissions(socket) do
@@ -557,6 +648,17 @@ defmodule KilnCMSWeb.FormBuilderLive do
           ash_error_message(error,
             forbidden: gettext("You don't have permission to edit form fields.")
           )
+      )
+    )
+  end
+
+  defp refuse_order(socket, {:conditions, field, target}) do
+    socket
+    |> update(:canvas_rev, &(&1 + 1))
+    |> put_flash(
+      :error,
+      gettext("Couldn't save the new order, so nothing was moved: %{reason}",
+        reason: KilnCMS.CMS.Validations.FormFieldCondition.order_message(field, target)
       )
     )
   end
@@ -621,7 +723,11 @@ defmodule KilnCMSWeb.FormBuilderLive do
       if no_placeholder?(type), do: Map.put(params, "placeholder", nil), else: params
     end)
     |> then(fn params ->
-      if type == :hidden, do: Map.put(params, "required", "false"), else: params
+      # A hidden field takes no condition (#2262): it goes with the retype,
+      # rather than refusing it over a rule the admin isn't editing.
+      if type == :hidden,
+        do: Map.merge(params, %{"required" => "false", "condition" => nil}),
+        else: params
     end)
   end
 
@@ -648,10 +754,20 @@ defmodule KilnCMSWeb.FormBuilderLive do
     # for the form's entries and its autoresponder (one line each).
     |> assign(:field_status, nil)
     |> assign(:rename_notice, [])
+    |> assign_condition(id)
+  end
+
+  # The conditional-logic rows for field `id` (#2262), from what is stored.
+  defp assign_condition(socket, id) do
+    field = id && Enum.find(socket.assigns[:fields] || [], &(&1.id == id))
+
+    socket
+    |> assign(:condition_state, FormConditionsBuilder.new(field))
+    |> assign(:condition_status, nil)
   end
 
   # The inputs that render their own errors (`<.setting_errors>` below).
-  @error_slots ~w(label name field_type options placeholder default_value help_text min_value max_value step)
+  @error_slots ~w(label name field_type options placeholder default_value help_text min_value max_value step condition)
 
   defp edited_params(params, ["field", key]) when is_map_key(@field_keys, key),
     do: Map.take(params, [key])
@@ -673,6 +789,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
         |> assign(:field_errors, drop_keys(socket.assigns.field_errors, cleared))
         |> note_saved(field, updated, keys)
         |> reload_fields()
+        |> then(&if("field_type" in keys, do: assign_condition(&1, field.id), else: &1))
 
       {:error, error} ->
         {slotted, unslotted} = Map.split(input_errors(error), @error_slots)
@@ -717,7 +834,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
       updated.name != field.name ->
         socket
         |> assign(:field_status, gettext("Saved."))
-        |> note_rename(field.name, updated.name)
+        |> note_rename(field.name, updated.name, updated)
 
       true ->
         assign(socket, :field_status, gettext("Saved."))
@@ -730,14 +847,15 @@ defmodule KilnCMSWeb.FormBuilderLive do
   # template (#2343), and a Confirmations tab still holding the old text would
   # show — and on its next save write back — a token for a field that no
   # longer exists.
-  defp note_rename(socket, old_name, new_name) do
+  defp note_rename(socket, old_name, new_name, updated) do
     opts = Keyword.put(actor_opts(socket), :load, [:submission_count])
 
     case CMS.get_form(socket.assigns.form.id, opts) do
       {:ok, form} ->
         notices = [
           entries_notice(form, old_name),
-          autoresponder_notice(socket.assigns.form, form, old_name, new_name)
+          autoresponder_notice(socket.assigns.form, form, old_name, new_name),
+          conditions_notice(updated, new_name)
         ]
 
         socket
@@ -759,6 +877,21 @@ defmodule KilnCMSWeb.FormBuilderLive do
   end
 
   defp entries_notice(_form, _old_name), do: nil
+
+  # The conditions a rename carried along (#2262,
+  # `Changes.RewriteConditionReferences`), by the labels of their fields.
+  defp conditions_notice(updated, new_name) do
+    case updated.__metadata__[:condition_rewrites] do
+      [_ | _] = labels ->
+        gettext("Conditions on %{fields} now use %{name}.",
+          fields: Enum.map_join(labels, ", ", &"“#{&1}”"),
+          name: new_name
+        )
+
+      _none ->
+        nil
+    end
+  end
 
   # Whether or not the form has entries: told by the template itself changing.
   defp autoresponder_notice(before, form, old_name, new_name) do
@@ -897,6 +1030,260 @@ defmodule KilnCMSWeb.FormBuilderLive do
     </div>
     """
   end
+
+  # A conditional field's canvas card says so (#2262), and a rule that can't
+  # apply (it names a field that is gone, or one now after it) is flagged:
+  # the public form shows that field always.
+  attr :field, :map, required: true
+  attr :fields, :list, required: true
+
+  defp condition_badge(assigns) do
+    stored = Logic.stored(assigns.field)
+    targets = condition_targets(assigns.field, assigns.fields)
+    earlier = MapSet.new(targets, & &1.name)
+
+    assigns =
+      assign(assigns,
+        stored: stored,
+        applies?: stored != nil and Logic.effective(assigns.field, earlier) != nil
+      )
+
+    ~H"""
+    <p
+      :if={@applies?}
+      id={"canvas-field-condition-#{@field.id}"}
+      class="mt-1 flex items-center gap-1 text-xs font-medium text-base-content/70"
+    >
+      <.icon name="hero-arrows-right-left" class="size-3.5 shrink-0" />
+      {if @stored.action == :hide, do: gettext("Hidden when…"), else: gettext("Shown when…")}
+    </p>
+    <p
+      :if={@stored && !@applies?}
+      id={"canvas-field-condition-#{@field.id}"}
+      class="mt-1 flex items-center gap-1 text-xs font-medium text-warning-ink"
+    >
+      <.icon name="hero-exclamation-triangle" class="size-3.5 shrink-0" />
+      {gettext("Condition names a removed field")}
+    </p>
+    """
+  end
+
+  # The field settings' "Conditional logic" section (#2262): show or hide the
+  # field, all/any, and one row per test. Its own form, so its events never
+  # reach `update_field`. Rows name only `targets`, the fields before it.
+  attr :field, :map, required: true
+  attr :targets, :list, required: true
+  attr :state, :map, required: true
+  attr :errors, :map, required: true
+  attr :status, :string, default: nil
+
+  defp condition_settings(assigns) do
+    assigns =
+      assign(assigns,
+        dangling?: FormConditionsBuilder.dangling?(assigns.field, assigns.targets),
+        present?: FormConditionsBuilder.present?(assigns.state)
+      )
+
+    ~H"""
+    <section
+      id={"field-condition-#{@field.id}"}
+      aria-labelledby="fs-condition-title"
+      class="space-y-2 border-t border-base-content/10 pt-3 text-sm"
+    >
+      <h3 id="fs-condition-title" class="font-medium">{gettext("Conditional logic")}</h3>
+
+      <p :if={!@present? and @targets == []} class="text-xs text-base-content/70">
+        {gettext("Conditions use the answers to earlier fields. Add a field above this one first.")}
+      </p>
+
+      <button
+        :if={!@present? and @targets != []}
+        type="button"
+        phx-click="add_condition"
+        phx-value-id={@field.id}
+        class="btn btn-sm btn-default"
+      >
+        <.icon name="hero-plus" class="size-4" />
+        {gettext("Add a condition")}
+      </button>
+
+      <div :if={@state.nested? or @dangling?} id="fs-condition-note" class="space-y-2">
+        <p class="flex items-start gap-1 text-xs text-warning-ink">
+          <.icon name="hero-exclamation-triangle" class="mt-px size-4 shrink-0" />
+          {if @dangling?,
+            do:
+              gettext(
+                "This condition names a field that isn't before this one any more, so the field is always shown."
+              ),
+            else: gettext("This condition was set up outside the builder and can't be edited here.")}
+        </p>
+      </div>
+
+      <form
+        :if={@state.rows != [] and !@state.nested? and !@dangling?}
+        id={"field-condition-form-#{@field.id}"}
+        phx-change="update_condition"
+        class="space-y-2"
+      >
+        <input type="hidden" name="field_id" value={@field.id} />
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label for="fs-condition-action" class="text-xs font-medium">{gettext("Action")}</label>
+            <select id="fs-condition-action" name="condition[action]" class="field-select mt-1 w-full">
+              <option value="show" selected={@state.action == "show"}>
+                {gettext("Show this field")}
+              </option>
+              <option value="hide" selected={@state.action == "hide"}>
+                {gettext("Hide this field")}
+              </option>
+            </select>
+          </div>
+          <div>
+            <label for="fs-condition-mode" class="text-xs font-medium">{gettext("When")}</label>
+            <select id="fs-condition-mode" name="condition[mode]" class="field-select mt-1 w-full">
+              <option value="all" selected={@state.mode == "all"}>
+                {gettext("all of these match")}
+              </option>
+              <option value="any" selected={@state.mode == "any"}>
+                {gettext("any of these match")}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <fieldset
+          :for={{row, index} <- Enum.with_index(@state.rows)}
+          id={"fs-condition-row-#{index}"}
+          class="space-y-1 rounded border border-base-300 p-2"
+        >
+          <legend class="sr-only">{gettext("Condition %{n}", n: index + 1)}</legend>
+          <% target = Enum.find(@targets, &(&1.name == row["field"])) %>
+          <label for={"fs-condition-field-#{index}"} class="sr-only">{gettext("Field")}</label>
+          <select
+            id={"fs-condition-field-#{index}"}
+            name={"condition[rows][#{index}][field]"}
+            class="field-select w-full"
+          >
+            <option :for={t <- @targets} value={t.name} selected={t.name == row["field"]}>
+              {t.label}
+            </option>
+          </select>
+          <div class="flex items-center gap-2">
+            <label for={"fs-condition-op-#{index}"} class="sr-only">{gettext("Test")}</label>
+            <select
+              id={"fs-condition-op-#{index}"}
+              name={"condition[rows][#{index}][op]"}
+              class="field-select min-w-0 flex-1"
+            >
+              <option
+                :for={op <- FormConditionsBuilder.ops_for(target && target.field_type)}
+                value={op}
+                selected={op == row["op"]}
+              >
+                {op_label(op)}
+              </option>
+            </select>
+            <button
+              type="button"
+              phx-click="remove_condition_row"
+              phx-value-id={@field.id}
+              phx-value-index={index}
+              aria-label={gettext("Remove condition %{n}", n: index + 1)}
+              class="p-1 text-base-content/70 hover:text-error"
+            >
+              <.icon name="hero-x-mark" class="size-4" />
+            </button>
+          </div>
+          <.condition_value
+            :if={row["op"] not in ["empty", "not_empty"]}
+            index={index}
+            row={row}
+            target={target}
+          />
+        </fieldset>
+      </form>
+
+      <.setting_errors key="condition" errors={@errors} />
+
+      <div :if={@present?} class="flex flex-wrap items-center gap-2">
+        <button
+          :if={!@state.nested? and !@dangling?}
+          type="button"
+          phx-click="add_condition"
+          phx-value-id={@field.id}
+          class="btn btn-sm btn-default"
+        >
+          <.icon name="hero-plus" class="size-4" />
+          {gettext("Add another")}
+        </button>
+        <button
+          type="button"
+          phx-click="clear_condition"
+          phx-value-id={@field.id}
+          class="btn btn-sm btn-default"
+        >
+          {gettext("Remove condition")}
+        </button>
+      </div>
+
+      <p id="fs-condition-status" role="status" aria-live="polite" class="text-xs text-success-ink">
+        {@status}
+      </p>
+    </section>
+    """
+  end
+
+  # A condition row's value: the target's options for a choice field,
+  # Checked/Unchecked for a checkbox, else free text.
+  attr :index, :integer, required: true
+  attr :row, :map, required: true
+  attr :target, :map, default: nil
+
+  defp condition_value(assigns) do
+    ~H"""
+    <label for={"fs-condition-value-#{@index}"} class="sr-only">{gettext("Value")}</label>
+    <%= cond do %>
+      <% @target && @target.field_type == :boolean -> %>
+        <select
+          id={"fs-condition-value-#{@index}"}
+          name={"condition[rows][#{@index}][value]"}
+          class="field-select w-full"
+        >
+          <option value="true" selected={@row["value"] == "true"}>{gettext("Checked")}</option>
+          <option value="false" selected={@row["value"] == "false"}>{gettext("Unchecked")}</option>
+        </select>
+      <% @target && @target.field_type in [:select, :radio, :checkboxes] and
+           @row["op"] in ["eq", "neq"] -> %>
+        <select
+          id={"fs-condition-value-#{@index}"}
+          name={"condition[rows][#{@index}][value]"}
+          class="field-select w-full"
+        >
+          <option :for={opt <- @target.options} value={opt} selected={opt == @row["value"]}>
+            {opt}
+          </option>
+        </select>
+      <% true -> %>
+        <input
+          id={"fs-condition-value-#{@index}"}
+          name={"condition[rows][#{@index}][value]"}
+          value={@row["value"]}
+          type={if @target && @target.field_type == :date, do: "date", else: "text"}
+          phx-debounce="300"
+          class="field-input w-full"
+        />
+    <% end %>
+    """
+  end
+
+  defp op_label("eq"), do: gettext("is")
+  defp op_label("neq"), do: gettext("is not")
+  defp op_label("empty"), do: gettext("is empty")
+  defp op_label("not_empty"), do: gettext("is not empty")
+  defp op_label("contains"), do: gettext("contains")
+  defp op_label("not_contains"), do: gettext("doesn't contain")
+  defp op_label("gt"), do: gettext("is greater than")
+  defp op_label("lt"), do: gettext("is less than")
 
   # --- render ------------------------------------------------------------------
 
@@ -1093,6 +1480,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     <.icon name="hero-exclamation-triangle" class="size-3.5 shrink-0" />
                     {gettext("Reserved name")}
                   </p>
+                  <.condition_badge field={field} fields={@fields} />
                 </div>
               </div>
 
@@ -1378,6 +1766,15 @@ defmodule KilnCMSWeb.FormBuilderLive do
                     </p>
                   </div>
                 </form>
+
+                <.condition_settings
+                  :if={Logic.conditionable?(selected.field_type)}
+                  field={selected}
+                  targets={condition_targets(selected, @fields)}
+                  state={@condition_state}
+                  errors={@field_errors}
+                  status={@condition_status}
+                />
               </div>
             </aside>
           </div>
@@ -1559,6 +1956,11 @@ defmodule KilnCMSWeb.FormBuilderLive do
               <p class="text-xs text-base-content/60">
                 {gettext("Available tokens: %{tokens}",
                   tokens: autoresponder_token_hint(@form, @fields)
+                )}
+              </p>
+              <p :if={Logic.conditional?(@fields)} class="text-xs text-base-content/70">
+                {gettext(
+                  "A field its condition hid leaves its token blank. The confirmation goes to the first email field that was shown and filled in."
                 )}
               </p>
 

@@ -465,7 +465,53 @@ export interface FormField {
   max?: number | null;
   /** A `number`'s step; `null` otherwise. */
   step?: number | null;
+  /**
+   * When the field is shown: `null` for always (absent from older servers).
+   * Evaluate the fields in order; a field hidden by its condition has no
+   * value for the rules after it. The server applies the same rules on
+   * submit: a hidden field is never required, and a value sent for it is
+   * dropped (`FormSubmitResult.discarded`).
+   */
+  condition?: FormCondition | null;
 }
+
+/**
+ * A field's condition: `"show"` the field while `rule` holds, or `"hide"` it
+ * while `rule` holds. A rule names only earlier fields. One the server can't
+ * apply is sent as `null`, so the field is always shown.
+ */
+export interface FormCondition {
+  action: "show" | "hide";
+  rule: FormRule;
+}
+
+/** The operators a rule leaf may use. The set only grows. */
+export type FormRuleOp =
+  | "eq"
+  | "neq"
+  | "in"
+  | "empty"
+  | "not_empty"
+  | "gt"
+  | "lt"
+  | "contains"
+  | "not_contains"
+  | "starts_with"
+  | "ends_with";
+
+/**
+ * A condition's rule: a test of one earlier field's value (`value` absent
+ * for `empty` / `not_empty`, a list for `in`), or every (`all`) or any
+ * (`any`) of several rules.
+ */
+export type FormRule =
+  | {
+      field: string;
+      op: FormRuleOp;
+      value?: string | number | boolean | Array<string | number | boolean>;
+    }
+  | { all: FormRule[] }
+  | { any: FormRule[] };
 
 /**
  * One value in a form submission, or in a `form.submitted` webhook's `data`:
@@ -545,6 +591,12 @@ export interface FormSubmitResult {
    * provider refused is a `KilnValidationError` naming `_kiln_challenge`.
    */
   challenge?: "verified" | "held";
+  /**
+   * The fields whose values were sent but dropped because their condition
+   * hid them, in form order. Present only when there are any (and absent
+   * from older servers).
+   */
+  discarded?: string[];
 }
 
 // ── sync (delta) API ────────────────────────────────────────────────────────

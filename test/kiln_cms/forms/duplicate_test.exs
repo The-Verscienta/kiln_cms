@@ -198,4 +198,70 @@ defmodule KilnCMS.Forms.DuplicateTest do
     assert copies(form) == []
     assert field_count() == before
   end
+
+  describe "conditions (#2262)" do
+    test "each field's condition is copied" do
+      admin = user(:admin)
+      form = form!(admin)
+      field!(form, admin, "topic", 0)
+      details = field!(form, admin, "details", 1)
+
+      rule = %{"field" => "topic", "op" => "eq", "value" => "Other"}
+      CMS.update_form_field!(details, %{condition: %{action: :hide, rule: rule}}, actor: admin)
+
+      assert {:ok, %{copy: copy}} = Duplicate.run(form, actor: admin)
+
+      copied =
+        copy.id |> CMS.form_fields_for!(authorize?: false) |> Enum.find(&(&1.name == "details"))
+
+      assert copied.condition.action == :hide
+      assert copied.condition.rule == rule
+    end
+
+    test "a reserved-name rename is carried into the rules that name it, even at a tied position" do
+      admin = user(:admin)
+      form = form!(admin)
+      # Both at position 0, ordered by name: `website` before `website_1`,
+      # which names it. The copy's `website_2` sorts after `website_1`, so
+      # the copy is numbered in the original's order instead.
+      legacy_field!(form, %{name: "website", position: 0})
+
+      legacy_field!(form, %{
+        name: "website_1",
+        position: 0,
+        condition: %{action: :show, rule: %{"field" => "website", "op" => "not_empty"}}
+      })
+
+      assert {:ok, %{copy: copy, renames: [{"website", "website_2"}]}} =
+               Duplicate.run(form, actor: admin)
+
+      assert field_names(copy) == ["website_2", "website_1"]
+
+      dependent =
+        copy.id |> CMS.form_fields_for!(authorize?: false) |> Enum.find(&(&1.name == "website_1"))
+
+      assert dependent.condition.rule == %{"field" => "website_2", "op" => "not_empty"}
+    end
+
+    test "a condition naming a field the copy leaves out is not copied, and the rest commits" do
+      admin = user(:admin)
+      form = form!(admin)
+      field!(form, admin, "email", 0)
+      newer = field!(form, admin, "signature", 1)
+      details = field!(form, admin, "details", 2)
+
+      rule = %{"field" => "signature", "op" => "not_empty"}
+      CMS.update_form_field!(details, %{condition: %{action: :show, rule: rule}}, actor: admin)
+      # A newer release's type: the copy can't carry the field the rule names.
+      KilnCMS.NewerReleaseRows.form_field_type!(newer.id)
+
+      assert {:ok, %{copy: copy}} = Duplicate.run(form, actor: admin)
+      assert field_names(copy) == ["email", "details"]
+
+      copied =
+        copy.id |> CMS.form_fields_for!(authorize?: false) |> Enum.find(&(&1.name == "details"))
+
+      assert copied.condition == nil
+    end
+  end
 end

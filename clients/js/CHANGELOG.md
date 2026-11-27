@@ -148,6 +148,18 @@ invocation`, so every request failed as a `KilnNetworkError` unless a
   `retryAfter`. The route comes with kiln_cms#3167, so `site()` needs a
   server that includes it.
 
+- **`FormField.condition` (`FormCondition` / `FormRule` types) and
+  `FormSubmitResult.discarded` (kiln_cms#2262).** Newer servers send each
+  form field's show/hide rule, and list the fields whose values were dropped
+  because their condition hid them. `condition` is `null` for a field that
+  is always shown, or `{ action: "show" | "hide", rule }`; evaluate the
+  fields in order, and treat a field its condition hides as having no value
+  for the rules after it. `submitForm()` still resolves `ok: true` when the
+  server drops a value sent for a hidden field, so a front end that doesn't
+  evaluate conditions loses that value without an error; `discarded` names
+  those fields, and is absent when there are none or from an older server.
+  Types only: no runtime change.
+
 ## 0.5.0
 
 - **`kiln-types --check <file>` (kiln_cms#2274):** fetches the live schema (or
