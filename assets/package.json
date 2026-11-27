@@ -16,6 +16,6 @@
     "yjs": "^13.6.31"
   },
   "scripts": {
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/conditions.test.mjs test/challenge.test.mjs test/passkeys.test.mjs test/reveal_section.test.mjs test/search_shortcut.test.mjs test/safe_storage.test.mjs test/collab_join.test.mjs test/backup_download.test.mjs"
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/conditions.test.mjs test/form_logic.test.mjs test/challenge.test.mjs test/passkeys.test.mjs test/reveal_section.test.mjs test/search_shortcut.test.mjs test/safe_storage.test.mjs test/collab_join.test.mjs test/backup_download.test.mjs"
   }
 }

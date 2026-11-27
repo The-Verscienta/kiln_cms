@@ -44,6 +44,8 @@ defmodule KilnCMS.BotClassTest do
     {"UC Browser",
      "UCWEB/2.0 (MIDP-2.0; U; Adr 9.0.0; en-US; SM-G950F) U2/1.0.0 UCBrowser/12.10"},
     {"IE8", "Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.1; Trident/4.0)"},
+    {"IE10, compatible; with no bot token",
+     "Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; Trident/6.0)"},
     {"bare Mozilla/5.0", "Mozilla/5.0"},
     {"iOS AppleCoreMedia",
      "AppleCoreMedia/1.0.0.21E236 (iPhone; U; CPU OS 17_4 like Mac OS X; en_us)"},
@@ -72,6 +74,11 @@ defmodule KilnCMS.BotClassTest do
     {"YandexBot", "Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)"},
     {"Applebot",
      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.1.1 Safari/605.1.15 (Applebot/0.1; +http://www.apple.com/go/applebot)"},
+    {"Storebot-Google (Google Shopping), browser-shaped",
+     "Mozilla/5.0 (X11; Linux x86_64; Storebot-Google/1.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"},
+    {"SeznamBot",
+     "Mozilla/5.0 (compatible; SeznamBot/4.0; +https://o-seznam.cz/napoveda/vyhledavani/en/seznambot-crawler/)"},
+    {"MojeekBot", "Mozilla/5.0 (compatible; MojeekBot/0.11; +https://www.mojeek.com/bot.html)"},
     # Pinned, not endorsed: a named crawler outranks a library, so this is how
     # cheaply the class is claimed. Spoofable by design (see the moduledoc).
     {"curl claiming Googlebot", "curl Googlebot"}
@@ -92,6 +99,8 @@ defmodule KilnCMS.BotClassTest do
      "Mozilla/5.0 (Linux; Android 5.0) AppleWebKit/537.36 (KHTML, like Gecko) Mobile Safari/537.36 (compatible; Bytespider; spider-feedback@bytedance.com)"},
     {"Amazonbot",
      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15 (Amazonbot/0.1; +https://developer.amazon.com/support/amazonbot)"},
+    {"Google-CloudVertexBot",
+     "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Google-CloudVertexBot; +https://cloud.google.com/enterprise-search)"},
     {"meta-externalagent",
      "meta-externalagent/1.1 (+https://developers.facebook.com/docs/sharing/webmasters/crawler)"}
   ]
@@ -120,6 +129,29 @@ defmodule KilnCMS.BotClassTest do
     {"a generic crawler token",
      "Mozilla/5.0 (compatible; ExampleCrawler/1.0; +https://example.com)"},
     {"a generic token at the end", "SomeSpider"},
+    {"GoogleOther, browser-shaped",
+     "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36 (compatible; GoogleOther)"},
+    {"GoogleOther, bare", "GoogleOther"},
+    {"GoogleOther-Image", "GoogleOther-Image/1.0"},
+    {"AdsBot-Google", "AdsBot-Google (+http://www.google.com/adsbot.html)"},
+    {"AdsBot-Google-Mobile, browser-shaped",
+     "Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/99.0.4844.84 Mobile Safari/537.36 (compatible; AdsBot-Google-Mobile; +http://www.google.com/mobile/adsbot.html)"},
+    {"Yeti (Naver)", "Mozilla/5.0 (compatible; Yeti/1.1; +https://naver.me/spd)"},
+    {"Yeti (Naver), browser-shaped",
+     "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 (compatible; Yeti/1.1; +https://naver.me/spd)"},
+    # Named until Qwant's own documentation confirms its verification domain.
+    {"Qwantbot", "Mozilla/5.0 (compatible; Qwantbot/2.1w_1; +https://help.qwant.com/bot/)"},
+    {"Qwantbot-news",
+     "Mozilla/5.0 (compatible; Qwantbot-news/2.1; +https://help.qwant.com/bot/)"},
+    {"Sogou web spider",
+     "Sogou web spider/4.0(+http://www.sogou.com/docs/help/webmasters.htm#07)"},
+    {"Sogou inst spider",
+     "Sogou inst spider/4.0(+http://www.sogou.com/docs/help/webmasters.htm#07)"},
+    # Stage 5: a bot token after `compatible;` inside a browser-shaped string.
+    {"an unlisted bot, browser-shaped, compatible;",
+     "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 (compatible; ExampleBot/1.0; +https://example.com/bot)"},
+    {"an unlisted bot with a suffix, browser-shaped, compatible;",
+     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko; compatible; ExampleBot-Mobile; +https://example.com/bot) Chrome/120.0.0.0 Safari/537.36"},
     {"GPTBot and Googlebot at once", "GPTBot/1.0 Googlebot/2.1"}
   ]
 
@@ -173,6 +205,12 @@ defmodule KilnCMS.BotClassTest do
       {"Baiduspider", "Mozilla/5.0 (compatible; Baiduspider/2.0)", :baidu},
       {"YandexBot", "Mozilla/5.0 (compatible; YandexBot/3.0; +http://yandex.com/bots)", :yandex},
       {"Applebot", "Mozilla/5.0 (Applebot/0.1; +http://www.apple.com/go/applebot)", :apple},
+      {"Storebot-Google",
+       "Mozilla/5.0 (X11; Linux x86_64; Storebot-Google/1.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+       :google},
+      {"SeznamBot", "Mozilla/5.0 (compatible; SeznamBot/4.0)", :seznam},
+      {"MojeekBot", "Mozilla/5.0 (compatible; MojeekBot/0.11; +https://www.mojeek.com/bot.html)",
+       :mojeek},
       {"two engines: the leftmost wins", "bingbot/2.0 Googlebot/2.1", :bing}
     ]
 
@@ -203,7 +241,8 @@ defmodule KilnCMS.BotClassTest do
     end
 
     test "engines/0 is the table, in order" do
-      assert BotClass.engines() == [:google, :bing, :duckduckgo, :baidu, :yandex, :apple]
+      assert BotClass.engines() ==
+               [:google, :bing, :duckduckgo, :baidu, :yandex, :apple, :seznam, :mojeek]
     end
   end
 end

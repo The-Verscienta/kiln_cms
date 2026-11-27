@@ -15,6 +15,10 @@ defmodule KilnCMS.Forms.MailWorkersTest do
   submission back, so the visitor's data never sits in `oban_jobs`. The
   "legacy jobs" blocks run the shape queued before that (`data`, and the
   autoresponder's `to`, in the args), which both workers still deliver.
+
+  Since #3051 both workers ask the suppression lists at send time, in either
+  job shape: a suppressed address completes the job unsent, and a list that
+  cannot be read fails it, which retries.
   """
   use KilnCMS.DataCase, async: true
   use Oban.Testing, repo: KilnCMS.Repo
@@ -28,6 +32,7 @@ defmodule KilnCMS.Forms.MailWorkersTest do
   alias KilnCMS.Forms
   alias KilnCMS.Forms.AutoresponderWorker
   alias KilnCMS.Forms.NotificationWorker
+  alias KilnCMS.Mail
 
   defp admin do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -588,6 +593,240 @@ defmodule KilnCMS.Forms.MailWorkersTest do
       assert row.state == "completed"
       assert row.args == args
       refute inspect(row) =~ "new-secret"
+    end
+
+    test "a finished autoresponder job's row is the three ids, and holds no address or data" do
+      form =
+        autoresponder_form!(
+          %{
+            autoresponder_enabled: true,
+            autoresponder_subject: "Thanks!",
+            autoresponder_body: "<p>Hi.</p>"
+          },
+          [
+            %{name: "email", label: "Email", field_type: :email},
+            %{name: "message", label: "Message", field_type: :string}
+          ]
+        )
+
+      args = args!(form, %{"email" => "ada@example.com", "message" => "new-secret"})
+      job = insert!(AutoresponderWorker, args)
+
+      Oban.drain_queue(queue: :mail)
+
+      assert_email_sent(fn email -> assert email.to == [{"", "ada@example.com"}] end)
+      row = job_row(job.id)
+      assert row.state == "completed"
+      assert row.args == args
+      assert Enum.sort(Map.keys(row.args)) == ["form_id", "org_id", "submission_id"]
+      refute inspect(row) =~ "ada@example.com"
+      refute inspect(row) =~ "new-secret"
+    end
+  end
+
+  describe "the suppression lists (#3051)" do
+    defp suppress!(address), do: Mail.suppress_recipient!(%{email: address}, authorize?: false)
+
+    defp suppress_on_site!(address, org_id),
+      do: Mail.suppress_site_recipient!(%{email: address}, tenant: org_id, authorize?: false)
+
+    defp failed_job_ids, do: Enum.map(Mail.recent_delivery_failures(100), & &1.id)
+
+    # Mail jobs are drained as the queue would run them: a raise is caught by
+    # Oban and recorded in the row's `errors`.
+    defp drain_mail, do: capture_log(fn -> Oban.drain_queue(queue: :mail) end)
+
+    defp retry_now!(job_id, attempt) do
+      Repo.update_all(from(j in Oban.Job, where: j.id == ^job_id),
+        set: [state: "available", attempt: attempt, scheduled_at: DateTime.utc_now()]
+      )
+    end
+
+    test "a notify_email on the instance-wide list is not sent, and the job completes" do
+      form = form!(%{notify_email: "team@example.com"})
+      job = insert!(NotificationWorker, args!(form, %{"message" => "hi"}))
+
+      # Case-insensitive, as every lookup of the list is.
+      suppress!("TEAM@EXAMPLE.COM")
+      log = drain_mail()
+
+      assert_no_email_sent()
+      # A skip, not a cancel: a cancelled mail job is listed as a delivery
+      # failure on /editor/mail, and nothing failed.
+      assert job_row(job.id).state == "completed"
+      refute job.id in failed_job_ids()
+      assert log =~ "[warning]"
+      assert log =~ "form notification job #{job.id} not sent"
+      refute String.downcase(log) =~ "team@example.com"
+    end
+
+    test "a submitter's address on the instance-wide list is not sent, and the job completes" do
+      form = simple_autoresponder_form!()
+      job = insert!(AutoresponderWorker, args!(form, %{"email" => "ada@example.com"}))
+
+      suppress!("ADA@EXAMPLE.COM")
+
+      # The skip is logged at info (a visitor's bounced address is the list
+      # working), below the test env's `:warning`; a per-module level reaches
+      # it without lowering the level every other test relies on.
+      Logger.put_module_level(AutoresponderWorker, :info)
+
+      log =
+        try do
+          drain_mail()
+        after
+          Logger.delete_module_level(AutoresponderWorker)
+        end
+
+      assert_no_email_sent()
+      assert job_row(job.id).state == "completed"
+      refute job.id in failed_job_ids()
+      assert log =~ "[info]"
+      assert log =~ "form autoresponder job #{job.id} not sent"
+      refute String.downcase(log) =~ "ada@example.com"
+    end
+
+    test "the form's site's own list stops both mails" do
+      form = form!(%{notify_email: "team@example.com"})
+      suppress_on_site!("team@example.com", form.org_id)
+
+      capture_log(fn ->
+        assert :ok = perform_job(NotificationWorker, args!(form, %{"message" => "hi"}))
+      end)
+
+      responder = simple_autoresponder_form!()
+      suppress_on_site!("ada@example.com", responder.org_id)
+
+      assert :ok =
+               perform_job(AutoresponderWorker, args!(responder, %{"email" => "ada@example.com"}))
+
+      assert_no_email_sent()
+    end
+
+    test "another site's list does not stop this site's form mail" do
+      other = other_org()
+      form = form!(%{notify_email: "team@example.com"})
+      responder = simple_autoresponder_form!()
+      suppress_on_site!("team@example.com", other.id)
+      suppress_on_site!("ada@example.com", other.id)
+
+      assert :ok = perform_job(NotificationWorker, args!(form, %{"message" => "hi"}))
+      assert_email_sent(fn email -> assert email.to == [{"", "team@example.com"}] end)
+
+      assert :ok =
+               perform_job(AutoresponderWorker, args!(responder, %{"email" => "ada@example.com"}))
+
+      assert_email_sent(fn email -> assert email.to == [{"", "ada@example.com"}] end)
+    end
+
+    test "a list that cannot be read raises, for either worker, and sends nothing" do
+      form = form!(%{notify_email: "team@example.com"})
+      responder = simple_autoresponder_form!()
+      notification = args!(form, %{"message" => "hi"})
+      autoresponse = args!(responder, %{"email" => "ada@example.com"})
+
+      # A lost grant on the list: `Mail.suppressed?/2` reads it with
+      # `authorize_with: :error`, so the refusal raises rather than reading as
+      # "not suppressed".
+      for {worker, args} <- [
+            {NotificationWorker, notification},
+            {AutoresponderWorker, autoresponse}
+          ] do
+        assert_raise Ash.Error.Forbidden, fn ->
+          Mail.with_actor(nil, fn -> perform_job(worker, args) end)
+        end
+      end
+
+      assert_no_email_sent()
+
+      # Not vacuous: with the list readable, both deliver.
+      assert :ok = perform_job(NotificationWorker, notification)
+      assert :ok = perform_job(AutoresponderWorker, autoresponse)
+      assert_email_sent(fn email -> assert email.to == [{"", "team@example.com"}] end)
+      assert_email_sent(fn email -> assert email.to == [{"", "ada@example.com"}] end)
+    end
+
+    test "an unreadable list leaves the job retryable, with no address in its errors" do
+      form = simple_autoresponder_form!()
+      job = insert!(AutoresponderWorker, args!(form, %{"email" => "ada@example.com"}))
+
+      Mail.with_actor(nil, fn -> drain_mail() end)
+
+      row = job_row(job.id)
+      assert row.state == "retryable"
+      assert_no_email_sent()
+      # The test build shows policy breakdowns (`show_policy_breakdowns?`), the
+      # wordiest a Forbidden gets; the stored error still names no address.
+      assert [_error] = row.errors
+      refute String.downcase(inspect(row.errors)) =~ "ada@example.com"
+
+      # The retry, with the list readable again, sends.
+      retry_now!(job.id, row.attempt)
+      drain_mail()
+
+      assert_email_sent(fn email -> assert email.to == [{"", "ada@example.com"}] end)
+      assert job_row(job.id).state == "completed"
+    end
+
+    test "a legacy job to a suppressed address completes unsent and forgets its data and address" do
+      form = simple_autoresponder_form!()
+      notify = form!(%{notify_email: "team@example.com"})
+      suppress!("legacy@example.com")
+      suppress!("team@example.com")
+
+      responder =
+        insert!(AutoresponderWorker, %{
+          "form_id" => form.id,
+          "org_id" => form.org_id,
+          "to" => "legacy@example.com",
+          "data" => %{"email" => "legacy@example.com"}
+        })
+
+      notification =
+        insert!(NotificationWorker, %{
+          "form_id" => notify.id,
+          "org_id" => notify.org_id,
+          "data" => %{"message" => "legacy-secret"}
+        })
+
+      drain_mail()
+
+      assert_no_email_sent()
+      assert job_row(responder.id).state == "completed"
+      assert job_row(responder.id).args == %{"form_id" => form.id, "org_id" => form.org_id}
+      assert job_row(notification.id).state == "completed"
+
+      assert job_row(notification.id).args == %{
+               "form_id" => notify.id,
+               "org_id" => notify.org_id
+             }
+    end
+
+    test "a legacy job keeps its data on an unreadable list with attempts left, and forgets it on the last" do
+      form = simple_autoresponder_form!()
+
+      job =
+        insert!(AutoresponderWorker, %{
+          "form_id" => form.id,
+          "org_id" => form.org_id,
+          "to" => "legacy@example.com",
+          "data" => %{"email" => "legacy@example.com"}
+        })
+
+      Mail.with_actor(nil, fn -> drain_mail() end)
+
+      row = job_row(job.id)
+      assert row.state == "retryable"
+      assert row.args["to"] == "legacy@example.com"
+      refute String.downcase(inspect(row.errors)) =~ "legacy@example.com"
+
+      retry_now!(job.id, row.max_attempts - 1)
+      Mail.with_actor(nil, fn -> drain_mail() end)
+
+      row = job_row(job.id)
+      assert row.state == "discarded"
+      assert row.args == %{"form_id" => form.id, "org_id" => form.org_id}
+      assert_no_email_sent()
     end
   end
 

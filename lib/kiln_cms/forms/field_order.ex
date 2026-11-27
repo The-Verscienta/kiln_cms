@@ -16,11 +16,20 @@ defmodule KilnCMS.Forms.FieldOrder do
 
   The writes run through `CMS.update_form_field/3` as the acting user, so the
   ordinary policies apply (admin-only, like every `FormField` write).
+
+  Conditions (#2262) name only earlier fields, so the final order is checked
+  once before anything moves (`KilnCMS.Forms.Logic.order_violations/1`): an
+  order that would put a field before one its condition names is refused
+  whole, naming both. Only a break the new order introduces counts, so a rule
+  an older release let fall out of order doesn't block every reorder. The
+  moves then carry `form_field_reorder: true`, which spares each one the
+  per-row order check: the order between two moves means nothing.
   """
 
   alias KilnCMS.AfterCommit
   alias KilnCMS.CMS
   alias KilnCMS.CMS.FormField
+  alias KilnCMS.Forms.Logic
 
   @doc """
   Give each field in `order` (a list of field ids) its index as its
@@ -28,11 +37,16 @@ defmodule KilnCMS.Forms.FieldOrder do
   index is not written.
 
   Returns `:ok`, `{:error, {:field, field, error}}` when `field`'s write was
-  refused (nothing was moved), or `{:error, error}` when the transaction
-  failed some other way. `opts` are the usual `:actor` / `:tenant`.
+  refused, `{:error, {:conditions, field, target}}` when the order would put
+  `field` before `target`, which its condition names (nothing was moved
+  either way), or `{:error, error}` when the transaction failed some other
+  way. `opts` are the usual `:actor` / `:tenant`.
   """
   @spec reorder([FormField.t()], [String.t()], keyword()) ::
-          :ok | {:error, {:field, FormField.t(), term()}} | {:error, term()}
+          :ok
+          | {:error, {:field, FormField.t(), term()}}
+          | {:error, {:conditions, FormField.t(), FormField.t()}}
+          | {:error, term()}
   def reorder(fields, order, opts) when is_list(fields) and is_list(order) do
     fields_by_id = Map.new(fields, &{&1.id, &1})
 
@@ -46,13 +60,35 @@ defmodule KilnCMS.Forms.FieldOrder do
         end
       end)
 
-    run(moves, opts)
+    case new_violations(fields, moves) do
+      [] -> run(moves, opts)
+      [{field, target} | _rest] -> {:error, {:conditions, field, target}}
+    end
+  end
+
+  defp new_violations(_fields, []), do: []
+
+  defp new_violations(fields, moves) do
+    moved = Map.new(moves, fn {field, index} -> {field.id, index} end)
+    before = Logic.sort(fields)
+
+    after_moves =
+      fields |> Enum.map(&%{&1 | position: Map.get(moved, &1.id, &1.position)}) |> Logic.sort()
+
+    seen = before |> Logic.order_violations() |> MapSet.new(fn {f, t} -> {f.id, t.id} end)
+
+    after_moves
+    |> Logic.order_violations()
+    |> Enum.reject(fn {f, t} -> MapSet.member?(seen, {f.id, t.id}) end)
   end
 
   defp run([], _opts), do: :ok
 
   defp run(moves, opts) do
-    opts = with_after_commit_context(opts)
+    opts =
+      opts
+      |> with_after_commit_context()
+      |> Keyword.update!(:context, &Map.put(&1, :form_field_reorder, true))
 
     # `Ash.transact/3` turns whatever the function returns as `{:error, _}`
     # into an Ash error class, which would lose *which* field was refused. A

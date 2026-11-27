@@ -426,6 +426,31 @@ defmodule KilnClientDeliveryTest do
       assert {:ok, ^body} = KilnClient.form("contact")
     end
 
+    test "form passes each field's condition through" do
+      condition = %{
+        "action" => "show",
+        "rule" => %{"field" => "topic", "op" => "eq", "value" => "Other"}
+      }
+
+      body = %{
+        "slug" => "contact",
+        "fields" => [
+          %{"name" => "topic", "type" => "select", "condition" => nil},
+          %{"name" => "details", "type" => "string", "condition" => condition}
+        ]
+      }
+
+      stub(200, body)
+      assert {:ok, ^body} = KilnClient.form("contact")
+    end
+
+    test "submit_form returns the fields the server discarded" do
+      stub(200, %{"ok" => true, "message" => nil, "discarded" => ["details"]})
+
+      assert {:ok, %{"discarded" => ["details"]}} =
+               KilnClient.submit_form("contact", %{"topic" => "Sales", "details" => "x"})
+    end
+
     test "an inactive form is :not_found" do
       stub(404, %{"errors" => [%{"status" => "404", "code" => "not_found"}]})
 

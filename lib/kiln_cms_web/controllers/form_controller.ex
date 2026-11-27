@@ -3,14 +3,16 @@ defmodule KilnCMSWeb.FormController do
   Public endpoints for admin-defined forms (`KilnCMS.CMS.Form`):
 
     * `GET /api/forms/:slug` — the form's schema as JSON (fields, labels,
-      types, options), so headless frontends can render `data-kiln-form`
-      placeholders themselves;
+      types, options, and each field's `condition`, #2262), so headless
+      frontends can render `data-kiln-form` placeholders themselves;
     * `GET /forms/:slug/embed` — the iframe document `/embed.js` frames;
     * `POST /forms/:slug` — the on-site browser submission (form-encoded),
       rendering a thank-you page inside the site's public chrome
       (`KilnCMSWeb.FormHTML.message/1`, #2338), or the iframe's own when the
       submission came from an embed;
-    * `POST /api/forms/:slug` — the same pipeline for JSON submissions.
+    * `POST /api/forms/:slug` — the same pipeline for JSON submissions. A
+      success lists under `discarded` the fields whose values were dropped
+      because their condition hid them (#2262), when there are any.
 
   The form's own public page, `GET /forms/:slug` (#2138), is not served here:
   it is the last fallback of `KilnCMSWeb.ContentController`'s miss funnel, so
@@ -49,6 +51,7 @@ defmodule KilnCMSWeb.FormController do
   alias KilnCMS.Challenge
   alias KilnCMS.Forms
   alias KilnCMS.Forms.EmbedPolicy
+  alias KilnCMS.Forms.Logic
   alias KilnCMS.I18n
   alias KilnCMSWeb.ApiError
   alias KilnCMSWeb.Embed
@@ -202,7 +205,10 @@ defmodule KilnCMSWeb.FormController do
           submit_url: "/forms/#{form.slug}",
           challenge: schema_challenge(form),
           fields:
-            Enum.map(form.fields, fn field ->
+            form.fields
+            |> Forms.known_fields()
+            |> Logic.effective_all()
+            |> Enum.map(fn {field, condition} ->
               %{
                 name: field.name,
                 label: field.label,
@@ -215,7 +221,8 @@ defmodule KilnCMSWeb.FormController do
                 width: field.width,
                 min: schema_min(field),
                 max: schema_max(field),
-                step: schema_step(field)
+                step: schema_step(field),
+                condition: schema_condition(condition)
               }
             end)
         })
@@ -236,6 +243,12 @@ defmodule KilnCMSWeb.FormController do
 
   defp schema_step(%{field_type: :number, step: step}), do: whole_or_float(step)
   defp schema_step(_field), do: nil
+
+  # `condition` is additive (#2262): null, or the one this release applies
+  # (`Logic.effective/2`), so a rule it can't apply (broken, naming a missing
+  # or later field) reads as null and the field as always shown, as it is here.
+  defp schema_condition(nil), do: nil
+  defp schema_condition(%{action: action, rule: rule}), do: %{action: action, rule: rule}
 
   # A stored float `5.0` reads as `5` on the wire; `0.5` stays `0.5`.
   defp whole_or_float(value) when is_float(value) and value == trunc(value), do: trunc(value)
@@ -406,7 +419,7 @@ defmodule KilnCMSWeb.FormController do
   defp submitted_values(form, params) do
     honeypot = Forms.honeypot_field()
 
-    for %{name: name} = field <- form.fields,
+    for %{name: name} = field <- Forms.known_fields(form.fields),
         name != honeypot,
         value = submitted_value(field, Map.get(params, name)),
         into: %{},
@@ -437,13 +450,12 @@ defmodule KilnCMSWeb.FormController do
         ApiError.send(conn, :not_found, "not_found", "Form not found.")
 
       {:ok, form, submission} ->
-        json(
-          conn,
-          put_challenge(
-            %{ok: true, message: form.success_message},
-            json_challenge(form, submission, params)
-          )
-        )
+        body =
+          %{ok: true, message: form.success_message}
+          |> put_challenge(json_challenge(form, submission, params))
+          |> put_discarded(json_discarded(form, submission, params))
+
+        json(conn, body)
 
       {:error, _form, %{} = errors} when is_map_key(errors, "_kiln_challenge") ->
         conn
@@ -471,6 +483,16 @@ defmodule KilnCMSWeb.FormController do
 
   defp put_challenge(body, nil), do: body
   defp put_challenge(body, value), do: Map.put(body, :challenge, value)
+
+  # `discarded` in a JSON submission's answer (#2262), additive: the fields
+  # whose values were sent but dropped because their condition hid them, in
+  # form order. Only when there are any. A tripped honeypot answers as the
+  # real thing would have.
+  defp json_discarded(form, :discarded, params), do: Forms.hidden_answers(form, params)
+  defp json_discarded(_form, submission, _params), do: Forms.discarded_fields(submission)
+
+  defp put_discarded(body, []), do: body
+  defp put_discarded(body, names), do: Map.put(body, :discarded, names)
 
   # The form a `run/3` result was about, if it found one — the thank-you page's
   # framing policy comes from it (#648).

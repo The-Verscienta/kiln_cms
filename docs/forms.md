@@ -15,7 +15,9 @@ and review submissions in the same builder.
 - `FormField` — machine name (the key in each submission), label, type
   (see [Field types](#field-types)), required flag, options (`select`,
   `radio`, `checkboxes`), `min_value` / `max_value` / `step` (`number`,
-  `rating`), help text, order.
+  `rating`), help text, order, and an optional `condition` that shows or
+  hides the field based on earlier answers (#2262, see
+  [Show or hide a field based on an earlier answer](#show-or-hide-a-field-based-on-an-earlier-answer)).
 - `FormSubmission` — the coerced `data` map, a moderation `status`
   (`new`/`reviewed`/`spam`) and `spam_score`, what the human-verification
   check decided (`challenge`: `passed`, `missing`, `wrong_host`,
@@ -86,6 +88,16 @@ Things to know:
   previous release likewise breaks every form that uses a new type (remove
   those fields first). Existing forms are unaffected: the new columns are
   nullable and nothing is backfilled.
+- **From this release on, a type a newer release adds is skipped, not
+  fatal.** `field_type` is now a `KilnCMS.Types.KnownAtom` (#2262), so a
+  field whose type this release doesn't know is left out of the public form,
+  the schema, submissions, the autoresponder's tokens and the builder (its
+  machine name stays taken), and the CSV export lists its stored answers
+  under a `(renamed or removed)` column. The rest of the form keeps
+  working. That covers a node running beside a newer one, or after a
+  rollback to this release. Releases before this one still fail to load such
+  a form, which is why the next new type ships at least one release later
+  ([New values in an atom column](releasing.md#new-values-in-an-atom-column)).
 
 ## Rendering
 
@@ -121,10 +133,18 @@ The `:form` content block references a form by slug:
   for a check, the POST carries the widget's token as `_kiln_challenge` and
   the answer adds `challenge` (`"verified"` or `"held"`); see
   [Headless sites](human-verification.md#headless-sites). The placeholder is
-  the same whatever the form's human-verification setting.
+  the same whatever the form's human-verification setting. Each field also
+  carries its `condition` (`null` when it has none), and a JSON answer lists
+  under `discarded` the fields whose values were dropped because their
+  condition hid them; see
+  [Headless front ends](#headless-front-ends).
 - **The form's own page**, `GET /forms/<slug>` (#2138), renders an active
   form with no content around it: its name, description and fields inside the
   site's layout. See [below](#share-a-form-at-its-own-address).
+- **A form with a field condition** loads one more small script, which
+  shows and hides its fields as the visitor answers; with no script every
+  field is shown. See
+  [Without JavaScript, and in previews](#without-javascript-and-in-previews).
 
 ## Edit and rename form fields
 
@@ -422,6 +442,223 @@ no field can be named `locale` again.
 An error that belongs to no input in the panel, such as a permission error,
 shows as a message at the corner of the screen instead.
 
+## Show or hide a field based on an earlier answer
+
+A field can be asked only when an earlier answer calls for it: **Tell us
+more** only when **Topic** is *Other*, a company name only when **I'm
+writing as** is *a business*. The visitor sees the field appear and
+disappear as they answer. A field its condition hides is not required, and
+whatever was sent for it is dropped on the server, whatever the browser did
+(#2262).
+
+You need the **admin** role: the Forms pages are admin-only.
+
+1. Open **Forms** (`/editor/forms`) and click the form's name. On the
+   preview, check that the field whose answer decides comes **above** the
+   field you want to show or hide. A condition can use only the answers to
+   fields before it, so drag the deciding field up first if it is below
+   ([Reorder fields and copy a field](#reorder-fields-and-copy-a-field)).
+2. Click the field you want to show or hide. **Field settings** ends with a
+   **Conditional logic** section. On the form's first field it says
+   *Conditions use the answers to earlier fields. Add a field above this one
+   first.* A **Hidden field** has no such section, because the visitor never
+   sees it.
+3. Click **Add a condition**. One row appears and is saved straight away,
+   testing the first field of the form with **is** and, as its value, that
+   field's first option (a dropdown, radio buttons or a checkbox group),
+   **Checked** (a checkbox) or nothing. The section says **Saved.**, and the
+   field on the preview now shows **Shown when…** under its machine name.
+4. Set the row. **Action** is **Show this field** or **Hide this field**.
+   The row's first menu lists only the fields above this one, by label. The
+   second is the test, offered only where it fits the type of the field it
+   tests:
+
+   | Test | Fields it can test |
+   | --- | --- |
+   | **is**, **is not**, **is empty**, **is not empty** | every type |
+   | **contains**, **doesn't contain** | single line text, paragraph text, email, phone, web address, dropdown, radio buttons, checkbox group, hidden field |
+   | **is greater than**, **is less than** | number, number (range), rating, date |
+
+   The value is a menu of the options for a dropdown, radio buttons or a
+   checkbox group tested with **is** or **is not**, **Checked** or
+   **Unchecked** for a checkbox, a date picker for a date, and free text
+   otherwise. **is empty** and **is not empty** take no value. A checkbox
+   group **is** an option when that box is among the ones ticked. Every
+   change saves as you make it, and the section says **Saved.**
+5. For more than one test, click **Add another** and set the new row, then
+   choose **When**: **all of these match** or **any of these match**. The
+   **×** at the end of a row removes it. **Remove condition** removes the
+   whole condition, and the field is always shown again.
+6. Click **Preview** in the builder's header (or open the form's page) to
+   try it. The builder's own preview always shows every field; the public
+   form shows the field only while the condition holds.
+
+For example, a contact form with a **Topic** dropdown (`Sales`, `Support`,
+`Other`) and, below it, a required **Details** single-line text field, with
+this condition on **Details**: **Show this field**, **Topic** **is**
+`Other`. Details is stored with:
+
+```json
+{"action": "show", "rule": {"field": "topic", "op": "eq", "value": "Other"}}
+```
+
+A condition with one row is stored as that one test; with several, as
+`{"all": [...]}` or `{"any": [...]}`. A visitor who picks `Sales` never sees
+Details and can send the form without it; the entry holds
+`{"topic": "Sales"}`. One who picks `Other` is asked for Details, and it is
+required.
+
+### How a condition is applied
+
+The browser and the server apply the same rules, held to the same test
+cases (`test/support/fixtures/form_visibility_cases.json`, and
+`conditions_cases.json` for the tests themselves):
+
+- **In form order, earlier fields only.** A condition can name only fields
+  above its own, so no chain of conditions can loop. Saving is refused
+  otherwise.
+- **A hidden field has no answer.** A later condition that tests a hidden
+  field sees it as empty, whatever the visitor typed before it was hidden.
+  That is what lets conditions chain: hide **Topic**, and a field shown when
+  Topic is `Other` hides too.
+- **Hidden means not asked.** A hidden field is never required, and the
+  value sent for it is not stored, not shown to the spam checks, not in the
+  notification email and not in the `form.submitted` webhook. Its
+  `[field:<name>]` token in the autoresponder is blank. The server works this
+  out again from what was sent, so a visitor who un-hides a field in their
+  browser, or a script posting straight to the form, gets nothing stored for
+  a field its condition hides.
+- **A condition Kiln can't apply leaves its field shown**, with its own
+  **Required**: one that names a field that is gone or no longer above it
+  (left by an older release, or written outside the builder), or one a newer
+  release wrote with an action this release does not know. The preview
+  marks such a field **Condition names a removed field**. For a field that
+  is gone or below, its **Conditional logic** section says *This condition
+  names a field that isn't before this one any more, so the field is always
+  shown.*; for an action this release doesn't know, *This condition was set
+  up outside the builder and can't be edited here.* Click **Remove
+  condition** and add it again.
+- **One level in the builder.** A condition written outside the builder (from
+  code) can also use `in` (one of a list), `starts_with` and `ends_with`,
+  and nest `all` and `any` up to 3 levels and 10 parts (tests and groups
+  together). The builder shows
+  such a condition as *This condition was set up outside the builder and
+  can't be edited here.*, applies it, and offers only **Remove condition**.
+- **Values are public.** The values a condition compares with are in the
+  public page's HTML and in `GET /api/forms/<slug>`, so anyone can read them.
+  Never put a secret in one, such as a discount code the visitor has to
+  type to reveal a field.
+
+The condition has its own **Action** rather than reusing the `visible_when`
+rule of custom fields, because the rule engine has no "not": a hide rule
+stored as a negated show rule could not be read back as the rule the admin
+wrote.
+
+### Rename, reorder or delete a field a condition uses
+
+Conditions follow the form's fields:
+
+- **Rename** a field and every condition that tests it is rewritten to the
+  new machine name in the same save. The panel says *Conditions on “Details”
+  now use subject.* (with the fields' labels and the new name).
+- **Drag** a field below one whose condition tests it, or a field with a
+  condition above the field it tests, and nothing is moved: *Couldn't save
+  the new order, so nothing was moved: “Details” is shown based on “Topic”,
+  which would come after it: conditions can only use earlier answers*.
+- **Delete** a field a condition tests and the field stays, with *is used in
+  the conditions of “Details”: remove those conditions first*. Remove the
+  condition on Details (or change its row to test another field), then
+  delete.
+- **Change the type** of a field a condition tests, to one that test doesn't
+  fit (a text field tested with **contains** made a number), and **Type** is
+  refused until you change the condition.
+- **Change a field's type to Hidden field** and its own condition goes with
+  the change.
+- **Duplicate the form** and each condition is copied, naming the copy's
+  fields, renamed `website_2` or `locale_2` included
+  ([Duplicate a form](#duplicate-a-form)). A condition the copy couldn't
+  apply, such as one naming a field that isn't copied, is left off: the
+  original shows that field always anyway.
+
+### Without JavaScript, and in previews
+
+The public form is drawn by the server, and a small script then shows and
+hides its fields. Until that script runs, or when the browser runs no
+script:
+
+- every field is shown;
+- a field with a condition says *Depends on an earlier answer; leave it
+  blank if it doesn't apply.* under it, and is never required by the
+  browser. The server still requires it when its condition shows it, and
+  still drops its value when its condition hides it, so a refused
+  submission comes back saying which field is missing.
+
+Once the script runs it hides that note, hides each field its condition
+hides and disables its inputs (so they are neither checked nor sent), and
+restores **Required** on a shown field. Content previews in the editor show
+every field, as without a script, because a LiveView page update would
+undo what the script sets.
+
+The script is `/assets/js/challenge_static.js`, the one an embedded form
+already loads for its human-verification widget. Only a form with a
+condition loads it, from inside the form, as an external module (about
+10.5 KB minified, 4 KB gzipped), on its own page, in a form block and in the
+embed alike. Pages without such a form, and `public.js`, are unchanged, and
+a form with no condition renders exactly as before. A theme stylesheet can
+style the parts it adds: the form carries `data-kiln-enhance`, each field's
+wrapper `data-kiln-field` (its machine name), a conditional one
+`data-kiln-condition`, and the note the class `kiln-form-condition-hint`.
+
+### Headless front ends
+
+`GET /api/forms/<slug>` gives each field a `condition`: `null`, or
+`{"action": "show" | "hide", "rule": ...}` as above. It is `null` for a
+condition the server can't apply, so the field is always shown there too.
+Evaluate the fields in order, and treat a hidden field as having no value
+for the conditions after it. A front end that doesn't evaluate conditions
+keeps working: a value it sends for a field the condition hides is dropped,
+not refused, and the answer is still `{"ok": true}`, with the dropped fields
+listed under `discarded`. See
+[Embeddable forms](api.md#embeddable-forms) for the shapes.
+
+### Before you upgrade or roll back
+
+The release adds one nullable column, `form_fields.condition`, and nothing
+is backfilled: every existing form works as before.
+
+- **Add conditions only once every node runs this release.** An older node
+  ignores conditions: it shows every field and requires each field marked
+  **Required**. During a rolling deploy, a page drawn by a new node can be
+  submitted to an old one, which refuses the submission because a required
+  field the condition hid was left blank.
+- **Before rolling back, look at the conditional fields that are
+  required.** After a rollback every conditional field is shown, and a
+  required one is required of every visitor again, whatever they answered
+  before it. Untick **Required** on those fields first if that would block
+  visitors who shouldn't be asked. The stored conditions are kept, and apply
+  again once you upgrade.
+
+### Condition errors you can see
+
+The messages under **Conditional logic**, and the ones the builder shows
+for a change elsewhere that a condition stops:
+
+| Message | Meaning |
+| --- | --- |
+| names “Topic”, which comes after this field: conditions can only use earlier answers | The condition tests a field below this one. Drag that field above this one, or test another field. |
+| names "topic", which is not a field on this form | The condition names a machine name the form doesn't have. Seen only for a condition written outside the builder. |
+| can't depend on the field itself | The condition tests the field it is on. |
+| can't test “Topic” with gt | That test doesn't fit the type of the field it tests (see the table in step 4). |
+| a hidden field can't have a condition | A **Hidden field** is never seen, so it takes no condition. The builder removes the condition when you change a field's type to hidden. |
+| is not a valid condition: … | The condition's shape is wrong, for example *has more than 10 conditions* or *nests more than 3 levels*. Seen only for a condition written outside the builder. |
+| each value must be at most 1000 characters | A value in the condition is longer than 1,000 characters. |
+| would depend on itself through other conditions | A chain of conditions would loop. The earlier-fields rule already prevents this; the check is a second line of defence. |
+| is used in the conditions of “Details”: remove those conditions first | Shown when you delete the field: another field's condition tests it. Also refused when moving the field to another form. |
+| the conditions of “Details” test this field in a way this type can't answer: change those conditions first | Shown under **Type**: the new type doesn't fit a test another field's condition makes on this one. |
+| “Details” is shown based on “Topic”, which would come after it: conditions can only use earlier answers | A new order, or a new machine name that sorts a field differently at the same position, would put a field above the one its condition tests. When you drag, it follows *Couldn't save the new order, so nothing was moved:*. |
+| its condition already names this field | A rename would give the field the machine name its own condition tests. |
+| has a condition: remove it before moving the field to another form | Moving a field to another form (changing its `form_id`, which the builder does not offer) while it has a condition, which names fields of the form it is leaving. |
+
 ## Duplicate a form
 
 A duplicate copies a form's settings and fields into a new, inactive form, so
@@ -441,7 +678,9 @@ copied. You need the **admin** role.
    ready.
 
 The copy's **Confirmations** template, and whether it is switched on, follow
-the original's.
+the original's. Each field's condition is copied too, naming the copy's
+fields
+([Rename, reorder or delete a field a condition uses](#rename-reorder-or-delete-a-field-a-condition-uses)).
 
 A duplicate is made whole or not at all: the copy, every one of its fields
 and its autoresponder are saved together, so a duplicate that fails leaves
@@ -865,6 +1104,15 @@ submission as it is stored. That also means:
   runs, and none goes if it was cleared in the meantime (as before).
 - If the read is refused (the system actor lost its grant), the job fails and
   retries rather than treating the submission as deleted.
+- An address on a **suppression list** is sent nothing (#3051). Before it
+  sends, each worker asks the instance-wide list and the form's site's own
+  about the address it is about to mail: the form's `notify_email` for the
+  notification, the submitter's address for the autoresponder. A listed
+  address is skipped: the job completes without sending, so it is not among
+  the delivery failures on `/editor/mail` or `/editor/site-mail`. This holds
+  for jobs queued by an earlier release too.
+- If a suppression list cannot be read, the job fails and retries rather
+  than sending past it. Its stored error does not name the address.
 
 A job usually runs within seconds of the submit, so these matter mostly when
 mail is retrying after a failed delivery (up to five attempts over about 81
@@ -872,15 +1120,48 @@ minutes). Jobs queued by the release before this one carry the submitted data
 themselves and are delivered from it; that data is dropped from the job's row
 once it finishes. See [Job args retention](data-flows.md#job-args-retention).
 
+**When a form's notifications stop arriving**, check whether the
+`notify_email` address is suppressed. A relay that hard-bounced it once put
+it on a list, and every notification since has been skipped. The instance-wide
+list is under **Delivery health** on `/editor/mail` (platform admins); the
+site's own is under **Delivery health** on `/editor/site-mail` (the site's
+admins). **Remove** the entry once the mailbox works again. Each skipped
+notification logs a warning that names the job, the form and the site, never
+the address:
+
+```text
+form notification job 4182 not sent: form 5f0e2a7c-3b1d-4c8e-9a61-2d7b8e4f1c90's notify address is suppressed (org 0c4d6e2a-8b7f-4a19-b3e5-71f2c9d0a6b4); clear it on /editor/mail or /editor/site-mail
+```
+
+A skipped confirmation logs at info level, because the visitor typed that
+address and a bounced one is the list doing its job:
+
+```text
+form autoresponder job 4183 not sent: the submitter's address is suppressed (form 5f0e2a7c-3b1d-4c8e-9a61-2d7b8e4f1c90, org 0c4d6e2a-8b7f-4a19-b3e5-71f2c9d0a6b4)
+```
+
 ### Autoresponder (#468)
 
 The builder's **Confirmations** tab can turn on a confirmation email back to
 the *submitter* — separate from `notify_email`, which mails the admin.
 It only ever fires when the form declares an `:email` field *and* the
-submission filled it in (`KilnCMS.Forms.Autoresponder.eligible?/3` is the one
+submission filled one in (`KilnCMS.Forms.Autoresponder.eligible?/3` is the one
 place that decides this, so the send path and the config-time validation
 below can't drift on it); a `:spam`-scored submission is excluded the same as
 `notify_email` and the webhook.
+
+The confirmation goes to the **first `:email` field, in form order, that the
+submission gave a value** (#2262). A field its condition hid has no value, so
+it is passed over, and so is an optional one left blank: on a form with an
+optional personal address and, shown only to business customers, a work
+address, the confirmation goes to the personal address when it was given and
+to the work address otherwise. Before
+this release only the form's first email field counted, so a blank first
+email field meant no confirmation even when a later one was filled in. A
+`[field:<name>]` token for a field its condition hid expands to nothing,
+like a field left blank. On a form with a condition the **Confirmations** tab
+says so: *A field its condition hid leaves its token blank. The confirmation
+goes to the first email field that was shown and filled in.*
 
 It is asked twice: when the submission is accepted, so a submission with no
 one to confirm queues no job, and again when the job runs, against the form

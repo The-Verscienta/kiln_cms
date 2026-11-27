@@ -2086,7 +2086,7 @@ Optional attributes:
 
 **Schema.** `GET /api/forms/:slug` returns each field as `name`, `label`,
 `type`, `required`, `options`, `help_text`, `placeholder`, `default_value`,
-`width`, and `min`, `max`, `step`. `type` is one of `string`, `text`, `email`,
+`width`, `min`, `max`, `step` and `condition`. `type` is one of `string`, `text`, `email`,
 `integer`, `boolean`, `date`, `select`, `radio`, `checkboxes`, `phone`, `url`,
 `hidden`, `number`, `rating`; treat a type you do not know as `text`, since the
 list only grows. `options` is filled for `select`, `radio` and `checkboxes`
@@ -2095,11 +2095,63 @@ and step the admin set, each possibly `null`) and `rating` (`min` is `1`,
 `max` the star count, `5` when unset). The keys are additive: older clients
 ignore them. Each type's accepted input is in [forms.md](forms.md#field-types).
 
+**Conditional fields** (#2262). `condition` is `null` (the field is always
+shown) or an object: `"show"` the field while `rule` holds, or `"hide"` it
+while `rule` holds.
+
+```json
+{
+  "name": "details",
+  "type": "string",
+  "required": true,
+  "condition": {
+    "action": "show",
+    "rule": {"field": "topic", "op": "eq", "value": "Other"}
+  }
+}
+```
+
+A `rule` is a test of one field, `{"field", "op", "value"}`, or
+`{"all": [rule, ...]}` / `{"any": [rule, ...]}`. `op` is one of `eq`, `neq`,
+`in` (`value` is a list), `empty` and `not_empty` (no `value`), `gt` and `lt`
+(numbers, or ISO 8601 dates), and `contains`, `not_contains`, `starts_with`,
+`ends_with` (text, ignoring case); the list only grows. A field with several
+values (a checkboxes answer) `eq`s a value it contains. A rule names only
+fields that come **before** its own, so:
+
+1. Evaluate the fields in the order the schema lists them.
+2. A field its condition hides has no value for the rules after it: test it
+   as empty, whatever is in its input.
+3. A rule naming a field your values don't hold sees it as empty.
+
+The server sends `null` for a condition it can't apply (one naming a field
+that is gone or no longer before it), so the field is always shown on both
+sides. The browser's own evaluator and the server's are tested against
+`test/support/fixtures/conditions_cases.json` (each test) and
+`test/support/fixtures/form_visibility_cases.json` (the ordering), which make
+good conformance cases for your own. Condition values are public, like the
+rest of the schema.
+
 **Submitting.** `POST /api/forms/:slug` takes JSON values by field name.
 `checkboxes` is a JSON array of option strings (`"tags": ["a", "b"]`);
 `number` and `rating` may be JSON numbers or numeric strings. The
 form-encoded `POST /forms/:slug` sends a checkboxes group as repeated
 `tags[]=a&tags[]=b`. Refusals are `{"ok": false, "errors": {"<field>": "…"}}`.
+
+A field its condition hides is never required, and a value sent for it is
+dropped rather than refused: it is not stored, sent to the webhook or mailed.
+The answer is still a success, and lists those fields under `discarded`, in
+form order, only when there are any:
+
+```json
+{"ok": true, "message": null, "discarded": ["details"]}
+```
+
+So a front end that doesn't evaluate conditions keeps working, but loses
+whatever it sent for a hidden field. `discarded` is additive: a submission
+with nothing dropped, and any answer from an older server, has no such key.
+A submission the honeypot caught answers with the `discarded` a real one
+would have.
 
 Submissions post to the normal `POST /forms/:slug` endpoint and render the
 form's success message inside the iframe. No CORS is involved: the iframe is

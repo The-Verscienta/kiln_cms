@@ -646,9 +646,17 @@ defmodule KilnClient do
   `"challenge"`: `nil`, or the form's
   human-verification check (`"provider"`, `"site_key"`, `"script_url"`,
   `"global"`, `"onload_param"`, `"render_options"`, `"action"`,
-  `"action_option"`, `"interactive"`, `"api"`, `"field"`). An unknown or
-  inactive form is
-  `reason: :not_found`. Options: `:req`.
+  `"action_option"`, `"interactive"`, `"api"`, `"field"`).
+
+  Newer servers also give each field a `"condition"`: `nil` (always shown),
+  or `%{"action" => "show" | "hide", "rule" => rule}`, which shows (or
+  hides) the field while `rule` holds. A rule is `%{"field", "op",
+  "value"}` naming an earlier field, or `%{"all" => [rule]}` /
+  `%{"any" => [rule]}`. Evaluate the fields in order; a field hidden by its
+  condition has no value for the rules after it. The server applies the
+  same rules on submit.
+
+  An unknown or inactive form is `reason: :not_found`. Options: `:req`.
   """
   @spec form(String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def form(slug, opts \\ []), do: json_get("/api/forms/" <> segment(slug), [], opts)
@@ -671,6 +679,10 @@ defmodule KilnClient do
   human-verification token as `"_kiln_challenge"`: relay it untouched as
   well. Without it the submission is accepted but held for review, and the
   result carries `"challenge" => "held"` (`"verified"` when it passed).
+
+  A field its `"condition"` hides is never required, and a value sent for it
+  is dropped rather than refused: the result is still a success, and on
+  newer servers lists those fields under `"discarded"`.
 
   Options: `:locale` (recorded on the submission), `:req`.
   """

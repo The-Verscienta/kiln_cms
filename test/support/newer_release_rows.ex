@@ -176,6 +176,22 @@ defmodule KilnCMS.NewerReleaseRows do
   end
 
   @doc """
+  Set the stored `field_type` of form field `field_id` to `type` (default
+  `unknown/0`), as a newer release that added a form field type would have
+  written it (#2262). Returns `field_id`.
+  """
+  @spec form_field_type!(Ecto.UUID.t(), String.t()) :: Ecto.UUID.t()
+  def form_field_type!(field_id, type \\ @unknown) do
+    %{num_rows: 1} =
+      KilnCMS.Repo.query!("UPDATE form_fields SET field_type = $1 WHERE id = $2", [
+        type,
+        dump(field_id)
+      ])
+
+    field_id
+  end
+
+  @doc """
   A row as stored, read past every Ash type: a map of column name to raw
   value (uuids as 16-byte binaries).
   """

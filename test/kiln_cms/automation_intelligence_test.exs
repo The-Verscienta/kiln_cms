@@ -50,6 +50,24 @@ defmodule KilnCMS.AutomationIntelligenceTest do
     end
   end
 
+  # Tells the test process each time it generates, so a test can show a
+  # reaction spent nothing (#3051). `RuleWorker.perform/1` runs in the test
+  # process, so `self()` is the test.
+  defmodule CountingGenerator do
+    @behaviour KilnCMS.Seo.Generator
+    @impl true
+    def draft(_document, _opts \\ []) do
+      send(self(), :generated)
+
+      {:ok,
+       %KilnCMS.Seo.Draft{
+         seo_title: "Counted",
+         seo_description: "A counted draft",
+         seo_keywords: ["tea"]
+       }}
+    end
+  end
+
   setup do
     original = Application.get_env(:kiln_cms, KilnCMS.Search, [])
     on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Search, original) end)
@@ -807,6 +825,163 @@ defmodule KilnCMS.AutomationIntelligenceTest do
       editor_side = draft_in(org, actor, "editor-reserve link passage", "Editor")
       assert is_list(KilnCMS.Seo.Links.suggest(editor_side, user_id: actor.id))
       assert centroid_cached?.(editor_side)
+    end
+  end
+
+  # ── the suppression lists (#3051) ──────────────────────────────────────────
+  #
+  # A findings email to a suppressed `to` is skipped before the document is
+  # loaded, so nothing is generated for a mail nobody will get, and an
+  # unreadable list raises before generation, so its retry bills nothing.
+  describe "the suppression lists (#3051)" do
+    defp with_counting_generator do
+      previous = Application.get_env(:kiln_cms, KilnCMS.Seo, [])
+
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Seo,
+        Keyword.merge(previous,
+          generator: CountingGenerator,
+          model: "stub:stub",
+          base_url: "http://127.0.0.1:11434"
+        )
+      )
+
+      on_exit(fn -> Application.put_env(:kiln_cms, KilnCMS.Seo, previous) end)
+    end
+
+    defp suggest_metadata_rule(config) do
+      rule(%{trigger_event: :in_review, action: :suggest_metadata, config: config})
+    end
+
+    defp metadata_post do
+      indexed_post(admin(), Enum.map_join(1..60, " ", &"word#{&1}"), "Chamomile")
+    end
+
+    test "not suppressed: the generator runs and the findings are mailed (the counter counts)" do
+      with_counting_generator()
+      post = metadata_post()
+
+      assert :ok =
+               run_rule(
+                 suggest_metadata_rule(%{"to" => "eds@example.com"}),
+                 post,
+                 "post.in_review"
+               )
+
+      assert_received :generated
+      assert_email_sent(fn email -> assert email.to == [{"", "eds@example.com"}] end)
+    end
+
+    test "a suppressed `to` generates nothing and sends nothing" do
+      with_counting_generator()
+      post = metadata_post()
+      r = suggest_metadata_rule(%{"to" => "eds@example.com"})
+      KilnCMS.Mail.suppress_recipient!(%{email: "EDS@EXAMPLE.COM"}, authorize?: false)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn -> assert :ok = run_rule(r, post, "post.in_review") end)
+
+      refute_received :generated
+      refute_email_sent()
+      assert log =~ "Automation rule #{r.id} sent nothing"
+      refute String.downcase(log) =~ "eds@example.com"
+    end
+
+    test "the rule's site's own list stops a finder reaction too" do
+      actor = admin()
+
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :flag_duplicates,
+          config: %{"to" => "eds@example.com"}
+        })
+
+      entry =
+        KilnCMS.Mail.suppress_site_recipient!(%{email: "eds@example.com"},
+          tenant: r.org_id,
+          authorize?: false
+        )
+
+      anchor = indexed_post(actor, "the exact same passage", "Same")
+      _dup = indexed_post(actor, "the exact same passage", "Same")
+
+      ExUnit.CaptureLog.capture_log(fn -> assert :ok = run_rule(r, anchor, "post.published") end)
+
+      refute_email_sent()
+
+      # Control: with the site's row cleared, the same run finds the duplicate
+      # and mails it, so the refute above is the list, not an empty finding.
+      KilnCMS.Mail.unsuppress_site_recipient!(entry, tenant: r.org_id, authorize?: false)
+
+      assert :ok = run_rule(r, anchor, "post.published")
+      assert_email_sent(fn email -> assert email.to == [{"", "eds@example.com"}] end)
+    end
+
+    test "an unknown deliver_as is emailed, so it is checked too" do
+      actor = admin()
+
+      # Seeded, so `ActionConfig` never sees the value; `deliver_findings/2`
+      # emails anything that is not a comment or a task.
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :flag_duplicates,
+          config: %{"deliver_as" => "fax", "to" => "eds@example.com"}
+        })
+
+      entry = KilnCMS.Mail.suppress_recipient!(%{email: "eds@example.com"}, authorize?: false)
+
+      anchor = indexed_post(actor, "a passage the fax rule finds twice", "Fax")
+      _dup = indexed_post(actor, "a passage the fax rule finds twice", "Fax")
+
+      ExUnit.CaptureLog.capture_log(fn -> assert :ok = run_rule(r, anchor, "post.published") end)
+
+      refute_email_sent()
+
+      # Control: unsuppressed, the same rule does email its findings.
+      KilnCMS.Mail.unsuppress_recipient!(entry, authorize?: false)
+
+      assert :ok = run_rule(r, anchor, "post.published")
+      assert_email_sent(fn email -> assert email.to == [{"", "eds@example.com"}] end)
+    end
+
+    test "an unreadable list raises before anything is generated" do
+      with_counting_generator()
+      post = metadata_post()
+      r = suggest_metadata_rule(%{"to" => "eds@example.com"})
+
+      assert_raise Ash.Error.Forbidden, fn ->
+        KilnCMS.Mail.with_actor(nil, fn -> run_rule(r, post, "post.in_review") end)
+      end
+
+      refute_received :generated
+      refute_email_sent()
+    end
+
+    test "findings delivered as a comment are posted whatever the `to` says" do
+      actor = admin()
+
+      r =
+        rule(%{
+          trigger_event: :published,
+          action: :flag_duplicates,
+          config: %{"deliver_as" => "comment", "to" => "eds@example.com"}
+        })
+
+      KilnCMS.Mail.suppress_recipient!(%{email: "eds@example.com"}, authorize?: false)
+
+      anchor = indexed_post(actor, "a passage shared word for word", "Twin")
+      _dup = indexed_post(actor, "a passage shared word for word", "Twin")
+
+      # Not even asked: an unreadable list would raise if it were.
+      assert :ok =
+               KilnCMS.Mail.with_actor(nil, fn -> run_rule(r, anchor, "post.published") end)
+
+      refute_email_sent()
+      assert [comment] = CMS.list_comments_for_document!("post", anchor.id, authorize?: false)
+      assert comment.created_by_rule_id == r.id
     end
   end
 end
