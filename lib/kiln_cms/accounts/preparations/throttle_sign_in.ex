@@ -303,7 +303,9 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
 
   defp refuse(query, identifier, opts, context) do
     simulate_hashing(query, opts, context)
-    SignInAlert.account_locked(identifier)
+    # Read before the account lookup the alert makes, so the same one read
+    # runs whether or not the address has an account (#3437).
+    SignInAlert.account_locked(identifier, pause_cause(identifier))
 
     Query.add_error(
       query,
@@ -316,6 +318,15 @@ defmodule KilnCMS.Accounts.Preparations.ThrottleSignIn do
         }
       )
     )
+  end
+
+  # Which mail the pause gets. Best effort: a failed read is today's mail.
+  defp pause_cause(identifier) do
+    AccountThrottle.sign_in_pause_cause(identifier)
+  rescue
+    _error -> :none
+  catch
+    :exit, _reason -> :none
   end
 
   # Equalizes the refusal against the wrong-password path — see the moduledoc.

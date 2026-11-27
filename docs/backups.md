@@ -4483,6 +4483,11 @@ backups (retention)** ticked on both, each row showing **Not pruned:** with
 the message above. You need to be a platform admin, as for everything on
 the Destinations tab.
 
+When only the Tests are missing, each row also says **Press Test on both
+destinations to let them prune.** under its badge, with a link here. A row
+that a Test can't clear (no trusted key, keys of different types, one
+fingerprint) shows no such line.
+
 1. On **Backups → Destinations**, read the trusted key on each row:
    "Trusted ssh-ed25519 key SHA256:…, since …". The two must name the same
    type and different fingerprints.

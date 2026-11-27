@@ -6,7 +6,12 @@
 - **References** — [#2408](https://github.com/The-Verscienta/kiln_cms/issues/2408)
   (strictest policy across an account's admin sites) and
   [#2407](https://github.com/The-Verscienta/kiln_cms/issues/2407) (the check
-  at sign-in); [ADR 0031](0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md)
+  at sign-in), with follow-ups
+  [#3436](https://github.com/The-Verscienta/kiln_cms/issues/3436) (the reset
+  mail's branding),
+  [#3437](https://github.com/The-Verscienta/kiln_cms/issues/3437) (the pause
+  mail) and [#3438](https://github.com/The-Verscienta/kiln_cms/issues/3438)
+  (auditing when the deciding sites can't be read); [ADR 0031](0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md)
   for the check itself and why it fails open;
   [ADR 0023](0023-an-unlock-link-lifts-only-the-account-pause-and-the-pause-stays-undisclosed.md)
   for the per-account sign-in pause a blocked sign-in still counts toward.
@@ -119,11 +124,44 @@ guess. The minted token is revoked, and a reset link is mailed through
 asked for it and the sign-in may not have been the owner's. The browser lands
 on `/reset`; the API answers `403 password_reset_required`.
 
+*Amended (#3436–#3438, 2026-11-26):* the mail is branded for a site whose policy refused
+the sign-in, not the site the request came in on: the request's site when it
+is one of them, else the one with the smallest id (stable across attempts,
+and no extra read). The request's site had been used because it was at hand,
+but under the strictest-policy rule it may be a site where the person is only
+a viewer, or one they never think of, so a mail in its name reads like
+phishing. A platform admin administers every site, so no deciding site is
+more theirs than another; their mail keeps the request's site (the default
+site's branding with none). No log or audit line gets a deciding site's name.
+
 The mail is charged to the address's reset-mail budget like every other
 reset mail. The person who typed the password may be an attacker holding it,
 so the budget is never waived. For the same reason the per-account sign-in
 counter is not forgiven: a blocked attempt counts like a failed one, and an
 owner who keeps retrying is paused like anyone else.
+
+*Amended (#3436–#3438, 2026-11-26):* the reasoning above assumed each block mails the
+owner. It does not: the block's reset mail shares the address's five-an-hour
+budget with the anonymous `/reset` form, so someone holding the password can
+spend that budget first, and every block after it is `:over_budget` and sends
+nothing. The pause mail is therefore the notice that budget cannot silence,
+and it now says what filled the counter. Each block is noted in a tally
+beside the counter, on the same window (`AccountThrottle.note_sign_in_block/1`,
+a new bucket, no migration), and `KilnCMS.Accounts.SignInAlert.account_locked/2`
+picks the wording from `AccountThrottle.sign_in_pause_cause/1`: the usual
+"Unusual sign-in activity" mail when there were no blocks; "Sign-in paused on
+your (site) account: choose a new password" when there were, saying that the
+attempts (or some of them) used the current, breached password and that a new
+password lifts the pause. It links `/reset` bare: an unlock link would send the
+owner back to a password that is still refused, and a token would be minted
+on an attacker's schedule. Withholding the mail when every attempt was a
+block was considered, since those attempts are not guesses, and rejected: with
+the reset budget spent it would leave the owner with no word that someone
+holds their current password. So every cause mails, and spends the six-hour
+alert window like the usual mail. The throttle itself is unchanged; the tally
+admits and refuses no one. The tally and the counter are separate rows, so a
+forgiveness or a window boundary between the two reads can only move the mail
+between its wordings.
 
 Under Warn the person signs in and is told: a flash on the browser doors, an
 additive `password_breach` field on the API's one-step `201`.
@@ -135,6 +173,20 @@ unsampled in the log of each site whose policy refused it, not the request
 site's, and not charged to the failed-sign-ins alert. Only the right password
 gets this far, so it is neither a guess nor something a flood can produce,
 and an alert about guessing would mislead.
+
+*Amended (#3436–#3438, 2026-11-26):* a refusal whose deciding sites cannot be read is
+recorded once in the request's site. The rule above left such a refusal
+unrecorded, on the reasoning that the request's site is not one that decided.
+But only a platform admin's deciding sites are read at refusal time (a
+member's come with the decision), and a platform admin's correct password
+refused with no trace anywhere is worse than one row in a site that did not
+decide. So the fallback applies only when the deciding read fails or comes
+back empty, never alongside the deciding sites; it names no other site, and
+the account is labelled only if it is a member of the request's site, so the
+row shows a platform admin to that site's admins no more than a failed sign-in
+by them already would. `PasswordResetRequired`'s `org_ids` stay the sites that
+decided: `[]` means "not known", and the request's site is never put in it.
+With no request site nothing is recorded, as for every sign-in event.
 
 ## Rejected
 
@@ -177,11 +229,16 @@ These are recorded in the threat model's "Breached passwords" section:
   sign-in would have.
 - An attacker holding the breached password can spend the owner's five reset
   mails an hour, and pause the account through the sign-in throttle (which a
-  wrong password could already do).
+  wrong password could already do). *Amended (#3436–#3438, 2026-11-26):* the pause
+  mail names the breach and is not withheld (above), so the owner hears
+  even when the reset budget is spent. It shares the six-hour alert window
+  with the usual pause mail, so a window spent on a pause of wrong guesses
+  delays it until the window rolls.
 - The Warn signal does not reach an API client of a two-factor administrator:
   `/api/auth/sign_in/verify` does not carry `password_breach`.
-- The reset mail is branded for the site the request came in on, not the
-  site whose policy refused the sign-in.
+- ~~The reset mail is branded for the site the request came in on, not the
+  site whose policy refused the sign-in.~~ *Amended (#3436–#3438, 2026-11-26):* closed:
+  it is branded for a deciding site (a platform admin's, the request's site).
 
 ## When to revisit
 

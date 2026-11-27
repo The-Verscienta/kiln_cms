@@ -6,8 +6,9 @@ defmodule KilnCMS.Security.Preparations.AuditSignIn do
   (`:sign_in_failed`, reason `challenge_failed` / `challenge_unavailable`,
   #2249), a breached administrator password refused at sign-in
   (`:sign_in_failed`, reason `breached_password`, #2407, recorded in the orgs
-  whose policy refused it) and the two throttle lockouts (`:sign_in_locked`, scope `"account"` or
-  `"address"`).
+  whose policy refused it, or in the request's org when those could not be
+  read, #3438) and the two throttle lockouts (`:sign_in_locked`, scope
+  `"account"` or `"address"`).
 
   It sits on the action rather than at a controller because the browser form
   submits over `/live` and never reaches `AuthController.failure/3`; the action
@@ -70,8 +71,9 @@ defmodule KilnCMS.Security.Preparations.AuditSignIn do
     do: AuthEvents.sign_in_failed(context, email, "password", "challenge_unavailable")
 
   # A breached administrator password refused at sign-in (#2407): recorded in
-  # the orgs whose policy refused it, unsampled and not charged to the
-  # failed-sign-in alert (`AuthEvents.sign_in_refused_breached/3`).
+  # the orgs whose policy refused it (the request's org when they could not
+  # be read), unsampled and not charged to the failed-sign-in alert
+  # (`AuthEvents.sign_in_refused_breached/3`).
   defp record({:breached, org_ids}, context, email),
     do: AuthEvents.sign_in_refused_breached(context, email, org_ids)
 
