@@ -245,6 +245,47 @@ defmodule KilnCMS.Accounts.Sessions do
     end
   end
 
+  @doc """
+  Sign out every unexpired session, headless app token, remember-me cookie
+  and held two-factor sign-in on every site, bound to one or not, except the
+  rows in `keep` (#2491). Run by `KilnCMS.Accounts.SignOutEveryone`, inside
+  its transaction and after its authorization; drops nothing live itself.
+
+  Returns `{:ok, sessions, others}` like `revoke_org/2`: the revoked `"user"`
+  rows and every other revoked row.
+  """
+  @spec revoke_everywhere([String.t()]) :: {:ok, [Token.t()], [Token.t()]} | {:error, term()}
+  def revoke_everywhere(keep) when is_list(keep) do
+    user_purpose = Token.user_purpose()
+
+    # Two statements for the same reason as `revoke_org/2`: once revoked, a
+    # row no longer says it was a session.
+    with {:ok, sessions} <-
+           revoke_everywhere_rows(Ash.Query.filter(Token, purpose == ^user_purpose), keep),
+         {:ok, others} <-
+           revoke_everywhere_rows(Ash.Query.filter(Token, purpose != ^user_purpose), keep) do
+      {:ok, sessions, others}
+    end
+  end
+
+  defp revoke_everywhere_rows(query, keep) do
+    # authorize?: false — "sign out everyone on every site" has already been
+    # authorized as a platform admin by `InstanceSessions.sign_out_everyone`;
+    # the action forbids every other caller by name.
+    case Accounts.revoke_all_sessions(query, %{keep: keep},
+           authorize?: false,
+           bulk_options: [
+             strategy: :atomic,
+             return_records?: true,
+             return_errors?: true,
+             select: [:jti, :purpose]
+           ]
+         ) do
+      %Ash.BulkResult{status: :success, records: records} -> {:ok, records || []}
+      %Ash.BulkResult{errors: errors} -> {:error, errors}
+    end
+  end
+
   # --- internals ---------------------------------------------------------------
 
   defp fetch_own(user, jti) do

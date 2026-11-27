@@ -24,7 +24,9 @@ defmodule KilnCMS.Accounts.Token do
   was signed in on) and `revoked_reason` (why a row was revoked, so the page
   that sends a browser to sign-in can say why), and `:session_activity`,
   `:expire_idle_session`, `:revoke_stale_session` and `:revoke_org_session`.
-  See `KilnCMS.Accounts.IdleTimeout`.
+  See `KilnCMS.Accounts.IdleTimeout`. "Sign out everyone on every site"
+  (#2491) adds one more system action, `:revoke_all_sessions`
+  (`KilnCMS.Accounts.SignOutEveryone`).
   """
   use Ash.Resource,
     otp_app: :kiln_cms,
@@ -96,6 +98,7 @@ defmodule KilnCMS.Accounts.Token do
   # the page that sends a browser to sign-in can say why.
   @idle_reason "idle"
   @sign_out_all_reason "admin_sign_out_all"
+  @instance_sign_out_all_reason "instance_sign_out_all"
 
   @doc "The `revoked_reason` of a session ended by the site's idle timeout (#2246)."
   @spec idle_reason() :: String.t()
@@ -104,6 +107,13 @@ defmodule KilnCMS.Accounts.Token do
   @doc "The `revoked_reason` of a session ended by an admin's \"sign out everyone\" (#2246)."
   @spec sign_out_all_reason() :: String.t()
   def sign_out_all_reason, do: @sign_out_all_reason
+
+  @doc """
+  The `revoked_reason` of a session ended by a platform admin's "sign out
+  everyone on every site" (#2491).
+  """
+  @spec instance_sign_out_all_reason() :: String.t()
+  def instance_sign_out_all_reason, do: @instance_sign_out_all_reason
 
   @doc "The `purpose` a live, usable stored token carries — AshAuthentication's (#742)."
   @spec user_purpose() :: String.t()
@@ -562,6 +572,28 @@ defmodule KilnCMS.Accounts.Token do
       change set_attribute(:revoked_reason, @sign_out_all_reason)
     end
 
+    # "Sign out everyone on every site" (#2491): every unexpired session
+    # (browser or headless bearer JWT), remember-me cookie and held two-factor
+    # sign-in of every account, bound to a site or not, minus `keep` (the
+    # platform admin's own browser, when asked). API keys are another
+    # resource; reset, confirmation and magic-link tokens have purposes of
+    # their own; neither is reached.
+    update :revoke_all_sessions do
+      description "Sign out every session on every site."
+      accept []
+      argument :keep, {:array, :string}, default: [], sensitive?: true
+
+      change filter(
+               expr(
+                 purpose in ^[@user_purpose, @remember_me_purpose, @second_factor_hold_purpose] and
+                   expires_at > now() and jti not in ^arg(:keep)
+               )
+             )
+
+      change set_attribute(:purpose, "revocation")
+      change set_attribute(:revoked_reason, @instance_sign_out_all_reason)
+    end
+
     destroy :expunge_expired do
       description "Deletes expired tokens."
       change filter(expr(expires_at < now()))
@@ -625,7 +657,8 @@ defmodule KilnCMS.Accounts.Token do
              :session_activity,
              :expire_idle_session,
              :revoke_stale_session,
-             :revoke_org_session
+             :revoke_org_session,
+             :revoke_all_sessions
            ]) do
       forbid_if always()
     end
@@ -687,8 +720,8 @@ defmodule KilnCMS.Accounts.Token do
     # row signed in before this, an API sign-in, or a non-session purpose.
     attribute :org_id, :uuid
 
-    # Why the row was revoked (#2246): `"idle"` or `"admin_sign_out_all"`, or
-    # `nil` for every other revocation.
+    # Why the row was revoked (#2246): `"idle"`, `"admin_sign_out_all"` or
+    # `"instance_sign_out_all"` (#2491), or `nil` for every other revocation.
     attribute :revoked_reason, :string do
       constraints max_length: 40
     end

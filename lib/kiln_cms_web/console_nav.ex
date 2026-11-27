@@ -685,7 +685,9 @@ defmodule KilnCMSWeb.ConsoleNav do
               "sign out",
               "log out",
               "logout",
-              "security"
+              "security",
+              "every site",
+              "instance"
             ]
           },
           # What happens when a new password is in a known breach (#2240).

@@ -491,4 +491,86 @@ defmodule KilnCMSWeb.IdleTimeoutTest do
       assert signed_out?(session_of(admin_browser))
     end
   end
+
+  describe "sign out everyone on every site (#2491)" do
+    test "a platform admin ends browsers on every site, and keeps this one", %{site: site} do
+      other = org("idle-web-every")
+      admin_browser = sign_in(account(), site)
+      here = sign_in(account(:viewer) |> member!(site, :editor), site)
+      there = sign_in(account(:viewer) |> member!(other, :editor), other)
+      {:ok, here_lv, _html} = settings(session_of(here))
+      {:ok, there_lv, _html} = settings(session_of(there))
+      {:ok, lv, _html} = live(session_of(admin_browser), ~p"/editor/sessions")
+
+      lv
+      |> form("#sign-out-everyone-form",
+        sign_out_everyone: %{"confirmation" => KilnCMS.Accounts.SignOutEveryone.phrase()}
+      )
+      |> render_change()
+
+      html =
+        lv
+        |> form("#sign-out-everyone-form",
+          sign_out_everyone: %{
+            "confirmation" => KilnCMS.Accounts.SignOutEveryone.phrase(),
+            "keep_me" => "true"
+          }
+        )
+        |> render_submit()
+
+      assert html =~ "Signed out 2 sessions on every site."
+
+      for open <- [here_lv, there_lv] do
+        flash = assert_redirect(open, ~p"/sign-in", 1_000)
+        assert flash["info"] =~ "An administrator signed everyone out. Sign in again"
+      end
+
+      assert signed_out?(session_of(here))
+      assert signed_out?(session_of(there))
+      refute signed_out?(session_of(admin_browser))
+
+      # The next request says why, too.
+      html = session_of(there) |> get(~p"/sign-in") |> html_response(200)
+      assert html =~ "An administrator signed everyone out. Sign in again to continue."
+    end
+
+    test "signs the platform admin out too when not asked to keep them", %{site: site} do
+      admin_browser = sign_in(account(), site)
+      {:ok, lv, _html} = live(session_of(admin_browser), ~p"/editor/sessions")
+
+      lv
+      |> form("#sign-out-everyone-form",
+        sign_out_everyone: %{
+          "confirmation" => KilnCMS.Accounts.SignOutEveryone.phrase(),
+          "keep_me" => "false"
+        }
+      )
+      |> render_submit()
+
+      flash = assert_redirect(lv, ~p"/sign-in", 1_000)
+      assert flash["info"] =~ "An administrator signed everyone out. Sign in again"
+      assert signed_out?(session_of(admin_browser))
+    end
+
+    test "a remember-me cookie stops signing in", %{site: site} do
+      admin = account()
+
+      browser =
+        sign_in(account(:viewer) |> member!(site, :editor), site, %{"remember_me" => "true"})
+
+      cookie = browser.resp_cookies[@cookie].value
+      assert remembered_as(cookie, site).assigns[:current_user]
+
+      {:ok, _count} =
+        KilnCMS.Accounts.sign_out_everyone_on_every_site(
+          %{confirmation: KilnCMS.Accounts.SignOutEveryone.phrase()},
+          actor: admin
+        )
+
+      refute remembered_as(cookie, site).assigns[:current_user]
+
+      assert %{purpose: "revocation", revoked_reason: "instance_sign_out_all"} =
+               row(Token.peeked_jti(cookie))
+    end
+  end
 end

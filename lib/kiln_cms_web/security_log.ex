@@ -213,6 +213,10 @@ defmodule KilnCMSWeb.SecurityLog do
     do: gettext("Backup server host key changed")
 
   def type_label(:platform_alerts_changed), do: gettext("Platform security alerts changed")
+
+  def type_label(:all_sessions_revoked_everywhere),
+    do: gettext("Everyone signed out on every site")
+
   def type_label(:api_key_reuse_detected), do: gettext("Rotated API key used again")
   def type_label(:ip_block_refused), do: gettext("Blocked address refused")
   def type_label(:api_key_rate_limited), do: gettext("API key hit a rate limit")

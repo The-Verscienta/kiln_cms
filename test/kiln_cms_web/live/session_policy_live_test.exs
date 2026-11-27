@@ -3,16 +3,20 @@ defmodule KilnCMSWeb.SessionPolicyLiveTest do
   `/editor/sessions` (#2246): the admin gate, saving an idle timeout for the
   request's org only (and the audit event it records), the refusal of an
   administrators' timeout longer than everyone's, and "Off" keeping the row
-  that holds the "sign out everyone" watermark. Signing everyone out from this
-  page is in `KilnCMSWeb.IdleTimeoutTest`, beside the browsers it affects.
+  that holds the "sign out everyone" watermark, and the platform admins'
+  "Sign out everyone on every site" (#2491): who sees it, the phrase gate and
+  the refusals. Signing everyone out from this page is in
+  `KilnCMSWeb.IdleTimeoutTest`, beside the browsers it affects.
   """
   use KilnCMSWeb.ConnCase, async: true
 
   @moduletag :capture_log
 
+  import Ecto.Query, only: [from: 2]
   import KilnCMS.OrgFixtures, only: [org: 1]
   import Phoenix.LiveViewTest
 
+  alias KilnCMS.Accounts.SignOutEveryone
   alias KilnCMS.Accounts.User
   alias KilnCMS.CMS
   alias KilnCMS.Security
@@ -148,6 +152,135 @@ defmodule KilnCMSWeb.SessionPolicyLiveTest do
     {:ok, lv, _html} = admin_live(conn, org)
 
     assert has_element?(lv, ~s(nav a[href="/editor/sessions"]))
+  end
+
+  describe "sign out everyone on every site" do
+    test "is hidden from a site admin who is not a platform admin", %{conn: conn, org: org} do
+      site_admin = authed_user(:viewer)
+      member!(site_admin, org, :admin)
+
+      {:ok, lv, _html} = conn |> org_conn(org) |> log_in(site_admin) |> live(~p"/editor/sessions")
+
+      assert has_element?(lv, "#sign-out-all")
+      refute has_element?(lv, "#session-sign-out-everyone")
+      refute has_element?(lv, "#sign-out-everyone")
+    end
+
+    test "a platform admin sees it, with keep-this-session ticked", %{conn: conn, org: org} do
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      assert has_element?(lv, "#session-sign-out-everyone", SignOutEveryone.phrase())
+      assert has_element?(lv, "#session-sign-out-everyone", "API keys keep working")
+
+      assert has_element?(
+               lv,
+               "#sign-out-everyone-form input[type=checkbox][name='sign_out_everyone[keep_me]'][checked]"
+             )
+    end
+
+    test "the button is disabled until the phrase matches", %{conn: conn, org: org} do
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      assert has_element?(lv, "#sign-out-everyone[disabled]")
+
+      change(lv, "wrong.example.com")
+      assert has_element?(lv, "#sign-out-everyone[disabled]")
+
+      change(lv, " " <> String.upcase(SignOutEveryone.phrase()))
+      assert has_element?(lv, "#sign-out-everyone")
+      refute has_element?(lv, "#sign-out-everyone[disabled]")
+
+      change(lv, "")
+      assert has_element?(lv, "#sign-out-everyone[disabled]")
+    end
+
+    test "a wrong phrase submitted anyway signs nobody out", %{conn: conn, org: org} do
+      victim = victim_session(org)
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      html =
+        render_submit(lv, "sign_out_everyone", %{
+          "sign_out_everyone" => %{"confirmation" => "wrong.example.com", "keep_me" => "true"}
+        })
+
+      assert html =~ "type the server&#39;s host name exactly"
+      assert live?(victim)
+    end
+
+    test "a hand-crafted event from a site admin is refused by the action", %{
+      conn: conn,
+      org: org
+    } do
+      victim = victim_session(org)
+      site_admin = authed_user(:viewer)
+      member!(site_admin, org, :admin)
+
+      {:ok, lv, _html} = conn |> org_conn(org) |> log_in(site_admin) |> live(~p"/editor/sessions")
+
+      for event <- ["check_everyone_phrase", "sign_out_everyone"] do
+        html =
+          render_submit(lv, event, %{
+            "sign_out_everyone" => %{
+              "confirmation" => SignOutEveryone.phrase(),
+              "keep_me" => "true"
+            }
+          })
+
+        refute html =~ "Signed out"
+      end
+
+      assert render(lv) =~ "permission to sign everyone out on every site"
+      refute has_element?(lv, "#session-sign-out-everyone")
+      assert live?(victim)
+    end
+
+    test "malformed payloads sign nobody out and do not crash the page", %{conn: conn, org: org} do
+      victim = victim_session(org)
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      render_change(lv, "check_everyone_phrase", %{"sign_out_everyone" => "nope"})
+
+      render_change(lv, "check_everyone_phrase", %{
+        "sign_out_everyone" => %{"confirmation" => [1]}
+      })
+
+      render_submit(lv, "sign_out_everyone", %{"sign_out_everyone" => "nope"})
+      render_submit(lv, "sign_out_everyone", %{"sign_out_everyone" => %{"confirmation" => [1]}})
+
+      assert render(lv) =~ "Sign out everyone on every site"
+      assert live?(victim)
+    end
+  end
+
+  defp change(lv, typed) do
+    lv
+    |> form("#sign-out-everyone-form", sign_out_everyone: %{"confirmation" => typed})
+    |> render_change()
+  end
+
+  defp member!(user, org, role) do
+    Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+      organization_id: org.id,
+      user_id: user.id,
+      role: role
+    })
+  end
+
+  defp victim_session(org) do
+    user = authed_user(:editor)
+
+    Ash.Seed.seed!(KilnCMS.Accounts.Token, %{
+      jti: "spl-victim-#{System.unique_integer([:positive])}",
+      subject: "user?id=#{user.id}",
+      purpose: "user",
+      org_id: org.id,
+      expires_at: DateTime.add(DateTime.utc_now(), 3600, :second)
+    }).jti
+  end
+
+  defp live?(jti) do
+    KilnCMS.Repo.one!(from(t in KilnCMS.Accounts.Token, where: t.jti == ^jti, select: t.purpose)) !=
+      "revocation"
   end
 
   defp admin_live(conn, org) do
