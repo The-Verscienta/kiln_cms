@@ -9,6 +9,7 @@ defmodule KilnCMSWeb.BlockComponents do
   """
   use Phoenix.Component
   use Gettext, backend: KilnCMSWeb.Gettext
+  use KilnCMSWeb, :verified_routes
 
   alias KilnCMS.Blocks
   alias KilnCMS.CMS.TypedBlocks
@@ -489,7 +490,8 @@ defmodule KilnCMSWeb.BlockComponents do
   # itself. An external module, never inline, so every page's
   # `script-src 'self'` covers it, and only on a page with a conditional
   # form, so no other page grows. A module runs once however many forms load
-  # it. It is the embed's own bundle (`kiln_challenge_embed`), which also
+  # it, so the URL is the one `ChallengeComponents` uses, digest included. It
+  # is the embed's own bundle (`kiln_challenge_embed`), which also
   # mounts the human-verification widget, idempotently beside public.js or
   # app.js.
   attr :script?, :boolean, required: true
@@ -499,7 +501,7 @@ defmodule KilnCMSWeb.BlockComponents do
     <p class="kiln-form-condition-hint mt-1 text-xs text-base-content/70">
       {gettext("Depends on an earlier answer; leave it blank if it doesn't apply.")}
     </p>
-    <script :if={@script?} type="module" src="/assets/js/challenge_static.js">
+    <script :if={@script?} type="module" src={~p"/assets/js/challenge_static.js"}>
     </script>
     """
   end

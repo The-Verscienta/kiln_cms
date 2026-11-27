@@ -253,6 +253,38 @@ defmodule KilnCMS.CMS.FormFieldConditionTest do
       assert message(error) =~ "has a condition"
     end
 
+    test "moving a field to another form while giving it a condition is refused", ctx do
+      other =
+        CMS.create_form!(%{name: "G", slug: "move-#{System.unique_integer([:positive])}"},
+          actor: ctx.actor
+        )
+
+      CMS.create_form_field!(
+        %{form_id: other.id, name: "there", label: "There", field_type: :string, position: 0},
+        actor: ctx.actor
+      )
+
+      loner = field!(ctx, "loner", 9)
+
+      assert {:error, error} =
+               CMS.update_form_field(
+                 loner,
+                 %{form_id: other.id, position: 5, condition: show(leaf("there"))},
+                 actor: ctx.actor
+               )
+
+      assert message(error) =~ "has a condition"
+      assert reload(loner).form_id == ctx.form.id
+    end
+
+    test "a rename leaves the rule of a field this release doesn't know alone", ctx do
+      KilnCMS.NewerReleaseRows.form_field_type!(ctx.b.id)
+
+      assert {:ok, renamed} = CMS.update_form_field(ctx.a, %{name: "choice"}, actor: ctx.actor)
+      assert renamed.__metadata__.condition_rewrites == []
+      assert reload(ctx.b).condition.rule == leaf("a", "eq", "x")
+    end
+
     test "a position change that puts a dependent first is refused", ctx do
       assert {:error, error} = CMS.update_form_field(ctx.a, %{position: 5}, actor: ctx.actor)
       assert message(error) =~ "“B” is shown based on “A”, which would come after it"

@@ -242,5 +242,26 @@ defmodule KilnCMS.Forms.DuplicateTest do
 
       assert dependent.condition.rule == %{"field" => "website_2", "op" => "not_empty"}
     end
+
+    test "a condition naming a field the copy leaves out is not copied, and the rest commits" do
+      admin = user(:admin)
+      form = form!(admin)
+      field!(form, admin, "email", 0)
+      newer = field!(form, admin, "signature", 1)
+      details = field!(form, admin, "details", 2)
+
+      rule = %{"field" => "signature", "op" => "not_empty"}
+      CMS.update_form_field!(details, %{condition: %{action: :show, rule: rule}}, actor: admin)
+      # A newer release's type: the copy can't carry the field the rule names.
+      KilnCMS.NewerReleaseRows.form_field_type!(newer.id)
+
+      assert {:ok, %{copy: copy}} = Duplicate.run(form, actor: admin)
+      assert field_names(copy) == ["email", "details"]
+
+      copied =
+        copy.id |> CMS.form_fields_for!(authorize?: false) |> Enum.find(&(&1.name == "details"))
+
+      assert copied.condition == nil
+    end
   end
 end

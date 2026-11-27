@@ -160,9 +160,12 @@ defmodule KilnCMSWeb.FormConditionsTest do
       assert LazyHTML.attribute(input, "data-kiln-required") == [""]
       assert html =~ "Depends on an earlier answer"
 
-      assert doc
-             |> LazyHTML.query(~s(script[src="/assets/js/challenge_static.js"]))
-             |> Enum.count() == 1
+      # The URL the challenge widget loads it from (`ChallengeComponents`),
+      # digest included, so a page with both runs the module once.
+      src =
+        Phoenix.VerifiedRoutes.static_path(KilnCMSWeb.Endpoint, "/assets/js/challenge_static.js")
+
+      assert doc |> LazyHTML.query("form script[src]") |> LazyHTML.attribute("src") == [src]
 
       # No inline script.
       assert doc |> LazyHTML.query("form script:not([src])") |> Enum.count() == 0

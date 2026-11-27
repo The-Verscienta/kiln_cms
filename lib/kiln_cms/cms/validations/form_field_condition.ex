@@ -25,7 +25,8 @@ defmodule KilnCMS.CMS.Validations.FormFieldCondition do
   **The fields whose conditions name this one** ("dependents"):
 
     * a delete, or a move to another form (`form_id`), is refused while there
-      are any. A move is also refused while the field has a condition;
+      are any. A move is also refused while the field has a condition, or
+      when the same write gives it one;
     * a retype is refused when a dependent tests it with an operator the new
       type can't answer;
     * a `position` change, or a rename (it can reorder fields at the same
@@ -148,8 +149,10 @@ defmodule KilnCMS.CMS.Validations.FormFieldCondition do
     end
   end
 
+  # The stored condition or the one this write sets: either names fields of
+  # the form the field is leaving, and the siblings read here are that form's.
   defp run(:no_condition, changeset, _siblings) do
-    if Logic.stored(changeset.data),
+    if Logic.stored(changeset.data) || Logic.stored(resulting(changeset)),
       do:
         error(
           :form_id,
@@ -288,7 +291,7 @@ defmodule KilnCMS.CMS.Validations.FormFieldCondition do
         {field.name, refs}
       end)
 
-    if reaches?(graph, graph[self.name] || [], self.name, MapSet.new()),
+    if reaches?(graph, graph[self.name] || [], self.name, %{}),
       do: error(:condition, gettext("would depend on itself through other conditions")),
       else: :ok
   end
@@ -300,11 +303,11 @@ defmodule KilnCMS.CMS.Validations.FormFieldCondition do
       name == target ->
         true
 
-      MapSet.member?(seen, name) ->
+      Map.has_key?(seen, name) ->
         reaches?(graph, rest, target, seen)
 
       true ->
-        seen = MapSet.put(seen, name)
+        seen = Map.put(seen, name, true)
         reaches?(graph, Map.get(graph, name, []) ++ rest, target, seen)
     end
   end

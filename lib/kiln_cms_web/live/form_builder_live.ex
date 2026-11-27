@@ -203,8 +203,8 @@ defmodule KilnCMSWeb.FormBuilderLive do
   end
 
   def handle_event("remove_condition_row", %{"id" => id, "index" => index}, socket)
-      when is_binary(id) do
-    case Integer.parse(to_string(index)) do
+      when is_binary(id) and is_binary(index) do
+    case Integer.parse(index) do
       {index, ""} ->
         with_condition_field(socket, id, fn state, _targets ->
           FormConditionsBuilder.remove(state, index)
@@ -1189,7 +1189,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
               phx-value-id={@field.id}
               phx-value-index={index}
               aria-label={gettext("Remove condition %{n}", n: index + 1)}
-              class="p-1 text-base-content/60 hover:text-error"
+              class="p-1 text-base-content/70 hover:text-error"
             >
               <.icon name="hero-x-mark" class="size-4" />
             </button>
@@ -1958,7 +1958,7 @@ defmodule KilnCMSWeb.FormBuilderLive do
                   tokens: autoresponder_token_hint(@form, @fields)
                 )}
               </p>
-              <p :if={Logic.conditional?(@fields)} class="text-xs text-base-content/60">
+              <p :if={Logic.conditional?(@fields)} class="text-xs text-base-content/70">
                 {gettext(
                   "A field its condition hid leaves its token blank. The confirmation goes to the first email field that was shown and filled in."
                 )}

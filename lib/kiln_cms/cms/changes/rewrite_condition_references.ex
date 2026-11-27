@@ -52,7 +52,9 @@ defmodule KilnCMS.CMS.Changes.RewriteConditionReferences do
 
   defp rewrite_all(fields, renamed, from, opts) do
     fields
-    |> Enum.reject(&(&1.id == renamed.id))
+    # A row of a type this release doesn't know is left alone: it couldn't be
+    # written back, and this release never applies its condition.
+    |> Enum.reject(&(&1.id == renamed.id or not Logic.known?(&1)))
     |> Enum.reduce_while({:ok, []}, fn other, {:ok, done} ->
       case rewrite_one(other, renamed, from, opts) do
         :unchanged -> {:cont, {:ok, done}}
