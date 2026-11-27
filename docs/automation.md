@@ -110,8 +110,9 @@ lost until someone looks at `/editor/social`. See
 
 ### The intelligence reactions suggest, and never write
 
-The last four rows compute something about the document and **email the
-findings**. None of them touches the record, and that is a design decision
+The last four rows compute something about the document and **report the
+findings** by email, as a comment or as a task (`deliver_as`). None of them
+touches the record, and that is a design decision
 rather than an unfinished one.
 
 Generated metadata lands in `<meta>` tags on the public site, so a successful
