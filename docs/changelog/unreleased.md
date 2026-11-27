@@ -42,6 +42,14 @@ carries the reasoning.
 
 ## Changed
 
+<a id="bot-classes-regional-engines"></a>
+
+- **More crawlers land in the bot-budget class they belong to (#2468).** `KilnCMS.BotClass` gave a browser-shaped crawler that was not on its lists the browser ceiling, and regional search engines the other-bot one, so raising **Search engines (%)** did nothing for them. See [How a request is classified](../bot-budgets.md#how-a-request-is-classified).
+  - **Search engine, checked by DNS.** `SeznamBot` (PTR under `seznam.cz`) and `MojeekBot` (`mojeek.com`), each the domain the vendor documents, and Google Shopping's `Storebot-Google`, verified like Googlebot. A claim proven false is charged as No user agent, as for the others. Their published IP lists are not fetched yet.
+  - **Other bot.** `GoogleOther` (Google's generic fetcher, no product), `AdsBot-Google` (checked only under `google.com`, which verification refuses), and Naver's `Yeti` and Sogou's spiders: they document no domain to check, and an unprovable claim would keep the 404 guard's exemption for anyone who typed the name. `Qwantbot` is named here too: it can become a search engine once its verification domain is confirmed from Qwant's own documentation, since a wrong domain would prove the real crawler's claims false. A user agent with `compatible;` followed by a name ending in bot, crawler, spider or scraper is another bot even inside a browser's string; a phone model such as `CUBOT_X30` is not.
+  - **AI crawler.** `Google-CloudVertexBot`, which fetches for Vertex AI Agents. AI crawlers keep the browser's 100% by default, so this raises its ceiling from 50%, no more than a browser user agent already gets.
+  - **No migration; rolling the pin back is safe.** Telemetry's `engine` tag gains `:seznam` and `:mojeek`.
+
 <a id="sftp-prune-test-hint"></a>
 
 - **The Destinations tab says when pressing Test on both SFTP destinations would let them prune (#3428).** Two SFTP destinations whose folders nest stay **Not pruned** until both trust host keys of the same type that differ and each has passed a Test since the later trust (#3200). When the Tests are all that's missing, each row now shows **Press Test on both destinations to let them prune.** with a link to [Let two SFTP destinations on different servers both prune](../backups.md#let-two-sftp-destinations-on-different-servers-both-prune).
