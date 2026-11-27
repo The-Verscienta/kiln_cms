@@ -302,7 +302,8 @@ defmodule KilnCMS.Accounts.Sessions do
     timeout = revoke_timeout()
 
     Repo.with_timeout(timeout + @client_grace, fn ->
-      Repo.query!("SET LOCAL statement_timeout = #{timeout}")
+      # `set_config(…, true)` is `SET LOCAL`: for the rest of this transaction.
+      Repo.query!("SELECT set_config('statement_timeout', $1, true)", [Integer.to_string(timeout)])
 
       # authorize?: false — the sign-out calling this authorized first; all others forbidden
       with {:ok, rows} <- lock.(authorize?: false),
