@@ -334,6 +334,7 @@ defmodule KilnCMSWeb.BackupDestinationsSftpLiveTest do
                )
 
         refute has_element?(lv, "#backup-destination-#{row.id} [data-role=prune-blocked]")
+        refute has_element?(lv, "#backup-destination-#{row.id} [data-role=prune-test-hint]")
       end
     end
 
@@ -353,10 +354,42 @@ defmodule KilnCMSWeb.BackupDestinationsSftpLiveTest do
                    "host keys of the same type that differ, and each has passed a Test since " <>
                    "the later of the two was trusted"
                )
+
+        # A Test can't tell one server from itself: no hint to press it.
+        refute has_element?(lv, "#backup-destination-#{row.id} [data-role=prune-test-hint]")
       end
     end
 
-    test "a row not tested since the other was trusted blocks the pair", %{conn: conn} do
+    test "a key not yet trusted on the other row gets no hint to press Test", %{conn: conn} do
+      a = trusted!(2201, "ssh-ed25519", @fp_a)
+
+      # Disabled: an SFTP row can't be enabled before its key is trusted.
+      # A disabled row still blocks an overlapping one.
+      _b =
+        Backups.create_backup_destination!(
+          %{
+            name: "NAS untrusted",
+            kind: "sftp",
+            enabled: false,
+            settings: %{
+              "host" => "127.0.0.1",
+              "port" => 2202,
+              "username" => "kiln",
+              "path" => "/backups"
+            },
+            secrets: %{"password" => SftpServer.password()}
+          },
+          actor: platform_admin()
+        )
+
+      lv = mount(conn)
+
+      assert has_element?(lv, "#backup-destination-#{a.id} [data-role=prune-blocked]")
+      refute has_element?(lv, "#backup-destination-#{a.id} [data-role=prune-test-hint]")
+    end
+
+    test "a row not tested since the other was trusted blocks the pair, and says to press Test",
+         %{conn: conn} do
       # A was tested before B was trusted: A has not been seen since.
       rows = [trusted!(2201, "ssh-ed25519", @fp_a), trusted!(2202, "ssh-ed25519", @fp_b)]
       lv = mount(conn)
@@ -364,7 +397,27 @@ defmodule KilnCMSWeb.BackupDestinationsSftpLiveTest do
       for row <- rows do
         refute has_element?(lv, "#backup-destination-#{row.id} [data-role=prunes]")
         assert has_element?(lv, "#backup-destination-#{row.id} [data-role=prune-blocked]")
+
+        assert has_element?(
+                 lv,
+                 "#backup-destination-#{row.id} [data-role=prune-test-hint]",
+                 "Press Test on both destinations to let them prune."
+               )
+
+        assert has_element?(
+                 lv,
+                 ~s(#backup-destination-#{row.id}-prune-docs[href$="backups.md#let-two-sftp-destinations-on-different-servers-both-prune"])
+               )
       end
+    end
+
+    test "the hint's guide anchor exists in docs/backups.md" do
+      guide = File.read!(Path.expand("../../../docs/backups.md", __DIR__))
+
+      assert guide =~
+               ~s(<a id="let-two-sftp-destinations-on-different-servers-both-prune"></a>)
+
+      assert guide =~ "##### Let two SFTP destinations on different servers both prune"
     end
 
     test "a failed Test blocks the pair", %{conn: conn} do
