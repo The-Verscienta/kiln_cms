@@ -182,6 +182,10 @@ else.
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#mention-roster-scoping))
 
+- **Erasing an account now takes its address off the instance mail suppression list and every site's list, whatever its case (#3036).**
+  Before, an erased person's hard-bounced address stayed listed until an admin removed it. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#erasure-drops-suppressions))
+
 - **An IP block rule added or removed, or a site's new slug or custom domain, takes effect on a node's next request, instead of the old answer being cached for up to a minute (five for an old host) when a lookup straddled the save (#2972).**
   No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#cache-fill-after-bust))
