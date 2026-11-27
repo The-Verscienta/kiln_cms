@@ -16014,6 +16014,11 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
+msgid "Nobody was signed out: this site's security log could not record it. Try again."
+msgstr ""
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
 msgid "Nobody was signed out: type the server's host name exactly to confirm."
 msgstr ""
 

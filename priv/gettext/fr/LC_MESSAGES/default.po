@@ -16014,6 +16014,11 @@ msgstr "Personne n’a été déconnecté : la session de ce navigateur a déjà
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
+msgid "Nobody was signed out: this site's security log could not record it. Try again."
+msgstr "Personne n’a été déconnecté : le journal de sécurité de ce site n’a pas pu l’enregistrer. Réessayez."
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
 msgid "Nobody was signed out: type the server's host name exactly to confirm."
 msgstr "Personne n’a été déconnecté : saisissez exactement le nom d’hôte du serveur pour confirmer."
 

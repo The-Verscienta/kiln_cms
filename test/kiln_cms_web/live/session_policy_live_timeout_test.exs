@@ -105,6 +105,55 @@ defmodule KilnCMSWeb.SessionPolicyLiveTimeoutTest do
     refute_received {:latch_timeout, _, _}
   end
 
+  # The per-site "Sign out everyone" took the same lock pass and timeout
+  # (#2491): its flash says so too, never Ash's own timeout text.
+  test "a site's sign-out past its timeout says so and signs nobody out", %{
+    conn: conn,
+    org: org,
+    held: held
+  } do
+    site_jti = "#{held.jti}-site"
+
+    unboxed(fn ->
+      Repo.query!(
+        "UPDATE tokens SET org_id = $1 WHERE jti = $2",
+        [Ecto.UUID.dump!(org.id), held.jti]
+      )
+    end)
+
+    holder =
+      Task.async(fn ->
+        unboxed(fn ->
+          Repo.transaction(fn ->
+            Repo.query!("SELECT 1 FROM tokens WHERE jti = $1 FOR UPDATE", [held.jti])
+            Latch.enter(:spl_timeout)
+            :ok
+          end)
+        end)
+      end)
+
+    assert_receive {:latch_started, :spl_timeout, 1}, 5_000
+
+    {:ok, lv, _html} =
+      conn |> org_conn(org) |> log_in(authed_user()) |> live(~p"/editor/sessions")
+
+    html = render_submit(lv, "sign_out_all", %{"sign_out_all" => %{"keep_me" => "true"}})
+
+    assert html =~ "it took too long and was undone"
+    refute html =~ "timed out after"
+    refute html =~ "57014"
+    refute html =~ site_jti
+
+    assert [_] = Latch.release_all(:spl_timeout)
+    assert {:ok, :ok} = Task.await(holder, 10_000)
+
+    assert unboxed(fn ->
+             Repo.one!(from(t in Token, where: t.jti == ^held.jti, select: t.purpose))
+           end) == "user"
+
+    refute_received {:latch_timeout, _, _}
+  end
+
   defp authed_user do
     email = "spl-timeout-admin-#{System.unique_integer([:positive])}@example.com"
 

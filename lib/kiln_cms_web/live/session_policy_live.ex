@@ -96,10 +96,7 @@ defmodule KilnCMSWeb.SessionPolicyLive do
          put_flash(
            socket,
            :error,
-           ash_error_message(error,
-             forbidden: gettext("You don't have permission to sign everyone out of this site."),
-             fallback: gettext("Nobody was signed out. Try again.")
-           )
+           site_error(error)
          )}
     end
   end
@@ -178,6 +175,36 @@ defmodule KilnCMSWeb.SessionPolicyLive do
 
   # Every refusal and failure in words the admin can act on — never the
   # error's own text, which is English and can be a database's.
+  # The per-site sign-out's refusals (#2491): a timeout or an audit write that
+  # was skipped reaches the flash as a sentence, never as Ash's own text; any
+  # other refusal keeps the messages it had.
+  defp site_error(error) do
+    errors =
+      case error do
+        :not_recorded -> [:not_recorded]
+        error -> error |> Ash.Error.to_error_class() |> Map.get(:errors, [])
+      end
+
+    cond do
+      Enum.any?(errors, &match?(%Ash.Error.Invalid.Timeout{}, &1)) ->
+        gettext("Nobody was signed out: it took too long and was undone. Try again.")
+
+      Enum.any?(errors, &not_recorded?/1) ->
+        gettext("Nobody was signed out: this site's security log could not record it. Try again.")
+
+      true ->
+        ash_error_message(error,
+          forbidden: gettext("You don't have permission to sign everyone out of this site."),
+          fallback: gettext("Nobody was signed out. Try again.")
+        )
+    end
+  end
+
+  defp not_recorded?(:not_recorded), do: true
+  defp not_recorded?(%{error: :not_recorded}), do: true
+  defp not_recorded?(%{error: error}) when is_binary(error), do: error =~ "not_recorded"
+  defp not_recorded?(_other), do: false
+
   defp everyone_error(%Ash.Error.Forbidden{}),
     do: gettext("You don't have permission to sign everyone out on every site.")
 

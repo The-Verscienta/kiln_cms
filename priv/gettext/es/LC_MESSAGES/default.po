@@ -16014,6 +16014,11 @@ msgstr "No se cerró la sesión de nadie: la sesión de este navegador ya termin
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
+msgid "Nobody was signed out: this site's security log could not record it. Try again."
+msgstr "No se cerró la sesión de nadie: el registro de seguridad de este sitio no pudo anotarlo. Inténtalo de nuevo."
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
 msgid "Nobody was signed out: type the server's host name exactly to confirm."
 msgstr "No se cerró la sesión de nadie: escribe exactamente el nombre de host del servidor para confirmar."
 
