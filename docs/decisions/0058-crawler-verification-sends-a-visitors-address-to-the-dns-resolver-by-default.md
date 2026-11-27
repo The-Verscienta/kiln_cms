@@ -71,7 +71,10 @@ of. It is the most privacy-relevant call Kiln makes by default.
 The scope is the real case for default-on. A lookup happens only for a
 public delivery request (a page, `/search`, a media download or stream)
 whose user agent names Googlebot, Google-InspectionTool, bingbot, Applebot,
-YandexBot or Baiduspider (`KilnCMS.BotClass.search_engine/1`), and only:
+YandexBot or Baiduspider (`KilnCMS.BotClass.search_engine/1`; *amended
+2026-11-26 by #2468:* also Storebot-Google, SeznamBot and MojeekBot, each
+checked by its vendor's documented domain — `docs/data-flows.md` holds the
+current list), and only:
 
 - from a public address that is not a trusted proxy and did not arrive
   through a forwarding header nothing trusts;

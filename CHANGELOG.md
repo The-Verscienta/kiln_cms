@@ -92,6 +92,9 @@ else.
 
 ### Changed
 
+- **Bot budgets: SeznamBot, MojeekBot and Storebot-Google count as search engines, checked by DNS; GoogleOther, AdsBot-Google, Naver's Yeti, Qwantbot, Sogou and a browser-shaped `(compatible; …bot)` crawler count as other bots, and Google-CloudVertexBot as an AI crawler (#2468).**
+  No migration; rolling the pin back is safe.
+  ([#3477](https://github.com/The-Verscienta/kiln_cms/pull/3477) · [long form](docs/changelog/unreleased.md#bot-classes-regional-engines))
 - **Forms: the autoresponder writes to the first email field, in form order, that the submission filled in; before, a blank first email field meant no confirmation even when a later one was filled (#2262).**
   A field its condition hid is passed over, and its `[field:…]` token is blank. No migration.
   ([#3480](https://github.com/The-Verscienta/kiln_cms/pull/3480) · [long form](docs/changelog/unreleased.md#autoresponder-first-filled-email))

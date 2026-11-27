@@ -11691,8 +11691,8 @@ msgstr "Bien"
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
-msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot and Applebot, when the address checks out as theirs. A claim proven false counts as No user agent."
-msgstr "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot y Applebot, cuando se comprueba que la dirección es suya. Una identificación que resulta falsa cuenta como Sin agente de usuario."
+msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot, Applebot, SeznamBot and MojeekBot, when the address checks out as theirs. A claim proven false counts as No user agent."
+msgstr "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot, Applebot, SeznamBot y MojeekBot, cuando se comprueba que la dirección es suya. Una identificación que resulta falsa cuenta como Sin agente de usuario."
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/governance_live.ex

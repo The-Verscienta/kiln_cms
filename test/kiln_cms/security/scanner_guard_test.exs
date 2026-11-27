@@ -588,6 +588,28 @@ defmodule KilnCMS.Security.ScannerGuardTest do
       assert [_] = rules()
     end
 
+    # The engines #2468 added: with verification off the rate limiter gives
+    # them the search-engine ceiling, so the 404 guard must agree.
+    for ua <- [
+          "Mozilla/5.0 (compatible; Storebot-Google/1.0; +http://www.google.com/storebot.html)",
+          "Mozilla/5.0 (compatible; SeznamBot/4.0; +https://o-seznam.cz/napoveda/vyhledavani/en/seznambot-crawler/)",
+          "Mozilla/5.0 (compatible; MojeekBot/0.11; +https://www.mojeek.com/bot.html)"
+        ] do
+      test "with verification off, #{ua |> String.split(["; ", "/"]) |> Enum.at(2)} is exempt too",
+           %{ip: ip} do
+        previous = Application.get_env(:kiln_cms, CrawlerVerification, [])
+
+        Application.put_env(
+          :kiln_cms,
+          CrawlerVerification,
+          Keyword.put(previous, :enabled, false)
+        )
+
+        miss(10, "/gone", ua: unquote(ua), ip: ip)
+        assert rules() == []
+      end
+    end
+
     test "with verification off, a planted failure is not read", %{ip: ip} do
       CrawlerVerification.put_result(:google, ip, {:rejected, :no_ptr})
       previous = Application.get_env(:kiln_cms, CrawlerVerification, [])

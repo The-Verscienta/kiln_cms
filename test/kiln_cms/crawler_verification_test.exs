@@ -53,7 +53,9 @@ defmodule KilnCMS.CrawlerVerificationTest do
           yandex: "spider-1-1.yandex.ru",
           yandex: "spider-1-1.yandex.net",
           baidu: "baiduspider-1-1.crawl.baidu.com",
-          baidu: "baiduspider-1-1.crawl.baidu.jp"
+          baidu: "baiduspider-1-1.crawl.baidu.jp",
+          seznam: "fulltextrobot-77-75-77-1.seznam.cz",
+          mojeek: "crawl-5-102-173-71.mojeek.com"
         ] do
       test "#{engine} via #{host} is verified, asking only for A records", %{opts: opts} do
         engine = unquote(engine)
@@ -1381,6 +1383,15 @@ defmodule KilnCMS.CrawlerVerificationTest do
       refute Engines.matches?(:google, "x.googleusercontent.com")
       refute Engines.matches?(:google, "x.google.com")
       assert Engines.matches?(:google, "crawl-1.geo.googlebot.com")
+    end
+
+    test "a regional engine's domain must end the name (#2468)" do
+      for {engine, suffix} <- [seznam: "seznam.cz", mojeek: "mojeek.com"] do
+        assert Engines.matches?(engine, "crawl-1." <> suffix)
+        refute Engines.matches?(engine, "crawl-1.evil" <> suffix)
+        refute Engines.matches?(engine, "crawl-1." <> suffix <> ".example.net")
+        refute Engines.matches?(:google, "crawl-1." <> suffix)
+      end
     end
 
     test "normalize_host/1 reads plain hostnames only" do

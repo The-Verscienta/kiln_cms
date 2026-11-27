@@ -61,6 +61,14 @@ carries the reasoning.
 
 ## Changed
 
+<a id="bot-classes-regional-engines"></a>
+
+- **More crawlers land in the bot-budget class they belong to (#2468).** `KilnCMS.BotClass` gave a browser-shaped crawler that was not on its lists the browser ceiling, and regional search engines the other-bot one, so raising **Search engines (%)** did nothing for them. See [How a request is classified](../bot-budgets.md#how-a-request-is-classified).
+  - **Search engine, checked by DNS.** `SeznamBot` (PTR under `seznam.cz`) and `MojeekBot` (`mojeek.com`), each the domain the vendor documents, and Google Shopping's `Storebot-Google`, verified like Googlebot. A claim proven false is charged as No user agent, as for the others. Their published IP lists are not fetched yet.
+  - **Other bot.** `GoogleOther` (Google's generic fetcher, no product), `AdsBot-Google` (checked only under `google.com`, which verification refuses; its landing-page checks now get the other-bot ceiling, 50% by default, instead of the browser's), and Naver's `Yeti` and Sogou's spiders: they document no domain to check, and an unprovable claim would keep the 404 guard's exemption for anyone who typed the name. `Qwantbot` is named here too: it can become a search engine once its verification domain is confirmed from Qwant's own documentation, since a wrong domain would prove the real crawler's claims false. A user agent with `compatible;` followed by a name ending in bot, crawler, spider or scraper is another bot even inside a browser's string; a phone model such as `CUBOT_X30` is not.
+  - **AI crawler.** `Google-CloudVertexBot`, which fetches for Vertex AI Agents. AI crawlers keep the browser's 100% by default, so this raises its ceiling from 50%, no more than a browser user agent already gets.
+  - **No migration; rolling the pin back is safe.** Telemetry's `engine` tag gains `:seznam` and `:mojeek`.
+
 <a id="autoresponder-first-filled-email"></a>
 
 - **The autoresponder confirms to the first email field the submission filled in (#2262).** `KilnCMS.Forms.Autoresponder.eligible?/3` used to take the form's first `:email` field and send nothing when that one was blank, even if a later email field held an address. It now takes the first `:email` field, in form order, with a non-blank value. That is needed for conditions, where the first email field may be hidden, and it changes forms without any condition too: a form with an optional first email field and a filled-in second one now sends a confirmation to the second. A `[field:<name>]` token for a field its condition hid expands to nothing, like a blank field; the **Confirmations** tab says so on a form with a condition. No migration; rolling the pin back restores the old choice.
