@@ -18,13 +18,14 @@ defmodule KilnCMS.Backups.DiskView do
   unreadable directory, an `:unknown` presence).
   """
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Manifest, Markers, Presence, Run}
+  alias KilnCMS.Backups.{DirId, Manifest, Markers, Presence, Run}
 
   @type t :: %{
           markers: Markers.t(),
           presence: %{optional(Ecto.UUID.t()) => Presence.t()},
           resumable: MapSet.t(Ecto.UUID.t()),
-          cron_keep_days: pos_integer() | nil
+          cron_keep_days: pos_integer() | nil,
+          dir_id: {:ok, String.t()} | {:error, term()}
         }
 
   @doc """
@@ -35,6 +36,10 @@ defmodule KilnCMS.Backups.DiskView do
   `nil`: the app doesn't know cron's window then. It judges an imported row
   only when no imported run is newer than it; one that is newer and recorded
   its own `keep_days` judges it instead (#3113).
+
+  `dir_id` is the directory's `.kiln-dir-id` (`KilnCMS.Backups.DirId.current/1`,
+  one read), so the page can tell a row whose files are in another server's
+  backup directory (#2539) before anyone clicks Download (part of #2225).
 
   Options: `:cron_prunes`, the later imported runs' windows
   (`KilnCMS.Backups.Presence.cron_prunes/2`), default `nil`: none were read,
@@ -56,7 +61,8 @@ defmodule KilnCMS.Backups.DiskView do
       markers: context.markers,
       presence: Map.new(runs, &{&1.id, Presence.for(&1, context)}),
       resumable: for(run <- runs, resumable?(run, now), into: MapSet.new(), do: run.id),
-      cron_keep_days: cron_keep_days
+      cron_keep_days: cron_keep_days,
+      dir_id: DirId.current(dir)
     }
   end
 

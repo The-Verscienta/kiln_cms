@@ -194,6 +194,7 @@ defmodule KilnCMSWeb.SecurityLog do
   def type_label(:registration_approved), do: gettext("Registration approved")
   def type_label(:registration_rejected), do: gettext("Registration rejected")
   def type_label(:backup_canceled), do: gettext("Backup canceled")
+  def type_label(:backup_downloaded), do: gettext("Backup downloaded")
   def type_label(:backup_schedule_created), do: gettext("Backup schedule created")
   def type_label(:backup_schedule_changed), do: gettext("Backup schedule changed")
   def type_label(:backup_schedule_deleted), do: gettext("Backup schedule deleted")

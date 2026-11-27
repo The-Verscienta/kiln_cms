@@ -74,6 +74,15 @@ defmodule KilnCMS.Backups.DiskViewTest do
     assert view.resumable == MapSet.new([failed.id])
   end
 
+  # Part of #2225: the page names a row pinned to another server's directory
+  # before anyone clicks Download.
+  test "reports the directory's own id, or why it has none", %{dir: dir} do
+    assert DiskView.read(dir, []).dir_id == {:error, :enoent}
+
+    {:ok, id} = KilnCMS.Backups.DirId.local(dir)
+    assert DiskView.read(dir, []).dir_id == {:ok, id}
+  end
+
   test "cron's keep days come from a manifest backup.sh wrote, not Kiln's", %{dir: dir} do
     :ok = Manifest.write(dir, %Manifest{trigger: "cron", ok: true, keep_days: 3})
     assert DiskView.read(dir, []).cron_keep_days == 3

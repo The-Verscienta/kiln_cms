@@ -1608,10 +1608,20 @@ other sessions stay connected. The browser's own **Sign out** leaves that
 browser's other open tabs as they are until they next load a page or
 reconnect, which finds the session gone and goes to sign-in.
 
+The pages say so where you click. Under **Active sessions**, when another
+session is listed: "Signing other sessions out, one at a time or all at once,
+also closes the collaborative-editing rooms open on those devices." On an
+account's page in `/editor/accounts`, under **Credentials and removal**:
+"“Sign out everywhere” also closes the collaborative-editing rooms this
+account has open on any device."
+
 That is one account, on every site. A site admin can also act on one site:
 sign browsers out after a stretch of inactivity
 ([Sign people out when idle](#sign-people-out-when-idle)), or end every browser
-session there at once ([Sign everyone out](#sign-everyone-out)).
+session there at once ([Sign everyone out](#sign-everyone-out)). Those reach
+only the site because a browser session belongs to the site it signed in on,
+and a session cookie presented on another site's host is signed out there; why:
+[ADR 0090](decisions/0090-a-browser-session-is-bound-to-the-site-it-signed-in-on-and-is-signed-out-on-another-sites-host.md).
 
 ## Sign people out when idle
 
@@ -1646,7 +1656,7 @@ minutes without activity."
 | Counts | Does not count |
 |---|---|
 | Loading any page of this site while signed in, public pages included | A tab left open with nobody using it |
-| Clicking, typing or submitting on a console page | A page reconnecting after a network drop or a deploy |
+| Clicking, typing or submitting on a console page, including inside a part of the page that handles its own clicks (the notification bell, and the content editor's reference pickers and reference fields) | A page reconnecting after a network drop or a deploy (but see below) |
 | Moving within a console page (a LiveView patch, such as a tab or filter change) | Replies a page sends on its own (`body_flushed`, `push_state`, `push_unsupported`) |
 | | Requests with an API key or a bearer token, and image transforms (`/media/:id/t/…`) |
 | | Activity on another site |
@@ -1655,6 +1665,12 @@ Activity is written down at most once per tenth of the timeout, clamped to
 between 30 seconds and 5 minutes, so a browser is signed out after between 90% and 100% of the timeout without
 activity. An open page checks a few seconds after its deadline; a closed one is
 checked at its next request.
+
+One gap: when a page reconnects, the browser re-sends the contents of its open
+forms, and that counts as activity. A tab left idle that reconnects after a
+deploy just before its deadline can therefore stay signed in for another full
+timeout. This is tracked in
+[#3474](https://github.com/The-Verscienta/kiln_cms/issues/3474).
 
 The timeout wins over "remember me". A browser that goes idle loses its
 remember-me cookie with its session, and a remember-me cookie that sat unused
@@ -1678,13 +1694,10 @@ and the person signs in again.
 - **The setting cannot be read** (a database fault): the timeout is off for
   that minute and a warning is logged. It fails open rather than signing every
   account out during an outage. There is no operator ceiling and no
-  environment variable: the site decides.
+  environment variable: the site decides
+  ([ADR 0090](decisions/0090-a-browser-session-is-bound-to-the-site-it-signed-in-on-and-is-signed-out-on-another-sites-host.md) says why).
 - **API keys, bearer tokens and headless app tokens** are not browser sessions
   and never expire for idleness.
-- **Clicks inside some components** (a LiveComponent handling its own events)
-  do not count on their own. Every page that has them also sends page-level
-  events, but a page driven only by such clicks can sign out the person using
-  it.
 
 ### Errors you can hit
 
@@ -1707,6 +1720,10 @@ For a suspected breach on one site. Requires the admin role on the site.
 3. Click **Sign out everyone** and confirm "Sign out everyone on this site
    now?". You see "Signed out 12 sessions on this site."
 
+The section says, above the button: "Sessions from before this was available
+are signed out the next time they're used here. Collaborative-editing rooms
+open on the signed-out devices close too."
+
 What it ends, on this site only:
 
 - every browser session, including platform admins' sessions on this site;
@@ -1724,7 +1741,11 @@ cookie), not your sessions on other devices.
 
 The count covers sessions known to belong to this site. Sessions signed in
 before the upgrade that added this page record no site yet; they are not
-counted, and each is signed out the first time it is used on this site again.
+counted, and each is signed out the first time it is used on this site again,
+so right after the upgrade the page can say "Signed out 0 sessions on this
+site." and still sign people out. That holds for as long as such a session
+could still be alive: the longest sign-in lifetime, 30 days today (the
+"remember me" cookie). Why a session belongs to one site: [ADR 0090](decisions/0090-a-browser-session-is-bound-to-the-site-it-signed-in-on-and-is-signed-out-on-another-sites-host.md).
 
 What it does **not** end:
 

@@ -1652,7 +1652,8 @@ Configured at `/editor/sessions`.
   signed out on B and nothing is written to it, so it can neither be used on B
   nor kept awake from B. A remember-me cookie's signature is verified before
   its row is looked at, and every write is also filtered on the account
-  (`subject`), so a forged or foreign jti changes no one's row.
+  (`subject`), so a forged or foreign jti changes no one's row. Why a session
+  is bound this way, and what the binding does not cover: [ADR 0090](decisions/0090-a-browser-session-is-bound-to-the-site-it-signed-in-on-and-is-signed-out-on-another-sites-host.md).
 - **Last activity is the database's clock.** `last_used_at` is written by and
   compared with Postgres `now()`, never a node's clock, and the expiring
   UPDATE repeats the idle test in its `WHERE`, so a tab that kept the session
@@ -1668,7 +1669,11 @@ Configured at `/editor/sessions`.
   two-factor hold row bound to the site, writes a watermark
   (`SiteSessionPolicy.sessions_revoked_at`) and records `all_sessions_revoked`.
   A row bound to no site that predates the watermark is revoked the next time
-  it is used on this site's host, for 30 days (the remember-me lifetime). The
+  it is used on this site's host, for as long as such a row could still be
+  alive: the longest of the session token's lifetime, the remember-me
+  token's and a two-factor hold's (30 days today), derived from the sign-in
+  configuration (`IdleTimeout.watermark_horizon_seconds/0`), so raising one
+  widens it. The
   token writes that bind a row to a site read the watermark in the same
   statement, so such a row cannot escape by being used first. Other sites are
   never reached.
@@ -1718,9 +1723,15 @@ Configured at `/editor/sessions`.
   cannot be read fails open on both sockets, as on every other door; (e) a
   collab connect refused by the admin allowlist has already run the session
   check, so it can expire an idle session, as a page load from the same
-  address would. (3) Events a LiveComponent
-  handles itself (`phx-target={@myself}`) do not count as activity on their
-  own. (4) A node holding a cached policy from before a sign out everyone may,
+  address would. (3) A LiveView that rejoins after a network drop or a deploy
+  replays each recoverable form's `phx-change`, to the page or to the
+  component it targets, and the first replayed event counts as activity, so a
+  tab that reconnects just before its deadline can keep an idle session awake
+  ([#3474](https://github.com/The-Verscienta/kiln_cms/issues/3474)). Only the
+  cookie's holder can send it. Since #2491, events a LiveComponent handles
+  itself (`phx-target={@myself}`) count as activity like a page's own
+  (`KilnCMSWeb.IdleSession.ComponentActivity`), which widens this to component
+  forms. (4) A node holding a cached policy from before a sign out everyone may,
   for up to the cache's minute and until the cluster-wide bust lands, let an
   unbound pre-watermark session through on a request; binding still refuses
   it, and the next check catches it. (5) Activity is written at most once per
@@ -2561,6 +2572,100 @@ and [ADR 0029](decisions/0029-security-alert-email-stays-english-until-accounts-
   that recently verified the key
   ([Running more than one server](security-alerts.md#running-more-than-one-server)).
 
+### Backup download (part of #2225)
+
+`POST /editor/backups/download`. `KilnCMS.Backups.Run.Actions.Download`
+(`Backups.Run` `:check_download` and `:download`),
+`KilnCMSWeb.BackupDownloadToken`,
+`KilnCMSWeb.BackupDownloadController` and the History rows of
+`KilnCMSWeb.BackupLive`. A platform admin downloads one local file of a
+backup; the guide is
+[Download the files of a backup](backups.md#download-the-files-of-a-backup)
+and the decision is
+[ADR 0089](decisions/0089-a-platform-admin-downloads-a-local-backup-file-through-a-one-minute-link-and-never-while-the-console-shares-an-origin.md).
+
+The asset is the largest one Kiln holds: a database dump is every
+organization's content, accounts and password hashes, and a media set is
+every upload.
+
+- **Who.** A platform admin only: the actions' one policy is
+  `authorize_if Accounts.Checks.PlatformAdmin`, so the `:backups` system
+  actor, org admins (the default org's included), editors, viewers and
+  anonymous callers are refused. The page's handler re-checks
+  `platform_admin?` at the click, and the controller re-checks it before
+  anything else, so an admin demoted or a grant expired since the click is
+  `403`.
+- **The link.** Minted at the click, never at render: a `Phoenix.Token` under
+  its own salt, good for 60 seconds, naming the run, the file, the user, the
+  browser session's jti (#2490) and the click node's backup-directory id.
+  Another user's, another session's, a forged or an expired one is refused.
+  It travels in a CSRF-protected `POST` body, so `:filter_parameters` keeps it
+  out of every log line (an older node's included) and it never enters the
+  browser's history or downloads list. `GET` and `HEAD` answer `405` and touch
+  nothing.
+- **The path never comes from the client.** The token's file name is
+  compared byte for byte with the names `Artifact.checked_files/2` derives
+  from the run's own row (the files and sidecar of each artifact), after a
+  shape check (at most 255 bytes, no `/`, `\` or NUL). The path is built from
+  `Backups.dir/0`, the kind's subdirectory and the matched name, and must
+  stay under that subdirectory. `File.lstat` must find a regular file, so a
+  symlink is refused; `.partial` files, markers, `manifest.json` and files
+  marked pruned here are never served; only `:app` and `:imported` rows are
+  (an origin a later release adds is refused until it has its own decision).
+  Every file refusal is the same `404`.
+- **Audited before bytes.** `:download` records `backup_downloaded` in the
+  instance security log as its last check, after the file opened for
+  reading, and returns the path only once the event is written. An event that
+  can't be written is `503` and nothing is sent. The page's click runs
+  `:check_download`, which writes nothing.
+- **Re-checked at the send.** The controller `lstat`s the path again right
+  before `send_file` and sends only the same regular file (inode, device,
+  size, mtime) the checks saw.
+- **Bounded.** The `:export` budget, 10 a minute per account per node, shared
+  with the content-list and security-log exports, charged before the token is
+  verified so guessing tokens costs too. The response is an
+  `application/octet-stream` attachment with `cache-control: no-store`,
+  `x-content-type-options: nosniff` and `x-robots-tag: noindex`.
+- **Refused while the console shares an origin.** Both actions refuse while
+  `KILN_CONSOLE_HOST` is unset and there is more than one organization, or
+  while that can't be told: an organization count that can't be read, or a
+  `KilnCMSWeb.Tenant.OrgCount` verdict other than `:single`. That fails
+  closed, unlike the boot warning `Tenant.console_shares_origin?/1`. The
+  count is read by `Tenant.org_count/0`, an advisory probe that reads with
+  `authorize?: false`; it decides only whether to refuse, and fails toward
+  refusing. See residual risk 16 below for what this does and does not close.
+- **Several nodes.** A row pinned to a backup directory (#2539) is served only
+  from that directory, and a directory id that can't be read refuses. A
+  request that reaches a node whose directory id differs from the click
+  node's is `409`, not a bare `404`.
+
+Residual risks:
+
+- **A link can be replayed within its minute by the same session.** It is not
+  single-use. Each request is checked again, charged against `:export` and
+  recorded again, and it works only with that browser session's cookie.
+- **A file that changes in the last moment leaves an event for bytes not
+  sent.** The event is written before the send. A file replaced, removed or
+  swapped for a symlink between the checks and the send answers `404` with
+  nothing sent, and the server log has a warning saying the event was
+  recorded for bytes that were not sent. A swap between the second `lstat`
+  and `send_file`'s own open needs write access to `BACKUP_DIR`, which is
+  already total compromise.
+- **A single-organization install with `KILN_CONSOLE_HOST` unset can
+  download.** Following residual 16's verdict, the org admin and the operator
+  are then one party, so an org admin's code injection can reach a platform
+  admin's download. This is an open question for the owner (ADR 0089).
+- **A stolen platform-admin session on an isolated console can download.**
+  The event names the admin, the address and the user agent, and the server
+  logs each sent file, but `backup_downloaded` raises no security alert.
+  Whether to add an optional, off-by-default platform alert kind is an open
+  question for the owner (ADR 0089).
+- **Unpinned rows on nodes with no directory id.** For an imported or
+  pre-#2539 row, when neither the click node nor the answering node has a
+  `.kiln-dir-id`, the `409` can't fire, and the answering node serves its own
+  file of that name: the same name, checked against the same row, possibly
+  another node's copy.
+
 ### Other outbound calls
 `Kiln.Updates` (the kilncms.dev release feed, then GitHub releases;
 admin-triggered from System, or from Security posture when no answer is
@@ -2663,8 +2768,11 @@ the provider. See [sso.md](sso.md#per-site-providers).
   access anywhere else: a platform admin (standing or temporary), a member of
   any other organization at any tier, or a membership-less account whose global
   role reaches beyond the site. Checked at every sign-in, in
-  `KilnCMS.Accounts.SiteSso.Admission`. Kiln has no site-scoped session, so the
-  guarantee is made at admission. **Accepted:** a session such a provider
+  `KilnCMS.Accounts.SiteSso.Admission`. Since #2489 a browser session is bound
+  to the site it signed in on and is signed out on another site's host
+  ([ADR 0090](decisions/0090-a-browser-session-is-bound-to-the-site-it-signed-in-on-and-is-signed-out-on-another-sites-host.md)), but the binding stops a cookie replayed on
+  another site, not an account that later gains access elsewhere, so the
+  guarantee is still made at admission. **Accepted:** a session such a provider
   minted before the account later gained access elsewhere keeps working until
   it ends — no wider than the mail-control concession above.
 - **Pre-registered accounts** — an unconfirmed account is never handed to a
@@ -3755,6 +3863,21 @@ because other files cite them by number.
     same-origin with that org's code injection. It reaches the shared routes
     only, never a console route, and it is a separate session from the
     one on any console host.
+
+    **Backup downloads (part of #2225).** Since #2225 a platform admin can
+    download a backup's files, a full dump of every organization, so on an
+    unconfigured multi-org deployment that is the most direct thing a
+    same-origin script could take with a platform admin's session. The
+    download is therefore refused while `KILN_CONSOLE_HOST` is unset and
+    there is more than one organization, or while the count can't be told
+    ([Backup download](#backup-download-part-of-2225)).
+    That closes the **direct** download path only, not the residual: other
+    console actions a same-origin script could take with a platform admin's
+    session stay open until the console has its own origin. The answer is
+    still `KILN_CONSOLE_HOST`. A single-org install with it unset can download,
+    following this residual's verdict that the org admin and the operator
+    are one party (an open question for the owner in
+    [ADR 0089](decisions/0089-a-platform-admin-downloads-a-local-backup-file-through-a-one-minute-link-and-never-while-the-console-shares-an-origin.md)).
 
 17. **Queued mail carries sign-in links, sealed under `SECRET_KEY_BASE`
     (#1843).** Account confirmations, password resets, magic links and

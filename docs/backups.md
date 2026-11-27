@@ -2155,6 +2155,11 @@ does not take the lock, so a cron backup and an in-app backup can run at the
 same time. They write different stamps; schedule them apart to keep the load
 down.
 
+**Downloads.** A backup's files are downloaded from the node whose backup
+directory holds them. A download link made on one node and answered by
+another is refused with `409`; route `/editor/backups*` to one node, or share
+`BACKUP_DIR` ([Download the files of a backup](#download-the-files-of-a-backup)).
+
 ### Which node runs a step
 
 A backup step after `start`, a resume's `start`, a re-send's steps (#2949)
@@ -5968,6 +5973,136 @@ Each logs "a platform admin", never a name. Who canceled is in
 the instance security log only (#3029); a run canceled before that names the
 admin by email in its log, which erasure does not rewrite. It is purged by
 the staging scrub (`backup_runs_purged`).
+
+### Download the files of a backup
+
+A platform admin can download a backup's local files from **History**, one
+file at a time (part of #2225). Each download is written to the
+[instance security log](security-events.md#the-instance-log) as
+`backup_downloaded` before any byte is sent. The reasoning is in
+[ADR 0089](decisions/0089-a-platform-admin-downloads-a-local-backup-file-through-a-one-minute-link-and-never-while-the-console-shares-an-origin.md).
+
+Starting point: you are a platform admin, and the backup's files are in this
+server's `BACKUP_DIR`.
+
+1. Open **Backups** (`/editor/backups`) and scroll to **History**.
+2. On the backup's row, open **Download**. The menu, "Download a file of this
+   backup", lists each component (**Database**, **Media**) with every file of
+   it that is on this server and not pruned, with its size, and the
+   component's **Checksum file** (`kiln-<kind>-<stamp>.sha256`). A media set in
+   parts lists each part, with "Parts download one at a time; at most 10
+   downloads a minute." A set with parts missing here is labelled
+   **Incomplete set**.
+3. Click a file. The page says "Your download is starting. The link works for
+   one minute.", and the browser saves the file under its own name, for
+   example `kiln-db-20261107-031700.dump`. The Backups page stays open.
+4. Repeat for each file you need. **Take the checksum file with the parts of a
+   media set**: `restore.sh` stops on a `.partNN` set without its sidecar, and
+   checks that the sidecar lists exactly the parts present
+   ([Restore a media set that has several parts](#restore-a-media-set-that-has-several-parts)).
+5. To see who downloaded what, open **Security log → Instance log** and filter
+   **Event** on **Backup downloaded**. Each event names the admin, the backup
+   run, and the `stamp`, `file`, `kind`, `bytes` and `node` that served it.
+
+What is offered, and what isn't:
+
+- **Local copies only.** The files in this server's `BACKUP_DIR`: each dump,
+  archive or media part, and each component's `.sha256` sidecar. Never
+  `manifest.json`, a marker, `.work/`, a `.partial` file, or a copy on a
+  destination: fetch those with the provider's own tools (`rclone copy`, the
+  S3 console, `sftp`).
+- **Not while a backup is written.** A running backup has no Download menu.
+  A backup whose stamp the backup lock holds (a resume or a re-send of it) is
+  refused at the click with "This backup is still being written. Download it
+  once it has finished.". While the lock can't be read, every click is
+  refused with "Whether this backup is still being written couldn't be told.
+  Try again in a moment."
+- **Not a pruned file.** A file retention marked pruned here is not offered or
+  served, even if a file of that name is still on disk. The sidecar goes too
+  once every file of its component is pruned.
+- **Only files the row names.** The name you click is compared byte for byte
+  with the names recorded on the backup's row, never read as a path, and the
+  file must be a regular file (a symlink is refused).
+- **No archive of a whole set, and no resume.** One file per click. An
+  interrupted download starts again from the beginning: there is no HTTP
+  `Range` support.
+
+**The link.** A click mints a token, and the browser posts it in a hidden form
+to `POST /editor/backups/download`, so it never appears in a URL, the
+browser's history or its downloads list, and the request log prints it as
+`[FILTERED]`. It works for one minute, and only for the admin who clicked, in
+the browser session they clicked from. It is not single-use: a second request
+with it in that minute, from that session, is checked again, charged against
+the limit and recorded again. A `GET` or `HEAD` of that path answers `405`.
+
+**The limit.** Downloads share the `:export` budget with content-list and
+security-log CSV exports: 10 a minute per account, counted on each server. A
+media set of many parts therefore downloads in batches of ten. A refusal is
+`429` with `retry-after`.
+
+**Refused while the console shares an origin.** With `KILN_CONSOLE_HOST`
+unset and more than one organization, a site's
+[code injection](code-injection.md#read-this-before-granting-the-role) runs on
+the same origin as the console, so a script on any site could ask for a full
+dump in a platform admin's browser. Downloads are then off: the page shows
+"Downloads are off: the console shares its address with your organizations'
+sites (KILN_CONSOLE_HOST is unset and there is more than one organization), so
+a site's injected code could take a download. Set KILN_CONSOLE_HOST, or copy
+the files from the server." in place of every Download menu. They are also
+off while a server can't tell how many organizations there are (the count
+can't be read, or the server hasn't counted yet). A single-organization
+install with `KILN_CONSOLE_HOST` unset can download. To turn downloads on, set
+`KILN_CONSOLE_HOST` ([environment-variables.md](environment-variables.md)), or
+copy the files from the server with `scp` or `rsync`.
+
+**Several nodes.** A History row records which backup directory holds its
+files (#2539). On another node's page the row shows "These files are in
+another server's backup directory; download them on that server." instead of
+**Download**. The click (over the page's socket) and the download (a plain
+HTTP request) can reach different nodes behind a load balancer: the link
+carries the click node's directory id, and a request that reaches a node with
+another one answers `409` `other_server`. Give `/editor/backups*` sticky
+routing to one node, or share one `BACKUP_DIR` between the nodes. For an
+imported or pre-#2539 row, when neither node has a `.kiln-dir-id`, the `409`
+can't tell the two apart, and the node that answers serves the file of that
+name in its own directory.
+
+**During a rolling deploy.** A node still on the previous release has no
+download route, so a request that reaches it answers `404`. Click again. The
+token travels in the request body, which an older node's logs filter too.
+
+**When the file changes at the last moment.** The file is checked again right
+before it is sent. If it was replaced, removed or swapped for a symlink since
+the checks, the answer is `404` and nothing is sent, but the
+`backup_downloaded` event has already been written. The server log then has a
+warning, "backup download not sent: `<file>` (stamp=`<stamp>`) changed or went
+between its checks and the send …; its backup_downloaded event was already
+recorded for bytes that were not sent". A sent file logs
+`backup download user_id=… stamp=… file=… bytes=…` at info.
+
+**No alert.** `backup_downloaded`, like every instance event but the SFTP host
+key one, raises no [security alert](security-alerts.md). The instance log is
+where a download shows.
+
+#### What the download answers
+
+A refusal at the click is a flash on the Backups page, and nothing is
+recorded. A refusal of the download request itself is a short plain-text page
+that ends `error: <code>` (the `429` is the usual rate-limit page instead). It
+replaces the Backups page in that tab: go back to it.
+
+| Status | `error` | Meaning |
+|---|---|---|
+| `403` | `admin_required` | You are not a platform admin now (demoted, or a temporary grant expired, since the click). |
+| `403` | `invalid_link` | The link is not one this application made, or was made for another admin or another browser session. Click **Download** again. |
+| `403` | `console_shares_origin` | Downloads are off (above). |
+| `404` | `not_found` | The file isn't available: not one of the row's, pruned, missing, not a regular file, unreadable, or changed just before sending. One answer for all, so nothing says which files exist. |
+| `405` | `method_not_allowed` | A `GET` or `HEAD`. Download from the Backups page. |
+| `409` | `other_server` | The request reached a server other than the page's, or the row's files are in another backup directory, or this server's directory id can't be read. |
+| `409` | `in_progress` | The backup is still being written, or the backup lock can't be read. |
+| `410` | `link_expired` | Older than one minute. Click **Download** again. |
+| `429` | | Over 10 downloads and exports a minute. Wait for `retry-after`. |
+| `503` | `audit_failed` | The `backup_downloaded` event couldn't be written (or erasure of your account is in progress), so nothing was sent. Try again. |
 
 ### It needs the client tools in the image
 

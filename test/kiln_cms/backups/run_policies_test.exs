@@ -243,6 +243,57 @@ defmodule KilnCMS.Backups.RunPoliciesTest do
     end
   end
 
+  # Part of #2225: downloading a run's local file is the platform admin's
+  # alone. The policy alone here (`can_check_backup_download?/3` decides it
+  # without running the action); `download_test.exs` runs the action.
+  describe "check_download and download" do
+    defp expired_grant do
+      Ash.Seed.seed!(User, %{
+        email: "run-expired-#{System.unique_integer([:positive])}@example.com",
+        hashed_password: Bcrypt.hash_pwd_salt("password123456"),
+        confirmed_at: DateTime.utc_now(),
+        role: :editor,
+        granted_role: :admin,
+        granted_role_expires_at: DateTime.add(DateTime.utc_now(), -60, :second)
+      })
+    end
+
+    test "a platform admin may" do
+      run = run!()
+      admin = user(:admin)
+
+      assert Backups.can_check_backup_download?(admin, run.id, "kiln-db-x.dump")
+      assert Backups.can_download_backup_file?(admin, run.id, "kiln-db-x.dump")
+    end
+
+    test "editor, viewer, org admin, an expired grant, anonymous and the system actors are refused" do
+      run = run!()
+      name = "kiln-db-#{run.stamp}.dump"
+
+      for actor <- [
+            user(:editor),
+            user(:viewer),
+            org_admin(),
+            expired_grant(),
+            nil,
+            Backups.system(),
+            SystemActor.new(:billing)
+          ] do
+        refute Backups.can_check_backup_download?(actor, run.id, name),
+               "check_download must refuse #{inspect(actor)}"
+
+        refute Backups.can_download_backup_file?(actor, run.id, name),
+               "download must refuse #{inspect(actor)}"
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Backups.check_backup_download(run.id, name, actor: actor)
+
+        assert {:error, %Ash.Error.Forbidden{}} =
+                 Backups.download_backup_file(run.id, name, actor: actor)
+      end
+    end
+  end
+
   describe "record_interrupted (#3078)" do
     defp failed!, do: Backups.fail_run!(run!(), %{error: "x"}, actor: Backups.system())
 

@@ -266,6 +266,11 @@ defmodule KilnCMSWeb.SessionPolicyLive do
             "API keys and app tokens keep working. If an account may be compromised, reset its password; a platform admin can also use “Sign out everywhere” on the Accounts page."
           )}
         </p>
+        <p id="sign-out-all-hint" class="mt-2 text-sm text-base-content/70">
+          {gettext(
+            "Sessions from before this was available are signed out the next time they're used here. Collaborative-editing rooms open on the signed-out devices close too."
+          )}
+        </p>
 
         <.form
           for={@sign_out_form}

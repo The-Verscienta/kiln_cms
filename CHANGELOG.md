@@ -86,6 +86,10 @@ else.
   `GET /api/forms/:slug` gains `fields[].condition` and a JSON submission's answer an additive `discarded` list. Condition values are public. Expand-only migration.
   ([long form](docs/changelog/unreleased.md#form-field-conditions))
 
+- **Backups: a platform admin can download a backup's local files (each dump, media part and checksum file) from History, one file per click, through a one-minute link bound to their session and recorded in the instance security log as `backup_downloaded` before any byte is sent (part of #2225).**
+  Refused while `KILN_CONSOLE_HOST` is unset and there is more than one organization. Shares the `:export` limit of 10 a minute. No migration; rolling the pin back is safe.
+  ([#3471](https://github.com/The-Verscienta/kiln_cms/pull/3471) · [long form](docs/changelog/unreleased.md#backup-download))
+
 ### Changed
 
 - **Forms: the autoresponder writes to the first email field, in form order, that the submission filled in; before, a blank first email field meant no confirmation even when a later one was filled (#2262).**
@@ -103,6 +107,9 @@ else.
 
 ### Fixed
 
+- **Sessions: clicks inside a component (the notification bell, reference pickers) now count as activity for a site's idle timeout, and the sign-out buttons say they also close open collaborative-editing rooms (#3464, part of #2491).**
+  The "sign out everyone" watermark now lasts the longest sign-in lifetime (30 days today). No migration.
+  ([#3476](https://github.com/The-Verscienta/kiln_cms/pull/3476) · [long form](docs/changelog/unreleased.md#idle-component-activity))
 - **JSON fields: a valid value is no longer refused as "took too long to check against the schema" when building its JSON Schema is slow on a cold or busy node (#3063).**
   The 1-second deadline now covers only checking the value. No migration.
   ([long form](docs/changelog/unreleased.md#field-schema-deadline))

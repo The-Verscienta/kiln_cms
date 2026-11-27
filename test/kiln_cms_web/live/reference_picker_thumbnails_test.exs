@@ -410,6 +410,11 @@ defmodule KilnCMSWeb.ReferencePickerThumbnailsTest do
 
       lv = open_editor(ctx.conn, ctx.editor, ctx.post)
       QueryCounting.warm_up(fn -> search(lv, "rt_list", ctx.word) end)
+      # A component event is idle activity (#2491): the warm-up search sends the
+      # page its one throttled `tokens` touch. `render/1` is a call to the
+      # LiveView, so it returns only after that message is handled, and the
+      # touch never lands inside a measured search.
+      _ = render(lv)
 
       two_queries = search_queries(lv, "rt_list", two)
       six_queries = search_queries(lv, "rt_list", six)
@@ -442,6 +447,11 @@ defmodule KilnCMSWeb.ReferencePickerThumbnailsTest do
 
       lv = open_editor(ctx.conn, ctx.editor, ctx.post)
       QueryCounting.warm_up(fn -> search(lv, "rt_mixed", ctx.word) end)
+      # A component event is idle activity (#2491): the warm-up search sends the
+      # page its one throttled `tokens` touch. `render/1` is a call to the
+      # LiveView, so it returns only after that message is handled, and the
+      # touch never lands inside a measured search.
+      _ = render(lv)
 
       two_queries = search_queries(lv, "rt_mixed", two)
       six_queries = search_queries(lv, "rt_mixed", six)

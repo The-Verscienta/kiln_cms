@@ -383,6 +383,40 @@ defmodule KilnCMSWeb.IdleTimeoutTest do
       assert DateTime.compare(row(jti).last_used_at, aged) == :gt
     end
 
+    test "an event a component handles counts as activity", %{site: site} do
+      aged_policy!(site, %{idle_timeout_minutes: 15})
+      browser = sign_in(account(), site)
+      jti = jti_of(browser)
+      # A mount that writes nothing, like the page-event test's.
+      {:ok, lv, _html} = live(session_of(browser), ~p"/editor/sessions")
+
+      idle_for!(jti, 120)
+      aged = row(jti).last_used_at
+
+      # The bell's root, so the event goes to the component, not the page.
+      lv |> with_target(".bell") |> render_click("mark-all-read", %{})
+      # The component tells the page by message; a render after it has run.
+      render(lv)
+
+      assert DateTime.compare(row(jti).last_used_at, aged) == :gt
+    end
+
+    test "a reply a component's hook sends on its own is not activity", %{site: site} do
+      aged_policy!(site, %{idle_timeout_minutes: 15})
+      browser = sign_in(account(), site)
+      jti = jti_of(browser)
+      # A mount that writes nothing, like the page-event test's.
+      {:ok, lv, _html} = live(session_of(browser), ~p"/editor/sessions")
+
+      idle_for!(jti, 120)
+      aged = row(jti).last_used_at
+
+      lv |> with_target(".bell") |> render_click("push_state", %{})
+      render(lv)
+
+      assert row(jti).last_used_at == aged
+    end
+
     test "a reply a hook sends on its own is not activity" do
       refute KilnCMSWeb.IdleSession.activity_event?("body_flushed")
       refute KilnCMSWeb.IdleSession.activity_event?("push_state")

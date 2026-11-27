@@ -23,7 +23,8 @@ defmodule KilnCMS.Backups.Artifact do
   `part_name/2`, `set_names/2`, `sidecar_name/2`, `parse_sidecar_name/1`,
   `keep_name/1`, `parse_keep_name/1`, `good_name/1`, `parse_good_name/1`,
   `hold_name/1`, `parse_hold_name/1`, `partial_name/2`, `name_stamp/1`,
-  `refused_name/2`, `parse_refused_name/1`.
+  `refused_name/2`, `parse_refused_name/1`. Which of a row's names may be
+  joined to a path is `checked_files/2`'s.
 
   ## Temporary files
 
@@ -398,6 +399,115 @@ defmodule KilnCMS.Backups.Artifact do
   end
 
   def files(%{name: name}), do: [name]
+
+  @typedoc "One file of an artifact whose name `checked_files/2` accepted."
+  @type checked_file :: %{
+          name: String.t(),
+          sha256: String.t() | nil,
+          bytes: integer() | nil,
+          destinations: map() | nil
+        }
+
+  @doc """
+  The files of `artifact` as `[%{name, sha256, bytes, destinations}]`, in
+  order, once every name on the row is a bare backup file name of `stamp` and
+  the artifact's kind, not a `.partial`, with part numbers 1..n in list order
+  (a set of one may keep the legacy single-file name). `sha256` is the
+  lowercase digest or nil; a part's `destinations` are its own, else the
+  artifact's. Only names that pass may ever be joined to a path: what
+  `KilnCMS.Backups.Verify` and a download (#2225) read is decided here.
+
+  `{:error, detail}` names the first name that doesn't pass.
+  """
+  @spec checked_files(t(), String.t()) :: {:ok, [checked_file()]} | {:error, String.t()}
+  def checked_files(%__MODULE__{parts: [_ | _] = parts} = artifact, stamp) do
+    total = length(parts)
+
+    parts
+    |> Enum.with_index(1)
+    |> Enum.reduce_while({:ok, []}, fn {part, index}, {:ok, acc} ->
+      name = if is_map(part), do: field(part, "name")
+
+      case safe_name(name, stamp, artifact.kind, index, total) do
+        :ok -> {:cont, {:ok, [part_file(part, name, artifact) | acc]}}
+        {:error, _detail} = error -> {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, files} -> {:ok, Enum.reverse(files)}
+      error -> error
+    end
+  end
+
+  def checked_files(%__MODULE__{} = artifact, stamp) do
+    with :ok <- safe_name(artifact.name, stamp, artifact.kind, nil, 1) do
+      {:ok,
+       [
+         %{
+           name: artifact.name,
+           sha256: digest(artifact.sha256),
+           bytes: artifact.bytes,
+           destinations: artifact.destinations
+         }
+       ]}
+    end
+  end
+
+  @doc """
+  Whether `file` (one of `checked_files/2`'s) of `artifact` was pruned from
+  the backup directory by the application's retention: its own `"local"`
+  marker says `"pruned"`, else the artifact's does (as
+  `KilnCMS.Backups.Presence` judges a unit). Such a file is never offered or
+  served for download, whatever is on disk under its name (part of #2225).
+  """
+  @spec pruned_here?(checked_file(), t() | map()) :: boolean()
+  def pruned_here?(%{destinations: own}, %{destinations: fallback}),
+    do: local_status(own, fallback) == "pruned"
+
+  defp local_status(%{"local" => %{"status" => status}}, _fallback), do: status
+  defp local_status(_own, %{"local" => %{"status" => status}}), do: status
+  defp local_status(_own, _fallback), do: nil
+
+  defp part_file(part, name, artifact) do
+    %{
+      name: name,
+      sha256: digest(field(part, "sha256")),
+      bytes: field(part, "bytes"),
+      destinations: field(part, "destinations") || artifact.destinations
+    }
+  end
+
+  # A part map's field, string-keyed as stored, atom-keyed as built in code.
+  defp field(part, "name"), do: part["name"] || part[:name]
+  defp field(part, "sha256"), do: part["sha256"] || part[:sha256]
+  defp field(part, "bytes"), do: part["bytes"] || part[:bytes]
+  defp field(part, "destinations"), do: part["destinations"] || part[:destinations]
+
+  defp safe_name(name, stamp, kind, index, total) when is_binary(name) do
+    with true <- Path.basename(name) == name,
+         {:ok, %{stamp: ^stamp, kind: ^kind, partial?: false, part: part}} <- parse_file(name),
+         true <- part_in_order?(part, index, total) do
+      :ok
+    else
+      _ -> {:error, "#{inspect(name)} is not a file name of this backup; nothing was read"}
+    end
+  end
+
+  defp safe_name(name, _stamp, _kind, _index, _total),
+    do: {:error, "a file of this backup has no usable name (#{inspect(name)}); nothing was read"}
+
+  # A single file has no part number; a set's parts count 1..n in list order,
+  # and a set of one may keep the legacy single-file name.
+  defp part_in_order?(nil, nil, 1), do: true
+  defp part_in_order?(nil, 1, 1), do: true
+  defp part_in_order?(part, index, _total) when is_integer(index), do: part == index
+  defp part_in_order?(_part, _index, _total), do: false
+
+  defp digest(hex) when is_binary(hex) do
+    if hex =~ ~r/\A[0-9a-fA-F]{64}\z/, do: String.downcase(hex)
+  end
+
+  defp digest(_other), do: nil
 
   @doc """
   A run's artifacts as the flat file entries a backup step hands to the

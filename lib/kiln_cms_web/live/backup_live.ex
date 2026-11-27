@@ -161,6 +161,29 @@ defmodule KilnCMSWeb.BackupLive do
   `next_at`), the warnings when they can't run, and each component's alarm
   threshold.
 
+  ## Download (part of #2225)
+
+  A row whose files are on this server's disk has a **Download** menu: each
+  local file that is here and not pruned (the dump, the archive or each part
+  of a media set) with its size, and each artifact's checksum file. A set
+  with parts missing here is marked "Incomplete set". The offers come from
+  the disk read already on the page, never from a check per file per poll.
+
+  A click sends only the run's id and the file's name. The handler re-checks
+  `platform_admin?`, then `Backups.check_download/3` as the admin (which
+  matches the name against the run's own row and writes nothing), then mints
+  a one-minute `KilnCMSWeb.BackupDownloadToken` bound to this user, this
+  browser session (`:current_session_jti`) and this node's backup directory,
+  and pushes it to the `BackupDownload` hook, which posts it in a hidden
+  CSRF-protected form to `KilnCMSWeb.BackupDownloadController`. That request
+  checks everything again and records `backup_downloaded` before any byte is
+  sent. A page with no session jti mints nothing.
+
+  While the console shares an origin with several organizations' sites
+  (`Backups.download_refusal/0`), one note replaces every Download control. A
+  row pinned to another server's backup directory says so instead of
+  offering files.
+
   ## Restore is not here
 
   Deliberately, and the page says so rather than leaving an admin hunting for
@@ -169,14 +192,27 @@ defmodule KilnCMSWeb.BackupLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Destination, DiskView, Importer, Manifest, Markers, Presence, Resend}
+
+  alias KilnCMS.Backups.{
+    Artifact,
+    Destination,
+    DiskView,
+    Importer,
+    Manifest,
+    Markers,
+    Presence,
+    Resend
+  }
+
   alias KilnCMS.Backups.Run.Changes.{Cancel, CancelResend, CancelResume}
+  alias KilnCMSWeb.BackupDownloadToken
   alias KilnCMSWeb.Params
 
   import KilnCMSWeb.BackupComponents,
     only: [
       tabs: 1,
       component_label: 1,
+      download_menu: 1,
       held_deleted_warning: 1,
       offsite_headline: 1,
       retention_lines: 1,
@@ -213,6 +249,8 @@ defmodule KilnCMSWeb.BackupLive do
        |> assign(:resumable, %{})
        |> assign(:resend_offers, %{})
        |> assign(:disk, @idle_disk)
+       |> assign(:dir_id, nil)
+       |> assign(:downloads, Backups.download_refusal())
        |> assign(:status, nil)
        |> assign(:status_loading?, false)
        |> assign(:status_failed?, false)
@@ -368,6 +406,102 @@ defmodule KilnCMSWeb.BackupLive do
   end
 
   def handle_event("cancel_resend", _params, socket), do: {:noreply, socket}
+
+  # Download one local file of a run (part of #2225): the client names the
+  # run by id and the file by name, and both are only compared against the
+  # server's own record (`Backups.check_download/3`, as the admin). The link
+  # is minted here, on click, and works for one minute in this session only.
+  def handle_event("download", %{"id" => id, "file" => file}, socket)
+      when is_binary(id) and is_binary(file) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      download(socket, id, file)
+    else
+      deny(socket)
+    end
+  end
+
+  def handle_event("download", _params, socket), do: {:noreply, socket}
+
+  defp download(socket, id, file) do
+    user = socket.assigns.current_user
+
+    # No session to bind the link to (a page mounted without one): nothing
+    # is checked or minted.
+    case socket.assigns[:current_session_jti] do
+      jti when is_binary(jti) ->
+        case Backups.check_download(id, file, user) do
+          {:ok, download} ->
+            token = BackupDownloadToken.sign(user, jti, id, download.name, download.dir_id)
+
+            {:noreply,
+             socket
+             |> put_flash(
+               :info,
+               gettext("Your download is starting. The link works for one minute.")
+             )
+             |> push_event("kiln:backup-download", %{
+               action: ~p"/editor/backups/download",
+               token: token
+             })}
+
+          {:error, reason} ->
+            {:noreply, socket |> put_flash(:error, download_message(reason)) |> refresh()}
+        end
+
+      _none ->
+        {:noreply, put_flash(socket, :error, download_message(:no_session))}
+    end
+  end
+
+  defp download_message(:forbidden),
+    do: gettext("Only a platform admin can download backup files.")
+
+  defp download_message(:console_shares_origin),
+    do:
+      gettext(
+        "Downloads are off while the console shares its address with your organizations' sites."
+      )
+
+  defp download_message(:not_found), do: gettext("That file isn't one of this backup's.")
+
+  defp download_message(:pruned),
+    do: gettext("That file was removed from this server by retention.")
+
+  defp download_message(:missing), do: gettext("That file is no longer on this server.")
+
+  defp download_message(:not_regular),
+    do: gettext("That file isn't a regular file on this server, so it isn't offered.")
+
+  defp download_message(:unreadable), do: gettext("This server can't read that file.")
+
+  defp download_message({:other_directory, _dir_id}),
+    do:
+      gettext(
+        "These files are in another server's backup directory; download them on that server."
+      )
+
+  defp download_message({:dir_id_unreadable, _reason}),
+    do:
+      gettext(
+        "This server's backup directory id couldn't be read, so whether these are its files can't be told."
+      )
+
+  defp download_message(:in_progress),
+    do: gettext("This backup is still being written. Download it once it has finished.")
+
+  defp download_message({:lock_unreadable, _reason}),
+    do:
+      gettext(
+        "Whether this backup is still being written couldn't be told. Try again in a moment."
+      )
+
+  defp download_message(:no_session),
+    do:
+      gettext(
+        "Sign in again to download backup files: this page has no session to bind the link to."
+      )
+
+  defp download_message(_other), do: gettext("Couldn't prepare that download.")
 
   # Through the lock (#2218), as the admin, so the policy decides too: a
   # backup while one runs queues behind it, or folds into a queued fresh one;
@@ -804,6 +938,7 @@ defmodule KilnCMSWeb.BackupLive do
         socket
         |> assign(:disk, %{disk | state: :ready, running?: false, dirty?: false})
         |> assign(:markers, view.markers)
+        |> assign(:dir_id, Map.get(view, :dir_id))
         |> assign(:presence, presence |> Map.merge(view.presence) |> Map.take(ids))
         |> assign(:resumable, resumable |> Map.merge(fresh_resumable) |> Map.take(ids))
 
@@ -1003,6 +1138,59 @@ defmodule KilnCMSWeb.BackupLive do
   defp disk_view, do: Keyword.get(live_config(), :disk_view, DiskView)
   defp status_reader, do: Keyword.get(live_config(), :status_reader, &Backups.status/0)
   defp live_config, do: Application.get_env(:kiln_cms, __MODULE__, [])
+
+  # Part of #2225: how a run pinned to a backup directory (#2539) relates to
+  # this server's, as the disk read found it: `:other` when this server's id
+  # is another one, `:unreadable` when it couldn't be read (which says
+  # nothing about where the files are), else nil (unpinned, the same
+  # directory, or nothing read yet). Either answer hides the Download menu.
+  defp pin_note(%{state: :ready}, dir_id, %{dir_id: pinned, artifacts: [_ | _]})
+       when is_binary(pinned) do
+    case dir_id do
+      {:ok, ^pinned} -> nil
+      {:ok, _other} -> :other
+      _unread_or_error -> :unreadable
+    end
+  end
+
+  defp pin_note(_disk, _dir_id, _run), do: nil
+
+  # What a row's Download menu offers (part of #2225), from the disk read on
+  # the page: per artifact whose names `Artifact.checked_files/2` accepts and
+  # some file of which is here, the files that are neither gone (`Presence`)
+  # nor marked pruned, and its checksum file. The download itself checks
+  # everything again; this only decides what to show.
+  defp download_offers(%{state: :ready}, %{origin: origin, status: status} = run, %{
+         artifacts: presences
+       })
+       when origin in [:app, :imported] and status != :running do
+    run.artifacts
+    |> Enum.zip(presences)
+    |> Enum.flat_map(fn {artifact, presence} -> download_offer(run, artifact, presence) end)
+  end
+
+  defp download_offers(_disk, _run, _presence), do: []
+
+  defp download_offer(run, artifact, %{state: state, gone: gone})
+       when state in [:present, :partly_pruned, :missing] do
+    with {:ok, files} <- Artifact.checked_files(artifact, run.stamp),
+         [_ | _] = offered <-
+           Enum.reject(files, &(&1.name in gone or Artifact.pruned_here?(&1, artifact))) do
+      [
+        %{
+          kind: artifact.kind,
+          files: Enum.map(offered, &%{name: &1.name, size: humanize_bytes(&1.bytes)}),
+          sidecar: Artifact.sidecar_name(artifact.kind, run.stamp),
+          parts?: artifact.parts != [],
+          incomplete?: length(offered) < length(files)
+        }
+      ]
+    else
+      _none -> []
+    end
+  end
+
+  defp download_offer(_run, _artifact, _presence), do: []
 
   # Which rows of the page offer Re-send (#2949), and to where: a run
   # `Resend.offered/1` accepts, that the policy lets this admin re-send, with
@@ -1405,6 +1593,34 @@ defmodule KilnCMSWeb.BackupLive do
 
         <.schedule_summary :if={@status} status={@status} />
 
+        <div
+          id="backup-download"
+          phx-hook="BackupDownload"
+          class="hidden"
+          aria-hidden="true"
+        >
+        </div>
+
+        <p
+          :if={@downloads == :console_shares_origin}
+          id="backup-download-refused"
+          class="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning-ink"
+        >
+          {gettext(
+            "Downloads are off: the console shares its address with your organizations' sites (KILN_CONSOLE_HOST is unset and there is more than one organization), so a site's injected code could take a download. Set KILN_CONSOLE_HOST, or copy the files from the server."
+          )}
+          <a
+            href={docs_url("code-injection.md")}
+            target="_blank"
+            rel="noopener"
+            class="link ml-1 inline-flex items-center gap-1"
+          >
+            {gettext("Learn more")}
+            <.icon name="hero-arrow-top-right-on-square" class="size-3" />
+            <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+          </a>
+        </p>
+
         <.history
           runs={@runs}
           page={@page}
@@ -1416,6 +1632,8 @@ defmodule KilnCMSWeb.BackupLive do
           resumable={@resumable}
           resend_offers={@resend_offers}
           disk={@disk}
+          dir_id={@dir_id}
+          downloads={@downloads}
           expected={if @status, do: @status.expected, else: Backups.expected_components()}
         />
       </div>
@@ -1701,6 +1919,15 @@ defmodule KilnCMSWeb.BackupLive do
     doc: "run id => `%{targets, pruned_soon}` where Re-send is offered (#2949)"
 
   attr :disk, :map, required: true, doc: "the disk read's state (#2417)"
+
+  attr :dir_id, :any,
+    default: nil,
+    doc: "this server's backup-directory id as the disk read found it, nil until read"
+
+  attr :downloads, :atom,
+    default: nil,
+    doc: "`Backups.download_refusal/0`: nil when downloads are allowed (part of #2225)"
+
   attr :expected, :list, required: true
 
   defp history(assigns) do
@@ -1921,6 +2148,32 @@ defmodule KilnCMSWeb.BackupLive do
               run={run}
               presence={Map.get(@presence, run.id)}
               disk={@disk}
+            />
+            <%!-- Part of #2225: this server's local files of the run. Hidden
+                  while the console shares an origin (the page-level note
+                  says why), and for a run whose files are in another
+                  server's backup directory, which says so instead. --%>
+            <span
+              :if={is_nil(@downloads) and pin_note(@disk, @dir_id, run) == :other}
+              data-role="download-other-server"
+              class="text-base-content/70"
+            >
+              {download_message({:other_directory, run.dir_id})}
+            </span>
+            <span
+              :if={is_nil(@downloads) and pin_note(@disk, @dir_id, run) == :unreadable}
+              data-role="download-dir-id-unreadable"
+              class="text-warning-ink"
+            >
+              {download_message({:dir_id_unreadable, nil})}
+            </span>
+            <.download_menu
+              :if={
+                is_nil(@downloads) and is_nil(pin_note(@disk, @dir_id, run)) and
+                  download_offers(@disk, run, Map.get(@presence, run.id)) != []
+              }
+              run_id={run.id}
+              offers={download_offers(@disk, run, Map.get(@presence, run.id))}
             />
             <%!-- Hidden once the backup is finishing, as on the strip: Cancel is
                   refused from there (#2542). Hidden too while a resume of it

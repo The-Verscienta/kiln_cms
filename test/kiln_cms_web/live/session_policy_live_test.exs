@@ -42,6 +42,18 @@ defmodule KilnCMSWeb.SessionPolicyLiveTest do
     assert has_element?(lv, "#sign-out-all")
   end
 
+  test "says what sign-out-everyone also reaches", %{conn: conn, org: org} do
+    {:ok, lv, _html} = admin_live(conn, org)
+
+    assert has_element?(
+             lv,
+             "#sign-out-all-hint",
+             "Sessions from before this was available are signed out the next time they're used here."
+           )
+
+    assert has_element?(lv, "#sign-out-all-hint", "Collaborative-editing rooms open")
+  end
+
   test "an admin saves a timeout, only for this org, and it is logged", %{conn: conn, org: org} do
     other = org("sessionpolicyother")
     {:ok, lv, _html} = admin_live(conn, org)
