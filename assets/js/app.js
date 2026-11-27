@@ -42,6 +42,7 @@ import {BodyImageUploader} from "./body_image_uploader"
 import {watchLiveness} from "./liveness"
 import {watchConnectionNotices} from "./connection_notice"
 import {safeStorage} from "./safe_storage"
+import {BackupDownload} from "./backup_download"
 
 const clamp01 = (n) => Math.min(Math.max(n, 0), 1)
 
@@ -60,6 +61,9 @@ const Hooks = {
     mounted() { setSearchKbdCue(this.el) },
   },
   SavedTicker,
+  // A backup file's download, posted with its one-minute token (part of
+  // #2225) — see assets/js/backup_download.js.
+  BackupDownload,
   // Arrow/Home/End keys on a kit `.tabs` tablist — see assets/js/tab_keys.js.
   TabKeys,
   // Combobox keys and drag-to-reorder for a reference custom field — see

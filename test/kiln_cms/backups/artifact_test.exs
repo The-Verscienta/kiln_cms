@@ -574,4 +574,110 @@ defmodule KilnCMS.Backups.ArtifactTest do
       end
     end
   end
+
+  # What `Verify` and a download (part of #2225) may join to a path.
+  describe "checked_files/2" do
+    @stamp "20261118-031700"
+
+    defp artifact(attrs), do: struct(Artifact, Map.merge(%{destinations: %{}, parts: []}, attrs))
+
+    test "a single file: its name, lowercase digest, size and destinations" do
+      dests = %{"local" => %{"status" => "ok"}}
+
+      assert {:ok, [file]} =
+               Artifact.checked_files(
+                 artifact(%{
+                   kind: :db,
+                   name: "kiln-db-#{@stamp}.dump",
+                   bytes: 3,
+                   sha256: String.duplicate("A", 64),
+                   destinations: dests
+                 }),
+                 @stamp
+               )
+
+      assert file == %{
+               name: "kiln-db-#{@stamp}.dump",
+               sha256: String.duplicate("a", 64),
+               bytes: 3,
+               destinations: dests
+             }
+    end
+
+    test "a set's parts in order, each with its own destinations or the set's" do
+      own = %{"local" => %{"status" => "pruned"}}
+      set = %{"local" => %{"status" => "ok"}}
+      [one, two] = Artifact.set_names(@stamp, 2)
+
+      assert {:ok, [first, second]} =
+               Artifact.checked_files(
+                 artifact(%{
+                   kind: :media,
+                   name: "kiln-media-#{@stamp}",
+                   destinations: set,
+                   parts: [
+                     %{"name" => one, "bytes" => 1, "destinations" => own},
+                     %{name: two, bytes: 2, sha256: "not a digest"}
+                   ]
+                 }),
+                 @stamp
+               )
+
+      assert %{name: ^one, bytes: 1, destinations: ^own, sha256: nil} = first
+      assert %{name: ^two, bytes: 2, destinations: ^set} = second
+    end
+
+    test "a set of one may keep the legacy name" do
+      legacy = "kiln-media-#{@stamp}.tar.gz"
+
+      assert {:ok, [%{name: ^legacy}]} =
+               Artifact.checked_files(
+                 artifact(%{
+                   kind: :media,
+                   name: "kiln-media-#{@stamp}",
+                   parts: [%{"name" => legacy}]
+                 }),
+                 @stamp
+               )
+    end
+
+    test "refuses any name that isn't a bare file of this stamp and kind, in order" do
+      [one, two] = Artifact.set_names(@stamp, 2)
+
+      for bad <- [
+            artifact(%{kind: :db, name: "../kiln-db-#{@stamp}.dump"}),
+            artifact(%{kind: :db, name: "db/kiln-db-#{@stamp}.dump"}),
+            artifact(%{kind: :db, name: "kiln-db-20261117-031700.dump"}),
+            artifact(%{kind: :db, name: "kiln-db-#{@stamp}.dump.partial"}),
+            artifact(%{kind: :db, name: "kiln-db-#{@stamp}.dump.4821-2.partial"}),
+            artifact(%{kind: :db, name: "kiln-media-#{@stamp}.tar.gz"}),
+            artifact(%{kind: :media, name: "x", parts: [%{"name" => two}, %{"name" => one}]}),
+            artifact(%{
+              kind: :media,
+              name: "x",
+              parts: [%{"name" => "kiln-media-#{@stamp}.part1.tar.gz"}]
+            }),
+            artifact(%{kind: :media, name: "x", parts: [%{"name" => one}, %{"bytes" => 1}]}),
+            artifact(%{kind: :media, name: "x", parts: [%{"name" => one}, "not a map"]})
+          ] do
+        assert {:error, detail} = Artifact.checked_files(bad, @stamp)
+        assert detail =~ "nothing was read"
+      end
+    end
+
+    test "pruned_here?/2: the file's own local marker, else the artifact's" do
+      pruned = %{"local" => %{"status" => "pruned"}}
+      ok = %{"local" => %{"status" => "ok"}}
+
+      assert Artifact.pruned_here?(%{destinations: pruned}, %{destinations: ok})
+      refute Artifact.pruned_here?(%{destinations: ok}, %{destinations: pruned})
+
+      assert Artifact.pruned_here?(%{destinations: %{"dest:x" => ok["local"]}}, %{
+               destinations: pruned
+             })
+
+      assert Artifact.pruned_here?(%{destinations: nil}, %{destinations: pruned})
+      refute Artifact.pruned_here?(%{destinations: nil}, %{destinations: %{}})
+    end
+  end
 end

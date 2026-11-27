@@ -120,8 +120,9 @@ a destination's retention delete another backup directory's backups
 an SFTP backup server's host key (`backup_destination_host_key_trusted`;
 #2222), an SFTP backup server presenting a key other than the trusted one
 (`backup_destination_host_key_mismatch`; #2222, the one instance event with
-no person behind it and the one that raises a security alert), and a
-platform admin changing the platform's security alerts
+no person behind it and the one that raises a security alert), a platform
+admin downloading one of a backup's files (`backup_downloaded`; part of
+#2225), and a platform admin changing the platform's security alerts
 (`platform_alerts_changed`). A site's log is readable by that
 site's admins, who need not be platform admins, so these go to a separate
 **instance security log** instead (#2541).
@@ -175,8 +176,8 @@ No instance event raises a [security alert](security-alerts.md).
 ## What is recorded
 
 Every type below goes to a site's log except `backup_canceled`, the three
-`backup_schedule_*` types, the four `backup_destination_*` types and
-`platform_alerts_changed`, which go to the
+`backup_schedule_*` types, the `backup_destination_*` types,
+`backup_downloaded` and `platform_alerts_changed`, which go to the
 [instance log](#the-instance-log).
 
 Every event has a time, a type, the person who acted (an email snapshot and
@@ -231,6 +232,7 @@ a type may carry only the keys below; anything else is dropped.
 | `api_key_reuse_detected` | Rotated API key used again | A draft-write key that had been rotated away was presented to `POST /api/keys/rotate` more than 120 seconds after its rotation, so two parties held it, and the live key of its lineage was revoked ([self-rotation](headless-consumer-guide.md#keeping-the-key-alive-self-rotation)). No person; the target is the presented key (target type `api_key`), the IP the request's. Raises the platform's `api_key_abuse` [alert](security-alerts.md) | `name`, `revoked` |
 | `ip_block_refused` | Blocked address refused | A request or socket connect from an address on the site's [block list](ip-blocking.md) was refused. **No IP address and no user agent**, and no person: nothing records a blocked address. Sampled: see below. Raises the site's `blocked_ip` [alert](security-alerts.md#blocked-addresses-raise-one-alert-per-window), and is written even when the site turned that alert off | `rule`, `surface` |
 | `api_key_rate_limited` | API key hit a rate limit | An API key this server verified recently (it forgets a key 2.5 to 5 minutes after the key's last successful request there) went over a rate limit an API key can reach. No person (whoever presented it is not known to be the owner); the target is the key (target type `api_key`), the IP the request's. Sampled: see below. Raises the platform's `api_key_rate_limited` [alert](security-alerts.md#api-keys-over-a-rate-limit) | `name`, `bucket` |
+| `backup_downloaded` | Backup downloaded | A platform admin [downloaded one of a backup's local files](backups.md#download-the-files-of-a-backup) (part of #2225). Recorded once every check passed and before any byte is sent, once per download request, so a link used twice in its minute records two. A file that changed or went just before the send is not sent, and its event stays. In the instance log. The person is the admin; the target is the backup run (target type `backup_run`) | `stamp`, `file` (the file's name), `kind` (`db` or `media`), `bytes`, `node` (the node that served it) |
 | `platform_alerts_changed` | Platform security alerts changed | A platform admin saved the platform's [security alert settings](security-alerts.md#turn-off-rate-limit-alerts-for-api-keys). In the [instance log](#the-instance-log), never a site's. The person is the admin; the target is the settings row (target type `platform_security_alerts`) | `disabled_kinds` |
 | `second_factor_policy_changed` | Two-step sign-in requirement changed | A site's two-step sign-in requirement (who must hold a second factor, and the grace period) was saved, including turned off, or was turned off from the server with `KilnCMS.Release.second_factor_requirement_off/1` ([Turn the requirement off from the server](two-factor-auth.md#turn-the-requirement-off-from-the-server)). An admin's save names the admin; the server's names no person and has no IP address. The target is the setting (target type `site_second_factor_policy`). Saved at `/editor/two-factor` (#2247) | `required_for`, `grace_days`, `previous_required_for`, `change`, `via` |
 | `second_factor_required` | Held for two-step sign-in setup | A sign-in was held, or refused, because the site requires a second factor of the account (#2247): sent to set one up, or a passkey-only account's password refused where its passkey cannot be used. Recorded once per sign-in, at the sign-in doors only, never for each request a held session or token makes afterwards. The person is the account | `tier`, `surface`, `reason` |
@@ -502,7 +504,8 @@ since whoever presents the key chooses it. A key over a rate limit
 (`api_key_rate_limited`) follows the same rule. A blocked address
 (`ip_block_refused`) goes to the log of the site whose block list refused it.
 A change to the platform's alert settings (`platform_alerts_changed`) goes to
-the [instance log](#the-instance-log).
+the [instance log](#the-instance-log). So does a downloaded backup file (`backup_downloaded`):
+the dump holds every site.
 
 ## Event matrix: where each event comes from
 
@@ -557,6 +560,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `backup_destination_created`, `backup_destination_changed`, `backup_destination_deleted`, `backup_destination_tested`, `backup_destination_adoptions_changed` | `KilnCMS.Security.Changes.Record` on `Backups.DestinationConfig` `:create`, `:update`, `:reorder` (as `backup_destination_changed`), `:destroy`, `:record_test_result` and `:adopt_directories` (`lib/kiln_cms/backups/destination_config.ex`; metadata from `KilnCMS.Backups.DestinationConfig.Audit`), called from the Backups page's Destinations tab and a release console | in txn, with the write: if the event cannot be written the destination does not change; `scope: :instance`; `backup_destination_changed` only when something changed. `backup_destination_tested` is written with the test's result once the adapter call has returned; the write runs as the `:backups` system actor, and the admin who pressed **Test** is the event's person |
 | `backup_destination_host_key_trusted` | `KilnCMS.Security.Changes.Record` on `Backups.DestinationConfig` `:trust_host_key` (`lib/kiln_cms/backups/destination_config.ex`; metadata from `DestinationConfig.Audit`'s `host_key_trusted`), called from the Destinations tab's **Trust this key** and a release console | in txn, with the write: if the event cannot be written the key is not trusted; `scope: :instance` |
 | `backup_destination_host_key_mismatch` | `lib/kiln_cms/backups/destination/sftp/host_key_alert.ex`: `mismatch/4`, called by `KilnCMS.Backups.Destination.Sftp` when a connection's host key check fails | best-effort, outside the adapter's call result: claimed first with `ThrottleStore.hit/5` (one per destination per hour, cluster-wide), then `Recorder.record/2` and the `backup_host_key_changed` alert claim in one transaction; a failure is logged and the destination fails all the same; `scope: :instance` |
+| `backup_downloaded` | `KilnCMS.Backups.Run.Actions.Download` on `Backups.Run` `:download` (`lib/kiln_cms/backups/run/actions/download.ex`, through `KilnCMS.Backups.download/4`), called only by `KilnCMSWeb.BackupDownloadController` immediately before it sends the file; the page's click runs `:check_download`, which records nothing | `Recorder.record/2` outside any transaction, as the last check: the controller gets the file's path only once the event is written, and anything else (an error, or `:skipped` while the admin's erasure runs) is `503` `audit_failed` with nothing sent. Written before the send, so a file that fails the re-check just before `send_file` leaves an event for bytes not sent, with a warning in the server log; `scope: :instance` |
 | `api_key_reuse_detected` | `lib/kiln_cms/accounts/api_key_reuse.ex`: `check/2`, called by `KilnCMSWeb.ApiKeyRotationController` with the request context, after the lineage's live keys are revoked | `Recorder.record/2` outside any transaction, with `alert_required: true`: if its `api_key_abuse` alert cannot be claimed the event is not written either, and when the event is not written the platform admins get the plain reuse email instead |
 | `ip_block_refused` | `lib/kiln_cms/security/blocked_ip_alert.ex`: `note/4`, called by `KilnCMSWeb.Plugs.IpBlock` (`surface` `http`) and by `KilnCMSWeb.IpBlock.check_connect/2`, from its LiveView `on_mount` (`live`) and the `/ws/gql`, `/ws/collab` and `/ws/bridge` connects (`gql`, `collab`, `bridge`), with the rule `IpBlocklist.match/2` returned. Never by `IpBlocklist.blocked?/2`, which the scanner guard also asks | sampled, after commit, off the request path (a task under `KilnCMS.TaskSupervisor`); in-memory gates first; `request: nil`, so no IP or user agent |
 | `api_key_rate_limited` | `lib/kiln_cms/security/api_key_trip.ex`: `note/2`, called from the refusal branch of `KilnCMSWeb.Plugs.RateLimit` and `KilnCMSWeb.Plugs.GraphqlBatchLimit` for the `api`, `gql`, `media_upload`, `media_transform` and `plugin_endpoint` buckets | sampled, after commit, off the request path; only for a key in the node's verified-key cache (filled by `KilnCMSWeb.Plugs.ApiKeyAuth` and, on `/mcp`, by `KilnCMSWeb.Plugs.RememberApiKey` after `KilnCMSWeb.Plugs.RequireApiKey` verified the key), reloaded and still valid; tenant from `ApiKeyTrip.owner_org_id/1`; `user: nil` |

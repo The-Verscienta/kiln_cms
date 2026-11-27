@@ -80,6 +80,10 @@ else.
   `prune` only reports and `verify` records nothing. New image only; no migration, and rolling the pin back is safe.
   ([#3455](https://github.com/The-Verscienta/kiln_cms/pull/3455) · [long form](docs/changelog/unreleased.md#backup-cli))
 
+- **Backups: a platform admin can download a backup's local files (each dump, media part and checksum file) from History, one file per click, through a one-minute link bound to their session and recorded in the instance security log as `backup_downloaded` before any byte is sent (part of #2225).**
+  Refused while `KILN_CONSOLE_HOST` is unset and there is more than one organization. Shares the `:export` limit of 10 a minute. No migration; rolling the pin back is safe.
+  ([#3471](https://github.com/The-Verscienta/kiln_cms/pull/3471) · [long form](docs/changelog/unreleased.md#backup-download))
+
 ### Changed
 
 - **Backups: two SFTP destinations held back only by a missing Test now say so on the Destinations tab, "Press Test on both destinations to let them prune.", with a link to the how-to (#3428).**

@@ -69,7 +69,11 @@ tenant's editors, so Kiln says so: once a second organization exists and
 and on `/editor/system` (#1661). The console host stays opt-in rather than
 forced, because it is a DNS and TLS change Kiln cannot make for you on upgrade.
 Set `KILN_CONSOLE_HOST` on multi-org installs; since #1688 it isolates every
-org's console, not only the default org's.
+org's console, not only the default org's. Until it is set, a multi-org
+install refuses [backup downloads](backups.md#download-the-files-of-a-backup)
+(part of #2225), so a snippet can't fetch a dump directly; other console
+actions remain reachable from a shared origin, which only the console host
+prevents.
 See [threat-model.md](threat-model.md#residual-risks), residual risk 16.
 
 The `:delivery` pipeline keeps the markup out of console *pages*. It does not

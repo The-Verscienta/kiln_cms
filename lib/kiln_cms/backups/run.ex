@@ -22,6 +22,12 @@ defmodule KilnCMS.Backups.Run do
   files, not rows, and marks the deleted artifacts of a run `pruned`
   (`:mark_pruned`). Deleting a run is #2225.
 
+  A platform admin may also download a run's local files (part of #2225):
+  `:check_download` and `:download` are generic actions that write no Run;
+  `:download` records `backup_downloaded` in the instance log before the file
+  is handed over (`Actions.Download`). Nobody else may, the system actor
+  included.
+
   ## Idempotency
 
   `stamp` (`YYYYMMDD-HHMMSS`, the stamp in the artifacts' file names) is the
@@ -440,6 +446,38 @@ defmodule KilnCMS.Backups.Run do
               end}
     end
 
+    # Downloading one local file of a run (part of #2225): the checks, and
+    # where the file is (`Actions.Download`). `:check_download` writes
+    # nothing (the History page's click); `:download` records
+    # `backup_downloaded` once every check passed and returns the path only
+    # if it was written (the download request, before any byte is sent).
+    # Not in a transaction: the event is written on its own, before the
+    # file is streamed.
+    action :check_download, :map do
+      argument :run_id, :uuid, allow_nil?: false
+
+      argument :file, :string do
+        allow_nil? false
+        # Compared byte for byte with the row's names: never trimmed.
+        constraints max_length: 255, trim?: false
+      end
+
+      transaction? false
+      run {KilnCMS.Backups.Run.Actions.Download, audit: false}
+    end
+
+    action :download, :map do
+      argument :run_id, :uuid, allow_nil?: false
+
+      argument :file, :string do
+        allow_nil? false
+        constraints max_length: 255, trim?: false
+      end
+
+      transaction? false
+      run {KilnCMS.Backups.Run.Actions.Download, audit: true}
+    end
+
     # A cron-made backup becomes a row, once. `keep_days` (#3113) is cron's
     # window as the run's own manifest recorded it; no other action takes it. `upsert_fields []` makes a
     # conflict on the stamp do nothing, so an existing run — the app's own,
@@ -490,7 +528,8 @@ defmodule KilnCMS.Backups.Run do
 
     # Writes: the pipeline's actions are closed to every person, platform admin
     # included, and open only to the `:backups` system actor. (No `destroy`
-    # action exists; deletion comes with #2225.) `resume` (#2218) is the worker
+    # action exists; deletion comes with #2225. Downloads, its first part,
+    # write no Run: their policy is below.) `resume` (#2218) is the worker
     # re-opening a failed run; the platform admin's "Resume" button requests a
     # backup, it never writes the run itself. `note_resume_refused` (#2539) is
     # the worker saying on the row that a requested resume couldn't run.
@@ -529,6 +568,13 @@ defmodule KilnCMS.Backups.Run do
     # The Cancel of a running re-send (#2949): the platform admin's alone, as
     # `:cancel`. Not the system actor: nothing in the pipeline cancels one.
     policy action(:cancel_resend) do
+      authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
+    end
+
+    # A download of a run's local file (part of #2225), checked or made: the
+    # platform admin's alone. Not the system actor, not an org admin: nothing
+    # in the pipeline downloads, and the dump holds every organization.
+    policy action([:check_download, :download]) do
       authorize_if KilnCMS.Accounts.Checks.PlatformAdmin
     end
 

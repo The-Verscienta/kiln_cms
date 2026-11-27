@@ -63,6 +63,14 @@ defmodule KilnCMS.Backups do
   it means taking the application down, replacing the database underneath a
   running BEAM, and having a credible answer when it fails halfway. The
   documented drill in `docs/backups.md` is the supported path.
+
+  ## Downloading a backup's files (part of #2225)
+
+  A platform admin may download a run's local files, one at a time:
+  `check_download/3` checks (the History page's click) and `download/4`
+  checks again and records `backup_downloaded` in the instance log before it
+  hands back the path to send. Never while the console shares an origin with
+  several organizations' sites (`download_refusal/0`).
   """
 
   use Ash.Domain
@@ -122,6 +130,8 @@ defmodule KilnCMS.Backups do
       define :begin_run_resend, action: :begin_resend
       define :record_run_resend, action: :record_resend
       define :cancel_run_resend, action: :cancel_resend
+      define :check_backup_download, action: :check_download, args: [:run_id, :file]
+      define :download_backup_file, action: :download, args: [:run_id, :file]
     end
 
     resource KilnCMS.Backups.Lock do
@@ -2214,6 +2224,90 @@ defmodule KilnCMS.Backups do
   end
 
   defp refusal(error), do: error
+
+  @doc """
+  Whether `actor` may download `file`, a local file of the run `run_id`
+  (part of #2225), and where it is: the History page's click, which writes
+  nothing. `KilnCMS.Backups.Run.Actions.Download` lists the checks.
+
+  `{:ok, %{path, name, kind, bytes, stamp, dir_id, identity}}`, where `dir_id` is
+  this node's backup-directory id (nil when it has none) and `identity` the
+  file's `lstat` identity
+  (`KilnCMS.Backups.Run.Actions.Download.identity/1`), or `{:error, reason}`:
+  `:forbidden` (only a platform admin may), `:console_shares_origin`,
+  `:not_found` (no such run or file of it, an origin that isn't served, or a
+  name that isn't one of the row's), `:in_progress`, `{:lock_unreadable,
+  reason}`, `:pruned`, `{:other_directory, dir_id}`, `{:dir_id_unreadable,
+  reason}`, `:missing`, `:not_regular` or `:unreadable`.
+  """
+  @spec check_download(term(), term(), term()) :: {:ok, map()} | {:error, term()}
+  def check_download(run_id, file, actor) do
+    with {:ok, run_id} <- download_run_id(run_id) do
+      case check_backup_download(run_id, file, actor: actor) do
+        {:ok, download} -> {:ok, download}
+        {:error, error} -> {:error, download_refusal(error)}
+      end
+    end
+  end
+
+  @doc """
+  `check_download/3`, then the `backup_downloaded` instance event, as
+  `actor`, with the request context in `context` (`KilnCMS.Security.Recorder.context/1`).
+  The path comes back only once the event is written: `{:error, :audit_failed}`
+  otherwise. What the download request calls immediately before it sends the
+  file (`KilnCMSWeb.BackupDownloadController`).
+  """
+  @spec download(term(), term(), term(), map()) :: {:ok, map()} | {:error, term()}
+  def download(run_id, file, actor, context \\ %{}) do
+    with {:ok, run_id} <- download_run_id(run_id) do
+      case download_backup_file(run_id, file, actor: actor, context: context) do
+        {:ok, download} -> {:ok, download}
+        {:error, error} -> {:error, download_refusal(error)}
+      end
+    end
+  end
+
+  @doc """
+  Why downloads are refused on this node right now, or nil (part of #2225):
+  `:console_shares_origin` while the console shares an origin with several
+  organizations' sites, or that can't be told
+  (`KilnCMS.Backups.Run.Actions.Download.origin_refusal/0`). What the History
+  page shows in place of its Download controls.
+  """
+  @spec download_refusal() :: :console_shares_origin | nil
+  def download_refusal, do: KilnCMS.Backups.Run.Actions.Download.origin_refusal()
+
+  @doc "This node's backup-directory id, or nil (what a download link carries)."
+  @spec download_dir_id() :: String.t() | nil
+  def download_dir_id, do: KilnCMS.Backups.Run.Actions.Download.current_dir_id()
+
+  defp download_run_id(run_id) do
+    case Ecto.UUID.cast(run_id) do
+      {:ok, id} -> {:ok, id}
+      :error -> {:error, :not_found}
+    end
+  end
+
+  # A name the argument's own constraints refuse (too long, not a string) is
+  # a file of no run: `:not_found`, as the action's own checks say.
+  defp download_refusal(%Ash.Error.Invalid{errors: errors} = error) do
+    case Enum.find(errors, &match?(%Refused{}, &1)) do
+      %Refused{reason: reason} -> reason
+      nil -> if invalid_argument?(errors), do: :not_found, else: error
+    end
+  end
+
+  defp download_refusal(error), do: refusal(error)
+
+  defp invalid_argument?(errors) do
+    errors != [] and
+      Enum.all?(
+        errors,
+        &(match?(%Ash.Error.Action.InvalidArgument{}, &1) or
+            match?(%Ash.Error.Changes.InvalidArgument{}, &1) or
+            match?(%Ash.Error.Changes.Required{}, &1))
+      )
+  end
 
   @doc """
   Enqueue a backup as `system/0` (deprecated: use `request/2` with the actor
