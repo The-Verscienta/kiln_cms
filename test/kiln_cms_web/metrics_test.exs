@@ -68,6 +68,31 @@ defmodule KilnCMSWeb.MetricsTest do
       assert %{status: 401} = Req.get!(url, headers: [authorization: "bearer wrong"])
       assert %{status: 401} = Req.get!(url, headers: [authorization: "bearer"])
     end
+
+    # docs/observability.md documents the `cache` label as the instance's bare
+    # name, not the atom's `inspect` form (#2972).
+    test "the fill guard's counters label the cache by its bare name" do
+      port = start_exporter(@enabled)
+      cache = KilnCMS.Cache.Hosts.cache_name()
+
+      :telemetry.execute([:kiln_cms, :cache, :fill_discarded], %{count: 1}, %{
+        cache: cache,
+        reason: :busted
+      })
+
+      :telemetry.execute([:kiln_cms, :cache, :bust_unmarked], %{count: 1}, %{
+        cache: cache,
+        reason: :mark_failed
+      })
+
+      assert %{status: 200, body: body} = Req.get!("http://127.0.0.1:#{port}/metrics")
+
+      assert body =~
+               ~s|kiln_cms_cache_fill_discarded_count{cache="kiln_cms_host_cache",reason="busted"} 1|
+
+      assert body =~
+               ~s|kiln_cms_cache_bust_unmarked_count{cache="kiln_cms_host_cache",reason="mark_failed"} 1|
+    end
   end
 
   describe "what a scrape carries" do

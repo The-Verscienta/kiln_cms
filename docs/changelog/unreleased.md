@@ -158,7 +158,6 @@ carries the reasoning.
   - **What changes.** The window is claimed per destination (scope `backup_destination:<id>`), so each destination's key change raises its own alert naming it. The event's own limit, at most one per destination per hour across nodes, still bounds how many one destination can raise. The alert can't be turned off, as before.
   - **No migration; rolling the pin back is safe.** An older release shares one window again.
 
-
 <a id="publish-shows-unpublish-date"></a>
 
 - **Publishing a draft without opening the editor shows its scheduled unpublish date (#2892).** This was a 1.13.0 known issue. A draft can carry a takedown date, **Scheduled unpublish at** in the editor (`unpublish_at`, with `expiry_action` saying what happens then), and [ADR 0051](../decisions/0051-taking-content-down-needs-the-same-approval-as-putting-it-up.md) leaves it ungated on a draft because whoever publishes the draft approves the date with the page. Only the editor showed it. An admin who approved a draft from the content list, the bulk bar or a release never saw the date, and the page came down at it.
@@ -182,14 +181,12 @@ carries the reasoning.
   - **Other copy paths checked.** Duplicating a columns block already copied its nested blocks' text, which lives in the columns block's own state, and keeps doing so. Duplicating a whole document copies the saved record on the server and never read the editor's state. Copy and paste between blocks goes through the editor's normal typing path.
   - **No migration; rolling the pin back is safe.** A copy saved empty on an earlier release stays empty; its original, or a version in the document's history, still holds the text to copy back.
 
-
 <a id="slack-missing-site-name"></a>
 
 - **A Slack webhook message whose payload names no site names the endpoint's site (#2797).** `KilnCMS.Webhooks.SlackFormat` renders a Slack-format endpoint's body at send time from the ledger row's payload, and read the site from its `site_name`. A test ping queued by a 1.9 node while a rolling deploy to 1.10 was under way carries Kiln's ping payload (`message`, `endpoint_url`, `sent_at`) and no `site_name`, so the new node posted "KilnCMS webhook test for `-`". A security alert row without the key would have read "Security alert on `-`".
   - **What changes.** `KilnCMS.Webhooks.DeliveryWorker` fills in a missing or empty `site_name` from the endpoint's site (`KilnCMS.Branding.for_org/1`) before rendering a Slack body. If the renderer is still handed a ping without one, it says "KilnCMS webhook test" with no placeholder.
   - **Unchanged.** The job arguments are the same shape they were in 1.9, so no compatibility clause was needed; only the payload differed. The ledger row keeps the payload as it was queued, and Kiln-format endpoints are sent exactly what they were before.
   - **No migration; rolling the pin back is safe.** An older release renders such a row with `-` again.
-
 
 <a id="console-small-defects-2"></a>
 
@@ -203,7 +200,6 @@ carries the reasoning.
   - **Not changed.** A `?to=9999-12-31` date filter on `/editor` was reported as a crash; it lists as expected.
   - **No migration; rolling the pin back is safe.**
 
-
 <a id="reserved-route-slugs"></a>
 
 - **A slug that a built-in route already answers is refused (#2898).** This was a 1.13.0 known issue. `KilnCMS.CMS.ContentTypes.reserved_path_segments/0` is the list the slug, path-alias and content-type validations check, and it had fallen behind the router: `GET /developers`, `/ready`, `/setup`, `/sign-in`, `/sign-out`, `/actor`, `/ap/...`, `/mcp` and `/password-reset/:token` are all declared ahead of the `/:slug` catch-all. A page slugged `developers` saved without error, and `/developers` kept serving the developer page.
@@ -212,14 +208,12 @@ carries the reasoning.
   - **Unchanged.** Post and entry slugs live under `/blog/` or their type's segment, which no such route reaches, so `developers` is still a valid post slug. A dynamic type that already used a newly reserved segment can still be edited: its segment is checked only when it changes.
   - **No migration; rolling the pin back is safe.** Existing records are not changed; see the upgrade note for listing them.
 
-
 <a id="fallback-mode-refire"></a>
 
 - **Changing a custom field's localization to or from `:fallback` re-fires the type's locale variants (#2905).** A `:fallback` field that a variant leaves empty is filled from the next locale along the site's chain when the variant is fired, and the fired `:json` body names it under `inherited_fields`. Saving the chain at `/editor/locales` and publishing a variant re-fired the documents that inherit; changing the field's mode on the Fields screen re-fired nothing. A French page whose tagline was empty kept serving it empty, with no `inherited_fields`, after the field became `:fallback`, and kept serving the English tagline after it stopped being one, until that page was next published.
   - **What changes.** `KilnCMS.CMS.Changes.BustTypeRegistry` now re-fires the field's type when its `localization` changes to or from `:fallback`, and when a `:fallback` field is deleted. Only the type's published rows outside the default locale are queued (`KilnCMS.Firing.Sweep.sweep_type/3` with `only: :translations`): the default locale ends every chain, so it never inherits. A site with no translations queues nothing.
   - **Unchanged.** A switch between `:localized` and `:shared` re-fires nothing; a shared value is copied into the variants when the source publishes, as before. Creating a field as `:fallback` re-fires nothing either: no document holds a value for it yet.
   - **No migration; rolling the pin back is safe.** An artifact fired with the old answer on an earlier release is corrected by `mix kiln.refire_all`, or by publishing the variant.
-
 
 <a id="plugin-typed-filters"></a>
 
@@ -228,13 +222,11 @@ carries the reasoning.
   - **Unchanged.** Everything else compares as the text sent, as before, so no read that answered `200` is refused now: an operand that is not a value of the kind (`gt=ten`), `contains`, `starts_with` and `ilike` (`starts_with=1` still finds `10`), and every operand on a type whose kind is `:string`, `:datetime` or `:json` or that has no `graphql_kind/1` (a plugin's date-time spelling is its own). `custom_sort` already compared the stored jsonb. The console's list filters don't offer plugin fields, as before. See [extending-content.md](../extending-content.md#filters-on-a-plugin-field-type).
   - **No migration; rolling the pin back is safe.** An older release compares such operands as text again.
 
-
 <a id="counted-read-refusal"></a>
 
 - **A refused count-paginated read returns `Forbidden` (#2934).** A read with `authorize_with: :error` and `page: [count: true]` raised `Ash.Error.Framework` ("Invalid value returned from AshPostgres.DataLayer.run_aggregate_query/3") for an actor the policy refused, where the same read without a count returned `{:error, %Ash.Error.Forbidden{}}`. With `:error`, Ash turns the refusal into a filter that raises inside Postgres; AshPostgres hands that back as `{:error, :no_rollback, error}`, which Ash accepts from the rows query but not from the count query (seen on ash 3.38.1 and ash_postgres 2.15.2).
   - **What changes.** `KilnCMS.CountedRead.read/1` runs such a read with its count and, when the count fails that way, runs it again without one and returns that read's error: the refusal. The backup history's "Last scheduled run" lookup (`Backups.history_page_of/3`) counts through it. A canary test fails once Ash accepts the AshPostgres return, so the workaround can be removed then.
   - **Unchanged.** The JSON:API `page[count]`, GraphQL and MCP reads, and the console lists, authorize with Ash's default `:filter`: refused rows are left out of the page and the count, and the answer is never a 500. No migration; rolling the pin back is safe.
-
 
 <a id="custom-where-error-spelling"></a>
 
@@ -242,7 +234,6 @@ carries the reasoning.
   - **What changes.** Over MCP, JSON:API and the code interface the text names `custom_where`, `custom_filter`, `date_time`, `not_eq` and `is_null`, and reads "an int field" and "an int condition" where it read "a int". `docs/mcp.md` no longer warns that some messages use GraphQL's spelling.
   - **Unchanged.** GraphQL's messages are the same, word for word, so a client matching on them keeps working: the GraphQL schema marks a GraphQL request in the Ash context, and only then are the keys spelled in camelCase. The conditions each surface accepts are the same as before.
   - **No migration; rolling the pin back is safe.** An older release spells these messages the GraphQL way again.
-
 
 <a id="gen-plugin-overlay-config"></a>
 
@@ -252,14 +243,12 @@ carries the reasoning.
   - **`@impl`.** Checked: the generated plugin compiles under `--warnings-as-errors`, including every commented example once uncommented, because an overridden `Kiln.Plugin` callback inherits `@impl` from `use Kiln.Plugin`. The one example that warned was the field type's `handle_input_event/3`, which has no default to inherit from and bound an unused variable; it now has its own `@impl Kiln.FieldType`.
   - **Unchanged.** `--dep` plugins still touch nothing in the checkout. A plugin generated by an earlier release keeps its `config/config.exs` line until you move it into the overlay's `project.exs`. No migration.
 
-
 <a id="plugin-widgets-full-definition"></a>
 
 - **The fields admin asks a plugin field type for its editor inputs with the whole definition, as the save does (#2883).** A `Kiln.FieldType` that offers a choice of editor input lists it from `widgets/1`, which is handed the field's definition. The save asked with the whole definition the write would store. The **Editor input** cards on `/editor/fields` asked with a definition built from six posted settings (type, `multiple`, new terms, text format, options and the number bounds) laid over the stored field. A type whose list reads any other setting, such as `required`, `name` or another constraint, got a different answer on the page: the admin could pick a card the save then refused, or never see one the save would take.
   - **What changes.** The cards are asked with the form's own changeset, applied the way the save applies it, so the page and the save hand `widgets/1` the same definition. A card checked before a setting change that stops offering it is still dropped back to the default rather than refused; the page now decides that from the validated form instead of from the six settings. `mix kiln.plugins.doctor` asks `widgets/1` with one full sample definition in both of its checks.
   - **For plugin authors.** The `widgets/1` doc in `kiln_plugin` now says what the definition holds. Core field types are unaffected: their inputs read only the settings the page already sent.
   - **No migration; rolling the pin back is safe.**
-
 
 <a id="feed-relay-exit"></a>
 
@@ -305,6 +294,14 @@ carries the reasoning.
   - **Staging scrub.** It still empties both lists. It anonymizes accounts before it purges, so its `suppressed_recipients_purged` and `site_suppressed_recipients_purged` counts no longer include the rows that matched an account's address.
   - **For developers.** Both `KilnCMS.Mail.SuppressedRecipient` and `KilnCMS.Mail.SiteSuppressedRecipient` gain a destroy action, `:forget_erased`, that takes the address as a required `email` argument and deletes only that address's rows. It is actor-less only: any request that carries an actor is refused, the platform admin, the site's admin and `KilnCMS.Mail.system/0` included ([policy matrix](../policy-matrix.md)). `KilnCMS.Mail.forget_suppressions/2` is the one caller. Reading, recording and clearing a row with `:destroy` are unchanged. Why drop the rows rather than keep or hash them: [ADR 0091](../decisions/0091-erasure-drops-the-erased-address-from-the-suppression-lists.md).
   - **No migration, no setting; rolling the pin back is safe.** An older release goes back to leaving the rows; the rows already deleted stay deleted.
+
+<a id="cache-fill-after-bust"></a>
+
+- **A lookup that read before a save can no longer put the old answer back in the IP block list or host cache (#2972).** Both caches fill in two steps, read then store, and a save busts them once it commits. When the commit and the bust both landed between a lookup's read and its store, the bust deleted nothing and the store came after it. An IP block rule added or removed (in the console, by the scanner guard, or with `KilnCMS.Release.remove_ip_blocks`) could then stay unenforced, or stay enforced, on that node for up to a minute. After a site's `slug` or `custom_domain` changed, the new host could be cached as unknown (a `404`) for up to a minute, and the old one keep resolving for up to five.
+  - **What changes.** `KilnCMS.Cache.FillGuard` orders each store against each bust in the cache's own transaction queue. A bust records when it ran; a lookup that began before it answers its request with what it read and stores nothing, so the next request reads the saved data. This holds on every node from the moment the cluster bust message reaches it. See [ip-blocking.md](../ip-blocking.md#how-fast-a-change-takes-effect) and [multi-tenancy.md](../multi-tenancy.md#change-the-slug-or-custom-domain).
+  - **New metrics.** `kiln_cms.cache.fill_discarded.count` counts lookups served but not stored (`reason`: `busted`, or `too_old` for one that ran over five minutes). `kiln_cms.cache.bust_unmarked.count` counts busts that deleted but could not record their mark (`reason`: `mark_failed` or `queue_unavailable`), each with a warning, `FillGuard: a bust of <cache> deleted but left no mark (<reason>)`; a lookup already in flight may then still store its old value until the TTL. Both are tagged `cache`. See [observability.md](../observability.md#cache-fills-discarded-after-a-bust).
+  - **Unchanged.** The request that straddled the save is still answered from what it read, once. A node that misses the cluster message still waits out the TTL. The cluster bust message is the same, so a node on an earlier release still honors it during a rolling deploy. The settings and published-content cache (#3431), firing artifact bodies (#3433) and the media cache bust (#3432) are not guarded yet.
+  - **No migration, no new configuration; rolling the pin back is safe.**
 
 ## Security
 

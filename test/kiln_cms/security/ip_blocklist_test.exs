@@ -11,9 +11,12 @@ defmodule KilnCMS.Security.IpBlocklistTest do
   alias KilnCMS.CMS
   alias KilnCMS.CMS.IpBlockRule
   alias KilnCMS.Security.IpBlocklist
+  alias KilnCMS.Test.Latch
   alias KilnCMS.Test.QueryCounting
 
   @moduletag :capture_log
+
+  @fill_latch __MODULE__.FillLatch
 
   setup do
     IpBlocklist.clear()
@@ -146,12 +149,114 @@ defmodule KilnCMS.Security.IpBlocklistTest do
 
     test "the entry has a TTL, the backstop for a row removed by hand" do
       add!("203.0.113.9")
+      # The rule's bust reaches this node twice, and a fill that begins
+      # before the second is (rightly) not stored: let it land first.
+      _ = :sys.get_state(KilnCMS.Cache.ClusterBust)
       assert IpBlocklist.blocked?(org_id(), {203, 0, 113, 9})
 
       assert {:ok, ttl} = Cachex.ttl(IpBlocklist.cache_name(), "rules:#{org_id()}")
       assert is_integer(ttl) and ttl > 0 and ttl <= IpBlocklist.ttl()
     end
   end
+
+  # #2972: a fill whose read ran before a write committed must not store the
+  # list it read after that write's bust. The fill runs in a task; a telemetry
+  # handler holds it, in that task, right after its read of the rules returns
+  # and before it stores. The test writes and lets the bust run on both ends
+  # (the local delete and this node's own `ClusterBust` subscriber), then
+  # releases the fill.
+  describe "a fill that read before a write's bust" do
+    setup do
+      start_supervised!({Latch, name: @fill_latch, listener: self()})
+      handler = "ip-blocklist-fill-#{System.unique_integer([:positive])}"
+
+      :ok =
+        :telemetry.attach(handler, [:ash, :cms, :read, :stop], &__MODULE__.hold_fill/4, nil)
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+      :ok
+    end
+
+    defp start_held_check(ip) do
+      task =
+        Task.async(fn ->
+          Process.put(:hold_ip_blocklist_fill, true)
+          IpBlocklist.blocked?(org_id(), ip)
+        end)
+
+      assert_receive {:latch_started, @fill_latch, 1}, 2_000
+      task
+    end
+
+    defp flush_busts, do: _ = :sys.get_state(KilnCMS.Cache.ClusterBust)
+
+    defp release_and_await(task) do
+      assert [_fill] = Latch.release_all(@fill_latch)
+      result = Task.await(task, 5_000)
+      refute_received {:latch_timeout, _, _}
+      result
+    end
+
+    defp cached, do: Cachex.get(IpBlocklist.cache_name(), "rules:#{org_id()}")
+
+    test "a rule added meanwhile is enforced on the next check" do
+      task = start_held_check({203, 0, 113, 9})
+
+      add!("203.0.113.9")
+      flush_busts()
+
+      # The check that read before the commit answers from what it read...
+      refute release_and_await(task)
+      # ...and stores none of it, so the next check reads the new rule.
+      assert {:ok, nil} = cached()
+      assert IpBlocklist.blocked?(org_id(), {203, 0, 113, 9})
+    end
+
+    test "a rule removed meanwhile stops matching on the next check" do
+      rule = add!("203.0.113.9")
+      flush_busts()
+      task = start_held_check({203, 0, 113, 9})
+
+      CMS.destroy_ip_block_rule!(rule, actor: admin(), tenant: org_id())
+      flush_busts()
+
+      assert release_and_await(task)
+      assert {:ok, nil} = cached()
+      refute IpBlocklist.blocked?(org_id(), {203, 0, 113, 9})
+    end
+
+    test "a bust from another node keeps the fill out too" do
+      task = start_held_check({203, 0, 113, 9})
+
+      # Written on another node: no bust here but the cluster message.
+      Ash.Seed.seed!(IpBlockRule, %{cidr: "203.0.113.9/32", org_id: org_id()})
+
+      send(
+        KilnCMS.Cache.ClusterBust,
+        {:bust_cache_keys, IpBlocklist.cache_name(), ["rules:#{org_id()}"]}
+      )
+
+      flush_busts()
+
+      refute release_and_await(task)
+      assert {:ok, nil} = cached()
+      assert IpBlocklist.blocked?(org_id(), {203, 0, 113, 9})
+    end
+
+    test "a fill no bust touched is stored" do
+      task = start_held_check({203, 0, 113, 9})
+
+      refute release_and_await(task)
+      assert {:ok, []} = cached()
+    end
+  end
+
+  @doc false
+  def hold_fill(_event, _measurements, %{resource: IpBlockRule}, _config) do
+    if Process.get(:hold_ip_blocklist_fill), do: Latch.enter(@fill_latch)
+  end
+
+  def hold_fill(_event, _measurements, _metadata, _config), do: :ok
 
   describe "when the rules cannot be read" do
     test "fails open, and does not cache the failure" do

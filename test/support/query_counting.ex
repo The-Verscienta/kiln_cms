@@ -131,10 +131,12 @@ defmodule KilnCMS.Test.QueryCounting do
 
   defp cold_caches do
     {:ok, _} = Cachex.clear(KilnCMS.Cache.cache_name())
-    {:ok, _} = Cachex.clear(KilnCMS.Cache.generation_cache_name())
     :ok = IpBlocklist.clear()
     :ok = Hosts.clear()
     _count = KilnCMS.Firing.Cache.clear()
+    # Last: the two clears above leave a `KilnCMS.Cache.FillGuard` mark there.
+    # Dropping it is safe here, with no fill in flight in a sync module.
+    {:ok, _} = Cachex.clear(KilnCMS.Cache.generation_cache_name())
     :ok
   end
 

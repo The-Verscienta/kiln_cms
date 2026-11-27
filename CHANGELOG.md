@@ -192,6 +192,10 @@ else.
   Before, an erased person's hard-bounced address stayed listed until an admin removed it. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#erasure-drops-suppressions))
 
+- **An IP block rule added or removed, or a site's new slug or custom domain, takes effect on a node's next request, instead of the old answer being cached for up to a minute (five for an old host) when a lookup straddled the save (#2972).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#cache-fill-after-bust))
+
 ### Security
 
 - **Smart 404 blocking: a spoofed search-engine claim rotating through the addresses of one IPv6 `/64` is counted once another address there has failed its DNS check or left its reverse zone silent (#2838).**

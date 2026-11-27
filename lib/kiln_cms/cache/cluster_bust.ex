@@ -47,6 +47,16 @@ defmodule KilnCMS.Cache.ClusterBust do
   second time, which is harmless: if a read cached a key again in between, that
   entry is dropped too and the next read rebuilds it.
 
+  That second delete is not what keeps a fill that read before the commit out
+  of the cache: it can land before that fill stores. For `broadcast_in/2`,
+  `KilnCMS.Cache.FillGuard` does that (#2972). The other shapes are not guarded
+  yet, and the TTL is still their backstop:
+
+    * `KilnCMS.Cache` settings and published-content entries (`broadcast/1`,
+      `broadcast_prefix/1`, `broadcast_clear/0`) are exposed to the race: #3431.
+    * `KilnCMS.Firing.Cache` artifact bodies: #3433.
+    * `KilnCMS.CMS.Changes.BustMediaCache` busts before the commit: #3432.
+
   ## Single-node deployments
 
   Cost nothing. `Phoenix.PubSub`'s default adapter broadcasts to local
@@ -54,6 +64,8 @@ defmodule KilnCMS.Cache.ClusterBust do
   traffic, and the one extra `Cachex.del` of an already-deleted key is a no-op.
   """
   use GenServer
+
+  alias KilnCMS.Cache.FillGuard
 
   @topic "kiln:cache_bust"
 
@@ -84,12 +96,18 @@ defmodule KilnCMS.Cache.ClusterBust do
   the Cachex instance `cache` on this node now, and on every other node.
 
   For the caches that deliberately sit outside `KilnCMS.Cache` (the IP block list,
-  #2242) but need the same cluster-wide "forget this" signal. Same guarantees as
-  `broadcast/1`.
+  #2242, and the host cache, #3194) but need the same cluster-wide "forget this"
+  signal. Same guarantees as `broadcast/1`.
+
+  Both ends delete through `KilnCMS.Cache.FillGuard.bust/2`, not `Cachex.del/2`,
+  so a fill on that node that read before the write committed cannot store its
+  value after the delete (#2972). `cache` must therefore be a fill-guarded
+  instance, started with `transactions: true`. The message is unchanged, so a
+  node on an earlier release still honors it with a plain delete.
   """
   @spec broadcast_in(atom(), [String.t()]) :: :ok
   def broadcast_in(cache, keys) when is_atom(cache) and is_list(keys) do
-    Enum.each(keys, &Cachex.del(cache, &1))
+    FillGuard.bust(cache, keys)
 
     Phoenix.PubSub.broadcast(KilnCMS.PubSub, @topic, {:bust_cache_keys, cache, keys})
 
@@ -195,7 +213,7 @@ defmodule KilnCMS.Cache.ClusterBust do
   end
 
   def handle_info({:bust_cache_keys, cache, keys}, state) when is_atom(cache) and is_list(keys) do
-    Enum.each(keys, &Cachex.del(cache, &1))
+    FillGuard.bust(cache, keys)
     {:noreply, state}
   end
 
