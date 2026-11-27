@@ -15,7 +15,11 @@ defmodule KilnCMS.Forms do
       language (`submit/3`'s `:locale`);
     * **coercion + validation** per `FormField` (required, type coercion to
       JSON-native values, select membership, email shape), unknown keys
-      dropped;
+      dropped. Fields are taken in form order, and a field its condition
+      hides (#2262, `KilnCMS.Forms.Logic`) is skipped: never required, and
+      whatever was sent for it is dropped, so it reaches neither storage, the
+      spam checks, the mail nor the webhook. A field whose type this release
+      doesn't know (`known_fields/1`) is skipped the same way;
     * **human verification** (#2249) — only for a form that asks for it
       (`KilnCMS.Challenge.form_required?/2`), and only once the fields are
       valid, so a typo never spends the visitor's token. The token rides in
@@ -57,6 +61,7 @@ defmodule KilnCMS.Forms do
   alias KilnCMS.Challenge.Gate
   alias KilnCMS.CMS
   alias KilnCMS.Forms.Autoresponder
+  alias KilnCMS.Forms.Logic
 
   # See `with_actor/2`.
   @actor_override {__MODULE__, :actor_override}
@@ -305,13 +310,62 @@ defmodule KilnCMS.Forms do
         {:ok, :discarded}
 
       true ->
-        form_fields = fields(form)
+        form_fields = form |> fields() |> known_fields()
 
-        with {:ok, data} <- coerce(form_fields, params),
+        with {:ok, data, discarded} <- coerce(form_fields, params),
              {:ok, challenge} <- verify(form, params, opts) do
-          {:ok, record(form, form_fields, data, params, Keyword.put(opts, :challenge, challenge))}
+          form
+          |> record(form_fields, data, params, Keyword.put(opts, :challenge, challenge))
+          |> Ash.Resource.put_metadata(:discarded_fields, discarded)
+          |> then(&{:ok, &1})
         end
     end
+  end
+
+  @doc """
+  `fields` without the rows whose type this release doesn't know (a newer
+  release's, read during a rolling deploy or after a rollback), in the order
+  given. Every reader of a form's fields goes through this; see
+  `KilnCMS.Forms.Logic`.
+  """
+  @spec known_fields([map()]) :: [map()]
+  defdelegate known_fields(fields), to: KilnCMS.Forms.Logic
+
+  @doc """
+  Whether `form` (fields loaded) has a field whose condition (#2262) this
+  release applies: its public markup then carries the rules, and the page
+  loads the script that applies them.
+  """
+  @spec conditional?(map()) :: boolean()
+  def conditional?(%{fields: fields}) when is_list(fields),
+    do: fields |> known_fields() |> KilnCMS.Forms.Logic.conditional?()
+
+  def conditional?(_form), do: false
+
+  @doc """
+  The names of the fields whose values `submit/3` dropped from a stored
+  `submission` because their condition hid them (#2262), in form order; `[]`
+  when none was dropped or for anything else.
+  """
+  @spec discarded_fields(term()) :: [String.t()]
+  def discarded_fields(%{__metadata__: %{discarded_fields: names}}) when is_list(names), do: names
+  def discarded_fields(_submission), do: []
+
+  @doc """
+  The names of the fields of `form` that `params` gave a value but whose
+  condition hides them for those params, in form order: what `submit/3`
+  would drop. For an answer that must read like a real submission's without
+  having run one (a tripped honeypot).
+  """
+  @spec hidden_answers(map(), map()) :: [String.t()]
+  def hidden_answers(form, params) when is_map(params) do
+    fields = form |> fields() |> known_fields()
+    shown = Logic.visibility(fields, params)
+
+    for field <- fields,
+        shown[field.name] == false,
+        not blank?(field, Map.get(params, field.name)),
+        do: field.name
   end
 
   @doc """
@@ -484,17 +538,39 @@ defmodule KilnCMS.Forms do
 
   # --- coercion ---------------------------------------------------------------
 
+  # In form order, carrying what the conditions of later fields see (#2262,
+  # `KilnCMS.Forms.Logic`): the coerced value of each shown field, or what was
+  # sent when it doesn't cast, so a rule reads the same answer the browser
+  # did and the visitor still hears about the bad value. A hidden field is
+  # never resolved: not required, and anything sent for it is dropped and
+  # named in `discarded`.
   defp coerce(fields, params) do
-    {data, errors} =
-      Enum.reduce(fields, {%{}, %{}}, fn field, {data, errors} ->
-        case resolve(field, Map.get(params, field.name)) do
-          :skip -> {data, errors}
-          {:ok, value} -> {Map.put(data, field.name, value), errors}
-          {:error, message} -> {data, Map.put(errors, field.name, message)}
-        end
+    {data, errors, discarded, _scope} =
+      fields
+      |> Logic.effective_all()
+      |> Enum.reduce({%{}, %{}, [], %{}}, fn {field, condition}, acc ->
+        coerce_field(field, condition, Map.get(params, field.name), acc)
       end)
 
-    if errors == %{}, do: {:ok, data}, else: {:error, errors}
+    if errors == %{}, do: {:ok, data, Enum.reverse(discarded)}, else: {:error, errors}
+  end
+
+  defp coerce_field(field, condition, raw, {data, errors, discarded, scope}) do
+    if Logic.shown?(condition, scope) do
+      case resolve(field, raw) do
+        :skip ->
+          {data, errors, discarded, Map.put(scope, field.name, raw)}
+
+        {:ok, value} ->
+          {Map.put(data, field.name, value), errors, discarded, Map.put(scope, field.name, value)}
+
+        {:error, message} ->
+          {data, Map.put(errors, field.name, message), discarded, Map.put(scope, field.name, raw)}
+      end
+    else
+      discarded = if blank?(field, raw), do: discarded, else: [field.name | discarded]
+      {data, errors, discarded, scope}
+    end
   end
 
   defp resolve(field, raw) do
@@ -522,7 +598,8 @@ defmodule KilnCMS.Forms do
   """
   @spec copyable_field_attrs(map()) :: map()
   def copyable_field_attrs(field) do
-    Map.take(field, [
+    field
+    |> Map.take([
       :label,
       :field_type,
       :required,
@@ -533,9 +610,23 @@ defmodule KilnCMS.Forms do
       :width,
       :min_value,
       :max_value,
-      :step
+      :step,
+      :condition
     ])
+    |> Map.update(:condition, nil, &copyable_condition/1)
   end
+
+  # The condition as input for the copy (#2262). One whose action this
+  # release doesn't know is not copied: it couldn't be written back, and this
+  # release shows its field anyway (`KilnCMS.Forms.Logic`).
+  defp copyable_condition(condition) when is_map(condition) do
+    case Logic.stored(%{condition: condition}) do
+      %{action: action, rule: rule} when action in [:show, :hide] -> %{action: action, rule: rule}
+      _unknown -> nil
+    end
+  end
+
+  defp copyable_condition(_none), do: nil
 
   @doc """
   A submitted value as display text, for every surface that shows a

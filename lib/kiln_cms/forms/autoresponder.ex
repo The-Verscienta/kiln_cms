@@ -9,7 +9,10 @@ defmodule KilnCMS.Forms.Autoresponder do
   not two.
 
   Only ever fires when the form actually has an `:email`-typed `FormField`
-  *and* the submission gave it a non-blank value — `eligible?/3` is the one
+  *and* the submission gave one a non-blank value — the first such field in
+  form order that has one. A field its condition hid (#2262) has no value in
+  the submission, so it is passed over, and its `[field:…]` token expands to
+  `""`, like any field left blank. `eligible?/3` is the one
   place that decides "is there anyone to confirm with", so `KilnCMS.Forms`'
   submission pipeline and the config-time validation
   (`KilnCMS.CMS.Validations.FormAutoresponderTokens`) can't drift on it.
@@ -32,8 +35,11 @@ defmodule KilnCMS.Forms.Autoresponder do
   def definitions(fields, form_name, escape?) do
     wrap = if escape?, do: &h/1, else: &plain/1
 
+    # A field whose type this release doesn't know has no token here.
     field_definitions =
-      Enum.map(fields, fn field ->
+      fields
+      |> Forms.known_fields()
+      |> Enum.map(fn field ->
         %{
           match: "field:#{field.name}",
           resolve: fn _token, data -> data |> Map.get(field.name) |> wrap.() end
@@ -69,19 +75,33 @@ defmodule KilnCMS.Forms.Autoresponder do
 
   @doc """
   Whether `form` should autorespond to a submission of `data`, and the
-  address to send it to. `false` covers every reason it shouldn't: the
-  toggle is off, the form declares no `:email` field, or this particular
-  submission left that field blank (an optional email field, unfilled).
+  address to send it to: the value of the first `:email` field, in form
+  order, that this submission gave one. `false` covers every reason it
+  shouldn't: the toggle is off, the form declares no `:email` field, or this
+  particular submission left every one blank (an optional email field,
+  unfilled, or one its condition hid, #2262).
   """
   @spec eligible?(KilnCMS.CMS.Form.t(), map(), [field()]) :: {true, String.t()} | false
   def eligible?(form, data, fields) do
     with true <- form.autoresponder_enabled,
-         %{name: name} <- Enum.find(fields, &(&1.field_type == :email)),
-         value when is_binary(value) and value != "" <- Map.get(data, name) do
+         value when is_binary(value) <- first_email(data, fields) do
       {true, value}
     else
       _ -> false
     end
+  end
+
+  defp first_email(data, fields) do
+    Enum.find_value(fields, fn
+      %{field_type: :email, name: name} ->
+        case Map.get(data, name) do
+          value when is_binary(value) and value != "" -> value
+          _blank -> nil
+        end
+
+      _other ->
+        nil
+    end)
   end
 
   @doc """

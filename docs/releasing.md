@@ -915,7 +915,8 @@ So the rule for a column, or an embedded attribute, that will grow:
 
 The switch has to ship **at least one release before** the first new value,
 for the same reason a contract step waits a release. `Security.Event.type`,
-`Notification.event` and `ApiKey.access` are already `KnownAtom`.
+`Notification.event`, `ApiKey.access`, `FormField.field_type` and
+`FormFieldCondition.action` (#2262) are already `KnownAtom`.
 
 **A column that grants authority** needs one more thing: at authentication,
 an `UnknownAtom` must grant nothing. A value the older release doesn't know

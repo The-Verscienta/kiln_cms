@@ -1,0 +1,787 @@
+[
+  {
+    "name": "no conditions shows every field",
+    "fields": [
+      {
+        "name": "a",
+        "condition": null
+      },
+      {
+        "name": "b",
+        "condition": null
+      }
+    ],
+    "values": {
+      "a": "x"
+    },
+    "expected": {
+      "a": true,
+      "b": true
+    }
+  },
+  {
+    "name": "show while the rule holds",
+    "fields": [
+      {
+        "name": "topic",
+        "condition": null
+      },
+      {
+        "name": "details",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "topic",
+            "op": "eq",
+            "value": "Other"
+          }
+        }
+      }
+    ],
+    "values": {
+      "topic": "Other",
+      "details": "d"
+    },
+    "expected": {
+      "topic": true,
+      "details": true
+    }
+  },
+  {
+    "name": "show is hidden while the rule fails",
+    "fields": [
+      {
+        "name": "topic",
+        "condition": null
+      },
+      {
+        "name": "details",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "topic",
+            "op": "eq",
+            "value": "Other"
+          }
+        }
+      }
+    ],
+    "values": {
+      "topic": "Sales",
+      "details": "d"
+    },
+    "expected": {
+      "topic": true,
+      "details": false
+    }
+  },
+  {
+    "name": "hide while the rule holds",
+    "fields": [
+      {
+        "name": "topic",
+        "condition": null
+      },
+      {
+        "name": "details",
+        "condition": {
+          "action": "hide",
+          "rule": {
+            "field": "topic",
+            "op": "eq",
+            "value": "Other"
+          }
+        }
+      }
+    ],
+    "values": {
+      "topic": "Other"
+    },
+    "expected": {
+      "topic": true,
+      "details": false
+    }
+  },
+  {
+    "name": "hide is shown while the rule fails",
+    "fields": [
+      {
+        "name": "topic",
+        "condition": null
+      },
+      {
+        "name": "details",
+        "condition": {
+          "action": "hide",
+          "rule": {
+            "field": "topic",
+            "op": "eq",
+            "value": "Other"
+          }
+        }
+      }
+    ],
+    "values": {
+      "topic": "Sales"
+    },
+    "expected": {
+      "topic": true,
+      "details": true
+    }
+  },
+  {
+    "name": "an unanswered field is empty",
+    "fields": [
+      {
+        "name": "a",
+        "condition": null
+      },
+      {
+        "name": "b",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "a",
+            "op": "not_empty"
+          }
+        }
+      }
+    ],
+    "values": {},
+    "expected": {
+      "a": true,
+      "b": false
+    }
+  },
+  {
+    "name": "a chain hides the second link with the first",
+    "fields": [
+      {
+        "name": "a",
+        "condition": null
+      },
+      {
+        "name": "b",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "a",
+            "op": "eq",
+            "value": "yes"
+          }
+        }
+      },
+      {
+        "name": "c",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "b",
+            "op": "not_empty"
+          }
+        }
+      }
+    ],
+    "values": {
+      "a": "no",
+      "b": "sent anyway",
+      "c": "c"
+    },
+    "expected": {
+      "a": true,
+      "b": false,
+      "c": false
+    }
+  },
+  {
+    "name": "a chain shows the second link with the first",
+    "fields": [
+      {
+        "name": "a",
+        "condition": null
+      },
+      {
+        "name": "b",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "a",
+            "op": "eq",
+            "value": "yes"
+          }
+        }
+      },
+      {
+        "name": "c",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "b",
+            "op": "not_empty"
+          }
+        }
+      }
+    ],
+    "values": {
+      "a": "yes",
+      "b": "x"
+    },
+    "expected": {
+      "a": true,
+      "b": true,
+      "c": true
+    }
+  },
+  {
+    "name": "a hidden field reads as empty to later rules",
+    "fields": [
+      {
+        "name": "a",
+        "condition": null
+      },
+      {
+        "name": "b",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "a",
+            "op": "eq",
+            "value": "yes"
+          }
+        }
+      },
+      {
+        "name": "c",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "b",
+            "op": "empty"
+          }
+        }
+      }
+    ],
+    "values": {
+      "a": "no",
+      "b": "sent anyway"
+    },
+    "expected": {
+      "a": true,
+      "b": false,
+      "c": true
+    }
+  },
+  {
+    "name": "all needs every leaf",
+    "fields": [
+      {
+        "name": "a",
+        "condition": null
+      },
+      {
+        "name": "b",
+        "condition": null
+      },
+      {
+        "name": "c",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "all": [
+              {
+                "field": "a",
+                "op": "eq",
+                "value": "1"
+              },
+              {
+                "field": "b",
+                "op": "eq",
+                "value": "2"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "values": {
+      "a": "1",
+      "b": "3"
+    },
+    "expected": {
+      "a": true,
+      "b": true,
+      "c": false
+    }
+  },
+  {
+    "name": "any needs one leaf",
+    "fields": [
+      {
+        "name": "a",
+        "condition": null
+      },
+      {
+        "name": "b",
+        "condition": null
+      },
+      {
+        "name": "c",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "any": [
+              {
+                "field": "a",
+                "op": "eq",
+                "value": "1"
+              },
+              {
+                "field": "b",
+                "op": "eq",
+                "value": "2"
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "values": {
+      "a": "0",
+      "b": "2"
+    },
+    "expected": {
+      "a": true,
+      "b": true,
+      "c": true
+    }
+  },
+  {
+    "name": "a rule naming a later field leaves the field shown",
+    "fields": [
+      {
+        "name": "a",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "b",
+            "op": "eq",
+            "value": "x"
+          }
+        }
+      },
+      {
+        "name": "b",
+        "condition": null
+      }
+    ],
+    "values": {
+      "b": "y"
+    },
+    "expected": {
+      "a": true,
+      "b": true
+    }
+  },
+  {
+    "name": "a rule naming the field itself leaves it shown",
+    "fields": [
+      {
+        "name": "a",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "a",
+            "op": "eq",
+            "value": "x"
+          }
+        }
+      }
+    ],
+    "values": {
+      "a": "y"
+    },
+    "expected": {
+      "a": true
+    }
+  },
+  {
+    "name": "a rule naming a missing field leaves the field shown",
+    "fields": [
+      {
+        "name": "a",
+        "condition": null
+      },
+      {
+        "name": "b",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "gone",
+            "op": "eq",
+            "value": "x"
+          }
+        }
+      }
+    ],
+    "values": {
+      "a": "y"
+    },
+    "expected": {
+      "a": true,
+      "b": true
+    }
+  },
+  {
+    "name": "a rule with a broken shape leaves the field shown",
+    "fields": [
+      {
+        "name": "a",
+        "condition": null
+      },
+      {
+        "name": "b",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "a",
+            "op": "nope",
+            "value": "x"
+          }
+        }
+      }
+    ],
+    "values": {
+      "a": "y"
+    },
+    "expected": {
+      "a": true,
+      "b": true
+    }
+  },
+  {
+    "name": "an unknown action leaves the field shown",
+    "fields": [
+      {
+        "name": "a",
+        "condition": null
+      },
+      {
+        "name": "b",
+        "condition": {
+          "action": "blink",
+          "rule": {
+            "field": "a",
+            "op": "eq",
+            "value": "x"
+          }
+        }
+      }
+    ],
+    "values": {
+      "a": "y"
+    },
+    "expected": {
+      "a": true,
+      "b": true
+    }
+  },
+  {
+    "name": "a checked boolean equals true",
+    "fields": [
+      {
+        "name": "agree",
+        "condition": null
+      },
+      {
+        "name": "why",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "agree",
+            "op": "eq",
+            "value": true
+          }
+        }
+      }
+    ],
+    "values": {
+      "agree": true
+    },
+    "expected": {
+      "agree": true,
+      "why": true
+    }
+  },
+  {
+    "name": "an unchecked boolean is false, not empty",
+    "fields": [
+      {
+        "name": "agree",
+        "condition": null
+      },
+      {
+        "name": "why",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "agree",
+            "op": "eq",
+            "value": true
+          }
+        }
+      },
+      {
+        "name": "note",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "agree",
+            "op": "not_empty"
+          }
+        }
+      }
+    ],
+    "values": {
+      "agree": false
+    },
+    "expected": {
+      "agree": true,
+      "why": false,
+      "note": true
+    }
+  },
+  {
+    "name": "a checkbox list holds each ticked option",
+    "fields": [
+      {
+        "name": "colours",
+        "condition": null
+      },
+      {
+        "name": "shade",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "colours",
+            "op": "eq",
+            "value": "Red"
+          }
+        }
+      }
+    ],
+    "values": {
+      "colours": [
+        "Blue",
+        "Red"
+      ]
+    },
+    "expected": {
+      "colours": true,
+      "shade": true
+    }
+  },
+  {
+    "name": "an unticked checkbox list is empty",
+    "fields": [
+      {
+        "name": "colours",
+        "condition": null
+      },
+      {
+        "name": "shade",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "colours",
+            "op": "not_empty"
+          }
+        }
+      }
+    ],
+    "values": {
+      "colours": []
+    },
+    "expected": {
+      "colours": true,
+      "shade": false
+    }
+  },
+  {
+    "name": "a number sent as text compares as a number",
+    "fields": [
+      {
+        "name": "count",
+        "condition": null
+      },
+      {
+        "name": "bulk",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "count",
+            "op": "gt",
+            "value": 5
+          }
+        }
+      }
+    ],
+    "values": {
+      "count": "7"
+    },
+    "expected": {
+      "count": true,
+      "bulk": true
+    }
+  },
+  {
+    "name": "a number compares as a number",
+    "fields": [
+      {
+        "name": "count",
+        "condition": null
+      },
+      {
+        "name": "bulk",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "count",
+            "op": "gt",
+            "value": 5
+          }
+        }
+      }
+    ],
+    "values": {
+      "count": 3
+    },
+    "expected": {
+      "count": true,
+      "bulk": false
+    }
+  },
+  {
+    "name": "a date compares as a date",
+    "fields": [
+      {
+        "name": "day",
+        "condition": null
+      },
+      {
+        "name": "late",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "day",
+            "op": "gt",
+            "value": "2026-06-01"
+          }
+        }
+      }
+    ],
+    "values": {
+      "day": "2026-07-01"
+    },
+    "expected": {
+      "day": true,
+      "late": true
+    }
+  },
+  {
+    "name": "contains ignores case",
+    "fields": [
+      {
+        "name": "msg",
+        "condition": null
+      },
+      {
+        "name": "refund",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "msg",
+            "op": "contains",
+            "value": "refund"
+          }
+        }
+      }
+    ],
+    "values": {
+      "msg": "I want a REFUND"
+    },
+    "expected": {
+      "msg": true,
+      "refund": true
+    }
+  },
+  {
+    "name": "in matches one of the values",
+    "fields": [
+      {
+        "name": "size",
+        "condition": null
+      },
+      {
+        "name": "fit",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "size",
+            "op": "in",
+            "value": [
+              "S",
+              "M"
+            ]
+          }
+        }
+      }
+    ],
+    "values": {
+      "size": "M"
+    },
+    "expected": {
+      "size": true,
+      "fit": true
+    }
+  },
+  {
+    "name": "a field shown by hide reads its own answer to later rules",
+    "fields": [
+      {
+        "name": "a",
+        "condition": null
+      },
+      {
+        "name": "b",
+        "condition": {
+          "action": "hide",
+          "rule": {
+            "field": "a",
+            "op": "eq",
+            "value": "skip"
+          }
+        }
+      },
+      {
+        "name": "c",
+        "condition": {
+          "action": "show",
+          "rule": {
+            "field": "b",
+            "op": "eq",
+            "value": "go"
+          }
+        }
+      }
+    ],
+    "values": {
+      "a": "keep",
+      "b": "go"
+    },
+    "expected": {
+      "a": true,
+      "b": true,
+      "c": true
+    }
+  }
+]

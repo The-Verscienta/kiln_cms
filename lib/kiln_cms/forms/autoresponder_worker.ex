@@ -87,7 +87,8 @@ defmodule KilnCMS.Forms.AutoresponderWorker do
 
     case CMS.get_form(form_id, opts) do
       {:ok, %{autoresponder_enabled: true} = form} ->
-        {:ok, form, CMS.form_fields_for!(form_id, opts)}
+        # A field whose type this release doesn't know is skipped (#2262).
+        {:ok, form, form_id |> CMS.form_fields_for!(opts) |> Forms.known_fields()}
 
       {:error, %Ash.Error.Forbidden{} = error} ->
         {:error, error}
