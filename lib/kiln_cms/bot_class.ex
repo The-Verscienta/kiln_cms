@@ -15,22 +15,34 @@ defmodule KilnCMS.BotClass do
 
   The first stage that matches decides:
 
-    1. **AI crawler** names (`GPTBot`, `ClaudeBot`, `CCBot`, …) → `:ai_crawler`.
-    2. **Search engine** names (`Googlebot`, `bingbot`, `DuckDuckBot`, …) →
-       `:search_engine`.
+    1. **AI crawler** names (`GPTBot`, `ClaudeBot`, `CCBot`,
+       `Google-CloudVertexBot`, …) → `:ai_crawler`.
+    2. **Search engine** names (`Googlebot`, `bingbot`, `DuckDuckBot`,
+       `SeznamBot`, …) → `:search_engine`. Only an engine Kiln can check is
+       here: each has a row in `KilnCMS.CrawlerVerification.Engines`.
     3. A user agent that matched **both** 1 and 2 is `:declared_bot`: it claims
        two things at once, so it gets neither class's ceiling.
     4. **Scripting libraries and headless browsers** (`curl/`, `python-requests/`,
        `HeadlessChrome`, …) and the curated link-preview fetchers
-       (`facebookexternalhit`, `Twitterbot`, `Slackbot`, …) → `:declared_bot`.
-    5. **Browser-shaped** (`Mozilla/5.0 (` with `AppleWebKit/`, `Gecko/` or
+       (`facebookexternalhit`, `Twitterbot`, `Slackbot`, …), and named crawlers
+       that do not end in bot or that send a browser-shaped string
+       (`GoogleOther`, `AdsBot-Google`, `Yeti`, `Qwantbot`, `Sogou web spider`) →
+       `:declared_bot`.
+    5. **A `compatible;` product token ending in bot, crawler, spider or
+       scraper** (`(compatible; ExampleBot/1.0; …)`, also `ExampleBot-Mobile`)
+       → `:declared_bot`, browser-shaped or not. This is how a crawler that
+       borrows a browser's string still declares itself. Real phone user
+       agents put the model in the platform parentheses without `compatible;`
+       (`CUBOT_X30`), so they are not caught; a string that placed a model
+       right after `compatible;` would be read as a bot.
+    6. **Browser-shaped** (`Mozilla/5.0 (` with `AppleWebKit/`, `Gecko/` or
        `Trident/`) → `:browser`.
-    6. A generic **product token ending in bot, crawler, spider or scraper**,
+    7. A generic **product token ending in bot, crawler, spider or scraper**,
        followed by `/`, `;`, `)`, `+` or the end → `:declared_bot`. Not applied
-       to a browser-shaped user agent (stage 5 has already answered), so a
+       to a browser-shaped user agent (stage 6 has already answered), so a
        phone model or an app name inside a real browser's string cannot demote
        it.
-    7. **Anything else that is not empty** → `:browser`. Media players
+    8. **Anything else that is not empty** → `:browser`. Media players
        (`AppleCoreMedia`, `stagefright`, `ExoPlayerLib`, VLC, Roku), native
        HTTP stacks (`CFNetwork`, `Dalvik`, `okhttp`) and old or unusual browsers
        land here, because an unknown client is far more often a person's device
@@ -48,6 +60,18 @@ defmodule KilnCMS.BotClass do
   to decide what the content may be used for. No request carries them, so
   there is nothing to classify; control them in robots.txt.
 
+  ## Search engines that are not here
+
+  A search engine joins `:search_engine` only when its vendor documents a way
+  to check a request is theirs (a reverse-DNS domain or a published IP list).
+  An engine with nothing to check against would be a claim no one can prove
+  false, and such a claim keeps the 404 guard's exemption
+  (`KilnCMS.Security.ScannerGuard`), so typing its name would be a scanner's
+  way past the guard. Naver's `Yeti` and Sogou's spiders publish no such
+  domain, so they are `:declared_bot`. So is `Qwantbot`, until its reverse-DNS
+  domain is confirmed from Qwant's own documentation: a wrong domain would
+  prove the real crawler's claims false.
+
   ## Adding a name
 
   The lists are curated here, not configured: what an operator configures is
@@ -60,7 +84,8 @@ defmodule KilnCMS.BotClass do
   @type t :: :search_engine | :ai_crawler | :declared_bot | :empty | :browser
 
   @typedoc "A search engine `search_engine/1` can name."
-  @type engine :: :google | :bing | :duckduckgo | :baidu | :yandex | :apple
+  @type engine ::
+          :google | :bing | :duckduckgo | :baidu | :yandex | :apple | :seznam | :mojeek
 
   @classes [:browser, :search_engine, :ai_crawler, :declared_bot, :empty]
 
@@ -71,20 +96,24 @@ defmodule KilnCMS.BotClass do
   # One compiled regex per stage, held in module attributes so each match runs
   # the precompiled pattern. No `u` flag anywhere: matching is over bytes, so a
   # header that is not valid UTF-8 matches nothing rather than raising.
-  @ai_crawler ~r/\b(?:GPTBot|ChatGPT-User|OAI-SearchBot|ClaudeBot|Claude-User|Claude-SearchBot|anthropic-ai|CCBot|PerplexityBot|Perplexity-User|Bytespider|Amazonbot|meta-externalagent)\b/i
+  @ai_crawler ~r/\b(?:GPTBot|ChatGPT-User|OAI-SearchBot|ClaudeBot|Claude-User|Claude-SearchBot|anthropic-ai|CCBot|PerplexityBot|Perplexity-User|Bytespider|Amazonbot|meta-externalagent|Google-CloudVertexBot)\b/i
 
   # The search engines and the user-agent tokens that name each, in one table
   # so `search_engine/1` and crawler verification (#2254) agree on who is who.
   # `Googlebot` also covers `Googlebot-Image`, `-News` and `-Video` (the hyphen
-  # is a word boundary). Each engine needs a row in
-  # `KilnCMS.CrawlerVerification.Engines`.
+  # is a word boundary), and `Storebot-Google` is Google Shopping's crawler,
+  # one of the common crawlers Google verifies like Googlebot. Each engine
+  # needs a row in `KilnCMS.CrawlerVerification.Engines`; an engine with
+  # nothing to verify it by does not belong here (see the moduledoc).
   @search_engines [
-    google: ~w(Googlebot Google-InspectionTool),
+    google: ~w(Googlebot Google-InspectionTool Storebot-Google),
     bing: ~w(bingbot),
     duckduckgo: ~w(DuckDuckBot),
     baidu: ~w(Baiduspider),
     yandex: ~w(YandexBot),
-    apple: ~w(Applebot)
+    apple: ~w(Applebot),
+    seznam: ~w(SeznamBot),
+    mojeek: ~w(MojeekBot)
   ]
 
   @search_tokens Enum.flat_map(@search_engines, fn {_engine, tokens} -> tokens end)
@@ -104,8 +133,20 @@ defmodule KilnCMS.BotClass do
   # Scripting tools, headless browsers, and named fetchers that do not need the
   # generic token to be caught (some send a browser-shaped string). `okhttp` is
   # deliberately absent: it is the HTTP stack of native Android apps, which
-  # play `/media/:id/stream` for a person.
-  @declared ~r/(?:(?<![a-z0-9_.\-])(?:curl|Wget|python-requests|Python-urllib|python-httpx|aiohttp|Go-http-client|Java|libwww-perl|Scrapy|axios|node-fetch|PostmanRuntime|Apache-HttpClient|req)\/|\b(?:HeadlessChrome|PhantomJS|facebookexternalhit|Twitterbot|Slackbot|LinkedInBot|Discordbot|PetalBot|AhrefsBot|SemrushBot)\b)/i
+  # play `/media/:id/stream` for a person. `GoogleOther` (Google's generic
+  # research fetcher, no product) and `AdsBot-Google` (ad landing-page checks,
+  # verified only under google.com, which crawler verification refuses) are
+  # Google's but not search; `Yeti` (Naver), `Qwantbot` and Sogou's spiders
+  # are search engines Kiln cannot verify yet.
+  @declared ~r/(?:(?<![a-z0-9_.\-])(?:curl|Wget|python-requests|Python-urllib|python-httpx|aiohttp|Go-http-client|Java|libwww-perl|Scrapy|axios|node-fetch|PostmanRuntime|Apache-HttpClient|req)\/|\b(?:HeadlessChrome|PhantomJS|facebookexternalhit|Twitterbot|Slackbot|LinkedInBot|Discordbot|PetalBot|AhrefsBot|SemrushBot|GoogleOther|AdsBot-Google|Qwantbot|Sogou(?: [a-z]+)? spider)\b|\bYeti\/)/i
+
+  # `compatible;` (after `(` or `;`) and a product token ending in
+  # bot/crawler/spider/scraper, followed by `/`, `;`, `)`, `+`, `-`, a space
+  # or the end. Read before the browser shape, so a crawler that wraps its name
+  # in a browser's string is still a bot. A device model sits in the platform
+  # parentheses without `compatible;`, so a real `CUBOT_X30` string is not read
+  # here (one that put the model right after `compatible;` would be).
+  @compatible_bot ~r/[(;]\s*compatible;\s*[a-z0-9._\-]*(?:bot|crawler|spider|scraper)(?:[\/;)+\s\-]|\z)/i
 
   @browser_shaped ~r/\AMozilla\/5\.0 \(.*(?:AppleWebKit\/|Gecko\/|Trident\/)/i
 
@@ -174,6 +215,7 @@ defmodule KilnCMS.BotClass do
   defp classify_unnamed(ua) do
     cond do
       Regex.match?(@declared, ua) -> :declared_bot
+      Regex.match?(@compatible_bot, ua) -> :declared_bot
       Regex.match?(@browser_shaped, ua) -> :browser
       Regex.match?(@generic_bot, ua) -> :declared_bot
       true -> :browser

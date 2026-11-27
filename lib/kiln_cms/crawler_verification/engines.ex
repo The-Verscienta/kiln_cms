@@ -15,12 +15,15 @@ defmodule KilnCMS.CrawlerVerification.Engines do
   | `:yandex`     | `yandex.ru`, `yandex.net`, `yandex.com`      | <https://yandex.com/support/webmaster/en/robot-workings/check-yandex-robots.html> |
   | `:baidu`      | `baidu.com`, `baidu.jp`                      | <https://help.baidu.com/question?prod_id=99&class=0&id=3001> |
   | `:duckduckgo` | none: DuckDuckBot publishes IP ranges only   | <https://duckduckgo.com/duckduckgo-help-pages/results/duckduckbot> |
+  | `:seznam`     | `seznam.cz`                                  | <https://o-seznam.cz/napoveda/vyhledavani/en/seznambot-crawler/> |
+  | `:mojeek`     | `mojeek.com`                                 | <https://www.mojeek.com/bot.html> |
 
   ## Published IP ranges
 
   The lists `KilnCMS.CrawlerVerification.Ranges` fetches, each the vendor's
   own published list of its crawlers' addresses. Yandex and Baidu publish
-  none and are checked by DNS only.
+  none and are checked by DNS only. Seznam and Mojeek do publish one,
+  but Kiln does not fetch it yet: their claims are checked by DNS only.
 
   | Engine        | Published list |
   | ------------- | -------------- |
@@ -57,7 +60,9 @@ defmodule KilnCMS.CrawlerVerification.Engines do
     apple: ["applebot.apple.com"],
     yandex: ["yandex.ru", "yandex.net", "yandex.com"],
     baidu: ["baidu.com", "baidu.jp"],
-    duckduckgo: :none
+    duckduckgo: :none,
+    seznam: ["seznam.cz"],
+    mojeek: ["mojeek.com"]
   }
 
   @range_sources %{

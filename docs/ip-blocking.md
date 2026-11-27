@@ -172,8 +172,9 @@ Never counted, so a person or a service is not blocked by mistake:
   proxy is trusted: the address is then the proxy's.
 - An address already on the block list.
 - For the **miss threshold only**, a client whose `User-Agent` names a search
-  engine (Googlebot, Google-InspectionTool, Bingbot, DuckDuckBot, Applebot,
-  YandexBot, Baiduspider) and no AI crawler, unless crawler verification has proven the claim false (see
+  engine (Googlebot, Google-InspectionTool, Storebot-Google, Bingbot,
+  DuckDuckBot, Applebot, YandexBot, Baiduspider, SeznamBot, MojeekBot)
+  and no AI crawler, unless crawler verification has proven the claim false (see
   [Verified search engines](bot-budgets.md#verified-search-engines)). A claim
   still being checked, or whose lookup could not start, keeps the exemption,
   so a real crawler's first misses from a new address never count, except
@@ -228,9 +229,9 @@ Never counted, so a person or a service is not blocked by mistake:
   [ADR 0086](decisions/0086-an-ipv6-64-that-produced-claimant-controlled-negative-evidence-loses-the-404-exemption-for-unproven-claims.md)
   records why.
 
-  With `KILN_CRAWLER_VERIFICATION=false` the six names Googlebot, Bingbot,
-  DuckDuckBot, Applebot, YandexBot and Baiduspider in the user agent are
-  enough. **Bait paths count for everyone**: no crawler has a reason to ask
+  With `KILN_CRAWLER_VERIFICATION=false` the names Googlebot,
+  Storebot-Google, Bingbot, DuckDuckBot, Applebot, YandexBot, Baiduspider,
+  SeznamBot and MojeekBot in the user agent are enough. **Bait paths count for everyone**: no crawler has a reason to ask
   for one.
 
 Link-preview fetchers (`facebookexternalhit`, `Twitterbot`, `LinkedInBot`) and

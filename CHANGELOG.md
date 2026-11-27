@@ -86,6 +86,9 @@ else.
 
 ### Changed
 
+- **Bot budgets: SeznamBot, MojeekBot and Storebot-Google count as search engines, checked by DNS; GoogleOther, AdsBot-Google, Naver's Yeti, Qwantbot, Sogou and a browser-shaped `(compatible; …bot)` crawler count as other bots, and Google-CloudVertexBot as an AI crawler (#2468).**
+  No migration; rolling the pin back is safe.
+  ([#3477](https://github.com/The-Verscienta/kiln_cms/pull/3477) · [long form](docs/changelog/unreleased.md#bot-classes-regional-engines))
 - **Backups: two SFTP destinations held back only by a missing Test now say so on the Destinations tab, "Press Test on both destinations to let them prune.", with a link to the how-to (#3428).**
   Shown only when a Test would clear the block. No migration.
   ([#3466](https://github.com/The-Verscienta/kiln_cms/pull/3466) · [long form](docs/changelog/unreleased.md#sftp-prune-test-hint))
