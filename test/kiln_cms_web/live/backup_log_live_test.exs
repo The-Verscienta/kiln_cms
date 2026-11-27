@@ -263,10 +263,11 @@ defmodule KilnCMSWeb.BackupLogLiveTest do
       {:ok, lv, _html} = live(conn, ~p"/editor/backups/log?#{%{run: run.id}}")
       assert has_element?(lv, "#backup-log-level-all[aria-current=page]", "200")
 
+      # 252 written, 199 kept: the count the download shows.
       assert has_element?(
                lv,
                "[data-role=truncated]",
-               "Some lines were dropped to keep the log small"
+               "53 lines were dropped to keep the log small"
              )
 
       for {level, count} <- [{"warn", "3"}, {"error", "2"}] do

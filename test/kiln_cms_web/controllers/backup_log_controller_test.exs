@@ -3,7 +3,8 @@ defmodule KilnCMSWeb.BackupLogControllerTest do
   `GET /editor/backups/runs/:id/log.txt` (part of #2230): a platform admin's
   download of one run's log, redacted again and sanitized; refused for anyone
   else and while the console shares an origin, with nothing charged before
-  those checks; rate-limited on the `:export` bucket.
+  those checks; rate-limited on the `:export` bucket, which only a run that
+  is found charges.
 
   `async: false`: it changes the rate limits, `PGPASSWORD`, the
   `KilnCMS.Backups` env and `:console_host`, all VM-global.
@@ -293,14 +294,24 @@ defmodule KilnCMSWeb.BackupLogControllerTest do
   end
 
   describe "the run" do
-    test "an id that isn't a UUID, and an unknown one, are the same 404", %{conn: conn} do
-      conn = log_in(conn, authed_user(:admin))
+    test "an id that isn't a UUID, and an unknown one, are the same 404, uncharged", %{
+      conn: conn,
+      run: run
+    } do
+      admin = authed_user(:admin)
+      conn = log_in(conn, admin)
 
       for id <- ["not-a-uuid", Ash.UUID.generate()] do
         refused = fetch(conn, id)
         assert refused.status == 404
         assert error_code(refused) == "not_found"
       end
+
+      assert spent(admin) == 0
+
+      # A run that is found is what charges.
+      assert conn |> fetch(run.id) |> response(200)
+      assert spent(admin) == 1
     end
   end
 
@@ -332,11 +343,22 @@ defmodule KilnCMSWeb.BackupLogControllerTest do
         assert error_code(refused) == "admin_required"
         refute refused.resp_body =~ "rclone failed"
         assert spent(user) == 0
+
+        # An unknown id, or one that isn't a UUID, gets the very same answer:
+        # a refused request can't learn which runs exist.
+        for id <- [Ash.UUID.generate(), "not-a-uuid"] do
+          unknown = build_conn() |> log_in(user) |> fetch(id)
+          assert {unknown.status, unknown.resp_body} == {refused.status, refused.resp_body}
+        end
+
+        assert spent(user) == 0
       end
 
       anonymous = fetch(conn, run.id)
       assert anonymous.status == 403
       assert error_code(anonymous) == "admin_required"
+      unknown = fetch(build_conn(), Ash.UUID.generate())
+      assert {unknown.status, unknown.resp_body} == {anonymous.status, anonymous.resp_body}
     end
 
     test "an admin demoted since signing in is 403", %{conn: conn, run: run} do
@@ -376,7 +398,9 @@ defmodule KilnCMSWeb.BackupLogControllerTest do
       assert spent(admin) == 1
 
       # An unknown id answers the same: the origin decides before the read.
-      assert conn |> fetch(Ash.UUID.generate()) |> error_code() == "console_shares_origin"
+      unknown = fetch(conn, Ash.UUID.generate())
+      assert {unknown.status, unknown.resp_body} == {refused.status, refused.resp_body}
+      assert spent(admin) == 1
     end
 
     test "a console host of its own allows it again", %{run: run} do
@@ -405,10 +429,30 @@ defmodule KilnCMSWeb.BackupLogControllerTest do
       assert [retry] = get_resp_header(limited, "retry-after")
       assert String.to_integer(retry) >= 1
 
-      # An unknown id is charged too, so guessing ids costs.
-      assert conn |> fetch(Ash.UUID.generate()) |> response(429)
-
       assert build_conn() |> log_in(other) |> fetch(run.id) |> response(200)
+    end
+
+    test "with the bucket spent, an unknown id is 404 and a found run is 429", %{
+      conn: conn,
+      run: run
+    } do
+      RateLimitHelpers.put_limit(:export, 1)
+      admin = authed_user(:admin)
+      conn = log_in(conn, admin)
+
+      assert conn |> fetch(run.id) |> response(200)
+      assert spent(admin) == 1
+
+      # Only a found run is charged, so a spent bucket doesn't hide a 404,
+      # and an unknown or malformed id spends nothing more.
+      for id <- [Ash.UUID.generate(), "not-a-uuid"] do
+        unknown = fetch(conn, id)
+        assert unknown.status == 404
+        assert error_code(unknown) == "not_found"
+      end
+
+      assert spent(admin) == 1
+      assert conn |> fetch(run.id) |> response(429)
     end
   end
 end

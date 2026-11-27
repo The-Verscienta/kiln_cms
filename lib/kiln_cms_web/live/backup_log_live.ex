@@ -51,7 +51,7 @@ defmodule KilnCMSWeb.BackupLogLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Backups
-  alias KilnCMS.Backups.{Chain, LogText, Progress, Run}
+  alias KilnCMS.Backups.{Chain, Log, LogText, Progress, Run}
   alias KilnCMSWeb.Params
 
   import KilnCMSWeb.BackupComponents,
@@ -604,7 +604,7 @@ defmodule KilnCMSWeb.BackupLogLive do
         <%= if LogText.truncated?(entry) do %>
           <p data-role="truncated" class="flex items-center gap-1.5 text-warning-ink">
             <.icon name="hero-scissors" class="size-4 shrink-0" />
-            {gettext("Some lines were dropped to keep the log small")}
+            {dropped_label(entry)}
           </p>
         <% else %>
           <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
@@ -654,6 +654,21 @@ defmodule KilnCMSWeb.BackupLogLive do
   defp level_label(:warn), do: gettext("Warning")
   defp level_label(:error), do: gettext("Error")
   defp level_label(other), do: to_string(other)
+
+  # The count the download shows too, read from the cap's own marker.
+  defp dropped_label(entry) do
+    case Log.marker_count(entry) do
+      nil ->
+        gettext("Some lines were dropped to keep the log small")
+
+      count ->
+        ngettext(
+          "One line was dropped to keep the log small",
+          "%{count} lines were dropped to keep the log small",
+          count
+        )
+    end
+  end
 
   defp level_icon(:warn), do: "hero-exclamation-triangle"
   defp level_icon(:error), do: "hero-x-circle"

@@ -23,11 +23,15 @@ defmodule KilnCMSWeb.BackupLogController do
        the admin. A request without the headers (an older browser, curl)
        is let through: they are a browser's, and a client that omits them
        is spending its own bucket on purpose.
-    4. The `:export` rate bucket of that admin, the one the backup file
-       download and the security-log exports charge, else 429. A request
-       refused above charges nothing.
-    5. The run, read as the admin (`Backups.get_run/2`): an id that isn't a
-       UUID, an unknown run and a refused read are the same 404.
+    4. The run, read as the admin (`Backups.get_run/2`): an id that isn't a
+       UUID (cast before any read), an unknown run and a refused read are
+       the same 404, and charge nothing. Every refusal above answers the
+       same whether the id exists, so only an admin on the console learns
+       that, and run ids are random UUIDs, so guessing them never paid.
+    5. The `:export` rate bucket of that admin, the one the backup file
+       download and the security-log exports charge, else 429. Only a run
+       that is found is charged: the bucket rations an admin's downloads,
+       not their typos.
 
   A GET with no token: it changes nothing, and the path carries only the
   run's id. A cross-site GET can only start a download in the admin's own
@@ -52,8 +56,9 @@ defmodule KilnCMSWeb.BackupLogController do
     with :ok <- require_admin(conn),
          :ok <- origin_ok(),
          :ok <- fetch_ok(conn),
-         :ok <- charge(conn),
-         {:ok, run} <- read(conn, id) do
+         {:ok, id} <- cast_id(id),
+         {:ok, run} <- read(conn, id),
+         :ok <- charge(conn) do
       send_log(conn, run)
     else
       {:deny, retry_after_ms} -> RateLimitPlug.deny(conn, retry_after_ms)
@@ -93,13 +98,17 @@ defmodule KilnCMSWeb.BackupLogController do
     end
   end
 
+  defp cast_id(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, id} -> {:ok, id}
+      :error -> {:error, :not_found}
+    end
+  end
+
   defp read(conn, id) do
-    with {:ok, id} <- Ecto.UUID.cast(id),
-         {:ok, run} <-
-           Backups.get_run(id, actor: conn.assigns.current_user, authorize_with: :error) do
-      {:ok, run}
-    else
-      _not_found -> {:error, :not_found}
+    case Backups.get_run(id, actor: conn.assigns.current_user, authorize_with: :error) do
+      {:ok, run} -> {:ok, run}
+      {:error, _not_found} -> {:error, :not_found}
     end
   end
 

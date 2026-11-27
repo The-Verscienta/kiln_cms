@@ -35,6 +35,44 @@ defmodule KilnCMS.Backups.LogTest do
     assert Log.cap(once) == once
   end
 
+  test "marker_count/1 reads the count from the marker cap/1 itself writes" do
+    marker = 1_000 |> entries() |> Log.cap() |> Enum.find(&Log.marker?/1)
+
+    assert Log.marker_count(marker) == 801
+  end
+
+  test "marker_count/1 is nil for any other line" do
+    marker = 300 |> entries() |> Log.cap() |> Enum.find(&Log.marker?/1)
+
+    assert Log.marker_count(%{marker | level: :info}) == nil
+    assert Log.marker_count(%{marker | step: "dump"}) == nil
+    assert Log.marker_count(%{marker | message: marker.message <> "!"}) == nil
+
+    assert Log.marker_count(%{marker | message: "some log entries were dropped to bound the log"}) ==
+             nil
+
+    assert Log.marker_count(%LogEntry{step: "dump", level: :info, message: "m1"}) == nil
+    assert Log.marker_count(:other) == nil
+  end
+
+  test "a log capped again counts the entries its old marker had dropped" do
+    once = Log.cap(entries(300))
+    assert once |> Enum.find(&Log.marker?/1) |> Log.marker_count() == 101
+
+    appended = for i <- 301..400, do: %{step: "s", message: "m#{i}", level: :info}
+    twice = Log.cap(once ++ appended)
+
+    assert length(twice) == 200
+    assert [marker] = Enum.filter(twice, &Log.marker?/1)
+    assert Enum.at(twice, 50) == marker
+
+    # 400 entries were written and 199 of them are kept.
+    assert Log.marker_count(marker) == 400 - 199
+    assert Enum.at(twice, 49).message == "m50"
+    assert Enum.at(twice, 51).message == "m252"
+    assert List.last(twice).message == "m400"
+  end
+
   test "messages are cut to 500 characters and redacted" do
     long = String.duplicate("x", 900)
 
