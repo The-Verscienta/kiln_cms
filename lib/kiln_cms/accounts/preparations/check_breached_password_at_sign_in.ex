@@ -181,8 +181,13 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn do
   defp resolve_deciding(deciding) do
     deciding.()
   rescue
-    _error ->
-      Logger.warning("breached-password sign-in refusal: deciding sites could not be read")
-      []
+    _error -> deciding_unreadable()
+  catch
+    :exit, _reason -> deciding_unreadable()
+  end
+
+  defp deciding_unreadable do
+    Logger.warning("breached-password sign-in refusal: deciding sites could not be read")
+    []
   end
 end

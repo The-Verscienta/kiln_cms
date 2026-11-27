@@ -618,14 +618,13 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignInTest do
       {:ok, token} = AshAuthentication.Strategy.Password.reset_token_for(strategy, admin)
       new_pw = password()
 
-      assert {:ok, _user} =
-               admin
-               |> Ash.Changeset.for_update(
-                 :reset_password_with_token,
-                 %{reset_token: token, password: new_pw, password_confirmation: new_pw},
-                 authorize?: false
-               )
-               |> Ash.update()
+      params = %{
+        "reset_token" => token,
+        "password" => new_pw,
+        "password_confirmation" => new_pw
+      }
+
+      assert {:ok, _user} = AshAuthentication.Strategy.action(strategy, :reset, params, [])
 
       assert AccountThrottle.sign_in_pause_cause(address) == :none
       assert AccountThrottle.sign_in_attempts(address) == 0
