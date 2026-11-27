@@ -12,6 +12,7 @@ defmodule KilnCMSWeb.BlockComponents do
 
   alias KilnCMS.Blocks
   alias KilnCMS.CMS.TypedBlocks
+  alias KilnCMS.Forms.Logic
   alias KilnCMS.HTMLSanitizer
   alias KilnCMS.I18n
   alias KilnCMSWeb.ChallengeComponents
@@ -338,6 +339,14 @@ defmodule KilnCMSWeb.BlockComponents do
   first render. `values` must only ever carry the admin-defined fields' string
   values — the caller builds it (`FormController`), and the honeypot is never
   among them: this component renders it empty unconditionally.
+
+  A field whose type this release doesn't know is not drawn. A form with a
+  field condition (#2262, `KilnCMS.Forms.Logic`) is marked for the form
+  script (`assets/js/form_enhance.js`, loaded through `challenge_static.js`):
+  with no script every field shows, and a conditional field is never
+  browser-required. Inside a LiveView (previews) the script leaves the form
+  alone, so every field shows there too. A form with no condition renders
+  byte for byte as before.
   """
   attr :form, :map, required: true
   attr :embed, :boolean, default: false
@@ -357,17 +366,31 @@ defmodule KilnCMSWeb.BlockComponents do
   attr :action, :string, default: nil
 
   def public_form(assigns) do
+    # A field whose type this release doesn't know (a newer release's) is not
+    # drawn (#2262); each field comes with the condition this release applies.
+    fields = assigns.form.fields |> KilnCMS.Forms.known_fields() |> Logic.effective_all()
+
     assigns =
       assigns
       |> assign(:id_prefix, "kiln-form-" <> assigns.form.slug)
       |> assign(:action, assigns.action || "/forms/" <> assigns.form.slug)
       |> assign(:error_items, error_items(assigns.form, assigns.errors))
+      |> assign(:fields, fields)
+      |> assign(:conditional, Enum.any?(fields, &(elem(&1, 1) != nil)))
+      |> assign(:script_field, Enum.find_value(fields, fn {f, c} -> c && f.name end))
 
+    # A form with a condition (#2262) is marked for the form script
+    # (`assets/js/form_enhance.js`): every field wrapper names its field and a
+    # conditional one carries its rule and `condition_extras/1`. A form with
+    # none renders byte for byte as before, which is why the wrapper is
+    # `phx-no-format`: an absent extra must leave no whitespace behind
+    # (`PublicFormGoldenTest`).
     ~H"""
     <form
       method="post"
       action={@action}
       class="kiln-form space-y-4 rounded-lg border border-base-300 p-4"
+      data-kiln-enhance={@conditional}
     >
       <%!-- The error summary (#1683). `autofocus` moves focus here on load with
             no script (the page is a plain POST response), and `role="alert"`
@@ -433,15 +456,19 @@ defmodule KilnCMSWeb.BlockComponents do
 
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-6">
         <div
-          :for={field <- @form.fields}
+          :for={{field, condition} <- @fields}
           class={[field_width_class(field), field.field_type == :hidden && "hidden"]}
+          data-kiln-field={@conditional && field.name}
+          data-kiln-condition={condition && Jason.encode!(condition)}
+          phx-no-format
         >
           <.public_form_field
             field={field}
             id_prefix={@id_prefix}
             value={Map.get(@values, field.name, field.default_value)}
             error={Map.get(@errors, field.name)}
-          />
+            native_required={is_nil(condition)}
+          /><.condition_extras :if={condition} script?={field.name == @script_field} />
         </div>
       </div>
 
@@ -453,6 +480,27 @@ defmodule KilnCMSWeb.BlockComponents do
         {@form.submit_label || gettext("Submit")}
       </button>
     </form>
+    """
+  end
+
+  # What a field with a condition (#2262) adds after its control: a line
+  # saying why it may not apply, which shows only without the script (it
+  # hides it once it runs), and on the form's first such field the script
+  # itself. An external module, never inline, so every page's
+  # `script-src 'self'` covers it, and only on a page with a conditional
+  # form, so no other page grows. A module runs once however many forms load
+  # it. It is the embed's own bundle (`kiln_challenge_embed`), which also
+  # mounts the human-verification widget, idempotently beside public.js or
+  # app.js.
+  attr :script?, :boolean, required: true
+
+  defp condition_extras(assigns) do
+    ~H"""
+    <p class="kiln-form-condition-hint mt-1 text-xs text-base-content/70">
+      {gettext("Depends on an earlier answer; leave it blank if it doesn't apply.")}
+    </p>
+    <script :if={@script?} type="module" src="/assets/js/challenge_static.js">
+    </script>
     """
   end
 
@@ -533,6 +581,13 @@ defmodule KilnCMSWeb.BlockComponents do
   # The refusal message for this field from `KilnCMS.Forms.submit/3`, or nil.
   attr :error, :string, default: nil
 
+  # Whether a required field's controls carry the browser's `required`. A
+  # field with a condition (#2262) passes false: it may be hidden, so the
+  # browser must not demand an answer the server would then drop. Its
+  # controls carry `data-kiln-required` instead, which the form script turns
+  # back into `required` while the field is shown, and the server decides.
+  attr :native_required, :boolean, default: true
+
   def public_form_field(assigns) do
     field_id = "#{assigns.id_prefix}-#{assigns.field.name}"
     error_id = assigns.error && field_id <> "-error"
@@ -559,8 +614,10 @@ defmodule KilnCMSWeb.BlockComponents do
         error_id: error_id,
         help_id: help_id,
         current: current,
-        described_by: described_by
+        described_by: described_by,
+        kiln_required: assigns.field.required == true and not assigns.native_required
       )
+      |> assign(:native_required, assigns.field.required == true and assigns.native_required)
 
     ~H"""
     <label
@@ -580,7 +637,8 @@ defmodule KilnCMSWeb.BlockComponents do
         <textarea
           id={@field_id}
           name={@field.name}
-          required={@field.required}
+          required={@native_required}
+          data-kiln-required={@kiln_required}
           placeholder={@field.placeholder}
           aria-invalid={@error && "true"}
           aria-describedby={@described_by}
@@ -590,7 +648,8 @@ defmodule KilnCMSWeb.BlockComponents do
         <select
           id={@field_id}
           name={@field.name}
-          required={@field.required}
+          required={@native_required}
+          data-kiln-required={@kiln_required}
           aria-invalid={@error && "true"}
           aria-describedby={@described_by}
           class="field-select w-full"
@@ -638,7 +697,8 @@ defmodule KilnCMSWeb.BlockComponents do
                 type="radio"
                 name={@field.name}
                 value={opt}
-                required={@field.required}
+                required={@native_required}
+                data-kiln-required={@kiln_required}
                 checked={opt == @current}
                 class={if i == 0, do: group_target_class()}
               />
@@ -692,7 +752,8 @@ defmodule KilnCMSWeb.BlockComponents do
                 type="radio"
                 name={@field.name}
                 value={n}
-                required={@field.required}
+                required={@native_required}
+                data-kiln-required={@kiln_required}
                 checked={to_string(n) == to_string(@current)}
                 class={if n == 1, do: group_target_class()}
               />
@@ -710,7 +771,8 @@ defmodule KilnCMSWeb.BlockComponents do
           id={@field_id}
           type="number"
           name={@field.name}
-          required={@field.required}
+          required={@native_required}
+          data-kiln-required={@kiln_required}
           placeholder={@field.placeholder}
           value={@current}
           min={range_attr(@field.min_value)}
@@ -725,7 +787,8 @@ defmodule KilnCMSWeb.BlockComponents do
           id={@field_id}
           type={form_input_type(type)}
           name={@field.name}
-          required={@field.required}
+          required={@native_required}
+          data-kiln-required={@kiln_required}
           placeholder={@field.placeholder}
           value={@current}
           aria-invalid={@error && "true"}
@@ -790,7 +853,9 @@ defmodule KilnCMSWeb.BlockComponents do
   defp error_items(_form, errors) when errors == %{}, do: []
 
   defp error_items(form, errors) do
-    fields = Enum.filter(form.fields, &Map.has_key?(errors, &1.name))
+    fields =
+      form.fields |> KilnCMS.Forms.known_fields() |> Enum.filter(&Map.has_key?(errors, &1.name))
+
     names = MapSet.new(fields, & &1.name)
 
     field_items =

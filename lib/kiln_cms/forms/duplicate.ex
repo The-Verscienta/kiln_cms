@@ -19,6 +19,12 @@ defmodule KilnCMS.Forms.Duplicate do
   the copy's autoresponder template follows. The renames are returned so the
   caller can say why.
 
+  ## Conditions
+
+  Each field's condition (#2262) is copied, naming the renamed fields by
+  their new names. A field whose type this release doesn't know is not
+  copied.
+
   ## The autoresponder
 
   The copy is created with its autoresponder off, and switched on (when the
@@ -38,6 +44,7 @@ defmodule KilnCMS.Forms.Duplicate do
   alias Kiln.Tokens
   alias KilnCMS.AfterCommit
   alias KilnCMS.CMS
+  alias KilnCMS.CMS.Conditions
   alias KilnCMS.CMS.Form
   alias KilnCMS.CMS.FormField
   alias KilnCMS.Forms
@@ -114,25 +121,51 @@ defmodule KilnCMS.Forms.Duplicate do
 
   # Creates each of the original's fields on `copy`, renaming a reserved name
   # to the first free `website_2`, `locale_2`, … Returns the renames made.
+  #
+  # A field whose type this release doesn't know (a newer release's) is not
+  # copied: it couldn't be written back. The others are created in form order
+  # and numbered by it, so a condition (#2262) only ever names a field that
+  # already exists and comes before it, even when a rename would reorder two
+  # fields an older release left at the same position. Each copied condition
+  # names the renamed fields by their new names.
   defp copy_fields!(fields, copy, opts) do
-    fields
-    |> Enum.flat_map(fn field ->
-      name =
-        if Forms.reserved_field_name?(field.name),
-          do: Forms.unique_field_name(field.name, fields),
-          else: field.name
+    fields = Forms.known_fields(fields)
 
+    renames =
+      for field <- fields,
+          Forms.reserved_field_name?(field.name),
+          do: {field.name, Forms.unique_field_name(field.name, fields)}
+
+    fields
+    |> Enum.with_index()
+    |> Enum.each(fn {field, index} ->
       attrs =
         field
         |> Forms.copyable_field_attrs()
-        |> Map.merge(%{form_id: copy.id, name: name, position: field.position})
+        |> Map.update!(:condition, &rename_references(&1, renames))
+        |> Map.merge(%{
+          form_id: copy.id,
+          name: List.keyfind(renames, field.name, 0, {nil, field.name}) |> elem(1),
+          position: index
+        })
 
       case CMS.create_form_field(attrs, opts) do
-        {:ok, _field} when name != field.name -> [{field.name, name}]
-        {:ok, _field} -> []
+        {:ok, _field} -> :ok
         {:error, error} -> throw({__MODULE__, field.name, error})
       end
     end)
+
+    renames
+  end
+
+  defp rename_references(nil, _renames), do: nil
+
+  defp rename_references(%{rule: rule} = condition, renames) do
+    %{
+      condition
+      | rule:
+          Enum.reduce(renames, rule, fn {from, to}, rule -> Conditions.rename(rule, from, to) end)
+    }
   end
 
   # The copy's autoresponder is still off, so only the blank check runs on

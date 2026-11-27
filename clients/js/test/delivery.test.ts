@@ -211,6 +211,29 @@ describe("form and submitForm", () => {
     expect(got.fields[1]).toMatchObject({ min: 0, max: 10, step: 0.5 });
   });
 
+  it("form passes each field's condition through, typed", async () => {
+    const condition = {
+      action: "show" as const,
+      rule: { field: "topic", op: "eq" as const, value: "Other" },
+    };
+    const body = {
+      slug: "contact",
+      honeypot_field: "website",
+      fields: [
+        { name: "topic", type: "select", options: ["Sales", "Other"], condition: null },
+        { name: "details", type: "string", options: [], condition },
+      ],
+    };
+    const got = await client(stubFetch({ body })).form("contact");
+    expect(got.fields.map((f) => f.condition ?? null)).toEqual([null, condition]);
+  });
+
+  it("submitForm returns the fields the server discarded", async () => {
+    const stub = stubFetch({ body: { ok: true, message: null, discarded: ["details"] } });
+    const result = await client(stub).submitForm("contact", { topic: "Sales", details: "x" });
+    expect(result.discarded).toEqual(["details"]);
+  });
+
   it("submitForm sends a checkboxes answer as a JSON array", async () => {
     const stub = stubFetch({ body: { ok: true, message: "Thanks!" } });
     await client(stub).submitForm("contact", { tags: ["a", "b"], stars: 4 });
