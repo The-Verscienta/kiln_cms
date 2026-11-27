@@ -174,6 +174,10 @@ else.
   The importer's summary gains a `reevaluated` count, and retention's `pruned` mark now locks the row it marks. No migration; rolling the pin back is safe.
   ([#3447](https://github.com/The-Verscienta/kiln_cms/pull/3447) · [long form](docs/changelog/unreleased.md#reevaluate-interrupted-import))
 
+- **Form notifications, form autoresponders and automation email skip an address on the instance-wide or the site's suppression list when they send (#3051).**
+  The job completes unsent and logs why, never the address; an unreadable list retries it. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#send-time-suppression-forms-automation))
+
 - **Erasing an account now takes its address off the instance mail suppression list and every site's list, whatever its case (#3036).**
   Before, an erased person's hard-bounced address stayed listed until an admin removed it. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#erasure-drops-suppressions))

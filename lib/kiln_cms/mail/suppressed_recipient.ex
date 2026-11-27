@@ -9,9 +9,12 @@ defmodule KilnCMS.Mail.SuppressedRecipient do
   `KilnCMS.Mail.enqueue!/1`, which drops suppressed recipients before queuing,
   and by the workers that build their own mail when they run (the newsletter
   worker, `KilnCMS.Notifications.WorkflowMailWorker` and
-  `KilnCMS.Notifications.TaskMailWorker`, #3036) — so a dead address isn't re-attempted on every future send, which wastes
-  retries and signals spamminess to receivers. Admin-managed (viewable and
-  removable from `/editor/mail`).
+  `KilnCMS.Notifications.TaskMailWorker`, #3036; `KilnCMS.Forms.NotificationWorker`,
+  `KilnCMS.Forms.AutoresponderWorker` and the email reactions of
+  `KilnCMS.Automation.RuleWorker`, #3051) — so a dead address isn't
+  re-attempted on every future send, which wastes retries and signals
+  spamminess to receivers. Admin-managed (viewable and removable from
+  `/editor/mail`).
 
   The address is a `ci_string`, so suppression and lookup are
   case-insensitive.
