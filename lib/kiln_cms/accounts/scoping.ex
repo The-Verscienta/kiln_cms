@@ -588,12 +588,24 @@ defmodule KilnCMS.Accounts.Scoping do
   def admin_org_ids(%{anonymized_at: %DateTime{}}), do: []
 
   def admin_org_ids(%{id: user_id} = user) when is_binary(user_id) do
-    if RoleGrant.effective_role(user) == :admin,
+    if platform_admin?(user),
       do: :all,
       else: member_admin_org_ids(user_id)
   end
 
   def admin_org_ids(_user), do: []
+
+  @doc """
+  Whether `user` is a platform admin: the case `admin_org_ids/1` answers
+  `:all`, decided from the record alone, with no read.
+  """
+  @spec platform_admin?(map() | nil) :: boolean()
+  def platform_admin?(%{anonymized_at: %DateTime{}}), do: false
+
+  def platform_admin?(%{id: user_id} = user) when is_binary(user_id),
+    do: RoleGrant.effective_role(user) == :admin
+
+  def platform_admin?(_user), do: false
 
   defp member_admin_org_ids(user_id) do
     admin = RoleGrant.expression([:admin])

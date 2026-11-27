@@ -14,6 +14,10 @@ defmodule KilnCMS.Accounts.User.Senders.SendBreachedPasswordReset do
   request (no IP, no host, no time): whoever triggered it holds the password,
   and request data echoed into the mail would make it a phishing channel.
   English, like the other account mail.
+
+  `tenant` is the site the mail is branded for, which the caller picks
+  (#3436): a site whose policy refused the sign-in, so the mail names one the
+  recipient administers rather than whichever host they signed in on.
   """
   use KilnCMSWeb, :verified_routes
 

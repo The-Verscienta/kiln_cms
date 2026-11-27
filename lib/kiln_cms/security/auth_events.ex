@@ -136,26 +136,49 @@ defmodule KilnCMS.Security.AuthEvents do
   `:sign_in_failed` with reason `"breached_password"`, once in each of
   `org_ids` (the orgs whose policy refused it), not in the request's org.
 
+  An empty `org_ids` means the deciding sites could not be read (#3438): the
+  refusal stands, and the event is recorded once in the request's org
+  instead, so it is never lost. It names no other org. Without a request org
+  (no HTTP door) it is skipped, like every other sign-in event.
+
   Unsampled, and not charged to a site's failed-sign-in alert tally: only
   the right password gets this far, so it is neither a guess nor something a
   flood can produce, and an alert about guessing would mislead. The account
-  is labelled in an org it belongs to (`member_of/2`).
+  is labelled in an org it belongs to (`member_of/2`), so a platform admin
+  who is not a member of the request's org is recorded unlabelled there.
   """
   @spec sign_in_refused_breached(map(), term(), [Ash.UUID.t()]) :: :ok
   def sign_in_refused_breached(context, email, org_ids) when is_list(org_ids) do
     safe(:sign_in_failed, fn ->
-      user = if org_ids != [], do: account(email)
-
-      for org_id <- Enum.uniq(org_ids), is_binary(org_id) do
-        Recorder.record_after_commit(
-          :sign_in_failed,
-          user: member_of(user, org_id),
-          metadata: %{"method" => "password", "reason" => "breached_password"},
-          tenant: org_id,
-          request: context[Recorder.context_key()]
-        )
+      case breached_targets(context, org_ids) do
+        [] -> :ok
+        targets -> record_breached(context, account(email), targets)
       end
     end)
+  end
+
+  defp record_breached(context, user, org_ids) do
+    for org_id <- org_ids do
+      Recorder.record_after_commit(
+        :sign_in_failed,
+        user: member_of(user, org_id),
+        metadata: %{"method" => "password", "reason" => "breached_password"},
+        tenant: org_id,
+        request: context[Recorder.context_key()]
+      )
+    end
+  end
+
+  # The deciding orgs, or the request's org when they could not be read.
+  defp breached_targets(context, org_ids) do
+    case for(org_id <- Enum.uniq(org_ids), is_binary(org_id), do: org_id) do
+      [] ->
+        tenant = context[Recorder.tenant_key()]
+        if is_binary(tenant), do: [tenant], else: []
+
+      ids ->
+        ids
+    end
   end
 
   @doc """

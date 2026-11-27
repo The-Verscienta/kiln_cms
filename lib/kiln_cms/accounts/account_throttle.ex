@@ -168,6 +168,10 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   # Sign-in attempts that need no human-verification challenge (#2249).
   @free_bucket "challenge:free_signin"
 
+  # A tally, never a gate (#3437): the sign-ins refused in this window because
+  # the password is breached, so the pause mail can say why the counter filled.
+  @block_bucket "signin:breached_block"
+
   @second_factor_budget 5
   @second_factor_window :timer.minutes(15)
 
@@ -180,7 +184,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   @passkey_registration_window :timer.hours(1)
 
   # Every bucket this module charges, for `forget_all/0`.
-  @buckets ~w(signin challenge:free_signin 2fa signin:alert 2fa:alert 2fa:settings-alert mail:password_reset mail:magic_link mail:registration_notice
+  @buckets ~w(signin challenge:free_signin signin:breached_block 2fa signin:alert 2fa:alert 2fa:settings-alert mail:password_reset mail:magic_link mail:registration_notice
                mail:invitation mail:membership_notice mail:sign_in_unlock mail:enrolment_proof
                passkey:register)
 
@@ -211,6 +215,9 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   # One "someone is guessing at your password" mail per address per window,
   # however long the attack runs.
   @alert_window :timer.hours(6)
+
+  @typedoc "What filled a sign-in counter, for the pause mail (`sign_in_pause_cause/1`)."
+  @type pause_cause :: :none | :some_blocks | :blocks_only
 
   @type purpose ::
           :password_reset
@@ -254,11 +261,50 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   releaser for a 2FA account since #742), a completed password reset, a passkey
   sign-in. A locked-out owner whose only remedy was the thing being blocked
   would have no remedy at all.
+
+  Also clears the tally of breached-password refusals (`note_sign_in_block/1`),
+  which describes only the attempts the sign-in counter holds.
   """
   @spec forgive(String.t()) :: :ok
   def forgive(identifier) do
     drop("signin", identifier)
     drop(@free_bucket, identifier)
+    drop(@block_bucket, identifier)
+  end
+
+  @doc """
+  Notes that a sign-in of this identifier was refused because its password is
+  in a known breach (#3437). Charges no budget.
+
+  A tally beside the sign-in counter, on the same window, so the pause mail
+  (`sign_in_pause_cause/1`) can tell a pause made of those refusals from one
+  made of guesses. The attempt is still charged to `consume/1`'s budget like
+  any other; this changes nothing about who is admitted. Keyed on the
+  submitted identifier like `consume/1`.
+  """
+  @spec note_sign_in_block(String.t()) :: :ok
+  def note_sign_in_block(identifier) do
+    ThrottleStore.count(@block_bucket, digest(identifier), window())
+    :ok
+  end
+
+  @doc """
+  What filled this identifier's sign-in counter, for the pause mail (#3437):
+  `:blocks_only` when the breached-password refusals noted this window reach
+  the budget, `:some_blocks` when there are some, `:none` otherwise. One read,
+  charging nothing, and never a gate.
+
+  The tally and the counter share a window but are not one row, so a
+  forgiveness or a window boundary that lands between them can only move the
+  answer between the two breached wordings, or to `:none`; it never changes
+  whether anyone is admitted.
+  """
+  @spec sign_in_pause_cause(String.t()) :: pause_cause()
+  def sign_in_pause_cause(identifier) do
+    case ThrottleStore.peek(@block_bucket, digest(identifier), window()) do
+      0 -> :none
+      blocks -> if blocks >= budget(), do: :blocks_only, else: :some_blocks
+    end
   end
 
   @doc """
@@ -274,7 +320,8 @@ defmodule KilnCMS.Accounts.AccountThrottle do
 
   @doc """
   Lifts the sign-in pause on this identifier (#2250): clears the sign-in
-  counter and nothing else.
+  counter, and the tally of breached-password refusals that describes it
+  (#3437), and nothing else.
 
   Narrower than `forgive/1` on purpose. An unlock link proves the mailbox, not
   the password, so it does not hand back the free attempts before a
@@ -284,7 +331,10 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   second factor exactly as before.
   """
   @spec unlock(String.t()) :: :ok
-  def unlock(identifier), do: drop("signin", identifier)
+  def unlock(identifier) do
+    drop("signin", identifier)
+    drop(@block_bucket, identifier)
+  end
 
   @doc """
   Spends one of this identifier's sign-in attempts that need no
