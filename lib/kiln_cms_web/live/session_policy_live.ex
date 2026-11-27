@@ -179,11 +179,7 @@ defmodule KilnCMSWeb.SessionPolicyLive do
   # was skipped reaches the flash as a sentence, never as Ash's own text; any
   # other refusal keeps the messages it had.
   defp site_error(error) do
-    errors =
-      case error do
-        :not_recorded -> [:not_recorded]
-        error -> error |> Ash.Error.to_error_class() |> Map.get(:errors, [])
-      end
+    errors = error |> Ash.Error.to_error_class() |> Map.get(:errors, [])
 
     cond do
       Enum.any?(errors, &match?(%Ash.Error.Invalid.Timeout{}, &1)) ->
@@ -200,7 +196,6 @@ defmodule KilnCMSWeb.SessionPolicyLive do
     end
   end
 
-  defp not_recorded?(:not_recorded), do: true
   defp not_recorded?(%{error: :not_recorded}), do: true
   defp not_recorded?(%{error: error}) when is_binary(error), do: error =~ "not_recorded"
   defp not_recorded?(_other), do: false
