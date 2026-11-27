@@ -76,6 +76,26 @@ The builder is numbered steps:
 `send_email` subject/body and templates support `{{title}}`, `{{slug}}`,
 `{{id}}`, `{{type}}`, `{{event}}` (each HTML-escaped).
 
+The four intelligence reactions take `deliver_as` (#946) to choose where their
+findings land: `"email"` (the default, to `to`), `"comment"` (a document-level
+comment on the document, needs nothing else) or `"task"` (a task for
+`assignee`, due in `due_in_days`, default 3).
+
+`send_email`, and the four intelligence reactions when they deliver by email,
+check their `to` against the instance-wide suppression list (`/editor/mail`)
+and the rule's site's own (`/editor/site-mail`) when the job runs (#3051). A suppressed address is sent
+nothing: the job completes, and a warning names the rule and the site, never
+the address:
+
+```text
+Automation rule 7a2e4c91-5d3b-4f60-8e1a-c94b2d7f3e05 sent nothing: its `to` address is suppressed (org 0c4d6e2a-8b7f-4a19-b3e5-71f2c9d0a6b4); clear it on /editor/mail or /editor/site-mail
+```
+
+If a rule's mail stops arriving, look for that line, then **Remove** the
+address under **Delivery health** on either page once the mailbox works again.
+A suppression list that cannot be read fails the job, which retries rather
+than sending past the list.
+
 ### `social_post` is the one reaction that cannot be undone
 
 Every other reaction writes somewhere the operator controls — an inbox, a cache,
@@ -111,7 +131,16 @@ Two consequences worth knowing:
   generator, an exhausted budget bucket, a provider outage or a greylisting
   relay is logged and dropped. Retrying a nice-to-have suggestion five times
   per document spends real tokens to tell an editor something they can ask for
-  directly, and an Oban retry re-runs the generation, not just the send.
+  directly, and an Oban retry re-runs the generation, not just the send. The
+  one exception is a suppression list that cannot be read when the findings
+  go by email (below): that retries, and the list is asked before the
+  document is loaded, so a retry never repeats a generation.
+- **A suppressed `to` gets nothing, and costs nothing** (#3051). Findings
+  delivered by email (the default) are checked against the instance-wide
+  suppression list and the rule's site's own before the reaction loads the
+  document or calls a generator, so a skip spends no tokens. Findings
+  delivered as a comment or a task (`"deliver_as": "comment"` or `"task"`)
+  send no mail and are not checked.
 - **The SEO draft budget is shared with the editor panel, but people keep a
   reserve.** The org ceiling is `KilnCMS.Seo` `per_org_limit` (default
   200/hour) and every caller draws on it. A `suggest_metadata` rule is keyed
@@ -275,7 +304,8 @@ Phase-1 slice:
   Two mistakes it exists to catch: `"allow_egress": "true"` (the string — every
   other key in that textarea is one, and the runtime gate correctly fails
   closed on it), and a missing `to` on `send_email` or on any of the four
-  intelligence reactions, all of which deliver by email and nothing else.
+  intelligence reactions delivering by email (the default; a `"task"`
+  delivery needs an `assignee` instead, and a `"comment"` needs neither).
 
   Rules written before this validation existed are not re-checked, and
   AshAdmin writes the attribute directly, so the executor keeps its own

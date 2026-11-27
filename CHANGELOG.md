@@ -165,6 +165,10 @@ else.
   The importer's summary gains a `reevaluated` count, and retention's `pruned` mark now locks the row it marks. No migration; rolling the pin back is safe.
   ([#3447](https://github.com/The-Verscienta/kiln_cms/pull/3447) · [long form](docs/changelog/unreleased.md#reevaluate-interrupted-import))
 
+- **Form notifications, form autoresponders and automation email skip an address on the instance-wide or the site's suppression list when they send (#3051).**
+  The job completes unsent and logs why, never the address; an unreadable list retries it. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#send-time-suppression-forms-automation))
+
 ### Security
 
 - **Smart 404 blocking: a spoofed search-engine claim rotating through the addresses of one IPv6 `/64` is counted once another address there has failed its DNS check or left its reverse zone silent (#2838).**
