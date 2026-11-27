@@ -91,7 +91,7 @@ else.
   ([#3471](https://github.com/The-Verscienta/kiln_cms/pull/3471) · [long form](docs/changelog/unreleased.md#backup-download))
 - **Sessions: a platform admin can sign out every session on every site at once from `/editor/sessions`, confirmed by typing the server's host name and recorded in the instance security log; API keys keep working (#2491).**
   Browser sessions, remember-me, two-factor holds and app tokens all end. A site's own "Sign out everyone" now waits for sessions in use and gives up after two minutes. No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#sign-out-everyone-every-site))
+  ([#3486](https://github.com/The-Verscienta/kiln_cms/pull/3486) · [long form](docs/changelog/unreleased.md#sign-out-everyone-every-site))
 
 ### Changed
 
