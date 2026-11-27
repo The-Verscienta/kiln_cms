@@ -60,6 +60,17 @@ defmodule KilnCMS.Accounts.SessionEviction do
   All four derive their topic from `topic/1` here, so the broadcaster and the
   listeners cannot drift onto different strings — which would fail silently, in
   the direction of not evicting.
+
+  ## One session, not the whole account
+
+  `evict/2` reaches every socket a user has. Signing out one session — from
+  the settings page, by idle expiry, by a site's "sign out everyone", or with
+  the browser's own Sign out — must leave the account's other sessions alone,
+  so `evict_session/2` broadcasts on two per-session topics instead:
+  `session_topic/1`, which that session's LiveViews hear (#1823), and
+  `session_socket_topic/1`, which the collab socket its token was minted for
+  and a `/ws/gql` socket opened with its bearer JWT subscribe to at connect
+  (#2490).
   """
   require Logger
 
@@ -86,9 +97,24 @@ defmodule KilnCMS.Accounts.SessionEviction do
   def session_topic(jti) when is_binary(jti), do: "user_session:#{jti}"
 
   @doc """
-  Close the LiveViews of one session, named by its token's jti (#1823).
+  The PubSub topic one signed-in session's `Phoenix.Socket` connections listen
+  on (#2490): a collab socket whose token names the session, and a `/ws/gql`
+  socket opened with the session's own bearer JWT.
 
-  Each one redirects to sign-in. Its token must already be revoked: what makes
+  A topic of its own rather than `session_topic/1`, because what is sent here
+  is a `%Phoenix.Socket.Broadcast{event: "disconnect"}` — the message
+  `Phoenix.Socket` closes on — and a LiveView on `session_topic/1` without a
+  catch-all `handle_info/2` would crash on it.
+  """
+  @spec session_socket_topic(String.t()) :: String.t()
+  def session_socket_topic(jti) when is_binary(jti), do: "session_sockets:#{jti}"
+
+  @doc """
+  Close the LiveViews and sockets of one session, named by its token's jti
+  (#1823, #2490).
+
+  Each LiveView redirects to sign-in; each socket on `session_socket_topic/1`
+  is disconnected, and its reconnect is refused. Its token must already be revoked: what makes
   this an eviction rather than a page reload is that the rejoin and the next
   request both find the token gone and are refused. Same contract as `evict/2`:
   always `:ok`, failures logged.
@@ -99,8 +125,37 @@ defmodule KilnCMS.Accounts.SessionEviction do
     broadcast_session(jti)
   end
 
+  @doc """
+  Close only the sockets of one session (`session_socket_topic/1`), not its
+  LiveViews (#2490). For the browser's own Sign out: its pages follow the
+  revoked token on their next request or rejoin, and telling them now would
+  race the sign-out's own redirect and show "signed out from another device"
+  in the user's other tabs. Always `:ok`, failures logged.
+  """
+  @spec disconnect_sockets(String.t(), atom()) :: :ok
+  def disconnect_sockets(jti, reason) when is_binary(jti) do
+    Logger.info("Disconnecting sockets for one session: #{reason}")
+
+    guarded(fn ->
+      KilnCMSWeb.Endpoint.broadcast(session_socket_topic(jti), "disconnect", %{})
+    end)
+  end
+
+  # Two broadcasts, each guarded on its own: a raise in the first must not
+  # skip the second, or the session's sockets would stay open while its pages
+  # were sent to sign-in (#2490).
   defp broadcast_session(jti) do
-    Phoenix.PubSub.broadcast(KilnCMS.PubSub, session_topic(jti), {:session_revoked, jti})
+    guarded(fn ->
+      Phoenix.PubSub.broadcast(KilnCMS.PubSub, session_topic(jti), {:session_revoked, jti})
+    end)
+
+    guarded(fn ->
+      KilnCMSWeb.Endpoint.broadcast(session_socket_topic(jti), "disconnect", %{})
+    end)
+  end
+
+  defp guarded(broadcast) do
+    broadcast.()
     :ok
   rescue
     error ->

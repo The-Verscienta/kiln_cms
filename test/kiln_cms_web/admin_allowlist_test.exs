@@ -808,7 +808,7 @@ defmodule KilnCMSWeb.AdminAllowlistTest do
 
     test "a connect from outside is refused even with a valid token", %{site: site} do
       allow!(site, ["203.0.113.0/24"], {203, 0, 113, 7})
-      token = Phoenix.Token.sign(KilnCMSWeb.Endpoint, "collab", admin_of(site).id)
+      {token, jti} = KilnCMS.CollabTokenFixtures.collab_token_and_jti(admin_of(site))
 
       assert :error =
                CollabSocket.connect(
@@ -818,6 +818,12 @@ defmodule KilnCMSWeb.AdminAllowlistTest do
                )
 
       assert_received {:refused, %{count: 1}, %{surface: :collab, reason: :not_listed}}
+
+      # The allowlist is the last refusal, after the session check passed: the
+      # session's eviction topic must not have been subscribed before it (#2490).
+      refute KilnCMS.PubSub
+             |> Registry.lookup(KilnCMS.Accounts.SessionEviction.session_socket_topic(jti))
+             |> Enum.any?(fn {pid, _value} -> pid == self() end)
 
       assert {:ok, socket} =
                CollabSocket.connect(

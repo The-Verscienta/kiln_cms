@@ -85,6 +85,18 @@ defmodule KilnCMSWeb.CollabChannel do
   an inert check that looks like a working one. Everything else here is
   plumbing around that reload.
 
+  **The session is re-checked too (#2490).** The socket's token names the
+  browser session it was minted for, and every re-check reads that session's
+  token row again (`KilnCMSWeb.CollabSocket.session_refused?/3`): a session
+  revoked with no broadcast to say so — one lost between nodes, sent by a node
+  on an older release, or revoked by a path that broadcasts nothing — closes
+  the room within the interval, and so does a session the site's idle timeout
+  expires while no page of it is left open to notice (recorded with surface
+  `"collab"`). The cost is one primary-key read of the token row and the
+  site's cached policy per re-check, including the one every
+  `SocketReauth.update_floor/0` updates. A legacy token, which names no
+  session, skips it.
+
   What this catches is exactly what a *fresh join* would refuse — no more, by
   design, so the room's rule cannot drift from the join's. In particular a
   publish under an open room does not close it: `Ash.can?` on `:autosave` does
@@ -456,6 +468,10 @@ defmodule KilnCMSWeb.CollabChannel do
     %{actor: actor, org: org, topic_key: key, doc_key: doc_key} = socket.assigns
 
     with {:ok, %{} = actor} <- SocketReauth.reload_actor(actor),
+         # The session the socket's token was minted for (#2490), for a
+         # sign-out no broadcast reached; a legacy token names none.
+         false <-
+           KilnCMSWeb.CollabSocket.session_refused?(socket.assigns[:session_jti], actor, org),
          {:ok, ^doc_key, _org_id} <- authorize(key, actor, org),
          # The admin allowlist (#2248), against the address the socket
          # connected from: a list saved since then closes the room.

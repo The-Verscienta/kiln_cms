@@ -13,13 +13,16 @@ defmodule KilnCMS.Accounts.SignOutAll do
        held at the two-factor prompt — the next time it is used here;
     3. records `:all_sessions_revoked` in the site's security log.
 
-  Once it commits, each revoked session's open pages are sent to sign-in
+  Once it commits, each revoked session's open pages are sent to sign-in and
+  its collab and `/ws/gql` sockets are closed
   (`SessionEviction.evict_sessions/2`, one message per session — never the
   per-user topic, which would reach the account's sessions on other sites).
 
   It reaches this site only. A session on another site is bound to that site,
-  or, bound to none, is caught only on this site's host. API keys and bearer
-  JWTs are not sessions and are untouched: a compromised account needs a
+  or, bound to none, is caught only on this site's host. API keys and headless
+  bearer JWTs (`POST /api/auth/sign_in`, bound to no site) are untouched; a
+  browser session's own JWT presented as a bearer is that session's row, so
+  it is revoked with it and its socket closed. A compromised account needs a
   password reset or "Sign out everywhere" on the account itself.
 
   ## Keeping the caller signed in

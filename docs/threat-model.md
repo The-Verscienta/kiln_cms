@@ -329,9 +329,14 @@ build if a resource is ever registered without that authorizer.
   but the current, through `KilnCMS.Accounts.Sessions`. That revokes the
   session's token, the remember-me cookie issued to the same browser (its jti
   is recorded on the session row at sign-in), and closes that session's open
-  LiveViews (`SessionEviction.evict_session/2`). It does not reach a
-  `/ws/collab` or `/ws/gql` socket already connected from that browser: those
-  are keyed per user, and close at their next reconnect or re-check.
+  LiveViews (`SessionEviction.evict_session/2`). Since #2490 it also closes
+  that session's `/ws/collab` rooms, whose token names the session, and a
+  `/ws/gql` socket opened with that session's own JWT: both subscribe to
+  `SessionEviction.session_socket_topic/1` at connect. The browser's own
+  **Sign out** closes its session's sockets the same way
+  (`SessionEviction.disconnect_sockets/2`); its other tabs follow the revoked
+  token on their next request. What is left is listed under
+  [Idle timeout and sign out everyone](#idle-timeout-and-sign-out-everyone-2246).
   Since #2246 a site admin can also end sessions on one site: after a
   configurable idle time, or all at once with *Sign out everyone*; see
   [Idle timeout and sign out everyone](#idle-timeout-and-sign-out-everyone-2246).
@@ -1637,15 +1642,47 @@ Configured at `/editor/sessions`.
   The site decides the timeout; there is no operator ceiling
   ([ADR 0018](decisions/0018-a-site-may-only-lower-a-deployment-ceiling-refused-on-write-clamped-on-read.md)
   constrains a site only against one).
+- **Sockets go with their session (#2490).** Every per-session sign-out (one
+  session or all others from *Active sessions*, idle expiry, sign out
+  everyone, an unbound row revoked against the watermark, and the browser's
+  own **Sign out**) also broadcasts a `"disconnect"` on
+  `SessionEviction.session_socket_topic/1`. A `/ws/collab` socket subscribes
+  to it because its token now names the session (`"j"`, the jti); a `/ws/gql`
+  socket subscribes for the jti of the bearer JWT it was opened with. A collab
+  connect is refused for a session that is idle, revoked, bound to another
+  site, older than the watermark, expired, not a `"user"` row (a remember-me
+  or held two-factor row) or another account's
+  (`KilnCMSWeb.CollabSocket.session_refused?/3`), and `CollabChannel`'s
+  30-second re-check repeats that check, so a revocation no broadcast reached
+  still closes the room, and a session that went idle with no page left open
+  is expired from the room (`session_idle_expired`, `surface: "collab"`).
+  `/ws/gql` applies no site rule to its bearer, as `/gql` applies none; each
+  document re-reads the bearer's row and is refused with
+  `extensions.code: "unauthenticated"` once it is revoked, expired or gone
+  (`GraphqlLimits.SocketSession`). A headless JWT, bound to no site, is
+  untouched by idle expiry and sign out everyone, as before. Why:
+  [ADR 0087](decisions/0087-a-socket-opened-from-a-sign-in-lives-no-longer-than-that-sign-in.md).
 - **Cost.** Every signed-in browser request and LiveView mount reads the
   session's token row by primary key, whether or not the site has a timeout,
-  because the cross-site rule needs it.
+  because the cross-site rule needs it. Each collab re-check (every 30
+  seconds, and every 200th update) and each `/ws/gql` document from a signed-in
+  socket adds one more such read; the collab check also reads the site's
+  cached policy.
 - **Residual risks.** (1) Not covered: API keys and headless bearer tokens,
   including a token minted with a phished password. A breach response needs a
-  password reset or *Sign out everywhere* as well. (2) `/ws/collab` (a 24-hour
-  per-account token, behind a flag that is off by default) and `/ws/gql`
-  sockets are keyed per account and survive both idle expiry and sign out
-  everyone until their next reconnect or re-check. (3) Events a LiveComponent
+  password reset or *Sign out everywhere* as well. (2) Sockets, after #2490:
+  (a) a collab token minted by a node on the release before #2490 names no
+  session; it is still accepted, per account as before, for this release only,
+  and lives at most 24 hours after the last such node stops; (b) a `/ws/gql`
+  socket that only holds subscriptions sends no documents, so after a
+  revocation whose broadcast never arrived it keeps receiving pushes until it
+  sends one or reconnects; (c) during a rolling deploy, a node still on the
+  older release revokes a session without the socket broadcast, which leaves
+  collab to its 30-second re-check and `/ws/gql` to (b); (d) a token row that
+  cannot be read fails open on both sockets, as on every other door; (e) a
+  collab connect refused by the admin allowlist has already run the session
+  check, so it can expire an idle session, as a page load from the same
+  address would. (3) Events a LiveComponent
   handles itself (`phx-target={@myself}`) do not count as activity on their
   own. (4) A node holding a cached policy from before a sign out everyone may,
   for up to the cache's minute and until the cluster-wide bust lands, let an
@@ -1653,7 +1690,11 @@ Configured at `/editor/sessions`.
   it, and the next check catches it. (5) Activity is written at most once per
   tenth of the timeout (30 seconds to 5 minutes), so a session can end after
   as little as 90% of the timeout since its real last use. (6) Fail-open,
-  above.
+  above. (7) A collab room counts as activity only through the page: the rich
+  text editor pushes its body to the page on each change, and by reading of
+  the editor code (not verified in a browser) that includes changes arriving
+  from other peers, so a passive collaborator in a room where others type is
+  kept awake.
 
 ### Two-step sign-in requirement (#2247)
 
@@ -3454,8 +3495,9 @@ because other files cite them by number.
     signing everyone out would need dual-key session verification. That is a
     feature for after 1.0, not a fix.
 14. ~~**The collaborative-editing socket is scoped by topic, not by
-    tenancy.**~~ **Closed by #655.** The socket token still names only a user,
-    so it establishes *who* and nothing more; `CollabChannel.join/3` now
+    tenancy.**~~ **Closed by #655.** The socket token names a user and, since
+    #2490, the browser session it was minted for (below), so it establishes
+    *who* and nothing more; `CollabChannel.join/3` now
     resolves the topic to a real document, loads it as that user under the
     connection's org, and authorizes the `:autosave` **write** — not the read,
     which is the wider scope and would have let a reader author, since the
@@ -3504,6 +3546,27 @@ because other files cite them by number.
     reload is the mechanism: re-running the policies against the actor struct
     the socket connected with would answer from the same stale role, scopes and
     audiences forever.
+
+    **The session is re-checked too — *#2490.*** The token carries the jti of
+    the browser session whose editor minted it (`"j"`;
+    `ContentEditorLive` mints none when it cannot name its session, and the
+    page edits on its own). The connect and every re-check read that session's
+    token row (`CollabSocket.session_refused?/3`) and refuse a row that is not
+    a live, unexpired `"user"` sign-in of the connecting account, or that
+    `IdleTimeout` signs out on this site: idle, revoked, bound to another
+    site, or older than the site's last *Sign out everyone*. A connection that
+    passes subscribes to `SessionEviction.session_socket_topic/1` after its
+    last refusal, so every per-session sign-out closes it at once (a refused
+    upgrade leaves the HTTP/1 process alive for keep-alive, which is why the
+    subscription waits). The re-check is for what no broadcast reached: a
+    message lost between nodes, a revocation by a node on an older release, a
+    path that broadcasts nothing, and a session that went idle while no page
+    of it was open (expired from the room, `session_idle_expired` with
+    `surface: "collab"`). It adds one primary-key read and a cached policy
+    lookup to each re-check. A token minted before #2490 has no `"j"` and
+    skips both, per account as before; it is accepted for this release only
+    and lives a day. Decision:
+    [ADR 0087](decisions/0087-a-socket-opened-from-a-sign-in-lives-no-longer-than-that-sign-in.md).
 
     **The exposure window an operator can rely on is 30 seconds** — the
     interval in `KilnCMSWeb.SocketReauth` — plus the in-flight message. Both
