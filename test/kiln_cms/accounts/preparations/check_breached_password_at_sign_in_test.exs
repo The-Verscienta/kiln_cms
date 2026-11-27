@@ -439,6 +439,89 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignInTest do
       assert events(a, "breached_password") == []
     end
 
+    for {name, reader} <- [
+          {"fails", quote(do: fn _policy -> raise "boom" end)},
+          {"finds none", quote(do: fn _policy -> [] end)}
+        ] do
+      test "a platform admin's deciding read that #{name} is audited in the request's site",
+           %{a: a, b: b} do
+        pw = password()
+        breached(pw)
+        save!(b, :block, true)
+        admin = user(:admin, pw)
+        on_exit(fn -> AccountThrottle.reset(to_string(admin.email)) end)
+
+        log =
+          capture_log(fn ->
+            PasswordPolicy.with_deciding_reader(unquote(reader), fn ->
+              assert {:error, error} = sign_in(admin, pw, org: a)
+              assert reset_required?(error)
+              assert PasswordResetRequired.find(error).org_ids == []
+            end)
+          end)
+
+        # Once, in the request's site, unlabelled: a platform admin is not
+        # one of its members. Nothing in the deciding site it could not read.
+        assert [event] = events(a, "breached_password")
+        assert event.actor_id == nil
+        assert event.metadata == %{"method" => "password", "reason" => "breached_password"}
+        assert events(b, "breached_password") == []
+        assert events(a, "invalid_credentials") == []
+
+        for secret <- [to_string(admin.email), admin.id, a.id, b.id],
+            do: refute(log =~ secret)
+      end
+    end
+
+    test "the request-site fallback is unsampled and labels a member platform admin",
+         %{a: a, b: b} do
+      pw = password()
+      breached(pw)
+      save!(b, :block, true)
+      admin = member!(a, user(:admin, pw), :viewer)
+      on_exit(fn -> AccountThrottle.reset(to_string(admin.email)) end)
+      ip = unique_ip()
+
+      PasswordPolicy.with_deciding_reader(fn _policy -> raise "boom" end, fn ->
+        # More than the per-address sample of a failed sign-in (five).
+        for _ <- 1..7, do: assert({:error, _} = sign_in(admin, pw, org: a, ip: ip))
+      end)
+
+      recorded = events(a, "breached_password")
+      assert length(recorded) == 7
+      assert Enum.all?(recorded, &(&1.actor_id == admin.id and &1.ip == ip))
+      assert events(b, "breached_password") == []
+      assert events(a, "invalid_credentials") == []
+    end
+
+    test "with no request site, a failed deciding read records nothing and still refuses",
+         %{b: b} do
+      pw = password()
+      breached(pw)
+      save!(b, :block, true)
+      admin = user(:admin, pw)
+      on_exit(fn -> AccountThrottle.reset(to_string(admin.email)) end)
+
+      PasswordPolicy.with_deciding_reader(fn _policy -> raise "boom" end, fn ->
+        assert {:error, error} =
+                 AshAuthentication.Strategy.action(
+                   AshAuthentication.Info.strategy!(User, :password),
+                   :sign_in,
+                   %{"email" => to_string(admin.email), "password" => pw},
+                   context:
+                     Map.merge(
+                       %{security_request: %{ip: unique_ip(), user_agent: "bp-test"}},
+                       Challenge.context(:browser)
+                     )
+                 )
+
+        assert reset_required?(error)
+      end)
+
+      assert events(b, "breached_password") == []
+      assert events(nil, "breached_password") == []
+    end
+
     test "a pending admin membership, an expired grant and an erased account are not checked",
          %{a: a} do
       pw = password()

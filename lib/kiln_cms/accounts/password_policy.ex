@@ -237,12 +237,37 @@ defmodule KilnCMS.Accounts.PasswordPolicy do
 
   # A member's rows are each one org's, so the ids are at hand. A platform
   # admin's are one per distinct value, so the ids are read when asked for.
-  defp deciding_orgs(:all, _rows, policy), do: fn -> orgs_checking_with(policy) end
+  defp deciding_orgs(:all, _rows, policy), do: fn -> deciding_reader().(policy) end
 
   defp deciding_orgs(_member, rows, policy) do
     ids = for row <- rows, row.breached_password_policy == policy, uniq: true, do: row.org_id
     fn -> ids end
   end
+
+  @doc false
+  # Test seam (#3438): run `fun` with a platform admin's deciding-site read
+  # (the thunk `sign_in_decision/1` returns) answered by `reader`, a function
+  # of the policy, in this process. The decision and that read are the same
+  # action with the same actor, so nothing else can fail the one and leave the
+  # other. Like `OrgSettings.system/1`, the `Process.get` in `deciding_reader/0`
+  # runs in production, once per refused platform-admin sign-in; only this
+  # override is test-only. Process-local, restored afterwards, and nothing on a
+  # request path calls it.
+  @spec with_deciding_reader((:warn | :block -> [Ash.UUID.t()]), (-> result)) :: result
+        when result: term()
+  def with_deciding_reader(reader, fun) when is_function(reader, 1) do
+    key = {__MODULE__, :deciding_reader}
+    previous = Process.get(key, :unset)
+    Process.put(key, reader)
+
+    try do
+      fun.()
+    after
+      if previous == :unset, do: Process.delete(key), else: Process.put(key, previous)
+    end
+  end
+
+  defp deciding_reader, do: Process.get({__MODULE__, :deciding_reader}, &orgs_checking_with/1)
 
   defp orgs_checking_with(policy) do
     query =

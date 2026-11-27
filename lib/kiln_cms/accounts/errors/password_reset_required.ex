@@ -14,8 +14,9 @@ defmodule KilnCMS.Accounts.Errors.PasswordResetRequired do
   password_reset_required`).
 
   `org_ids` are the orgs whose policy refused the sign-in, for the audit log
-  alone (`KilnCMS.Security.Preparations.AuditSignIn`). The message names
-  nothing: no account, no org, no password.
+  alone (`KilnCMS.Security.Preparations.AuditSignIn`). `[]` means they are not
+  known (the read of them failed, #3438); the refusal is then audited in the
+  request's site. The message names nothing: no account, no org, no password.
   """
   use Splode.Error, fields: [org_ids: [], field: :password_reset], class: :invalid
 

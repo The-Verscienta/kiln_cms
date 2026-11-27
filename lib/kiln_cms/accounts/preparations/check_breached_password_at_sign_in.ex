@@ -15,7 +15,9 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn do
       and a reset link is mailed (`KilnCMS.Accounts.PasswordResetMail`, best
       effort, within the address's reset-mail budget). The per-account sign-in
       counter is not forgiven, so an owner who keeps trying ends up paused
-      like anyone else. The doors send the person to `/reset`.
+      like anyone else. The doors send the person to `/reset`. The refusal
+      is audited in the orgs whose policy decided it, or in the request's
+      site when those cannot be read (#3438).
     * breached under `:warn`: the sign-in goes ahead and the record carries
       `__metadata__.password_breach == %{status: :breached}`. On a browser
       door a `:sign_in` note is left (`KilnCMS.Accounts.PasswordNotice`) for
@@ -89,7 +91,7 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn do
     Sessions.revoke_first_factor(token)
     send_reset_mail(record, Map.get(query.context, Recorder.tenant_key()))
 
-    {:error, PasswordResetRequired.exception(org_ids: deciding_ids(deciding))}
+    {:error, PasswordResetRequired.exception(org_ids: resolve_deciding(deciding))}
   end
 
   defp apply_verdict(%{outcome: :breached}, query, record, _token, _deciding) do
@@ -123,9 +125,11 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn do
   defp reason_class({:enqueue, _error}), do: :enqueue
   defp reason_class(reason) when is_atom(reason), do: reason
 
-  # The orgs whose policy refused this sign-in, for the audit log alone. A
-  # failed read leaves the event unrecorded rather than the sign-in standing.
-  defp deciding_ids(deciding) do
+  # The orgs whose policy refused this sign-in, for the audit log. A failed
+  # read must not let the sign-in stand: it answers `[]`, and the refusal is
+  # audited in the request's site instead (#3438,
+  # `KilnCMS.Security.AuthEvents.sign_in_refused_breached/3`).
+  defp resolve_deciding(deciding) do
     deciding.()
   rescue
     _error ->
