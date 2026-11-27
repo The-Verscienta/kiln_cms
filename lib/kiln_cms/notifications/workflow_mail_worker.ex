@@ -244,13 +244,11 @@ defmodule KilnCMS.Notifications.WorkflowMailWorker do
   defp legacy_entitled(_args, _user), do: :ok
 
   # The suppression lists (#3036): the instance-wide one and, for a site's
-  # mail, that site's own (`Mail.suppressed?/2`). An address on either is a
-  # skip. A list that cannot be read raises, which fails the job and retries
-  # it, as the newsletter worker does: mail is never sent past a list nobody
-  # read.
-  defp not_suppressed(address, tenant) do
-    if Mail.suppressed?(address, org_id: tenant), do: {:skip, :suppressed}, else: :ok
-  end
+  # mail, that site's own (`Mail.check_suppression/2`). An address on either
+  # is a skip. A list that cannot be read raises, which fails the job and
+  # retries it, as the newsletter worker does: mail is never sent past a list
+  # nobody read.
+  defp not_suppressed(address, tenant), do: Mail.check_suppression(address, org_id: tenant)
 
   # The content's title and author now. Gone (deleted, trashed, or of a type
   # that no longer exists) is a skip: there is nothing left to link to.

@@ -1104,12 +1104,41 @@ submission as it is stored. That also means:
   runs, and none goes if it was cleared in the meantime (as before).
 - If the read is refused (the system actor lost its grant), the job fails and
   retries rather than treating the submission as deleted.
+- An address on a **suppression list** is sent nothing (#3051). Before it
+  sends, each worker asks the instance-wide list and the form's site's own
+  about the address it is about to mail: the form's `notify_email` for the
+  notification, the submitter's address for the autoresponder. A listed
+  address is skipped: the job completes without sending, so it is not among
+  the delivery failures on `/editor/mail` or `/editor/site-mail`. This holds
+  for jobs queued by an earlier release too.
+- If a suppression list cannot be read, the job fails and retries rather
+  than sending past it. Its stored error does not name the address.
 
 A job usually runs within seconds of the submit, so these matter mostly when
 mail is retrying after a failed delivery (up to five attempts over about 81
 minutes). Jobs queued by the release before this one carry the submitted data
 themselves and are delivered from it; that data is dropped from the job's row
 once it finishes. See [Job args retention](data-flows.md#job-args-retention).
+
+**When a form's notifications stop arriving**, check whether the
+`notify_email` address is suppressed. A relay that hard-bounced it once put
+it on a list, and every notification since has been skipped. The instance-wide
+list is under **Delivery health** on `/editor/mail` (platform admins); the
+site's own is under **Delivery health** on `/editor/site-mail` (the site's
+admins). **Remove** the entry once the mailbox works again. Each skipped
+notification logs a warning that names the job, the form and the site, never
+the address:
+
+```text
+form notification job 4182 not sent: form 5f0e2a7c-3b1d-4c8e-9a61-2d7b8e4f1c90's notify address is suppressed (org 0c4d6e2a-8b7f-4a19-b3e5-71f2c9d0a6b4); clear it on /editor/mail or /editor/site-mail
+```
+
+A skipped confirmation logs at info level, because the visitor typed that
+address and a bounced one is the list doing its job:
+
+```text
+form autoresponder job 4183 not sent: the submitter's address is suppressed (form 5f0e2a7c-3b1d-4c8e-9a61-2d7b8e4f1c90, org 0c4d6e2a-8b7f-4a19-b3e5-71f2c9d0a6b4)
+```
 
 ### Autoresponder (#468)
 
