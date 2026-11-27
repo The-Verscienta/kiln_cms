@@ -76,6 +76,9 @@ else.
 
 ### Changed
 
+- **Backups: two SFTP destinations held back only by a missing Test now say so on the Destinations tab, "Press Test on both destinations to let them prune.", with a link to the how-to (#3428).**
+  Shown only when a Test would clear the block. No migration.
+  ([long form](docs/changelog/unreleased.md#sftp-prune-test-hint))
 - **Backups: an SFTP destination's path may hold spaces and `+ @ ,`, so a NAS share such as `/volume1/Backup Share/kiln` can be used (#3199).**
   ASCII only; `..`, `~`, `\`, control characters and a space at either end of a folder name are still refused. No migration; after a rollback, a destination whose path uses the new characters fails until its path is changed.
   ([#3425](https://github.com/The-Verscienta/kiln_cms/pull/3425) · [long form](docs/changelog/unreleased.md#sftp-path-spaces))

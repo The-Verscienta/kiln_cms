@@ -36,6 +36,12 @@ carries the reasoning.
 
 ## Changed
 
+<a id="sftp-prune-test-hint"></a>
+
+- **The Destinations tab says when pressing Test on both SFTP destinations would let them prune (#3428).** Two SFTP destinations whose folders nest stay **Not pruned** until both trust host keys of the same type that differ and each has passed a Test since the later trust (#3200). When the Tests are all that's missing, each row now shows **Press Test on both destinations to let them prune.** with a link to [Let two SFTP destinations on different servers both prune](../backups.md#let-two-sftp-destinations-on-different-servers-both-prune).
+  - **When it shows.** On an enabled row with retention ticked whose block a Test would clear for every overlapping SFTP row (`KilnCMS.Backups.Retention.cleared_by_test?/3`, which reuses the pruning rule rather than restating it). A partner with no trusted key, a key of another type or the same fingerprint means no hint, since testing can't clear it.
+  - **No migration; rolling the pin back is safe.** Pruning itself is unchanged.
+
 <a id="sftp-path-spaces"></a>
 
 - **An SFTP destination's path may hold spaces and `+ @ ,` (#3199).** NAS shares are often named with a space (`/volume1/Backup Share`), and the path was held to the characters an S3 prefix allows, `A-Z a-z 0-9 . _ -`, so such a share could not be used at all.
