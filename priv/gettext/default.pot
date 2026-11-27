@@ -14332,6 +14332,11 @@ msgstr ""
 msgid "Mention a teammate"
 msgstr ""
 
+#: lib/kiln_cms_web/components/block_discussion_components.ex
+#, elixir-autogen, elixir-format
+msgid "Mention suggestions couldn't be loaded. Reload to try again; an @mention sent now may notify no one."
+msgstr ""
+
 #: lib/kiln_cms_web/components/layouts.ex
 #, elixir-autogen, elixir-format
 msgid "Menu"

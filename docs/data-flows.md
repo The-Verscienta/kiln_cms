@@ -239,7 +239,7 @@ that chose the recipient, and sends nothing if the rule no longer holds
 | Review requested | an admin of the site: a member admin, a platform admin, or someone with a live temporary admin grant |
 | Published, returned to draft | the content's author |
 | Comment added, comment resolved | someone with a comment on the comment's thread, or the content's author |
-| Mentioned | on the site's mention roster (an active member, or an account with no site memberships at all), or on the comment's thread, or the content's author |
+| Mentioned | on the site's mention roster (an active member; on the default site, an account with no site memberships at all; on any site, a platform admin with none), or on the comment's thread, or the content's author |
 | Task assigned | the task's assignee, with the task still open |
 | Task digest | sent with only the lines whose task is still open and still theirs, each with the task's due date now; not sent if no line is left |
 
@@ -253,10 +253,13 @@ Each event re-checks its own rule and no other. Being removed from a site
 stops a review request, but not a comment notice to someone still on the
 thread, a notice to the content's author, or task mail to the assignee
 ([#3048](https://github.com/The-Verscienta/kiln_cms/issues/3048)). Someone
-removed from the only site they belonged to has no membership left, which
-the mention roster reads as belonging to every site, so they can still be
-mentioned and mailed
-([#3047](https://github.com/The-Verscienta/kiln_cms/issues/3047)).
+removed from the only site they belonged to has no membership left. The
+mention roster reads such an account the way every other permission does
+(`KilnCMS.Accounts.Scoping.effective_tier/2`): it counts on the default site
+only, so on any other site a queued mention to them is not sent, unless they
+wrote the content or are on its thread
+([#3047](https://github.com/The-Verscienta/kiln_cms/issues/3047)). A platform
+admin with no membership is on every site's roster.
 
 A job queued by v1.10.1 (it carries the address, not an id) is checked
 against the rules its args still allow: review requests and mentions by the

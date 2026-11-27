@@ -178,6 +178,10 @@ else.
   The job completes unsent and logs why, never the address; an unreadable list retries it. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#send-time-suppression-forms-automation))
 
+- **Mentions: on any site but the default one, an account with no site membership (someone removed from their only site included) is no longer suggested, resolved or mailed by an `@` mention; a platform admin still is (#3047). A roster that can't be read is now logged and shown in the comment box (#3052).**
+  No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#mention-roster-scoping))
+
 - **Erasing an account now takes its address off the instance mail suppression list and every site's list, whatever its case (#3036).**
   Before, an erased person's hard-bounced address stayed listed until an admin removed it. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#erasure-drops-suppressions))
