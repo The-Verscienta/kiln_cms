@@ -16939,6 +16939,13 @@ msgstr[1] ""
 msgid "One line"
 msgstr ""
 
+#: lib/kiln_cms_web/live/backup_log_live.ex
+#, elixir-autogen, elixir-format
+msgid "One line was dropped to keep the log small"
+msgid_plural "%{count} lines were dropped to keep the log small"
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms/cms/computed/recipes.ex
 #, elixir-autogen, elixir-format
 msgid "One number as a percentage of another."

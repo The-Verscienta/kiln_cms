@@ -1,6 +1,7 @@
 # 0092. A backup run's log is shown and downloaded redacted, refused while the console shares an origin, without an audit event
 
-- **Status** — accepted (2026-11-27).
+- **Status** — accepted (2026-11-27); amended 2026-11-27 (only a run
+  that is found is charged, #3490).
 - **References** — [#2230](https://github.com/The-Verscienta/kiln_cms/issues/2230)
   (backup logs and progress; this is its log viewer, not live progress);
   [#2231](https://github.com/The-Verscienta/kiln_cms/issues/2231) (the tabbed
@@ -105,12 +106,21 @@ say `document` (the Download link) or `empty` (a same-origin `fetch`), else
 browsers send them, and a client that omits them (curl, an older browser) is
 spending its own bucket on purpose.
 
-The checks run in a fixed order, and only a request that passes the
-platform-admin, origin and Fetch Metadata checks is charged: platform admin
-(`403` `admin_required`), origin (`403` `console_shares_origin`), Fetch
-Metadata (`403` `cross_site_request`), the `:export` bucket (`429`), then
-the run read as the admin (`404` `not_found`, the same for a malformed id,
-an unknown run and a refused read).
+The checks run in a fixed order, and only a request for a run that is
+found is charged: platform admin (`403` `admin_required`), origin (`403`
+`console_shares_origin`), Fetch Metadata (`403` `cross_site_request`), the
+id cast to a UUID and the run read as the admin (`404` `not_found`, the
+same for a malformed id, an unknown run and a refused read, and charged
+nothing), then the `:export` bucket (`429`).
+
+*Amended 2026-11-27 (#3490), before release.* The record first charged
+the bucket before the read, so an unknown id cost one of the admin's ten
+downloads a minute, on the reasoning that guessing ids should cost. Run
+ids are random UUIDv4s, so guessing them never paid, and the bucket is
+there to ration one admin's own downloads, not their typos. Every refusal
+before the read answers the same whether the id exists, so only a
+platform admin on a console with its own origin learns that a run exists,
+and that admin can already list every run on the Log tab.
 
 ### Logged, not audited
 
