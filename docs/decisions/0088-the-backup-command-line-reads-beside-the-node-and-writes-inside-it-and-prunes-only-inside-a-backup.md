@@ -1,4 +1,4 @@
-# 0087. The backup command line reads beside the node and writes inside it, and prunes only inside a backup
+# 0088. The backup command line reads beside the node and writes inside it, and prunes only inside a backup
 
 - **Status** — accepted (2026-11-26).
 - **References** — [#2234](https://github.com/The-Verscienta/kiln_cms/issues/2234)
