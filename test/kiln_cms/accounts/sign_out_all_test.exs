@@ -14,6 +14,7 @@ defmodule KilnCMS.Accounts.SignOutAllTest do
 
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.SessionEviction
+  alias KilnCMS.Accounts.Sessions
   alias KilnCMS.Accounts.Token
   alias KilnCMS.CMS
   alias KilnCMS.Repo
@@ -342,6 +343,23 @@ defmodule KilnCMS.Accounts.SignOutAllTest do
       assert_receive {:session_revoked, ^victim_jti}
       assert_receive {:session_revoked, ^second_jti}
       refute_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
+    end
+  end
+
+  describe "Sessions.revoke_org/2" do
+    test "returns the revoked sessions' jtis and nothing of the other rows it revokes", ctx do
+      cookie = token!(ctx.victim, %{purpose: "remember_me", org_id: ctx.site.id})
+      held = token!(ctx.victim, %{purpose: "pending_second_factor", org_id: ctx.site.id})
+      kept = token!(ctx.admin, %{org_id: ctx.site.id})
+      elsewhere = token!(ctx.victim, %{org_id: org("soa-elsewhere").id})
+
+      assert {:ok, [jti]} = Sessions.revoke_org(ctx.site.id, [kept.jti])
+
+      assert jti == ctx.victim_session.jti
+      refute live?(cookie.jti)
+      refute live?(held.jti)
+      assert live?(kept.jti)
+      assert live?(elsewhere.jti)
     end
   end
 end

@@ -78,7 +78,10 @@ defmodule KilnCMS.Security.InstanceEvent do
     :backup_downloaded,
     # A platform admin saved the platform's security alert settings (#2245):
     # which platform alert kinds are off (`KilnCMS.Security.PlatformAlertSettings`).
-    :platform_alerts_changed
+    :platform_alerts_changed,
+    # A platform admin signed everyone out on every site (#2491): every
+    # session, app token, remember-me cookie and held two-factor sign-in.
+    :all_sessions_revoked_everywhere
   ]
 
   @metadata_keys %{
@@ -106,7 +109,10 @@ defmodule KilnCMS.Security.InstanceEvent do
     backup_downloaded: ~w(stamp file kind bytes node),
     # `disabled_kinds`: the platform kinds off after the save, comma-joined,
     # or "none".
-    platform_alerts_changed: ~w(disabled_kinds)
+    platform_alerts_changed: ~w(disabled_kinds),
+    # `count`: the sessions and app tokens signed out; `except_self`: whether
+    # the admin kept their own browser.
+    all_sessions_revoked_everywhere: ~w(count except_self)
   }
 
   # Alerts: only `backup_destination_host_key_mismatch` raises one, claimed by

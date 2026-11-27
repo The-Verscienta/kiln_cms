@@ -855,10 +855,10 @@ cookie's jti, by `KilnCMSWeb.Plugs.SessionTracking`) and `:record_session_use`
 `KilnCMS.Accounts.Sessions` calls both with `authorize?: false`, keyed by the jti
 in the signed session.
 
-**Idle timeout and "sign out everyone" (#2246).** Five more, all
+**Idle timeout and "sign out everyone" (#2246, #2491).** Eight more, all
 `forbid_if always()` in the same policy as the two above, so no actor reaches
 any of them, an admin included. Each is called with `authorize?: false` only by
-the module named:
+the module named, after the action that calls it authorized its caller:
 
 | Action | Called by | What it is for |
 |---|---|---|
@@ -866,7 +866,10 @@ the module named:
 | `:bind_session_to_site` | `Accounts.Sessions` | Stamps `org_id` on a session or remember-me row of the named account. Never moves a row bound to another site, and never binds one older than the site's last "sign out everyone" |
 | `:expire_idle_session` | `Accounts.IdleTimeout` | Revokes an idle session and its remember-me row (`revoked_reason: "idle"`); the idle test is repeated in the UPDATE |
 | `:revoke_stale_session` | `Accounts.IdleTimeout` | Revokes a row bound to no site that predates the site's watermark, when it is next used there (`revoked_reason: "admin_sign_out_all"`) |
+| `:lock_org_sessions` (read) | `Accounts.Sessions.revoke_org/2`, from `SiteSessionPolicy` `:sign_out_all` | Locks `FOR UPDATE`, in jti order, the rows `:revoke_org_session` is about to revoke (same filter), and says which were sessions |
 | `:revoke_org_session` | `Accounts.Sessions.revoke_org/2`, from `SiteSessionPolicy` `:sign_out_all` | Revokes every session, remember-me and two-factor hold row bound to one site, minus the kept jtis |
+| `:lock_all_sessions` (read) | `Accounts.Sessions.revoke_everywhere/1`, from `Accounts.InstanceSessions` `:sign_out_everyone` | Locks `FOR UPDATE`, in jti order, the rows `:revoke_all_sessions` is about to revoke (same filter), and says which were sessions |
+| `:revoke_all_sessions` | `Accounts.Sessions.revoke_everywhere/1`, from `Accounts.InstanceSessions` `:sign_out_everyone` | Revokes every unexpired session (browser or headless app token), remember-me and two-factor hold row on every site and on none, minus the kept jtis (`revoked_reason: "instance_sign_out_all"`) |
 
 Every write is keyed by a jti read from the signed session cookie (or a
 remember-me cookie whose signature was verified first) and also filtered on the
@@ -1307,6 +1310,30 @@ because the row carries the watermark, and deleting it would let every session
 the watermark still catches back in; "Never" on the page saves empty timeouts
 instead. `except_session_jti` must be one of the caller's own sessions on the
 site, or nothing is revoked.
+
+The instance-wide "Sign out everyone on every site" (#2491) is not this
+resource's: it reaches every site, so it is `Accounts.InstanceSessions`
+`:sign_out_everyone`, platform admins only (next section).
+
+## Instance sessions — `Accounts.InstanceSessions` (#2491)
+
+| Action | platform admin (standing or live grant) | org admin | editor | viewer | anonymous | API-key actor | System actor |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| `sign_out_everyone` (generic action) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ |
+
+"Sign out everyone on every site" at `/editor/sessions`. One policy:
+`forbid_if AshAuthentication.Checks.UsingApiKey` (a key's owner may be a
+platform admin, and this is on no API), then `authorize_if
+Accounts.Checks.PlatformAdmin`, by **effective** role, so a temporary platform
+admin grant counts until it expires. There is no system-actor grant and no
+tenant. Like `Security.PostureReport`, the resource has no data layer and
+stores nothing; the console section's visibility
+(`Accounts.can_sign_out_everyone_on_every_site?/2`) is not the control. The
+implementation (`Accounts.SignOutEveryone`) compares the typed `confirmation`
+with the instance host only after the policy passed, checks that
+`except_session_jti` is one of the caller's own live sessions, and then calls
+`Token` `:lock_all_sessions` and `:revoke_all_sessions` with `authorize?:
+false` (table above). Not on JSON:API, GraphQL or MCP.
 
 ## Password policy — `SitePasswordPolicy` (#2240)
 

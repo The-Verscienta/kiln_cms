@@ -45,6 +45,11 @@ defmodule KilnCMS.Accounts.Sessions do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.SessionEviction
   alias KilnCMS.Accounts.Token
+  alias KilnCMS.Repo
+
+  # How much longer than `revoke_timeout/0` the client waits for a statement,
+  # so that the database's own timeout is the one that fires.
+  @client_grace :timer.seconds(5)
 
   # The `record_*` writes: one atomic UPDATE keyed by jti, errors returned
   # rather than raised.
@@ -214,35 +219,127 @@ defmodule KilnCMS.Accounts.Sessions do
   `KilnCMS.Accounts.SignOutAll`, inside its transaction and after its
   authorization; drops nothing live itself.
 
-  Returns `{:ok, sessions, others}`: the revoked session rows (purpose
-  `"user"`) and every other revoked row.
+  Returns `{:ok, jtis}`: the jtis of the revoked sessions (purpose `"user"`),
+  whose pages are then closed. Run it in `revoke_transaction/1`.
   """
-  @spec revoke_org(Ash.UUID.t(), [String.t()]) ::
-          {:ok, [Token.t()], [Token.t()]} | {:error, term()}
+  @spec revoke_org(Ash.UUID.t(), [String.t()]) :: {:ok, [String.t()]} | {:error, term()}
   def revoke_org(org_id, keep) when is_binary(org_id) and is_list(keep) do
-    user_purpose = Token.user_purpose()
+    args = %{org_id: org_id, keep: keep}
 
-    # Two statements so the sessions can be counted and their pages closed:
-    # once revoked, every row reads "revocation" and no longer says what it was.
-    with {:ok, sessions} <-
-           revoke_org_rows(Ash.Query.filter(Token, purpose == ^user_purpose), org_id, keep),
-         {:ok, others} <-
-           revoke_org_rows(Ash.Query.filter(Token, purpose != ^user_purpose), org_id, keep) do
-      {:ok, sessions, others}
+    # authorize?: false — "sign out everyone" has already been authorized as an
+    # org admin by `SiteSessionPolicy.sign_out_all`; both actions are scoped to
+    # the tenant's own rows by their filter and forbid every other caller.
+    lock_and_revoke(
+      fn opts -> Accounts.lock_org_sessions(args, opts) end,
+      fn opts -> Accounts.revoke_org_sessions(Ash.Query.new(Token), args, opts) end
+    )
+  end
+
+  @doc """
+  Sign out every unexpired session, headless app token, remember-me cookie
+  and held two-factor sign-in on every site, bound to one or not, except the
+  rows in `keep` (#2491). Run by `KilnCMS.Accounts.SignOutEveryone`, inside
+  its transaction and after its authorization; drops nothing live itself.
+
+  Returns `{:ok, jtis}` like `revoke_org/2`. Run it in `revoke_transaction/1`.
+  """
+  @spec revoke_everywhere([String.t()]) :: {:ok, [String.t()]} | {:error, term()}
+  def revoke_everywhere(keep) when is_list(keep) do
+    args = %{keep: keep}
+
+    # authorize?: false — "sign out everyone on every site" has already been
+    # authorized as a platform admin by `InstanceSessions.sign_out_everyone`;
+    # both actions forbid every other caller by name.
+    lock_and_revoke(
+      fn opts -> Accounts.lock_all_sessions(args, opts) end,
+      fn opts -> Accounts.revoke_all_sessions(Ash.Query.new(Token), args, opts) end
+    )
+  end
+
+  @doc """
+  Run `fun` — the caller's sign-out, which calls `revoke_org/2` or
+  `revoke_everywhere/1` — in a transaction sized for them, like
+  `Repo.transaction/1`.
+
+  Each of their statements may run for `revoke_timeout/0`: every live row of
+  the tokens table is locked and rewritten, which on a large installation is
+  far longer than Ecto's 15-second default. The database enforces it
+  (`statement_timeout`, set with `SET LOCAL` for the rest of the
+  transaction), cancelling the statement and leaving the connection usable;
+  the client waits a little longer, so it is the database that gives up
+  first. A cancelled statement rolls everything back and returns
+  `{:error, %Ash.Error.Invalid.Timeout{}}`.
+  """
+  @spec revoke_transaction((-> result)) :: {:ok, result} | {:error, term()}
+        when result: term()
+  def revoke_transaction(fun) when is_function(fun, 0) do
+    # Room for both statements and the caller's few short writes:
+    # `Repo.transaction/2`'s timeout bounds the whole checkout, and past it the
+    # connection is dropped rather than a statement cancelled.
+    case Repo.transaction(fun, timeout: 2 * revoke_timeout() + 2 * @client_grace) do
+      {:ok, result} -> {:ok, result}
+      {:error, error} -> {:error, timed_out_or(error)}
     end
   end
 
-  defp revoke_org_rows(query, org_id, keep) do
-    # authorize?: false — "sign out everyone" has already been authorized as an
-    # org admin by `SiteSessionPolicy.sign_out_all`; the action is scoped to the
-    # tenant's own rows by its filter and forbids every other caller.
-    case Accounts.revoke_org_sessions(query, %{org_id: org_id, keep: keep},
-           authorize?: false,
-           bulk_options: [strategy: :atomic, return_records?: true, return_errors?: true]
-         ) do
-      %Ash.BulkResult{status: :success, records: records} -> {:ok, records || []}
-      %Ash.BulkResult{errors: errors} -> {:error, errors}
-    end
+  @doc "How long each statement of a sign-out may run, in milliseconds: two minutes."
+  @spec revoke_timeout() :: pos_integer()
+  def revoke_timeout,
+    do: Application.get_env(:kiln_cms, :sign_out_everyone_timeout, :timer.minutes(2))
+
+  # Lock every row the write will revoke in one pass, in jti order, then write
+  # them in one statement. `record_use/3` bumps a session and its remember-me
+  # row in one statement, which locks them in the same order, so the two wait
+  # for each other rather than each holding a row the other wants: a deadlock
+  # would roll the whole sign-out back. The lock also says which rows were
+  # sessions, which the revoked rows no longer do ("revocation"), so the write
+  # returns nothing.
+  #
+  # Both statements run under `revoke_timeout/0` (see `revoke_transaction/1`).
+  # The client's own wait is set with `KilnCMS.Repo.with_timeout/2`: the
+  # atomic bulk update would drop a `timeout:` passed to it.
+  defp lock_and_revoke(lock, revoke) do
+    timeout = revoke_timeout()
+
+    Repo.with_timeout(timeout + @client_grace, fn ->
+      # `set_config(…, true)` is `SET LOCAL`: for the rest of this transaction.
+      Repo.query!("SELECT set_config('statement_timeout', $1, true)", [Integer.to_string(timeout)])
+
+      # authorize?: false — the sign-out calling this authorized first; all others forbidden
+      with {:ok, rows} <- lock.(authorize?: false),
+           %Ash.BulkResult{status: :success} <-
+             revoke.(
+               # authorize?: false — authorized by the sign-out, as the lock above
+               authorize?: false,
+               bulk_options: [strategy: :atomic, return_records?: false, return_errors?: true]
+             ) do
+        user_purpose = Token.user_purpose()
+        {:ok, for(%Token{purpose: ^user_purpose, jti: jti} <- rows, do: jti)}
+      else
+        {:error, error} -> {:error, error}
+        %Ash.BulkResult{errors: errors} -> {:error, errors}
+      end
+    end)
+  end
+
+  # A statement past `statement_timeout` is cancelled (SQLSTATE 57014,
+  # `query_canceled`), which Ash reports only as an unknown error's text — and
+  # by rolling back the caller's transaction itself, so it is recognized from
+  # the transaction's result. Nothing else cancels these statements.
+  defp timed_out_or(error) do
+    canceled? =
+      error
+      |> Ash.Error.to_error_class()
+      |> Map.get(:errors, [])
+      |> Enum.any?(&(Exception.message(&1) =~ "57014"))
+
+    if canceled?,
+      do:
+        Ash.Error.Invalid.Timeout.exception(
+          timeout: revoke_timeout(),
+          name: "sign out everyone"
+        ),
+      else: error
   end
 
   # --- internals ---------------------------------------------------------------
