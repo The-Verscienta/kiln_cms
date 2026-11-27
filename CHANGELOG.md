@@ -74,7 +74,7 @@ else.
 ### Added
 
 - **Password policy: a site can also check its administrators' passwords against known breaches as they sign in, off by default; under Block a breached one is sent to reset by email, under Warn the admin signs in with a warning (#2407).**
-  `POST /api/auth/sign_in` gains a `403` `password_reset_required` and an additive `password_breach` field. Expand-only migration; rolling the pin back is safe.
+  `POST /api/auth/sign_in` gains a `403` `password_reset_required` and an additive `password_breach` field. A sign-in pause that blocked attempts fill mails the owner to choose a new password. Expand-only migration; rolling the pin back is safe.
   ([#3434](https://github.com/The-Verscienta/kiln_cms/pull/3434) · [long form](docs/changelog/unreleased.md#breached-password-sign-in-check))
 - **Backups: `bin/backup` in a release and `mix kiln.backup.*` in a checkout list backups, start one and optionally wait for it, re-check a backup's files, report what retention would delete, and import cron's backups, with `--json` output and exit codes 0, 1 and 2 (part of #2234).**
   `prune` only reports and `verify` records nothing. New image only; no migration, and rolling the pin back is safe.
@@ -82,6 +82,9 @@ else.
 
 ### Changed
 
+- **Backups: two SFTP destinations held back only by a missing Test now say so on the Destinations tab, "Press Test on both destinations to let them prune.", with a link to the how-to (#3428).**
+  Shown only when a Test would clear the block. No migration.
+  ([#3466](https://github.com/The-Verscienta/kiln_cms/pull/3466) · [long form](docs/changelog/unreleased.md#sftp-prune-test-hint))
 - **Backups: an SFTP destination's path may hold spaces and `+ @ ,`, so a NAS share such as `/volume1/Backup Share/kiln` can be used (#3199).**
   ASCII only; `..`, `~`, `\`, control characters and a space at either end of a folder name are still refused. No migration; after a rollback, a destination whose path uses the new characters fails until its path is changed.
   ([#3425](https://github.com/The-Verscienta/kiln_cms/pull/3425) · [long form](docs/changelog/unreleased.md#sftp-path-spaces))

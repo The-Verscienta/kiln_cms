@@ -12251,6 +12251,11 @@ msgstr "Comment construire la formule"
 msgid "How to restore a media backup written in several parts"
 msgstr "Comment restaurer une sauvegarde des médias écrite en plusieurs parties"
 
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "How two SFTP servers both prune"
+msgstr "Comment deux serveurs SFTP purgent tous les deux"
+
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format
 msgid "How your name appears to readers and to the people you work with."
@@ -18170,6 +18175,11 @@ msgstr "Appuyez sur Entrée pour ajouter. Collez plusieurs lignes pour ajouter u
 #, elixir-autogen, elixir-format
 msgid "Press Publish in the editor. Until then, only people signed in to the console can see it."
 msgstr "Cliquez sur Publier dans l'éditeur. D'ici là, seules les personnes connectées à la console peuvent la voir."
+
+#: lib/kiln_cms_web/live/backup_destinations_live.ex
+#, elixir-autogen, elixir-format
+msgid "Press Test on both destinations to let them prune."
+msgstr "Appuyez sur Test sur les deux destinations pour qu’elles puissent purger."
 
 #: lib/kiln_cms_web/components/computed_builder_components.ex
 #: lib/kiln_cms_web/components/content_editor/inspector_components.ex

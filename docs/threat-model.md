@@ -1332,21 +1332,42 @@ password leaves the server.
   the reset mail at will. It is charged to the address's reset-mail budget
   (`AccountThrottle.allow_mail?(:password_reset, email)`, five an hour, shared
   with the owner's own requests and never waived), so they can spend the
-  owner's reset mails for the hour; and a blocked attempt is not forgiven by
-  the per-account sign-in throttle, so repeated ones pause the account (a
-  wrong password could already do that). The owner then also gets the
-  "Unusual sign-in activity" mail. (9) The Warn signal does not reach an API
-  client of a two-factor administrator: `password_breach` is on the one-step
-  `201` only, not on `/api/auth/sign_in/verify`'s. (10) The reset mail is
-  branded for the site the request came in on, not the site whose policy
-  refused the sign-in. (11) The provider sees the same prefix from the
+  owner's reset mails for the hour, through these sign-ins or the anonymous
+  `/reset` form, after which a blocked sign-in mails the owner nothing. So a
+  block does *not* always mail the owner. A blocked attempt is not forgiven
+  by the per-account sign-in throttle, so repeated ones pause the account (a
+  wrong password could already do that), and the pause mail is the notice
+  the reset-mail budget cannot silence (#3437): when the counter holds
+  blocked sign-ins, `KilnCMS.Accounts.SignInAlert` sends "Sign-in paused on
+  your (site) account: choose a new password", saying the attempts, or some
+  of them, used the current password and that it appears in a known breach,
+  with a bare `/reset` link and no unlock link, IP or count. It is never
+  withheld for its cause, so making a window all blocks does not hide the
+  guessing mail; it changes the wording. It shares the six-hour alert window
+  with the "Unusual sign-in activity" mail, so at most one of the two goes
+  out per address in that time, and a window already spent by a pause of
+  wrong guesses holds back a later breached one until it rolls. The block
+  tally (`AccountThrottle.note_sign_in_block/1`) and the sign-in counter are
+  separate rows on the same window, so timing can move the mail between its
+  breached wordings, or to the usual one, never to silence. (9) The Warn
+  signal does not reach an API client of a two-factor administrator:
+  `password_breach` is on the one-step `201` only, not on
+  `/api/auth/sign_in/verify`'s. (10) *Closed by #3436:* the reset mail is
+  branded for a site whose policy refused the sign-in (the request's site
+  when it is one, else the one with the smallest id), so it names a site the
+  recipient administers; for a platform admin, who administers every site,
+  the request's site. (11) The provider sees the same prefix from the
   server's IP at each checked sign-in of one administrator (nothing is
   cached), so it can see one prefix recurring at sign-in times. The prefix is
   still one of about a million, as at any lookup.
 - **Audit.** A refusal at sign-in is `sign_in_failed`, reason
   `breached_password`, unsampled, in the log of each site whose policy
   refused it, and not charged to the failed-sign-ins alert
-  ([security events](security-events.md)).
+  ([security events](security-events.md)). When those sites cannot be read
+  (only a platform admin's are read at refusal time, and that read can fail), the refusal stands
+  and the event is written once in the request's site instead (#3438),
+  naming no other site, the account unlabelled unless it is a member there.
+  With no request site nothing is recorded.
 - **Telemetry.** `[:kiln_cms, :password, :breach_check]`; see
   [observability.md](observability.md#breached-password-checks).
 - **Why on by default, and why fail open.**

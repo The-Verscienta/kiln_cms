@@ -1316,7 +1316,10 @@ Anyone can follow these steps; they need access to the account's mailbox.
 The "Unusual sign-in activity on your (site) account" mail that Kiln sends
 the owner when the pause starts also links to the page in step 1. It never
 carries an unlock link itself: that mail goes out on a pause anyone can
-cause, so it would be a link minted whenever an attacker liked.
+cause, so it would be a link minted whenever an attacker liked. A pause that
+sign-ins blocked for a breached password helped fill gets a different mail,
+which links to `/reset` instead
+([If a sign-in check goes wrong](#if-a-sign-in-check-goes-wrong)).
 
 ### Why the sign-in page never says an account is paused
 
@@ -1502,9 +1505,12 @@ Who is checked, and by which policy:
   appears in a known data breach, so it can't be used to sign in as an
   administrator. We've emailed you a link to choose a new one. If it doesn't
   arrive, request one below." The mail is **Choose a new password for your
-  (site) account**. It says someone signed in with their current password,
-  that it appears in a breach, and that if it wasn't them, someone else knows
-  it. The link works like any reset link. Once they choose a new password they
+  (site) account**, where (site) is a site whose policy blocked them: the
+  site whose address they used, when it is one of those, and otherwise
+  another of those sites, the same one each time. For a platform admin it is
+  always the site whose address they used. It says someone signed in with
+  their current password, that it appears in a breach, and that if it wasn't
+  them, someone else knows it. The link works like any reset link. Once they choose a new password they
   sign in with it as usual.
 - **Warned.** They are signed in, and see "Your password appears in a public
   data breach. Change it soon from your account page." (after the
@@ -1517,16 +1523,24 @@ Who is checked, and by which policy:
 ### If a sign-in check goes wrong
 
 - **The reset mail doesn't arrive.** Each address gets at most five reset
-  mails an hour, the ones this check sends included. Someone who tried to
-  sign in several times, or anyone else holding the breached password, may
-  have used them up. Request one on `/reset` once the hour is over. **Send password
+  mails an hour, the ones this check sends and the ones anyone can ask for
+  on `/reset` included. Someone who tried to sign in several times, or anyone
+  else holding the breached password, may have used them up. Request one on `/reset` once the hour is over. **Send password
   reset** on the account's page under **Accounts** (`/editor/accounts`) shares
   the same budget, but says so by name when it is spent.
 - **"Paused after too many attempts".** A blocked sign-in counts toward the
   account's sign-in pause like a failed one, so retrying the old password
-  pauses the account after 20 attempts in 15 minutes, and the owner gets the
-  usual "Unusual sign-in activity" mail. Choosing a new password through the
-  reset link lifts the pause ([Lift a sign-in pause by email](#lift-a-sign-in-pause-by-email)).
+  pauses the account after 20 attempts in 15 minutes. The owner then gets
+  **Sign-in paused on your (site) account: choose a new password** instead
+  of the usual "Unusual sign-in activity" mail. It says the attempts used
+  their current password, which appears in a known data breach, or, when
+  only some did, that the others did not complete a sign-in. It links to
+  `/reset` and has no unlock link, because lifting the pause would not help:
+  the old password is still refused. This mail does not count against the
+  five reset mails, so it arrives even when those are used up; like the
+  usual pause mail, at most one goes out every six hours. Choosing a new
+  password, through the reset link or `/reset`, lifts the pause
+  ([Lift a sign-in pause by email](#lift-a-sign-in-pause-by-email)).
 - **"I signed in from an app and saw no warning."** An app that signs in with
   `POST /api/auth/sign_in` gets the warning as a `password_breach` field on
   the response, and only when the account has no second factor
@@ -1539,7 +1553,9 @@ Who is checked, and by which policy:
 Your security log records each blocked sign-in as **Failed sign-in** with
 reason `breached_password`
 ([security events](security-events.md#what-is-recorded)). The failed
-sign-ins alert does not count it.
+sign-ins alert does not count it. For a platform admin, if the sites that
+blocked them can't be read at that moment, the sign-in is still refused and
+the event goes to the log of the site whose address they used instead.
 
 ### What people see
 

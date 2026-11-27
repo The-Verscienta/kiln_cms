@@ -486,4 +486,4 @@ Windows version. No release smoke test in CI runs `bin/kiln_cms rpc`, so the
 not by one run through a built release.
 
 Why the commands are split this way, and why `prune` only reports:
-[ADR 0087](decisions/0087-the-backup-command-line-reads-beside-the-node-and-writes-inside-it-and-prunes-only-inside-a-backup.md).
+[ADR 0088](decisions/0088-the-backup-command-line-reads-beside-the-node-and-writes-inside-it-and-prunes-only-inside-a-backup.md).
