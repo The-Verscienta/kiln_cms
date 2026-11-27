@@ -495,8 +495,10 @@ defmodule KilnCMSWeb.ContentEditorLive do
     # (loaded once — an org's roster doesn't change mid-session), so a
     # keystroke costs no query. `Notifications.mention_roster/1` is the
     # list `NotifyComment` resolves against after the write, so what the
-    # dropdown offers is exactly who a mention reaches.
-    |> assign(:mention_roster, Notifications.mention_roster(org))
+    # dropdown offers is exactly who a mention reaches. A roster that could
+    # not be read is `[]` plus `mentions_unavailable?` (#3052), so the
+    # composer says so instead of looking like a site with nobody on it.
+    |> assign(org |> Notifications.fetch_mention_roster() |> mention_roster_assigns())
     |> assign(:mention_suggestions, [])
     # Who is typing into which block's composer, as `block_id => %{name =>
     # timer_ref}`. Transient and never persisted; each entry cancels
@@ -1771,6 +1773,14 @@ defmodule KilnCMSWeb.ContentEditorLive do
     )
     |> to_form()
   end
+
+  @doc false
+  # The mount's mention assigns from `Notifications.fetch_mention_roster/1`'s
+  # answer (#3052): a failed read suggests no one and says so in the composer.
+  def mention_roster_assigns({:ok, roster}),
+    do: [mention_roster: roster, mentions_unavailable?: false]
+
+  def mention_roster_assigns(:error), do: [mention_roster: [], mentions_unavailable?: true]
 
   # --- generic dispatch to the per-kind code interfaces (via the registry) ---
 
@@ -8874,6 +8884,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                         assignable_users={@assignable_users}
                         linkable_tasks={linkable_tasks(@tasks)}
                         auto_complete_default={@auto_complete_default}
+                        mentions_unavailable?={@mentions_unavailable?}
                       />
                       <%!-- Inline "+" to insert a block right after this one (B2). --%>
                       <.block_inserter
@@ -8939,6 +8950,7 @@ defmodule KilnCMSWeb.ContentEditorLive do
                     assignable_users={@assignable_users}
                     linkable_tasks={linkable_tasks(@tasks)}
                     auto_complete_default={@auto_complete_default}
+                    mentions_unavailable?={@mentions_unavailable?}
                   />
                 </div>
 

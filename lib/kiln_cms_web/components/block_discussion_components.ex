@@ -38,6 +38,10 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
   per block by the caller: `RouteToBlockThread` guarantees every comment on a
   block belongs to one thread, so the filter is all the grouping there is.
   `tasks` is the same shape for open tasks.
+
+  `mentions_unavailable?` is true when the mention roster could not be read
+  (#3052): the composer then says suggestions couldn't be loaded, so an empty
+  dropdown isn't taken for a site with nobody on it.
   """
   attr :block_id, :string, required: true
   attr :comments, :list, required: true
@@ -52,6 +56,7 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
   attr :linkable_tasks, :list, default: []
   attr :auto_complete_default, :boolean, default: true
   attr :orphan?, :boolean, default: false
+  attr :mentions_unavailable?, :boolean, default: false
 
   def block_discussion(assigns) do
     thread = thread_for_block(assigns.comments, assigns.block_id)
@@ -135,7 +140,12 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
           <span class="animate-pulse">{typing_label(@typing)}</span>
         </p>
 
-        <.composer block_id={@block_id} draft={@draft} suggestions={@suggestions} />
+        <.composer
+          block_id={@block_id}
+          draft={@draft}
+          suggestions={@suggestions}
+          mentions_unavailable?={@mentions_unavailable?}
+        />
 
         <.task_bridge
           block_id={@block_id}
@@ -400,6 +410,7 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
   attr :block_id, :string, required: true
   attr :draft, :string, default: nil
   attr :suggestions, :list, default: []
+  attr :mentions_unavailable?, :boolean, default: false
 
   # No `<form>`: this sits inside the editor's main content form, which cannot
   # nest one. The textarea carries its own `phx-change` and the Send button
@@ -420,9 +431,20 @@ defmodule KilnCMSWeb.BlockDiscussionComponents do
         data-block-id={@block_id}
         phx-change="comment_draft"
         aria-label={gettext("Write a comment")}
+        aria-describedby={@mentions_unavailable? && "mentions-unavailable-#{@block_id}"}
         placeholder={gettext("Write a comment…")}
         class="field-input text-xs"
       >{@draft}</textarea>
+
+      <p
+        :if={@mentions_unavailable?}
+        id={"mentions-unavailable-#{@block_id}"}
+        class="mt-1 text-xs text-base-content/70"
+      >
+        {gettext(
+          "Mention suggestions couldn't be loaded. Reload to try again; an @mention sent now may notify no one."
+        )}
+      </p>
 
       <ul
         :if={@suggestions != []}

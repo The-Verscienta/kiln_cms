@@ -640,8 +640,10 @@ defmodule KilnCMS.Notifications do
 
   @doc """
   The candidates an `@name` in a comment on `org`'s content resolves against:
-  this org's members, plus every user who belongs to no org at all — any
-  global role — less anyone who has muted comment notifications.
+  this org's active members; on the default org only, every account with no
+  membership row anywhere, as `KilnCMS.Accounts.Scoping.effective_tier/2`
+  reads them; and on every org, every platform admin with no membership row.
+  Less anyone who has muted comment notifications or been erased.
 
   Public because it is the one roster for mentions: `dispatch_comment/4`
   resolves against it after the write, and the content editor's `@`
@@ -656,16 +658,38 @@ defmodule KilnCMS.Notifications do
   multi-tenant install that would let a mention carry another tenant's
   content title into an outsider's inbox.
 
-  The union is the honest reading of the data: a user with no membership row
-  is not scoped to any org, and a user with rows is reachable only from the
-  orgs those rows name.
+  The membership-less rule is Scoping's legacy rule (#3047): such an account
+  holds its global role on the default org and no tier on any other, so it is
+  not mentionable there either. That includes a person removed from the only
+  site they belonged to, since removal deletes the row. A platform admin is
+  `:admin` everywhere, so one with no rows stays on every roster; one who holds
+  rows is reachable only from the orgs those rows name.
 
   A system read (`User`'s read policy is self-only). `org` takes the shapes
   `KilnCMS.Accounts.org_id/1` does — nil is the default org. A failed read is
-  `[]`: a mention that cannot resolve its candidates simply does not fire.
+  `[]`, with a warning logged (`fetch_mention_roster/1`): a mention that cannot
+  resolve its candidates simply does not fire.
   """
   @spec mention_roster(struct() | String.t() | nil) :: [struct()]
   def mention_roster(org) do
+    case fetch_mention_roster(org) do
+      {:ok, users} -> users
+      :error -> []
+    end
+  end
+
+  @doc """
+  `mention_roster/1`, saying whether the read worked: `{:ok, users}`, or
+  `:error` when the roster could not be read (#3052).
+
+  For a caller that shows the roster to someone, as the content editor's `@`
+  autocomplete does: an empty list and a failed read look the same in
+  `mention_roster/1`, and only one of them means "nobody to mention". A
+  failure logs a warning naming the exception's module only, never its
+  message, which may carry account ids or addresses.
+  """
+  @spec fetch_mention_roster(struct() | String.t() | nil) :: {:ok, [struct()]} | :error
+  def fetch_mention_roster(org) do
     org_id = KilnCMS.Accounts.org_id(org)
 
     # authorize?: false — on this membership read and the user read below: both
@@ -677,32 +701,43 @@ defmodule KilnCMS.Notifications do
 
     # authorize?: false — the user read for the roster: `User` reads are
     # self-only, and a system grant would be a standing read of every account.
-    User
-    |> Ash.read!(authorize?: false)
-    |> Enum.filter(fn user ->
-      on_mention_roster?(
-        user,
-        MapSet.member?(member_ids, user.id),
-        MapSet.member?(assigned_ids, user.id)
-      )
-    end)
+    users =
+      User
+      |> Ash.read!(authorize?: false)
+      |> Enum.filter(fn user ->
+        on_mention_roster?(
+          user,
+          org_id,
+          MapSet.member?(member_ids, user.id),
+          MapSet.member?(assigned_ids, user.id)
+        )
+      end)
+
+    {:ok, users}
   rescue
     # A mention that cannot resolve its candidate list simply does not fire —
-    # the comment is still saved and still visible on the thread.
-    _error -> []
+    # the comment is still saved and still visible on the thread. The module
+    # only: an Ash error's message can quote the ids or addresses it read.
+    error ->
+      Logger.warning(
+        "mention roster could not be read; mentions on this site resolve to no one " <>
+          "(#{inspect(error.__struct__)})"
+      )
+
+      :error
   end
 
   @doc """
   Whether `user` is on `mention_roster(org)` now, decided from that one
   account's membership rows rather than by loading the roster (#3037): the
   mention mail asks it when the job runs, so a person who has since left the
-  roster (their membership on the site deactivated, a membership on another
-  site added, comment mail muted) is not mailed.
+  roster (their membership on the site deactivated or removed, a membership on
+  another site added, comment mail muted) is not mailed.
 
-  The same rule as `mention_roster/1`, through the same predicate. That
-  includes the roster's reading of an account with no membership rows at
-  all as unscoped, so on every org's roster: a person removed from the only
-  site they belonged to (removal deletes the row) is on every roster again.
+  The same rule as `mention_roster/1`, through the same predicate, so an
+  account with no membership rows counts on the default org only (a platform
+  admin with none, on every org). `org` nil is the default org, which is what
+  a job queued before mention jobs carried an org id resolves to.
 
   Unlike `mention_roster/1`, a read that fails raises: a caller deciding
   whether to send must not read a failure as either answer.
@@ -718,14 +753,23 @@ defmodule KilnCMS.Notifications do
     rows = KilnCMS.Accounts.list_memberships_for_user!(user_id, authorize?: false)
     member? = Enum.any?(rows, &(&1.organization_id == org_id and &1.status == :active))
 
-    on_mention_roster?(user, member?, rows != [])
+    on_mention_roster?(user, org_id, member?, rows != [])
   end
 
   # The mention roster's rule, for `mention_roster/1` and
   # `mention_roster_member?/2` alike: an active member of the org, or an
-  # account scoped to no org at all, that has not muted comment mail.
-  defp on_mention_roster?(user, member?, scoped?),
-    do: (member? or not scoped?) and wants?(user, :comment)
+  # account with no membership row anywhere, that has not muted comment mail.
+  # The membership-less branch is Scoping's legacy rule
+  # (`Scoping.effective_tier/2`, `users_with_tier/2`): such an account counts
+  # on the default org only, unless it is a platform admin, which is `:admin`
+  # on every org.
+  defp on_mention_roster?(user, org_id, member?, scoped?) do
+    unscoped_here? =
+      not scoped? and
+        (org_id == Accounts.default_org_id() or Scoping.platform_admin?(user))
+
+    (member? or unscoped_here?) and wants?(user, :comment)
+  end
 
   # Every user who is scoped to at least one org: a membership row on any
   # org, of any status.
