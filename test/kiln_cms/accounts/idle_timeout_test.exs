@@ -461,4 +461,43 @@ defmodule KilnCMS.Accounts.IdleTimeoutTest do
       assert row(session.jti).purpose == "user"
     end
   end
+
+  describe "the watermark's horizon" do
+    test "covers every lifetime a pre-watermark row can sign in with" do
+      horizon = IdleTimeout.watermark_horizon_seconds()
+
+      session = AshAuthentication.Info.authentication_tokens_token_lifetime!(Accounts.User)
+      remember_me = AshAuthentication.Info.strategy!(Accounts.User, :remember_me).token_lifetime
+
+      assert horizon >= AshAuthentication.Utils.lifetime_to_seconds(session)
+      assert horizon >= AshAuthentication.Utils.lifetime_to_seconds(remember_me)
+      assert horizon >= Token.second_factor_hold_ttl()
+    end
+
+    # Pinned independently of the derivation: `AshAuthentication.Utils` is
+    # not a public API, and the remember-me cookie lives 30 days today.
+    test "is at least the 30-day remember-me cookie" do
+      assert IdleTimeout.watermark_horizon_seconds() >= 30 * 24 * 3600
+    end
+
+    test "a watermark inside it still catches; one older than it is inert" do
+      horizon = IdleTimeout.watermark_horizon_seconds()
+      now = DateTime.utc_now()
+
+      assert IdleTimeout.watermark?(%Policy{revoked_at: DateTime.add(now, -(horizon - 60))})
+      refute IdleTimeout.watermark?(%Policy{revoked_at: DateTime.add(now, -(horizon + 60))})
+    end
+
+    test "a row that predates a watermark older than it is left alone" do
+      site = org("idle-mark-old")
+      at = DateTime.add(DateTime.utc_now(), -(IdleTimeout.watermark_horizon_seconds() + 60))
+      CMS.record_sessions_revoked!(%{at: at}, authorize?: false, tenant: site.id)
+      KilnCMS.Cache.bust_session_policy(site.id)
+
+      session = token!(user(), %{created_at: DateTime.add(at, -60)})
+
+      assert {:active, _} = IdleTimeout.check(session.jti, site.id)
+      assert row(session.jti).purpose == "user"
+    end
+  end
 end

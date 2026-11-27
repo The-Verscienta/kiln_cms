@@ -98,6 +98,9 @@ else.
 
 ### Fixed
 
+- **Sessions: clicks inside a component (the notification bell, reference pickers) now count as activity for a site's idle timeout, and the sign-out buttons say they also close open collaborative-editing rooms (#3464, part of #2491).**
+  The "sign out everyone" watermark now lasts the longest sign-in lifetime (30 days today). No migration.
+  ([#3476](https://github.com/The-Verscienta/kiln_cms/pull/3476) · [long form](docs/changelog/unreleased.md#idle-component-activity))
 - **JSON fields: a valid value is no longer refused as "took too long to check against the schema" when building its JSON Schema is slow on a cold or busy node (#3063).**
   The 1-second deadline now covers only checking the value. No migration.
   ([long form](docs/changelog/unreleased.md#field-schema-deadline))

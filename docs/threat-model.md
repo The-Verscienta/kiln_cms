@@ -1637,7 +1637,8 @@ Configured at `/editor/sessions`.
   signed out on B and nothing is written to it, so it can neither be used on B
   nor kept awake from B. A remember-me cookie's signature is verified before
   its row is looked at, and every write is also filtered on the account
-  (`subject`), so a forged or foreign jti changes no one's row.
+  (`subject`), so a forged or foreign jti changes no one's row. Why a session
+  is bound this way, and what the binding does not cover: [ADR 0090](decisions/0090-a-browser-session-is-bound-to-the-site-it-signed-in-on-and-is-signed-out-on-another-sites-host.md).
 - **Last activity is the database's clock.** `last_used_at` is written by and
   compared with Postgres `now()`, never a node's clock, and the expiring
   UPDATE repeats the idle test in its `WHERE`, so a tab that kept the session
@@ -1653,7 +1654,11 @@ Configured at `/editor/sessions`.
   two-factor hold row bound to the site, writes a watermark
   (`SiteSessionPolicy.sessions_revoked_at`) and records `all_sessions_revoked`.
   A row bound to no site that predates the watermark is revoked the next time
-  it is used on this site's host, for 30 days (the remember-me lifetime). The
+  it is used on this site's host, for as long as such a row could still be
+  alive: the longest of the session token's lifetime, the remember-me
+  token's and a two-factor hold's (30 days today), derived from the sign-in
+  configuration (`IdleTimeout.watermark_horizon_seconds/0`), so raising one
+  widens it. The
   token writes that bind a row to a site read the watermark in the same
   statement, so such a row cannot escape by being used first. Other sites are
   never reached.
@@ -1703,9 +1708,15 @@ Configured at `/editor/sessions`.
   cannot be read fails open on both sockets, as on every other door; (e) a
   collab connect refused by the admin allowlist has already run the session
   check, so it can expire an idle session, as a page load from the same
-  address would. (3) Events a LiveComponent
-  handles itself (`phx-target={@myself}`) do not count as activity on their
-  own. (4) A node holding a cached policy from before a sign out everyone may,
+  address would. (3) A LiveView that rejoins after a network drop or a deploy
+  replays each recoverable form's `phx-change`, to the page or to the
+  component it targets, and the first replayed event counts as activity, so a
+  tab that reconnects just before its deadline can keep an idle session awake
+  ([#3474](https://github.com/The-Verscienta/kiln_cms/issues/3474)). Only the
+  cookie's holder can send it. Since #2491, events a LiveComponent handles
+  itself (`phx-target={@myself}`) count as activity like a page's own
+  (`KilnCMSWeb.IdleSession.ComponentActivity`), which widens this to component
+  forms. (4) A node holding a cached policy from before a sign out everyone may,
   for up to the cache's minute and until the cluster-wide bust lands, let an
   unbound pre-watermark session through on a request; binding still refuses
   it, and the next check catches it. (5) Activity is written at most once per
@@ -2742,8 +2753,11 @@ the provider. See [sso.md](sso.md#per-site-providers).
   access anywhere else: a platform admin (standing or temporary), a member of
   any other organization at any tier, or a membership-less account whose global
   role reaches beyond the site. Checked at every sign-in, in
-  `KilnCMS.Accounts.SiteSso.Admission`. Kiln has no site-scoped session, so the
-  guarantee is made at admission. **Accepted:** a session such a provider
+  `KilnCMS.Accounts.SiteSso.Admission`. Since #2489 a browser session is bound
+  to the site it signed in on and is signed out on another site's host
+  ([ADR 0090](decisions/0090-a-browser-session-is-bound-to-the-site-it-signed-in-on-and-is-signed-out-on-another-sites-host.md)), but the binding stops a cookie replayed on
+  another site, not an account that later gains access elsewhere, so the
+  guarantee is still made at admission. **Accepted:** a session such a provider
   minted before the account later gained access elsewhere keeps working until
   it ends — no wider than the mail-control concession above.
 - **Pre-registered accounts** — an unconfirmed account is never handed to a

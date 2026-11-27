@@ -89,6 +89,10 @@ defmodule KilnCMSWeb do
     quote do
       use Phoenix.LiveComponent
 
+      # Wraps the component's `handle_event/3`, so an event it handles counts
+      # as activity for the idle timeout the way a LiveView's own do (#2491).
+      @before_compile KilnCMSWeb.IdleSession.ComponentActivity
+
       unquote(html_helpers())
     end
   end

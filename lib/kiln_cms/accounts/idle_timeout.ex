@@ -55,9 +55,9 @@ defmodule KilnCMS.Accounts.IdleTimeout do
   watermark and used on this site's host — one signed in before sessions
   recorded their site, or held at the two-factor prompt at the time — is
   revoked here when it is next seen, until the watermark is older than the
-  longest-lived cookie. No write binds such a row to the site (the token
-  actions read the watermark in the same statement), so it cannot escape by
-  being used first.
+  longest sign-in lifetime (30 days today; `watermark_horizon_seconds/0`).
+  No write binds such a row to the site (the token actions read the watermark
+  in the same statement), so it cannot escape by being used first.
   """
   require Ash.Query
   require Logger
@@ -85,11 +85,6 @@ defmodule KilnCMS.Accounts.IdleTimeout do
   end
 
   @ttl :timer.seconds(60)
-
-  # The longest a cookie that predates a "sign out everyone" can still sign a
-  # request in: the remember-me token's lifetime. Past it, the watermark has
-  # nothing left to catch and the token read stops.
-  @watermark_horizon_seconds 30 * 24 * 3600
 
   # How late the LiveView timer fires after the computed deadline, so the
   # re-read finds the session past it rather than a second short of it.
@@ -209,12 +204,31 @@ defmodule KilnCMS.Accounts.IdleTimeout do
   def touch_interval(timeout_seconds),
     do: timeout_seconds |> div(10) |> max(30) |> min(Token.last_used_interval_minutes() * 60)
 
+  @doc """
+  The longest anything that predates a "sign out everyone" can still sign a
+  request in, in seconds: the longest of the session token's lifetime, the
+  remember-me token's, and a two-factor hold's (30 days today, the
+  remember-me cookie). Past it, the watermark has nothing left to catch and
+  the token read stops. Derived from the sign-in configuration, so raising a
+  lifetime there widens the horizon with it.
+  """
+  @spec watermark_horizon_seconds() :: pos_integer()
+  def watermark_horizon_seconds do
+    session = AshAuthentication.Info.authentication_tokens_token_lifetime!(Accounts.User)
+    remember_me = AshAuthentication.Info.strategy!(Accounts.User, :remember_me).token_lifetime
+
+    [session, remember_me]
+    |> Enum.map(&AshAuthentication.Utils.lifetime_to_seconds/1)
+    |> Enum.concat([Token.second_factor_hold_ttl()])
+    |> Enum.max()
+  end
+
   @doc "Whether the site's last \"sign out everyone\" can still catch a cookie."
   @spec watermark?(Policy.t()) :: boolean()
   def watermark?(%Policy{revoked_at: nil}), do: false
 
   def watermark?(%Policy{revoked_at: at}),
-    do: DateTime.diff(DateTime.utc_now(), at) < @watermark_horizon_seconds
+    do: DateTime.diff(DateTime.utc_now(), at) < watermark_horizon_seconds()
 
   @doc "Milliseconds until a LiveView should look again, for `remaining` seconds."
   @spec timer_ms(integer()) :: pos_integer()

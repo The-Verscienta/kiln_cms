@@ -1267,6 +1267,15 @@ defmodule KilnCMSWeb.SettingsLive do
                 >
                   {gettext("Sign out of all other sessions")}
                 </button>
+                <p
+                  :if={Enum.any?(@sessions, &(&1.jti != @current_session_jti))}
+                  id="sessions-sign-out-hint"
+                  class="mt-2 text-xs text-base-content/70"
+                >
+                  {gettext(
+                    "Signing other sessions out, one at a time or all at once, also closes the collaborative-editing rooms open on those devices."
+                  )}
+                </p>
               </div>
             </section>
 

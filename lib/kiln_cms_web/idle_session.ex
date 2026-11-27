@@ -24,12 +24,10 @@ defmodule KilnCMSWeb.IdleSession do
   (`activity_event?/1`) are not activity: an open tab nobody touches goes idle
   like any other. A patch (`handle_params` after the first) is.
 
-  Events handled by a LiveComponent (`phx-target={@myself}`) are not seen by
-  the LiveView's `handle_event` hook, so they do not count as activity on
-  their own. Every component page here also raises page-level events (form
-  changes, navigation), and a person working in one keeps the session awake
-  through those; a page driven purely by component events can idle out under
-  the person using it.
+  Events a LiveComponent handles (`phx-target={@myself}`) never reach the
+  LiveView's `handle_event` hook; `KilnCMSWeb.IdleSession.ComponentActivity`
+  wraps every Kiln component's `handle_event/3` to report them
+  (`component_event/1`), so they count the same way.
   """
   use KilnCMSWeb, :verified_routes
   use Gettext, backend: KilnCMSWeb.Gettext
@@ -41,6 +39,14 @@ defmodule KilnCMSWeb.IdleSession do
   alias Phoenix.LiveView
 
   @key :kiln_idle
+
+  # Set in the LiveView process once this module's hooks are attached. A
+  # component's `handle_event/3` only sees its own socket, not the LiveView's
+  # private state, so the process dictionary is the one place it can learn
+  # whether anyone will handle the message it would send: a LiveView without
+  # these hooks (an anonymous page, a mount the timeout does not apply to) may
+  # have a `handle_info/2` with no catch-all, which the message would crash.
+  @tracked {__MODULE__, :tracked}
 
   # Client events a hook sends without the person doing anything.
   @automatic_events ~w(body_flushed push_state push_unsupported)
@@ -91,6 +97,8 @@ defmodule KilnCMSWeb.IdleSession do
           {:halt, leave(socket, why)}
 
         result ->
+          Process.put(@tracked, true)
+
           {:cont,
            socket
            |> LiveView.put_private(@key, state)
@@ -155,6 +163,20 @@ defmodule KilnCMSWeb.IdleSession do
   end
 
   @doc """
+  Called by every Kiln LiveComponent's `handle_event/3`, in the LiveView
+  process (see `KilnCMSWeb.IdleSession.ComponentActivity`): when the event is
+  the person's activity and this process carries the idle hooks, tell the
+  LiveView, whose `handle_info` hook notes the use. Anywhere else, nothing.
+  """
+  @spec component_event(String.t()) :: :ok
+  def component_event(event) do
+    if Process.get(@tracked, false) and activity_event?(event),
+      do: send(self(), {:kiln_idle_component_activity})
+
+    :ok
+  end
+
+  @doc """
   Whether a client event counts as the person's activity. Not the replies a
   hook sends by itself: `body_flushed` (the rich-text editor answering a
   lock takeover's `flush_body`), and `push_state` / `push_unsupported` (the
@@ -178,6 +200,9 @@ defmodule KilnCMSWeb.IdleSession do
     do: recheck(socket)
 
   defp handle_info(:kiln_idle_policy_check, socket), do: recheck(socket)
+
+  # An event a component handled (`component_event/1`).
+  defp handle_info({:kiln_idle_component_activity}, socket), do: {:halt, touch(socket)}
 
   defp handle_info({:session_policy_changed, policy}, %{private: %{@key => state}} = socket) do
     Process.send_after(self(), :kiln_idle_policy_check, :rand.uniform(@jitter_ms))

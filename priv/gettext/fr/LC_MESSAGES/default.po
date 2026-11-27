@@ -21683,6 +21683,11 @@ msgstr "Paramètres de session enregistrés."
 msgid "Sessions"
 msgstr "Sessions"
 
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Sessions from before this was available are signed out the next time they're used here. Collaborative-editing rooms open on the signed-out devices close too."
+msgstr "Les sessions antérieures à cette fonctionnalité sont déconnectées la prochaine fois qu’elles sont utilisées ici. Les salles d’édition collaborative ouvertes sur les appareils déconnectés se ferment aussi."
+
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
 msgid "Set KILN_CONSOLE_HOST to a host no organization controls, such as console under your main host, point it and every subdomain of it at Kiln in DNS and TLS, and restart. Each organization's console then gets its own host, its slug followed by the console host. Otherwise, grant organization admin only to people you would trust with the console."
@@ -22329,6 +22334,11 @@ msgstr "Clé de signature"
 #, elixir-autogen, elixir-format
 msgid "Signing key generated. New publishes are signed; re-fire existing content to sign it too."
 msgstr "Clé de signature générée. Les nouvelles publications sont signées ; régénérez le contenu existant pour le signer aussi."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Signing other sessions out, one at a time or all at once, also closes the collaborative-editing rooms open on those devices."
+msgstr "Déconnecter d’autres sessions, une par une ou toutes à la fois, ferme aussi les salles d’édition collaborative ouvertes sur ces appareils."
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #: lib/kiln_cms_web/live/settings_live.ex
@@ -32219,6 +32229,11 @@ msgstr "« %{value} » n’est pas une valeur utilisable dans une formule."
 #, elixir-autogen, elixir-format
 msgid "“Leading” means the highest rate so far over at least %{floor} impressions per arm — a comparison, not a significance test."
 msgstr "« En tête » signifie le taux le plus élevé à ce jour sur au moins %{floor} impressions par variante — une comparaison, pas un test de significativité."
+
+#: lib/kiln_cms_web/live/accounts_live.ex
+#, elixir-autogen, elixir-format
+msgid "“Sign out everywhere” also closes the collaborative-editing rooms this account has open on any device."
+msgstr "« Déconnecter partout » ferme aussi les salles d’édition collaborative que ce compte a ouvertes sur n’importe quel appareil."
 
 #: lib/kiln_cms_web/components/content_editor/block_canvas_components.ex
 #, elixir-autogen, elixir-format
