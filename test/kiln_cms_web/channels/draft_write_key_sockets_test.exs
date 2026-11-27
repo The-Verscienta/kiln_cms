@@ -122,7 +122,7 @@ defmodule KilnCMSWeb.DraftWriteKeySocketsTest do
 
     test "the key owner's own account cannot join the room of its own draft", ctx do
       own = post!(%{state: :draft, author_id: ctx.owner.id})
-      token = Phoenix.Token.sign(@endpoint, "collab", ctx.owner.id)
+      token = KilnCMS.CollabTokenFixtures.collab_token(ctx.owner)
       {:ok, socket} = connect(CollabSocket, %{"token" => token})
 
       assert {:error, %{reason: "not found"}} =

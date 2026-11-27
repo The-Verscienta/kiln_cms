@@ -143,6 +143,10 @@ GraphQL WebSocket `/ws/gql` refuses the connect for the same token (the
 handshake answers `403`), and for a `kiln_` API key, which that socket has
 never accepted (#2634). Treat it as "sign in again", and send no header when
 you mean to read as the public.
+A `/ws/gql` socket opened with a JWT is closed when that token is signed out,
+and a document sent on it after a sign-out the socket missed is answered with
+`extensions.code: "unauthenticated"` (#2490); see
+[Connecting with a token](headless-graphql-api.md#connecting-with-a-token).
 Details, and the one-release opt-out `KILN_API_REJECT_INVALID_BEARER=false`:
 [headless-consumer-guide.md](headless-consumer-guide.md#a-bad-bearer-token-is-a-401).
 

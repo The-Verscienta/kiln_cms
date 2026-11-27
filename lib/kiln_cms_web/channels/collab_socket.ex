@@ -24,10 +24,45 @@ defmodule KilnCMSWeb.CollabSocket do
   uses for HTTP (epic #336, #563). Sockets bypass the plug pipeline, so
   `connect_info: [:uri]` in the endpoint is what makes the host reachable at
   all; without it every collab session resolved to the default org.
+
+  ## The token names the session it was minted for (#2490)
+
+  Besides the user, the token carries the jti of the browser session whose
+  editor minted it (`"j"`), and the connection lives no longer than that
+  session. Without it, signing one session out — from the settings page, by
+  the site's idle timeout or "sign out everyone", or with the browser's own
+  Sign out — closed that session's pages but left its open rooms editing for
+  up to a day, since only per-user eviction reached this socket.
+
+    * At connect the session's token row is read and must be a live sign-in
+      (`Token.user_purpose/0`, unexpired) of this account that the site would
+      let a page through on (`KilnCMS.Accounts.IdleTimeout.check_row/3`, no
+      use noted): an idle, revoked, foreign-site or pre-"sign out everyone"
+      session is refused, and so is a jti that names another account's row, a
+      held two-factor sign-in or a remember-me cookie. A row that cannot be
+      read fails open, as the HTTP and LiveView checks do.
+    * A connection that passes subscribes to
+      `KilnCMS.Accounts.SessionEviction.session_socket_topic/1`, so every
+      per-session sign-out drops it at once. The subscription is made only
+      after the last refusal: a refused upgrade leaves the HTTP/1 process
+      alive for keep-alive, and a stray subscription would outlive the refusal
+      into a later upgrade on that connection.
+    * `KilnCMSWeb.CollabChannel`'s periodic re-check repeats the session check,
+      for a revocation no broadcast reached.
+
+  `id/1` stays per user, so per-user eviction still reaches the socket.
+
+  A token minted before #2490 has no `"j"`: it is still accepted, with the
+  per-user semantics it always had, for this release only (it lives a day).
   """
   use Phoenix.Socket
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.IdleTimeout
+  alias KilnCMS.Accounts.SessionEviction
+  alias KilnCMS.Accounts.Token
+
+  require Logger
 
   channel "collab:*", KilnCMSWeb.CollabChannel
 
@@ -44,11 +79,14 @@ defmodule KilnCMSWeb.CollabSocket do
          :ok <- KilnCMSWeb.SocketJoinBudget.charge(:collab_join, connect_info),
          {:ok, claims} <-
            Phoenix.Token.verify(KilnCMSWeb.Endpoint, "collab", token, max_age: @max_age),
-         {user_id, verified?} = claims(claims),
+         {user_id, verified?, session_jti} = claims(claims),
          # The struct match matters: a `not_found_error?: false` interface would
          # return `{:ok, nil}`, and an anonymous actor reads published content.
          {:ok, %{} = actor} <- fetch_actor(user_id),
          {:ok, org} <- fetch_org(connect_info),
+         # The session the token was minted for (#2490): signed out, idle,
+         # bound to another site, or not this account's sign-in at all.
+         false <- session_refused?(session_jti, actor, org),
          # The token is minted for a day, possibly during the grace period of
          # a site that requires a second factor: an account the site now
          # holds for one it has not set up is refused (#2247), and so is a
@@ -60,12 +98,17 @@ defmodule KilnCMSWeb.CollabSocket do
          # site is resolved, so an unserved host is refused (and alerted) there
          # first; the address is kept for the channel's periodic re-check.
          {:ok, client_ip} <- KilnCMSWeb.AdminAllowlist.check_connect(:collab, connect_info) do
+      # After every refusal above, never before: see the moduledoc on why a
+      # refused connect must leave no subscription behind.
+      subscribe_session(session_jti)
+
       {:ok,
        socket
        |> assign(:actor, actor)
        |> assign(:org, org)
        |> assign(:client_ip, client_ip)
-       |> assign(:second_factor_verified?, verified?)}
+       |> assign(:second_factor_verified?, verified?)
+       |> assign(:session_jti, session_jti)}
     else
       _refused -> :error
     end
@@ -74,22 +117,108 @@ defmodule KilnCMSWeb.CollabSocket do
   def connect(_params, _socket, _connect_info), do: :error
 
   @doc """
-  The token for `user`'s collab socket. `second_factor_verified?` is whether
-  the session it is minted for passed a second factor at sign-in
+  The token for `user`'s collab socket, bound to the browser session
+  `session_jti` it is minted for (#2490). `second_factor_verified?` is whether
+  that session passed a second factor at sign-in
   (`KilnCMSWeb.SecondFactorGate.session_verified?/1`), which a passkey-only
   account past its deadline needs (#2247).
+
+  There is no clause without a session: a page that cannot name its session
+  gets no token, and edits on its own.
   """
-  @spec token(KilnCMS.Accounts.User.t(), boolean()) :: String.t()
-  def token(user, second_factor_verified?) do
+  @spec token(KilnCMS.Accounts.User.t(), boolean(), String.t()) :: String.t()
+  def token(user, second_factor_verified?, session_jti) when is_binary(session_jti) do
+    # Signed, not encrypted, so the jti is readable in the page's DOM. That
+    # is deliberate: a node still running the previous release must be able
+    # to verify this token during a rolling deploy, and a jti authenticates
+    # nothing on its own — every use of one checks the row's subject against
+    # the account that presents it.
     Phoenix.Token.sign(KilnCMSWeb.Endpoint, "collab", %{
       "u" => user.id,
-      "sf" => second_factor_verified? == true
+      "sf" => second_factor_verified? == true,
+      "j" => session_jti
     })
   end
 
-  # A token from before #2247 carried the id alone: no second factor shown.
-  defp claims(%{"u" => user_id, "sf" => verified?}), do: {user_id, verified? == true}
-  defp claims(user_id), do: {user_id, false}
+  defp claims(%{"u" => user_id, "sf" => verified?, "j" => jti}) when is_binary(jti),
+    do: {user_id, verified? == true, jti}
+
+  # Legacy tokens, minted before #2490 with no session (and before #2247 with
+  # the id alone, no second factor shown): accepted, per user as they always
+  # were, for this release only — they live a day, so none survives the next
+  # upgrade. Remove both clauses in the next release (#2490 follow-up).
+  defp claims(%{"u" => user_id, "sf" => verified?} = claims) when not is_map_key(claims, "j"),
+    do: legacy({user_id, verified? == true, nil})
+
+  defp claims(user_id) when is_binary(user_id), do: legacy({user_id, false, nil})
+
+  defp claims(_malformed), do: {nil, false, nil}
+
+  defp legacy(claims) do
+    Logger.info("Collab socket connect with a legacy collab token (no session)")
+    claims
+  end
+
+  @doc """
+  Whether the session `session_jti` refuses a collab connection of `actor` on
+  `org` (#2490): its token row is not a live, unexpired sign-in of `actor`, or
+  `KilnCMS.Accounts.IdleTimeout` signs it out on this site (idle, revoked,
+  bound to another site, older than the site's last "sign out everyone").
+  Never notes a use. An idle session is expired here, recorded with surface
+  `"collab"`, and evicted.
+
+  `nil` — a legacy token that names no session — is not refused. A row that
+  cannot be read is not refused either (fails open, as every other idle check
+  does). Shared with `KilnCMSWeb.CollabChannel`'s periodic re-check.
+  """
+  @spec session_refused?(String.t() | nil, KilnCMS.Accounts.User.t(), struct()) :: boolean()
+  def session_refused?(nil, _actor, _org), do: false
+
+  def session_refused?(session_jti, actor, org) when is_binary(session_jti) do
+    policy = IdleTimeout.policy(org.id)
+
+    case IdleTimeout.read(session_jti, policy) do
+      {:ok, row} -> row_refused?(row, actor, org, policy)
+      :error -> false
+    end
+  end
+
+  # `IdleTimeout`'s verdict reads only `"revocation"` as signed out, so a held
+  # two-factor sign-in or a remember-me row would pass it; and it ignores
+  # `expires_at`. Both are judged here, from the same read.
+  defp row_refused?(nil, _actor, _org, _policy), do: true
+
+  defp row_refused?(%Token{} = row, actor, org, policy) do
+    if row.purpose == Token.user_purpose() and unexpired?(row) do
+      opts = [
+        policy: policy,
+        subject: AshAuthentication.user_to_subject(actor),
+        touch?: false,
+        tier: fn -> KilnCMS.Accounts.Scoping.effective_tier(actor, org.id) end,
+        user: actor,
+        surface: "collab"
+      ]
+
+      match?({:signed_out, _why}, IdleTimeout.check_row(row, org.id, opts))
+    else
+      true
+    end
+  end
+
+  defp unexpired?(%Token{expires_at: %DateTime{} = at}),
+    do: DateTime.compare(at, DateTime.utc_now()) == :gt
+
+  defp unexpired?(_row), do: false
+
+  # `connect/3` runs in the transport process, which becomes the socket's
+  # (`Phoenix.Transports.WebSocket` upgrades in place), so this subscription
+  # is the socket's own and `Phoenix.Socket` closes on the `"disconnect"`
+  # broadcast it delivers. `KilnCMSWeb.GraphqlSocket`'s `close_at/1` relies on
+  # the same.
+  defp subscribe_session(nil), do: :ok
+
+  defp subscribe_session(session_jti),
+    do: KilnCMSWeb.Endpoint.subscribe(SessionEviction.session_socket_topic(session_jti))
 
   @doc """
   Whether a collab connection of `actor` is refused on `org_id`: the site

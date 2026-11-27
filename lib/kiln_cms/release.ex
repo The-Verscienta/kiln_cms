@@ -907,6 +907,150 @@ defmodule KilnCMS.Release do
     result
   end
 
+  @doc """
+  The release side of `bin/backup <command>` (#2234; `KilnCMS.Backups.CLI`
+  has the commands, flags, JSON keys and exit codes).
+
+  Not typed by hand. `rel/overlays/bin/backup` joins its arguments with
+  newlines, base64-encodes them and passes that string literal, so nothing
+  an operator types ever becomes part of an Elixir expression:
+
+      bin/kiln_cms eval 'KilnCMS.Release.backup("bGlzdAo=")'   # bin/backup list
+
+  `list` and `verify` arrive through `eval` and start only the repo;
+  `run`, `rescan` and `prune` arrive through `rpc` into the serving node and
+  are refused under `eval` before anything starts.
+
+  Exit codes are the CLI's: 0, 1 (the command failed) or 2 (a usage error),
+  carried by `exit({:shutdown, code})`. `bin/kiln_cms eval` and `rpc` both exit
+  with exactly that code and print no stack trace; under `rpc` the exit stays
+  in the call's own process, so the serving node is untouched. It never
+  halts the VM, which under `rpc` would stop the server.
+  """
+  @spec backup(String.t()) :: :ok
+  def backup(encoded), do: run_backup(encoded, serving?())
+
+  @doc false
+  # `serving?` is an argument only so the test can take the `eval` branch.
+  # Options are test seams: `:with_repo` (`Ecto.Migrator.with_repo/2`),
+  # `:logger_to_stderr` (a 0-arity function; default: move the `:default`
+  # handler to stderr, only inside a release) and `:cli` (options
+  # passed on to `KilnCMS.Backups.CLI.main/2`).
+  @spec run_backup(String.t(), boolean(), keyword()) :: :ok
+  def run_backup(encoded, serving?, opts \\ []) do
+    case decode_backup_argv(encoded) do
+      {:ok, argv} when serving? ->
+        backup_in_node(argv, opts)
+
+      {:ok, argv} ->
+        backup_beside_node(argv, opts)
+
+      :error ->
+        IO.puts("bin/backup: malformed arguments")
+        exit({:shutdown, 2})
+    end
+  end
+
+  @doc false
+  # Newline-joined, base64 (what `printf '%s\n' "$@" | base64` writes).
+  @spec decode_backup_argv(term()) :: {:ok, [String.t()]} | :error
+  def decode_backup_argv(encoded) when is_binary(encoded) do
+    with {:ok, decoded} <- Base.decode64(encoded),
+         true <- String.valid?(decoded) do
+      {:ok, split_argv(decoded)}
+    else
+      _ -> :error
+    end
+  end
+
+  def decode_backup_argv(_other), do: :error
+
+  defp split_argv(""), do: []
+
+  defp split_argv(decoded) do
+    case decoded |> String.split("\n") |> Enum.reverse() do
+      ["" | rest] -> Enum.reverse(rest)
+      all -> Enum.reverse(all)
+    end
+  end
+
+  # `rpc`: the CLI's output goes to the caller's group leader (the operator's
+  # terminal), and a monitor on it lets `run --wait` stop once they leave.
+  defp backup_in_node(argv, opts) do
+    ref = Process.monitor(Process.group_leader())
+    cli = Keyword.merge([mode: :rpc, caller_ref: ref], Keyword.get(opts, :cli, []))
+    {code, output} = KilnCMS.Backups.CLI.main(argv, cli)
+    gone? = KilnCMS.Backups.CLI.caller_gone?(ref)
+    Process.demonitor(ref, [:flush])
+    finish_backup(code, if(gone?, do: [], else: output))
+  end
+
+  # `eval`: what must run inside the node is refused before `load_app`, so
+  # nothing (repo, cache setting, logger) is touched for it; only `list` and
+  # `verify` start the repo.
+  defp backup_beside_node(argv, opts) do
+    cli = Keyword.merge([mode: :eval], Keyword.get(opts, :cli, []))
+
+    case KilnCMS.Backups.CLI.parse(argv) do
+      {:ok, command, _args} ->
+        if KilnCMS.Backups.CLI.reads_database?(command),
+          do: backup_with_repo(argv, cli, opts),
+          else: finish_backup(KilnCMS.Backups.CLI.main(argv, cli))
+
+      {:usage, _message} ->
+        finish_backup(KilnCMS.Backups.CLI.main(argv, cli))
+    end
+  end
+
+  defp backup_with_repo(argv, cli, opts) do
+    load_app()
+    Keyword.get(opts, :logger_to_stderr, &default_logger_to_stderr/0).()
+    with_repo = Keyword.get(opts, :with_repo, &Ecto.Migrator.with_repo/2)
+
+    case with_repo.(hd(repos()), fn _repo -> KilnCMS.Backups.CLI.main(argv, cli) end) do
+      {:ok, {code, output}, _apps} ->
+        finish_backup(code, output)
+
+      {:error, _reason} ->
+        message = KilnCMS.Backups.CLI.unreachable_message()
+        finish_backup(KilnCMS.Backups.CLI.failure(argv, "database_unreachable", message))
+    end
+  end
+
+  defp finish_backup({code, output}), do: finish_backup(code, output)
+
+  defp finish_backup(code, output) do
+    IO.write(output)
+    if code == 0, do: :ok, else: exit({:shutdown, code})
+  end
+
+  # Only inside a release: a test or a dev VM keeps its logger as it is.
+  defp default_logger_to_stderr do
+    if System.get_env("RELEASE_NAME") not in [nil, ""], do: logger_to_stderr(:default)
+    :ok
+  end
+
+  @doc false
+  # Under `eval`, the logger writes to stdout, which a `--json` reader parses.
+  # `logger_std_h` can't change its `type` in place, so the handler is
+  # removed and added back on `:standard_error` with the same config.
+  @spec logger_to_stderr(atom()) :: :ok | {:error, term()}
+  def logger_to_stderr(handler_id) do
+    with {:ok, %{module: :logger_std_h, config: config} = handler} <-
+           :logger.get_handler_config(handler_id),
+         :ok <- :logger.remove_handler(handler_id) do
+      handler = Map.drop(handler, [:id, :module])
+
+      :logger.add_handler(handler_id, :logger_std_h, %{
+        handler
+        | config: Map.put(config, :type, :standard_error)
+      })
+    else
+      {:ok, _other_handler} -> :ok
+      {:error, _} = error -> error
+    end
+  end
+
   # No `load_app`/`with_repo` here: unlike the tasks above, an import cannot
   # run on the bare repo `eval` gives, so it refuses rather than starting a
   # second copy of the application next to the serving one. `serving?` is an

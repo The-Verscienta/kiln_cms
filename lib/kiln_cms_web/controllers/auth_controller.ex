@@ -8,6 +8,7 @@ defmodule KilnCMSWeb.AuthController do
   alias KilnCMS.Accounts.Errors.PasswordResetRequired
   alias KilnCMS.Accounts.PasswordNotice
   alias KilnCMS.Accounts.PendingSignIn
+  alias KilnCMS.Accounts.SessionEviction
   alias KilnCMS.Security.AuthEvents
   alias KilnCMSWeb.ChallengeComponents
   alias KilnCMSWeb.SafeRedirect
@@ -502,9 +503,12 @@ defmodule KilnCMSWeb.AuthController do
   @impl true
   def sign_out(conn, _params) do
     return_to = SafeRedirect.local_path(get_session(conn, :return_to), ~p"/")
+    # Read before `clear_session/2` empties the session (#2490).
+    jti = KilnCMS.Accounts.Token.peeked_jti(get_session(conn, "user_token"))
 
     conn
     |> clear_session(:kiln_cms)
+    |> evict_signed_out(jti)
     # `clear_session/2` already deletes the remember-me cookie — but through the
     # *library's* writer, whose attributes are not the ones we wrote it with
     # (`secure: Mix.env() != :dev`, no explicit `path`). A browser only replaces
@@ -517,4 +521,15 @@ defmodule KilnCMSWeb.AuthController do
     |> put_flash(:info, gettext("You are now signed out"))
     |> redirect(to: return_to)
   end
+
+  # `clear_session/2` revokes the session's token but tells nobody, so this
+  # session's other tabs and its collab and GraphQL sockets stayed open on the
+  # strength of having connected (#2490). Evicted after the revocation, so
+  # their reconnects find the token revoked.
+  defp evict_signed_out(conn, jti) when is_binary(jti) do
+    SessionEviction.disconnect_sockets(jti, :signed_out)
+    conn
+  end
+
+  defp evict_signed_out(conn, _no_session), do: conn
 end

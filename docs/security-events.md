@@ -300,8 +300,10 @@ comma-separated, or `none`.
 For `session_idle_expired`, `timeout_minutes` is the timeout that applied,
 `tier` is `admin` when it was the administrators' own timeout and `member` when
 it was everyone's, and `surface` is where it was noticed: `http` (a request),
-`live` (an open page) or `remember_me` (a remember-me cookie that sat unused too
-long). For `all_sessions_revoked`, `count` is the number of browser sessions
+`live` (an open page), `remember_me` (a remember-me cookie that sat unused too
+long) or `collab` (a collaborative-editing connection, at its connect or its
+30-second re-check, which can notice an idle session with no page of it left
+open). A `collab` event carries no IP address or user agent. For `all_sessions_revoked`, `count` is the number of browser sessions
 signed out (remember-me cookies and two-factor holds are not counted) and
 `except_self` is `true` when the admin kept their own browser. Saving the idle
 timeout itself is `org_setting_changed` with `setting` `site_session_policy`.
@@ -541,7 +543,7 @@ All sites write through `KilnCMS.Security.Recorder` (`record/2` in txn,
 | `sso_config_changed` | `CMS.SiteSsoProvider` (every write, via the `audit: :sso_config` option of `use KilnCMS.CMS.OrgSettings`, `lib/kiln_cms/cms/site_sso_provider.ex`), and `CMS.SiteSsoDomain` `:add`, `:verify`, `:remove` (`lib/kiln_cms/cms/site_sso_domain.ex`) | in txn; never the issuer, client id, secret or domain |
 | `org_setting_changed` | `lib/kiln_cms/cms/org_settings.ex`: the `use KilnCMS.CMS.OrgSettings` macro adds `Changes.RecordOrgSetting` to every write of every settings resource, and `CMS.IpBlockRule` `:create`, `:destroy` (`lib/kiln_cms/cms/ip_block_rule.ex`) | in txn; names the setting, never a value. The retention setting itself is one of them |
 | `ip_auto_blocked` | `lib/kiln_cms/security/scanner_guard.ex`, after the guard's `CMS.IpBlockRule` `:create` succeeds, via `Recorder.record_after_commit/2` | outside the transaction, off the request path; skipped when the guard is off, the cap is reached or a recent sign-in from the address exists |
-| `session_idle_expired` | `lib/kiln_cms/accounts/idle_timeout.ex`: `check/3`, once the expiring UPDATE matched the row (a racing tab that kept the session awake records nothing). Reached from `KilnCMSWeb.Plugs.IdleTimeout` (requests, remember-me) and `KilnCMSWeb.IdleSession` (open pages) | after commit; tenant is the site the request was on; target type `session`, no target id |
+| `session_idle_expired` | `lib/kiln_cms/accounts/idle_timeout.ex`: `check/3`, once the expiring UPDATE matched the row (a racing tab that kept the session awake records nothing). Reached from `KilnCMSWeb.Plugs.IdleTimeout` (requests, remember-me), `KilnCMSWeb.IdleSession` (open pages) and, through `check_row/3`, `KilnCMSWeb.CollabSocket.session_refused?/3` (the collab connect and `KilnCMSWeb.CollabChannel`'s re-check) | after commit; tenant is the site the request was on; target type `session`, no target id |
 | `all_sessions_revoked` | `lib/kiln_cms/accounts/sign_out_all.ex`: `run/3`, the `:sign_out_all` action of `CMS.SiteSessionPolicy` | in txn, with the revocation and the watermark: if the event cannot be written nothing is signed out |
 | `admin_access_refused` | `KilnCMSWeb.AdminAllowlist.record_refusal/4`, called from `lib/kiln_cms_web/plugs/admin_allowlist.ex` (`surface` `http` or `api`) and from `lib/kiln_cms_web/admin_allowlist.ex`: the LiveView `on_mount` (`live`) and `check_connect/2`, from the collab socket's `connect/3` in `lib/kiln_cms_web/channels/collab_socket.ex` (`collab`) | sampled, after commit; only for an address not on the list, never for a list that could not be read |
 | `admin_allowlist_changed` | `lib/kiln_cms/cms/changes/record_admin_allowlist_change.ex`, on `CMS.SiteAdminAllowlist` `:save` and `:update` (the `audit: {:change, ...}` option of `use KilnCMS.CMS.OrgSettings`) | in txn; only when the actor is a user. The previous list is read in the same transaction; if it cannot be read the save fails |

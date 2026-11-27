@@ -61,6 +61,9 @@ else.
 
 - **Run `mix kiln.reserved_paths` (in a release, `bin/kiln_cms eval 'KilnCMS.Release.reserved_paths()'`) to list pages slugged `developers`, `ready`, `setup`, `sign-in`, `sign-out`, `actor`, `ap`, `mcp` or `password-reset`, and path aliases under them: their built-in routes already served those URLs instead (#2898). Give each a new slug or alias.** No migration; read-only.
   ([long form](docs/changelog/unreleased.md#reserved-route-slugs-upgrade))
+- **Collaborative editing: a collab token minted before this release names no session, and is still accepted with its old per-account behavior for this release only, at most 24 hours after the last old node stops (#2490).**
+  Nothing to do; the next release refuses such tokens. No migration; rolling the pin back is safe.
+  ([#3460](https://github.com/The-Verscienta/kiln_cms/pull/3460) · [long form](docs/changelog/unreleased.md#session-bound-sockets-upgrade))
 
 ### Breaking
 
@@ -73,6 +76,9 @@ else.
 - **Password policy: a site can also check its administrators' passwords against known breaches as they sign in, off by default; under Block a breached one is sent to reset by email, under Warn the admin signs in with a warning (#2407).**
   `POST /api/auth/sign_in` gains a `403` `password_reset_required` and an additive `password_breach` field. A sign-in pause that blocked attempts fill mails the owner to choose a new password. Expand-only migration; rolling the pin back is safe.
   ([#3434](https://github.com/The-Verscienta/kiln_cms/pull/3434) · [long form](docs/changelog/unreleased.md#breached-password-sign-in-check))
+- **Backups: `bin/backup` in a release and `mix kiln.backup.*` in a checkout list backups, start one and optionally wait for it, re-check a backup's files, report what retention would delete, and import cron's backups, with `--json` output and exit codes 0, 1 and 2 (part of #2234).**
+  `prune` only reports and `verify` records nothing. New image only; no migration, and rolling the pin back is safe.
+  ([#3455](https://github.com/The-Verscienta/kiln_cms/pull/3455) · [long form](docs/changelog/unreleased.md#backup-cli))
 
 ### Changed
 
@@ -151,6 +157,10 @@ else.
 - **Smart 404 blocking: a spoofed search-engine claim rotating through the addresses of one IPv6 `/64` is counted once another address there has failed its DNS check or left its reverse zone silent (#2838).**
   Only with `KILN_SCANNER_BLOCKING` on; verified crawlers stay exempt, IPv4 is unchanged. No migration; rolling the pin back is safe.
   ([#3449](https://github.com/The-Verscienta/kiln_cms/pull/3449) · [long form](docs/changelog/unreleased.md#scanner-guard-ipv6-rotation))
+
+- **Signing out one session now also closes that session's collaborative-editing rooms (`/ws/collab`) and a `/ws/gql` socket opened with its token, which before stayed open after idle expiry, "Sign out everyone", the browser's own Sign out or a sign-out from Active sessions (#2490).**
+  A `/ws/gql` document sent after a sign-out the socket missed is refused with `extensions.code: "unauthenticated"`. No migration, no setting.
+  ([#3460](https://github.com/The-Verscienta/kiln_cms/pull/3460) · [long form](docs/changelog/unreleased.md#session-bound-sockets))
 
 ## [1.13.0] - 2026-11-25
 
