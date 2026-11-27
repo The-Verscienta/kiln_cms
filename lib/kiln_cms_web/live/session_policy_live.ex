@@ -23,6 +23,7 @@ defmodule KilnCMSWeb.SessionPolicyLive do
   use KilnCMSWeb, :live_view
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Errors.SignOutNotRecorded
   alias KilnCMS.Accounts.SignOutEveryone
   alias KilnCMS.CMS
   alias KilnCMS.CMS.SiteSessionPolicy
@@ -175,19 +176,34 @@ defmodule KilnCMSWeb.SessionPolicyLive do
     |> assign(:phrase_matches?, false)
   end
 
-  defp everyone_error(%Ash.Error.Invalid{errors: errors} = error) do
-    if Enum.any?(errors, &match?(%{field: :confirmation}, &1)),
-      do: gettext("Nobody was signed out: type the server's host name exactly to confirm."),
-      else: generic_everyone_error(error)
-  end
+  # Every refusal and failure in words the admin can act on — never the
+  # error's own text, which is English and can be a database's.
+  defp everyone_error(%Ash.Error.Forbidden{}),
+    do: gettext("You don't have permission to sign everyone out on every site.")
 
-  defp everyone_error(error), do: generic_everyone_error(error)
+  defp everyone_error(error) do
+    errors = error |> Ash.Error.to_error_class() |> Map.get(:errors, [])
 
-  defp generic_everyone_error(error) do
-    ash_error_message(error,
-      forbidden: gettext("You don't have permission to sign everyone out on every site."),
-      fallback: gettext("Nobody was signed out. Try again.")
-    )
+    cond do
+      Enum.any?(errors, &match?(%{field: :confirmation}, &1)) ->
+        gettext("Nobody was signed out: type the server's host name exactly to confirm.")
+
+      Enum.any?(errors, &match?(%{field: :except_session_jti}, &1)) ->
+        gettext(
+          "Nobody was signed out: this browser's session has already ended. Reload the page and try again."
+        )
+
+      Enum.any?(errors, &match?(%SignOutNotRecorded{}, &1)) ->
+        gettext(
+          "Nobody was signed out: the instance security log could not record it. Try again."
+        )
+
+      Enum.any?(errors, &match?(%Ash.Error.Invalid.Timeout{}, &1)) ->
+        gettext("Nobody was signed out: it took too long and was undone. Try again.")
+
+      true ->
+        gettext("Nobody was signed out. Try again.")
+    end
   end
 
   defp load_settings(socket) do

@@ -234,6 +234,46 @@ defmodule KilnCMSWeb.SessionPolicyLiveTest do
       assert live?(victim)
     end
 
+    test "says so when this browser's session ended before the click", %{conn: conn, org: org} do
+      victim = victim_session(org)
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      # Signed out in another tab: the session to keep is no longer one.
+      own = :sys.get_state(lv.pid).socket.assigns.current_session_jti
+
+      KilnCMS.Repo.update_all(from(t in KilnCMS.Accounts.Token, where: t.jti == ^own),
+        set: [purpose: "revocation"]
+      )
+
+      html = submit_everyone(lv, "true")
+
+      assert html =~ "this browser&#39;s session has already ended"
+      refute html =~ "not one of your sessions"
+      assert live?(victim)
+    end
+
+    test "says so when the instance log could not record it", %{conn: conn, org: org} do
+      victim = victim_session(org)
+      {:ok, lv, _html} = admin_live(conn, org)
+
+      # An acting account already anonymized: the event is skipped, and the
+      # sign-out with it.
+      :sys.replace_state(lv.pid, fn state ->
+        update_in(state.socket, fn socket ->
+          Phoenix.Component.assign(socket, :current_user, %{
+            socket.assigns.current_user
+            | anonymized_at: DateTime.utc_now()
+          })
+        end)
+      end)
+
+      html = submit_everyone(lv, "false")
+
+      assert html =~ "the instance security log could not record it"
+      refute html =~ "unknown error"
+      assert live?(victim)
+    end
+
     test "malformed payloads sign nobody out and do not crash the page", %{conn: conn, org: org} do
       victim = victim_session(org)
       {:ok, lv, _html} = admin_live(conn, org)
@@ -250,6 +290,12 @@ defmodule KilnCMSWeb.SessionPolicyLiveTest do
       assert render(lv) =~ "Sign out everyone on every site"
       assert live?(victim)
     end
+  end
+
+  defp submit_everyone(lv, keep_me) do
+    render_submit(lv, "sign_out_everyone", %{
+      "sign_out_everyone" => %{"confirmation" => SignOutEveryone.phrase(), "keep_me" => keep_me}
+    })
   end
 
   defp change(lv, typed) do

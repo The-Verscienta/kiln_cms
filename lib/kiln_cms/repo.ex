@@ -26,6 +26,38 @@ defmodule KilnCMS.Repo do
     ]
   end
 
+  @timeout_key {__MODULE__, :timeout}
+
+  @doc """
+  Run `fun` with every statement it sends from this process allowed
+  `timeout` milliseconds, rather than the pool's default (15 seconds). A
+  statement that passes its own `timeout:` keeps it.
+
+  For a write Ash cannot hand a timeout to: an atomic bulk update
+  (`strategy: :atomic`) drops the `timeout:` it is given before the
+  statement is sent. `Repo.transaction/2`'s own `timeout:` is no substitute:
+  it bounds how long the whole transaction holds its connection, while each
+  statement inside it still gets the default.
+  """
+  @spec with_timeout(pos_integer(), (-> result)) :: result when result: term()
+  def with_timeout(timeout, fun) when is_integer(timeout) and timeout > 0 do
+    previous = Process.put(@timeout_key, timeout)
+
+    try do
+      fun.()
+    after
+      if previous, do: Process.put(@timeout_key, previous), else: Process.delete(@timeout_key)
+    end
+  end
+
+  @impl true
+  def default_options(_operation) do
+    case Process.get(@timeout_key) do
+      nil -> []
+      timeout -> [timeout: timeout]
+    end
+  end
+
   # Don't open unnecessary transactions
   # will default to `false` in 4.0
   @impl true

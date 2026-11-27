@@ -18,7 +18,14 @@ defmodule KilnCMS.Accounts.SignOutEveryone do
        own browser when asked;
     3. records `:all_sessions_revoked_everywhere` in the **instance** security
        log (`KilnCMS.Security.InstanceEvent`), which only platform admins
-       read. A write that fails, or is skipped, rolls the revocation back.
+       read. A write that fails, or is skipped
+       (`KilnCMS.Accounts.Errors.SignOutNotRecorded`), rolls the revocation
+       back.
+
+  The rows are locked before they are written, in the order a session in use
+  locks them, so a session used meanwhile waits rather than deadlocking the
+  sign-out. Each statement may take `Sessions.revoke_timeout/0`; past it the
+  whole sign-out rolls back with an `Ash.Error.Invalid.Timeout`.
 
   Once it commits, each revoked session's open pages are sent to sign-in and
   its collab and `/ws/gql` sockets are closed
@@ -40,6 +47,7 @@ defmodule KilnCMS.Accounts.SignOutEveryone do
   require Logger
 
   alias KilnCMS.Accounts
+  alias KilnCMS.Accounts.Errors.SignOutNotRecorded
   alias KilnCMS.Accounts.SessionEviction
   alias KilnCMS.Accounts.Sessions
   alias KilnCMS.Accounts.Token
@@ -106,7 +114,7 @@ defmodule KilnCMS.Accounts.SignOutEveryone do
   defp sign_out(keep, except, context) do
     result =
       AfterCommit.deferring(fn ->
-        Repo.transaction(fn -> in_transaction(keep, except, context) end)
+        Sessions.revoke_transaction(fn -> in_transaction(keep, except, context) end)
       end)
 
     case result do
@@ -116,14 +124,13 @@ defmodule KilnCMS.Accounts.SignOutEveryone do
   end
 
   defp in_transaction(keep, except, context) do
-    with {:ok, sessions, _others} <- Sessions.revoke_everywhere(keep),
-         {:ok, _event} <- record(length(sessions), except, context) do
-      jtis = Enum.map(sessions, & &1.jti)
+    with {:ok, jtis} <- Sessions.revoke_everywhere(keep),
+         {:ok, _event} <- record(length(jtis), except, context) do
       AfterCommit.run(fn -> dispatch_eviction(jtis) end)
-      length(sessions)
+      length(jtis)
     else
       {:error, error} -> Repo.rollback(error)
-      :skipped -> Repo.rollback(:not_recorded)
+      :skipped -> Repo.rollback(SignOutNotRecorded.exception([]))
     end
   end
 

@@ -15999,6 +15999,21 @@ msgstr "No se cerró la sesión de nadie. Inténtalo de nuevo."
 
 #: lib/kiln_cms_web/live/session_policy_live.ex
 #, elixir-autogen, elixir-format
+msgid "Nobody was signed out: it took too long and was undone. Try again."
+msgstr "No se cerró la sesión de nadie: tardó demasiado y se deshizo. Inténtalo de nuevo."
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody was signed out: the instance security log could not record it. Try again."
+msgstr "No se cerró la sesión de nadie: el registro de seguridad de la instancia no pudo anotarlo. Inténtalo de nuevo."
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody was signed out: this browser's session has already ended. Reload the page and try again."
+msgstr "No se cerró la sesión de nadie: la sesión de este navegador ya terminó. Vuelve a cargar la página e inténtalo de nuevo."
+
+#: lib/kiln_cms_web/live/session_policy_live.ex
+#, elixir-autogen, elixir-format
 msgid "Nobody was signed out: type the server's host name exactly to confirm."
 msgstr "No se cerró la sesión de nadie: escribe exactamente el nombre de host del servidor para confirmar."
 

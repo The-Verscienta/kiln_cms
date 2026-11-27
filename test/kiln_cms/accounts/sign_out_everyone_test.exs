@@ -17,6 +17,7 @@ defmodule KilnCMS.Accounts.SignOutEveryoneTest do
   alias KilnCMS.Accounts
   alias KilnCMS.Accounts.InstanceSessions
   alias KilnCMS.Accounts.SessionEviction
+  alias KilnCMS.Accounts.Sessions
   alias KilnCMS.Accounts.SignOutEveryone
   alias KilnCMS.Accounts.Token
   alias KilnCMS.Repo
@@ -348,6 +349,28 @@ defmodule KilnCMS.Accounts.SignOutEveryoneTest do
 
       user_topic = SessionEviction.topic(ctx.victim.id)
       refute_receive %Phoenix.Socket.Broadcast{topic: ^user_topic}
+    end
+  end
+
+  describe "Sessions.revoke_everywhere/1" do
+    test "returns the revoked sessions' jtis and nothing of the other rows it revokes", ctx do
+      cookie = token!(ctx.victim, %{purpose: "remember_me", org_id: ctx.site.id})
+      held = token!(ctx.victim, %{purpose: "pending_second_factor"})
+      other = token!(user())
+
+      assert {:ok, jtis} = Sessions.revoke_everywhere([])
+
+      assert Enum.sort(jtis) == Enum.sort([ctx.victim_session.jti, other.jti])
+      refute live?(cookie.jti)
+      refute live?(held.jti)
+    end
+
+    test "keeps the rows it is told to, and returns none of them", ctx do
+      kept = token!(ctx.platform, %{org_id: ctx.site.id})
+
+      assert {:ok, [jti]} = Sessions.revoke_everywhere([kept.jti])
+      assert jti == ctx.victim_session.jti
+      assert live?(kept.jti)
     end
   end
 
