@@ -88,10 +88,22 @@ defmodule KilnCMS.Accounts.ThrottleStore do
   Deliberately **not** a fallback: an in-transaction call. That raises (above)
   rather than counting locally, because it is a bug that would otherwise pass
   every single-node test.
+
+  ## Keys are stored as an HMAC
+
+  A key reaches the table, and the node-local fallback, only as
+  `KilnCMS.Keys.ClientDigest.digest/1` of itself (#3501): an HMAC-SHA256 under
+  a key derived from `secret_key_base`. Keys are addresses and email digests,
+  a space small enough that a plain SHA-256 in a `pg_dump` would name them.
+  The derivation needs no database, so the fallback hashes the same way, and
+  every node shares the secret, so every node lands a key on the same row. See
+  that moduledoc for what rotating the secret, and the rolling deploy that
+  introduced the HMAC, do to a budget.
   """
 
   require Logger
 
+  alias KilnCMS.Keys.ClientDigest
   alias KilnCMS.Repo
 
   defmodule Local do
@@ -516,10 +528,12 @@ defmodule KilnCMS.Accounts.ThrottleStore do
   end
 
   @doc false
-  # The digest a key is stored under. Exported for the tests that assert no
-  # submitted string reaches the table in the clear.
+  # The digest a key is stored under: an HMAC keyed from `secret_key_base`
+  # (`KilnCMS.Keys.ClientDigest`), never a plain hash a dump could reverse.
+  # Every statement above hashes through here. Exported for the tests that
+  # assert no submitted string reaches the table in the clear.
   @spec key_hash(String.t()) :: <<_::256>>
-  def key_hash(key), do: :crypto.hash(:sha256, key)
+  def key_hash(key), do: ClientDigest.digest(key)
 
   defp refuse_in_transaction!(bucket) do
     if Repo.in_transaction?() do

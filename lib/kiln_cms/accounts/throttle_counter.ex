@@ -19,10 +19,12 @@ defmodule KilnCMS.Accounts.ThrottleCounter do
 
     * `bucket` — which budget (`"signin"`, `"2fa"`, `"ip:auth"`, …). A short
       constant chosen by the code, never by a caller.
-    * `key_hash` — SHA-256 of the budget's key. Keys are attacker-chosen (one
-      per distinct address *submitted* at the sign-in form), so the column is
-      fixed at 32 bytes whatever was submitted, and no address, email or IP is
-      ever written in the clear.
+    * `key_hash` — an HMAC-SHA256 of the budget's key under a key derived
+      from `secret_key_base` (`KilnCMS.Keys.ClientDigest`, #3501). Keys are
+      attacker-chosen (one per distinct address *submitted* at the sign-in
+      form), so the column is fixed at 32 bytes whatever was submitted, and no
+      address, email or IP is ever written in the clear, nor as a plain hash
+      a dump could be reversed from.
     * `window_index` — which fixed window, computed from the **database's**
       clock so every node agrees on where a window starts.
     * `expires_at` — when that window closes. The prune below deletes every

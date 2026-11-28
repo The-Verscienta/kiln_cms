@@ -19,8 +19,10 @@ defmodule KilnCMS.Security.CrawlerSighting do
 
   ## What a row holds, and what it does not
 
-    * `key_hash`: SHA-256 of the counted client (an IPv4 address, or an IPv6
-      address's `/64`). No address is ever written in the clear.
+    * `key_hash`: an HMAC-SHA256 of the counted client (an IPv4 address, or
+      an IPv6 address's `/64`) under a key derived from `secret_key_base`
+      (`KilnCMS.Keys.ClientDigest`, #3501). No address is ever written in the
+      clear, nor as a plain hash a dump could be reversed from.
     * `engine`: which engine's list the client is outside (`"duckduckgo"`),
       a constant chosen by the code.
     * `first_seen_at`: the first sighting, by the **database's** clock, so

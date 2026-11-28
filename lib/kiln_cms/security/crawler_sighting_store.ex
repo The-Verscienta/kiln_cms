@@ -40,8 +40,17 @@ defmodule KilnCMS.Security.CrawlerSightingStore do
   backoff that report and pace it: see `KilnCMS.CrawlerVerification`'s
   "List-only evidence". This module logs nothing itself, so the test seams
   that share `shared/1` stay quiet.
+
+  ## The client is stored as an HMAC
+
+  A client key reaches the table only as `KilnCMS.Keys.ClientDigest.digest/1`
+  of itself (#3501), an HMAC-SHA256 under a key derived from
+  `secret_key_base`, because the IPv4 space is small enough that a plain
+  SHA-256 in a `pg_dump` would name every address. Rotating the secret
+  restarts every sighting's grace; see that moduledoc.
   """
 
+  alias KilnCMS.Keys.ClientDigest
   alias KilnCMS.Repo
 
   # Short: this runs on a 404's request path, and an unanswered store only
@@ -169,10 +178,12 @@ defmodule KilnCMS.Security.CrawlerSightingStore do
   end
 
   @doc false
-  # The digest a client key is stored under. Exported for the tests that
-  # assert no address reaches the table in the clear.
+  # The digest a client key is stored under: the same HMAC as the throttle
+  # counters' (`KilnCMS.Keys.ClientDigest`), never a plain hash a dump could
+  # reverse. Exported for the tests that assert no address reaches the table
+  # in the clear.
   @spec key_hash(String.t()) :: <<_::256>>
-  def key_hash(key), do: :crypto.hash(:sha256, key)
+  def key_hash(key), do: ClientDigest.digest(key)
 
   # The exceptions that mean "the store cannot answer", as `ThrottleStore`'s:
   # no connection, no sandbox owner (tests), or Postgres refusing the

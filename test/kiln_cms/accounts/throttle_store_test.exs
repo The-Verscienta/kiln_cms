@@ -8,6 +8,7 @@ defmodule KilnCMS.Accounts.ThrottleStoreTest do
   use KilnCMS.DataCase, async: true
 
   alias KilnCMS.Accounts.ThrottleStore
+  alias KilnCMS.Keys.ClientDigest
   alias KilnCMS.Repo
 
   # Windows are epoch-aligned (by the database clock, or Hammer's on the
@@ -150,6 +151,48 @@ defmodule KilnCMS.Accounts.ThrottleStoreTest do
     end
   end
 
+  # A key is an address or an email digest: a plain SHA-256 of one is
+  # reversed by hashing every candidate (#3501). Every entry point writes, and
+  # finds, the HMAC.
+  describe "every entry point stores the HMAC" do
+    test "hit/5, peek/3, refund/3, spent/2 and forget/2" do
+      b = bucket()
+      key = "inet:203.0.113.5"
+
+      assert {:allow, 2} = ThrottleStore.hit(b, key, @window, 5, 2)
+      assert stored_hashes(b) == [ClientDigest.digest(key)]
+      assert_hmac_stored(b, key)
+
+      assert ThrottleStore.peek(b, key, @window) == 2
+      assert ThrottleStore.spent(b, key) == 2
+      assert :ok = ThrottleStore.refund(b, key, @window)
+      assert ThrottleStore.peek(b, key, @window) == 1
+
+      assert :ok = ThrottleStore.forget(b, key)
+      assert stored_hashes(b) == []
+    end
+
+    test "count/3 and window_count/3" do
+      b = bucket()
+      key = "203.0.113.5"
+
+      assert {1, index} = ThrottleStore.count(b, key, @window)
+      assert stored_hashes(b) == [ClientDigest.digest(key)]
+      assert_hmac_stored(b, key)
+      assert ThrottleStore.window_count(b, key, index) == 1
+    end
+
+    test "count_sharded/5 and window_sum/3" do
+      b = bucket()
+      key = "org|198.51.100.7/32"
+
+      assert {1, index, :shared} = ThrottleStore.count_sharded(b, key, @window, 4, shard: 2)
+      assert stored_hashes(b) == [ClientDigest.digest("#{key}:2")]
+      assert_hmac_stored(b, "#{key}:2")
+      assert ThrottleStore.window_sum(b, ThrottleStore.sharded_keys(key, 4), index) == 1
+    end
+  end
+
   describe "never inside a transaction" do
     test "a charge inside a transaction raises rather than being refundable" do
       b = bucket()
@@ -168,6 +211,20 @@ defmodule KilnCMS.Accounts.ThrottleStoreTest do
       assert {:ok, :ok} = Repo.transaction(fn -> ThrottleStore.forget(b, "k") end)
       assert ThrottleStore.spent(b, "k") == 0
     end
+  end
+
+  defp stored_hashes(b) do
+    %{rows: rows} =
+      Repo.query!("SELECT DISTINCT key_hash FROM throttle_counters WHERE bucket = $1", [b])
+
+    List.flatten(rows)
+  end
+
+  defp assert_hmac_stored(b, key) do
+    hashes = stored_hashes(b)
+    assert ClientDigest.digest(key) in hashes
+    refute :crypto.hash(:sha256, key) in hashes
+    assert ThrottleStore.key_hash(key) == ClientDigest.digest(key)
   end
 
   defp wait_for_window_start(scale) do
@@ -291,7 +348,7 @@ defmodule KilnCMS.Accounts.ThrottleStorePeerTest do
       |> Keyword.merge(pool: DBConnection.ConnectionPool, pool_size: 4, log: false)
 
     nodes = for _ <- 1..2, do: start_node(repo_config)
-    %{nodes: nodes}
+    %{nodes: nodes, repo_config: repo_config}
   end
 
   test "the second-factor budget holds across two nodes", %{nodes: [a, b] = nodes} do
@@ -396,9 +453,29 @@ defmodule KilnCMS.Accounts.ThrottleStorePeerTest do
     assert {:deny, _} = call(a, KilnCMSWeb.RateLimit, :check, [:auth, ip])
   end
 
+  # The other side of the shared secret: a node on another `secret_key_base`
+  # (mid-rotation, say) lands every key on rows of its own, so the budget
+  # restarts there. Proves the peers above share the budget because they share
+  # the secret, not by accident.
+  test "a node on another secret_key_base counts on rows of its own", %{
+    nodes: [a | _] = nodes,
+    repo_config: repo_config
+  } do
+    other = start_node(repo_config, KilnCMS.Keys.Vault.secret_key_base() <> "-rotated")
+    ip = "peer-secret-#{System.unique_integer([:positive])}"
+    on_exit(fn -> forget(nodes, "ip:auth", ip) end)
+    on_exit(fn -> forget([other], "ip:auth", ip) end)
+
+    {limit, _scale} = KilnCMSWeb.RateLimit.default_limits()[:auth]
+    for _ <- 1..limit, do: assert(call(a, KilnCMSWeb.RateLimit, :check, [:auth, ip]) == :allow)
+    assert {:deny, _} = call(a, KilnCMSWeb.RateLimit, :check, [:auth, ip])
+
+    assert :allow = call(other, KilnCMSWeb.RateLimit, :check, [:auth, ip])
+  end
+
   # ---------------------------------------------------------------------------
 
-  defp start_node(repo_config) do
+  defp start_node(repo_config, secret_key_base \\ KilnCMS.Keys.Vault.secret_key_base()) do
     args = Enum.flat_map(:code.get_path(), &[~c"-pa", &1])
     {:ok, peer, _node} = :peer.start(%{connection: :standard_io, args: args, wait_boot: 60_000})
     on_exit(fn -> stop_node(peer) end)
@@ -406,6 +483,18 @@ defmodule KilnCMS.Accounts.ThrottleStorePeerTest do
     {:ok, _} = :peer.call(peer, Application, :ensure_all_started, [:ecto_sql], 60_000)
     {:ok, _} = :peer.call(peer, Application, :ensure_all_started, [:postgrex], 60_000)
     :ok = :peer.call(peer, Application, :put_env, [:kiln_cms, KilnCMS.Repo, repo_config])
+
+    # Keys are stored as an HMAC keyed from `secret_key_base` (#3501), which
+    # every node of a deployment shares. The peers load no config, so give
+    # them this node's, and the key cache `Plug.Crypto.KeyGenerator` uses.
+    {:ok, _} = :peer.call(peer, Application, :ensure_all_started, [:plug_crypto], 60_000)
+
+    :ok =
+      :peer.call(peer, Application, :put_env, [
+        :kiln_cms,
+        KilnCMSWeb.Endpoint,
+        [secret_key_base: secret_key_base]
+      ])
 
     # Under `kernel_safe_sup` — the kernel's own home for children like these —
     # because a `start_link` from `:peer.call/5` links to the call's process,
