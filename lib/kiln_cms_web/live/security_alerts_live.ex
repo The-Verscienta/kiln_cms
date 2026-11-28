@@ -30,7 +30,8 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
       its own form (`KilnCMS.Security.PlatformAlertSettings`), shown to
       platform admins only and re-checked on save; the resource policy
       refuses anyone else. Turning it off is recorded in the instance
-      security log, which the page says.
+      security log and sends every platform admin a notice (#2811), which
+      the page says. A notice that cannot be written fails the save.
     * Site alerts go to the site's member admins only. A site with none gets
       no bell and no email for its alerts, and the page warns about it.
   """
@@ -105,6 +106,13 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
       false ->
         {:noreply, put_flash(socket, :error, platform_forbidden_message())}
 
+      # Not the admin's to fix, such as a platform notice that could not be
+      # written (#2811, which fails the save): the plain line, never the
+      # database's own words.
+      {:error, %Ash.Error.Unknown{}} ->
+        {:noreply,
+         put_flash(socket, :error, gettext("The platform alert settings could not be saved."))}
+
       {:error, error} ->
         {:noreply,
          put_flash(
@@ -156,9 +164,7 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
 
   defp platform_saved_message(before, attrs) do
     if attrs.disabled_kinds -- before != [] do
-      gettext(
-        "Platform alert settings saved. Turning an alert off is recorded in the instance security log."
-      )
+      gettext("Platform alert settings saved. Every platform admin will be sent a notice.")
     else
       gettext("Platform alert settings saved.")
     end
@@ -439,7 +445,7 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
         <h2 class="text-sm font-semibold">{gettext("Platform alerts")}</h2>
         <p class="text-sm text-base-content/70">
           {gettext(
-            "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log."
+            "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log, and every platform admin is sent a notice."
           )}
         </p>
         <.form

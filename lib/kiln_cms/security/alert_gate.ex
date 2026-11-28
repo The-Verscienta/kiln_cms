@@ -40,12 +40,14 @@ defmodule KilnCMS.Security.AlertGate do
       transaction (a reused API key mails its legacy alert when the event
       cannot be recorded).
 
-  `insert_notice!/2` is always required: an `alerts_silenced` notice that
-  cannot be written rolls back the change that silenced the alerts.
+  `insert_notice!/2` and `insert_platform_notice!/1` are always required: an
+  `alerts_silenced` notice that cannot be written rolls back the change that
+  silenced the alerts.
   """
 
   require Logger
 
+  alias KilnCMS.Accounts
   alias KilnCMS.Repo
   alias KilnCMS.Security.Alerts
 
@@ -75,11 +77,13 @@ defmodule KilnCMS.Security.AlertGate do
   RETURNING d.id::text
   """
 
+  # A site notice (`'notice'`, scope `notice:<id>`) or a platform one
+  # (`'platform_notice'`, scope `platform_notice:<id>`), by $4.
   @notice_sql """
   INSERT INTO security_alert_dispatches
     (id, scope, kind, channel, org_id, window_index, window_started_at, window_ends_at,
      notice, expires_at, inserted_at)
-  SELECT w.id, 'notice:' || w.id::text, 'alerts_silenced', 'notice', $1::text::uuid, 0,
+  SELECT w.id, $4::text || ':' || w.id::text, 'alerts_silenced', $4::text, $1::text::uuid, 0,
          w.now, w.now, $2::jsonb, w.now + ($3::bigint * interval '1 millisecond'), w.now
   FROM (SELECT gen_random_uuid() AS id, clock_timestamp() AT TIME ZONE 'UTC' AS now) AS w
   RETURNING id::text
@@ -87,8 +91,11 @@ defmodule KilnCMS.Security.AlertGate do
 
   @notice_keys ~w(change kinds endpoint_id actor_id)
 
-  @typedoc "Where a claim is made from: `:site`, `:platform` or `:notice`."
-  @type channel :: :site | :platform | :notice
+  @typedoc """
+  A dispatch's channel: `:site` or `:platform` for a claim, `:notice` or
+  `:platform_notice` for a notice.
+  """
+  @type channel :: :site | :platform | :notice | :platform_notice
 
   @doc """
   Claim the alert window for `kind` in `scope` (an org id, `"platform"`, or
@@ -219,7 +226,32 @@ defmodule KilnCMS.Security.AlertGate do
       raise ArgumentError, "unknown alerts_silenced change: #{inspect(notice["change"])}"
     end
 
-    %{rows: [[id]]} = Repo.query!(@notice_sql, [org_id, notice, @keep_ms])
+    insert_notice_row!("notice", org_id, notice)
+  end
+
+  @doc """
+  Write a **platform** `alerts_silenced` notice (#2811), in the caller's
+  transaction, and return its dispatch id: one for every platform admin,
+  whoever they are when it is delivered. `notice` holds the `change` (one of
+  `KilnCMS.Security.Alerts.platform_notice_changes/0`, which no site notice
+  may name), the `kinds` turned off and the `actor_id`; any other key is
+  dropped. The row's org is the default org, where its bell rows go.
+
+  **Fails closed**, like `insert_notice!/2`: raises on any failure.
+  """
+  @spec insert_platform_notice!(map()) :: Ash.UUID.t()
+  def insert_platform_notice!(%{} = notice) do
+    notice = notice |> Map.new(fn {k, v} -> {to_string(k), v} end) |> Map.take(@notice_keys)
+
+    unless notice["change"] in Alerts.platform_notice_changes() do
+      raise ArgumentError, "unknown platform alerts_silenced change: #{inspect(notice["change"])}"
+    end
+
+    insert_notice_row!("platform_notice", Accounts.default_org_id(), notice)
+  end
+
+  defp insert_notice_row!(channel, org_id, notice) do
+    %{rows: [[id]]} = Repo.query!(@notice_sql, [org_id, notice, @keep_ms, channel])
     id
   end
 

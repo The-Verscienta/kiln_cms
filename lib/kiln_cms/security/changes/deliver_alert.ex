@@ -42,6 +42,12 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
       recipients (`KilnCMS.Security.Alerts.site_recipients/1`: its member
       admins, else the platform admins), muted or not, and the site's webhooks
       subscribed to `security.alerts_silenced`.
+    * **platform notice** (#2811, a platform admin turned a platform kind
+      off) — a bell row (in the default org, anchored as a platform alert)
+      and an email for every platform admin
+      (`KilnCMS.Security.Alerts.platform_recipients/0`, as they are at
+      delivery), the one who turned it off included. No mute applies, no
+      setting turns it off, and no webhook goes. It has no summary.
 
   ## Summaries
 
@@ -93,10 +99,20 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
   # What a delivery of `dispatch` would send, read but not written. Public for
   # the tests' sake only.
   @spec build_plan(struct(), :alert | :summary) :: map()
+  # A notice has no summary, and the summary trigger never picks one up; a
+  # platform notice says so here as well, so no change to that trigger can
+  # send its recipients a second copy.
+  def build_plan(%{channel: :platform_notice}, :summary), do: empty_plan()
+
   def build_plan(dispatch, phase) do
     org = organization!(dispatch.org_id)
     channel = dispatch.channel
-    kind = if channel == :notice, do: :alerts_silenced, else: Alerts.kind(dispatch.kind)
+
+    kind =
+      if channel in [:notice, :platform_notice],
+        do: :alerts_silenced,
+        else: Alerts.kind(dispatch.kind)
+
     settings = if channel == :site, do: Alerts.settings_for(org.id)
 
     cond do
@@ -116,17 +132,19 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
   end
 
   # A site kind the site turned off, or a platform kind a platform admin did:
-  # stamped, nothing sent. A notice is never turned off.
+  # stamped, nothing sent. A notice, a site's or the platform's, is never
+  # turned off.
   defp turned_off?(:site, kind, settings), do: not Alerts.enabled?(settings, kind)
   defp turned_off?(:platform, kind, _settings), do: not Alerts.platform_enabled?(kind)
   defp turned_off?(:notice, _kind, _settings), do: false
+  defp turned_off?(:platform_notice, _kind, _settings), do: false
 
   defp empty_plan, do: %{data: nil, bell: [], mail: [], endpoints: [], event_name: nil}
 
   defp audience(dispatch, kind, org, settings, data) do
     {bell, mail} =
       case dispatch.channel do
-        :platform ->
+        channel when channel in [:platform, :platform_notice] ->
           admins = Alerts.platform_recipients()
           {admins, admins}
 
@@ -145,8 +163,11 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
 
     event_name = "security.#{kind}"
 
+    # Platform alerts and platform notices are not webhook events.
     endpoints =
-      if dispatch.channel == :platform, do: [], else: endpoints!(org.id, event_name)
+      if dispatch.channel in [:platform, :platform_notice],
+        do: [],
+        else: endpoints!(org.id, event_name)
 
     %{
       data: data,
@@ -181,7 +202,8 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
 
   # -- The payload (webhooks, bell and mail alike) ---------------------------
 
-  defp payload(%{channel: :notice} = dispatch, _phase, _kind, org, _settings) do
+  defp payload(%{channel: channel} = dispatch, _phase, _kind, org, _settings)
+       when channel in [:notice, :platform_notice] do
     notice = dispatch.notice || %{}
 
     base(dispatch, org, "notice")
@@ -360,7 +382,11 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
   defp send!(%{data: nil}, _dispatch), do: :ok
 
   defp send!(plan, dispatch) do
-    notification = if dispatch.channel == :notice, do: :security_notice, else: :security_alert
+    notification =
+      if dispatch.channel in [:notice, :platform_notice],
+        do: :security_notice,
+        else: :security_alert
+
     # The English line stays in `excerpt`, which is all a release before
     # `details` reads (a rollback shows it as before); `details` lets the
     # inbox say it in the reader's language (#2642).
@@ -395,7 +421,11 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
   # (`KilnCMS.Notifications.unread_platform_alert_count/1`) is one exact
   # filter. Rows written before this (`"security_alert_dispatch"`) stay where
   # they are, in the default console's bell.
-  defp content_type(%{channel: :platform}), do: Notifications.platform_alert_content_type()
+  # A platform notice is anchored the same way (#2811), so it is counted with
+  # them.
+  defp content_type(%{channel: channel}) when channel in [:platform, :platform_notice],
+    do: Notifications.platform_alert_content_type()
+
   defp content_type(_dispatch), do: "security_alert_dispatch"
 
   # -- 3. After the commit --------------------------------------------------
