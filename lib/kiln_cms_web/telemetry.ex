@@ -327,15 +327,17 @@ defmodule KilnCMSWeb.Telemetry do
             "and whether the class's ceiling allowed or throttled them. At most " <>
             "ten series; the user agent, address and org are deliberately not tags. " <>
             "The class is the one charged: since #2254 a search-engine claim proven " <>
-            "false by DNS is counted as empty."
+            "false by DNS, or (#2852) a DuckDuckBot claim outside DuckDuckGo's list, " <>
+            "is counted as empty."
       ),
       counter("kiln_cms.delivery.unverified_crawler.count",
         tags: [:engine, :reason],
         description:
           "Delivery requests naming a search engine whose address was not verified " <>
-            "by DNS or a published IP range list (#2254, #2586), by engine and reason (failed / pending / error / " <>
-            "forward_error / skipped / unverifiable / not_public). Only failed is " <>
-            "charged as empty."
+            "by DNS or a published IP range list (#2254, #2586), by engine and reason " <>
+            "(failed / not_listed / pending / error / forward_error / skipped / " <>
+            "unverifiable / not_public). Only failed and not_listed (#2852: outside " <>
+            "the engine's list, for an engine DNS cannot check) are charged as empty."
       ),
       counter("kiln_cms.crawler_verification.lookup.count",
         tags: [:engine, :result],

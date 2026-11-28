@@ -169,6 +169,22 @@ defmodule KilnCMS.CrawlerVerification.Ranges do
   end
 
   @doc """
+  Was `engine`'s installed list fetched at or after `at_ms`?
+
+  Both are this node's monotonic milliseconds. A list a peer sent is dated
+  by the age it carried, measured on this node's clock (`RangesSync`), and a
+  refetch moves the time even when the list is unchanged. `false` when no
+  list was ever installed. Says nothing about freshness: see `fresh?/2`.
+  """
+  @spec fetched_since?(atom(), integer()) :: boolean()
+  def fetched_since?(engine, at_ms) when is_integer(at_ms) do
+    case fetched_at(engine) do
+      fetched when is_integer(fetched) -> fetched >= at_ms
+      nil -> false
+    end
+  end
+
+  @doc """
   Installs `cidrs` as `engine`'s list, fetched `:age_ms` ago (0: just now),
   unless the list installed already is as new or newer. Answers
   `:installed`, or `:ignored` for an older list.

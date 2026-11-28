@@ -24,12 +24,18 @@ defmodule KilnCMS.CrawlerVerification.Supervisor do
        (`KilnCMS.CrawlerVerification.resolver_failing?/1`), apart from the
        lookups so a node whose lookup slots are all busy can still tell a
        failing resolver from a silent reverse zone.
+    7. the first-sighting cache (#2852): when this node first asked
+       `KilnCMS.CrawlerVerification.listing_overdue?/3` about a client
+       outside a published list, bounded to `:max_listing_entries` (100,000)
+       clients the same way. Last, so a restart of anything above it wipes
+       it too, and it restarts alone.
 
   If a cache restarts, the claims and lookups after it restart with it, so a
   lookup never writes into a cache that is not the one being read. A restart
   of either result cache also restarts the network-mark cache, so it wipes
   every mark: the networks it named are exempt again until their next
-  finished lookup.
+  finished lookup. A restart that reaches the first-sighting cache starts
+  every client's grace again, which errs toward not counting.
 
   The caps come from `config :kiln_cms, KilnCMS.CrawlerVerification` at
   start, or from the child's options.
@@ -44,6 +50,7 @@ defmodule KilnCMS.CrawlerVerification.Supervisor do
   @default_max_entries 50_000
   @default_max_verified_entries 10_000
   @default_max_network_marks 10_000
+  @default_max_listing_entries 100_000
   @default_max_concurrency 16
 
   @doc false
@@ -64,6 +71,9 @@ defmodule KilnCMS.CrawlerVerification.Supervisor do
     max_network_marks = Keyword.get(config, :max_network_marks, @default_max_network_marks)
     max_concurrency = Keyword.get(config, :max_concurrency, @default_max_concurrency)
 
+    max_listing_entries =
+      Keyword.get(config, :max_listing_entries, @default_max_listing_entries)
+
     children = [
       cache(CrawlerVerification.verified_cache_name(), max_verified_entries),
       cache(CrawlerVerification.cache_name(), max_entries),
@@ -74,7 +84,8 @@ defmodule KilnCMS.CrawlerVerification.Supervisor do
       Supervisor.child_spec(
         {Task.Supervisor, name: CrawlerVerification.canary_supervisor(), max_children: 1},
         id: CrawlerVerification.canary_supervisor()
-      )
+      ),
+      cache(CrawlerVerification.listing_cache_name(), max_listing_entries)
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)

@@ -9,6 +9,7 @@ defmodule KilnCMS.CrawlerVerificationTest do
   # `Application.put_env/3`.
   use ExUnit.Case, async: false
 
+  import Cachex.Spec, only: [hook: 1]
   import ExUnit.CaptureLog
   import KilnCMS.Test.Eventually
 
@@ -801,12 +802,57 @@ defmodule KilnCMS.CrawlerVerificationTest do
       assert Stub.calls(:ptr, ip6) == 0
     end
 
-    test "DuckDuckBot outside a fresh list is a proven failure", %{opts: opts} do
-      Ranges.put_fixture(:duckduckgo, [@range_v4])
-      ip = v4()
+    # #2852: a list can lag the vendor's newest crawler, so an address outside
+    # it is evidence against the claim, never a proof.
+    test "DuckDuckBot outside a fresh list is not listed: no lookup, no cache write, no mark",
+         %{opts: opts} do
+      previous = Application.get_env(:kiln_cms, :scanner_blocking)
+      Application.put_env(:kiln_cms, :scanner_blocking, enabled: true)
 
-      assert CrawlerVerification.check(:duckduckgo, ip, opts) == {:unverified, :failed}
-      assert Stub.calls(:ptr, ip) == 0
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:kiln_cms, :scanner_blocking, previous),
+          else: Application.delete_env(:kiln_cms, :scanner_blocking)
+      end)
+
+      Ranges.put_fixture(:duckduckgo, [@range_v4, @range_v6])
+      ip = v4()
+      ip6 = fresh({0x2A01, 0x4F8, 9, 2, 0, 0, 0, 7})
+      CrawlerVerification.forget_listing(ip)
+      CrawlerVerification.forget_listing(ip6)
+      CrawlerVerification.forget_network(ip6)
+
+      for address <- [ip, ip6] do
+        assert CrawlerVerification.check(:duckduckgo, address, opts) ==
+                 {:unverified, :not_listed}
+
+        assert Stub.calls(:ptr, address) == 0
+        assert {:ok, nil} = Cachex.get(CrawlerVerification.cache_name(), address)
+        assert {:ok, nil} = Cachex.get(CrawlerVerification.verified_cache_name(), address)
+        assert CrawlerVerification.first_seen(address) == nil
+      end
+
+      refute CrawlerVerification.network_flagged?(ip6, opts)
+    end
+
+    test "an IPv4-mapped address outside DuckDuckGo's list is the IPv4 client, not listed",
+         %{opts: opts} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4])
+      {a, b, c, d} = v4()
+      mapped = {0, 0, 0, 0, 0, 0xFFFF, Bitwise.bsl(a, 8) + b, Bitwise.bsl(c, 8) + d}
+
+      assert CrawlerVerification.check(:duckduckgo, mapped, opts) == {:unverified, :not_listed}
+    end
+
+    test "Google, Bing and Apple outside their fresh lists still go to DNS", %{opts: opts} do
+      for engine <- [:google, :bing, :apple] do
+        Ranges.put_fixture(engine, [@range_v4])
+        ip = v4()
+
+        assert CrawlerVerification.check(engine, ip, opts) == {:unverified, :pending}
+        assert settle(engine, ip, opts) == {:unverified, :failed}
+        assert Stub.calls(:ptr, ip) == 1
+      end
     end
 
     test "DuckDuckBot over IPv6 is unverifiable when its list holds no IPv6 range",
@@ -909,6 +955,174 @@ defmodule KilnCMS.CrawlerVerificationTest do
       Ranges.put_fixture(:duckduckgo, [@range_v4])
 
       assert CrawlerVerification.check(:duckduckgo, v4(), [enabled: false] ++ opts) == :disabled
+    end
+  end
+
+  describe "listing_overdue?/3 (#2852)" do
+    @range_v4 "45.143.200.0/24"
+    @range_v6 "2a01:4f8:1::/48"
+
+    setup do
+      Ranges.clear()
+      on_exit(&Ranges.clear/0)
+      %{grace: :timer.hours(24), now: now()}
+    end
+
+    test "the first question records the sighting and answers false", %{opts: opts} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4])
+      ip = listed_out()
+
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+      assert {_at, ttl} = CrawlerVerification.first_seen(ip)
+      assert_in_delta ttl, :timer.hours(48), :timer.minutes(1)
+    end
+
+    test "only a list fetched a full grace after the first sighting is believed",
+         %{opts: opts, grace: grace, now: now} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+      ip = listed_out()
+
+      CrawlerVerification.put_first_seen(ip, now - grace + 1)
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+
+      CrawlerVerification.put_first_seen(ip, now - grace)
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+    end
+
+    test "a sighting is never moved by a later question", %{opts: opts, grace: grace, now: now} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+      ip = listed_out()
+      CrawlerVerification.put_first_seen(ip, now - grace - 5)
+
+      for _ <- 1..3, do: assert(CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts))
+      assert {first_seen, _ttl} = CrawlerVerification.first_seen(ip)
+      assert first_seen == now - grace - 5
+    end
+
+    test "every question refreshes the sighting's TTL", %{opts: opts, grace: grace, now: now} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+      ip = listed_out()
+      CrawlerVerification.put_first_seen(ip, now - grace, listing_ttl_ms: 60_000)
+      assert {_at, short} = CrawlerVerification.first_seen(ip)
+      assert short <= 60_000
+
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+      assert {_at, ttl} = CrawlerVerification.first_seen(ip)
+      assert ttl > :timer.hours(47)
+    end
+
+    test "a real DuckDuckBot the list names after its grace is verified, never overdue",
+         %{opts: opts, grace: grace, now: now} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now - 10)
+      ip = listed_out()
+      CrawlerVerification.put_first_seen(ip, now - grace - 100)
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+
+      {a, b, c, _d} = ip
+      Ranges.put_fixture(:duckduckgo, [@range_v4, "#{a}.#{b}.#{c}.0/24"], now: now)
+
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+      assert CrawlerVerification.check(:duckduckgo, ip, opts) == :verified
+    end
+
+    test "a stale list is never overdue, and a list that goes stale mid-grace keeps the " <>
+           "first sighting",
+         %{opts: opts, grace: grace, now: now} do
+      max_age = Ranges.config()[:max_age_ms]
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now, age_ms: max_age + 1)
+      ip = listed_out()
+      CrawlerVerification.put_first_seen(ip, now - grace - max_age - 10)
+
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+      assert {first_seen, _ttl} = CrawlerVerification.first_seen(ip)
+      assert first_seen == now - grace - max_age - 10
+
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+    end
+
+    test "IPv6 addresses in one /64 share a sighting; two IPv4 neighbors do not",
+         %{opts: opts, grace: grace, now: now} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4, @range_v6], now: now)
+      n = rem(System.unique_integer([:positive]), 0xFFFF)
+      first = listed_out({0x2A01, 0x4F8, 9, n, 0, 0, 0, 1})
+      rotated = listed_out({0x2A01, 0x4F8, 9, n, 0xAB, 0xCD, 0xEF, 0x12})
+      CrawlerVerification.put_first_seen(first, now - grace)
+
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, rotated, opts)
+
+      ip = listed_out()
+      {a, b, c, d} = ip
+      neighbor = listed_out({a, b, c, rem(d + 1, 254) + 1})
+      CrawlerVerification.put_first_seen(ip, now - grace)
+
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, neighbor, opts)
+    end
+
+    test "an address inside the list, or with no list, records nothing", %{opts: opts} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4])
+      inside = listed_out({45, 143, 200, 77})
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, inside, opts)
+      assert CrawlerVerification.first_seen(inside) == nil
+
+      Ranges.clear()
+      ip = listed_out()
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, nil, opts)
+      assert CrawlerVerification.first_seen(ip) == nil
+    end
+
+    test "with verification off nothing is recorded", %{opts: opts, grace: grace, now: now} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+      ip = listed_out()
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, [enabled: false] ++ opts)
+      assert CrawlerVerification.first_seen(ip) == nil
+
+      CrawlerVerification.put_first_seen(ip, now - grace)
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, [enabled: false] ++ opts)
+    end
+
+    test "a cache that is not running answers false and never raises", %{opts: opts, now: now} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+      name = :"cv-listing-#{System.unique_integer([:positive])}"
+      {:ok, pid} = Cachex.start_link(name: name)
+      Process.unlink(pid)
+      GenServer.stop(pid)
+
+      refute CrawlerVerification.listing_overdue?(
+               :duckduckgo,
+               listed_out(),
+               [listing_cache: name] ++ opts
+             )
+    end
+
+    # The bound on the cache is the bound on the grace: an evicted sighting
+    # starts again, which errs toward not counting.
+    test "a sighting evicted at the cap starts its grace again",
+         %{opts: opts, grace: grace, now: now} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+      name = :"cv-listing-#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        {Cachex,
+         name: name, hooks: [hook(module: Cachex.Limit.Evented, args: {3, [reclaim: 0.5]})]}
+      )
+
+      opts = [listing_cache: name] ++ opts
+      ip = listed_out()
+      CrawlerVerification.put_first_seen(ip, now - grace, listing_cache: name)
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+
+      # Cachex dates writes to the millisecond and evicts the oldest first; a
+      # tie with the newer sightings would leave which one goes to chance.
+      Process.sleep(5)
+      for _ <- 1..4, do: refute(CrawlerVerification.listing_overdue?(:duckduckgo, v4(), opts))
+      eventually(fn -> CrawlerVerification.first_seen(ip, listing_cache: name) == nil end)
+
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+      assert {first_seen, _ttl} = CrawlerVerification.first_seen(ip, listing_cache: name)
+      assert first_seen > now - grace
     end
   end
 
@@ -1431,6 +1645,15 @@ defmodule KilnCMS.CrawlerVerificationTest do
     Stub.reset(ip)
     ip
   end
+
+  # Fresh, with no first sighting before or after the test (#2852).
+  defp listed_out(ip \\ PublicAddress.v4()) do
+    CrawlerVerification.forget_listing(ip)
+    on_exit(fn -> CrawlerVerification.forget_listing(ip) end)
+    fresh(ip)
+  end
+
+  defp now, do: System.monotonic_time(:millisecond)
 
   defp unique_host(template) do
     [first | rest] = String.split(template, ".", parts: 2)
