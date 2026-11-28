@@ -960,4 +960,453 @@ defmodule KilnCMS.Backups.StatusTest do
       assert_received {[:kiln_cms, :backups, :status, :notices_unreadable], ^ref, %{count: 1}, _}
     end
   end
+
+  # #2229 part C: "no backup has reached X in N hours", per destination and
+  # per component. Needs `pg_dump` and `pg_restore` on PATH: without them
+  # backups are unavailable here and nothing is listed.
+  describe "destination freshness" do
+    @describetag :pg_tools
+
+    alias KilnCMS.Backups.DestinationConfig
+
+    @env "offsite:kiln"
+    @env_key "rclone:offsite:kiln"
+
+    setup do
+      erase = fn ->
+        for read <- [:runs, :env_probe, :grace],
+            do: :persistent_term.erase({Backups, :freshness_warned_at, read})
+
+        :persistent_term.erase({Backups, :destinations_warned_at})
+      end
+
+      erase.()
+      on_exit(erase)
+
+      # The database only, unless a test says otherwise: one threshold, 36 h.
+      put_config!(media_dir: nil)
+      :ok
+    end
+
+    defp put_config!(opts) do
+      Application.put_env(
+        :kiln_cms,
+        KilnCMS.Backups,
+        Keyword.merge(Application.get_env(:kiln_cms, KilnCMS.Backups), opts)
+      )
+    end
+
+    # A stored destination, created `hours` ago (100 h unless said).
+    defp stored!(name, opts \\ []) do
+      Ash.Seed.seed!(DestinationConfig, %{
+        name: name,
+        kind: "local",
+        settings: %{},
+        enabled: Keyword.get(opts, :enabled, true),
+        inserted_at: hours_ago(Keyword.get(opts, :created, 100))
+      })
+    end
+
+    defp key(row), do: DestinationConfig.key(row)
+
+    defp entry(key, status, at \\ :now),
+      do: %{
+        key: key,
+        kind: "local",
+        label: key,
+        status: status,
+        at: if(at == :now, do: DateTime.utc_now(), else: at)
+      }
+
+    # An in-app run started `hours` ago over `components`, with Run-level
+    # `entries`, finished with `status`.
+    defp app_run!(hours, entries, opts \\ []) do
+      at = hours_ago(hours)
+      stamp = Artifact.stamp(at)
+      components = Keyword.get(opts, :components, [:db])
+
+      run =
+        Backups.start_run!(
+          %{stamp: stamp, trigger: "manual", components: components, started_at: at},
+          actor: Backups.system()
+        )
+
+      attrs = %{
+        artifacts: for(c <- components, do: artifact(c, stamp, true)),
+        destinations: entries,
+        offsite_status: :partial
+      }
+
+      case Keyword.get(opts, :status, :succeeded) do
+        :succeeded ->
+          Backups.finish_run!(run, attrs, actor: Backups.system())
+
+        :failed ->
+          Backups.fail_run!(run, Map.put(attrs, :error, "boom"), actor: Backups.system())
+
+        :canceled ->
+          Ash.Seed.update!(run, Map.merge(attrs, %{status: :canceled, finished_at: at}))
+      end
+    end
+
+    # A cron run `hours` ago, as the importer records it: its files carry
+    # `remote`'s key only when the run succeeded (an ok manifest naming the
+    # remote, `Importer`'s `offsite/1`), and only "local" otherwise.
+    defp cron_run!(hours, remote, opts \\ []) do
+      at = hours_ago(hours)
+      stamp = Artifact.stamp(at)
+      status = Keyword.get(opts, :status, :succeeded)
+
+      destinations =
+        if status == :succeeded and remote,
+          do: %{
+            "local" => %{"status" => "ok"},
+            KilnCMS.Backups.Destination.env_key(remote) => %{"status" => "ok"}
+          },
+          else: %{"local" => %{"status" => "ok"}}
+
+      artifacts =
+        for c <- Keyword.get(opts, :components, [:db]) do
+          c |> artifact(stamp, true) |> Map.put(:destinations, destinations)
+        end
+
+      Backups.import_run!(
+        %{
+          stamp: stamp,
+          trigger: "cron",
+          status: status,
+          components: Keyword.get(opts, :components, [:db]),
+          started_at: at,
+          finished_at: at,
+          artifacts: artifacts,
+          error: if(status == :failed, do: "boom")
+        },
+        actor: Backups.system()
+      )
+    end
+
+    defp insert_run!(origin, artifacts) do
+      KilnCMS.Repo.query!(
+        """
+        INSERT INTO backup_runs (id, stamp, trigger, status, origin, components, started_at,
+                                 artifacts, destinations, inserted_at, updated_at)
+        VALUES (gen_random_uuid(), '20260101-000000', 'cron', 'succeeded', $1, '{}',
+                now(), $2::jsonb[], '{}', now(), now())
+        """,
+        [origin, artifacts]
+      )
+    end
+
+    defp stale_keys, do: Enum.map(Backups.status().destinations_stale, & &1.key)
+
+    test "a stored destination never reached and older than its threshold is listed" do
+      nas = stored!("NAS")
+      app_run!(1, [])
+
+      assert [entry] = Backups.status().destinations_stale
+
+      assert %{label: "NAS", components: [:db], last_at: nil, hours: 36, lookback_days: 8} =
+               entry
+
+      assert entry.key == key(nas)
+    end
+
+    test "reached within the threshold: not listed" do
+      nas = stored!("NAS")
+      app_run!(2, [entry(key(nas), :ok)])
+
+      assert Backups.status().destinations_stale == []
+    end
+
+    test "reached longer ago than the threshold: listed with when" do
+      nas = stored!("NAS")
+      run = app_run!(40, [entry(key(nas), :ok)])
+      app_run!(1, [entry(key(nas), :failed)])
+
+      assert [%{last_at: last_at, hours: 36}] = Backups.status().destinations_stale
+      assert DateTime.compare(last_at, run.started_at) == :eq
+    end
+
+    test "reached only before the lookback: no last_at, said in days" do
+      nas = stored!("NAS", created: 300)
+      app_run!(200, [entry(key(nas), :ok)])
+
+      assert [%{last_at: nil, lookback_days: 8}] = Backups.status().destinations_stale
+    end
+
+    test "the lookback grows to the longest threshold" do
+      put_config!(stale_after_hours: 240)
+      nas = stored!("NAS", created: 300)
+      bucket = stored!("Bucket", created: 300)
+      app_run!(230, [entry(key(nas), :ok)])
+
+      assert [%{last_at: nil, lookback_days: 10} = entry] = Backups.status().destinations_stale
+      assert entry.key == key(bucket)
+    end
+
+    test "a disabled destination is not listed" do
+      stored!("NAS", enabled: false)
+
+      assert Backups.status().destinations_stale == []
+    end
+
+    test "a stored destination created within its threshold is not listed yet" do
+      stored!("NAS", created: 2)
+
+      assert Backups.status().destinations_stale == []
+    end
+
+    test "failed and pending entries don't count as reached" do
+      nas = stored!("NAS")
+      app_run!(1, [entry(key(nas), :failed)])
+      app_run!(2, [entry(key(nas), :pending)])
+
+      assert stale_keys() == [key(nas)]
+    end
+
+    test "only succeeded runs count: failed and canceled runs never do" do
+      nas = stored!("NAS")
+      app_run!(1, [entry(key(nas), :ok)], status: :failed)
+      app_run!(2, [entry(key(nas), :ok)], status: :canceled)
+
+      assert stale_keys() == [key(nas)]
+
+      # A partly off-site success counts for the destination it reached.
+      app_run!(3, [entry(key(nas), :ok), entry("dest:#{Ash.UUID.generate()}", :failed)])
+      assert Backups.status().destinations_stale == []
+    end
+
+    test "the run's start counts, not the entry's: a re-send is data of its own time" do
+      nas = stored!("NAS")
+      app_run!(50, [entry(key(nas), :ok, DateTime.utc_now())])
+
+      assert [%{last_at: %DateTime{}}] = Backups.status().destinations_stale
+    end
+
+    test "an ok entry with no at counts" do
+      nas = stored!("NAS")
+      app_run!(1, [entry(key(nas), :ok, nil)])
+
+      assert Backups.status().destinations_stale == []
+    end
+
+    test "per component: fresh only when each expected component reached it in time" do
+      put_config!(media_dir: System.tmp_dir!())
+      nas = stored!("NAS")
+      app_run!(50, [entry(key(nas), :ok)], components: [:db, :media])
+      app_run!(1, [entry(key(nas), :ok)], components: [:db])
+
+      assert [%{components: [:media], hours: 36, last_at: %DateTime{}}] =
+               Backups.status().destinations_stale
+
+      app_run!(2, [entry(key(nas), :ok)], components: [:media])
+      assert Backups.status().destinations_stale == []
+    end
+
+    # Review 2: one stale component reached it 50 h ago, the other never in
+    # the read. The line must not say "in the last 8 days".
+    test "mixed: last_at is the newest one, and the line is in hours" do
+      put_config!(media_dir: System.tmp_dir!())
+      nas = stored!("NAS")
+      run = app_run!(50, [entry(key(nas), :ok)], components: [:db])
+
+      status = Backups.status()
+
+      assert [%{components: [:db, :media], last_at: last_at, hours: 36}] =
+               status.destinations_stale
+
+      assert DateTime.compare(last_at, run.started_at) == :eq
+
+      assert [%{text: "No backup has reached NAS in 36 hours."}] =
+               KilnCMSWeb.BackupComponents.freshness_lines(status)
+    end
+
+    test "the env destination nothing has tried is not listed: cron owns it" do
+      put_config!(rclone_remote: @env)
+      app_run!(1, [])
+
+      assert Backups.status().destinations_stale == []
+    end
+
+    test "the env destination the app fails on every run is listed" do
+      put_config!(rclone_remote: @env)
+      app_run!(1, [entry(@env_key, :failed)])
+      app_run!(25, [entry(@env_key, :failed)])
+
+      assert [%{key: @env_key, label: @env, last_at: nil}] = Backups.status().destinations_stale
+    end
+
+    test "the env destination cron reaches nightly is not listed" do
+      put_config!(rclone_remote: @env)
+      cron_run!(2, @env)
+      cron_run!(26, @env)
+
+      assert Backups.status().destinations_stale == []
+    end
+
+    test "a cron run counts for the kinds of the files it sent" do
+      put_config!(rclone_remote: @env, media_dir: System.tmp_dir!())
+      cron_run!(2, @env, components: [:db])
+
+      assert [%{key: @env_key, components: [:media]}] = Backups.status().destinations_stale
+
+      cron_run!(3, @env, components: [:media])
+      assert Backups.status().destinations_stale == []
+    end
+
+    test "a failed cron run names no remote, so it is no attempt" do
+      put_config!(rclone_remote: @env)
+      cron_run!(2, @env, status: :failed)
+
+      assert Backups.status().destinations_stale == []
+    end
+
+    # Review 1: the exemption doesn't expire with the lookback. Cron reached
+    # the remote long ago, then stopped sending there (its newer runs carry
+    # only "local"): it was tried, so it is judged, and nothing reached it.
+    test "the env destination tried only before the lookback stays listed" do
+      put_config!(rclone_remote: @env)
+      cron_run!(300, @env)
+      cron_run!(2, nil)
+      cron_run!(26, nil)
+      cron_run!(5, @env, status: :failed)
+
+      assert [%{key: @env_key, last_at: nil, lookback_days: 8}] =
+               Backups.status().destinations_stale
+    end
+
+    test "a changed BACKUP_RCLONE_REMOTE is listed once runs attempt it" do
+      put_config!(rclone_remote: @env)
+      cron_run!(2, @env)
+
+      put_config!(rclone_remote: "offsite:new")
+      assert Backups.status().destinations_stale == []
+
+      app_run!(1, [entry("rclone:offsite:new", :failed)])
+      assert stale_keys() == ["rclone:offsite:new"]
+    end
+
+    test "nothing is listed while backups are not available here" do
+      stored!("NAS")
+      put_config!(enabled: false)
+
+      assert Backups.status().destinations_stale == []
+    end
+
+    test "an unreadable run history lists nothing, counted every time and warned once" do
+      stored!("NAS")
+
+      # A row no release could load (an origin no release knows): every read
+      # that loads it fails, and only the freshness read loads it (no
+      # component, not an app run).
+      insert_run!("kiln_no_such_origin_zz", [])
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
+          [:kiln_cms, :backups, :status, :destination_freshness_unreadable]
+        ])
+
+      warning = "Backup status can't tell when each off-site destination was last reached"
+
+      first = ExUnit.CaptureLog.capture_log(fn -> Backups.status() end)
+      assert first =~ warning
+
+      second = ExUnit.CaptureLog.capture_log(fn -> send(self(), {:status, Backups.status()}) end)
+      refute second =~ warning
+      assert_received {:status, %{destinations_stale: []}}
+
+      for _ <- 1..2 do
+        assert_received {[:kiln_cms, :backups, :status, :destination_freshness_unreadable], ^ref,
+                         %{count: 1}, _}
+      end
+    end
+
+    # Review 7: a newer release's file kind, or a file that isn't one at
+    # all, fails no read; it just matches no component.
+    test "a run with a file kind this release doesn't know fails nothing" do
+      nas = stored!("NAS")
+      app_run!(1, [entry(key(nas), :ok)])
+
+      insert_run!("imported", [
+        %{"kind" => "archive", "name" => "x", "verified" => true, "destinations" => %{}},
+        "not a file at all"
+      ])
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
+          [:kiln_cms, :backups, :status, :destination_freshness_unreadable]
+        ])
+
+      assert Backups.status().destinations_stale == []
+      refute_received {_, ^ref, _, _}
+    end
+
+    test "the lookback stops at 31 days, and says so" do
+      put_config!(stale_after_hours: 2000)
+      nas = stored!("NAS", created: 3000)
+      app_run!(1, [])
+
+      assert [%{last_at: nil, lookback_days: 31} = entry] = Backups.status().destinations_stale
+      assert entry.key == key(nas)
+
+      assert [%{text: "No backup has reached NAS in the last 31 days."}] =
+               KilnCMSWeb.BackupComponents.freshness_lines(Backups.status())
+    end
+
+    test "a read the row cap cut short of the threshold lists nothing it didn't see" do
+      stored!("NAS")
+
+      KilnCMS.Repo.query!("""
+      INSERT INTO backup_runs (id, stamp, trigger, status, origin, components, started_at,
+                               artifacts, destinations, inserted_at, updated_at)
+      SELECT gen_random_uuid(), 'cap-' || n, 'manual', 'failed', 'app', '{}',
+             now() - n * interval '10 seconds', '{}', '{}', now(), now()
+      FROM generate_series(1, 2001) AS n
+      """)
+
+      assert Backups.status().destinations_stale == []
+    end
+
+    test "unreadable destinations: one event, and nothing listed" do
+      stored!("NAS")
+
+      KilnCMS.Repo.query!(
+        "INSERT INTO backup_destinations (name, kind, settings) VALUES ('Broken', 'fake', '\"x\"')"
+      )
+
+      ref =
+        :telemetry_test.attach_event_handlers(self(), [
+          [:kiln_cms, :backups, :status, :destinations_unreadable],
+          [:kiln_cms, :backups, :status, :destination_freshness_unreadable]
+        ])
+
+      assert Backups.status().destinations_stale == []
+
+      assert_received {[:kiln_cms, :backups, :status, :destinations_unreadable], ^ref,
+                       %{count: 1}, _}
+
+      refute_received {[:kiln_cms, :backups, :status, :destinations_unreadable], ^ref, _, _}
+
+      refute_received {[:kiln_cms, :backups, :status, :destination_freshness_unreadable], ^ref, _,
+                       _}
+    end
+
+    test "the label is the redacted name, never key text" do
+      put_config!(
+        rclone_remote: ":s3,access_key_id=AKIAEXAMPLE1234,secret_access_key=hunter2hunter2:bucket"
+      )
+
+      stored!("s3://admin:sup3rsecret@host/kiln?token=abcdef123456")
+      env_key = KilnCMS.Backups.Destination.env_key(Backups.rclone_remote())
+      app_run!(1, [entry(env_key, :failed)])
+
+      stale = Backups.status().destinations_stale
+      assert length(stale) == 2
+      labels = Enum.map_join(stale, " ", & &1.label)
+
+      for secret <- ["AKIAEXAMPLE1234", "hunter2hunter2", "sup3rsecret", "abcdef123456"] do
+        refute labels =~ secret
+      end
+    end
+  end
 end

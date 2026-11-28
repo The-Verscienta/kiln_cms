@@ -96,6 +96,7 @@ defmodule KilnCMS.Backups do
 
   alias KilnCMS.Backups.Schedule.Window
 
+  require Ash.Expr
   require Ash.Query
   require Logger
 
@@ -866,6 +867,7 @@ defmodule KilnCMS.Backups do
           schedules: :none | :unreadable | [schedule_entry()],
           next_at: DateTime.t() | nil,
           offsite: offsite_status(),
+          destinations_stale: [destination_stale()],
           retention: [retention_notice()],
           held_deleted: [held_deleted_notice()]
         }
@@ -898,6 +900,19 @@ defmodule KilnCMS.Backups do
           units: [String.t()],
           total: non_neg_integer(),
           at: DateTime.t()
+        }
+
+  @typedoc """
+  A configured destination no backup has reached lately (#2229), as
+  `status/0`'s `destinations_stale` lists it. See `status/0`.
+  """
+  @type destination_stale :: %{
+          key: String.t(),
+          label: String.t(),
+          components: [component()],
+          last_at: DateTime.t() | nil,
+          hours: pos_integer(),
+          lookback_days: pos_integer()
         }
 
   @typedoc """
@@ -1234,9 +1249,71 @@ defmodule KilnCMS.Backups do
   and the rest move to `gone`: a failed destination that was removed since
   no longer holds the alarm up. With no destination configured at all,
   `configured?` is false (it is true otherwise). When the destinations
-  can't be read nothing is moved (the alarm stays), counted as
-  `[:kiln_cms, :backups, :status, :destinations_unreadable]` and logged now
+  can't be read nothing is moved (the alarm stays). That read is shared
+  with the destinations' freshness (below), and while it fails every status
+  read counts it once as
+  `[:kiln_cms, :backups, :status, :destinations_unreadable]`, logged now
   and then.
+
+  ## Destination freshness (#2229)
+
+  `destinations_stale` lists, in `KilnCMS.Backups.Destination.configured/0`
+  order (the env destination first, then the enabled stored ones), each
+  destination that some expected component hasn't reached within that
+  component's `stale_after_hours` (the threshold `components` already
+  reports): "no backup has reached X in N hours". Each entry has:
+
+    * `key` — the destination's key (never shown: an env key can carry the
+      remote's text);
+    * `label` — its redacted name, what the panels show;
+    * `components` — the components that are stale on it;
+    * `last_at` — the newest time any of those reached it, or nil when none
+      did in the read (then the panels say "in the last `lookback_days`
+      days");
+    * `hours` — the lowest threshold among them, so "not in `hours` hours"
+      holds for each;
+    * `lookback_days` — how far back the read covered.
+
+  The read is one query through the `started_at` index: the runs of the
+  last eight days, or of the longest component threshold when that is
+  longer, but at most 31 days and the newest 2000 runs. Past 31 days a
+  destination nothing reached is listed as "not in the last 31 days"; when
+  the 2000-run cap cuts the read short of a threshold, a component that
+  read shows nothing for is not listed (it can't be told). The files and
+  entries are read as plain fields, not cast, so one row of a newer
+  release's file kind doesn't fail the read.
+
+  A destination got a component when a run with status `succeeded` (a
+  partly off-site success counts for the destinations it reached) and a
+  verified file of that kind reached it: for an in-app run, its Run-level
+  entry for the key is `ok`; for an imported (cron) one, the file's
+  `destinations` carry the key with status `ok` (the importer writes it only
+  for an ok manifest that names the remote). Failed, canceled and skipped
+  runs never count, and neither do `failed` or `pending` entries. The time
+  is the run's `started_at`, never the entry's `at`, so a re-send counts as
+  data of its own time.
+
+  Never listed:
+
+    * anything while backups are not available here, or while the
+      destinations can't be read (counted as `destinations_unreadable`,
+      above);
+    * a stored destination, for a component, while it was created less than
+      that component's threshold ago. Its first `inserted_at` counts, so one
+      that is disabled and enabled again alarms at once;
+    * the env destination (`BACKUP_RCLONE_REMOTE`) while no run of any age,
+      the app's or cron's, has an entry for its key: host cron owns it until
+      then. When the read has none, an `EXISTS` probe of the whole history
+      (`LIMIT 1`, no index) decides. Which env destination there is follows
+      the environment of the node serving the status, so in a cluster whose
+      nodes set different remotes each node's panels speak of its own.
+
+  Failures are counted as
+  `[:kiln_cms, :backups, :status, :destination_freshness_unreadable]`, with
+  `read:` in the metadata, and each is logged now and then in its own
+  words: `:runs` (nothing is listed), `:env_probe` (the env destination is
+  judged as tried) and `:grace` (the list is returned without the grace
+  period).
 
   ## Notices (#2487, #2931)
 
@@ -1277,6 +1354,15 @@ defmodule KilnCMS.Backups do
         {component, component_status(component, Map.get(runs, component), manifest, rule, now)}
       end)
 
+    # Read once for the off-site outcome and the destinations' freshness
+    # (#2229), so a failure is one event, not one per reader.
+    configured = Destination.configured()
+
+    case configured do
+      {:ok, _entries} -> :ok
+      {:error, error} -> destinations_unreadable(error)
+    end
+
     %{
       configured?: not match?({:error, :disabled}, availability),
       available?: availability == :ok,
@@ -1295,7 +1381,8 @@ defmodule KilnCMS.Backups do
       scheduler_cron: scheduler_cron,
       schedules: schedule_entries(schedules, firing?, now),
       next_at: components |> Enum.map(fn {_c, cs} -> cs.next_at end) |> earliest(),
-      offsite: status_offsite()
+      offsite: status_offsite(configured),
+      destinations_stale: destinations_stale(configured, components, availability, now)
     }
     |> Map.merge(status_notices(now))
   end
@@ -1482,7 +1569,7 @@ defmodule KilnCMS.Backups do
   # The off-site outcome of the newest finished in-app run that had
   # destinations (see `status/0`). A read that fails is `:unknown`: the same
   # telemetry and occasional warning as the rest of the history.
-  defp status_offsite do
+  defp status_offsite(configured) do
     query =
       Run
       |> Ash.Query.filter(
@@ -1502,7 +1589,7 @@ defmodule KilnCMS.Backups do
 
     case list_runs(query: query, actor: system(), authorize_with: :error) do
       {:ok, [run]} ->
-        offsite_of(run)
+        offsite_of(run, configured)
 
       {:ok, []} ->
         @offsite_none
@@ -1513,7 +1600,7 @@ defmodule KilnCMS.Backups do
     end
   end
 
-  defp offsite_of(run) do
+  defp offsite_of(run, configured) do
     counted = Enum.reject(run.destinations, &(&1.status == :skipped))
 
     destinations =
@@ -1537,7 +1624,7 @@ defmodule KilnCMS.Backups do
       gone: [],
       destinations: destinations
     }
-    |> still_configured(state == :partial or (state == :failed and succeeded?))
+    |> still_configured(configured, state == :partial or (state == :failed and succeeded?))
   end
 
   # The broad alarm rule (#2951): a failed destination that is no longer
@@ -1545,11 +1632,12 @@ defmodule KilnCMS.Backups do
   # fixed by anyone, so it moves from `failed` to `gone` and no longer raises
   # the alarm; with nothing configured at all, `configured?` is false. Only a
   # succeeded backup's outcome is filtered: a failed one is the run's own
-  # alarm. A read that fails filters nothing (fails closed: the alarm stays).
-  defp still_configured(offsite, false = _check?), do: offsite
+  # alarm. A read that fails filters nothing (fails closed: the alarm stays);
+  # `status/0` has already counted it.
+  defp still_configured(offsite, _configured, false = _check?), do: offsite
 
-  defp still_configured(offsite, true) do
-    case Destination.configured() do
+  defp still_configured(offsite, configured, true) do
+    case configured do
       {:ok, []} ->
         %{offsite | configured?: false, failed: [], gone: offsite.failed}
 
@@ -1558,8 +1646,7 @@ defmodule KilnCMS.Backups do
         {failed, gone} = Enum.split_with(offsite.failed, &MapSet.member?(keys, &1.key))
         %{offsite | failed: failed, gone: gone}
 
-      {:error, error} ->
-        destinations_unreadable(error)
+      {:error, _error} ->
         offsite
     end
   end
@@ -1599,12 +1686,316 @@ defmodule KilnCMS.Backups do
 
       Logger.warning(
         "Backup status can't tell which off-site destinations are still configured: " <>
-          "a read failed (#{inspect(error.__struct__)}); the off-site alarm is left as it is"
+          "a read failed (#{inspect(error.__struct__)}); the off-site alarm is left as it is, " <>
+          "and no destination's freshness is checked"
       )
     end
 
     :ok
   end
+
+  # How far back the destinations' freshness looks (#2229): the eight days
+  # the rest of the status reads, or the longest component threshold when
+  # that is longer, but never more than 31 days, nor more than the newest
+  # 2000 runs. What that read covers is what the panels say ("in the last N
+  # days").
+  @freshness_min_days 8
+  @freshness_max_days 31
+  @freshness_max_runs 2000
+
+  # The configured destinations no backup has reached lately (#2229), as
+  # `status/0`'s `destinations_stale` says them. Nothing while backups can't
+  # run here or the destinations couldn't be read.
+  defp destinations_stale({:ok, [_ | _] = entries}, components, :ok, now) do
+    hours = Map.new(components, fn {component, cs} -> {component, cs.stale_after_hours} end)
+
+    lookback =
+      hours
+      |> Map.values()
+      |> Enum.max(fn -> 0 end)
+      |> Kernel.max(@freshness_min_days * 24)
+      |> Kernel.min(@freshness_max_days * 24)
+
+    case freshness_runs(DateTime.add(now, -lookback * 3600, :second)) do
+      {:ok, runs} ->
+        covered = covered_hours(runs, lookback, now)
+        reach = {covered, lookback}
+
+        entries
+        |> Enum.map(&stale_components(&1, runs, hours, reach, now))
+        |> Enum.reject(fn {_entry, stale} -> stale == [] end)
+        |> in_grace(hours, now)
+        |> Enum.map(&stale_entry(&1, hours, div(covered, 24)))
+
+      {:error, error} ->
+        freshness_unreadable(error, :runs)
+        []
+    end
+  end
+
+  defp destinations_stale(_configured, _components, _availability, _now), do: []
+
+  # The newest runs in the lookback, through the `started_at` index, folded
+  # over every destination here. Only what freshness judges by is read, and
+  # the files and entries come back as plain maps narrowed in SQL rather
+  # than cast as `Artifact`s: one row of a newer release's file kind doesn't
+  # fail the whole read (it just never matches a component).
+  defp freshness_runs(since) do
+    query =
+      Run
+      |> Ash.Query.filter(started_at > ^since)
+      |> Ash.Query.sort(started_at: :desc)
+      |> Ash.Query.limit(@freshness_max_runs)
+      |> Ash.Query.select([:origin, :status, :started_at])
+      |> Ash.Query.calculate(
+        :freshness_files,
+        {:array, :map},
+        Ash.Expr.expr(
+          fragment(
+            "ARRAY(SELECT jsonb_build_object('kind', a->>'kind', 'verified', a->'verified', 'destinations', a->'destinations') FROM unnest(?) AS a)",
+            artifacts
+          )
+        )
+      )
+      |> Ash.Query.calculate(
+        :freshness_entries,
+        {:array, :map},
+        Ash.Expr.expr(
+          fragment(
+            "ARRAY(SELECT jsonb_build_object('key', d->>'key', 'status', d->>'status') FROM unnest(?) AS d)",
+            destinations
+          )
+        )
+      )
+
+    with {:ok, runs} <- list_runs(query: query, actor: system(), authorize_with: :error) do
+      {:ok, Enum.map(runs, &freshness_facts/1)}
+    end
+  end
+
+  defp freshness_facts(run) do
+    %{
+      origin: run.origin,
+      status: run.status,
+      started_at: run.started_at,
+      files: run.calculations[:freshness_files] || [],
+      entries: run.calculations[:freshness_entries] || []
+    }
+  end
+
+  # The hours the read covers: the whole lookback, unless it stopped at the
+  # row cap, then back to the oldest run it got.
+  defp covered_hours(runs, lookback, now) do
+    if length(runs) < @freshness_max_runs,
+      do: lookback,
+      else: DateTime.diff(now, List.last(runs).started_at, :hour)
+  end
+
+  # `{entry, [{component, last_at | nil}]}`: the components no succeeded run
+  # brought to this destination within their threshold. The env destination
+  # is cron's until something has tried it: nothing is stale on it while no
+  # run of any age, the app's or cron's, has an entry for its key.
+  defp stale_components(%{"key" => key} = entry, runs, hours, reach, now) do
+    stale =
+      if entry["source"] == "env" and not env_attempted?(runs, key) do
+        []
+      else
+        for {component, threshold} <- hours,
+            stale = stale_on(runs, key, component, threshold, reach, now),
+            do: stale
+      end
+
+    {entry, stale}
+  end
+
+  # `{component, last_at | nil}` when `component` didn't reach `key` within
+  # `threshold` hours; nil (not stale) otherwise. Nothing in the read is
+  # stale when the read covers the threshold, or the whole (capped)
+  # lookback: a threshold past 31 days alarms on "not in the last 31 days".
+  # A read the row cap cut short below the threshold can't say what came
+  # before it, so it alarms on nothing it didn't see.
+  defp stale_on(runs, key, component, threshold, {covered, lookback}, now) do
+    case last_reached(runs, key, component) do
+      nil ->
+        if covered >= threshold or covered >= lookback, do: {component, nil}
+
+      last_at ->
+        if DateTime.diff(now, last_at, :hour) >= threshold, do: {component, last_at}
+    end
+  end
+
+  # When the destination last got a backup of `component`: the start of the
+  # newest succeeded run that reached it with a verified file of that kind.
+  # The run's start, not the entry's `at`, so a re-send counts as the data of
+  # its own time.
+  defp last_reached(runs, key, component) do
+    kind = Atom.to_string(component)
+
+    runs
+    |> Enum.filter(&(&1.status == :succeeded and reached?(&1, key, kind)))
+    |> Enum.map(& &1.started_at)
+    |> Enum.max(DateTime, fn -> nil end)
+  end
+
+  # An in-app run says so in its Run-level entry; an imported (cron) one in
+  # its files' destinations, which carry the env key when cron sent them.
+  defp reached?(%{origin: :app} = run, key, kind) do
+    Enum.any?(run.entries, &(&1["key"] == key and &1["status"] == "ok")) and
+      Enum.any?(run.files, &(&1["kind"] == kind and &1["verified"] == true))
+  end
+
+  defp reached?(%{origin: :imported} = run, key, kind) do
+    Enum.any?(run.files, fn file ->
+      file["kind"] == kind and file["verified"] == true and
+        match?(%{^key => %{"status" => "ok"}}, file["destinations"])
+    end)
+  end
+
+  defp reached?(_run, _key, _kind), do: false
+
+  # Whether any run has tried the env destination: one in the read, or,
+  # when none of those did, any older one (a bounded probe). A probe that
+  # fails counts as tried, so the destination is judged rather than exempt.
+  defp env_attempted?(runs, key) do
+    Enum.any?(runs, &attempted?(&1, key)) or
+      case ever_attempted(key) do
+        {:ok, attempted?} ->
+          attempted?
+
+        {:error, error} ->
+          freshness_unreadable(error, :env_probe)
+          true
+      end
+  end
+
+  defp attempted?(run, key) do
+    Enum.any?(run.entries, &(&1["key"] == key and &1["status"] != "skipped")) or
+      Enum.any?(run.files, &is_map_key(&1["destinations"] || %{}, key))
+  end
+
+  defp ever_attempted(key) do
+    query =
+      Run
+      |> Ash.Query.filter(
+        fragment(
+          "EXISTS (SELECT 1 FROM unnest(?) AS d WHERE d->>'key' = ? AND d->>'status' <> 'skipped')",
+          destinations,
+          ^key
+        ) or
+          fragment(
+            "EXISTS (SELECT 1 FROM unnest(?) AS a WHERE jsonb_exists(a->'destinations', ?))",
+            artifacts,
+            ^key
+          )
+      )
+      |> Ash.Query.limit(1)
+      |> Ash.Query.select([:id])
+
+    with {:ok, rows} <- list_runs(query: query, actor: system(), authorize_with: :error) do
+      {:ok, rows != []}
+    end
+  end
+
+  # A stored destination added less than a component's threshold ago has had
+  # no chance to get that component yet. Its `inserted_at` is read here, for
+  # the stale ones only (not kept in `Destination`'s entries, which go into
+  # `state.json`); a read that fails gives no grace, so the alarm stays. A
+  # destination disabled and enabled again keeps its first `inserted_at`,
+  # so it alarms at once.
+  defp in_grace(stale, hours, now) do
+    ids = for {%{"source" => "db", "id" => id}, _components} <- stale, do: id
+
+    case inserted_ats(ids) do
+      {:ok, inserted} ->
+        stale
+        |> Enum.map(fn {entry, components} ->
+          {entry, Enum.reject(components, &new_for?(inserted[entry["id"]], &1, hours, now))}
+        end)
+        |> Enum.reject(fn {_entry, components} -> components == [] end)
+
+      {:error, error} ->
+        freshness_unreadable(error, :grace)
+        stale
+    end
+  end
+
+  defp inserted_ats([]), do: {:ok, %{}}
+
+  defp inserted_ats(ids) do
+    query =
+      DestinationConfig
+      |> Ash.Query.filter(id in ^ids)
+      |> Ash.Query.select([:id, :inserted_at])
+
+    with {:ok, rows} <-
+           list_backup_destinations(query: query, actor: system(), authorize_with: :error) do
+      {:ok, Map.new(rows, &{&1.id, &1.inserted_at})}
+    end
+  end
+
+  defp new_for?(nil, _component, _hours, _now), do: false
+
+  defp new_for?(inserted_at, {component, _last_at}, hours, now),
+    do: DateTime.diff(now, inserted_at, :hour) < Map.fetch!(hours, component)
+
+  # The entry as `status/0` lists it: `last_at` is the newest the stale
+  # components reached it (nil only when none did in the read), `hours` the
+  # lowest of their thresholds, so "no backup has reached it in `hours`
+  # hours" holds for each.
+  defp stale_entry({entry, stale}, hours, lookback_days) do
+    components = stale |> Enum.map(&elem(&1, 0)) |> Enum.sort_by(&(&1 != :db))
+
+    last_at =
+      stale
+      |> Enum.map(&elem(&1, 1))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.max(DateTime, fn -> nil end)
+
+    %{
+      key: entry["key"],
+      label: entry["label"],
+      components: components,
+      last_at: last_at,
+      hours: components |> Enum.map(&Map.fetch!(hours, &1)) |> Enum.min(),
+      lookback_days: lookback_days
+    }
+  end
+
+  # Every failure is a telemetry event (`read:` says which); each read's
+  # warning is logged at most once per 15 minutes, in its own words.
+  defp freshness_unreadable(error, read) do
+    :telemetry.execute(
+      [:kiln_cms, :backups, :status, :destination_freshness_unreadable],
+      %{count: 1},
+      %{error: error.__struct__, read: read}
+    )
+
+    key = {__MODULE__, :freshness_warned_at, read}
+    now = System.monotonic_time(:millisecond)
+    last = :persistent_term.get(key, nil)
+
+    if is_nil(last) or now - last >= @notices_warn_every_ms do
+      :persistent_term.put(key, now)
+      Logger.warning(freshness_warning(read) <> " (#{inspect(error.__struct__)})")
+    end
+
+    :ok
+  end
+
+  defp freshness_warning(:runs),
+    do:
+      "Backup status can't tell when each off-site destination was last reached: " <>
+        "the run history could not be read, so none is listed"
+
+  defp freshness_warning(:env_probe),
+    do:
+      "Backup status can't tell whether any backup ever tried BACKUP_RCLONE_REMOTE: " <>
+        "the run history could not be read, so it is judged as tried"
+
+  defp freshness_warning(:grace),
+    do:
+      "Backup status can't tell when the stored destinations were added: " <>
+        "a read failed, so a new destination no backup has reached yet is listed without its grace period"
 
   # Every schedule, read as `system/0`; `:unreadable` (logged now and then)
   # when that fails, so the thresholds fall back to the environment's.

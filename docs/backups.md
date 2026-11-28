@@ -109,7 +109,9 @@ Rules that make this a strategy rather than a script:
   the bell, but a backup that never starts sends nothing. The overview's red
   strip catches that once the last good backup is older than
   `BACKUP_STALE_AFTER_HOURS`, and only while someone looks at it; the ping is
-  what alerts you from outside.
+  what alerts you from outside. In the app, a destination no backup has
+  reached within its threshold raises the backup alarm too
+  ([Check that each destination is still reached](#check-that-each-destination-is-still-reached)).
 - If Postgres runs as a **Coolify-managed database resource**, also enable
   Coolify's built-in scheduled backups to S3 — belt and braces; the host cron
   works regardless of how PG is run.
@@ -992,9 +994,10 @@ Platform admins only, like the rest of the page.
      one.
 3. The panel's border and icon turn to the alarm when any line is failed or
    stale: a fresh database backup does not make stale media fine. A
-   partly off-site backup and a retention warning add lines of their own
-   and turn it too
+   partly off-site backup, a destination no backup has reached lately and
+   a retention warning add lines of their own and turn it too
    ([When a backup reaches only some destinations](#when-a-backup-reaches-only-some-destinations),
+   [Check that each destination is still reached](#check-that-each-destination-is-still-reached),
    [When retention is skipped or stops](#when-retention-is-skipped-or-stops)). The file
    list and the **Last run failed** box below still describe the manifest,
    the last backup, whatever it covered.
@@ -1044,6 +1047,159 @@ manifest that names no files by it. The stamp can't be recomputed from
 the start a moment later, so the two can name different seconds. A manifest
 without the key (one from an earlier release) is keyed by its `"started_at"`,
 as before.
+
+### Check that each destination is still reached
+
+A fresh last backup can hide a destination that stopped receiving them: a
+schedule that no longer covers it, a remote that fails every night while
+another succeeds, a stored destination that was added and never sent to.
+The off-site line above speaks only of the newest in-app backup, so the
+status also asks, of every destination configured now, when a backup last
+reached it (#2229). Platform admins only, like the rest of the page.
+
+1. Open **Backups** (`/editor/backups`). When some destination hasn't been
+   reached in time, the status panel adds one line per destination, in the
+   alarm's red, and its border and icon turn to the alarm:
+   - "No backup has reached NAS in 26 hours.": no backup has reached it
+     within its threshold. The number is the threshold, not the time since
+     the last one: the lowest `stale_after_hours` among the components that
+     are late there, the one the **Alarm thresholds** section shows
+     ([How a schedule sets the alarm threshold](#how-a-schedule-sets-the-alarm-threshold)).
+   - "No backup has reached NAS in the last 8 days.": nothing reached it as
+     far back as the status looked (the lookback, below).
+   - "No media backup has reached NAS in 26 hours." (or "… in the last 8
+     days."): this deployment backs up both the database and the media, and
+     only the named one is late there.
+
+   The line sits beside the last backup's off-site line, not in place of
+   it: that one is about the newest backup, this one about the destination.
+2. Open the **Overview** page (`/editor/overview`). Its backup strip turns
+   red with the same lines, after the components' lines and the off-site
+   line. Admins who are not platform admins see no strip.
+3. Open the **Schedule** tab (`/editor/backups/schedules`). The same lines
+   are in the warning box above the schedules, where a schedule that
+   doesn't cover a component explains one.
+
+The line names the destination by its redacted label: a stored
+destination's **Name**, or `BACKUP_RCLONE_REMOTE` redacted. Never the key,
+which for the env destination can carry the remote's text.
+
+**What counts as reaching a destination.** For each component this
+deployment backs up (**Database**, and **Media** with a `MEDIA_DIR`), the
+destination is fresh when a backup of that component reached it within that
+component's own threshold. A fresh database does not cover late media.
+
+- Only `Succeeded` runs count. A partly off-site success counts for the
+  destinations it reached. `Failed`, `Canceled` and `Skipped` runs never do,
+  so the check errs toward the alarm.
+- The run has a verified file of that component.
+- An in-app run reached the destination when its entry for it is `ok`; a
+  `failed` or `pending` entry doesn't count.
+- An imported (cron) run reached it when one of its files records the
+  destination as `ok`. The importer records this only for a successful
+  manifest that names `BACKUP_RCLONE_REMOTE`, so cron counts for the env
+  destination and never for a stored one.
+- The time is the run's start, not when its file arrived there. A
+  [re-send](#re-send-a-partly-off-site-backup) therefore counts as data of
+  the time it was backed up.
+
+**What is never listed.**
+
+- Anything while backups are not available on the node serving the page,
+  or while the destinations can't be read (counted as
+  `destinations_unreadable`, [below](#how-an-in-app-backup-runs-2218)).
+- A disabled destination.
+- A stored destination, for a component, while it was created less than
+  that component's threshold ago: it has had no chance to get one yet. The
+  grace runs from when it was first created. A destination disabled and
+  enabled again keeps that time, so it alarms at once if nothing reached it
+  meanwhile.
+- `BACKUP_RCLONE_REMOTE`, until some run of any age, the app's or cron's,
+  has tried it. Until then host cron owns it and its own ping
+  (`BACKUP_PING_URL`) is the alarm. While nothing in the lookback has
+  tried it, each status read also looks through the whole run history for
+  an attempt (one `EXISTS` query, `LIMIT 1`, which no index serves).
+  Once anything has, it is judged like every other destination, so a
+  remote the app fails on every night, or a `BACKUP_RCLONE_REMOTE` changed
+  to one nothing has reached, is listed.
+
+**How far back it looks.** One read of the run history through the
+`started_at` index: the last eight days, or the longest component threshold
+when that is longer, but never more than 31 days, and never more than the
+newest 2000 runs. "In the last N days" is that lookback. A threshold longer
+than 31 days alarms on "in the last 31 days".
+
+When the 2000-run cap cuts the read short of a component's threshold (more
+than 2000 runs within it), the read can't tell what happened before its
+oldest run, so it fails open: a component that the read shows no backup of
+on a destination is not listed for it, and "in the last N days" counts only
+the days the read covered. A component it saw reach the destination too
+long ago is still listed.
+
+**On several nodes.** Which `BACKUP_RCLONE_REMOTE` there is follows the
+environment of the node serving the page. In a cluster whose nodes set
+different remotes, each node's panels speak of its own.
+
+**When the read fails.** Each failure emits
+`[:kiln_cms, :backups, :status, :destination_freshness_unreadable]`
+(measurements `%{count: 1}`, metadata `error`, the error's module, and
+`read`), and logs a warning at most once every 15 minutes for each `read`:
+
+| `read` | What failed | What the status does |
+|---|---|---|
+| `:runs` | The run history read | Lists no destination: "Backup status can't tell when each off-site destination was last reached: the run history could not be read, so none is listed". |
+| `:env_probe` | The probe for any attempt at `BACKUP_RCLONE_REMOTE` | Judges the env destination as tried, so it can be listed. |
+| `:grace` | Reading when the stored destinations were created | Lists them without their grace period, so a new one can alarm early. |
+
+**What can go wrong.**
+
+- **The stored destination's media alarms and never clears, on a
+  deployment whose media goes only through cron.** Cron
+  (`scripts/backup.sh`) sends only to `BACKUP_RCLONE_REMOTE`, so a stored
+  destination gets media only from an in-app backup that covers it. If the
+  in-app schedules are database-only and cron takes the media, nothing ever
+  sends media there, and "No media backup has reached NAS in …" stays once
+  its grace period is over. That is true, not a false alarm: the
+  destination holds no media. Have an in-app schedule cover the media
+  ([Schedule backups in the app](#schedule-backups-in-the-app)), or, if
+  the destination is meant for the database alone, accept the line or
+  disable the destination.
+- **A destination is listed although a backup reached it today.** That
+  backup isn't counted: it failed or was canceled, its entry for the
+  destination was `failed`, or it has no verified file of the late
+  component. Check its History row.
+- **Nothing is listed while a destination is clearly behind.** Backups are
+  not available on the node serving the page, the destinations or the run
+  history can't be read (the events above), or the 2000-run cap applies.
+
+**Upgrade.** No migration and no setting; rolling the pin back is safe.
+`status/0`'s map gains the additive `destinations_stale` key
+(*Read it from code*, below).
+
+#### Read it from code
+
+`KilnCMS.Backups.status/0` lists each destination with a late component as
+an entry of `destinations_stale`, in `KilnCMS.Backups.Destination.configured/0`
+order (the env destination first, then the enabled stored ones), and `[]`
+when none is:
+
+```elixir
+%{
+  key: "dest:5f0c7c1e-…",     # the destination's key; never show it
+  label: "NAS",               # its redacted name, what the panels show
+  components: [:media],       # the late components, :db first
+  last_at: ~U[2026-11-26 03:17:00Z], # newest time any of them reached it; nil when none did in the read
+  hours: 26,                  # the lowest threshold among them
+  lookback_days: 8            # how far back the read covered
+}
+```
+
+`KilnCMSWeb.BackupComponents.freshness_lines/1` turns a status into the
+lines the three pages show, each `%{id: id, text: text}`; `id` is
+`"dest-<id>"` for a stored destination and `"env"` for the env one. The
+elements are `#backup-headline-freshness-<id>` on the Backups page and
+`#schedule-freshness-<id>` on the Schedule tab, both with
+`data-role="freshness-notice"`.
 
 ### The app path and the shell path share one format
 
@@ -1626,7 +1782,8 @@ as before.
 | `[:kiln_cms, :backups, :heartbeat, :dir_id_timeout]` | `node`; measurements also `waited_ms` | A heartbeat beat with no backup-directory id because reading `.kiln-dir-id` is held up, once per beat while it is ([below](#the-backup-directory-id-read-2848)). |
 | `[:kiln_cms, :backups, :marker_sync, :timeout]` | `phase` (`:dir_id` or `:sync`); measurements also `waited_ms` | A last-good marker sync job stopped waiting on the backup directory's id read or sync and gave up for the slot ([below](#the-marker-sync-on-a-hung-backup-directory-3079)). |
 | `[:kiln_cms, :backups, :offsite, :failed]` | `stamp`, `chain`, `reason` (`:destinations_unreadable`) | A backup finished without reaching any destination because the destinations table couldn't be read and `BACKUP_RCLONE_REMOTE` is not set: it stays Succeeded, marked not copied off-site (#2951). |
-| `[:kiln_cms, :backups, :status, :destinations_unreadable]` | `error` (the error's module) | The Backups or Home page couldn't read which destinations are configured, so the partly off-site alarm was left as recorded (logged at most every 15 minutes) (#2951). |
+| `[:kiln_cms, :backups, :status, :destinations_unreadable]` | `error` (the error's module) | The status couldn't read which destinations are configured, on every status read while it can't: the partly off-site alarm was left as recorded, and no destination's freshness was checked (logged at most every 15 minutes) (#2951, #2229). |
+| `[:kiln_cms, :backups, :status, :destination_freshness_unreadable]` | `error` (the error's module), `read` (`:runs`, `:env_probe` or `:grace`) | A read behind the destinations' freshness failed: nothing was listed, the env destination was judged as tried, or the stored ones were listed without their grace period ([above](#check-that-each-destination-is-still-reached)). Logged at most every 15 minutes for each `read`. |
 | `[:kiln_cms, :backups, :resend, :requested]` | `stamp`, `chain`; measurements also `targets` and `skipped` (how many destinations) | A re-send of a partly off-site backup took the lock ([Re-send a partly off-site backup](#re-send-a-partly-off-site-backup)). |
 | `[:kiln_cms, :backups, :resend, :destination]` | `stamp`, `chain`, `destination` (its key), `status` (`:ok`, `:failed`, `:skipped`, `:refused`, `:missing` or `:unreadable`); measurements also `files_ok` and `files_total` | One destination of a re-send settled. |
 | `[:kiln_cms, :backups, :resend, :stop]` | `stamp`, `chain`, `outcome` (`:done`, `:refused`, `:local_files_missing`, `:unreadable_file`, `:stopped`, `:interrupted` or `:canceled`), `offsite_status` (what the run's destinations now add up to, nil when unknown); measurements also `reached` and `total` | A re-send ended. |
@@ -4780,8 +4937,8 @@ off-site or not copied off-site, never for a complete one or for a
 deployment that never had a destination. When
 the destinations can't be read for this check, the alarm stays as it is,
 and Kiln emits `[:kiln_cms, :backups, :status, :destinations_unreadable]`
-(metadata `error`, the error's module), with a warning logged at most once
-every 15 minutes.
+(metadata `error`, the error's module) on every status read while they
+can't, with a warning logged at most once every 15 minutes.
 
 A backup that reached **none** of its destinations fails, as a failed
 `BACKUP_RCLONE_REMOTE` copy always did, with "Off-site copy FAILED to every

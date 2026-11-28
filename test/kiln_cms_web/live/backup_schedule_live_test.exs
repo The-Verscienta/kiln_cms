@@ -1724,6 +1724,30 @@ defmodule KilnCMSWeb.BackupScheduleLiveTest do
              )
     end
 
+    # #2229: a stored destination no backup has reached lately. Needs
+    # pg_dump: backups unavailable here list nothing.
+    @tag :pg_tools
+    test "a destination no backup has reached", %{conn: conn} do
+      admin = platform_admin()
+
+      nas =
+        Ash.Seed.seed!(Backups.DestinationConfig, %{
+          name: "NAS",
+          kind: "local",
+          settings: %{},
+          enabled: true,
+          inserted_at: DateTime.add(DateTime.utc_now(), -100 * 3600, :second)
+        })
+
+      lv = mount(conn, admin)
+
+      assert has_element?(
+               lv,
+               "#schedule-freshness-dest-#{nas.id}",
+               "No backup has reached NAS in the last 8 days."
+             )
+    end
+
     test "the scheduler turned off", %{conn: conn} do
       put_cron("false")
       lv = mount(conn, platform_admin())

@@ -116,6 +116,9 @@ else.
 - **Backups: a report after each backup, by email to the platform admins who choose it (failures only by default, every run, or off) and in the bell for every failed or partly off-site run, with a "recovered" email when a failed backup is resumed and succeeds (part A of #2229).**
   Queued in the same transaction as the run's outcome, ids only; content is redacted and display-sanitized. Re-sends are not reported.
   ([#3497](https://github.com/The-Verscienta/kiln_cms/pull/3497) · [long form](docs/changelog/unreleased.md#backup-reports))
+- **Backups: the alarm names a configured destination no succeeded backup has reached within each component's threshold, on the Backups panel, the Overview strip and the Schedule tab, for platform admins (part of #2229).**
+  `status/0` gains `destinations_stale`. A stored destination whose media goes only through cron alarms until an in-app schedule covers media. No migration; rolling the pin back is safe.
+  ([#3500](https://github.com/The-Verscienta/kiln_cms/pull/3500) · [long form](docs/changelog/unreleased.md#backup-destination-freshness))
 
 ### Changed
 

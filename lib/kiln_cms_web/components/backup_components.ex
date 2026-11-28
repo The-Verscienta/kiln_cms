@@ -109,6 +109,90 @@ defmodule KilnCMSWeb.BackupComponents do
 
   def offsite_headline(_offsite), do: nil
 
+  @doc """
+  The freshness alarm lines for `Backups.status/0`'s `destinations_stale`
+  (#2229), one per destination no backup has reached lately, as
+  `%{id: id, text: text}`: "No backup has reached X in N hours", or "in the
+  last N days" when nothing reached it as far back as the status looked
+  (at least a day).
+  When only some of the expected components are stale there, the line names
+  the one that is. `id` is `"dest-<id>"` for a stored destination and
+  `"env"` for `BACKUP_RCLONE_REMOTE`, never the key, which can carry the
+  remote's text. The Backups page, the Schedule tab and the home strip all
+  say them, beside the last backup's off-site line.
+  """
+  @spec freshness_lines(map()) :: [%{id: String.t(), text: String.t()}]
+  def freshness_lines(%{destinations_stale: [_ | _] = stale} = status) do
+    expected = Map.get(status, :expected, [])
+
+    for entry <- stale do
+      %{id: freshness_id(entry.key), text: freshness_text(entry, expected)}
+    end
+  end
+
+  def freshness_lines(_status), do: []
+
+  defp freshness_id("dest:" <> id), do: "dest-" <> id
+  defp freshness_id(_env_key), do: "env"
+
+  defp freshness_text(entry, expected) do
+    destination = run_destination_label(entry.key, entry.label)
+
+    case freshness_component(entry.components, expected) do
+      nil -> freshness_any(entry, destination)
+      component -> freshness_of(entry, destination, component)
+    end
+  end
+
+  # The component to name: the one stale component when another expected one
+  # is fine there; nil (say "backup") otherwise.
+  defp freshness_component([component], [_, _ | _]), do: freshness_component_name(component)
+  defp freshness_component(_components, _expected), do: nil
+
+  defp freshness_component_name(:db), do: gettext("database")
+  defp freshness_component_name(:media), do: gettext("media")
+  defp freshness_component_name(_other), do: nil
+
+  defp freshness_any(%{last_at: nil, lookback_days: days}, destination)
+       when days >= 1 do
+    ngettext(
+      "No backup has reached %{destination} in the last %{count} day.",
+      "No backup has reached %{destination} in the last %{count} days.",
+      days,
+      destination: destination
+    )
+  end
+
+  defp freshness_any(%{hours: hours}, destination) do
+    ngettext(
+      "No backup has reached %{destination} in %{count} hour.",
+      "No backup has reached %{destination} in %{count} hours.",
+      hours,
+      destination: destination
+    )
+  end
+
+  defp freshness_of(%{last_at: nil, lookback_days: days}, destination, component)
+       when days >= 1 do
+    ngettext(
+      "No %{component} backup has reached %{destination} in the last %{count} day.",
+      "No %{component} backup has reached %{destination} in the last %{count} days.",
+      days,
+      destination: destination,
+      component: component
+    )
+  end
+
+  defp freshness_of(%{hours: hours}, destination, component) do
+    ngettext(
+      "No %{component} backup has reached %{destination} in %{count} hour.",
+      "No %{component} backup has reached %{destination} in %{count} hours.",
+      hours,
+      destination: destination,
+      component: component
+    )
+  end
+
   defp not_copied_reason(%{key: key, label: label}) do
     if key == KilnCMS.Backups.RunDestination.unreadable_key(),
       do: gettext("couldn't read the backup destinations, and BACKUP_RCLONE_REMOTE was not set"),
