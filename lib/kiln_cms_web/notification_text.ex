@@ -95,6 +95,13 @@ defmodule KilnCMSWeb.NotificationText do
   # The un-mutable notice that a site's alerts were made quieter (#2245).
   def headline(%{event: :security_notice}), do: gettext("Security alerts were turned down")
 
+  # Actor-less (#2229): the backup pipeline decided. The row's excerpt names
+  # the run and its first error line, the instance's site name is its title.
+  def headline(%{event: :backup_failed}), do: gettext("A backup failed")
+
+  def headline(%{event: :backup_partly_offsite}),
+    do: gettext("A backup reached only some destinations")
+
   # An event this module has no sentence for — one a newer node wrote during a
   # rolling deploy, say. A neutral line rather than a crash of the whole bell;
   # the test holds every event this release knows to its own sentence.

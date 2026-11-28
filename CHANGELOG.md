@@ -67,6 +67,15 @@ else.
 - **Forms: add a field condition only once every node runs this release, and before rolling back untick Required on conditional fields that not every visitor should be asked (#2262).**
   An older node ignores conditions, so it shows every field and refuses a submission that left a required hidden field blank. Expand-only migration.
   ([#3480](https://github.com/The-Verscienta/kiln_cms/pull/3480) · [long form](docs/changelog/unreleased.md#form-field-conditions-upgrade))
+- **Security alerts: before rolling back past this release, let every pending platform notice be delivered; the previous release cannot load one, so a notice still waiting is lost after a day (#2811).**
+  During a rolling deploy an older node retries it until a newer node delivers it. No migration.
+  ([long form](docs/changelog/unreleased.md#platform-notice-rollback))
+- **Backups: every platform admin is now emailed about failed and partly off-site backups by default, cron's included once History imports them (within 48 hours of finishing, up to one import interval late); each can choose Every run or Off under Your settings (#2229).**
+  Before rolling back, drain the `mail` queue of `KilnCMS.Backups.Report*` jobs. Expand-only migration.
+  ([#3497](https://github.com/The-Verscienta/kiln_cms/pull/3497) · [long form](docs/changelog/unreleased.md#backup-reports-upgrade))
+- **Scanner guard: automatic block rules created before the upgrade, or by an old node during a rolling deploy, keep raising `blocked_ip` until they expire (60 minutes by default, at most 7 days); remove one on `/editor/ip-blocks` to stop it sooner (#2810).**
+  Additive migration, `ip_block_rules.source`, not backfilled. Rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#scanner-guard-rule-source-upgrade))
 
 ### Breaking
 
@@ -98,6 +107,15 @@ else.
 - **Backups: the Backups page and the Log tab follow a running backup about half a second after each change on clustered nodes, and the in-flight strip shows an approximate percent by steps (#3489, completes #2230).**
   The 3-second poll stays the source of truth and the fallback on unclustered nodes. No migration; rolling the pin back is safe.
   ([#3492](https://github.com/The-Verscienta/kiln_cms/pull/3492) · [long form](docs/changelog/unreleased.md#backup-live-progress))
+- **Security alerts: a verified API key over the `media_render`, `preview_api`, `unlock` or `feed_join` limit now raises `api_key_rate_limited`; `docs` still does not (#2809).**
+  A refused feed connect is still a `200` `busy`. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#api-key-rate-limit-more-buckets))
+- **Security alerts: turning off a platform alert sends every platform admin, the one who saved included, a notice by bell and email that cannot be muted; a notice that cannot be written fails the save (#2811).**
+  No webhook, no summary. No migration; see the upgrade note before rolling back.
+  ([long form](docs/changelog/unreleased.md#platform-alert-off-notice))
+- **Backups: a report after each backup, by email to the platform admins who choose it (failures only by default, every run, or off) and in the bell for every failed or partly off-site run, with a "recovered" email when a failed backup is resumed and succeeds (part A of #2229).**
+  Queued in the same transaction as the run's outcome, ids only; content is redacted and display-sanitized. Re-sends are not reported.
+  ([#3497](https://github.com/The-Verscienta/kiln_cms/pull/3497) · [long form](docs/changelog/unreleased.md#backup-reports))
 - **Backups: the alarm names a configured destination no succeeded backup has reached within each component's threshold, on the Backups panel, the Overview strip and the Schedule tab, for platform admins (part of #2229).**
   `status/0` gains `destinations_stale`. A stored destination whose media goes only through cron alarms until an in-app schedule covers media. No migration; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#backup-destination-freshness))
@@ -119,6 +137,9 @@ else.
 - **Backups: two SFTP destinations whose folders nest both prune once Kiln can tell they are different servers: both trust host keys of the same type that differ, and each has passed a Test since the later trust (#3200).**
   Press **Test** on both rows to clear "Not pruned". No migration.
   ([#3425](https://github.com/The-Verscienta/kiln_cms/pull/3425) · [long form](docs/changelog/unreleased.md#sftp-distinct-servers-prune))
+- **Security alerts: a request refused by a temporary rule the scanner guard added is still logged but no longer raises `blocked_ip`, so `security.blocked_ip` webhooks get fewer deliveries; an admin's rule alerts as before, with an unchanged payload (#2810).**
+  The setting is renamed **Requests from blocked addresses**. `IpBlocklist.match/2` returns the rule's source; `BlockedIpAlert.note/4` is now `note/5`.
+  ([long form](docs/changelog/unreleased.md#scanner-guard-refusals-no-alert))
 
 ### Fixed
 

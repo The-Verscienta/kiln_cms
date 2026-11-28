@@ -151,6 +151,86 @@ defmodule KilnCMS.Security.DeliverAlertTest do
     end
   end
 
+  describe "a platform notice (#2811)" do
+    defp platform_notice!(actor_id) do
+      {:ok, id} =
+        Repo.transaction(fn ->
+          KilnCMS.Security.AlertGate.insert_platform_notice!(%{
+            change: "platform_kind_disabled",
+            kinds: ["api_key_rate_limited"],
+            actor_id: actor_id
+          })
+        end)
+
+      id
+    end
+
+    defp platform_notice_struct(id) do
+      now = DateTime.utc_now()
+
+      %KilnCMS.Security.AlertDispatch{
+        id: id,
+        scope: "platform_notice:" <> id,
+        kind: "alerts_silenced",
+        channel: :platform_notice,
+        org_id: Accounts.default_org_id(),
+        window_index: 0,
+        window_started_at: now,
+        window_ends_at: now,
+        inserted_at: now,
+        notice: %{
+          "change" => "platform_kind_disabled",
+          "kinds" => ["api_key_rate_limited"],
+          "actor_id" => nil
+        }
+      }
+    end
+
+    test "is planned for every platform admin, unmutable, with no webhook", ctx do
+      muted_platform = user(:admin, %{notify_on_security_alert: false})
+      endpoint!(Accounts.default_org_id(), ["security.alerts_silenced"], ctx.platform)
+
+      plan =
+        KilnCMS.Security.Changes.DeliverAlert.build_plan(
+          platform_notice_struct(Ecto.UUID.generate()),
+          :alert
+        )
+
+      assert ids(plan.bell) == ids([ctx.platform, muted_platform])
+      assert ids(plan.mail) == ids([ctx.platform, muted_platform])
+      assert plan.endpoints == []
+      assert plan.mutable? == false
+      assert plan.data.phase == "notice"
+      assert plan.data.channel == "platform_notice"
+      assert plan.data.change == "platform_kind_disabled"
+      assert plan.data.kinds == ["api_key_rate_limited"]
+      assert plan.data.console_url =~ "/editor/security-alerts"
+    end
+
+    test "has no summary: the plan is empty and the trigger never picks it up", ctx do
+      plan =
+        KilnCMS.Security.Changes.DeliverAlert.build_plan(
+          platform_notice_struct(Ecto.UUID.generate()),
+          :summary
+        )
+
+      assert plan.data == nil
+      assert plan.bell == [] and plan.mail == [] and plan.endpoints == []
+
+      id = platform_notice!(ctx.platform.id)
+      SecurityAlerts.deliver()
+      assert [_bell] = bells()
+      _mails = mails()
+
+      SecurityAlerts.close_window(id)
+      SecurityAlerts.deliver()
+
+      assert [_bell] = bells()
+      assert mails() == []
+      assert [%{"alert_sent_at" => %{}, "summary_sent_at" => nil}] = SecurityAlerts.dispatches()
+    end
+  end
+
   describe "a site alert" do
     test "reaches the site's member admins: bell for each, email for the unmuted", ctx do
       lockout(ctx.org.id)

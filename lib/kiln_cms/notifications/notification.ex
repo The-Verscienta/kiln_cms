@@ -72,7 +72,10 @@ defmodule KilnCMS.Notifications.Notification do
   different thing to read. A registration notice (`:registration_pending`,
   #2251) collapses the same way, anchored on the site (`content_id` is the
   org's id): it says the queue has someone in it, so a second applicant while
-  it is unread adds nothing.
+  it is unread adds nothing. A backup notice (`:backup_failed`,
+  `:backup_partly_offsite`, #2229) collapses too, anchored on the default
+  org, but is refreshed (`:refresh`) rather than left as it was: it says the
+  newest run, so an admin opening it reads the failure that is current.
 
   `:notify` is the counterpart: system-only, because it writes a row addressed
   to somebody *other* than whoever acted. It is gated by `forbid_if
@@ -196,6 +199,14 @@ defmodule KilnCMS.Notifications.Notification do
       change Announce
     end
 
+    # A collapsing row that is still unread, told the newer news (#2229): a
+    # second backup failure while the first notice is unread says the newest
+    # run, not the first. Never who it is for, its anchor or its read state.
+    update :refresh do
+      description "Replace an unread row's title, excerpt and details (system-only — see the moduledoc)."
+      accept [:title, :excerpt, :details]
+    end
+
     update :forget_actor do
       description "Blank who did it, for an erased account (system-only — see the moduledoc)."
       accept []
@@ -234,6 +245,13 @@ defmodule KilnCMS.Notifications.Notification do
     # an actor-less system write never is.
     policy action([:mark_read, :mark_unread]) do
       authorize_if expr(user_id == ^actor(:id))
+    end
+
+    # The notifier's refresh of a row it would otherwise repeat (#2229): the
+    # row is addressed to someone other than whoever acted, as for `:notify`.
+    policy action(:refresh) do
+      forbid_if actor_present()
+      authorize_if always()
     end
 
     # Erasure (`KilnCMS.Notifications.anonymize_actor/1` and
@@ -319,7 +337,14 @@ defmodule KilnCMS.Notifications.Notification do
                     :security_alert,
                     # An `alerts_silenced` notice (#2245): someone made the site's
                     # alerts quieter. Same anchor as `:security_alert`.
-                    :security_notice
+                    :security_notice,
+                    # A backup run failed, or reached only some of its off-site
+                    # destinations (#2229), to every platform admin
+                    # (`KilnCMS.Backups.ReportWorker`). `content_type`
+                    # "platform_backups", `content_id` the default org's id;
+                    # `details` names the run.
+                    :backup_failed,
+                    :backup_partly_offsite
                   ]
     end
 

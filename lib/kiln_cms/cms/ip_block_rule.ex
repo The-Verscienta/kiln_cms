@@ -18,6 +18,16 @@ defmodule KilnCMS.CMS.IpBlockRule do
       at match time, the row is not swept) and must be in the future when set.
       Adding a range whose earlier rule has expired replaces that row
       (`Changes.ReplaceExpiredIpBlock`); an active duplicate is still refused.
+    * `source` — who added the rule (#2810): `:admin` (a person in the console,
+      or anyone else) or `:scanner_guard` (the scanner guard's temporary rule,
+      #2253). Never accepted as input: `Changes.SetIpBlockSource` sets it from
+      the actor, so only the `:scanner_guard` system actor can write
+      `:scanner_guard`. A refusal by a `:scanner_guard` rule is recorded but
+      raises no `blocked_ip` alert (`KilnCMS.Security.BlockedIpAlert`). Rows
+      written before the column existed read `:admin`; there is no backfill,
+      so an automatic rule from before the upgrade keeps alerting until it
+      expires (`KILN_SCANNER_BLOCKING_BLOCK_MINUTES`, default 60, at most 7
+      days).
     * No update: a rule is replaced by deleting it and adding another.
 
   ## Who
@@ -98,6 +108,7 @@ defmodule KilnCMS.CMS.IpBlockRule do
     change KilnCMS.CMS.Changes.NormalizeIpBlockCidr, on: [:create]
     change KilnCMS.CMS.Changes.RefuseIpSelfBlock, on: [:create]
     change KilnCMS.CMS.Changes.ReplaceExpiredIpBlock, on: [:create]
+    change KilnCMS.CMS.Changes.SetIpBlockSource, on: [:create]
     change KilnCMS.CMS.Changes.BustIpBlocklist, on: [:create, :destroy]
   end
 
@@ -139,6 +150,16 @@ defmodule KilnCMS.CMS.IpBlockRule do
 
     attribute :expires_at, :utc_datetime do
       public? true
+    end
+
+    # Who added the rule (#2810), from the actor (`Changes.SetIpBlockSource`),
+    # never from input.
+    attribute :source, :atom do
+      allow_nil? false
+      default :admin
+      writable? false
+      public? true
+      constraints one_of: [:admin, :scanner_guard]
     end
 
     timestamps()

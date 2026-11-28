@@ -8,6 +8,7 @@ defmodule KilnCMS.Security.IpBlockRuleTest do
 
   alias KilnCMS.CMS
   alias KilnCMS.CMS.IpBlockRule
+  alias KilnCMS.Repo
 
   defp user(role) do
     Ash.Seed.seed!(KilnCMS.Accounts.User, %{
@@ -245,6 +246,57 @@ defmodule KilnCMS.Security.IpBlockRuleTest do
       add!("198.51.100.0/24")
       assert [%{id: id}] = rules(theirs.id)
       assert id == stale.id
+    end
+  end
+
+  describe "source (#2810)" do
+    defp guard_add!(cidr, minutes \\ 60) do
+      CMS.create_ip_block_rule!(
+        %{
+          cidr: cidr,
+          expires_at: DateTime.add(DateTime.utc_now(), minutes * 60, :second),
+          confirm_self_block: true
+        },
+        actor: KilnCMS.SystemActor.new(:scanner_guard),
+        tenant: org_id()
+      )
+    end
+
+    test "an admin's rule is :admin" do
+      assert add!("203.0.113.70").source == :admin
+    end
+
+    test "the scanner guard's rule is :scanner_guard" do
+      assert guard_add!("203.0.113.71").source == :scanner_guard
+    end
+
+    test "an admin cannot mark a rule as the scanner guard's" do
+      assert {:error, %Ash.Error.Invalid{} = error} =
+               CMS.create_ip_block_rule(%{cidr: "203.0.113.72", source: :scanner_guard},
+                 actor: user(:admin),
+                 tenant: org_id(),
+                 context: %{client_ip: {192, 0, 2, 1}}
+               )
+
+      assert Exception.message(error) =~ "source"
+      refute Enum.any?(rules(org_id()), &(&1.cidr == "203.0.113.72/32"))
+    end
+
+    test "an admin re-adding a range over the scanner guard's lapsed rule gets an :admin rule" do
+      old = guard_add!("203.0.113.73")
+
+      # Lapse the guard's own row: a create cannot set a past expiry, and the
+      # row must keep the source its actor gave it.
+      Repo.query!(
+        "UPDATE ip_block_rules SET expires_at = now() - interval '1 minute' WHERE id = $1",
+        [
+          Ecto.UUID.dump!(old.id)
+        ]
+      )
+
+      assert %{id: id, source: :admin} = add!("203.0.113.73")
+      refute id == old.id
+      assert [%{id: ^id}] = Enum.filter(rules(org_id()), &(&1.cidr == "203.0.113.73/32"))
     end
   end
 

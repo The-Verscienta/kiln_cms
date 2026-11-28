@@ -1897,6 +1897,11 @@ msgstr ""
 msgid "A backup can't run on this deployment."
 msgstr ""
 
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "A backup failed"
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "A backup is running and a new backup is queued after it, so this resume was not queued. Try again once the queue clears."
@@ -1935,6 +1940,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "A backup or another re-send is running. Re-send this backup once it finishes: a re-send is never queued."
+msgstr ""
+
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "A backup reached only some destinations"
 msgstr ""
 
 #: lib/kiln_cms/security/alert_text.ex
@@ -2346,9 +2356,14 @@ msgstr ""
 msgid "A release needs a name."
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "A report after every backup, whatever its outcome"
+msgstr ""
+
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
-msgid "A request from an address on this site's block list is refused. One alert every %{minutes} minutes, then a summary."
+msgid "A request from an address on this site's block list is refused. Temporary rules the scanner guard adds don't raise it. One alert every %{minutes} minutes, then a summary. On by default. Your block list is under %{place}."
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
@@ -4964,6 +4979,11 @@ msgstr ""
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Backup downloaded"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backup emails"
 msgstr ""
 
 #: lib/kiln_cms_web/live/backup_log_live.ex
@@ -10471,6 +10491,11 @@ msgstr ""
 msgid "Every request re-reads the database until the cache warms again, so on a busy site this is a deliberate load spike. This clears the cache for every organization on this deployment, not just the one you are viewing. On a multi-node deployment it reaches every node; the count shown is from the node that served you."
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every run"
+msgstr ""
+
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every scanned slug already matches its derivation."
@@ -10800,6 +10825,11 @@ msgstr ""
 msgid "Failed at once: the destination said no retry fixes this."
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Failed backups, and backups that reached only some off-site destinations"
+msgstr ""
+
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Failed sign-in"
@@ -10818,6 +10848,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/federation_live.ex
 #, elixir-autogen, elixir-format
 msgid "Failures"
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Failures only"
 msgstr ""
 
 #: lib/kiln_cms_web/live/locale_settings_live.ex
@@ -15394,6 +15429,11 @@ msgstr ""
 msgid "No automation rules yet"
 msgstr ""
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "No backup emails"
+msgstr ""
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "No backup has ever been recorded"
@@ -16750,6 +16790,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/password_policy_live.ex
+#: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -18212,7 +18253,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Platform alert settings saved. Turning an alert off is recorded in the instance security log."
+msgid "Platform alert settings saved. Every platform admin will be sent a notice."
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
@@ -20037,6 +20078,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "Requesting…"
+msgstr ""
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Requests from blocked addresses"
 msgstr ""
 
 #: lib/kiln_cms/security/posture/checks/transport.ex
@@ -22378,7 +22424,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log."
+msgid "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log, and every platform admin is sent a notice."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
@@ -22509,6 +22555,7 @@ msgid "Sign-in"
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sign-in & access"
 msgstr ""
@@ -22921,6 +22968,11 @@ msgstr ""
 #: lib/kiln_cms_web/live/inbox_live.ex
 #, elixir-autogen, elixir-format
 msgid "Some notifications could not be marked read."
+msgstr ""
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "Some platform security alerts were turned off"
 msgstr ""
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
@@ -26652,6 +26704,11 @@ msgstr ""
 #: lib/kiln_cms_web/session_tracking.ex
 #, elixir-autogen, elixir-format
 msgid "This session was signed out from another device."
+msgstr ""
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "This sets the email only. Failed backups, and backups that reached only some destinations, still appear in your notifications."
 msgstr ""
 
 #: lib/kiln_cms_web/live/form_builder_live.ex

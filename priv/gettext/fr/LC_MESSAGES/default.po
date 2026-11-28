@@ -1897,6 +1897,11 @@ msgstr "Une sauvegarde demandée pendant qu’une autre est en cours attend qu�
 msgid "A backup can't run on this deployment."
 msgstr "Une sauvegarde ne peut pas s'exécuter sur cette installation."
 
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "A backup failed"
+msgstr "Une sauvegarde a échoué"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "A backup is running and a new backup is queued after it, so this resume was not queued. Try again once the queue clears."
@@ -1936,6 +1941,11 @@ msgstr "Une sauvegarde faite par scripts/backup.sh. Sa sortie complète se trouv
 #, elixir-autogen, elixir-format
 msgid "A backup or another re-send is running. Re-send this backup once it finishes: a re-send is never queued."
 msgstr "Une sauvegarde ou un autre renvoi est en cours. Renvoyez cette sauvegarde quand il sera terminé : un renvoi n’est jamais mis en file d’attente."
+
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "A backup reached only some destinations"
+msgstr "Une sauvegarde n'a atteint que certaines destinations"
 
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
@@ -2346,10 +2356,15 @@ msgstr "Une relation"
 msgid "A release needs a name."
 msgstr "Un lancement doit avoir un nom."
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "A report after every backup, whatever its outcome"
+msgstr "Un rapport après chaque sauvegarde, quel que soit son résultat"
+
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
-msgid "A request from an address on this site's block list is refused. One alert every %{minutes} minutes, then a summary."
-msgstr "Une requête provenant d'une adresse de la liste de blocage de ce site est refusée. Une alerte toutes les %{minutes} minutes, puis un résumé."
+msgid "A request from an address on this site's block list is refused. Temporary rules the scanner guard adds don't raise it. One alert every %{minutes} minutes, then a summary. On by default. Your block list is under %{place}."
+msgstr "Une requête provenant d'une adresse de la liste de blocage de ce site est refusée. Les règles temporaires ajoutées par la protection contre les scanners ne la déclenchent pas. Une alerte toutes les %{minutes} minutes, puis un résumé. Activée par défaut. Votre liste de blocage se trouve dans %{place}."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -4965,6 +4980,11 @@ msgstr "Destinations de sauvegarde"
 #, elixir-autogen, elixir-format
 msgid "Backup downloaded"
 msgstr "Sauvegarde téléchargée"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backup emails"
+msgstr "E-mails de sauvegarde"
 
 #: lib/kiln_cms_web/live/backup_log_live.ex
 #, elixir-autogen, elixir-format
@@ -10471,6 +10491,11 @@ msgstr "Tous les enregistrements à lier dans une seule liste — pour une liste
 msgid "Every request re-reads the database until the cache warms again, so on a busy site this is a deliberate load spike. This clears the cache for every organization on this deployment, not just the one you are viewing. On a multi-node deployment it reaches every node; the count shown is from the node that served you."
 msgstr "Chaque requête relit la base de données jusqu'à ce que le cache se remplisse à nouveau ; sur un site très fréquenté, c'est donc un pic de charge délibéré. Cela vide le cache de toutes les organisations de ce déploiement, pas seulement celle que vous consultez. Sur un déploiement multi-nœuds, cela atteint tous les nœuds ; le nombre affiché correspond au nœud qui vous a servi."
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every run"
+msgstr "Chaque exécution"
+
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every scanned slug already matches its derivation."
@@ -10800,6 +10825,11 @@ msgstr "Échec"
 msgid "Failed at once: the destination said no retry fixes this."
 msgstr "Échec immédiat : la destination a indiqué qu’aucune nouvelle tentative n’y remédierait."
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Failed backups, and backups that reached only some off-site destinations"
+msgstr "Les sauvegardes échouées et celles qui n'ont atteint que certaines destinations externes"
+
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Failed sign-in"
@@ -10819,6 +10849,11 @@ msgstr "Les échecs de connexion ont atteint le seuil d'alerte"
 #, elixir-autogen, elixir-format
 msgid "Failures"
 msgstr "Échecs"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Failures only"
+msgstr "Échecs uniquement"
 
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -15394,6 +15429,11 @@ msgstr "Aucune icône d'application définie."
 msgid "No automation rules yet"
 msgstr "Aucune règle d'automatisation pour le moment"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "No backup emails"
+msgstr "Aucun e-mail de sauvegarde"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "No backup has ever been recorded"
@@ -16750,6 +16790,7 @@ msgstr "octobre"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/password_policy_live.ex
+#: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -18212,8 +18253,8 @@ msgstr "Réglages des alertes de la plateforme enregistrés."
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Platform alert settings saved. Turning an alert off is recorded in the instance security log."
-msgstr "Réglages des alertes de la plateforme enregistrés. La désactivation d'une alerte est consignée dans le journal de sécurité de l’instance."
+msgid "Platform alert settings saved. Every platform admin will be sent a notice."
+msgstr "Réglages des alertes de la plateforme enregistrés. Chaque administrateur de la plateforme recevra un avis."
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
@@ -20038,6 +20079,11 @@ msgstr "Demander des modifications"
 #, elixir-autogen, elixir-format
 msgid "Requesting…"
 msgstr "Demande en cours…"
+
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Requests from blocked addresses"
+msgstr "Requêtes d'adresses bloquées"
 
 #: lib/kiln_cms/security/posture/checks/transport.ex
 #, elixir-autogen, elixir-format
@@ -22378,8 +22424,8 @@ msgstr "Affiché aux éditeurs. Laissez vide pour le message standard."
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log."
-msgstr "Visible par les administrateurs de la plateforme uniquement. Ces alertes vont à chaque administrateur de la plateforme, pour toute l'installation. La désactivation d'une alerte est consignée dans le journal de sécurité de l’instance."
+msgid "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log, and every platform admin is sent a notice."
+msgstr "Visible par les administrateurs de la plateforme uniquement. Ces alertes vont à chaque administrateur de la plateforme, pour toute l'installation. La désactivation d'une alerte est consignée dans le journal de sécurité de l’instance, et chaque administrateur de la plateforme reçoit un avis."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -22509,6 +22555,7 @@ msgid "Sign-in"
 msgstr "Connexion"
 
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sign-in & access"
 msgstr "Connexion et accès"
@@ -22922,6 +22969,11 @@ msgstr "Certaines lignes ont été supprimées pour garder le journal compact"
 #, elixir-autogen, elixir-format
 msgid "Some notifications could not be marked read."
 msgstr "Certaines notifications n'ont pas pu être marquées comme lues."
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "Some platform security alerts were turned off"
+msgstr "Certaines alertes de sécurité de la plateforme ont été désactivées"
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
@@ -26653,6 +26705,11 @@ msgstr "Cette session"
 #, elixir-autogen, elixir-format
 msgid "This session was signed out from another device."
 msgstr "Cette session a été fermée depuis un autre appareil."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "This sets the email only. Failed backups, and backups that reached only some destinations, still appear in your notifications."
+msgstr "Ce réglage ne concerne que l'e-mail. Les sauvegardes échouées et celles qui n'ont atteint que certaines destinations apparaissent toujours dans vos notifications."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format

@@ -270,6 +270,7 @@ defmodule KilnCMSWeb.BackupLive do
        |> assign(:status_failed?, false)
        |> assign(:status_ref, nil)
        |> assign(:importing?, false)
+       |> mark_report_notices_read()
        |> load_status()
        |> load_in_flight()
        |> poll()
@@ -284,6 +285,24 @@ defmodule KilnCMSWeb.BackupLive do
        socket
        |> push_navigate(to: KilnCMSWeb.AccessDenied.path(:platform))}
     end
+  end
+
+  # Opening the Backups page reads its bell notices (#2229): a failed or
+  # partly off-site backup is what it shows. The rows live in the default
+  # org whichever console this is (`KilnCMS.Backups.ReportWorker`), so that
+  # is the tenant, not the console's. As the user, through their own unread
+  # rows: nobody else's notice can be touched.
+  defp mark_report_notices_read(socket) do
+    if connected?(socket) do
+      user = socket.assigns.current_user
+      org_id = KilnCMS.Accounts.default_org_id()
+
+      for event <- [:backup_failed, :backup_partly_offsite] do
+        KilnCMS.Notifications.mark_read_about(user, org_id, event, org_id)
+      end
+    end
+
+    socket
   end
 
   # The route's `?page=`, or `?run=<id>` (#2875): the page that holds that

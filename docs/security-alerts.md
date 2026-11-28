@@ -20,7 +20,7 @@ There are two channels. A **site** alert is about one site and goes to that
 site's own admins, who can turn each kind off. A **platform** alert is about
 the whole installation and goes to every platform admin. Nobody can mute a
 platform alert, and only one platform kind, `api_key_rate_limited`, can be
-turned off, by a platform admin
+turned off, by a platform admin, which sends every platform admin a notice
 ([Turn off rate-limit alerts for API keys](#turn-off-rate-limit-alerts-for-api-keys)).
 
 Site alerts (each one can be turned off on the site's
@@ -34,7 +34,7 @@ Site alerts (each one can be turned off on the site's
 | `lockout` | Account locked out | A sign-in throttle locks an account or an address out: too many wrong passwords or second-factor codes | Yes |
 | `two_factor_disabled` | Second factor removed | A second factor is removed from an account: the authenticator app turned off, or a passkey removed, by the owner or a platform admin | Yes |
 | `sso_config_changed` | Single sign-on changed | The site's identity provider or a single sign-on domain is saved, verified or removed | Yes |
-| `blocked_ip` | Blocked addresses | A request or socket connect from an address on the site's [block list](ip-blocking.md) is refused (see [Blocked addresses](#blocked-addresses-raise-one-alert-per-window)) | Yes |
+| `blocked_ip` | Requests from blocked addresses | A request or socket connect from an address on the site's [block list](ip-blocking.md) is refused by a rule an admin added (see [Blocked addresses](#blocked-addresses-raise-one-alert-per-window)). A temporary rule the scanner guard added raises nothing | Yes |
 
 Platform alerts:
 
@@ -69,9 +69,12 @@ Platform alerts:
   ([Not recorded, and why](security-events.md#not-recorded-and-why) says why for each). A beta-round
   seat is not among them: since 1.13 its tier goes through the same action as
   the **Accounts** page.
-- **An automatic address block being created.** The scanner guard adding a
-  temporary rule is recorded as `ip_auto_blocked` and raises nothing. The
-  requests that rule then refuses do raise `blocked_ip`, like any rule's.
+- **An automatic address block, or the requests it refuses.** The scanner
+  guard adding a temporary rule is recorded as `ip_auto_blocked` and raises
+  nothing. The requests that rule then refuses are written to the security
+  log as `ip_block_refused` and raise nothing either: they are the rule doing
+  its job, and the guard already recorded the block. See
+  [Blocked addresses](#blocked-addresses-raise-one-alert-per-window).
 - **Every other security event**: sign-ins, invitations, passkeys, recovery
   codes, API key revocations, the admin allowlist, other site settings. They
   stay in the log.
@@ -83,6 +86,7 @@ Platform alerts:
 | Site alert | Each **member admin** of the site (the platform admins when it has none), unless the site switched admin notifications off | The same people, except those who muted the email | The site's endpoints subscribed to `security.<kind>` |
 | Platform alert | Every platform admin, in the **default site's** bell; other sites' consoles show only how many are unread | Every platform admin; no mute applies | None in this release |
 | Silencing notice | Each member admin of the site (the platform admins when it has none) | The same people; no setting or mute applies | The site's endpoints subscribed to `security.alerts_silenced` |
+| Platform notice | Every platform admin, the one who made the change included, in the **default site's** bell, counted like a platform alert in other sites' consoles | Every platform admin; no setting or mute applies | None |
 
 A **member admin** is an account with an active membership on the site whose
 role there is admin, standing or by a live temporary grant, that is not a
@@ -107,7 +111,10 @@ default site's console. In any other site's console, the bell and the inbox
 show one entry instead, "3 unread platform alerts", with the line "Open them
 in the default site's console". The entry links to the default site's unread
 inbox, on that site's console host, where the alerts can be read and marked
-read. The count is included in the bell's badge.
+read. The count is included in the bell's badge. It counts the backup
+notices too ("A backup failed", "A backup reached only some destinations",
+#2229), which live in the default site for the same reason
+([Reports and alerts](backups.md#reports-and-alerts-2229)).
 
 The entry is a number and nothing else: no site name, headline or address,
 and no way to open or mark an alert from there. Another site's console is
@@ -132,8 +139,10 @@ are not counted: they are only in the default site's bell.
   the language of the console you read it in. A row written before this
   wording was translated shows its English line.
 - **The email.** Subject "Security alert on (site): (what happened)", or
-  "Security alert summary for (site)" for a summary and "Security alerts on
-  (site) were changed" for a notice. It says
+  "Security alert summary for (site)" for a summary, "Security alerts on
+  (site) were changed" for a notice and "Platform security alerts were
+  changed" for a [platform notice](#turn-off-rate-limit-alerts-for-api-keys).
+  It says
   when (UTC), links to the security log on the site's own console host (a
   notice links to the Security alerts page), and says why you got it. Emails
   are in English, whatever language the console is in: an account stores no
@@ -204,16 +213,30 @@ that cap, so the alert always has its event.
 When `blocked_ip` is on (the default), a request refused by the site's
 [block list](ip-blocking.md) raises an alert: an HTTP request (the empty
 `403`), a page's LiveView connection, or a connect to `/ws/gql`,
-`/ws/collab` or `/ws/bridge`. Rules the [scanner guard](ip-blocking.md#block-scanners-automatically)
-adds for a while are rules like any other, so the requests they refuse
-alert too.
+`/ws/collab` or `/ws/bridge`.
+
+**Rules the scanner guard added don't alert.** The temporary rules the
+[scanner guard](ip-blocking.md#block-scanners-automatically) adds are rules
+like any other for blocking, but the requests they refuse raise no
+`blocked_ip` alert and are left out of the summary. They are still written to
+the security log as `ip_block_refused`, with `source` `scanner_guard`. Each
+rule records who added it when it is created, and nobody can set or change
+that: a rule an admin adds on **Blocked addresses** is the admin's, whatever
+its note or expiry. When an admin's rule and an automatic one both contain the
+address, the admin's rule is the one that matched, and it alerts. Automatic
+rules created before the upgrade to this release count as an admin's and keep
+alerting until they expire (for operators: see
+[Running more than one server](#running-more-than-one-server)).
 
 A blocked address is a flood by nature, so it is thinned out in memory
 before anything reaches the database:
 
 - Each server lets through the first refusal of each client network per
-  site per 15-minute window, and at most **20 networks per site per window**.
-  A client network is an IPv4 address, or an IPv6 address's `/64`.
+  site per 15-minute window, and at most **20 networks per site per window**
+  for admins' rules, and another 20 for the scanner guard's. The two are
+  counted apart, so a flood the scanner guard is already refusing cannot use
+  up the samples an admin's rule gets. A client network is an IPv4 address,
+  or an IPv6 address's `/64`.
 - What gets through is written to the security log as `ip_block_refused`,
   once per site and network per window across all servers. The event names
   the **rule that matched and the surface** (`http`, `live`, `gql`,
@@ -232,11 +255,11 @@ before anything reaches the database:
 every 15 minutes, 96 a day for each admin, by bell and by email. When more
 than one network is refused in a window, a summary follows each alert, so the
 most a site sends is one alert and one summary per window, 192 a day. To
-stop them, untick **Blocked addresses** on the Security alerts page (the
-[steps](#choose-which-alerts-your-site-sends) below). The refusals are still
+stop them, untick **Requests from blocked addresses** on the Security alerts
+page (the [steps](#choose-which-alerts-your-site-sends) below). The refusals are still
 written to the security log, sampled the same way, but no alert is sent.
 
-Don't confuse the alert setting with the **Blocked addresses** page under
+The alert setting is not the **Blocked addresses** page under
 **Sign-in & access** (`/editor/ip-blocks`), where the rules themselves are.
 Removing a rule there stops the alerts it raises.
 
@@ -253,9 +276,15 @@ API key that this server has verified goes over one of these rate limits:
 | `media_upload` | Uploads and imports under `/api/media` |
 | `media_transform` | Image transforms, `/media/:id/t/...` |
 | `plugin_endpoint` | Plugin routes |
+| `media_render` | Image transforms that have to render a new derivative (a cache miss on `/media/:id/t/...`), 120 a minute by default (#2809) |
+| `preview_api` | Headless reads that present a preview token: `/api/json`, `GET /api/content/:type/:slug` and `GET /api/visual-editing/:type/:slug` (#2809) |
+| `unlock` | Passphrase attempts against locked content: `POST /api/content/:type/:slug/unlock` and the lock page's `POST /_unlock` (#2809) |
+| `feed_join` | Connects to the change feed, `GET /api/feed`. A refusal here is still the stream's `200` with `event: busy`, never a `429` (#2809) |
 
-No other limit raises it: sign-in, forms, page delivery and the rest are
-about addresses, not keys.
+No other limit raises it. Sign-in, forms, page delivery and the rest are
+about addresses, not keys. The limit on the API explorer and the schema
+downloads (`docs`) is left out on purpose (an owner decision on #2809), so a
+key over it raises nothing.
 
 **"Verified" means used successfully on this server recently.**
 A rate limit refuses a request before the key in it is checked, and checking
@@ -272,12 +301,18 @@ server, or a JWT from the headless sign-in rather than a key) is counted on the
 is not checked at the refusal, and why servers do not share what they
 remember, is argued in [ADR 0053](decisions/0053-rate-limit-alerts-trust-a-node-local-verified-key-cache-never-a-check-on-the-refusal-path.md). That means:
 
-- On image transforms and plugin routes, which never check a key, a refusal
-  alerts only if the same key was used on an authenticated API on the same
-  server recently enough to still be remembered (2.5 to 5 minutes, as
-  above). Behind a load balancer, the earlier use and the refusal have to
-  land on the same server (see
+- On image transforms (`media_transform` and `media_render`), plugin routes,
+  the lock page's `POST /_unlock` and the change feed's connect budget
+  (`feed_join`, charged before the feed checks a key), a refusal alerts only
+  if the same key was used on an authenticated API on the same server
+  recently enough to still be remembered (2.5 to 5 minutes, as above). Behind
+  a load balancer, the earlier use and the refusal have to land on the same
+  server (see
   [Running more than one server](#running-more-than-one-server)).
+- `preview_api` and `POST /api/content/:type/:slug/unlock` are charged after
+  the `/api` pipeline has checked the key, so the key there is always
+  verified. A forged or revoked key never reaches them: it is answered `401`
+  first, and records nothing.
 - `/ws/gql` cannot carry an API key (the socket accepts only a JWT), so a
   refusal there never alerts.
 - A key revoked while it is still remembered records nothing: the key is
@@ -316,9 +351,11 @@ address.
    [Turn off rate-limit alerts for API keys](#turn-off-rate-limit-alerts-for-api-keys)).
 2. Under **Alerts**, tick the kinds you want and untick the ones you don't.
    Each has a line saying what raises it. **Failed sign-ins** reads "10 failed
-   sign-ins in 15 minutes on this site. Off by default." **Blocked addresses**
-   reads "A request from an address on this site's block list is refused.
-   One alert every 15 minutes, then a summary."
+   sign-ins in 15 minutes on this site. Off by default." **Requests from
+   blocked addresses** reads "A request from an address on this site's block
+   list is refused. Temporary rules the scanner guard adds don't raise it. One
+   alert every 15 minutes, then a summary. On by default. Your block list is
+   under Sign-in & access → Blocked addresses."
 3. Under **Delivery**:
    - **Notify this site's admins by bell and email**: untick it and the site's
      admins get no bell row and no email for site alerts. Webhooks subscribed
@@ -352,7 +389,8 @@ the whole installation, not one site.
 1. Open **Security alerts** (`/editor/security-alerts`) on any site. Below
    the site's form you see **Platform alerts**, with the line "Shown to
    platform admins only. These go to every platform admin, for the whole
-   installation. Turning one off is recorded in the instance security log."
+   installation. Turning one off is recorded in the instance security log,
+   and every platform admin is sent a notice."
    Site admins who are not platform admins don't see this part.
 2. Untick **API keys over a rate limit**. The line under it reads "A verified
    API key goes over a rate limit. One alert every 15 minutes, then a
@@ -363,9 +401,19 @@ the whole installation, not one site.
    verified the key." Its **Learn more** link opens
    [Running more than one server](#running-more-than-one-server).
 3. Select **Save platform alerts**. You see "Platform alert settings saved.
-   Turning an alert off is recorded in the instance security log." (Saving
-   with nothing turned off says "Platform alert settings saved.")
-4. Open **Security log**, then **Instance log**. The save is there as
+   Every platform admin will be sent a notice." Saving with nothing newly
+   turned off, or turning it back on, says "Platform alert settings saved."
+   and sends nothing. The message follows what the save itself wrote: if
+   another platform admin turned the kind off after your page loaded, your
+   save sends no second notice and does not promise one.
+4. Within about a minute every platform admin, you included, gets the
+   **platform notice**: a bell row in the default site's console, headed
+   "Security alerts were turned down", whose inbox line reads "Some platform
+   security alerts were turned off", and an email, "Platform security alerts
+   were changed", saying "Turned off: An API key hit a rate limit." with a
+   link to the Security alerts page. In any other site's console it is
+   counted in the "unread platform alerts" entry.
+5. Open **Security log**, then **Instance log**. The save is there as
    **Platform security alerts changed** (`platform_alerts_changed`), with
    `disabled_kinds` `api_key_rate_limited`, or `none` after turning it back
    on.
@@ -373,9 +421,25 @@ the whole installation, not one site.
 From the next delivery on, nothing is sent for the kind. The
 `api_key_rate_limited` events are still written to the security log, and the
 alert's window is still claimed and stamped delivered; only the bell and
-email are skipped. Unlike a site setting, turning it off sends no
-[silencing notice](#silencing-notices): notices go to one site's admins, and
-this is the installation's. The instance log is the record.
+email are skipped.
+
+The platform notice (#2811) is the installation's counterpart of a site's
+[silencing notice](#silencing-notices), so a hijacked platform admin session
+cannot turn the alert off without every other platform admin hearing of it:
+
+- **Who gets it.** Every platform admin as they are when it is delivered,
+  a live temporary platform grant included and erased accounts excluded. The
+  one who saved is included too, so a single-admin installation still hears
+  about a change it did not make. Site admins who are not platform admins
+  never get it.
+- **No way to quiet it.** No setting turns it off and no mute applies,
+  including the **Security alerts** mute under **Your settings**. It is
+  never grouped: each save that turns a kind off sends one. It has no
+  summary and no webhook carries it, like the platform alerts.
+- **Written with the save, or not at all.** The notice is written in the
+  save's own transaction, with the instance log event. If it cannot be
+  written, the save fails, nothing changes, and the page says "The platform
+  alert settings could not be saved."
 
 What can go wrong:
 
@@ -383,8 +447,11 @@ What can go wrong:
   alerts."** Your platform admin role was lowered, or a temporary platform
   grant expired, while the page was open. Nothing changed.
 - **"The platform alert settings could not be saved."** The save failed, for
-  example because its instance log event could not be written (the two are
-  saved together). Nothing changed; try again and check the application log.
+  example because its instance log event or its platform notice could not be
+  written (all three are saved together). Nothing changed; try again and
+  check the application log, which says "Platform alert settings not saved:
+  the platform notice could not be written: …" when the notice was the
+  cause.
 - **The alerts keep coming after you turned the kind off.** The setting
   could not be read when an alert was delivered; delivery then treats the
   kind as on and logs "Security alerts: the platform alert settings could
@@ -402,8 +469,8 @@ anything off for the other admins.
 3. Select **Save preferences**.
 
 The mute is one switch for every site you administer, and it mutes only the
-**email** of **site** alerts: the bell row is still written. It does not mute platform alerts or silencing notices, which are always
-emailed. The switch is shown only to member admins of some site; a platform
+**email** of **site** alerts: the bell row is still written. It does not mute platform alerts, silencing notices or platform notices,
+which are always emailed. The switch is shown only to member admins of some site; a platform
 admin, whose alerts are the platform's, does not see it. Only the account
 holder can change it: a platform admin editing another account's preferences
 is refused ("can only be changed by the account holder").
@@ -437,10 +504,15 @@ one back on raise nothing.
 
 A notice is written in the same transaction as the change. If the notice
 cannot be written, the change is refused and rolls back: alerts are never
-turned down without a word. The platform's own switch for
-`api_key_rate_limited` is the one exception: it sends no notice and is
-recorded in the instance security log instead
+turned down without a word
 ([ADR 0027](decisions/0027-security-alerts-derive-from-the-audit-log-and-turning-a-sites-alerts-down-is-never-silent.md)).
+
+The platform's own switch for `api_key_rate_limited` is not a site's
+setting, so it sends no site notice. Since #2811 it sends a **platform
+notice** instead, `change` `platform_kind_disabled`, to every platform admin
+by bell and email, under the same rules: written with the save, no setting
+or mute, no webhook (see
+[Turn off rate-limit alerts for API keys](#turn-off-rate-limit-alerts-for-api-keys)).
 
 ## IP addresses in alerts
 
@@ -562,6 +634,12 @@ the surface instead:
   "metadata": { "rule": "203.0.113.0/24", "surface": "http" }
 }
 ```
+
+Only a refusal by a rule an admin added is delivered: one by a temporary rule
+the scanner guard added raises no alert, so no `security.blocked_ip` delivery
+and no summary. The payload of the ones that are delivered is unchanged; the
+`source` key the security log gives an automatic rule's refusal never reaches
+a webhook.
 
 A **summary** adds `window` and `count` (the window's total) and has no
 `event`:
@@ -724,7 +802,8 @@ What can go wrong:
     only by webhook (admin notifications off, or no admins), the
     **Security alerts reach someone** posture line turns **Review** ("Some
     security alerts on this site reach nobody…") until the event is ticked
-    or **Blocked addresses** is turned off;
+    or **Requests from blocked addresses** (then labeled **Blocked
+    addresses**) is turned off;
   - platform admins get `api_key_rate_limited`.
 
   During a rolling deploy, a `blocked_ip` or `api_key_rate_limited` alert
@@ -740,6 +819,33 @@ What can go wrong:
   and that counts as unticking a security event, which sends the site's
   admins a `webhook_changed` silencing notice. Tick it again after rolling
   forward.
+- **Upgrade to platform notices and the four new rate-limit buckets
+  (#2809, #2811).** No migration and no setting. From the deploy on, turning
+  off `api_key_rate_limited` sends every platform admin a platform notice,
+  and a verified key over `media_render`, `preview_api`, `unlock` or
+  `feed_join` raises `api_key_rate_limited`.
+  - **During a rolling deploy.** A node still on the previous release cannot
+    load a platform notice's dispatch row (channel `platform_notice`), so the
+    delivery job fails there and is retried, up to 10 attempts per job and
+    re-queued every minute after that, until a node on the new release
+    delivers it. The notice is late, never sent to the wrong people. A key
+    over one of the new buckets on an old node raises nothing.
+  - **Before rolling back.** Wait until every platform notice written on the
+    new release has been delivered, or accept that it may be lost. This
+    query returns `0` when none is waiting:
+
+    ```sql
+    SELECT count(*) FROM security_alert_dispatches
+    WHERE channel = 'platform_notice'
+      AND alert_sent_at IS NULL AND failed_at IS NULL;
+    ```
+
+    On the previous release an undelivered notice fails every
+    minute and logs the failure until its one-day delivery window closes, and
+    then it is never sent. The instance log's `platform_alerts_changed` event
+    is kept either way. A notice already delivered still shows after a
+    rollback, its inbox line falling back to "Security alerts were made
+    quieter".
 - **Mail goes through the instance relay** (the `KilnCMS.Mailer`
   configuration), never a site's own SMTP relay: a site admin can change that
   relay, and an alert about the site must not depend on it. Alert mail is
@@ -789,8 +895,9 @@ ways.
 
 - **Most request-rate limits are per server.** Every request-rate limit
   (`KilnCMSWeb.RateLimit`) except sign-in (`auth`), registration (`register`)
-  and unlock (`unlock`) is counted in each server's memory, the five limits
-  that raise `api_key_rate_limited` included. (The per-account budgets, such as
+  and unlock (`unlock`) is counted in each server's memory, every other limit
+  that raises `api_key_rate_limited` included. (`unlock` is counted in the
+  database, but the gate that notes a key over it is still per server.) (The per-account budgets, such as
   sign-in lockout and invitations, are shared through the database and don't
   multiply.) Behind a load balancer an address can make up to N times the
   configured number of requests on N servers before it is refused, so a key goes over a limit, and
@@ -802,10 +909,11 @@ ways.
   or without session affinity: the server that refuses an address is the one
   that let the address's earlier requests through, and it checked the key on
   each of them that carried it. No alert is raised when:
-  - the refusal is on an image transform or a plugin route (neither checks a
-    key) or the ActivityPub inbox (which counts against the `api` limit
-    without checking a key), and the key's earlier API use landed on another
-    server;
+  - the refusal is on an image transform, a plugin route or the lock page's
+    `POST /_unlock` (none checks a key), the change feed's connect budget
+    (`feed_join`, charged before the feed checks the key) or the ActivityPub
+    inbox (which counts against the `api` limit without checking a key), and
+    the key's earlier API use landed on another server;
   - the address's limit was used up by requests that did not carry the key,
     such as other clients behind the same egress address;
   - the server's key cache restarted on its own while its rate-limit counts
@@ -822,6 +930,17 @@ ways.
   about 20 times the number of servers. It is "about" because each server
   starts its window by its own clock, and the summary's window starts by the
   database's.
+- **Automatic rules from before the upgrade still alert.** A rule records who
+  added it in `ip_block_rules.source`, a column the upgrade adds with
+  `admin` as its default, and nothing is backfilled. So a temporary rule the
+  scanner guard added before the upgrade, or added by a node still on the
+  previous release during a rolling deploy, reads as an admin's and its
+  refusals alert until it expires (`KILN_SCANNER_BLOCKING_BLOCK_MINUTES`,
+  60 minutes by default, at most 7 days). Remove such a rule on
+  `/editor/ip-blocks` to stop it sooner. During the deploy, a node still on
+  the previous release that sends a window's summary also counts the
+  scanner guard's refusals in it. Rolling back is safe: the previous release
+  ignores the column, and alerts on every rule again.
 
 ## For developers
 
@@ -846,18 +965,33 @@ ways.
   `CMS.update_site_security_alerts/2` and `CMS.reset_site_security_alerts/1`
   (admin only). `:save` writes every field it is not given back to its
   default, so pass all three.
-- `KilnCMS.Security.BlockedIpAlert.note/4`: called by every edge that refuses
+- `KilnCMS.Security.BlockedIpAlert.note/5`: called by every edge that refuses
   a blocked address (`KilnCMSWeb.Plugs.IpBlock`, `KilnCMSWeb.IpBlock`) with
-  the rule `KilnCMS.Security.IpBlocklist.match/2` returned. `blocked?/2` has
-  no side effect, so the scanner guard asking it raises nothing.
+  the rule and its source that `KilnCMS.Security.IpBlocklist.match/2`
+  returned (`{:blocked, rule, source}`, an admin's rule preferred where
+  several match). A source other than `:scanner_guard` is treated as
+  `:admin`, so a kind of rule added later alerts rather than passing
+  unnoticed. `blocked?/2` has no side effect, so the scanner guard asking it
+  raises nothing.
+- `KilnCMS.CMS.IpBlockRule`'s `source` (`:admin` or `:scanner_guard`) is set
+  by `KilnCMS.CMS.Changes.SetIpBlockSource` from the actor, never from input:
+  only the scanner guard's system actor writes `:scanner_guard`.
+  `KilnCMS.Security.Alerts.classify/2` raises nothing for an
+  `ip_block_refused` whose metadata has `"source" => "scanner_guard"`, and
+  the summary counts through the same function.
 - `KilnCMS.Security.ApiKeyTrip`: the node-local cache of verified keys
   (`remember/2`, called by `KilnCMSWeb.Plugs.ApiKeyAuth` and, on `/mcp`, by
   `KilnCMSWeb.Plugs.RememberApiKey` once `KilnCMSWeb.Plugs.RequireApiKey` has
   verified the key) and `note/2`, called from the refusal
   branch of `KilnCMSWeb.Plugs.RateLimit` and
-  `KilnCMSWeb.Plugs.GraphqlBatchLimit`. `buckets/0` lists the limits it
-  covers. A new rate-limited API surface that should alert needs its bucket
-  there and a key that reaches `remember/2`.
+  `KilnCMSWeb.Plugs.GraphqlBatchLimit`, and by the two places that check a
+  limit themselves rather than through the plug:
+  `KilnCMSWeb.MediaTransformController` (`:media_render`) and
+  `KilnCMSWeb.FeedStream.JoinBudget` (`:feed_join`). `buckets/0` lists the
+  limits it covers. A new rate-limited API surface that should alert needs
+  its bucket there, a key that reaches `remember/2`, and, when it calls
+  `KilnCMSWeb.RateLimit.check/2` directly, its own `note/2` call in the
+  refusal branch: adding the bucket alone does nothing there.
 - `KilnCMS.Security.PlatformAlertSettings`: the platform's one settings row,
   through `KilnCMS.Security.list_platform_alert_settings/1` and
   `KilnCMS.Security.save_platform_alert_settings/2` (platform admins only).
@@ -865,7 +999,17 @@ ways.
   `KilnCMS.Security.Alerts.platform_optional_kinds/0` may be added, and a
   save adding another kind is refused with "has alert kinds that cannot be
   turned off". `KilnCMS.Security.Alerts.platform_enabled?/1` is what
-  delivery asks.
+  delivery asks. A save that newly turns a kind off writes a platform notice
+  through `KilnCMS.Security.Changes.NoticePlatformAlertSettings`, which
+  compares against the row read `FOR UPDATE` before the write and calls
+  `KilnCMS.Security.AlertGate.insert_platform_notice!/1` in the save's
+  transaction. The saved record's `__metadata__.platform_notice?` says
+  whether this save wrote one. Its dispatch row has channel
+  `:platform_notice`, scope `platform_notice:<id>` and the default org; its
+  changes are `KilnCMS.Security.Alerts.platform_notice_changes/0`, kept apart
+  from `notice_changes/0` so neither `insert_notice!/2` nor
+  `insert_platform_notice!/1` accepts the other's (both raise
+  `ArgumentError`).
 - `KilnCMS.Security.AlertText`: the kind and change labels and the
   one-line headline, gettext'd. The inbox renders it in the reader's locale
   from `Notification.details` (the values `AlertText.details/1` keeps: phase,
@@ -903,11 +1047,13 @@ ways.
 | "Couldn't reveal that URL." on Webhooks | The endpoint was deleted after the page loaded, or you are no longer an admin of the site. Reload. |
 | A Slack endpoint was auto-disabled after an upgrade or rollback | A node running 1.9 sent it the Kiln envelope and Slack refused it. Once every node runs this release, tick **Active** on the endpoint. |
 | Several events, one alert | They fell in one 15-minute window. The summary follows about a minute after the window closes. |
-| A blocked-address alert every 15 minutes | A blocked client keeps trying. Untick **Blocked addresses** on Security alerts to stop the alerts, or remove the rule on `/editor/ip-blocks` if it is no longer wanted. |
+| A blocked-address alert every 15 minutes | A blocked client keeps trying against a rule an admin added. Untick **Requests from blocked addresses** on Security alerts to stop the alerts, or remove the rule on `/editor/ip-blocks` if it is no longer wanted. |
+| A blocked-address alert names a rule with the note **Automatic: scanner 404s** | The scanner guard added it before the upgrade to this release, or a node still on the previous release added it during the deploy. It reads as an admin's rule and alerts until it expires (`KILN_SCANNER_BLOCKING_BLOCK_MINUTES`, 60 minutes by default). Remove it to stop the alerts sooner. |
+| Refusals in the security log but no blocked-address alert | The rule that matched is one the scanner guard added: its `ip_block_refused` events have `source` `scanner_guard`, and raise nothing by design. |
 | A blocked-address summary counts far fewer than the refusals | The summary counts client networks (at most 20 per server per window), not requests. `kiln_cms.ip_block.refused.count` counts every refusal. |
 | An API key went over a rate limit and no alert came | That server no longer remembered the key (it forgets one between 2.5 and 5 minutes after the key's last successful request there; see [API keys over a rate limit](#api-keys-over-a-rate-limit)), the route was `/ws/gql`, the limit is not one of the [five covered](#api-keys-over-a-rate-limit), the key was revoked in the meantime, or a platform admin turned the kind off. |
 | An API key alert for a client that did nothing wrong | Limits are per address: someone else behind the same NAT or proxy used up the limit. |
-| "Security alerts reach someone" says some alerts reach nobody after an upgrade | Alerts go only by webhook on this site, and no endpoint has `security.blocked_ip` ticked. Tick it, or untick **Blocked addresses**. |
+| "Security alerts reach someone" says some alerts reach nobody after an upgrade | Alerts go only by webhook on this site, and no endpoint has `security.blocked_ip` ticked. Tick it, or untick **Requests from blocked addresses**. |
 | "You don't have permission to change this site's security alerts." | Your role on the site was lowered while the page was open. Reload. |
 | "The security alert settings could not be saved." | The save failed, for example because its notice could not be written; nothing changed. Try again, and check the application log. |
 | "can only be changed by the account holder" | Someone other than the account holder tried to change its security alert email setting. |

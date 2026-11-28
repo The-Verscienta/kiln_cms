@@ -53,16 +53,16 @@ your deployment.
 | Account email | `users` | Yes | Login identity; also the email recipient for workflow mail. |
 | Display name | `users.name` | Yes (optional) | Shown to other editors (presence) and as the JSON-LD author byline. Blank by default. |
 | RBAC role | `users.role` | No | `:admin` / `:editor` / `:viewer`. |
-| Notification preferences | `users.notify_on_*` | No | Per-user opt-out (issue #46): review requested, published, returned to draft, comments, new registrations (`notify_on_registration`, #2251, offered to site admins), site security alert email (`notify_on_security_alert`, #2245, offered to site member admins; only the account holder can change it), and webhook failure email (`notify_on_webhook_failure`, offered to the same admins as new registrations). All are included in the self-export and reset to on by erasure. |
+| Notification preferences | `users.notify_on_*` | No | Per-user opt-out (issue #46): review requested, published, returned to draft, comments, new registrations (`notify_on_registration`, #2251, offered to site admins), site security alert email (`notify_on_security_alert`, #2245, offered to site member admins; only the account holder can change it), webhook failure email (`notify_on_webhook_failure`, offered to the same admins as new registrations), and backup report email (`notify_on_backup`, #2229: `failures`, `every_run` or `off`, offered to platform admins; only the account holder can change it). All are included in the self-export and reset to their defaults by erasure (on, and `failures` for backup reports). |
 | In-app notifications | `notifications` | Yes | One row per recipient (#1320): event, content title, a comment excerpt, and the acting user's display name (`actor_name`) plus `actor_id`. Readable only by the recipient — no admin bypass. Deleted when the recipient is erased (#2514); `actor_name`/`actor_id` nulled when the *actor* is erased. No retention purge yet. A "registrations waiting" row (#2251) is titled with the site's name and carries no applicant data: no address, name, excerpt or actor. A security alert or notice row (#2245) is titled with the site's name and has no actor; its excerpt names what happened and, for an alert, the client's network (`/24`, `/48`), or the full IP address when the site opted in. Its `details` map holds the same facts as the excerpt (phase, kind, change, count, that address, the event type) so the inbox can say it in the reader's language. A blocked-address alert names no address: its excerpt and `details` carry the block rule that matched, masked the same way. |
 | Auth tokens | `tokens` | Pseudonymous | jti, subject (`user?id=<uuid>`), purpose, expiry; for a session, browser and OS family, last use and the site it signed in on; for a revoked one, why. See [Auth tokens](#auth-token-retention-218). |
 | Audit / version history | `document_events`, AshPaperTrail versions | Pseudonymous | Carries `actor_id`. See [Audit trail vs erasure](#audit-trail-vs-user-erasure-219). |
 | Security log | `security_events` | Yes | Admin-only audit log (#2241): the acting user's id and an **email snapshot** (known accounts only), the target, the **raw IP address** and **user agent** of the request, and a short allowlisted metadata map with no secrets. Kept 365 days by default (per-site setting, `0` keeps forever; then raw IPs are kept indefinitely). Scrubbed on erasure, purged on retention and by the staging scrub. A request refused by the site's block list (`ip_block_refused`, #2245) is the exception: it records the rule and surface only, with no IP address or user agent. See [Security log](security-events.md). |
 | Instance security log | `instance_security_events` | Yes | Platform-admin-only audit log of events about the installation rather than a site (#2541; today `backup_canceled`): the same columns as the site log (acting user's id and **email snapshot**, target, **raw IP address**, **user agent**, allowlisted metadata), with no site. Kept 365 days by default (`KILN_INSTANCE_SECURITY_LOG_RETENTION_DAYS`, `0` keeps forever). Scrubbed on erasure, purged on retention and by the staging scrub. See [The instance log](security-events.md#the-instance-log). |
 | Backup history | `backup_runs` | Possibly | One row per backup (#2217): its stamp, trigger, status, files and a step log. The log and error of a backup a platform admin canceled say "Canceled by a platform admin"; who canceled is in the instance security log (`backup_canceled`) only ([#3029](https://github.com/The-Verscienta/kiln_cms/issues/3029)). A run canceled before #3029 shipped still names that admin by email in its log, and erasure does not rewrite it (see [What erasure does not reach](#what-erasure-does-not-reach)). Platform-admin only. Purged by the staging scrub. See [Backups](backups.md). |
-| Security alert queue | `security_alert_dispatches` | Pseudonymous (transient) | One row per security alert window or silencing notice (#2245): the site, the alert kind, the window, the id of the security event that raised it, delivery stamps, and for a notice what changed, the kinds, the webhook endpoint's id and the acting user's id. Never an address, email, URL or token. Deleted by an hourly prune a day after its window ends, and by the staging scrub. Not touched by erasure: it holds ids only and is gone within a day. See [Security alerts](security-alerts.md). |
+| Security alert queue | `security_alert_dispatches` | Pseudonymous (transient) | One row per security alert window or silencing notice (#2245), or platform notice (#2811, filed under the default site): the site, the alert kind, the window, the id of the security event that raised it, delivery stamps, and for a notice what changed, the kinds, the webhook endpoint's id and the acting user's id. Never an address, email, URL or token. Deleted by an hourly prune a day after its window ends, and by the staging scrub. Not touched by erasure: it holds ids only and is gone within a day. See [Security alerts](security-alerts.md). |
 | Security alert settings | `site_security_alerts` | No | Per site (#2245): the alert kinds turned off, whether admins get the bell and email, whether alerts show full IP addresses. |
-| Platform security alert settings | `platform_security_alerts` | No | One row for the installation (#2245): the platform alert kinds a platform admin turned off (today only `api_key_rate_limited` can be). No person, address or key. Each save is recorded in the instance security log (`platform_alerts_changed`). |
+| Platform security alert settings | `platform_security_alerts` | No | One row for the installation (#2245): the platform alert kinds a platform admin turned off (today only `api_key_rate_limited` can be). No person, address or key. Each save is recorded in the instance security log (`platform_alerts_changed`), and a save that turns a kind off writes a platform notice to the security alert queue, which holds the acting user's id (#2811). |
 | Two-step sign-in requirement | `site_second_factor_policy` | No | Per site (#2247): who must hold a second factor (`required_for`: off, administrators, editors and administrators, or everyone), the grace period in days, when each role became covered and when the row last changed. No person, address or factor. Each save is recorded in the site's security log (`second_factor_policy_changed`). Written from `/editor/two-factor`. |
 | Account creation time | `users.inserted_at` | Pseudonymous | When the account was created (#2247), the earliest a required second factor's grace period can start. Accounts that existed before the column was added carry the time of that migration. Also decides whether a workflow or task mail job queued by a release before #3019 may reach the account holding its address: only one that existed when the job was queued. Not shown anywhere and not exposed by any API. |
 | Verified API keys | **memory only**, on each node | Pseudonymous (transient) | The SHA-256 of each API key that authenticated on the node recently, with the key's id and when the entry was written (an entry lasts 5 minutes and is rewritten at most every 2.5 minutes while the key is in use) (#2245, `KilnCMS.Security.ApiKeyTrip`), so a rate-limit refusal can tell a real key from a forged one without a database read. Never the key itself, a user or an address. At most 10,000 entries; swept every minute, gone on restart, never shared between nodes or written to disk. |
@@ -209,6 +209,23 @@ These kinds of email leave the system via the configured Swoosh adapter:
   always goes through the **instance** relay (`KilnCMS.Mailer`), never a
   site's own: a site admin can change that relay, and alerts about the site
   must not depend on it.
+- **Backup report email** (#2229), to current platform admins only, at the
+  address their account holds when it is sent, through the **instance**
+  relay (`KilnCMS.Mailer`), never a site's own: the backups are the
+  instance's. Each admin chooses failures only (the default), every run, or
+  off under **Backup emails** in `/editor/settings`; the bell notice of a
+  failed or partly off-site backup is written whatever they choose. The
+  jobs carry ids only (`run_id`, the `finished_at` of the outcome, and the
+  recipient's `user_id`), and the worker reads the run, the account and its
+  address when it sends, so no error text or address is written to a job
+  row. It names the site, the backup's stamp, schedules or trigger, times,
+  components, sizes and each destination's label, with up to ten error
+  lines and the first line of each destination's error. Text taken from the run has credentials redacted and is
+  display-sanitized, but an error line may still name a path or a host
+  (from `pg_dump`, rclone or a destination), and that leaves the instance
+  in the email. It never includes destination keys, file paths, checksums,
+  or any person's name or address
+  ([Reports and alerts](backups.md#reports-and-alerts-2229)).
 
 The recipient address is, necessarily, the user's email. The **display name** in
 the body is the user's chosen `name`, never the email local-part (#214); with no
@@ -221,7 +238,9 @@ security alerts (**Security alerts**); the in-app notice is still written.
 A workflow email muted after it was queued, while it waits or retries, is not
 sent: the worker checks the preference again when it sends (#3019). Task
 mail (assignment and digest) has no preference and cannot be muted.
-Platform security alerts and silencing notices cannot be muted.
+Platform security alerts and silencing notices cannot be muted. A platform
+admin's **Backup emails** choice, like the site security alert mute, can be
+changed only by the account holder.
 
 Configure the sender and adapter in `config/runtime.exs`
 (`config :kiln_cms, KilnCMS.Mailer, …` and `:email_from`).

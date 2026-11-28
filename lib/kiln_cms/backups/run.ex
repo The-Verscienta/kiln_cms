@@ -53,6 +53,14 @@ defmodule KilnCMS.Backups.Run do
   `dir_id` (#2539) names the backup directory the run's files are in, so a
   resume's start runs on a node that has them (`KilnCMS.Backups.StepWorker`).
 
+  ## Reports (#2229)
+
+  Each write that gives a run its outcome (`:finish`, `:fail`, `:skip`,
+  `:cancel`, `:cancel_resume`, `:note_resume_refused`, `:import`,
+  `:reevaluate_interrupted`) enqueues the run's report in its own
+  transaction (`Changes.AfterOutcome`, ADR 0094). A re-send's writes don't:
+  a re-send is not a run.
+
   ## A re-send (#2949)
 
   A succeeded run that is partly off-site (or not off-site at all) may be
@@ -77,6 +85,7 @@ defmodule KilnCMS.Backups.Run do
     authorizers: [Ash.Policy.Authorizer]
 
   alias KilnCMS.Backups.Run.Changes.{
+    AfterOutcome,
     BeginResend,
     Cancel,
     CancelResend,
@@ -236,6 +245,7 @@ defmodule KilnCMS.Backups.Run do
       change set_attribute(:status, :skipped)
       change set_attribute(:finished_at, &DateTime.utc_now/0)
       change Normalize
+      change AfterOutcome
     end
 
     # The chain's writes (`record_progress`, `finish`, `fail`) only land on a
@@ -260,6 +270,7 @@ defmodule KilnCMS.Backups.Run do
       change set_attribute(:status, :succeeded)
       change set_attribute(:finished_at, &DateTime.utc_now/0)
       change Normalize
+      change AfterOutcome
     end
 
     update :fail do
@@ -270,6 +281,7 @@ defmodule KilnCMS.Backups.Run do
       change set_attribute(:status, :failed)
       change set_attribute(:finished_at, &DateTime.utc_now/0)
       change Normalize
+      change AfterOutcome
     end
 
     # A backup interrupted from outside its step (#3078) is failed from its
@@ -320,6 +332,7 @@ defmodule KilnCMS.Backups.Run do
       require_atomic? false
       change ResumeRefused
       change Normalize
+      change AfterOutcome
     end
 
     # Retention marking another run's deleted files `pruned`. Separate from
@@ -349,6 +362,7 @@ defmodule KilnCMS.Backups.Run do
       change get_and_lock_for_update()
       change ReevaluateInterrupted
       change Normalize
+      change AfterOutcome
     end
 
     # A platform admin stops a running in-app backup (#2218). The guard and the
@@ -364,6 +378,7 @@ defmodule KilnCMS.Backups.Run do
       change set_attribute(:status, :canceled)
       change set_attribute(:finished_at, &DateTime.utc_now/0)
       change Normalize
+      change AfterOutcome
 
       # The backup directory is the instance's, so the event goes to the
       # instance log, which only platform admins read (#2541) - never a
@@ -389,6 +404,7 @@ defmodule KilnCMS.Backups.Run do
       require_atomic? false
       change CancelResume
       change Normalize
+      change AfterOutcome
 
       change {KilnCMS.Security.Changes.Record,
               type: :backup_canceled,
@@ -501,6 +517,7 @@ defmodule KilnCMS.Backups.Run do
       upsert_fields []
       change set_attribute(:origin, :imported)
       change Normalize
+      change AfterOutcome
     end
   end
 
@@ -677,6 +694,13 @@ defmodule KilnCMS.Backups.Run do
     end
 
     attribute :oban_job_id, :integer, public?: true
+
+    # When this run last ended `failed` (#2229): that write's `finished_at`,
+    # set by `Changes.AfterOutcome`, never accepted from input. A resume
+    # keeps it, so a resumed run that then succeeds is reported as recovered
+    # to the admins its failure was reported to. Nil on a run that never
+    # failed, and on runs that failed before #2229.
+    attribute :last_failed_at, :utc_datetime_usec, public?: true
 
     # The step chain (#2218) writing this run; a resume or retry under a new
     # chain replaces it. Nil on imported runs and runs from before #2218.

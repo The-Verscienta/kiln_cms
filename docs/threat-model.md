@@ -467,7 +467,8 @@ build if a resource is ever registered without that authorizer.
   charged to `:gql` like a `/gql` request (residual item 11). Introspection is
   off in production.
 - **A key used beyond its normal rate** — a verified API key over a rate limit
-  on `:api`, `:gql`, `:media_upload`, `:media_transform` or `:plugin_endpoint`
+  on `:api`, `:gql`, `:media_upload`, `:media_transform`, `:plugin_endpoint`,
+  `:media_render`, `:preview_api`, `:unlock` or `:feed_join` (not `:docs`)
   raises the platform's `api_key_rate_limited` alert (#2245). The limit runs
   before the key is checked, so "verified" means a key that authenticated on
   the same node recently (an entry lasts 5 minutes and is refreshed at most
@@ -740,9 +741,15 @@ An admin (#2242) can refuse an address or range per site from `/editor/ip-blocks
   key, held in memory for one window and hashed in the throttle table.
 - **An alert, without a flood.** A refusal reaches the database only after
   in-memory gates (one per client network per site per 15-minute window, at most
-  20 networks per site per window, on each node), so a blocked flood costs no
-  write per request. The cost is a bounded stream of admin alerts: one alert and
-  at most one summary per site per window, which an admin can turn off.
+  20 networks per site per window for each rule source, on each node), so a
+  blocked flood costs no write per request. The cost is a bounded stream of
+  admin alerts: one alert and at most one summary per site per window, which an
+  admin can turn off. A refusal by a temporary rule the scanner guard added is
+  logged but raises no alert (#2810), and is gated apart from admins' rules, so
+  a scanner flood cannot use up the samples an admin's rule gets. Which rule
+  source a rule has (`IpBlockRule.source`) is set from the creating actor,
+  never from input: a person cannot mark a rule of their own as automatic to
+  silence it. Where both kinds of rule contain an address, the admin's matches.
 - **Limits.** Matching is per source address: it does not stop a distributed
   source, and a visitor can change address. Expired rules are not swept.
 
@@ -908,6 +915,13 @@ probes bait paths. Off unless `KILN_SCANNER_BLOCKING` is on; see
   `kiln_cms.scanner_guard.blocked.count` is tagged by reason only. The
   `ip_auto_blocked` security event carries the address (as the event IP, subject
   to the log's retention and erasure) and never the attacker-controlled path.
+- **No alert for its own refusals.** The requests a guard rule refuses raise no
+  `blocked_ip` alert (#2810); the block itself is the `ip_auto_blocked` event.
+  The cost is visibility: admins are not told that an automatically blocked
+  address keeps trying. Its refusals are still in the security log (sampled,
+  with `source` `scanner_guard`) and on `kiln_cms.ip_block.refused.count`. A
+  guard rule created before the upgrade reads as an admin's (`source` defaults
+  to `admin`, not backfilled) and alerts until it expires.
 
 ### Bot budgets
 
@@ -2575,8 +2589,10 @@ and [ADR 0029](decisions/0029-security-alert-email-stays-english-until-accounts-
   another admin, and changing the site's mail relay each write an
   `alerts_silenced` notice in the change's own transaction. A notice that
   cannot be written rolls the change back. No setting turns a notice off and
-  no mute silences it. The one exception is the platform's own switch for
-  `api_key_rate_limited`, recorded in the instance security log instead.
+  no mute silences it. The platform's own switch for `api_key_rate_limited`
+  is held to the same rule (#2811): turning it off writes a platform notice
+  to every platform admin, the one who saved included, in the save's
+  transaction, as well as the instance security log event.
 - **The mail does not depend on what a site admin controls.** Alert email
   goes through the instance relay (`KilnCMS.Mailer`), never the site's own
   SMTP relay, which a site admin can change.

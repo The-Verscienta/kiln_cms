@@ -124,6 +124,9 @@ defmodule KilnCMS.Notifications do
       define :get_notification, action: :read, get_by: [:id]
       define :mark_notification_read, action: :mark_read
       define :mark_notification_unread, action: :mark_unread
+      # System-only, like `:notify`: a collapsing backup notice that is still
+      # unread is told the newest run (#2229).
+      define :refresh_notification, action: :refresh
     end
   end
 
@@ -195,6 +198,7 @@ defmodule KilnCMS.Notifications do
   end
 
   @platform_alert_content_type "platform_security_alert"
+  @platform_backups_content_type "platform_backups"
 
   @doc """
   The `content_type` of a platform security alert's bell row (#2642). The
@@ -206,8 +210,24 @@ defmodule KilnCMS.Notifications do
   def platform_alert_content_type, do: @platform_alert_content_type
 
   @doc """
-  How many unread platform security alerts `user` has waiting in the default
-  org, counted for a console that is **not** the default org's (#2642). Zero
+  The `content_type` of a backup notice's bell row (#2229): a failed or
+  partly off-site backup, to every platform admin, in the default org, with
+  the default org's id as `content_id`.
+  """
+  @spec platform_backups_content_type() :: String.t()
+  def platform_backups_content_type, do: @platform_backups_content_type
+
+  @doc """
+  Every `content_type` a platform-wide bell row carries (#2642, #2229): what
+  `unread_platform_alert_count/2` counts.
+  """
+  @spec platform_alert_content_types() :: [String.t()]
+  def platform_alert_content_types,
+    do: [@platform_alert_content_type, @platform_backups_content_type]
+
+  @doc """
+  How many unread platform alerts `user` has waiting in the default org (the
+  security alerts, #2642, and the backup notices, #2229), counted for a console that is **not** the default org's (#2642). Zero
   in the default console, whose bell lists those rows itself, and zero for
   anyone who is not a platform admin right now.
 
@@ -239,7 +259,9 @@ defmodule KilnCMS.Notifications do
         actor: user,
         tenant: default_org_id
       )
-      |> Ash.Query.filter(content_type == ^@platform_alert_content_type and exists(user, ^admin))
+      |> Ash.Query.filter(
+        content_type in ^platform_alert_content_types() and exists(user, ^admin)
+      )
       |> Ash.Query.unset(:sort)
       |> Ash.count(actor: user, tenant: default_org_id)
       |> case do
@@ -977,13 +999,18 @@ defmodule KilnCMS.Notifications do
   # sign-up while the first notice is unread changes nothing an admin does.
   # A webhook health notice is about one endpoint's state: a second failure
   # streak while the first notice is unread is the same news.
+  # A backup notice (#2229) is about the instance's backups, not one run:
+  # a second failure while the first is unread is refreshed into the row
+  # (`record_in_app_refreshing/1`), not written beside it.
   @collapsing_events [
     :submitted_for_review,
     :published,
     :returned_to_draft,
     :registration_pending,
     :webhook_failing,
-    :webhook_disabled
+    :webhook_disabled,
+    :backup_failed,
+    :backup_partly_offsite
   ]
 
   defp collapses?(%{event: event} = attrs),
@@ -995,6 +1022,109 @@ defmodule KilnCMS.Notifications do
     |> record_notification!(tenant: org_id)
   end
 
+  @doc """
+  `record_in_app_result/1` for a collapsing event whose row says the newest
+  occurrence (#2229, the backup notices): when one is still unread for the
+  recipient and anchor, its `title`, `excerpt` and `details` are replaced
+  with these (`:refreshed`) instead of being left as they were. Otherwise a
+  row is written (`:recorded`). `:not_recorded` when the write failed, which
+  is logged. Under the same advisory lock as `record_in_app_result/1`, so two
+  writers racing each other leave one row. Never raises.
+  """
+  @spec record_in_app_refreshing(map()) :: :recorded | :refreshed | :not_recorded
+  def record_in_app_refreshing(%{user_id: user_id, org_id: org_id, event: event} = attrs)
+      when event in @collapsing_events do
+    {:ok, outcome} =
+      with_row_lock(attrs, fn ->
+        case unread_notification_about(user_id, event, attrs.content_id, tenant: org_id) do
+          {:ok, [waiting | _]} ->
+            refresh_notification!(waiting, Map.take(attrs, [:title, :excerpt, :details]),
+              tenant: org_id
+            )
+
+            :refreshed
+
+          _none_or_failed ->
+            insert_notification(attrs)
+            :recorded
+        end
+      end)
+
+    Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic(user_id), :notifications_changed)
+    outcome
+  rescue
+    error ->
+      Logger.error("in-app notification not recorded: #{Exception.message(error)}")
+      :not_recorded
+  end
+
+  @doc """
+  Mark `user`'s unread `:backup_failed` row read when it is about the run
+  `run_id` (#2229): that run was resumed and has now succeeded. A row
+  refreshed since to say another run's failure is left unread: that one has
+  not recovered. Read and marked as `user`, through their own unread list and
+  the recipient-only `:mark_read`, as `mark_read_about/4` does. `{:ok, count}`
+  or `{:error, errors}`.
+  """
+  @spec mark_backup_recovered(struct(), String.t()) :: {:ok, non_neg_integer()} | {:error, term()}
+  def mark_backup_recovered(%{id: user_id} = user, run_id) when is_binary(run_id) do
+    org = Accounts.default_org_id()
+
+    result =
+      Notification
+      |> Ash.Query.for_read(:unread_for_user, %{user_id: user_id}, actor: user, tenant: org)
+      |> Ash.Query.filter(
+        event == :backup_failed and content_type == ^@platform_backups_content_type and
+          fragment("(?->>'run_id') = ?", details, ^run_id)
+      )
+      |> Ash.bulk_update(:mark_read, %{},
+        actor: user,
+        tenant: org,
+        context: %{announce?: false},
+        strategy: [:stream],
+        allow_stream_with: :full_read,
+        return_records?: true,
+        return_errors?: true
+      )
+
+    moved = length(result.records || [])
+
+    if moved > 0 do
+      Phoenix.PubSub.broadcast(KilnCMS.PubSub, topic(user_id), :notifications_changed)
+    end
+
+    case result do
+      %Ash.BulkResult{status: :success} -> {:ok, moved}
+      %Ash.BulkResult{errors: errors} -> {:error, errors}
+    end
+  end
+
+  @doc """
+  Whether a backup report of `class` goes to `user` by email (#2229):
+  `class` is `:failed`, `:partial` (reached only some off-site
+  destinations), `:succeeded`, `:skipped` or `:canceled`.
+
+  By `User.notify_on_backup`: `:failures` (the default) covers failed and
+  partial runs, `:every_run` every class, `:off` none. A value a newer
+  release stored (`KilnCMS.Types.UnknownAtom`) counts as `:failures`, the
+  default. An erased account gets none. Whether `user` is a platform admin
+  is the caller's question, not this one's.
+  """
+  @spec backup_mail?(map(), :failed | :partial | :succeeded | :skipped | :canceled) ::
+          boolean()
+  def backup_mail?(%{anonymized_at: %DateTime{}}, _class), do: false
+
+  def backup_mail?(%{notify_on_backup: preference}, class)
+      when class in [:failed, :partial, :succeeded, :skipped, :canceled] do
+    case preference do
+      :every_run -> true
+      :off -> false
+      _failures_or_unknown -> class in [:failed, :partial]
+    end
+  end
+
+  def backup_mail?(_user, _class), do: false
+
   # Check-then-insert, made atomic by a transaction-scoped advisory lock on
   # the row's key: two submits racing each other both check under the lock,
   # so the second sees the first's row. A lock rather than a partial unique
@@ -1004,18 +1134,25 @@ defmodule KilnCMS.Notifications do
   #
   # A failed check writes the row anyway: a duplicate in the inbox is a
   # smaller harm than a review request nobody hears about.
-  defp record_once(
-         %{org_id: org_id, user_id: user_id, event: event, content_id: content_id} = attrs
+  defp record_once(%{org_id: org_id, user_id: user_id, event: event} = attrs) do
+    with_row_lock(attrs, fn ->
+      case unread_notification_about(user_id, event, attrs.content_id, tenant: org_id) do
+        {:ok, [_waiting | _]} -> :already_waiting
+        _none_or_failed -> insert_notification(attrs)
+      end
+    end)
+  end
+
+  defp with_row_lock(
+         %{org_id: org_id, user_id: user_id, event: event, content_id: content_id},
+         fun
        ) do
     KilnCMS.Repo.transaction(fn ->
       KilnCMS.Repo.query!("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
         "kiln:notification:#{org_id}:#{user_id}:#{event}:#{content_id}"
       ])
 
-      case unread_notification_about(user_id, event, content_id, tenant: org_id) do
-        {:ok, [_waiting | _]} -> :already_waiting
-        _none_or_failed -> insert_notification(attrs)
-      end
+      fun.()
     end)
   end
 

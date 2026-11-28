@@ -465,7 +465,8 @@ must not hold them.
 `kiln_cms.security.api_key_trip.count` (#2245) is in
 `KilnCMSWeb.Telemetry.metrics/0`. It counts rate-limit refusals of requests
 that carried a credential, on the limits an API key reaches (`api`, `gql`,
-`media_upload`, `media_transform`, `plugin_endpoint`), tagged `bucket` and
+`media_upload`, `media_transform`, `plugin_endpoint`, and since #2809
+`media_render`, `preview_api`, `unlock`, `feed_join`), tagged `bucket` and
 `result`:
 
 - `unverified`: the credential was not a key this server still remembers
