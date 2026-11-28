@@ -3729,6 +3729,144 @@ defmodule KilnCMSWeb.BackupLiveTest do
     end
   end
 
+  # #2229 part C: a destination no backup has reached lately, on the Backups
+  # page and the home strip. Needs pg_dump: backups unavailable here list
+  # nothing.
+  describe "destination freshness (#2229)" do
+    @describetag :pg_tools
+
+    # A stored destination created `hours` ago, longer than the 36 h
+    # threshold, so it has had its chance.
+    defp old_destination!(name, hours \\ 100) do
+      Ash.Seed.seed!(Backups.DestinationConfig, %{
+        name: name,
+        kind: "local",
+        settings: %{},
+        enabled: true,
+        inserted_at: DateTime.add(DateTime.utc_now(), -hours * 3600, :second)
+      })
+    end
+
+    # A fresh backup that reached `row` `hours` ago (or none at all), so the
+    # components themselves are fine and only the destination alarms.
+    defp reached!(row, hours) do
+      key = Backups.DestinationConfig.key(row)
+
+      offsite_run!(
+        %{"local" => %{"status" => "ok"}, key => %{"status" => "ok"}},
+        [%{key: key, kind: "local", label: row.name, status: :ok}],
+        :complete,
+        hours
+      )
+
+      offsite_run!(%{"local" => %{"status" => "ok"}}, [], :none, 1)
+    end
+
+    test "the Backups page says it in the alarm tone", %{conn: conn} do
+      nas = old_destination!("NAS")
+      reached!(nas, 40)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "section.border-error\\/30 #backup-headline-freshness-dest-#{nas.id}",
+               "No backup has reached NAS in 36 hours."
+             )
+    end
+
+    test "never reached in the lookback: said in days", %{conn: conn} do
+      nas = old_destination!("NAS")
+      offsite_run!(%{"local" => %{"status" => "ok"}}, [], :none, 1)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      assert has_element?(
+               lv,
+               "#backup-headline-freshness-dest-#{nas.id}",
+               "No backup has reached NAS in the last 8 days."
+             )
+    end
+
+    test "reached in time: no line and no alarm", %{conn: conn} do
+      nas = old_destination!("NAS")
+      reached!(nas, 2)
+
+      {:ok, lv, _html} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+
+      refute has_element?(lv, "[data-role=freshness-notice]")
+      refute has_element?(lv, "section.border-error\\/30")
+    end
+
+    test "the overview strip shows a platform admin the line, as the alarm", %{conn: conn} do
+      nas = old_destination!("NAS")
+      reached!(nas, 40)
+
+      {:ok, lv, _html} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(
+               lv,
+               "#overview-backup-warning [data-role=backup-headline]",
+               "No backup has reached NAS in 36 hours."
+             )
+
+      # The backup itself ran on time: no line is about the schedule.
+      refute has_element?(lv, "#overview-backup-warning [data-role=backup-schedule]")
+      refute has_element?(lv, "#overview-backup-setup")
+    end
+
+    test "and is hidden from an org admin who is not a platform admin", %{conn: conn} do
+      nas = old_destination!("NAS")
+      reached!(nas, 40)
+      user = authed_user(:editor)
+
+      Ash.Seed.seed!(KilnCMS.Accounts.OrgMembership, %{
+        user_id: user.id,
+        organization_id: KilnCMS.Accounts.default_org_id(),
+        role: :admin
+      })
+
+      {:ok, _lv, html} = conn |> log_in(user) |> live(~p"/editor/overview")
+
+      refute html =~ "overview-backup-warning"
+      refute html =~ "No backup has reached"
+    end
+
+    test "a line never shows key text: an admin-typed name or an env remote's parameters",
+         %{conn: conn} do
+      remote = ":s3,access_key_id=AKIAEXAMPLE1234,secret_access_key=hunter2hunter2:bucket"
+
+      Application.put_env(
+        :kiln_cms,
+        Backups,
+        Keyword.put(Application.get_env(:kiln_cms, Backups), :rclone_remote, remote)
+      )
+
+      old_destination!("s3://admin:sup3rsecret@host/kiln?token=abcdef123456")
+      env_key = Backups.Destination.env_key(remote)
+
+      # The app tried the env destination and failed, so it is listed.
+      offsite_run!(
+        %{"local" => %{"status" => "ok"}, env_key => %{"status" => "failed"}},
+        [%{key: env_key, kind: "rclone", label: remote, status: :failed}],
+        :failed
+      )
+
+      {:ok, lv, page} = conn |> admin_conn() |> live_ready(~p"/editor/backups")
+      page = page <> render(lv)
+
+      {:ok, _lv, strip} = conn |> log_in(authed_user(:admin)) |> live(~p"/editor/overview")
+
+      assert has_element?(lv, "#backup-headline-freshness-env")
+      assert strip =~ "No backup has reached"
+
+      for html <- [page, strip],
+          secret <- ["AKIAEXAMPLE1234", "hunter2hunter2", "sup3rsecret", "abcdef123456"] do
+        refute html =~ secret
+      end
+    end
+  end
+
   # #2951: the off-site alarm says what can still be fixed, on both panels.
   # A failed destination removed since raises nothing; a backup that reached
   # no destination at all (the table unreadable, no env remote) says so.

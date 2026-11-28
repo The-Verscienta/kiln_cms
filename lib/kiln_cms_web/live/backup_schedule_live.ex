@@ -1280,7 +1280,8 @@ defmodule KilnCMSWeb.BackupScheduleLive do
     <div
       :if={
         not @status.scheduler_enabled? or not @status.available? or @stale_tick != nil or
-          @media_without_dir? or @status.held_deleted != []
+          @media_without_dir? or @status.held_deleted != [] or
+          freshness_lines(@status) != []
       }
       class="space-y-2 rounded-lg border border-warning/30 bg-warning/5 p-4 text-sm text-warning-ink"
     >
@@ -1319,6 +1320,15 @@ defmodule KilnCMSWeb.BackupScheduleLive do
       </p>
       <p :if={@media_without_dir?} id="schedule-media-missing">
         {gettext("Media isn't archived on this deployment, so a schedule can't include it.")}
+      </p>
+      <%!-- #2229: a destination no backup has reached lately, which a
+            schedule that doesn't cover a component there would explain. --%>
+      <p
+        :for={line <- freshness_lines(@status)}
+        id={"schedule-freshness-#{line.id}"}
+        data-role="freshness-notice"
+      >
+        {line.text}
       </p>
       <.held_deleted_warning
         :if={@status.held_deleted != []}
