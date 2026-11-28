@@ -92,11 +92,17 @@ defmodule KilnCMS.Security.BlockedIpAlert do
   Note one refused request from `ip` (an address tuple) on `org_id`'s site,
   blocked by `rule` (the rule's text), which `source` added. `ip` picks the
   client network the gates count per; it is not recorded. Always `:ok`.
+
+  Any `source` other than `:scanner_guard` is treated as `:admin`, so a rule
+  of a kind this module does not know yet is recorded and alerts rather than
+  passing unnoticed.
   """
-  @spec note(Ash.UUID.t(), :inet.ip_address(), String.t(), source(), surface()) :: :ok
+  @spec note(Ash.UUID.t(), :inet.ip_address(), String.t(), source() | atom(), surface()) :: :ok
   def note(org_id, ip, rule, source, surface)
-      when is_binary(org_id) and is_tuple(ip) and is_binary(rule) and
-             source in [:admin, :scanner_guard] and is_atom(surface) do
+      when is_binary(org_id) and is_tuple(ip) and is_binary(rule) and is_atom(source) and
+             is_atom(surface) do
+    source = if source == :scanner_guard, do: :scanner_guard, else: :admin
+
     with network when is_binary(network) <- Cidr.client_range(ip),
          true <- pass?(org_id, network, source) do
       dispatch(%{

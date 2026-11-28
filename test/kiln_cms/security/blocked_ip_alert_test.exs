@@ -407,6 +407,23 @@ defmodule KilnCMS.Security.BlockedIpAlertTest do
       refute_received {:email, _}
     end
 
+    # A source this module does not know yet (a future rule kind) fails toward
+    # alerting: recorded like an admin rule's, never skipped.
+    test "an unknown source is noted as an admin rule's and alerts", ctx do
+      assert :ok =
+               BlockedIpAlert.note(
+                 ctx.org.id,
+                 {192, 0, 2, 9},
+                 "192.0.2.9/32",
+                 :some_future_kind,
+                 :http
+               )
+
+      assert [event] = refused_events(ctx.org.id)
+      assert event.metadata == %{"rule" => "192.0.2.9/32", "surface" => "http"}
+      assert [_] = alerts(ctx.org.id)
+    end
+
     test "a socket refusal is logged with its source and raises nothing", ctx do
       ip = {198, 51, 100, 4}
       guard_block!(ctx, text(ip))
