@@ -66,7 +66,10 @@ defmodule KilnCMS.Keys.ClientDigest do
   def digest(client_key) when is_binary(client_key),
     do: digest(client_key, Vault.secret_key_base())
 
-  @doc "The digest of `client_key` under an explicit `secret_key_base`."
+  @doc false
+  # The digest under an explicit `secret_key_base`, for tests. Its derived key
+  # is cached per secret (`Plug.Crypto.Keys`), which is only safe for a bounded
+  # set of secrets, so the app itself calls `digest/1` alone.
   @spec digest(String.t(), String.t()) :: <<_::256>>
   def digest(client_key, secret_key_base)
       when is_binary(client_key) and is_binary(secret_key_base) do
