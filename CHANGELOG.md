@@ -89,8 +89,8 @@ else.
 ### Added
 
 - **Password policy: a site can also check its administrators' passwords against known breaches as they sign in, off by default; under Block a breached one is sent to reset by email, under Warn the admin signs in with a warning (#2407).**
-  `POST /api/auth/sign_in` gains a `403` `password_reset_required` and an additive `password_breach` field. A sign-in pause that blocked attempts fill mails the owner to choose a new password. Expand-only migration; rolling the pin back is safe.
-  ([#3434](https://github.com/The-Verscienta/kiln_cms/pull/3434) · [long form](docs/changelog/unreleased.md#breached-password-sign-in-check))
+  `POST /api/auth/sign_in` gains a `403` `password_reset_required`; it and `POST /api/auth/sign_in/verify` an additive `password_breach` field (#3435). A sign-in pause that blocked attempts fill mails the owner to choose a new password, on a six-hour window of its own (#3470). Expand-only migration; rolling the pin back is safe.
+  ([#3434](https://github.com/The-Verscienta/kiln_cms/pull/3434) · [#3469](https://github.com/The-Verscienta/kiln_cms/pull/3469) · [long form](docs/changelog/unreleased.md#breached-password-sign-in-check))
 - **Backups: `bin/backup` in a release and `mix kiln.backup.*` in a checkout list backups, start one and optionally wait for it, re-check a backup's files, report what retention would delete, and import cron's backups, with `--json` output and exit codes 0, 1 and 2 (part of #2234).**
   `prune` only reports and `verify` records nothing. New image only; no migration, and rolling the pin back is safe.
   ([#3455](https://github.com/The-Verscienta/kiln_cms/pull/3455) · [long form](docs/changelog/unreleased.md#backup-cli))

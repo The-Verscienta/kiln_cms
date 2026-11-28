@@ -74,7 +74,11 @@ no alert and sends no email.
   (#2407), the lookup runs on the password, before this gate: a blocked
   administrator is sent to reset their password and never reaches the code
   prompt, and a warned one gets the prompt and sees the warning once the code
-  verifies.
+  verifies. On the headless door the warning is the `password_breach` field
+  of `POST /api/auth/sign_in/verify`'s `201` (#3435): the verdict rides in the
+  encrypted pending token as a flag written on every token, `1` or `0`, so
+  the token's length doesn't give it away, and the browser's signed pending
+  token carries none (its warning waits in the session instead).
 - **Sign-in gate (headless):** `POST /api/auth/sign_in` answers a 2FA account
   with `200 {"two_factor_required": true, "pending_token": …}` rather than the
   `201` + JWT a single-factor account gets, and `POST /api/auth/sign_in/verify`

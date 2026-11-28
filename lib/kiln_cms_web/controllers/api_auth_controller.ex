@@ -222,7 +222,10 @@ defmodule KilnCMSWeb.ApiAuthController do
   plus a TOTP or recovery code for the bearer token.
 
   Body (`application/json`): `{"pending_token": "...", "code": "123456"}`.
-  Success → the same `201 Created` payload `sign_in/2` gives a 1FA account.
+  Success → the same `201 Created` payload `sign_in/2` gives a 1FA account,
+  including `password_breach` when the sign-in check warned at the password
+  step (#3435). That verdict rides in the pending token, because the password
+  is not in this request to look up again.
   """
   def verify(conn, params) do
     pending = params["pending_token"]
@@ -246,7 +249,13 @@ defmodule KilnCMSWeb.ApiAuthController do
          # nothing, so a 201 issued without it would be a token the client cannot
          # use.
          :ok <- PendingSignIn.claim(resolved) do
-      issue_token(conn, user)
+      # The verdict from the first factor, carried in the blob (#3435), not
+      # re-read from `user`: `resolve/4` reads the account back from the
+      # database, so it carries the token and nothing else from the first
+      # step. A policy that moved from warn to block
+      # between the two steps still issues the token with the warning, since
+      # the lookup ran under the policy of the step that had the password.
+      issue_token(conn, user, nil, if(resolved.password_breach?, do: :breached))
     else
       {:missing, detail} ->
         missing_params(conn, detail)
@@ -335,8 +344,8 @@ defmodule KilnCMSWeb.ApiAuthController do
 
   # The sign-in check's warning (#2407): set on the record when the password
   # is in a breach and the administrator's site checks at sign-in under
-  # `:warn`. Only the one-step `201` carries it; a two-factor sign-in does not
-  # carry it through `verify/2`.
+  # `:warn`. The one-step `201` carries it; a two-factor sign-in carries it in
+  # the pending token to `verify/2`'s `201` (#3435).
   defp password_breach(%{__metadata__: %{password_breach: %{status: :breached}}}), do: :breached
   defp password_breach(_user), do: nil
 
@@ -367,17 +376,26 @@ defmodule KilnCMSWeb.ApiAuthController do
 
   # 200 rather than 201: nothing was created, and a client that keys off the
   # status alone must not mistake this for a token.
+  #
+  # The breach warning goes into the pending token, not this body (#3435): the
+  # caller has not proved the second factor yet, and a warning about the
+  # account's password is the account's business only once it has.
   defp two_factor_required(conn, user) do
+    pending =
+      PendingSignIn.mint_and_hold(:encrypted, conn, user,
+        password_breach?: password_breach(user) == :breached
+      )
+
     conn
     |> put_status(:ok)
     |> json(%{
       two_factor_required: true,
-      pending_token: PendingSignIn.mint_and_hold(:encrypted, conn, user),
+      pending_token: pending,
       expires_in: PendingSignIn.max_age()
     })
   end
 
-  defp issue_token(conn, user, second_factor \\ nil, breach \\ nil) do
+  defp issue_token(conn, user, second_factor, breach) do
     # Both steps (password, or password then code) end here: the sign-in is
     # complete (#2241).
     AuthEvents.signed_in(conn, user, "password")

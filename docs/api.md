@@ -386,7 +386,9 @@ curl -s -X POST http://localhost:4000/api/auth/sign_in/verify \
   -d '{"pending_token": "<opaque>", "code": "123456"}'
 ```
 
-That returns the same `201 Created` body the single-step flow gives.
+That returns the same `201 Created` body the single-step flow gives, with
+`password_breach` when the password step found the password in a breach
+([Administrators whose password is in a known breach](#administrators-whose-password-is-in-a-known-breach)).
 
 **Branch on the status code, not on the presence of `token`** — `201` means
 signed in, `200` means one step to go. A client that only looks for `token`
@@ -523,7 +525,11 @@ again. This comes before the second factor, so a two-factor account gets the
 `403` rather than the `200` `two_factor_required` step. Retrying the same
 password gets the same answer, and counts toward the account's sign-in pause.
 
-**Warn**: the sign-in succeeds, and the one-step `201` carries one more field:
+**Warn**: the sign-in succeeds, and the `201` that issues the token carries
+one more field. For an account without a second factor that is the
+`201` from `POST /api/auth/sign_in`; for a
+[two-factor account](#accounts-with-two-factor-authentication), the `201`
+from `POST /api/auth/sign_in/verify`:
 
 ```jsonc
 // 201 Created
@@ -534,8 +540,30 @@ password gets the same answer, and counts toward the account's sign-in pause.
 }
 ```
 
-Show the person a prompt to change their password. A two-factor account's
-`201` from `/api/auth/sign_in/verify` does not carry the field.
+Show the person a prompt to change their password.
+
+For a two-factor account the password step's `200` `two_factor_required`
+never carries the field: the caller has not proved the second factor yet.
+The lookup still runs at that step, the only one with the password in it,
+and its verdict travels inside the `pending_token` to the verify step. The
+token holds the flag whether the sign-in was warned or not, so it is the same
+length either way, and a pending token that ends up in a log does not reveal
+it. A client reads the warning from the verify response only:
+
+```bash
+curl -s -X POST http://localhost:4000/api/auth/sign_in/verify \
+  -H 'content-type: application/json' \
+  -d '{"pending_token": "<opaque>", "code": "123456"}'
+```
+
+```jsonc
+// 201 Created
+{
+  "token": "<JWT>",
+  "user": { "id": "…", "email": "admin@example.com", "role": "admin" },
+  "password_breach": { "status": "breached" }
+}
+```
 
 Notes:
 
@@ -545,6 +573,9 @@ Notes:
   same generic `401` `invalid_credentials` as always, and makes no lookup.
 - If the lookup service is slow (more than 1.5 seconds) or unreachable, the
   sign-in goes ahead with neither answer.
+- The verify step does not look the password up again; it reports what the
+  password step found. A site whose policy changes from Warn to Block between
+  the two steps still issues that sign-in's token, with the warning.
 
 ### API keys (third-party access)
 

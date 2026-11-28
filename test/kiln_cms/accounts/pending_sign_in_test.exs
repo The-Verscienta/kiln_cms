@@ -244,6 +244,100 @@ defmodule KilnCMS.Accounts.PendingSignInTest do
     end
   end
 
+  describe "the sign-in check's warning (#3435)" do
+    @encrypted_salt "api two-factor pending"
+    @session_salt "two-factor pending"
+
+    test "survives the headless round trip, and defaults to false" do
+      {user, _secret} = enabled_user()
+
+      warned = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user, password_breach?: true)
+      plain = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
+
+      assert {:ok, %{password_breach?: true}} =
+               PendingSignIn.resolve(:encrypted, @endpoint, warned, :totp)
+
+      assert {:ok, %{password_breach?: false}} =
+               PendingSignIn.resolve(:encrypted, @endpoint, plain, :totp)
+    end
+
+    test "a warned blob and a clean one are the same length" do
+      # AES-GCM hides the content, not the length, and the headless blob is
+      # printed in client logs and CI transcripts. A key written only when
+      # warned would tell anyone reading those which administrators sign in
+      # with a breached password.
+      {user, _secret} = enabled_user()
+
+      warned = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user, password_breach?: true)
+      clean = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user, password_breach?: false)
+      default = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user)
+
+      assert byte_size(warned) == byte_size(clean)
+      assert byte_size(clean) == byte_size(default)
+
+      assert {:ok, %{"password_breach" => 1}} = decrypt(warned)
+      assert {:ok, %{"password_breach" => 0}} = decrypt(clean)
+    end
+
+    test "only the value a warning writes reads as warned" do
+      {user, _secret} = enabled_user()
+
+      for value <- [true, "true", "1", 1.0, 2, nil] do
+        blob = encrypt(%{payload(user) | "password_breach" => value})
+
+        assert {:ok, %{password_breach?: false}} =
+                 PendingSignIn.resolve(:encrypted, @endpoint, blob, :totp),
+               "#{inspect(value)} read as warned"
+      end
+    end
+
+    test "only `true` asks for a warning" do
+      {user, _secret} = enabled_user()
+
+      for value <- ["true", 1, :breached] do
+        blob = PendingSignIn.mint_and_hold(:encrypted, @endpoint, user, password_breach?: value)
+        assert {:ok, %{"password_breach" => 0}} = decrypt(blob)
+      end
+    end
+
+    test "a blob from the previous release, with no key, reads as not warned" do
+      # Rolling deploy: minted by a node that does not write the key, redeemed
+      # by one that reads it.
+      {user, _secret} = enabled_user()
+      blob = encrypt(Map.delete(payload(user), "password_breach"))
+
+      assert {:ok, %{password_breach?: false}} =
+               PendingSignIn.resolve(:encrypted, @endpoint, blob, :totp)
+    end
+
+    test "a session blob never carries or reports it, whatever was passed" do
+      # The browser gate carries the warning in `PasswordNotice` instead.
+      {user, _secret} = enabled_user()
+      blob = PendingSignIn.mint_and_hold(:session, @endpoint, user, password_breach?: true)
+
+      assert {:ok, payload} = Phoenix.Token.verify(@endpoint, @session_salt, blob)
+      refute Map.has_key?(payload, "password_breach")
+
+      forged =
+        Phoenix.Token.sign(@endpoint, @session_salt, Map.put(payload, "password_breach", 1))
+
+      assert {:ok, %{password_breach?: false}} =
+               PendingSignIn.resolve(:session, @endpoint, forged, :totp)
+    end
+
+    defp payload(user) do
+      %{
+        "user_id" => user.id,
+        "token" => user.__metadata__.token,
+        "jti" => Ecto.UUID.generate(),
+        "password_breach" => 0
+      }
+    end
+
+    defp encrypt(payload), do: Phoenix.Token.encrypt(@endpoint, @encrypted_salt, payload)
+    defp decrypt(blob), do: Phoenix.Token.decrypt(@endpoint, @encrypted_salt, blob)
+  end
+
   # Does this token contain the needle in any base64-decodable segment? A signed
   # token would; an encrypted one must not.
   defp decoded_anywhere?(token, needle) do

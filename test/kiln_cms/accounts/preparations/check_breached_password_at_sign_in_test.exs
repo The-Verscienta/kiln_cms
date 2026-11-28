@@ -8,8 +8,8 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignInTest do
   The doors (sign-in form, direct POST, API) are
   `KilnCMSWeb.SignInBreachedPasswordTest`.
 
-  `async: false`: the breach stub, the check's switch, the throttle budgets
-  and the notice store are node-wide.
+  `async: false`: the breach stub, the check's switch, the throttle budgets,
+  the mail sender (`:email_from`) and the notice store are node-wide.
   """
   use KilnCMS.DataCase, async: false
 
@@ -31,6 +31,8 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignInTest do
   alias KilnCMS.Accounts.PasswordNotice
   alias KilnCMS.Accounts.PasswordPolicy
   alias KilnCMS.Accounts.Preparations.ThrottleSignIn
+  alias KilnCMS.Accounts.SignInAlert
+  alias KilnCMS.Accounts.ThrottleStore
   alias KilnCMS.Accounts.User
   alias KilnCMS.Challenge
   alias KilnCMS.CMS
@@ -492,7 +494,7 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignInTest do
       refute mail.html_body =~ ~r/\b3\b/
     end
 
-    test "a pause made only of refusals mails the breached wording, spending the window", %{
+    test "a pause made only of refusals mails the breached wording, spending its own window", %{
       a: a,
       pw: pw,
       admin: admin,
@@ -512,8 +514,9 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignInTest do
       assert mail.html_body =~ "attempts that\nused your current password"
       refute mail.html_body =~ "The others did not complete"
 
-      # The window is spent like the usual mail's.
-      refute AccountThrottle.alert_allowed?(address)
+      # Its own window is spent (#3470), and the usual mail's is not.
+      assert spent("signin:breach-alert", address) == 1
+      assert spent("signin:alert", address) == 0
     end
 
     test "with the reset-mail budget spent first, the pause mail still names the breach", %{
@@ -657,6 +660,172 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignInTest do
       assert lock.metadata["scope"] == "account"
     end
 
+    defp spent(bucket, address), do: ThrottleStore.spent(bucket, AccountThrottle.digest(address))
+
+    defp unusual?(mail), do: mail.subject =~ "Unusual sign-in activity on your"
+
+    test "the breached pause after guesses spent the usual window still mails (#3470)", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      # Guesses fill the counter: the usual mail, which spends the usual window.
+      for _ <- 1..3, do: wrong!(admin, pw, a)
+      paused!(admin, pw, a)
+      assert [first] = mails()
+      assert unusual?(first)
+
+      # Stands in for the counter's window rolling over: it clears the counter
+      # and the tally, and leaves both alert windows alone.
+      AccountThrottle.unlock(address)
+
+      # Someone spends the address's reset-mail budget at `/reset`...
+      tighten_throttle!(budget: 3, mail_budget: 5)
+      for _ <- 1..5, do: AccountThrottle.allow_mail?(:password_reset, address)
+
+      # ...so the refusals that fill the counter again mail no reset link.
+      for _ <- 1..3, do: block!(admin, pw, a)
+      assert mails() == []
+      assert AccountThrottle.sign_in_pause_cause(address) == :blocks_only
+
+      ip = unique_ip()
+      paused!(admin, pw, a, ip)
+
+      assert [mail] = mails()
+      assert_breached_pause!(mail, ip)
+      assert spent("signin:alert", address) == 1
+      assert spent("signin:breach-alert", address) == 1
+    end
+
+    test "a second breached pause in the window mails nothing", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      for _ <- 1..3, do: block!(admin, pw, a)
+      paused!(admin, pw, a)
+      paused!(admin, pw, a)
+      assert [_mail] = pause_mails(mails())
+
+      AccountThrottle.unlock(address)
+      for _ <- 1..3, do: block!(admin, pw, a)
+      paused!(admin, pw, a)
+      assert pause_mails(mails()) == []
+    end
+
+    test "a mixed pause after a breached one mails nothing: it shares the breach window", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      for _ <- 1..3, do: block!(admin, pw, a)
+      paused!(admin, pw, a)
+      assert [_mail] = pause_mails(mails())
+
+      AccountThrottle.unlock(address)
+      wrong!(admin, pw, a)
+      wrong!(admin, pw, a)
+      block!(admin, pw, a)
+      assert AccountThrottle.sign_in_pause_cause(address) == :some_blocks
+      paused!(admin, pw, a)
+
+      assert pause_mails(mails()) == []
+    end
+
+    test "guessing after a breached pause is still news, once", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      for _ <- 1..3, do: block!(admin, pw, a)
+      paused!(admin, pw, a)
+      assert [_breached] = pause_mails(mails())
+
+      AccountThrottle.unlock(address)
+      for _ <- 1..3, do: wrong!(admin, pw, a)
+      paused!(admin, pw, a)
+      assert [mail] = mails()
+      assert unusual?(mail)
+      assert mail.html_body =~ "/sign-in/unlock"
+
+      AccountThrottle.unlock(address)
+      for _ <- 1..3, do: wrong!(admin, pw, a)
+      paused!(admin, pw, a)
+      assert mails() == []
+    end
+
+    test "usual, breached, usual in one window: two mails in all", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      for _ <- 1..3, do: wrong!(admin, pw, a)
+      paused!(admin, pw, a)
+      AccountThrottle.unlock(address)
+
+      for _ <- 1..3, do: block!(admin, pw, a)
+      paused!(admin, pw, a)
+      AccountThrottle.unlock(address)
+
+      for _ <- 1..3, do: wrong!(admin, pw, a)
+      paused!(admin, pw, a)
+
+      assert [usual, breached] = pause_mails(mails())
+      assert unusual?(usual)
+      assert breached.subject =~ "Sign-in paused"
+    end
+
+    test "a breached pause mail that fails to go out hands its window back", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      for _ <- 1..3, do: block!(admin, pw, a)
+      _ = mails()
+
+      previous = Application.fetch_env!(:kiln_cms, :email_from)
+      Application.delete_env(:kiln_cms, :email_from)
+      on_exit(fn -> Application.put_env(:kiln_cms, :email_from, previous) end)
+
+      # Must not break the sign-in it is reporting on.
+      paused!(admin, pw, a)
+      assert mails() == []
+      assert spent("signin:breach-alert", address) == 0
+
+      Application.put_env(:kiln_cms, :email_from, previous)
+      paused!(admin, pw, a)
+      assert [mail] = mails()
+      assert mail.subject =~ "Sign-in paused"
+    end
+
+    test "a usual pause mail that fails to go out hands its window back", %{
+      a: a,
+      pw: pw,
+      admin: admin,
+      address: address
+    } do
+      for _ <- 1..3, do: wrong!(admin, pw, a)
+
+      previous = Application.fetch_env!(:kiln_cms, :email_from)
+      Application.delete_env(:kiln_cms, :email_from)
+      on_exit(fn -> Application.put_env(:kiln_cms, :email_from, previous) end)
+
+      paused!(admin, pw, a)
+      assert mails() == []
+      assert spent("signin:alert", address) == 0
+
+      Application.put_env(:kiln_cms, :email_from, previous)
+      paused!(admin, pw, a)
+      assert [mail] = mails()
+      assert unusual?(mail)
+    end
+
     test "an unknown address keeps no tally and is mailed nothing", %{a: a, pw: pw} do
       unknown = "bp-nobody-#{uniq()}@example.com"
       on_exit(fn -> AccountThrottle.reset(unknown) end)
@@ -666,6 +835,16 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignInTest do
 
       assert AccountThrottle.sign_in_pause_cause(unknown) == :none
       assert mails() == []
+
+      # No path fills a pause with refusals for an address that has no
+      # account, so ask directly: the lookup comes before either charge.
+      for cause <- [:none, :some_blocks, :blocks_only] do
+        assert :ok = SignInAlert.account_locked(unknown, cause)
+      end
+
+      assert mails() == []
+      assert spent("signin:alert", unknown) == 0
+      assert spent("signin:breach-alert", unknown) == 0
     end
   end
 

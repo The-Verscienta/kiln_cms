@@ -233,7 +233,8 @@ build if a resource is ever registered without that authorizer.
   secure the wrong account. And it does not assume an attacker, because the
   budget is shared with the settings forms (#727), so an owner who fumbles
   codes there and then signs in trips it with nobody attacking them. Its
-  once-per-six-hours budget is separate from the password alert's, so the
+  once-per-six-hours budget is separate from the password alert's (and from
+  the breached-pause mail's, #3470), so the
   weaker signal cannot suppress the stronger one in exactly the order an attack
   produces them; the refusal is logged when the mail goes and when it is
   suppressed; and a delivery failure hands the window back rather than
@@ -1433,16 +1434,30 @@ password leaves the server.
   of them, used the current password and that it appears in a known breach,
   with a bare `/reset` link and no unlock link, IP or count. It is never
   withheld for its cause, so making a window all blocks does not hide the
-  guessing mail; it changes the wording. It shares the six-hour alert window
-  with the "Unusual sign-in activity" mail, so at most one of the two goes
-  out per address in that time, and a window already spent by a pause of
-  wrong guesses holds back a later breached one until it rolls. The block
+  guessing mail; it changes the wording. It has a six-hour alert window of
+  its own (`AccountThrottle.breach_alert_allowed?/1`, #3470), separate from
+  the "Unusual sign-in activity" mail's, for the reason the second-factor
+  alert has one: when they shared a window, wrong guesses spent it first and
+  the breached pause that followed mailed nothing until it rolled. So an
+  address gets at most one of each per six hours, and the breached one can
+  only be spent by someone holding the correct password of an administrator
+  whose site blocks it. Each window is handed back when its mail fails to be
+  queued. What stays open: someone who spends the reset-mail budget and then
+  makes too few blocked attempts to fill the sign-in counter (20 per 15
+  minutes) never pauses the account, so neither mail goes out and
+  the owner hears nothing of those sign-ins. The block
   tally (`AccountThrottle.note_sign_in_block/1`) and the sign-in counter are
   separate rows on the same window, so timing can move the mail between its
-  breached wordings, or to the usual one, never to silence. (9) The Warn
-  signal does not reach an API client of a two-factor administrator:
-  `password_breach` is on the one-step `201` only, not on
-  `/api/auth/sign_in/verify`'s. (10) *Closed by #3436:* the reset mail is
+  breached wordings, or to the usual one, never to silence. (9) *Closed by
+  #3435:* the Warn signal reaches an API client of a two-factor
+  administrator on `/api/auth/sign_in/verify`'s `201`, never the `200`
+  pending step. The lookup stays at the first factor; its verdict rides in the
+  encrypted, single-use pending blob (`KilnCMS.Accounts.PendingSignIn`),
+  which the caller can neither read nor forge, written on every blob as `1`
+  or `0` so that AES-GCM's visible length does not tell a reader of client
+  logs which administrators are warned. A policy that changes between the two
+  steps is not re-read: the token is issued with the first step's warning.
+  (10) *Closed by #3436:* the reset mail is
   branded for a site whose policy refused the sign-in (the request's site
   when it is one, else the one with the smallest id), so it names a site the
   recipient administers; for a platform admin, who administers every site,

@@ -290,12 +290,14 @@ defmodule KilnCMS.Accounts.SignInUnlockTest do
       AccountThrottle.spend_free_attempt(address, 1)
       AccountThrottle.consume_second_factor(user.id)
       AccountThrottle.alert_allowed?(address)
+      AccountThrottle.breach_alert_allowed?(address)
       KilnCMSWeb.RateLimit.check(:auth, @ip)
 
       before = %{
         free: ThrottleStore.spent("challenge:free_signin", AccountThrottle.digest(address)),
         second_factor: ThrottleStore.spent("2fa", AccountThrottle.digest(user.id)),
         alert: ThrottleStore.spent("signin:alert", AccountThrottle.digest(address)),
+        breach_alert: ThrottleStore.spent("signin:breach-alert", AccountThrottle.digest(address)),
         mail: ThrottleStore.spent("mail:sign_in_unlock", AccountThrottle.digest(address)),
         ip: ThrottleStore.spent("ip:auth", @ip)
       }
@@ -311,6 +313,8 @@ defmodule KilnCMS.Accounts.SignInUnlockTest do
                  ThrottleStore.spent("challenge:free_signin", AccountThrottle.digest(address)),
                second_factor: ThrottleStore.spent("2fa", AccountThrottle.digest(user.id)),
                alert: ThrottleStore.spent("signin:alert", AccountThrottle.digest(address)),
+               breach_alert:
+                 ThrottleStore.spent("signin:breach-alert", AccountThrottle.digest(address)),
                mail: ThrottleStore.spent("mail:sign_in_unlock", AccountThrottle.digest(address)),
                ip: ThrottleStore.spent("ip:auth", @ip)
              } == before

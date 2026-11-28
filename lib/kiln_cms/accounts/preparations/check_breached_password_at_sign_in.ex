@@ -26,8 +26,10 @@ defmodule KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn do
     * breached under `:warn`: the sign-in goes ahead and the record carries
       `__metadata__.password_breach == %{status: :breached}`. On a browser
       door a `:sign_in` note is left (`KilnCMS.Accounts.PasswordNotice`) for
-      the sign-in's completion to show as a flash; the API's one-step `201`
-      carries a `password_breach` field.
+      the sign-in's completion to show as a flash; the API's `201` carries a
+      `password_breach` field, on the one-step sign-in or, for a two-factor
+      sign-in, on `/api/auth/sign_in/verify`'s, through the pending token
+      (`KilnCMS.Accounts.PendingSignIn`, #3435).
     * clean, or the lookup could not tell: the sign-in goes ahead. Every
       failure fails open.
 
