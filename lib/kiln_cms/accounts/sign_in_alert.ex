@@ -198,6 +198,12 @@ defmodule KilnCMS.Accounts.SignInAlert do
     :exit, reason ->
       Logger.warning("Sign-in alert exited: #{inspect(reason)}")
       :ok
+
+    # `release_alert_on_failure/3` re-raises any kind, a throw included; like
+    # `second_factor_locked/1`, a throw must not 500 the sign-in either.
+    thrown ->
+      Logger.warning("Sign-in alert threw: #{inspect(thrown)}")
+      :ok
   end
 
   @doc """
