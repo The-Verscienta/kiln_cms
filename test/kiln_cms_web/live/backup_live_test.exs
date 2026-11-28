@@ -862,8 +862,14 @@ defmodule KilnCMSWeb.BackupLiveTest do
       run
     end
 
+    # The pipeline's jobs. Not the reports a fixture run's outcome enqueues
+    # (#2229), which are mail.
     defp backup_jobs do
-      Enum.filter(KilnCMS.Repo.all(Oban.Job), &String.starts_with?(&1.worker, "KilnCMS.Backups."))
+      Enum.filter(
+        KilnCMS.Repo.all(Oban.Job),
+        &(String.starts_with?(&1.worker, "KilnCMS.Backups.") and
+            not String.starts_with?(&1.worker, "KilnCMS.Backups.Report"))
+      )
     end
 
     test "a platform admin sees Resume on a failed run that kept its state", %{

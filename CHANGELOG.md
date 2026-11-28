@@ -70,6 +70,9 @@ else.
 - **Security alerts: before rolling back past this release, let every pending platform notice be delivered; the previous release cannot load one, so a notice still waiting is lost after a day (#2811).**
   During a rolling deploy an older node retries it until a newer node delivers it. No migration.
   ([long form](docs/changelog/unreleased.md#platform-notice-rollback))
+- **Backups: every platform admin is now emailed about failed and partly off-site backups by default, cron's included once History imports them (within 48 hours of finishing, up to one import interval late); each can choose Every run or Off under Your settings (#2229).**
+  Before rolling back, drain the `mail` queue of `KilnCMS.Backups.Report*` jobs. Expand-only migration.
+  ([#3497](https://github.com/The-Verscienta/kiln_cms/pull/3497) · [long form](docs/changelog/unreleased.md#backup-reports-upgrade))
 
 ### Breaking
 
@@ -107,6 +110,9 @@ else.
 - **Security alerts: turning off a platform alert sends every platform admin, the one who saved included, a notice by bell and email that cannot be muted; a notice that cannot be written fails the save (#2811).**
   No webhook, no summary. No migration; see the upgrade note before rolling back.
   ([long form](docs/changelog/unreleased.md#platform-alert-off-notice))
+- **Backups: a report after each backup, by email to the platform admins who choose it (failures only by default, every run, or off) and in the bell for every failed or partly off-site run, with a "recovered" email when a failed backup is resumed and succeeds (part A of #2229).**
+  Queued in the same transaction as the run's outcome, ids only; content is redacted and display-sanitized. Re-sends are not reported.
+  ([#3497](https://github.com/The-Verscienta/kiln_cms/pull/3497) · [long form](docs/changelog/unreleased.md#backup-reports))
 
 ### Changed
 
