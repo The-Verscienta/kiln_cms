@@ -235,7 +235,7 @@ defmodule KilnCMSWeb.BotBudgetsLive do
   defp class_hint(:empty),
     do:
       gettext(
-        "Requests that don't say what they are, and claimed search engines proven not to be them."
+        "Requests that don't say what they are, and claimed search engines proven not to be them or not on their published list."
       )
 
   defp source_label(%{clamped?: true, site_percent: site}),

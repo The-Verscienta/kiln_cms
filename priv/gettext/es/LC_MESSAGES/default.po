@@ -20092,8 +20092,8 @@ msgstr "Las peticiones o las cookies pueden viajar por HTTP sin cifrar."
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
-msgid "Requests that don't say what they are, and claimed search engines proven not to be them."
-msgstr "Solicitudes que no dicen qué son, y supuestos buscadores que se ha comprobado que no lo son."
+msgid "Requests that don't say what they are, and claimed search engines proven not to be them or not on their published list."
+msgstr "Solicitudes que no dicen qué son, y supuestos buscadores que se ha comprobado que no lo son o que no están en su lista publicada."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format

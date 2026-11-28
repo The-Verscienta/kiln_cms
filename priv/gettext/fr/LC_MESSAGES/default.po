@@ -20092,8 +20092,8 @@ msgstr "Des requêtes ou des cookies peuvent circuler en HTTP non chiffré."
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
-msgid "Requests that don't say what they are, and claimed search engines proven not to be them."
-msgstr "Requêtes qui ne disent pas ce qu’elles sont, et prétendus moteurs de recherche dont on a prouvé qu’ils ne le sont pas."
+msgid "Requests that don't say what they are, and claimed search engines proven not to be them or not on their published list."
+msgstr "Requêtes qui ne disent pas ce qu’elles sont, et prétendus moteurs de recherche dont on a prouvé qu’ils ne le sont pas ou absents de leur liste publiée."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format

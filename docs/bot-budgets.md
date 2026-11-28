@@ -145,7 +145,7 @@ You need the admin role. An editor does not see the page.
    then "The server allows at most 50% here." Under **Search engines (%)** the
    page says the class holds those crawlers "when the address checks out as
    theirs", and under **No user agent (%)** that it also holds "claimed search
-   engines proven not to be them". The **How claims are checked** link under
+   engines proven not to be them or not on their published list". The **How claims are checked** link under
    **Search engines (%)** opens [Verified search engines](#verified-search-engines).
    While the search-engine figure is above 100% (it is by default), the page also
    says "Above 100%, this applies only to addresses verified as the search engine

@@ -20092,7 +20092,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
-msgid "Requests that don't say what they are, and claimed search engines proven not to be them."
+msgid "Requests that don't say what they are, and claimed search engines proven not to be them or not on their published list."
 msgstr ""
 
 #: lib/kiln_cms_web/live/settings_live.ex
