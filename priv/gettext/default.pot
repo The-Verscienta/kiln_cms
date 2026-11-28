@@ -15291,6 +15291,20 @@ msgstr ""
 msgid "No %{component} backup has been recorded."
 msgstr ""
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "No %{component} backup has reached %{destination} in %{count} hour."
+msgid_plural "No %{component} backup has reached %{destination} in %{count} hours."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "No %{component} backup has reached %{destination} in the last %{count} day."
+msgid_plural "No %{component} backup has reached %{destination} in the last %{count} days."
+msgstr[0] ""
+msgstr[1] ""
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -15384,6 +15398,20 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "No backup has ever been recorded"
 msgstr ""
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "No backup has reached %{destination} in %{count} hour."
+msgid_plural "No backup has reached %{destination} in %{count} hours."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "No backup has reached %{destination} in the last %{count} day."
+msgid_plural "No backup has reached %{destination} in the last %{count} days."
+msgstr[0] ""
+msgstr[1] ""
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -30659,6 +30687,7 @@ msgstr ""
 msgid "custom"
 msgstr ""
 
+#: lib/kiln_cms_web/components/backup_components.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "database"
@@ -31440,6 +31469,7 @@ msgstr ""
 msgid "may only reference itself (a \"$ref\" starting with \"#\")"
 msgstr ""
 
+#: lib/kiln_cms_web/components/backup_components.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "media"

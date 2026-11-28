@@ -15291,6 +15291,20 @@ msgstr "Non"
 msgid "No %{component} backup has been recorded."
 msgstr "Aucune sauvegarde (%{component}) n'a été enregistrée."
 
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "No %{component} backup has reached %{destination} in %{count} hour."
+msgid_plural "No %{component} backup has reached %{destination} in %{count} hours."
+msgstr[0] "Aucune sauvegarde (%{component}) n'a atteint %{destination} en %{count} heure."
+msgstr[1] "Aucune sauvegarde (%{component}) n'a atteint %{destination} en %{count} heures."
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "No %{component} backup has reached %{destination} in the last %{count} day."
+msgid_plural "No %{component} backup has reached %{destination} in the last %{count} days."
+msgstr[0] "Aucune sauvegarde (%{component}) n'a atteint %{destination} au cours du dernier %{count} jour."
+msgstr[1] "Aucune sauvegarde (%{component}) n'a atteint %{destination} au cours des %{count} derniers jours."
+
 #: lib/kiln_cms_web/live/editor_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
 #, elixir-autogen, elixir-format
@@ -15384,6 +15398,20 @@ msgstr "Aucune règle d'automatisation pour le moment"
 #, elixir-autogen, elixir-format
 msgid "No backup has ever been recorded"
 msgstr "Aucune sauvegarde n'a jamais été enregistrée"
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "No backup has reached %{destination} in %{count} hour."
+msgid_plural "No backup has reached %{destination} in %{count} hours."
+msgstr[0] "Aucune sauvegarde n'a atteint %{destination} en %{count} heure."
+msgstr[1] "Aucune sauvegarde n'a atteint %{destination} en %{count} heures."
+
+#: lib/kiln_cms_web/components/backup_components.ex
+#, elixir-autogen, elixir-format
+msgid "No backup has reached %{destination} in the last %{count} day."
+msgid_plural "No backup has reached %{destination} in the last %{count} days."
+msgstr[0] "Aucune sauvegarde n'a atteint %{destination} au cours du dernier %{count} jour."
+msgstr[1] "Aucune sauvegarde n'a atteint %{destination} au cours des %{count} derniers jours."
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
@@ -30659,6 +30687,7 @@ msgstr "critique"
 msgid "custom"
 msgstr "personnalisé"
 
+#: lib/kiln_cms_web/components/backup_components.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "database"
@@ -31440,6 +31469,7 @@ msgstr "faible"
 msgid "may only reference itself (a \"$ref\" starting with \"#\")"
 msgstr "ne peut référencer que lui-même (un « $ref » commençant par « # »)"
 
+#: lib/kiln_cms_web/components/backup_components.ex
 #: lib/kiln_cms_web/live/overview_live.ex
 #, elixir-autogen, elixir-format
 msgid "media"

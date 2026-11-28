@@ -221,6 +221,7 @@ defmodule KilnCMSWeb.BackupLive do
       tabs: 1,
       component_label: 1,
       download_menu: 1,
+      freshness_lines: 1,
       held_deleted_warning: 1,
       offsite_headline: 1,
       retention_lines: 1,
@@ -1477,6 +1478,17 @@ defmodule KilnCMSWeb.BackupLive do
                 class="font-medium"
               >
                 {offsite_headline(@status.offsite)}
+              </p>
+              <%!-- #2229: a destination no backup has reached lately. Beside
+                    the off-site line, not instead of it: that one is about
+                    the last backup, this one about the destination. --%>
+              <p
+                :for={line <- freshness_lines(@status)}
+                id={"backup-headline-freshness-#{line.id}"}
+                data-role="freshness-notice"
+                class="font-medium"
+              >
+                {line.text}
               </p>
               <%!-- #2951: the last backup's failed destinations are all gone,
                     and nothing is configured in their place. Not an alarm:
@@ -2811,10 +2823,11 @@ defmodule KilnCMSWeb.BackupLive do
   # the disk fills up behind it.
   # The off-site alarm is exactly when there is an off-site line (#2951): a
   # failed destination removed since doesn't hold it up.
+  # A destination no backup has reached lately (#2229) too.
   defp alarming?(status),
     do:
       status.stale? or status.failed? or offsite_headline(status.offsite) != nil or
-        status.retention != []
+        status.destinations_stale != [] or status.retention != []
 
   # One component's line (#2219).
   defp headline(%{failed?: true}), do: gettext("The last backup failed")
