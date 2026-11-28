@@ -83,11 +83,19 @@ defmodule KilnCMS.Security.IpBlocklist do
   def blocked?(org, ip), do: match(org, ip) != false
 
   @doc """
-  The rule that blocks `ip` for `org`: `{:blocked, rule}` with the first
-  matching rule's canonical text (`KilnCMS.Security.Cidr.format/1`), or
-  `false` on the same terms as `blocked?/2`.
+  The rule that blocks `ip` for `org`: `{:blocked, rule, source}` with the
+  matching rule's canonical text (`KilnCMS.Security.Cidr.format/1`) and who
+  added it (`KilnCMS.CMS.IpBlockRule`'s `source`), or `false` on the same
+  terms as `blocked?/2`.
+
+  When several active rules contain `ip`, an `:admin` rule wins over a
+  `:scanner_guard` one (#2810): a temporary rule the scanner guard added
+  inside a range an admin blocked must not hide the admin's rule, whose
+  refusals raise the `blocked_ip` alert. Among rules of one source, the
+  first in list order (newest first).
   """
-  @spec match(struct() | Ash.UUID.t() | nil, term()) :: {:blocked, String.t()} | false
+  @spec match(struct() | Ash.UUID.t() | nil, term()) ::
+          {:blocked, String.t(), :admin | :scanner_guard} | false
   def match(%{id: org_id}, ip), do: match(org_id, ip)
   def match(nil, _ip), do: false
 
@@ -104,13 +112,21 @@ defmodule KilnCMS.Security.IpBlocklist do
 
   def match(_org, _ip), do: false
 
+  # The first active `:admin` rule containing `ip` ends the search; a
+  # `:scanner_guard` one is kept only until an admin rule turns up.
   defp first_match(rules, ip, now) do
-    Enum.find_value(rules, false, fn {cidr, expires_at} ->
-      if (is_nil(expires_at) or DateTime.compare(expires_at, now) == :gt) and
-           Cidr.contains?(cidr, ip),
-         do: {:blocked, Cidr.format(cidr)}
+    Enum.reduce_while(rules, false, fn {cidr, expires_at, source}, found ->
+      cond do
+        not active?(expires_at, now) or not Cidr.contains?(cidr, ip) -> {:cont, found}
+        source == :admin -> {:halt, {:blocked, Cidr.format(cidr), :admin}}
+        found == false -> {:cont, {:blocked, Cidr.format(cidr), source}}
+        true -> {:cont, found}
+      end
     end)
   end
+
+  defp active?(expires_at, now),
+    do: is_nil(expires_at) or DateTime.compare(expires_at, now) == :gt
 
   @doc """
   Would a rule for `cidr` (text) block `client_ip`? The self-lockout check.
@@ -179,10 +195,12 @@ defmodule KilnCMS.Security.IpBlocklist do
     end
   end
 
+  # `{parsed, expires_at, source}`. The cache is node-local and starts empty,
+  # so a node never reads an entry compiled to an older shape.
   defp compile(records) do
-    for %{cidr: text, expires_at: expires_at} <- records,
+    for %{cidr: text, expires_at: expires_at, source: source} <- records,
         {:ok, parsed} <- [Cidr.parse(text)],
-        do: {parsed, expires_at}
+        do: {parsed, expires_at, source}
   end
 
   defp enabled? do

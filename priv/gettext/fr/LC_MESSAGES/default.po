@@ -2348,8 +2348,8 @@ msgstr "Un lancement doit avoir un nom."
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
-msgid "A request from an address on this site's block list is refused. One alert every %{minutes} minutes, then a summary."
-msgstr "Une requête provenant d'une adresse de la liste de blocage de ce site est refusée. Une alerte toutes les %{minutes} minutes, puis un résumé."
+msgid "A request from an address on this site's block list is refused. Temporary rules the scanner guard adds don't raise it. One alert every %{minutes} minutes, then a summary. On by default. Your block list is under %{place}."
+msgstr "Une requête provenant d'une adresse de la liste de blocage de ce site est refusée. Les règles temporaires ajoutées par la protection contre les scanners ne la déclenchent pas. Une alerte toutes les %{minutes} minutes, puis un résumé. Activée par défaut. Votre liste de blocage se trouve dans %{place}."
 
 #: lib/kiln_cms_web/live/system_live.ex
 #, elixir-autogen, elixir-format
@@ -20011,6 +20011,11 @@ msgstr "Demander des modifications"
 msgid "Requesting…"
 msgstr "Demande en cours…"
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Requests from blocked addresses"
+msgstr "Requêtes d'adresses bloquées"
+
 #: lib/kiln_cms/security/posture/checks/transport.ex
 #, elixir-autogen, elixir-format
 msgid "Requests or cookies can travel over plain HTTP."
@@ -22481,6 +22486,7 @@ msgid "Sign-in"
 msgstr "Connexion"
 
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sign-in & access"
 msgstr "Connexion et accès"

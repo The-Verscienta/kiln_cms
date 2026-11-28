@@ -40,10 +40,10 @@ defmodule KilnCMSWeb.Plugs.IpBlock do
 
   def call(%Plug.Conn{assigns: %{current_org: org}, remote_ip: ip} = conn, _opts) do
     case KilnCMS.Security.IpBlocklist.match(org, ip) do
-      {:blocked, rule} ->
+      {:blocked, rule, source} ->
         KilnCMSWeb.IpBlock.count_refusal(:http)
 
-        KilnCMS.Security.BlockedIpAlert.note(org.id, ip, rule, :http)
+        KilnCMS.Security.BlockedIpAlert.note(org.id, ip, rule, source, :http)
 
         conn |> send_resp(403, "") |> halt()
 

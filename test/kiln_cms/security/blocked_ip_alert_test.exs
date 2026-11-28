@@ -367,6 +367,142 @@ defmodule KilnCMS.Security.BlockedIpAlertTest do
     end
   end
 
+  describe "rules the scanner guard added (#2810)" do
+    # Written by the guard's own system actor, the way the guard writes them,
+    # so `source` is `:scanner_guard` because of who added the rule.
+    defp guard_block!(ctx, cidr) do
+      CMS.create_ip_block_rule!(
+        %{
+          cidr: cidr,
+          note: ScannerGuard.note(),
+          expires_at: DateTime.add(DateTime.utc_now(), 3600, :second),
+          confirm_self_block: true
+        },
+        actor: KilnCMS.SystemActor.new(:scanner_guard),
+        tenant: ctx.org.id
+      )
+    end
+
+    test "a refusal is logged with its source and raises nothing", ctx do
+      endpoint!(ctx.org.id, ["security.blocked_ip"], ctx.admin)
+      rule = guard_block!(ctx, "203.0.113.7")
+
+      refuse(ctx.org, {203, 0, 113, 7})
+
+      assert [event] = refused_events(ctx.org.id)
+
+      assert event.metadata == %{
+               "rule" => rule.cidr,
+               "surface" => "http",
+               "source" => "scanner_guard"
+             }
+
+      assert event.ip == nil
+      assert alerts(ctx.org.id) == []
+
+      SecurityAlerts.deliver()
+
+      assert bells() == []
+      assert deliveries() == []
+      refute_received {:email, _}
+    end
+
+    test "a socket refusal is logged with its source and raises nothing", ctx do
+      ip = {198, 51, 100, 4}
+      guard_block!(ctx, text(ip))
+
+      assert :error = KilnCMSWeb.IpBlock.check_connect(:gql, host_info(ctx.org, ip))
+
+      assert [event] = refused_events(ctx.org.id)
+      assert event.metadata["surface"] == "gql"
+      assert event.metadata["source"] == "scanner_guard"
+      assert alerts(ctx.org.id) == []
+    end
+
+    test "a lapsed rule refuses nothing and records nothing", ctx do
+      rule = guard_block!(ctx, "203.0.113.7")
+
+      Repo.query!(
+        "UPDATE ip_block_rules SET expires_at = now() - interval '1 minute' WHERE id = $1",
+        [Ecto.UUID.dump!(rule.id)]
+      )
+
+      IpBlocklist.clear()
+
+      conn =
+        Plug.Test.conn(:get, "/")
+        |> Map.put(:remote_ip, {203, 0, 113, 7})
+        |> Plug.Conn.assign(:current_org, ctx.org)
+        |> IpBlock.call([])
+
+      refute conn.halted
+      assert refused_events(ctx.org.id) == []
+    end
+
+    test "an admin range over the guard's address is the rule matched, and alerts", ctx do
+      admin_rule = block!(ctx, "203.0.113.0/24")
+      guard_block!(ctx, "203.0.113.7")
+
+      refuse(ctx.org, {203, 0, 113, 7})
+
+      assert [event] = refused_events(ctx.org.id)
+      # An admin rule's event is the shape it was before #2810: no `source`.
+      assert event.metadata == %{"rule" => admin_rule.cidr, "surface" => "http"}
+      assert [_alert] = alerts(ctx.org.id)
+    end
+
+    test "the guard's flood does not use up the site's cap for an admin rule", ctx do
+      guard_block!(ctx, "10.0.0.0/8")
+      cap = BlockedIpAlert.site_cap()
+
+      for n <- 1..(cap + 10), do: refuse(ctx.org, {10, 1, 0, n})
+
+      assert length(refused_events(ctx.org.id)) == cap
+      assert alerts(ctx.org.id) == []
+
+      block!(ctx, "198.51.100.0/24")
+      refuse(ctx.org, {198, 51, 100, 5})
+
+      assert length(refused_events(ctx.org.id)) == cap + 1
+      assert [_alert] = alerts(ctx.org.id)
+    end
+
+    test "one network refused by the guard's rule, then an admin's, is sampled twice", ctx do
+      ip = {203, 0, 113, 9}
+      guard_block!(ctx, text(ip))
+      refuse(ctx.org, ip)
+
+      block!(ctx, "203.0.113.0/24")
+      refuse(ctx.org, ip)
+
+      events = refused_events(ctx.org.id)
+      assert length(events) == 2
+      assert Enum.count(events, &(&1.metadata["source"] == "scanner_guard")) == 1
+      assert sample_rows() == {2, 2}
+      assert [_alert] = alerts(ctx.org.id)
+    end
+
+    test "the guard's refusals in an admin alert's window raise no summary", ctx do
+      block!(ctx, "198.51.100.0/24")
+      guard_block!(ctx, "10.0.0.0/8")
+
+      refuse(ctx.org, {198, 51, 100, 5})
+      for n <- 1..5, do: refuse(ctx.org, {10, 1, 0, n})
+
+      assert length(refused_events(ctx.org.id)) == 6
+      assert [alert] = alerts(ctx.org.id)
+
+      SecurityAlerts.deliver()
+      SecurityAlerts.close_window(alert["id"])
+      SecurityAlerts.backdate_events()
+      SecurityAlerts.deliver()
+
+      # The window held only its alert: the guard's refusals are not counted.
+      assert [bell] = bells()
+      assert bell.excerpt == "A blocked address was refused (rule 198.51.100.0/24)"
+    end
+  end
+
   describe "not a refusal" do
     test "asking whether an address is blocked records nothing", ctx do
       ip = {203, 0, 113, 9}

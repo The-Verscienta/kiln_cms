@@ -14,9 +14,9 @@ defmodule KilnCMS.Security.BlockedIpAlert do
   window long):
 
     1. **The site's cap.** At most 20 client networks per site per window
-       are let through; once it is used up, nothing more is counted. Read
-       first, without adding to it, so a flood past the cap costs one ETS
-       read.
+       (20 of each rule source, see below) are let through; once it is used
+       up, nothing more is counted. Read first, without adding to it, so a
+       flood past the cap costs one ETS read.
     2. **One per client network.** The first refusal of a network (an IPv4
        address, an IPv6 `/64`, `KilnCMS.Security.Cidr.client_range/1`) in
        the window passes; the rest are dropped.
@@ -32,6 +32,28 @@ defmodule KilnCMS.Security.BlockedIpAlert do
 
   The event is recorded whether or not the site turned `blocked_ip` off: the
   log is the audit trail, and a kind turned off is dropped at delivery.
+
+  ## Rules the scanner guard added
+
+  A refusal by a temporary rule the scanner guard added
+  (`KilnCMS.CMS.IpBlockRule` `source: :scanner_guard`, #2253) is recorded
+  but raises no alert (#2810, owner decision 2026-11-27): the guard already
+  recorded `ip_auto_blocked` when it added the rule, and the refusals that
+  follow are the rule working, not news for the site's admins. Its event carries
+  `"source" => "scanner_guard"`, which `KilnCMS.Security.Alerts.classify/2`
+  reads to raise nothing; an admin rule's event has no `source` key, so its
+  metadata (and webhook payload) is what it was before.
+
+  The two sources are gated and sampled apart: 20 of each per site per
+  window, and a network's scanner refusal does not use up the one sample its
+  admin refusal gets. A flood the scanner guard is already answering cannot
+  hide a refusal by an admin's rule. Where both kinds of rule contain the
+  address, the admin rule is the one matched
+  (`KilnCMS.Security.IpBlocklist.match/2`).
+
+  A rule added before the `source` column existed reads `:admin` and keeps
+  alerting until it expires (`KILN_SCANNER_BLOCKING_BLOCK_MINUTES`, default
+  60, at most 7 days).
 
   ## No address is recorded
 
@@ -59,24 +81,29 @@ defmodule KilnCMS.Security.BlockedIpAlert do
   @typedoc "Where the refusal happened, recorded as the event's `surface`."
   @type surface :: :http | :live | :gql | :collab | :bridge
 
-  @doc "How many client networks one site records per node per alert window."
+  @typedoc "Who added the rule that matched (`KilnCMS.CMS.IpBlockRule`'s `source`)."
+  @type source :: :admin | :scanner_guard
+
+  @doc "How many client networks one site records per node per alert window, per rule source."
   @spec site_cap() :: pos_integer()
   def site_cap, do: @site_cap
 
   @doc """
   Note one refused request from `ip` (an address tuple) on `org_id`'s site,
-  blocked by `rule` (the rule's text). `ip` picks the client network the
-  gates count per; it is not recorded. Always `:ok`.
+  blocked by `rule` (the rule's text), which `source` added. `ip` picks the
+  client network the gates count per; it is not recorded. Always `:ok`.
   """
-  @spec note(Ash.UUID.t(), :inet.ip_address(), String.t(), surface()) :: :ok
-  def note(org_id, ip, rule, surface)
-      when is_binary(org_id) and is_tuple(ip) and is_binary(rule) and is_atom(surface) do
+  @spec note(Ash.UUID.t(), :inet.ip_address(), String.t(), source(), surface()) :: :ok
+  def note(org_id, ip, rule, source, surface)
+      when is_binary(org_id) and is_tuple(ip) and is_binary(rule) and
+             source in [:admin, :scanner_guard] and is_atom(surface) do
     with network when is_binary(network) <- Cidr.client_range(ip),
-         true <- pass?(org_id, network) do
+         true <- pass?(org_id, network, source) do
       dispatch(%{
         org_id: org_id,
         network: network,
         rule: rule,
+        source: source,
         surface: surface
       })
     end
@@ -88,15 +115,38 @@ defmodule KilnCMS.Security.BlockedIpAlert do
       :ok
   end
 
-  def note(_org_id, _ip, _rule, _surface), do: :ok
+  def note(_org_id, _ip, _rule, _source, _surface), do: :ok
 
-  defp pass?(org_id, network) do
+  defp pass?(org_id, network, source) do
     window_ms = Alerts.window_ms()
-    cap_key = "security_blocked_ip_org:#{org_id}"
+    {cap_key, network_key} = gate_keys(org_id, network, source)
 
     RateLimit.get(cap_key, window_ms) < @site_cap and
-      match?({:allow, _}, RateLimit.hit("security_blocked_ip:#{org_id}:#{network}", window_ms, 1)) and
+      match?({:allow, _}, RateLimit.hit(network_key, window_ms, 1)) and
       match?({:allow, _}, RateLimit.hit(cap_key, window_ms, @site_cap))
+  end
+
+  # An admin rule's keys are the ones used before #2810; the scanner guard's
+  # are their own, so neither source can use up the other's.
+  defp gate_keys(org_id, network, :admin),
+    do: {"security_blocked_ip_org:#{org_id}", "security_blocked_ip:#{org_id}:#{network}"}
+
+  defp gate_keys(org_id, network, :scanner_guard),
+    do:
+      {"security_blocked_ip_auto_org:#{org_id}", "security_blocked_ip_auto:#{org_id}:#{network}"}
+
+  defp sample_key(network, :admin), do: network
+  defp sample_key(network, :scanner_guard), do: "scanner_guard:" <> network
+
+  # `source` only on a scanner guard refusal: an admin rule's event, and the
+  # webhook payload built from it, keep the shape they had.
+  defp metadata(ctx) do
+    metadata = %{"rule" => ctx.rule, "surface" => Atom.to_string(ctx.surface)}
+
+    case ctx.source do
+      :scanner_guard -> Map.put(metadata, "source", "scanner_guard")
+      :admin -> metadata
+    end
   end
 
   # `:async_analytics` is off under test, where a detached task would run
@@ -119,10 +169,10 @@ defmodule KilnCMS.Security.BlockedIpAlert do
       tenant: ctx.org_id,
       # No request context: the event records no address (see the moduledoc).
       request: nil,
-      sample_key: ctx.network,
+      sample_key: sample_key(ctx.network, ctx.source),
       limit: 1,
       scale: Alerts.window_ms(),
-      metadata: %{"rule" => ctx.rule, "surface" => Atom.to_string(ctx.surface)}
+      metadata: metadata(ctx)
     )
   end
 end
