@@ -79,12 +79,22 @@ defmodule KilnCMS.Security.AlertGate do
 
   # A site notice (`'notice'`, scope `notice:<id>`) or a platform one
   # (`'platform_notice'`, scope `platform_notice:<id>`), by $4.
+  #
+  # A platform notice is written with `summary_sent_at` already set (#3496).
+  # It has no summary, and this release's summary trigger never picks it up;
+  # the stamp is for v1.13.0's, which excludes only `'notice'` and so matches
+  # a platform notice once it is delivered (`alert_sent_at` set, window
+  # closed), then fails to load it ten times, again and again, for a day.
+  # Stamped here at the insert rather than at delivery so that it holds
+  # whichever code delivers the row. A site notice needs none: v1.13.0
+  # already excludes `'notice'`.
   @notice_sql """
   INSERT INTO security_alert_dispatches
     (id, scope, kind, channel, org_id, window_index, window_started_at, window_ends_at,
-     notice, expires_at, inserted_at)
+     notice, expires_at, inserted_at, summary_sent_at)
   SELECT w.id, $4::text || ':' || w.id::text, 'alerts_silenced', $4::text, $1::text::uuid, 0,
-         w.now, w.now, $2::jsonb, w.now + ($3::bigint * interval '1 millisecond'), w.now
+         w.now, w.now, $2::jsonb, w.now + ($3::bigint * interval '1 millisecond'), w.now,
+         CASE WHEN $4::text = 'platform_notice' THEN w.now END
   FROM (SELECT gen_random_uuid() AS id, clock_timestamp() AT TIME ZONE 'UTC' AS now) AS w
   RETURNING id::text
   """
