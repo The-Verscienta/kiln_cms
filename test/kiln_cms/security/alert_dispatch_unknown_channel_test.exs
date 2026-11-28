@@ -9,7 +9,7 @@ defmodule KilnCMS.Security.AlertDispatchUnknownChannelTest do
   row and fails to load it on every attempt: nine AshOban error logs, a
   discarded job, no `failed_at`, and the scheduler inserts another job a
   minute later. This release never schedules it, cancels a job that names it
-  anyway, and a delivery run straight on it sends nothing and does not raise.
+  anyway, and a delivery run straight on it sends nothing, stamps nothing and does not raise.
 
   It also pins what this release writes against v1.13.0's two trigger
   predicates, copied from `git show v1.13.0:lib/kiln_cms/security/alert_dispatch.ex`
@@ -167,7 +167,7 @@ defmodule KilnCMS.Security.AlertDispatchUnknownChannelTest do
       assert [%{"alert_sent_at" => nil, "failed_at" => nil}] = SecurityAlerts.dispatches()
     end
 
-    test "a delivery run straight on it sends nothing, stamps it, and does not raise" do
+    test "a delivery run straight on it sends nothing, stamps nothing, and does not raise" do
       channel = unknown_channel()
       id = insert_row!(channel)
 
@@ -183,13 +183,15 @@ defmodule KilnCMS.Security.AlertDispatchUnknownChannelTest do
       log =
         capture_log(fn ->
           # authorize?: false — the action is the triggers' alone (AshOban's bypass).
-          assert {:ok, _} = Security.deliver_alert_dispatch(dispatch, authorize?: false)
+          assert {:error, error} = Security.deliver_alert_dispatch(dispatch, authorize?: false)
+          assert Exception.message(error) =~ "is not one this release delivers"
         end)
 
       assert log =~ "has a channel this release does not know"
       assert Repo.all(Notification) == []
 
-      assert [%{"alert_sent_at" => %NaiveDateTime{}, "failed_at" => nil}] =
+      # Left unstamped: the release that wrote it still owns its delivery.
+      assert [%{"alert_sent_at" => nil, "summary_sent_at" => nil, "failed_at" => nil}] =
                SecurityAlerts.dispatches()
 
       for phase <- [:alert, :summary] do
