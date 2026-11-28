@@ -118,7 +118,7 @@ else.
   ([#3497](https://github.com/The-Verscienta/kiln_cms/pull/3497) · [long form](docs/changelog/unreleased.md#backup-reports))
 - **Backups: the alarm names a configured destination no succeeded backup has reached within each component's threshold, on the Backups panel, the Overview strip and the Schedule tab, for platform admins (part of #2229).**
   `status/0` gains `destinations_stale`. A stored destination whose media goes only through cron alarms until an in-app schedule covers media. No migration; rolling the pin back is safe.
-  ([long form](docs/changelog/unreleased.md#backup-destination-freshness))
+  ([#3500](https://github.com/The-Verscienta/kiln_cms/pull/3500) · [long form](docs/changelog/unreleased.md#backup-destination-freshness))
 
 ### Changed
 
