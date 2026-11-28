@@ -6,6 +6,7 @@ defmodule KilnCMS.Security.CrawlerSightingStoreTest do
   """
   use KilnCMS.DataCase, async: true
 
+  alias KilnCMS.Keys.ClientDigest
   alias KilnCMS.Repo
   alias KilnCMS.Security
   alias KilnCMS.Security.CrawlerSightingStore, as: Store
@@ -50,6 +51,28 @@ defmodule KilnCMS.Security.CrawlerSightingStoreTest do
 
       assert {:ok, first_seen} = Store.record(k, :google, @ttl)
       assert_in_delta first_seen, wall(), :timer.minutes(1)
+    end
+
+    # A plain SHA-256 of an IPv4 key is reversed by hashing every address
+    # (#3501); the row holds the HMAC, and every seam finds it.
+    test "the row holds the client's HMAC, not its SHA-256" do
+      k = key()
+      assert {:ok, _} = Store.record(k, :duckduckgo, @ttl)
+
+      %{rows: rows} =
+        Repo.query!("SELECT key_hash FROM crawler_sightings WHERE engine = 'duckduckgo'")
+
+      hashes = List.flatten(rows)
+      assert ClientDigest.digest(k) in hashes
+      assert Store.key_hash(k) == ClientDigest.digest(k)
+      refute :crypto.hash(:sha256, k) in hashes
+
+      assert {_first_seen, _ttl} = Store.fetch(k, :duckduckgo)
+      assert :ok = Store.forget(k)
+
+      refute ClientDigest.digest(k) in List.flatten(
+               Repo.query!("SELECT key_hash FROM crawler_sightings").rows
+             )
     end
 
     test "inside a transaction nothing is written" do

@@ -105,8 +105,8 @@ so that nothing on the clone does so later on production's behalf.
 | **Per-site SSO providers** | purged (`sso_providers_purged`) | Production's identity provider (issuer, client id) and its encrypted client secret. |
 | **Per-site AI providers** | purged (`ai_providers_purged`) | Production's AI provider, base URL and encrypted API key. |
 | **Per-site Meilisearch settings** | purged (`meilisearch_sites_purged`) | Production's Meilisearch URL, index name and encrypted API key: the clone must not write into production's index. |
-| **Rate-limit counters** | purged (`throttle_counters_purged`) | Keyed on hashed client identifiers from production traffic. |
-| **Crawler first sightings** | purged (`crawler_sightings_purged`) | When the 404 guard first saw a crawler claim from outside a published list (#2852), keyed on hashed client addresses from production traffic. |
+| **Rate-limit counters** | purged (`throttle_counters_purged`) | Keyed on client addresses and account keys from production traffic, each stored as an HMAC under a key derived from production's `SECRET_KEY_BASE` (#3501). A clone that runs its own secret can neither read them back nor match them, so they would only sit there; anyone given production's secret could test guesses against them. |
+| **Crawler first sightings** | purged (`crawler_sightings_purged`) | When the 404 guard first saw a crawler claim from outside a published list (#2852), keyed on client addresses from production traffic, stored as HMACs keyed from production's `SECRET_KEY_BASE` like the rate-limit counters. |
 | **Idempotency keys** | purged (`idempotent_requests_purged`) | Each row caches the response production sent, which carries whatever that response did. |
 | **Backup lock** | purged (`backup_locks_purged`) | Names production's nodes and backup jobs the scrub deletes. An empty table is a free lock for the staging host's own backups. |
 | **Backup node heartbeats** | purged (`backup_node_beats_purged`) | Production's node ids. |

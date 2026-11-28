@@ -1122,22 +1122,26 @@ see [bot-budgets.md](bot-budgets.md).
   `[:kiln_cms, :crawler_verification, :sighting_unavailable]`, and asks the
   database about that client again only after 30 seconds. A missing table
   (a node on this release before its migration) reads the same way.
-- **Residual: sightings are pseudonymous, not anonymous.** A row holds an
-  unsalted SHA-256 of the client's address (an IPv4 address, or an IPv6
-  `/64`) and the engine, as `throttle_counters` holds its keys. The IPv4
-  space is small enough that anyone holding the table can test or enumerate
-  addresses against it, so a row is personal data about the client for as
-  long as it lives (48 hours from the client's last miss, then the hourly
-  prune). No action reads it, no API exposes it, and the staging scrub
-  purges it. Keying it by an HMAC with an instance secret is
-  [#3501](https://github.com/The-Verscienta/kiln_cms/issues/3501).
+- **Residual: sightings are pseudonymous to whoever holds `SECRET_KEY_BASE`.**
+  A row holds an HMAC-SHA256 of the client's address (an IPv4 address, or an
+  IPv6 `/64`) under a key derived from `SECRET_KEY_BASE`
+  (`KilnCMS.Keys.ClientDigest`, #3501), and the engine, as `throttle_counters`
+  holds its keys. The secret is not in the database, so a dump, a backup or a
+  staging clone that runs its own secret cannot test or enumerate addresses
+  against the table. Someone holding both the table and the secret can, and
+  to them a row is personal data about the client for as long as it lives
+  (48 hours from the client's last miss, then the hourly prune). No action
+  reads it, no API exposes it, and the staging scrub purges it. Rotating the
+  secret restarts every sighting's grace once, toward exemption.
 - **Residual: the sighting table has no row cap.** One row per distinct
   client outside the list and engine, kept 48 hours from its last miss. A
   holder of an IPv4 `/16` could write 65,536 rows, and a `/48` holder the
   same if a list ever carried the engine's IPv6 ranges. Each node's cached
   copies are capped at 100,000 clients (`:max_listing_entries`); the table
   is bounded only by the prune, which deletes up to a million lapsed rows an
-  hour in batches of 10,000.
+  hour in batches of 10,000. A cap per network is
+  [#3504](https://github.com/The-Verscienta/kiln_cms/issues/3504), waiting on
+  an owner decision.
 - **Outbound HTTPS to four vendors (#2586).** One node per cluster fetches
   `developers.google.com`, `www.bing.com`, `search.developer.apple.com` and
   `duckduckgo.com` every 6 hours, and a node with no fresh list queues a fetch
@@ -3524,10 +3528,43 @@ because other files cite them by number.
    (`:auth`, `:register`, `:unlock`) now count in one Postgres table,
    `throttle_counters`, through `KilnCMS.Accounts.ThrottleStore`. The item's own
    constraints still hold:
-   - **Nothing on the user row.** A counter row is keyed on a SHA-256 of the
+   - **Nothing on the user row.** A counter row is keyed on a digest of the
      budget's key and names no account, so a guess is not a write to a row the
      attacker chooses, and an address with no account counts exactly like one
      with an account.
+   - **Not reversible from a copy of the database (#3501).** The digest is an
+     HMAC-SHA256 under a key derived from `SECRET_KEY_BASE` with a label of
+     its own (`KilnCMS.Keys.ClientDigest`), not a plain SHA-256. Keys come
+     from small spaces (an IPv4 address, a site and an address, a SHA-256 of
+     an email), so a plain hash in a `pg_dump`, a backup or an unscrubbed
+     staging clone named every row to anyone who hashed the candidates. The
+     secret is the same on every node, so the budget stays one per key
+     cluster-wide; it is never written to the database; and deriving it needs
+     no database, so the node-local fallback below keys its entries the same
+     way. To someone holding the secret a row is still a pseudonym a guessed
+     key can be tested against. [ADR 0096](decisions/0096-client-keys-are-hmacd-under-a-key-derived-from-secret-key-base.md)
+     records the choice.
+   - **The digest changes split or reset budgets, once.** A rolling deploy
+     onto the release that introduced the HMAC, and a rolling
+     rotation of `SECRET_KEY_BASE`, run nodes that put one key on two rows,
+     and neither side sees the other's count. Every budget here (sign-in, the
+     second factor, the mail and alert budgets, passkey registration, the
+     credential `RateLimit` buckets, the challenge gate, the scanner guard)
+     then admits up to twice its limit per window for the windows the mixed
+     period covers: up to 20 more password guesses per account per 15-minute
+     window, and about 10 rather than 5 mails an hour. A fixed window already
+     admits twice its budget across a boundary, so the bound is of the same
+     kind; it ends one window of the longest budget (six hours) after the
+     last node on the old digest stops. An attacker collects it by retrying
+     through refusals, without having to notice the deploy. Two weaker
+     effects come with it: an alert window may send one duplicate mail, and
+     the failed-sign-in alert tally may undercount for one window, so a
+     threshold alert can fire late or not at all. That is a detective
+     control, not a budget. A pause one side recorded is not seen by the
+     other. A single node restarted onto the new digest, or a hard-cutover
+     rotation, instead starts every budget, tally and active sign-in pause
+     again once. `PREVIOUS_SECRET_KEY_BASE` is not read here, so there is
+     no read window to soften either.
    - **Bounded and expiring.** Whatever was submitted, a key is stored as 32
      bytes. A row lives for its window (one minute to six hours) plus at most
      five minutes, when an Oban cron job deletes closed windows in bounded

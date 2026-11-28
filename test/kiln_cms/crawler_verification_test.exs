@@ -1328,6 +1328,8 @@ defmodule KilnCMS.CrawlerVerificationTest do
         KilnCMS.Repo.query!("SELECT key_hash, engine FROM crawler_sightings")
 
       assert [CrawlerSightingStore.key_hash("inet:#{a}.#{b}.#{c}.#{d}"), "duckduckgo"] in rows
+      # A plain SHA-256 of an IPv4 key is reversible by hashing every address (#3501).
+      refute [:crypto.hash(:sha256, "inet:#{a}.#{b}.#{c}.#{d}"), "duckduckgo"] in rows
       refute Enum.any?(rows, fn [hash, _] -> String.contains?(hash, "#{a}.#{b}.#{c}.#{d}") end)
     end
 
@@ -1935,9 +1937,13 @@ defmodule KilnCMS.CrawlerVerificationTest do
     refute log =~ :inet.ntoa(ip) |> to_string()
     refute log =~ "inet:"
 
-    hash = CrawlerSightingStore.key_hash("inet:#{a}.#{b}.#{c}.#{d}")
-    refute log =~ Base.encode16(hash, case: :lower)
-    refute log =~ Base.encode16(hash)
+    for hash <- [
+          CrawlerSightingStore.key_hash("inet:#{a}.#{b}.#{c}.#{d}"),
+          :crypto.hash(:sha256, "inet:#{a}.#{b}.#{c}.#{d}")
+        ] do
+      refute log =~ Base.encode16(hash, case: :lower)
+      refute log =~ Base.encode16(hash)
+    end
   end
 
   # Runs `fun` in a process with no `$callers`, which the sandbox refuses a

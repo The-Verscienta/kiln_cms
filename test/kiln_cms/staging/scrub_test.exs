@@ -460,7 +460,7 @@ defmodule KilnCMS.Staging.ScrubTest do
       # throttle, so count what is there rather than assume an empty table.
       seed!(KilnCMS.Accounts.ThrottleCounter, %{
         bucket: "sign_in",
-        key_hash: :crypto.hash(:sha256, "203.0.113.5"),
+        key_hash: KilnCMS.Accounts.ThrottleStore.key_hash("203.0.113.5"),
         window_index: 1,
         count: 3,
         expires_at: DateTime.add(DateTime.utc_now(), 60, :second)

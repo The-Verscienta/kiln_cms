@@ -61,8 +61,9 @@ defmodule KilnCMS.Security.BlockedIpAlert do
   context: its `ip` and `user_agent` are `nil` (#2245), so ADR 0026's
   "nothing logs the address" holds for the audit log, the alert and its
   webhooks alike. The client network is only the sampling key: stored in
-  `throttle_counters` as its SHA-256 (`KilnCMS.Accounts.ThrottleStore`
-  hashes every key) and held in this node's ETS for one window, never
+  `throttle_counters` as an HMAC keyed from `secret_key_base`
+  (`KilnCMS.Accounts.ThrottleStore` hashes every key through
+  `KilnCMS.Keys.ClientDigest`) and held in this node's ETS for one window, never
   written to the database as text. A rule is the
   site's own text, masked the way the site's settings mask an address
   (`KilnCMS.Security.Alerts.display_metadata/3`). Nothing here raises, and

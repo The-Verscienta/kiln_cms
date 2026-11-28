@@ -174,7 +174,7 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
       assert Enum.count(results, &(&1 == :allow)) == @budget
     end
 
-    test "the counter table holds a hash of the digest, never the address" do
+    test "the counter table holds an HMAC of the digest, never the address" do
       address = email()
 
       AccountThrottle.consume(address)
@@ -183,6 +183,8 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
       expected = ThrottleStore.key_hash(AccountThrottle.digest(address))
 
       assert ["signin", expected] in rows
+      # A plain SHA-256 of the digest is reversible from a list of addresses (#3501).
+      refute ["signin", :crypto.hash(:sha256, AccountThrottle.digest(address))] in rows
 
       refute Enum.any?(rows, fn [bucket, key_hash] ->
                String.contains?(bucket, address) or
