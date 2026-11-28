@@ -139,25 +139,41 @@ defmodule KilnCMS.CrawlerVerification do
   list does not name yet. `listing_overdue?/3` tells them apart for
   `KilnCMS.Security.ScannerGuard`: it is `true` once the counted client
   (an IPv4 address, or an IPv6 address's `/64`) is still outside a list this
-  node fetched at least `:listing_grace_ms` (24 h) after it first asked about
-  that client. A vendor that adds a crawler's address publishes it within a
-  day; a spoofer's address never appears.
+  node fetched at least `:listing_grace_ms` (24 h) after the instance first
+  asked about that client. A vendor that adds a crawler's address publishes
+  it within a day; a spoofer's address never appears.
 
-  The first sighting is kept per node in a cache of its own
-  (`:max_listing_entries`, 100,000 clients, least-recently-written first), so
-  a flood of marks or rejections cannot evict it, and a flood of new
-  addresses can only evict the oldest sightings. Each call refreshes the
-  entry's `:listing_ttl_ms` (48 h). The clock starts at the guard's first
-  question, which is a counted 404 miss, not the client's first request. The
-  grace starts again whenever the sighting is lost: a node restart, a
-  deploy, a restart of the verifier's processes, an entry evicted at the cap
-  or one idle past its TTL. Each node keeps its own sightings and its own
-  grace. All of these err toward not counting.
+  The first sighting is the instance's, not a node's: a row of
+  `KilnCMS.Security.CrawlerSighting` per client and engine, keyed by a hash
+  of the client, dated by the database's clock and written by
+  `KilnCMS.Security.CrawlerSightingStore` in one upsert that keeps the
+  earliest live sighting and returns it. So a deploy, a restart or a new
+  node does not start the grace again, and every node counts the same
+  client from the same moment. The clock starts at the guard's first
+  question, which is a counted 404 miss, not the client's first request.
+  Each question moves the row's expiry to `:listing_ttl_ms` (48 h) on; a
+  client idle longer starts again, as does one the prune has removed.
 
-  Both times are this node's monotonic milliseconds; the list's fetch time is
-  `KilnCMS.CrawlerVerification.Ranges.fetched_since?/2`'s, which dates a list
-  a peer sent by the age it carried and moves on every refetch, unchanged or
-  not.
+  Each node keeps a read-through copy in a cache of its own
+  (`:max_listing_entries`, 100,000 clients, least-recently-written first),
+  so a busy client costs one database statement per `:listing_refresh_ms`
+  (5 min), not one per 404, and a flood of marks or rejections cannot evict
+  it. An entry evicted at the cap, or lost with a restart of the verifier's
+  processes, is read back from the database: it costs a statement, never
+  the grace. The statement is never run inside a transaction.
+
+  **When the database cannot answer**, the node's copy is used if it has
+  one, however old; with none, the claim is not overdue. That errs toward
+  not counting, as every failure here does: a database outage leaves new
+  spoofers exempt for its length, and a real crawler is never counted on a
+  sighting nobody recorded.
+
+  The sighting is wall-clock milliseconds by the database's clock; the
+  list's fetch time is this node's wall clock less the list's age
+  (`KilnCMS.CrawlerVerification.Ranges.age_ms/2`, which dates a list a peer
+  sent by the age it carried and moves on every refetch, unchanged or not).
+  The two clocks differ only by the skew between a node and its database,
+  seconds against a day's grace.
 
   ## Is the resolver failing?
 
@@ -196,6 +212,9 @@ defmodule KilnCMS.CrawlerVerification do
       list must have been fetched before `listing_overdue?/3` believes it
     * `:listing_ttl_ms` (48 h): how long a first sighting is kept after the
       last call that asked about it
+    * `:listing_refresh_ms` (5 min): how long a node trusts its cached copy
+      of a sighting before asking the database again, which also moves the
+      sighting's expiry on
     * `:max_entries` (50,000), `:max_verified_entries` (10,000),
       `:max_network_marks` (10,000), `:max_listing_entries` (100,000),
       `:max_concurrency` (16): read once, by
@@ -230,6 +249,7 @@ defmodule KilnCMS.CrawlerVerification do
   alias KilnCMS.CrawlerVerification.InFlight
   alias KilnCMS.CrawlerVerification.Ranges
   alias KilnCMS.Security.Cidr
+  alias KilnCMS.Security.CrawlerSightingStore
   alias KilnCMSWeb.RateLimit
 
   @cache :kiln_cms_crawler_verification
@@ -270,7 +290,8 @@ defmodule KilnCMS.CrawlerVerification do
     health_window_ms: :timer.minutes(1),
     canary_address: {8, 8, 8, 8},
     listing_grace_ms: :timer.hours(24),
-    listing_ttl_ms: :timer.hours(48)
+    listing_ttl_ms: :timer.hours(48),
+    listing_refresh_ms: :timer.minutes(5)
   ]
 
   # Error reasons named in telemetry; anything else is `:other`, so a metric
@@ -305,7 +326,7 @@ defmodule KilnCMS.CrawlerVerification do
   @spec network_cache_name() :: atom()
   def network_cache_name, do: @network_cache
 
-  @doc "The first-sighting cache's name: clients outside a published list (#2852)."
+  @doc "The first-sighting cache's name: this node's copy of `KilnCMS.Security.CrawlerSighting` (#2852)."
   @spec listing_cache_name() :: atom()
   def listing_cache_name, do: @listing_cache
 
@@ -420,42 +441,66 @@ defmodule KilnCMS.CrawlerVerification do
   end
 
   @doc false
-  # Test seam: date `ip`'s client's first sighting (`listing_overdue?/3`) at
-  # `at_ms`, this node's monotonic milliseconds, with the configured TTL.
-  @spec put_first_seen(:inet.ip_address(), integer(), keyword()) :: :ok
-  def put_first_seen(ip, at_ms, opts \\ []) when is_integer(at_ms) do
+  # Test seam: date `engine`'s first sighting of `ip`'s client
+  # (`listing_overdue?/3`) at `at_ms`, wall-clock milliseconds, in the
+  # database, lapsing the configured TTL from now, and drop this node's copy
+  # so the next question reads it.
+  @spec put_first_seen(atom(), :inet.ip_address(), integer(), keyword()) :: :ok
+  def put_first_seen(engine, ip, at_ms, opts \\ []) when is_integer(at_ms) do
     config = config(opts)
 
     case listing_key(normalize_ip(ip)) do
-      nil -> :ok
-      key -> Cachex.put(listing_cache(config), key, at_ms, expire: config[:listing_ttl_ms])
+      nil ->
+        :ok
+
+      key ->
+        CrawlerSightingStore.put(store_key(key), engine, at_ms, config[:listing_ttl_ms])
+        Cachex.del(listing_cache(config), {engine, key})
     end
 
     :ok
   end
 
   @doc false
-  # Test seam: `{first_seen_ms, ttl_ms}` for `ip`'s client, or nil.
-  @spec first_seen(:inet.ip_address(), keyword()) :: {integer(), integer() | nil} | nil
-  def first_seen(ip, opts \\ []) do
-    cache = listing_cache(config(opts))
+  # Test seam: `{first_seen_ms, ms_until_it_lapses}` for `engine`'s sighting
+  # of `ip`'s client in the database, or nil.
+  @spec first_seen(atom(), :inet.ip_address()) :: {integer(), integer()} | nil
+  def first_seen(engine, ip) do
+    case listing_key(normalize_ip(ip)) do
+      nil -> nil
+      key -> CrawlerSightingStore.fetch(store_key(key), engine)
+    end
+  end
 
+  @doc false
+  # Test seam: this node's copy of `engine`'s sighting of `ip`'s client, as
+  # `{first_seen_ms, refresh_at}` (`refresh_at` in monotonic milliseconds), or
+  # nil.
+  @spec cached_first_seen(atom(), :inet.ip_address(), keyword()) ::
+          {integer(), integer()} | nil
+  def cached_first_seen(engine, ip, opts \\ []) do
     with key when not is_nil(key) <- listing_key(normalize_ip(ip)),
-         {:ok, at} when is_integer(at) <- Cachex.get(cache, key),
-         {:ok, ttl} <- Cachex.ttl(cache, key) do
-      {at, ttl}
+         {:ok, {_at, _refresh_at} = cached} <-
+           Cachex.get(listing_cache(config(opts)), {engine, key}) do
+      cached
     else
       _none -> nil
     end
   end
 
   @doc false
-  # Test seam: forget `ip`'s client's first sighting.
+  # Test seam: forget every engine's sighting of `ip`'s client, in the
+  # database (when the caller can reach it) and in this node's copy.
   @spec forget_listing(:inet.ip_address(), keyword()) :: :ok
   def forget_listing(ip, opts \\ []) do
     case listing_key(normalize_ip(ip)) do
-      nil -> :ok
-      key -> Cachex.del(listing_cache(config(opts)), key)
+      nil ->
+        :ok
+
+      key ->
+        CrawlerSightingStore.forget(store_key(key))
+        cache = listing_cache(config(opts))
+        Enum.each(Engines.engines(), &Cachex.del(cache, {&1, key}))
     end
 
     :ok
@@ -531,18 +576,22 @@ defmodule KilnCMS.CrawlerVerification do
 
   `true` only while `ip` is outside `engine`'s fresh list
   (`KilnCMS.CrawlerVerification.Ranges.lookup/3` answers `:out`) and that
-  list was fetched at least `:listing_grace_ms` after this node first asked
-  about `ip`'s client. The first call for a client records the sighting and
-  answers `false`; every call refreshes its TTL. Only a client outside the
+  list was fetched, by this node's wall clock, at least `:listing_grace_ms`
+  after the instance first asked about `ip`'s client. The first call for a
+  client records the sighting and answers `false`. Only a client outside the
   list is recorded.
 
-  Never waits on DNS and never reads the database: one cache read and one
-  write. `false` with verification off, for anything that is not an address,
-  and when the verifier's processes are restarting.
+  Never waits on DNS. A cache hit is one cache read; a miss, or a copy older
+  than `:listing_refresh_ms`, adds one database statement
+  (`KilnCMS.Security.CrawlerSightingStore.record/3`) and a cache write. When
+  the database cannot answer, the cached copy decides if there is one, else
+  `false`. `false` with verification off, for anything that is not an
+  address, and when the verifier's processes are restarting.
 
-  Options, beyond the configuration keys: `:now` (monotonic milliseconds,
-  the time a first sighting is recorded at), `:ranges` (options for
-  `Ranges.lookup/3`) and `:listing_cache` (test seams).
+  Options, beyond the configuration keys (all test seams): `:now`
+  (monotonic milliseconds: when the cached copy is due, and the list's age),
+  `:system_now` (wall-clock milliseconds, from which the list's age is
+  taken), `:ranges` (options for `Ranges.lookup/3`) and `:listing_cache`.
   """
   @spec listing_overdue?(atom(), :inet.ip_address() | nil, keyword()) :: boolean()
   def listing_overdue?(engine, ip, opts \\ []) do
@@ -550,11 +599,15 @@ defmodule KilnCMS.CrawlerVerification do
     ip = normalize_ip(ip)
     ranges = Keyword.get(config, :ranges, [])
 
+    now = Keyword.get(config, :now, now())
+
     with true <- config[:enabled] == true,
          key when not is_nil(key) <- listing_key(ip),
          :out <- Ranges.lookup(engine, ip, ranges),
-         {:ok, first_seen} <- sighting(key, Keyword.get(config, :now, now()), config) do
-      Ranges.fetched_since?(engine, first_seen + config[:listing_grace_ms])
+         {:ok, first_seen} <- sighting(engine, key, now, config),
+         age when is_integer(age) <- Ranges.age_ms(engine, now: now) do
+      system_now = Keyword.get(config, :system_now, System.system_time(:millisecond))
+      system_now - age >= first_seen + config[:listing_grace_ms]
     else
       _not_overdue -> false
     end
@@ -564,28 +617,41 @@ defmodule KilnCMS.CrawlerVerification do
     :exit, _reason -> false
   end
 
-  # The client's first sighting, recorded now if there is none, with its TTL
-  # refreshed either way. A read then a write rather than a Cachex
-  # transaction, which would queue every 404 of every listed claim through
-  # one process: two first sightings of one client racing each other both
-  # write about now, so the race can only move the sighting by the time
-  # between them, never to a later one. A cache that cannot answer is no
-  # sighting at all.
-  defp sighting(key, now, config) do
+  # The client's first sighting, as wall-clock milliseconds by the
+  # database's clock: this node's copy while it is due no refresh, else the
+  # database's answer (recorded now if there is none), copied here. A read
+  # then a write rather than a Cachex transaction, which would queue every
+  # 404 of every listed claim through one process: two misses racing each
+  # other both ask the database, whose upsert gives both the same answer. A
+  # cache that cannot answer is no sighting at all.
+  defp sighting(engine, key, now, config) do
     cache = listing_cache(config)
-    ttl = config[:listing_ttl_ms]
+    cache_key = {engine, key}
 
-    case Cachex.get(cache, key) do
-      {:ok, at} when is_integer(at) ->
-        Cachex.expire(cache, key, ttl)
-        {:ok, at}
+    case Cachex.get(cache, cache_key) do
+      {:ok, {first_seen, refresh_at}} when now < refresh_at -> {:ok, first_seen}
+      {:ok, cached} -> refresh_sighting(cache, cache_key, cached, now, config)
+      {:error, _reason} -> :error
+    end
+  end
 
-      {:ok, nil} ->
-        Cachex.put(cache, key, now, expire: ttl)
-        {:ok, now}
+  defp refresh_sighting(cache, {engine, key} = cache_key, cached, now, config) do
+    case CrawlerSightingStore.record(store_key(key), engine, config[:listing_ttl_ms]) do
+      {:ok, first_seen} ->
+        Cachex.put(cache, cache_key, {first_seen, now + config[:listing_refresh_ms]},
+          expire: config[:listing_ttl_ms]
+        )
 
-      {:error, _reason} ->
-        :error
+        {:ok, first_seen}
+
+      # The database cannot answer: the last copy it gave, however old, or
+      # no sighting (not overdue). Nothing is written, so the next question
+      # asks it again.
+      {:unavailable, _reason} ->
+        case cached do
+          {first_seen, _refresh_at} -> {:ok, first_seen}
+          _none -> :error
+        end
     end
   end
 
@@ -596,6 +662,13 @@ defmodule KilnCMS.CrawlerVerification do
   # `/64`. Never a string, never joined with anything a client sends.
   defp listing_key({a, b, c, d}), do: {:inet, a, b, c, d}
   defp listing_key(ip), do: network_key(ip)
+
+  # The string `CrawlerSightingStore` hashes for a client: the address, or
+  # the `/64` in CIDR form. Never stored as is.
+  defp store_key({:inet, a, b, c, d}), do: "inet:#{a}.#{b}.#{c}.#{d}"
+
+  defp store_key({:inet6, a, b, c, d}),
+    do: "inet6:#{:inet.ntoa({a, b, c, d, 0, 0, 0, 0})}/64"
 
   # ---- check/3 --------------------------------------------------------------
 

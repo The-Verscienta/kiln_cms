@@ -879,9 +879,13 @@ defmodule KilnCMS.Security.ScannerGuardTest do
     @range_v4 "45.143.200.0/24"
     @range_v6 "2a01:4f8:1::/48"
 
+    # `now` (monotonic) and `wall` are read together; the guard reads the
+    # real clocks a moment later, so a sighting is put a margin either side
+    # of the grace rather than on it (`CrawlerVerificationTest` holds the
+    # exact boundary, with both clocks pinned).
     setup do
       on_exit(&Ranges.clear/0)
-      %{now: System.monotonic_time(:millisecond)}
+      %{now: System.monotonic_time(:millisecond), wall: System.system_time(:millisecond)}
     end
 
     test "outside a fresh list, exempt during the grace", %{now: now} do
@@ -891,14 +895,14 @@ defmodule KilnCMS.Security.ScannerGuardTest do
       miss(10, "/gone", ua: @duckduckbot, ip: ip)
       assert rules() == []
       assert counter_rows() == 0
-      assert {_first_seen, _ttl} = CrawlerVerification.first_seen(ip)
+      assert {_first_seen, _ttl} = CrawlerVerification.first_seen(:duckduckgo, ip)
     end
 
     test "still outside a list fetched a full grace after the first miss: counted and blocked",
-         %{now: now} do
+         %{now: now, wall: wall} do
       Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
       ip = listed_out()
-      CrawlerVerification.put_first_seen(ip, now - @grace)
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - @grace - 1_000)
 
       miss(3, "/gone", ua: @duckduckbot, ip: ip)
       assert rules() == []
@@ -910,10 +914,25 @@ defmodule KilnCMS.Security.ScannerGuardTest do
       assert claim_rows() == 0
     end
 
-    test "a list fetched within the grace is not believed yet", %{now: now} do
+    # The sighting is the instance's: a deploy that wiped this node's copy
+    # does not give the spoofer another day.
+    test "a day-old sighting still counts after this node's copy is wiped",
+         %{now: now, wall: wall} do
       Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
       ip = listed_out()
-      CrawlerVerification.put_first_seen(ip, now - @grace + 1)
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - @grace - 1_000)
+      miss(1, "/gone", ua: @duckduckbot, ip: ip)
+      Cachex.clear(CrawlerVerification.listing_cache_name())
+
+      miss(3, "/gone", ua: @duckduckbot, ip: ip)
+      assert [rule] = rules()
+      assert rule.cidr == "#{:inet.ntoa(ip)}/32"
+    end
+
+    test "a list fetched within the grace is not believed yet", %{now: now, wall: wall} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+      ip = listed_out()
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - @grace + 60_000)
 
       miss(10, "/gone", ua: @duckduckbot, ip: ip)
       assert rules() == []
@@ -944,7 +963,7 @@ defmodule KilnCMS.Security.ScannerGuardTest do
       assert event.metadata["reason"] == "bait_path"
     end
 
-    test "a real DuckDuckBot the list names later is never blocked", %{now: now} do
+    test "a real DuckDuckBot the list names later is never blocked", %{now: now, wall: wall} do
       Ranges.put_fixture(:duckduckgo, [@range_v4], now: now - 10)
       ip = listed_out()
 
@@ -952,7 +971,7 @@ defmodule KilnCMS.Security.ScannerGuardTest do
       assert rules() == []
 
       # A day on, the vendor's list names it.
-      CrawlerVerification.put_first_seen(ip, now - @grace - 10)
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - @grace - 1_000)
       {a, b, c, _d} = ip
       Ranges.put_fixture(:duckduckgo, [@range_v4, "#{a}.#{b}.#{c}.0/24"], now: now)
       assert CrawlerVerification.check(:duckduckgo, ip) == :verified
@@ -963,11 +982,11 @@ defmodule KilnCMS.Security.ScannerGuardTest do
     end
 
     test "with a stale list the claim is unverifiable and keeps the exemption over IPv4",
-         %{now: now} do
+         %{now: now, wall: wall} do
       max_age = Ranges.config()[:max_age_ms]
       Ranges.put_fixture(:duckduckgo, [@range_v4], now: now, age_ms: max_age + 1)
       ip = listed_out()
-      CrawlerVerification.put_first_seen(ip, now - @grace - max_age - 10)
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - @grace - max_age - 1_000)
       assert CrawlerVerification.check(:duckduckgo, ip) == {:unverified, :unverifiable}
 
       miss(10, "/gone", ua: @duckduckbot, ip: ip)
@@ -981,7 +1000,7 @@ defmodule KilnCMS.Security.ScannerGuardTest do
       ip = listed_out()
 
       miss(10, "/gone", ua: @duckduckbot, ip: ip)
-      assert CrawlerVerification.first_seen(ip) == nil
+      assert CrawlerVerification.first_seen(:duckduckgo, ip) == nil
       assert counter_rows() == 0
     end
   end

@@ -111,6 +111,7 @@ defmodule KilnCMS.Staging.Scrub do
           ai_providers_purged: non_neg_integer(),
           meilisearch_sites_purged: non_neg_integer(),
           throttle_counters_purged: non_neg_integer(),
+          crawler_sightings_purged: non_neg_integer(),
           idempotent_requests_purged: non_neg_integer(),
           backup_locks_purged: non_neg_integer(),
           backup_node_beats_purged: non_neg_integer(),
@@ -227,6 +228,9 @@ defmodule KilnCMS.Staging.Scrub do
     # Rate-limit counters and cached idempotent responses: keyed on hashed
     # client identifiers, and the cached bodies are production's responses.
     {:throttle_counters_purged, KilnCMS.Accounts.ThrottleCounter},
+    # First sightings of crawler claims (#2852): keyed on hashed client
+    # addresses, and production's traffic, not the clone's.
+    {:crawler_sightings_purged, KilnCMS.Security.CrawlerSighting},
     {:idempotent_requests_purged, KilnCMS.Accounts.IdempotentRequest}
   ]
 

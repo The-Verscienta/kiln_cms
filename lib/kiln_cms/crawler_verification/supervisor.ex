@@ -24,18 +24,20 @@ defmodule KilnCMS.CrawlerVerification.Supervisor do
        (`KilnCMS.CrawlerVerification.resolver_failing?/1`), apart from the
        lookups so a node whose lookup slots are all busy can still tell a
        failing resolver from a silent reverse zone.
-    7. the first-sighting cache (#2852): when this node first asked
-       `KilnCMS.CrawlerVerification.listing_overdue?/3` about a client
-       outside a published list, bounded to `:max_listing_entries` (100,000)
-       clients the same way. Last, so a restart of anything above it wipes
-       it too, and it restarts alone.
+    7. the first-sighting cache (#2852): this node's copy of when
+       `KilnCMS.CrawlerVerification.listing_overdue?/3` first saw a client
+       outside a published list, read through from the
+       `KilnCMS.Security.CrawlerSighting` table, bounded to
+       `:max_listing_entries` (100,000) clients the same way. Last, so a
+       restart of anything above it wipes it too, and it restarts alone.
 
   If a cache restarts, the claims and lookups after it restart with it, so a
   lookup never writes into a cache that is not the one being read. A restart
   of either result cache also restarts the network-mark cache, so it wipes
   every mark: the networks it named are exempt again until their next
-  finished lookup. A restart that reaches the first-sighting cache starts
-  every client's grace again, which errs toward not counting.
+  finished lookup. A restart that reaches the first-sighting cache costs
+  each client one database read; the sightings themselves are in the
+  database, so no grace starts again.
 
   The caps come from `config :kiln_cms, KilnCMS.CrawlerVerification` at
   start, or from the child's options.

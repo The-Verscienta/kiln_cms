@@ -57,8 +57,8 @@ defmodule KilnCMS.Security.ScannerGuard do
       evidence, not a proof, since a list can lag a vendor's new crawler
       (#2852): it counts once the list has had a day to name it and still
       does not (`CrawlerVerification.listing_overdue?/3`: the counted client
-      is still outside a list fetched 24 hours or more after this node first
-      saw it miss), or in a marked IPv6 `/64`, and keeps the exemption until
+      is still outside a list fetched 24 hours or more after the instance
+      first saw it miss), or in a marked IPv6 `/64`, and keeps the exemption until
       then. A claim whose PTR query
       got no answer (a timeout, SERVFAIL) keeps it only while this node's
       resolver is itself failing (`CrawlerVerification.resolver_failing?/1`,
@@ -96,8 +96,10 @@ defmodule KilnCMS.Security.ScannerGuard do
   `miss_threshold`. So the claims a `/64` makes count toward the miss
   threshold once the `/64` has made `threshold` of them in the window: a
   client making only such claims trips on miss `2 × threshold + 1` of a
-  window, and one that mixes them with counted misses trips when their sum
-  passes `threshold`. No setting of its own.
+  window. One that mixes them with counted misses trips once its counted
+  misses pass `threshold`: the first `threshold` claims of a window are
+  exempt, and once the tally is full each further claim adds one to the
+  counted misses. No setting of its own.
 
   At the moment of the trip the block is also skipped when the address has a
   successful `:sign_in` event on this site in the last 24 hours (one indexed

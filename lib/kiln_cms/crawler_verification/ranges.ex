@@ -169,18 +169,20 @@ defmodule KilnCMS.CrawlerVerification.Ranges do
   end
 
   @doc """
-  Was `engine`'s installed list fetched at or after `at_ms`?
+  How long ago `engine`'s installed list was fetched, in milliseconds, or
+  `nil` when no list was ever installed.
 
-  Both are this node's monotonic milliseconds. A list a peer sent is dated
-  by the age it carried, measured on this node's clock (`RangesSync`), and a
-  refetch moves the time even when the list is unchanged. `false` when no
-  list was ever installed. Says nothing about freshness: see `fresh?/2`.
+  Measured on this node's monotonic clock. A list a peer sent is dated by
+  the age it carried, measured on this node's clock (`RangesSync`), and a
+  refetch moves the time even when the list is unchanged. Says nothing about
+  freshness: see `fresh?/2`. Options: `:now` (monotonic milliseconds, a test
+  seam).
   """
-  @spec fetched_since?(atom(), integer()) :: boolean()
-  def fetched_since?(engine, at_ms) when is_integer(at_ms) do
+  @spec age_ms(atom(), keyword()) :: integer() | nil
+  def age_ms(engine, opts \\ []) do
     case fetched_at(engine) do
-      fetched when is_integer(fetched) -> fetched >= at_ms
-      nil -> false
+      nil -> nil
+      at -> Keyword.get(opts, :now, now()) - at
     end
   end
 
@@ -403,13 +405,6 @@ defmodule KilnCMS.CrawlerVerification.Ranges do
     slot = slot(engine)
     :atomics.put(clock, slot + 1, fetched_at)
     :atomics.put(clock, slot + 2, 1)
-  end
-
-  defp age_ms(engine, config) do
-    case fetched_at(engine) do
-      nil -> nil
-      at -> Keyword.get(config, :now, now()) - at
-    end
   end
 
   defp now, do: System.monotonic_time(:millisecond)

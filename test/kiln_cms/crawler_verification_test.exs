@@ -19,6 +19,7 @@ defmodule KilnCMS.CrawlerVerificationTest do
   alias KilnCMS.CrawlerVerification.InFlight
   alias KilnCMS.CrawlerVerification.Ranges
   alias KilnCMS.Security.Cidr
+  alias KilnCMS.Security.CrawlerSightingStore
   alias KilnCMS.Test.PublicAddress
   alias KilnCMS.Test.StubCrawlerResolver, as: Stub
   alias KilnCMSWeb.RateLimit
@@ -29,6 +30,12 @@ defmodule KilnCMS.CrawlerVerificationTest do
   @skipped [:kiln_cms, :crawler_verification, :skipped]
 
   setup do
+    # First sightings (#2852) are database rows. Not shared: a process the
+    # test spawns gets no connection, which is how the "database unavailable"
+    # case is made.
+    owner = Ecto.Adapters.SQL.Sandbox.start_owner!(KilnCMS.Repo, shared: false)
+    on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(owner) end)
+
     # No range list another test planted or fetched may answer for an
     # address here before DNS does (#2586).
     KilnCMS.CrawlerVerification.Ranges.clear()
@@ -829,7 +836,7 @@ defmodule KilnCMS.CrawlerVerificationTest do
         assert Stub.calls(:ptr, address) == 0
         assert {:ok, nil} = Cachex.get(CrawlerVerification.cache_name(), address)
         assert {:ok, nil} = Cachex.get(CrawlerVerification.verified_cache_name(), address)
-        assert CrawlerVerification.first_seen(address) == nil
+        assert CrawlerVerification.first_seen(:duckduckgo, address) == nil
       end
 
       refute CrawlerVerification.network_flagged?(ip6, opts)
@@ -962,129 +969,250 @@ defmodule KilnCMS.CrawlerVerificationTest do
     @range_v4 "45.143.200.0/24"
     @range_v6 "2a01:4f8:1::/48"
 
-    setup do
+    # `now` (monotonic) and `wall` are read together, and the list is
+    # installed at `now`: with both seams passed, the list was fetched at
+    # exactly `wall` by this node's wall clock.
+    setup %{opts: opts} do
       Ranges.clear()
       on_exit(&Ranges.clear/0)
-      %{grace: :timer.hours(24), now: now()}
+      now = now()
+      wall = System.system_time(:millisecond)
+      Ranges.put_fixture(:duckduckgo, [@range_v4, @range_v6], now: now)
+
+      %{grace: :timer.hours(24), now: now, wall: wall, at: [now: now, system_now: wall] ++ opts}
     end
 
-    test "the first question records the sighting and answers false", %{opts: opts} do
-      Ranges.put_fixture(:duckduckgo, [@range_v4])
+    test "the first question records the sighting in the database and answers false",
+         %{at: at} do
       ip = listed_out()
 
-      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
-      assert {_at, ttl} = CrawlerVerification.first_seen(ip)
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+      assert {first_seen, ttl} = CrawlerVerification.first_seen(:duckduckgo, ip)
+      assert_in_delta first_seen, System.system_time(:millisecond), :timer.minutes(1)
       assert_in_delta ttl, :timer.hours(48), :timer.minutes(1)
+      assert {^first_seen, _refresh_at} = CrawlerVerification.cached_first_seen(:duckduckgo, ip)
     end
 
     test "only a list fetched a full grace after the first sighting is believed",
-         %{opts: opts, grace: grace, now: now} do
-      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+         %{at: at, grace: grace, wall: wall} do
       ip = listed_out()
 
-      CrawlerVerification.put_first_seen(ip, now - grace + 1)
-      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace + 1)
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
 
-      CrawlerVerification.put_first_seen(ip, now - grace)
-      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace)
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
     end
 
-    test "a sighting is never moved by a later question", %{opts: opts, grace: grace, now: now} do
-      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+    # The restart the node-local sighting could not survive: a deploy, a
+    # restart or a new node every few hours kept the grace from ever running
+    # out.
+    test "a restart or another node keeps the grace: the database's sighting decides",
+         %{at: at, grace: grace, now: now, wall: wall} do
       ip = listed_out()
-      CrawlerVerification.put_first_seen(ip, now - grace - 5)
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+      assert {first_seen, _ttl} = CrawlerVerification.first_seen(:duckduckgo, ip)
 
-      for _ <- 1..3, do: assert(CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts))
-      assert {first_seen, _ttl} = CrawlerVerification.first_seen(ip)
-      assert first_seen == now - grace - 5
+      # A day and a minute on, this node restarted: its copy is gone. The
+      # list was refetched then, and still does not name the client.
+      Cachex.clear(CrawlerVerification.listing_cache_name())
+      later = [now: now, system_now: wall + grace + :timer.minutes(1)] ++ at
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, later)
+
+      # A node that never saw the client counts it from the same moment.
+      other = :"cv-listing-#{System.unique_integer([:positive])}"
+      start_supervised!({Cachex, name: other})
+
+      assert CrawlerVerification.listing_overdue?(
+               :duckduckgo,
+               ip,
+               [listing_cache: other] ++ later
+             )
+
+      assert {^first_seen, _ttl} = CrawlerVerification.first_seen(:duckduckgo, ip)
     end
 
-    test "every question refreshes the sighting's TTL", %{opts: opts, grace: grace, now: now} do
-      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+    test "a sighting is never moved by a later question",
+         %{at: at, grace: grace, wall: wall} do
       ip = listed_out()
-      CrawlerVerification.put_first_seen(ip, now - grace, listing_ttl_ms: 60_000)
-      assert {_at, short} = CrawlerVerification.first_seen(ip)
-      assert short <= 60_000
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace - 5)
 
-      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
-      assert {_at, ttl} = CrawlerVerification.first_seen(ip)
+      # Each question reaches the database: this node's copy is dropped first.
+      for _ <- 1..3 do
+        Cachex.clear(CrawlerVerification.listing_cache_name())
+        assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+      end
+
+      assert {first_seen, _ttl} = CrawlerVerification.first_seen(:duckduckgo, ip)
+      assert first_seen == wall - grace - 5
+    end
+
+    test "a lapsed sighting the prune has not reached yet starts again",
+         %{at: at, grace: grace, wall: wall} do
+      ip = listed_out()
+
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace - 5,
+        listing_ttl_ms: -1_000
+      )
+
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+      assert {first_seen, ttl} = CrawlerVerification.first_seen(:duckduckgo, ip)
+      assert first_seen > wall - grace
       assert ttl > :timer.hours(47)
     end
 
+    test "a refresh moves the sighting's expiry on", %{at: at, grace: grace, wall: wall} do
+      ip = listed_out()
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace, listing_ttl_ms: 60_000)
+      assert {_at, short} = CrawlerVerification.first_seen(:duckduckgo, ip)
+      assert short <= 60_000
+
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+      assert {_at, ttl} = CrawlerVerification.first_seen(:duckduckgo, ip)
+      assert ttl > :timer.hours(47)
+    end
+
+    test "this node's copy answers until it is due a refresh, then the database does",
+         %{at: at, grace: grace, now: now, wall: wall} do
+      ip = listed_out()
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+
+      # The database moves the sighting back a day behind this node's back.
+      {a, b, c, d} = ip
+      CrawlerSightingStore.put("inet:#{a}.#{b}.#{c}.#{d}", :duckduckgo, wall - grace, 60_000)
+
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+
+      # `:listing_refresh_ms`, by default.
+      refresh = :timer.minutes(5)
+      due = [now: now + refresh, system_now: wall + refresh] ++ at
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, due)
+    end
+
+    test "with the database unavailable, this node's copy decides, else not overdue",
+         %{at: at, grace: grace, now: now, wall: wall} do
+      ip = listed_out()
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace)
+
+      # No copy here, and a process the database will not serve.
+      refute without_database(fn -> CrawlerVerification.listing_overdue?(:duckduckgo, ip, at) end)
+      assert CrawlerVerification.cached_first_seen(:duckduckgo, ip) == nil
+
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+
+      # The copy is due a refresh the database cannot give: it still answers.
+      # `:listing_refresh_ms`, by default.
+      refresh = :timer.minutes(5)
+      due = [now: now + refresh, system_now: wall + refresh] ++ at
+
+      assert without_database(fn ->
+               CrawlerVerification.listing_overdue?(:duckduckgo, ip, due)
+             end)
+    end
+
+    test "inside a transaction nothing is recorded and the claim is not overdue",
+         %{at: at, grace: grace, wall: wall} do
+      ip = listed_out()
+
+      assert {:ok, false} =
+               KilnCMS.Repo.transaction(fn ->
+                 CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+               end)
+
+      assert CrawlerVerification.first_seen(:duckduckgo, ip) == nil
+
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace)
+
+      assert {:ok, false} =
+               KilnCMS.Repo.transaction(fn ->
+                 CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+               end)
+    end
+
     test "a real DuckDuckBot the list names after its grace is verified, never overdue",
-         %{opts: opts, grace: grace, now: now} do
+         %{opts: opts, at: at, grace: grace, now: now, wall: wall} do
+      Ranges.clear()
       Ranges.put_fixture(:duckduckgo, [@range_v4], now: now - 10)
       ip = listed_out()
-      CrawlerVerification.put_first_seen(ip, now - grace - 100)
-      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace - 100)
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
 
       {a, b, c, _d} = ip
       Ranges.put_fixture(:duckduckgo, [@range_v4, "#{a}.#{b}.#{c}.0/24"], now: now)
 
-      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
       assert CrawlerVerification.check(:duckduckgo, ip, opts) == :verified
     end
 
     test "a stale list is never overdue, and a list that goes stale mid-grace keeps the " <>
            "first sighting",
-         %{opts: opts, grace: grace, now: now} do
+         %{at: at, grace: grace, now: now, wall: wall} do
       max_age = Ranges.config()[:max_age_ms]
+      Ranges.clear()
       Ranges.put_fixture(:duckduckgo, [@range_v4], now: now, age_ms: max_age + 1)
       ip = listed_out()
-      CrawlerVerification.put_first_seen(ip, now - grace - max_age - 10)
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace - max_age - 10)
 
-      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
-      assert {first_seen, _ttl} = CrawlerVerification.first_seen(ip)
-      assert first_seen == now - grace - max_age - 10
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+      assert {first_seen, _ttl} = CrawlerVerification.first_seen(:duckduckgo, ip)
+      assert first_seen == wall - grace - max_age - 10
 
       Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
-      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
     end
 
     test "IPv6 addresses in one /64 share a sighting; two IPv4 neighbors do not",
-         %{opts: opts, grace: grace, now: now} do
-      Ranges.put_fixture(:duckduckgo, [@range_v4, @range_v6], now: now)
+         %{at: at, grace: grace, wall: wall} do
       n = rem(System.unique_integer([:positive]), 0xFFFF)
       first = listed_out({0x2A01, 0x4F8, 9, n, 0, 0, 0, 1})
       rotated = listed_out({0x2A01, 0x4F8, 9, n, 0xAB, 0xCD, 0xEF, 0x12})
-      CrawlerVerification.put_first_seen(first, now - grace)
+      CrawlerVerification.put_first_seen(:duckduckgo, first, wall - grace)
 
-      assert CrawlerVerification.listing_overdue?(:duckduckgo, rotated, opts)
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, rotated, at)
 
       ip = listed_out()
       {a, b, c, d} = ip
       neighbor = listed_out({a, b, c, rem(d + 1, 254) + 1})
-      CrawlerVerification.put_first_seen(ip, now - grace)
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace)
 
-      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
-      refute CrawlerVerification.listing_overdue?(:duckduckgo, neighbor, opts)
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, neighbor, at)
     end
 
-    test "an address inside the list, or with no list, records nothing", %{opts: opts} do
-      Ranges.put_fixture(:duckduckgo, [@range_v4])
+    test "the table holds a hash of the client, never its address", %{at: at} do
+      ip = listed_out()
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+      {a, b, c, d} = ip
+
+      %{rows: rows} =
+        KilnCMS.Repo.query!("SELECT key_hash, engine FROM crawler_sightings")
+
+      assert [CrawlerSightingStore.key_hash("inet:#{a}.#{b}.#{c}.#{d}"), "duckduckgo"] in rows
+      refute Enum.any?(rows, fn [hash, _] -> String.contains?(hash, "#{a}.#{b}.#{c}.#{d}") end)
+    end
+
+    test "an address inside the list, or with no list, records nothing", %{at: at} do
       inside = listed_out({45, 143, 200, 77})
-      refute CrawlerVerification.listing_overdue?(:duckduckgo, inside, opts)
-      assert CrawlerVerification.first_seen(inside) == nil
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, inside, at)
+      assert CrawlerVerification.first_seen(:duckduckgo, inside) == nil
 
       Ranges.clear()
       ip = listed_out()
-      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
-      refute CrawlerVerification.listing_overdue?(:duckduckgo, nil, opts)
-      assert CrawlerVerification.first_seen(ip) == nil
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, nil, at)
+      assert CrawlerVerification.first_seen(:duckduckgo, ip) == nil
     end
 
-    test "with verification off nothing is recorded", %{opts: opts, grace: grace, now: now} do
-      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+    test "with verification off nothing is recorded", %{at: at, grace: grace, wall: wall} do
       ip = listed_out()
-      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, [enabled: false] ++ opts)
-      assert CrawlerVerification.first_seen(ip) == nil
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, [enabled: false] ++ at)
+      assert CrawlerVerification.first_seen(:duckduckgo, ip) == nil
 
-      CrawlerVerification.put_first_seen(ip, now - grace)
-      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, [enabled: false] ++ opts)
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace)
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, [enabled: false] ++ at)
     end
 
-    test "a cache that is not running answers false and never raises", %{opts: opts, now: now} do
-      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+    test "a cache that is not running answers false and never raises", %{at: at} do
       name = :"cv-listing-#{System.unique_integer([:positive])}"
       {:ok, pid} = Cachex.start_link(name: name)
       Process.unlink(pid)
@@ -1093,15 +1221,14 @@ defmodule KilnCMS.CrawlerVerificationTest do
       refute CrawlerVerification.listing_overdue?(
                :duckduckgo,
                listed_out(),
-               [listing_cache: name] ++ opts
+               [listing_cache: name] ++ at
              )
     end
 
-    # The bound on the cache is the bound on the grace: an evicted sighting
-    # starts again, which errs toward not counting.
-    test "a sighting evicted at the cap starts its grace again",
-         %{opts: opts, grace: grace, now: now} do
-      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+    # The cap bounds this node's copies, not the sightings: an evicted copy is
+    # read back from the database, so the grace does not start again.
+    test "a copy evicted at the cap costs a database read, never the grace",
+         %{at: at, grace: grace, wall: wall} do
       name = :"cv-listing-#{System.unique_integer([:positive])}"
 
       start_supervised!(
@@ -1109,20 +1236,28 @@ defmodule KilnCMS.CrawlerVerificationTest do
          name: name, hooks: [hook(module: Cachex.Limit.Evented, args: {3, [reclaim: 0.5]})]}
       )
 
-      opts = [listing_cache: name] ++ opts
+      at = [listing_cache: name] ++ at
       ip = listed_out()
-      CrawlerVerification.put_first_seen(ip, now - grace, listing_cache: name)
-      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace, listing_cache: name)
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
 
       # Cachex dates writes to the millisecond and evicts the oldest first; a
-      # tie with the newer sightings would leave which one goes to chance.
+      # tie with the newer copies would leave which one goes to chance.
       Process.sleep(5)
-      for _ <- 1..4, do: refute(CrawlerVerification.listing_overdue?(:duckduckgo, v4(), opts))
-      eventually(fn -> CrawlerVerification.first_seen(ip, listing_cache: name) == nil end)
 
-      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, opts)
-      assert {first_seen, _ttl} = CrawlerVerification.first_seen(ip, listing_cache: name)
-      assert first_seen > now - grace
+      for _ <- 1..4,
+          do: refute(CrawlerVerification.listing_overdue?(:duckduckgo, listed_out(), at))
+
+      eventually(fn ->
+        CrawlerVerification.cached_first_seen(:duckduckgo, ip, listing_cache: name) == nil
+      end)
+
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+
+      assert {first_seen, _refresh_at} =
+               CrawlerVerification.cached_first_seen(:duckduckgo, ip, listing_cache: name)
+
+      assert first_seen == wall - grace
     end
   end
 
@@ -1654,6 +1789,16 @@ defmodule KilnCMS.CrawlerVerificationTest do
   end
 
   defp now, do: System.monotonic_time(:millisecond)
+
+  # Runs `fun` in a process with no `$callers`, which the sandbox refuses a
+  # connection: the database cannot answer it.
+  defp without_database(fun) do
+    parent = self()
+    ref = make_ref()
+    spawn(fn -> send(parent, {ref, fun.()}) end)
+    assert_receive {^ref, result}, 5_000
+    result
+  end
 
   defp unique_host(template) do
     [first | rest] = String.split(template, ".", parts: 2)
