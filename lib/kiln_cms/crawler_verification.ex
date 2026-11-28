@@ -166,7 +166,17 @@ defmodule KilnCMS.CrawlerVerification do
   one, however old; with none, the claim is not overdue. That errs toward
   not counting, as every failure here does: a database outage leaves new
   spoofers exempt for its length, and a real crawler is never counted on a
-  sighting nobody recorded.
+  sighting nobody recorded. The client's database question then waits
+  `:listing_retry_ms` (30 s): its copy is kept with a retry time in place of
+  its refresh time, or, with no copy, a marker answering "no sighting" is
+  cached until then, so an outage costs a client one statement timeout per
+  retry window rather than one per 404. Every unanswered statement emits
+  `[:kiln_cms, :crawler_verification, :sighting_unavailable]`, and the node
+  logs an error at most once a minute, with the database error's message
+  alone: a missing table or a missing grant would otherwise leave list-only
+  spoofers exempt with no sign of it. A question asked inside a transaction
+  is none of these: the store is not asked, nothing is cached, logged or
+  emitted, and the next question outside one asks the database.
 
   The sighting is wall-clock milliseconds by the database's clock; the
   list's fetch time is this node's wall clock less the list's age
@@ -215,6 +225,8 @@ defmodule KilnCMS.CrawlerVerification do
     * `:listing_refresh_ms` (5 min): how long a node trusts its cached copy
       of a sighting before asking the database again, which also moves the
       sighting's expiry on
+    * `:listing_retry_ms` (30 s): how long a node waits before asking the
+      database about a client again after it could not answer
     * `:max_entries` (50,000), `:max_verified_entries` (10,000),
       `:max_network_marks` (10,000), `:max_listing_entries` (100,000),
       `:max_concurrency` (16): read once, by
@@ -235,11 +247,18 @@ defmodule KilnCMS.CrawlerVerification do
     * `[:kiln_cms, :crawler_verification, :skipped]`, `%{count: 1}`,
       `%{engine, reason}`: a lookup not started, `reason` `:busy` or
       `:rate_limited`.
+    * `[:kiln_cms, :crawler_verification, :sighting_unavailable]`,
+      `%{count: 1}`, `%{engine, reason}`: the database could not answer a
+      first-sighting question (#2852), `reason` `:connection`, `:ownership`,
+      `:postgres` (Postgres refused the statement: a missing table or grant
+      among them) or `:other`.
 
   Two warnings are logged once per node: the first time the concurrency limit
   turns a lookup away, and after `:error_warning_after` lookups in a row could
   not reach an answer (a node with no DNS egress), naming
-  `KILN_CRAWLER_VERIFICATION=false`.
+  `KILN_CRAWLER_VERIFICATION=false`. An unanswered first-sighting question is
+  logged at `:error` at most once a minute per node (see "List-only
+  evidence").
   """
 
   require Logger
@@ -291,7 +310,8 @@ defmodule KilnCMS.CrawlerVerification do
     canary_address: {8, 8, 8, 8},
     listing_grace_ms: :timer.hours(24),
     listing_ttl_ms: :timer.hours(48),
-    listing_refresh_ms: :timer.minutes(5)
+    listing_refresh_ms: :timer.minutes(5),
+    listing_retry_ms: :timer.seconds(30)
   ]
 
   # Error reasons named in telemetry; anything else is `:other`, so a metric
@@ -480,7 +500,7 @@ defmodule KilnCMS.CrawlerVerification do
           {integer(), integer()} | nil
   def cached_first_seen(engine, ip, opts \\ []) do
     with key when not is_nil(key) <- listing_key(normalize_ip(ip)),
-         {:ok, {_at, _refresh_at} = cached} <-
+         {:ok, {at, _refresh_at} = cached} when is_integer(at) <-
            Cachex.get(listing_cache(config(opts)), {engine, key}) do
       cached
     else
@@ -585,8 +605,9 @@ defmodule KilnCMS.CrawlerVerification do
   than `:listing_refresh_ms`, adds one database statement
   (`KilnCMS.Security.CrawlerSightingStore.record/3`) and a cache write. When
   the database cannot answer, the cached copy decides if there is one, else
-  `false`. `false` with verification off, for anything that is not an
-  address, and when the verifier's processes are restarting.
+  `false`, and the database is not asked about the client again for
+  `:listing_retry_ms`. `false` with verification off, for anything that is
+  not an address, and when the verifier's processes are restarting.
 
   Options, beyond the configuration keys (all test seams): `:now`
   (monotonic milliseconds: when the cached copy is due, and the list's age),
@@ -629,6 +650,7 @@ defmodule KilnCMS.CrawlerVerification do
     cache_key = {engine, key}
 
     case Cachex.get(cache, cache_key) do
+      {:ok, {:unknown, retry_at}} when now < retry_at -> :error
       {:ok, {first_seen, refresh_at}} when now < refresh_at -> {:ok, first_seen}
       {:ok, cached} -> refresh_sighting(cache, cache_key, cached, now, config)
       {:error, _reason} -> :error
@@ -644,16 +666,60 @@ defmodule KilnCMS.CrawlerVerification do
 
         {:ok, first_seen}
 
+      # Inside a transaction the store was never asked, and nothing is wrong
+      # with it: no copy is written, so the next question outside one asks.
+      {:unavailable, :in_transaction} ->
+        cached_answer(cached)
+
       # The database cannot answer: the last copy it gave, however old, or
-      # no sighting (not overdue). Nothing is written, so the next question
-      # asks it again.
-      {:unavailable, _reason} ->
-        case cached do
-          {first_seen, _refresh_at} -> {:ok, first_seen}
-          _none -> :error
-        end
+      # no sighting (not overdue), and no question to it again for
+      # `:listing_retry_ms`, so an outage does not hold every 404 for the
+      # statement's timeout.
+      {:unavailable, reason} ->
+        retry_later(cache, cache_key, cached, now + config[:listing_retry_ms], config)
+        sighting_unavailable(engine, reason, now)
+        cached_answer(cached)
     end
   end
+
+  defp cached_answer({first_seen, _refresh_at}) when is_integer(first_seen), do: {:ok, first_seen}
+  defp cached_answer(_none), do: :error
+
+  # A copy keeps its first sighting and its expiry; with none, a marker that
+  # answers "no sighting" until the retry, and lapses soon after it.
+  defp retry_later(cache, cache_key, {first_seen, _refresh_at}, retry_at, _config)
+       when is_integer(first_seen),
+       do: Cachex.update(cache, cache_key, {first_seen, retry_at})
+
+  defp retry_later(cache, cache_key, _none, retry_at, config),
+    do: Cachex.put(cache, cache_key, {:unknown, retry_at}, expire: config[:listing_retry_ms])
+
+  # Logged at most once a minute per node, with the exception's message
+  # alone: no address, no key, no engine. The event is one per unanswered
+  # statement, which the retry bounds at one per client per retry window.
+  defp sighting_unavailable(engine, reason, now) do
+    if InFlight.claim_interval(:sighting_unavailable, now, :timer.minutes(1)) do
+      Logger.error(
+        "Crawler sighting store unavailable (#{unavailable_message(reason)}); " <>
+          "list-only search-engine claims (#2852) are not counted as overdue on " <>
+          "this node, except from a sighting it already holds, until the database answers."
+      )
+    end
+
+    :telemetry.execute(
+      [:kiln_cms, :crawler_verification, :sighting_unavailable],
+      %{count: 1},
+      %{engine: engine, reason: unavailable_reason(reason)}
+    )
+  end
+
+  defp unavailable_message(%{__exception__: true} = error), do: Exception.message(error)
+  defp unavailable_message(_reason), do: "unknown reason"
+
+  defp unavailable_reason(%DBConnection.ConnectionError{}), do: :connection
+  defp unavailable_reason(%DBConnection.OwnershipError{}), do: :ownership
+  defp unavailable_reason(%Postgrex.Error{}), do: :postgres
+  defp unavailable_reason(_reason), do: :other
 
   defp listing_cache(config), do: Keyword.get(config, :listing_cache, @listing_cache)
 

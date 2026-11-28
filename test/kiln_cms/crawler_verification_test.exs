@@ -28,6 +28,7 @@ defmodule KilnCMS.CrawlerVerificationTest do
 
   @lookup [:kiln_cms, :crawler_verification, :lookup]
   @skipped [:kiln_cms, :crawler_verification, :skipped]
+  @sighting_unavailable [:kiln_cms, :crawler_verification, :sighting_unavailable]
 
   setup do
     # First sightings (#2852) are database rows. Not shared: a process the
@@ -1095,31 +1096,170 @@ defmodule KilnCMS.CrawlerVerificationTest do
       CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace)
 
       # No copy here, and a process the database will not serve.
-      refute without_database(fn -> CrawlerVerification.listing_overdue?(:duckduckgo, ip, at) end)
+      capture_log(fn ->
+        refute without_database(fn ->
+                 CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+               end)
+      end)
+
       assert CrawlerVerification.cached_first_seen(:duckduckgo, ip) == nil
 
-      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+      # `:listing_retry_ms` on, by default, the database answers.
+      retry = :timer.seconds(30)
+      later = [now: now + retry, system_now: wall + retry] ++ at
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, later)
 
       # The copy is due a refresh the database cannot give: it still answers.
       # `:listing_refresh_ms`, by default.
       refresh = :timer.minutes(5)
-      due = [now: now + refresh, system_now: wall + refresh] ++ at
+      due = [now: now + retry + refresh, system_now: wall + retry + refresh] ++ at
 
-      assert without_database(fn ->
-               CrawlerVerification.listing_overdue?(:duckduckgo, ip, due)
-             end)
+      capture_log(fn ->
+        assert without_database(fn ->
+                 CrawlerVerification.listing_overdue?(:duckduckgo, ip, due)
+               end)
+      end)
+    end
+
+    test "an unanswered question is logged at most once a minute, naming no client, and emitted",
+         %{at: at, now: now} do
+      CrawlerVerification.reset_warnings()
+      on_exit(&CrawlerVerification.reset_warnings/0)
+      attach(@sighting_unavailable)
+      [first, second, third] = for _ <- 1..3, do: listed_out()
+
+      log =
+        capture_log(fn ->
+          refute without_database(fn ->
+                   CrawlerVerification.listing_overdue?(:duckduckgo, first, at)
+                 end)
+        end)
+
+      assert log =~ "[error]"
+      assert log =~ "Crawler sighting store unavailable"
+      # The database error's own message, and nothing naming the client.
+      assert log =~ "cannot find ownership process"
+      refute_names_client(log, first)
+
+      assert_receive {:telemetry, @sighting_unavailable, %{count: 1},
+                      %{engine: :duckduckgo, reason: :ownership} = metadata}
+
+      assert Map.keys(metadata) |> Enum.sort() == [:engine, :reason]
+
+      # Another client a second short of a minute on: emitted, not logged.
+      quiet =
+        capture_log(fn ->
+          refute without_database(fn ->
+                   CrawlerVerification.listing_overdue?(
+                     :duckduckgo,
+                     second,
+                     [now: now + 59_999] ++ at
+                   )
+                 end)
+        end)
+
+      refute quiet =~ "Crawler sighting store unavailable"
+      assert_receive {:telemetry, @sighting_unavailable, %{count: 1}, %{reason: :ownership}}
+
+      # A minute on, logged again.
+      loud =
+        capture_log(fn ->
+          refute without_database(fn ->
+                   CrawlerVerification.listing_overdue?(
+                     :duckduckgo,
+                     third,
+                     [now: now + 60_000] ++ at
+                   )
+                 end)
+        end)
+
+      assert loud =~ "Crawler sighting store unavailable"
+      refute_names_client(loud, third)
+    end
+
+    # The database is available to this test process again: a question
+    # that reached it would move the sighting's short expiry to 48 h, and
+    # find the sighting overdue.
+    test "with no copy, an unanswered question is not asked again until the retry",
+         %{at: at, grace: grace, now: now, wall: wall} do
+      ip = listed_out()
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace, listing_ttl_ms: 60_000)
+
+      capture_log(fn ->
+        refute without_database(fn ->
+                 CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+               end)
+      end)
+
+      retry = :timer.seconds(30)
+      at_ms = fn ms -> [now: now + ms, system_now: wall + ms] ++ at end
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, at_ms.(retry - 1))
+      assert {_at, ttl} = CrawlerVerification.first_seen(:duckduckgo, ip)
+      assert ttl <= 60_000
+
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, at_ms.(retry))
+      assert {_at, ttl} = CrawlerVerification.first_seen(:duckduckgo, ip)
+      assert ttl > :timer.hours(47)
+    end
+
+    test "with a copy, an unanswered refresh keeps the copy and waits for the retry",
+         %{at: at, grace: grace, now: now, wall: wall} do
+      ip = listed_out()
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace + 1)
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+      assert {first_seen, _refresh_at} = CrawlerVerification.cached_first_seen(:duckduckgo, ip)
+
+      # The database moves the sighting back behind this node's back.
+      {a, b, c, d} = ip
+      CrawlerSightingStore.put("inet:#{a}.#{b}.#{c}.#{d}", :duckduckgo, wall - grace, 60_000)
+
+      # `:listing_refresh_ms` and `:listing_retry_ms`, by default.
+      refresh = :timer.minutes(5)
+      retry = :timer.seconds(30)
+      at_ms = fn ms -> [now: now + ms, system_now: wall + ms] ++ at end
+
+      capture_log(fn ->
+        refute without_database(fn ->
+                 CrawlerVerification.listing_overdue?(:duckduckgo, ip, at_ms.(refresh))
+               end)
+      end)
+
+      assert CrawlerVerification.cached_first_seen(:duckduckgo, ip) ==
+               {first_seen, now + refresh + retry}
+
+      refute CrawlerVerification.listing_overdue?(:duckduckgo, ip, at_ms.(refresh + retry - 1))
+      assert {_at, ttl} = CrawlerVerification.first_seen(:duckduckgo, ip)
+      assert ttl <= 60_000
+
+      assert CrawlerVerification.listing_overdue?(:duckduckgo, ip, at_ms.(refresh + retry))
     end
 
     test "inside a transaction nothing is recorded and the claim is not overdue",
          %{at: at, grace: grace, wall: wall} do
+      CrawlerVerification.reset_warnings()
+      on_exit(&CrawlerVerification.reset_warnings/0)
+      attach(@sighting_unavailable)
       ip = listed_out()
 
-      assert {:ok, false} =
-               KilnCMS.Repo.transaction(fn ->
-                 CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
-               end)
+      log =
+        capture_log(fn ->
+          assert {:ok, false} =
+                   KilnCMS.Repo.transaction(fn ->
+                     CrawlerVerification.listing_overdue?(:duckduckgo, ip, at)
+                   end)
+        end)
 
       assert CrawlerVerification.first_seen(:duckduckgo, ip) == nil
+      # Nothing is wrong with the store: no log, no event, no retry marker.
+      refute log =~ "Crawler sighting store unavailable"
+      refute_received {:telemetry, @sighting_unavailable, _, _}
+      {a, b, c, d} = ip
+
+      assert Cachex.get(
+               CrawlerVerification.listing_cache_name(),
+               {:duckduckgo, {:inet, a, b, c, d}}
+             ) ==
+               {:ok, nil}
 
       CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - grace)
 
@@ -1789,6 +1929,16 @@ defmodule KilnCMS.CrawlerVerificationTest do
   end
 
   defp now, do: System.monotonic_time(:millisecond)
+
+  # Neither the address nor the digest it is stored under is in `log`.
+  defp refute_names_client(log, {a, b, c, d} = ip) do
+    refute log =~ :inet.ntoa(ip) |> to_string()
+    refute log =~ "inet:"
+
+    hash = CrawlerSightingStore.key_hash("inet:#{a}.#{b}.#{c}.#{d}")
+    refute log =~ Base.encode16(hash, case: :lower)
+    refute log =~ Base.encode16(hash)
+  end
 
   # Runs `fun` in a process with no `$callers`, which the sandbox refuses a
   # connection: the database cannot answer it.

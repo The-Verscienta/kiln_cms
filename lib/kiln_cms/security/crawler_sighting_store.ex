@@ -35,8 +35,11 @@ defmodule KilnCMS.Security.CrawlerSightingStore do
   `record/3` answers `{:unavailable, reason}`, and never raises, for no
   connection, no sandbox owner (tests), a timeout or Postgres refusing the
   statement (the table missing during a rolling deploy among them). What
-  that means for the guard is the caller's policy: see
-  `KilnCMS.CrawlerVerification`'s "List-only evidence".
+  that means for the guard is the caller's policy, and so are the error log
+  (at most once a minute per node), the telemetry event and the retry
+  backoff that report and pace it: see `KilnCMS.CrawlerVerification`'s
+  "List-only evidence". This module logs nothing itself, so the test seams
+  that share `shared/1` stay quiet.
   """
 
   alias KilnCMS.Repo

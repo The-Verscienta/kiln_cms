@@ -356,6 +356,13 @@ defmodule KilnCMSWeb.Telemetry do
           "Crawler verification lookups not started (#2254): busy (concurrency " <>
             "limit) or rate_limited (per-network or per-node budget)"
       ),
+      counter("kiln_cms.crawler_verification.sighting_unavailable.count",
+        tags: [:reason],
+        description:
+          "First-sighting questions the database could not answer (#2852), by reason " <>
+            "(connection / ownership / postgres / other). While this rises, list-only " <>
+            "search-engine claims are not counted as overdue except from a node's copy."
+      ),
       counter("kiln_cms.crawler_verification.ranges_fetch.count",
         tags: [:engine, :result],
         description:
