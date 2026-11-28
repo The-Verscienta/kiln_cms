@@ -336,6 +336,33 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
       # Only the first save's notice.
       assert [%{"channel" => "platform_notice"}] = SecurityAlerts.dispatches()
     end
+
+    # The message follows what the save wrote, not what the page last loaded:
+    # a page loaded before another admin turned the kind off promises no
+    # notice its own save never wrote.
+    test "a page loaded before another admin's save promises no notice it did not send",
+         %{conn: conn, org: org} do
+      platform = authed_user(:admin)
+      other = authed_user(:admin)
+
+      {:ok, lv, _html} =
+        conn |> org_conn(org) |> log_in(platform) |> live(~p"/editor/security-alerts")
+
+      KilnCMS.Security.save_platform_alert_settings!(
+        %{disabled_kinds: ["api_key_rate_limited"]},
+        actor: other
+      )
+
+      html =
+        lv
+        |> form("#platform-alerts-form", platform_alerts: %{"api_key_rate_limited" => "false"})
+        |> render_submit()
+
+      assert html =~ "Platform alert settings saved."
+      refute html =~ "will be sent a notice"
+      # The other admin's save wrote the one notice.
+      assert [%{"channel" => "platform_notice"}] = SecurityAlerts.dispatches()
+    end
   end
 
   describe "the mute switch in your settings" do

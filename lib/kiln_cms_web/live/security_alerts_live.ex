@@ -93,14 +93,14 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
       when is_map(params) do
     with true <- platform_admin?(socket),
          attrs = platform_attributes(params, socket.assigns.platform_disabled),
-         {:ok, _row} <-
+         {:ok, row} <-
            Security.save_platform_alert_settings(attrs,
              actor: socket.assigns.current_user,
              context: socket.assigns.security_context
            ) do
       {:noreply,
        socket
-       |> put_flash(:info, platform_saved_message(socket.assigns.platform_disabled, attrs))
+       |> put_flash(:info, platform_saved_message(row))
        |> load_platform_settings()}
     else
       false ->
@@ -162,8 +162,11 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
     %{disabled_kinds: kept ++ Enum.reject(shown, &checked?(params, &1))}
   end
 
-  defp platform_saved_message(before, attrs) do
-    if attrs.disabled_kinds -- before != [] do
+  # Whether the save wrote a notice is the server's call, made from the locked
+  # row (`NoticePlatformAlertSettings`): a page loaded before another admin's
+  # save must not promise a notice that was never written, or omit one that was.
+  defp platform_saved_message(row) do
+    if row.__metadata__[:platform_notice?] do
       gettext("Platform alert settings saved. Every platform admin will be sent a notice.")
     else
       gettext("Platform alert settings saved.")

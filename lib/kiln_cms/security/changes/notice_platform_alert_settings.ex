@@ -39,7 +39,7 @@ defmodule KilnCMS.Security.Changes.NoticePlatformAlertSettings do
       before = Map.fetch!(changeset.context, @before_key)
 
       case newly_disabled(before, record.disabled_kinds) do
-        [] -> {:ok, record}
+        [] -> {:ok, Ash.Resource.put_metadata(record, :platform_notice?, false)}
         kinds -> notice(record, kinds, actor_id(changeset))
       end
     end)
@@ -55,7 +55,9 @@ defmodule KilnCMS.Security.Changes.NoticePlatformAlertSettings do
       actor_id: actor_id
     })
 
-    {:ok, record}
+    # The page says a notice is on its way only when this save wrote one,
+    # judged from the locked row, never from what the page last loaded.
+    {:ok, Ash.Resource.put_metadata(record, :platform_notice?, true)}
   rescue
     error in [Postgrex.Error, DBConnection.ConnectionError] ->
       Logger.error(
