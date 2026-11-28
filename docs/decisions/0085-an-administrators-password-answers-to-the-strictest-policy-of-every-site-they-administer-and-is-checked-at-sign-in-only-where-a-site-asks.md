@@ -11,7 +11,11 @@
   mail's branding),
   [#3437](https://github.com/The-Verscienta/kiln_cms/issues/3437) (the pause
   mail) and [#3438](https://github.com/The-Verscienta/kiln_cms/issues/3438)
-  (auditing when the deciding sites can't be read); [ADR 0031](0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md)
+  (auditing when the deciding sites can't be read),
+  [#3435](https://github.com/The-Verscienta/kiln_cms/issues/3435) (the Warn
+  verdict across the API's second factor) and
+  [#3470](https://github.com/The-Verscienta/kiln_cms/issues/3470) (the
+  breached-pause mail's own alert window); [ADR 0031](0031-the-breached-password-check-calls-a-third-party-by-default-and-fails-open.md)
   for the check itself and why it fails open;
   [ADR 0023](0023-an-unlock-link-lifts-only-the-account-pause-and-the-pause-stays-undisclosed.md)
   for the per-account sign-in pause a blocked sign-in still counts toward.
@@ -112,6 +116,25 @@ factor; checking after the code would mean carrying a verdict through the
 pending sign-in on both verify doors. A refusal still comes before any
 session, so the second factor is never skipped.
 
+*Amended (#3435, #3470, 2026-11-28):* the lookup stays here, at the first
+factor, but its Warn result now does ride the pending state to the step that
+finishes the sign-in, on both doors. The browser door already did (a note in
+`KilnCMS.Accounts.PasswordNotice` and the session, shown after the code). The
+API door had nowhere to put it, so `POST /api/auth/sign_in/verify`'s `201`
+never warned a two-factor administrator. The verdict now rides inside the
+`:encrypted` pending blob (`KilnCMS.Accounts.PendingSignIn`), which is already
+encrypted, authenticated and single-use, so the caller can neither read nor
+forge it and it never travels in a URL. The key is written on every
+`:encrypted` blob, `1` when warned and `0` when not: AES-GCM hides the content
+but not the length, and the headless blob is printed in client logs and CI
+transcripts, so a key present only when warned would name the administrators
+who sign in with a breached password. Only `1` reads as warned, so a blob from
+a release without the key reads as not warned. The `:session` blob carries no
+key. Neither the salt nor the lifetime changed. The verify step does not
+re-read the policy: a site that moves from Warn to Block between the two
+steps still gets that sign-in issued, with the warning, since the lookup ran
+under the policy of the step that had the password.
+
 ### A refused sign-in is sent to reset, not locked out
 
 Under Block a breached password is refused with
@@ -163,8 +186,30 @@ admits and refuses no one. The tally and the counter are separate rows, so a
 forgiveness or a window boundary between the two reads can only move the mail
 between its wordings.
 
+*Amended (#3435, #3470, 2026-11-28):* the breached wordings no longer spend
+the usual mail's window. Sharing it let the weaker signal silence the
+stronger in the order an attack produces them: wrong guesses fill the counter
+and spend the window; the counter's window rolls; someone spends the
+address's reset mails; the blocks then fill the counter again, and the mail
+that says why found the window spent. They now spend their own six-hour
+window (`AccountThrottle.breach_alert_allowed?/1`, bucket
+`signin:breach-alert`, no migration), as the second-factor alert does. The
+choice was between at most two pause mails per address per six hours (one of
+each) and at most one (the breached mail also holding back a later usual
+one); it is two, because the second can only be spent by someone holding the
+correct password of an administrator whose site blocks it, and guessing that
+starts after a breached pause is still news. Both windows are charged before
+the mail is built, since the charge is one atomic increment-and-compare and
+two simultaneous refusals must not both send; when the mail then fails to be
+queued, the window is handed back (`AccountThrottle.forget_alert/1`, which the
+usual window did not have before, and `forget_breach_alert/1`).
+
 Under Warn the person signs in and is told: a flash on the browser doors, an
 additive `password_breach` field on the API's one-step `201`.
+
+*Amended (#3435, 2026-11-28):* and on the `201` of
+`POST /api/auth/sign_in/verify` for a two-factor administrator, never on the
+`200` pending step, since the caller has not yet proved the second factor.
 
 ### Audit
 
@@ -217,7 +262,14 @@ With no request site nothing is recorded, as for every sign-in event.
   copy says the person asked for it.
 - **Caching a verdict per account.** A stored password derivative, and a
   delay in noticing a newly breached password.
-- **Holding the verdict across the second factor.** See above.
+- **Holding the verdict across the second factor.** See above. *Amended
+  (#3435, 2026-11-28):* what stays rejected is running the lookup at the
+  second factor, which has no password. The first factor's Warn result does
+  ride the pending state, on both doors (above). Also rejected for carrying
+  it: re-running the lookup at verify, putting it in the `200` pending
+  response, a node-local cache, a URL, header or second token, a column on
+  the token row (a migration), a new salt or blob version, and writing the
+  key only when warned (its length would show).
 
 ## What it leaves open
 
@@ -231,11 +283,14 @@ These are recorded in the threat model's "Breached passwords" section:
   mails an hour, and pause the account through the sign-in throttle (which a
   wrong password could already do). *Amended (#3436–#3438, 2026-11-26):* the pause
   mail names the breach and is not withheld (above), so the owner hears
-  even when the reset budget is spent. It shares the six-hour alert window
-  with the usual pause mail, so a window spent on a pause of wrong guesses
-  delays it until the window rolls.
-- The Warn signal does not reach an API client of a two-factor administrator:
-  `/api/auth/sign_in/verify` does not carry `password_breach`.
+  even when the reset budget is spent. *Amended (#3470, 2026-11-28):* it has
+  its own six-hour window, so a pause of wrong guesses no longer delays it.
+  Still open: someone who spends the reset budget and then makes too few
+  blocked attempts to fill the sign-in counter never pauses the account, so
+  neither the reset mail nor the pause mail reaches the owner.
+- ~~The Warn signal does not reach an API client of a two-factor administrator:
+  `/api/auth/sign_in/verify` does not carry `password_breach`.~~ *Amended
+  (#3435, 2026-11-28):* closed: it does, through the pending token.
 - ~~The reset mail is branded for the site the request came in on, not the
   site whose policy refused the sign-in.~~ *Amended (#3436–#3438, 2026-11-26):* closed:
   it is branded for a deciding site (a platform admin's, the request's site).
