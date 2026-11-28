@@ -189,7 +189,7 @@ defmodule KilnCMS.Webhooks.SlackFormatTest do
                "Security alert on `Example`: An account was locked out: 7 in this alert window"
     end
 
-    test "a notice names the change and links to the alert settings" do
+    test "a notice names the change, the kinds as their checkboxes do, and links to the alert settings" do
       body =
         SlackFormat.render("security.alerts_silenced", %{
           "phase" => "notice",
@@ -203,7 +203,7 @@ defmodule KilnCMS.Webhooks.SlackFormatTest do
 
       assert section(body) ==
                "*Some security alerts were turned off* on `Example`\n" <>
-                 "Turned off: An account was locked out, A new administrator"
+                 "Turned off: Account locked out, New admin"
 
       assert context(body) =~
                "<https://console.test/editor/security-alerts|Open the security alerts settings>"

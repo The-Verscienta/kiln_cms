@@ -118,6 +118,30 @@ defmodule KilnCMS.Security.AlertText do
 
   def kind_label(_unknown), do: gettext("Security alert")
 
+  @doc """
+  The name of an alert kind as its setting's checkbox says it, in the current
+  locale (#3495): "Account locked out", not "An account was locked out". The
+  one source for the checkboxes on the security alerts page and for a notice
+  that names the kinds turned off (its email, `KilnCMS.Security.AlertMail`,
+  and its Slack message, `KilnCMS.Webhooks.SlackFormat`), so the reader can
+  find the box that was cleared. A kind with no setting, or one this release
+  does not know, falls back to `kind_label/1`.
+  """
+  @spec setting_label(String.t() | atom() | nil) :: String.t()
+  def setting_label(kind) when is_atom(kind) and not is_nil(kind),
+    do: setting_label(to_string(kind))
+
+  def setting_label("new_admin"), do: gettext("New admin")
+  def setting_label("role_elevation"), do: gettext("Role raised")
+  def setting_label("failed_sign_ins"), do: gettext("Failed sign-ins")
+  def setting_label("lockout"), do: gettext("Account locked out")
+  def setting_label("two_factor_disabled"), do: gettext("Second factor removed")
+  def setting_label("sso_config_changed"), do: gettext("Single sign-on changed")
+  # Not "Blocked addresses": that is the block list's own page (#2810).
+  def setting_label("blocked_ip"), do: gettext("Requests from blocked addresses")
+  def setting_label("api_key_rate_limited"), do: gettext("API keys over a rate limit")
+  def setting_label(kind), do: kind_label(kind)
+
   @doc "The label of an `alerts_silenced` notice's change, in the current locale."
   @spec change_label(String.t() | nil) :: String.t()
   def change_label("kind_disabled"), do: gettext("Some security alerts were turned off")

@@ -101,6 +101,9 @@ defmodule KilnCMS.Security.NoticesTest do
                MapSet.new([to_string(ctx.admin.email), to_string(ctx.muted.email)])
 
       assert mail.html_body =~ "cannot be muted"
+      # The kind as its checkbox names it, so the reader finds the box (#3495).
+      assert mail.html_body =~ "Turned off: Account locked out."
+      refute mail.html_body =~ "An account was locked out"
       refute_received {:email, _}
     end
 
@@ -381,7 +384,9 @@ defmodule KilnCMS.Security.NoticesTest do
 
       mail = hd(mails)
       assert mail.subject == "Platform security alerts were changed"
-      assert mail.html_body =~ "Turned off: An API key hit a rate limit."
+      # The kind as its checkbox names it (#3495).
+      assert mail.html_body =~ "Turned off: API keys over a rate limit."
+      refute mail.html_body =~ "An API key hit a rate limit"
       assert mail.html_body =~ "/editor/security-alerts"
 
       assert mail.html_body =~

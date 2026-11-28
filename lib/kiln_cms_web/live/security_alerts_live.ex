@@ -40,6 +40,7 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
   alias KilnCMS.CMS
   alias KilnCMS.Security
   alias KilnCMS.Security.Alerts
+  alias KilnCMS.Security.AlertText
 
   @impl true
   def mount(_params, _session, socket) do
@@ -254,17 +255,6 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
   defp forbidden_message,
     do: gettext("You don't have permission to change this site's security alerts.")
 
-  defp kind_label(:new_admin), do: gettext("New admin")
-  defp kind_label(:role_elevation), do: gettext("Role raised")
-  defp kind_label(:failed_sign_ins), do: gettext("Failed sign-ins")
-  defp kind_label(:lockout), do: gettext("Account locked out")
-  defp kind_label(:two_factor_disabled), do: gettext("Second factor removed")
-  defp kind_label(:sso_config_changed), do: gettext("Single sign-on changed")
-  # Not "Blocked addresses": that is the block list's own page (#2810).
-  defp kind_label(:blocked_ip), do: gettext("Requests from blocked addresses")
-
-  defp platform_kind_label(:api_key_rate_limited), do: gettext("API keys over a rate limit")
-
   defp platform_kind_description(:api_key_rate_limited) do
     gettext(
       "A verified API key goes over a rate limit. One alert every %{minutes} minutes, then a summary, to every platform admin.",
@@ -388,7 +378,7 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
           <legend class="text-sm font-semibold">{gettext("Alerts")}</legend>
           <div class="mt-3 space-y-3">
             <div :for={kind <- Alerts.site_kinds()} id={"security-alert-kind-#{kind}"}>
-              <.input field={@form[key(kind)]} type="checkbox" label={kind_label(kind)} />
+              <.input field={@form[key(kind)]} type="checkbox" label={AlertText.setting_label(kind)} />
               <p class="-mt-1 ml-6 text-xs text-base-content/70">{kind_description(kind)}</p>
             </div>
           </div>
@@ -452,6 +442,17 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
           {gettext(
             "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log, and every platform admin is sent a notice."
           )}
+          <a
+            id="security-alerts-platform-docs"
+            href={docs_url("security-alerts.md#turn-off-rate-limit-alerts-for-api-keys")}
+            target="_blank"
+            rel="noopener"
+            class="link inline-flex items-center gap-1 font-medium text-primary-ink"
+          >
+            {gettext("Learn more")}
+            <.icon name="hero-arrow-top-right-on-square" class="size-3.5" />
+            <span class="sr-only">{gettext("(opens in a new tab)")}</span>
+          </a>
         </p>
         <.form
           for={@platform_form}
@@ -466,7 +467,7 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
             <.input
               field={@platform_form[key(kind)]}
               type="checkbox"
-              label={platform_kind_label(kind)}
+              label={AlertText.setting_label(kind)}
             />
             <p class="-mt-1 ml-6 text-xs text-base-content/70">
               {platform_kind_description(kind)}
