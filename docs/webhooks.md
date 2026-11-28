@@ -515,8 +515,8 @@ site's mail relay changed).
   admin ticks them in the `security` group of its event list. The list's
   **Select all** does not tick them; the `security` group's own toggle does.
   A kind added in a later release is not ticked on existing endpoints either:
-  `security.blocked_ip` (a request from a blocked address refused) reaches
-  an endpoint, Slack-format ones included, only once someone ticks it.
+  `security.blocked_ip` (a request refused by a block rule an admin added;
+  the scanner guard's temporary rules send nothing) reaches an endpoint, Slack-format ones included, only once someone ticks it.
 - **To a chat channel.** A [Slack-format endpoint](#slack-format-endpoints)
   receives these events as a chat message instead of this JSON envelope.
 - **When.** Within about a minute of the event. Alerts are grouped per kind

@@ -67,6 +67,9 @@ else.
 - **Forms: add a field condition only once every node runs this release, and before rolling back untick Required on conditional fields that not every visitor should be asked (#2262).**
   An older node ignores conditions, so it shows every field and refuses a submission that left a required hidden field blank. Expand-only migration.
   ([#3480](https://github.com/The-Verscienta/kiln_cms/pull/3480) · [long form](docs/changelog/unreleased.md#form-field-conditions-upgrade))
+- **Scanner guard: automatic block rules created before the upgrade, or by an old node during a rolling deploy, keep raising `blocked_ip` until they expire (60 minutes by default, at most 7 days); remove one on `/editor/ip-blocks` to stop it sooner (#2810).**
+  Additive migration, `ip_block_rules.source`, not backfilled. Rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#scanner-guard-rule-source-upgrade))
 
 ### Breaking
 
@@ -116,6 +119,9 @@ else.
 - **Backups: two SFTP destinations whose folders nest both prune once Kiln can tell they are different servers: both trust host keys of the same type that differ, and each has passed a Test since the later trust (#3200).**
   Press **Test** on both rows to clear "Not pruned". No migration.
   ([#3425](https://github.com/The-Verscienta/kiln_cms/pull/3425) · [long form](docs/changelog/unreleased.md#sftp-distinct-servers-prune))
+- **Security alerts: a request refused by a temporary rule the scanner guard added is still logged but no longer raises `blocked_ip`, so `security.blocked_ip` webhooks get fewer deliveries; an admin's rule alerts as before, with an unchanged payload (#2810).**
+  The setting is renamed **Requests from blocked addresses**. `IpBlocklist.match/2` returns the rule's source; `BlockedIpAlert.note/4` is now `note/5`.
+  ([long form](docs/changelog/unreleased.md#scanner-guard-refusals-no-alert))
 
 ### Fixed
 

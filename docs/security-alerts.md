@@ -34,7 +34,7 @@ Site alerts (each one can be turned off on the site's
 | `lockout` | Account locked out | A sign-in throttle locks an account or an address out: too many wrong passwords or second-factor codes | Yes |
 | `two_factor_disabled` | Second factor removed | A second factor is removed from an account: the authenticator app turned off, or a passkey removed, by the owner or a platform admin | Yes |
 | `sso_config_changed` | Single sign-on changed | The site's identity provider or a single sign-on domain is saved, verified or removed | Yes |
-| `blocked_ip` | Blocked addresses | A request or socket connect from an address on the site's [block list](ip-blocking.md) is refused (see [Blocked addresses](#blocked-addresses-raise-one-alert-per-window)) | Yes |
+| `blocked_ip` | Requests from blocked addresses | A request or socket connect from an address on the site's [block list](ip-blocking.md) is refused by a rule an admin added (see [Blocked addresses](#blocked-addresses-raise-one-alert-per-window)). A temporary rule the scanner guard added raises nothing | Yes |
 
 Platform alerts:
 
@@ -69,9 +69,12 @@ Platform alerts:
   ([Not recorded, and why](security-events.md#not-recorded-and-why) says why for each). A beta-round
   seat is not among them: since 1.13 its tier goes through the same action as
   the **Accounts** page.
-- **An automatic address block being created.** The scanner guard adding a
-  temporary rule is recorded as `ip_auto_blocked` and raises nothing. The
-  requests that rule then refuses do raise `blocked_ip`, like any rule's.
+- **An automatic address block, or the requests it refuses.** The scanner
+  guard adding a temporary rule is recorded as `ip_auto_blocked` and raises
+  nothing. The requests that rule then refuses are written to the security
+  log as `ip_block_refused` and raise nothing either: they are the rule doing
+  its job, and the guard already recorded the block. See
+  [Blocked addresses](#blocked-addresses-raise-one-alert-per-window).
 - **Every other security event**: sign-ins, invitations, passkeys, recovery
   codes, API key revocations, the admin allowlist, other site settings. They
   stay in the log.
@@ -204,16 +207,30 @@ that cap, so the alert always has its event.
 When `blocked_ip` is on (the default), a request refused by the site's
 [block list](ip-blocking.md) raises an alert: an HTTP request (the empty
 `403`), a page's LiveView connection, or a connect to `/ws/gql`,
-`/ws/collab` or `/ws/bridge`. Rules the [scanner guard](ip-blocking.md#block-scanners-automatically)
-adds for a while are rules like any other, so the requests they refuse
-alert too.
+`/ws/collab` or `/ws/bridge`.
+
+**Rules the scanner guard added don't alert.** The temporary rules the
+[scanner guard](ip-blocking.md#block-scanners-automatically) adds are rules
+like any other for blocking, but the requests they refuse raise no
+`blocked_ip` alert and are left out of the summary. They are still written to
+the security log as `ip_block_refused`, with `source` `scanner_guard`. Each
+rule records who added it when it is created, and nobody can set or change
+that: a rule an admin adds on **Blocked addresses** is the admin's, whatever
+its note or expiry. When an admin's rule and an automatic one both contain the
+address, the admin's rule is the one that matched, and it alerts. Automatic
+rules created before the upgrade to this release count as an admin's and keep
+alerting until they expire (for operators: see
+[Running more than one server](#running-more-than-one-server)).
 
 A blocked address is a flood by nature, so it is thinned out in memory
 before anything reaches the database:
 
 - Each server lets through the first refusal of each client network per
-  site per 15-minute window, and at most **20 networks per site per window**.
-  A client network is an IPv4 address, or an IPv6 address's `/64`.
+  site per 15-minute window, and at most **20 networks per site per window**
+  for admins' rules, and another 20 for the scanner guard's. The two are
+  counted apart, so a flood the scanner guard is already refusing cannot use
+  up the samples an admin's rule gets. A client network is an IPv4 address,
+  or an IPv6 address's `/64`.
 - What gets through is written to the security log as `ip_block_refused`,
   once per site and network per window across all servers. The event names
   the **rule that matched and the surface** (`http`, `live`, `gql`,
@@ -232,11 +249,11 @@ before anything reaches the database:
 every 15 minutes, 96 a day for each admin, by bell and by email. When more
 than one network is refused in a window, a summary follows each alert, so the
 most a site sends is one alert and one summary per window, 192 a day. To
-stop them, untick **Blocked addresses** on the Security alerts page (the
-[steps](#choose-which-alerts-your-site-sends) below). The refusals are still
+stop them, untick **Requests from blocked addresses** on the Security alerts
+page (the [steps](#choose-which-alerts-your-site-sends) below). The refusals are still
 written to the security log, sampled the same way, but no alert is sent.
 
-Don't confuse the alert setting with the **Blocked addresses** page under
+The alert setting is not the **Blocked addresses** page under
 **Sign-in & access** (`/editor/ip-blocks`), where the rules themselves are.
 Removing a rule there stops the alerts it raises.
 
@@ -316,9 +333,11 @@ address.
    [Turn off rate-limit alerts for API keys](#turn-off-rate-limit-alerts-for-api-keys)).
 2. Under **Alerts**, tick the kinds you want and untick the ones you don't.
    Each has a line saying what raises it. **Failed sign-ins** reads "10 failed
-   sign-ins in 15 minutes on this site. Off by default." **Blocked addresses**
-   reads "A request from an address on this site's block list is refused.
-   One alert every 15 minutes, then a summary."
+   sign-ins in 15 minutes on this site. Off by default." **Requests from
+   blocked addresses** reads "A request from an address on this site's block
+   list is refused. Temporary rules the scanner guard adds don't raise it. One
+   alert every 15 minutes, then a summary. On by default. Your block list is
+   under Sign-in & access → Blocked addresses."
 3. Under **Delivery**:
    - **Notify this site's admins by bell and email**: untick it and the site's
      admins get no bell row and no email for site alerts. Webhooks subscribed
@@ -563,6 +582,12 @@ the surface instead:
 }
 ```
 
+Only a refusal by a rule an admin added is delivered: one by a temporary rule
+the scanner guard added raises no alert, so no `security.blocked_ip` delivery
+and no summary. The payload of the ones that are delivered is unchanged; the
+`source` key the security log gives an automatic rule's refusal never reaches
+a webhook.
+
 A **summary** adds `window` and `count` (the window's total) and has no
 `event`:
 
@@ -724,7 +749,8 @@ What can go wrong:
     only by webhook (admin notifications off, or no admins), the
     **Security alerts reach someone** posture line turns **Review** ("Some
     security alerts on this site reach nobody…") until the event is ticked
-    or **Blocked addresses** is turned off;
+    or **Requests from blocked addresses** (then labeled **Blocked
+    addresses**) is turned off;
   - platform admins get `api_key_rate_limited`.
 
   During a rolling deploy, a `blocked_ip` or `api_key_rate_limited` alert
@@ -822,6 +848,17 @@ ways.
   about 20 times the number of servers. It is "about" because each server
   starts its window by its own clock, and the summary's window starts by the
   database's.
+- **Automatic rules from before the upgrade still alert.** A rule records who
+  added it in `ip_block_rules.source`, a column the upgrade adds with
+  `admin` as its default, and nothing is backfilled. So a temporary rule the
+  scanner guard added before the upgrade, or added by a node still on the
+  previous release during a rolling deploy, reads as an admin's and its
+  refusals alert until it expires (`KILN_SCANNER_BLOCKING_BLOCK_MINUTES`,
+  60 minutes by default, at most 7 days). Remove such a rule on
+  `/editor/ip-blocks` to stop it sooner. During the deploy, a node still on
+  the previous release that sends a window's summary also counts the
+  scanner guard's refusals in it. Rolling back is safe: the previous release
+  ignores the column, and alerts on every rule again.
 
 ## For developers
 
@@ -846,10 +883,20 @@ ways.
   `CMS.update_site_security_alerts/2` and `CMS.reset_site_security_alerts/1`
   (admin only). `:save` writes every field it is not given back to its
   default, so pass all three.
-- `KilnCMS.Security.BlockedIpAlert.note/4`: called by every edge that refuses
+- `KilnCMS.Security.BlockedIpAlert.note/5`: called by every edge that refuses
   a blocked address (`KilnCMSWeb.Plugs.IpBlock`, `KilnCMSWeb.IpBlock`) with
-  the rule `KilnCMS.Security.IpBlocklist.match/2` returned. `blocked?/2` has
-  no side effect, so the scanner guard asking it raises nothing.
+  the rule and its source that `KilnCMS.Security.IpBlocklist.match/2`
+  returned (`{:blocked, rule, source}`, an admin's rule preferred where
+  several match). A source other than `:scanner_guard` is treated as
+  `:admin`, so a kind of rule added later alerts rather than passing
+  unnoticed. `blocked?/2` has no side effect, so the scanner guard asking it
+  raises nothing.
+- `KilnCMS.CMS.IpBlockRule`'s `source` (`:admin` or `:scanner_guard`) is set
+  by `KilnCMS.CMS.Changes.SetIpBlockSource` from the actor, never from input:
+  only the scanner guard's system actor writes `:scanner_guard`.
+  `KilnCMS.Security.Alerts.classify/2` raises nothing for an
+  `ip_block_refused` whose metadata has `"source" => "scanner_guard"`, and
+  the summary counts through the same function.
 - `KilnCMS.Security.ApiKeyTrip`: the node-local cache of verified keys
   (`remember/2`, called by `KilnCMSWeb.Plugs.ApiKeyAuth` and, on `/mcp`, by
   `KilnCMSWeb.Plugs.RememberApiKey` once `KilnCMSWeb.Plugs.RequireApiKey` has
@@ -903,11 +950,13 @@ ways.
 | "Couldn't reveal that URL." on Webhooks | The endpoint was deleted after the page loaded, or you are no longer an admin of the site. Reload. |
 | A Slack endpoint was auto-disabled after an upgrade or rollback | A node running 1.9 sent it the Kiln envelope and Slack refused it. Once every node runs this release, tick **Active** on the endpoint. |
 | Several events, one alert | They fell in one 15-minute window. The summary follows about a minute after the window closes. |
-| A blocked-address alert every 15 minutes | A blocked client keeps trying. Untick **Blocked addresses** on Security alerts to stop the alerts, or remove the rule on `/editor/ip-blocks` if it is no longer wanted. |
+| A blocked-address alert every 15 minutes | A blocked client keeps trying against a rule an admin added. Untick **Requests from blocked addresses** on Security alerts to stop the alerts, or remove the rule on `/editor/ip-blocks` if it is no longer wanted. |
+| A blocked-address alert names a rule with the note **Automatic: scanner 404s** | The scanner guard added it before the upgrade to this release, or a node still on the previous release added it during the deploy. It reads as an admin's rule and alerts until it expires (`KILN_SCANNER_BLOCKING_BLOCK_MINUTES`, 60 minutes by default). Remove it to stop the alerts sooner. |
+| Refusals in the security log but no blocked-address alert | The rule that matched is one the scanner guard added: its `ip_block_refused` events have `source` `scanner_guard`, and raise nothing by design. |
 | A blocked-address summary counts far fewer than the refusals | The summary counts client networks (at most 20 per server per window), not requests. `kiln_cms.ip_block.refused.count` counts every refusal. |
 | An API key went over a rate limit and no alert came | That server no longer remembered the key (it forgets one between 2.5 and 5 minutes after the key's last successful request there; see [API keys over a rate limit](#api-keys-over-a-rate-limit)), the route was `/ws/gql`, the limit is not one of the [five covered](#api-keys-over-a-rate-limit), the key was revoked in the meantime, or a platform admin turned the kind off. |
 | An API key alert for a client that did nothing wrong | Limits are per address: someone else behind the same NAT or proxy used up the limit. |
-| "Security alerts reach someone" says some alerts reach nobody after an upgrade | Alerts go only by webhook on this site, and no endpoint has `security.blocked_ip` ticked. Tick it, or untick **Blocked addresses**. |
+| "Security alerts reach someone" says some alerts reach nobody after an upgrade | Alerts go only by webhook on this site, and no endpoint has `security.blocked_ip` ticked. Tick it, or untick **Requests from blocked addresses**. |
 | "You don't have permission to change this site's security alerts." | Your role on the site was lowered while the page was open. Reload. |
 | "The security alert settings could not be saved." | The save failed, for example because its notice could not be written; nothing changed. Try again, and check the application log. |
 | "can only be changed by the account holder" | Someone other than the account holder tried to change its security alert email setting. |

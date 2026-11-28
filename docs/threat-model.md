@@ -740,9 +740,15 @@ An admin (#2242) can refuse an address or range per site from `/editor/ip-blocks
   key, held in memory for one window and hashed in the throttle table.
 - **An alert, without a flood.** A refusal reaches the database only after
   in-memory gates (one per client network per site per 15-minute window, at most
-  20 networks per site per window, on each node), so a blocked flood costs no
-  write per request. The cost is a bounded stream of admin alerts: one alert and
-  at most one summary per site per window, which an admin can turn off.
+  20 networks per site per window for each rule source, on each node), so a
+  blocked flood costs no write per request. The cost is a bounded stream of
+  admin alerts: one alert and at most one summary per site per window, which an
+  admin can turn off. A refusal by a temporary rule the scanner guard added is
+  logged but raises no alert (#2810), and is gated apart from admins' rules, so
+  a scanner flood cannot use up the samples an admin's rule gets. Which rule
+  source a rule has (`IpBlockRule.source`) is set from the creating actor,
+  never from input: a person cannot mark a rule of their own as automatic to
+  silence it. Where both kinds of rule contain an address, the admin's matches.
 - **Limits.** Matching is per source address: it does not stop a distributed
   source, and a visitor can change address. Expired rules are not swept.
 
@@ -908,6 +914,13 @@ probes bait paths. Off unless `KILN_SCANNER_BLOCKING` is on; see
   `kiln_cms.scanner_guard.blocked.count` is tagged by reason only. The
   `ip_auto_blocked` security event carries the address (as the event IP, subject
   to the log's retention and erasure) and never the attacker-controlled path.
+- **No alert for its own refusals.** The requests a guard rule refuses raise no
+  `blocked_ip` alert (#2810); the block itself is the `ip_auto_blocked` event.
+  The cost is visibility: admins are not told that an automatically blocked
+  address keeps trying. Its refusals are still in the security log (sampled,
+  with `source` `scanner_guard`) and on `kiln_cms.ip_block.refused.count`. A
+  guard rule created before the upgrade reads as an admin's (`source` defaults
+  to `admin`, not backfilled) and alerts until it expires.
 
 ### Bot budgets
 
