@@ -395,8 +395,8 @@ It is **Review** when:
   does not carry `security.new_admin`, and an endpoint made before a kind
   existed does not carry that kind until it is ticked: after upgrading to
   the release that added `security.blocked_ip`, a webhook-only site reads
-  **Review** until its endpoint ticks it or **Blocked addresses** is turned
-  off.
+  **Review** until its endpoint ticks it or **Requests from blocked
+  addresses** is turned off.
 
 It is **OK**, and says how alerts arrive, when:
 

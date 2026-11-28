@@ -222,6 +222,25 @@ defmodule KilnCMS.Security.AlertsTest do
       assert Alerts.event_types(:blocked_ip) == [:ip_block_refused]
     end
 
+    test "a refusal by a rule the scanner guard added raises nothing (#2810)" do
+      assert Alerts.classify(
+               event(:ip_block_refused, %{
+                 "rule" => "203.0.113.7/32",
+                 "surface" => "http",
+                 "source" => "scanner_guard"
+               })
+             ) == []
+
+      # Only that one value silences it: any other source still alerts.
+      assert Alerts.classify(
+               event(:ip_block_refused, %{
+                 "rule" => "203.0.113.7/32",
+                 "surface" => "http",
+                 "source" => "admin"
+               })
+             ) == [{:blocked_ip, :site}]
+    end
+
     test "unmapped types raise nothing" do
       for type <- [
             :sign_in,

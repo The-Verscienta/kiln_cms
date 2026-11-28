@@ -149,8 +149,12 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
 
     test "turning blocked addresses off saves it and sends the admins a notice", ctx do
       {:ok, lv, html} = admin_conn(ctx) |> live(~p"/editor/security-alerts")
-      assert html =~ "Blocked addresses"
-      assert html =~ "on this site&#39;s block list is refused. One alert every 15 minutes"
+      # Not "Blocked addresses", the block list's own page (#2810).
+      assert html =~ "Requests from blocked addresses"
+      assert html =~ "on this site&#39;s block list is refused."
+      assert html =~ "Temporary rules the scanner guard adds don&#39;t raise it."
+      assert html =~ "One alert every 15 minutes, then a summary. On by default."
+      assert html =~ "Your block list is under Sign-in &amp; access → Blocked addresses."
 
       lv
       |> form("#security-alerts-form", alerts: %{@all_on | "blocked_ip" => "false"})
@@ -164,6 +168,24 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
       assert notice["kinds"] == ["blocked_ip"]
 
       refute has_element?(lv, "#security-alert-kind-blocked_ip input[type=checkbox][checked]")
+    end
+
+    test "the blocked addresses kind is translated (#2810)", ctx do
+      {:ok, _lv, html} =
+        ctx
+        |> admin_conn()
+        |> Plug.Conn.put_session("locale", "es")
+        |> live(~p"/editor/security-alerts")
+
+      assert html =~ "Solicitudes de direcciones bloqueadas"
+
+      assert html =~
+               "Las reglas temporales que añade la protección contra escáneres no la activan."
+
+      assert html =~
+               "La lista de bloqueo está en Inicio de sesión y acceso → Direcciones bloqueadas."
+
+      refute html =~ "Requests from blocked addresses"
     end
 
     test "switching admin notifications off sends a notice", ctx do

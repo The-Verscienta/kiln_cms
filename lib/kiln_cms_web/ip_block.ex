@@ -49,10 +49,10 @@ defmodule KilnCMSWeb.IpBlock do
   @spec check_connect(atom(), map()) :: :ok | :error
   def check_connect(surface, connect_info) when is_map(connect_info) do
     case blocked_connect(connect_info) do
-      {:blocked, org_id, ip, rule} ->
+      {:blocked, org_id, ip, rule, source} ->
         count_refusal(surface)
 
-        KilnCMS.Security.BlockedIpAlert.note(org_id, ip, rule, surface)
+        KilnCMS.Security.BlockedIpAlert.note(org_id, ip, rule, source, surface)
 
         :error
 
@@ -72,8 +72,8 @@ defmodule KilnCMSWeb.IpBlock do
 
     with false <- is_nil(ip),
          {:ok, org} <- KilnCMSWeb.Tenant.fetch_org_from_connect_info(connect_info),
-         {:blocked, rule} <- KilnCMS.Security.IpBlocklist.match(org, ip) do
-      {:blocked, org.id, ip, rule}
+         {:blocked, rule, source} <- KilnCMS.Security.IpBlocklist.match(org, ip) do
+      {:blocked, org.id, ip, rule, source}
     else
       _no_address_org_or_rule -> :ok
     end
