@@ -260,7 +260,8 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
   defp kind_label(:lockout), do: gettext("Account locked out")
   defp kind_label(:two_factor_disabled), do: gettext("Second factor removed")
   defp kind_label(:sso_config_changed), do: gettext("Single sign-on changed")
-  defp kind_label(:blocked_ip), do: gettext("Blocked addresses")
+  # Not "Blocked addresses": that is the block list's own page (#2810).
+  defp kind_label(:blocked_ip), do: gettext("Requests from blocked addresses")
 
   defp platform_kind_label(:api_key_rate_limited), do: gettext("API keys over a rate limit")
 
@@ -321,8 +322,9 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
 
   defp kind_description(:blocked_ip) do
     gettext(
-      "A request from an address on this site's block list is refused. One alert every %{minutes} minutes, then a summary.",
-      minutes: div(Alerts.window_ms(), :timer.minutes(1))
+      "A request from an address on this site's block list is refused. Temporary rules the scanner guard adds don't raise it. One alert every %{minutes} minutes, then a summary. On by default. Your block list is under %{place}.",
+      minutes: div(Alerts.window_ms(), :timer.minutes(1)),
+      place: gettext("Sign-in & access") <> " → " <> gettext("Blocked addresses")
     )
   end
 

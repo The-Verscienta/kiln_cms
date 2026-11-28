@@ -73,6 +73,9 @@ else.
 - **Backups: every platform admin is now emailed about failed and partly off-site backups by default, cron's included once History imports them (within 48 hours of finishing, up to one import interval late); each can choose Every run or Off under Your settings (#2229).**
   Before rolling back, drain the `mail` queue of `KilnCMS.Backups.Report*` jobs. Expand-only migration.
   ([#3497](https://github.com/The-Verscienta/kiln_cms/pull/3497) · [long form](docs/changelog/unreleased.md#backup-reports-upgrade))
+- **Scanner guard: automatic block rules created before the upgrade, or by an old node during a rolling deploy, keep raising `blocked_ip` until they expire (60 minutes by default, at most 7 days); remove one on `/editor/ip-blocks` to stop it sooner (#2810).**
+  Additive migration, `ip_block_rules.source`, not backfilled. Rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#scanner-guard-rule-source-upgrade))
 
 ### Breaking
 
@@ -131,6 +134,9 @@ else.
 - **Backups: two SFTP destinations whose folders nest both prune once Kiln can tell they are different servers: both trust host keys of the same type that differ, and each has passed a Test since the later trust (#3200).**
   Press **Test** on both rows to clear "Not pruned". No migration.
   ([#3425](https://github.com/The-Verscienta/kiln_cms/pull/3425) · [long form](docs/changelog/unreleased.md#sftp-distinct-servers-prune))
+- **Security alerts: a request refused by a temporary rule the scanner guard added is still logged but no longer raises `blocked_ip`, so `security.blocked_ip` webhooks get fewer deliveries; an admin's rule alerts as before, with an unchanged payload (#2810).**
+  The setting is renamed **Requests from blocked addresses**. `IpBlocklist.match/2` returns the rule's source; `BlockedIpAlert.note/4` is now `note/5`.
+  ([long form](docs/changelog/unreleased.md#scanner-guard-refusals-no-alert))
 
 ### Fixed
 

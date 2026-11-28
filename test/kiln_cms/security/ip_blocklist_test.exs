@@ -111,6 +111,75 @@ defmodule KilnCMS.Security.IpBlocklistTest do
     end
   end
 
+  describe "match/2 and the rule's source (#2810)" do
+    # The scanner guard's rule, written by its own system actor so `source`
+    # is set the way production sets it.
+    defp guard_add!(cidr) do
+      CMS.create_ip_block_rule!(
+        %{
+          cidr: cidr,
+          expires_at: DateTime.add(DateTime.utc_now(), 3600, :second),
+          confirm_self_block: true
+        },
+        actor: KilnCMS.SystemActor.new(:scanner_guard),
+        tenant: org_id()
+      )
+    end
+
+    defp lapse!(rule) do
+      KilnCMS.Repo.query!(
+        "UPDATE ip_block_rules SET expires_at = now() - interval '1 minute' WHERE id = $1",
+        [Ecto.UUID.dump!(rule.id)]
+      )
+
+      IpBlocklist.clear()
+    end
+
+    test "names the rule and who added it" do
+      add!("198.51.100.0/24")
+      guard_add!("203.0.113.9")
+
+      assert IpBlocklist.match(org_id(), {198, 51, 100, 7}) ==
+               {:blocked, "198.51.100.0/24", :admin}
+
+      assert IpBlocklist.match(org_id(), {203, 0, 113, 9}) ==
+               {:blocked, "203.0.113.9/32", :scanner_guard}
+
+      assert IpBlocklist.match(org_id(), {192, 0, 2, 200}) == false
+    end
+
+    test "an admin range wins over the scanner guard's address inside it, added after" do
+      add!("203.0.113.0/24")
+      guard_add!("203.0.113.9")
+
+      assert IpBlocklist.match(org_id(), {203, 0, 113, 9}) ==
+               {:blocked, "203.0.113.0/24", :admin}
+    end
+
+    test "an admin range wins over the scanner guard's address inside it, added before" do
+      guard_add!("203.0.113.9")
+      add!("203.0.113.0/24")
+
+      assert IpBlocklist.match(org_id(), {203, 0, 113, 9}) ==
+               {:blocked, "203.0.113.0/24", :admin}
+    end
+
+    test "the scanner guard's lapsed rule matches nothing" do
+      "203.0.113.9" |> guard_add!() |> lapse!()
+
+      assert IpBlocklist.match(org_id(), {203, 0, 113, 9}) == false
+      refute IpBlocklist.blocked?(org_id(), {203, 0, 113, 9})
+    end
+
+    test "the scanner guard's lapsed rule leaves an active admin rule to match" do
+      add!("203.0.113.0/24")
+      "203.0.113.9" |> guard_add!() |> lapse!()
+
+      assert IpBlocklist.match(org_id(), {203, 0, 113, 9}) ==
+               {:blocked, "203.0.113.0/24", :admin}
+    end
+  end
+
   describe "the cache" do
     test "a warm check runs no database query" do
       add!("203.0.113.9")

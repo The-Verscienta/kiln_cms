@@ -24,14 +24,17 @@ your CDN, reverse proxy or firewall.
 
 ### What a refusal tells your admins
 
-A refusal raises the site's `blocked_ip` [security alert](security-alerts.md#blocked-addresses-raise-one-alert-per-window),
+A refusal by a rule an admin added raises the site's `blocked_ip`
+[security alert](security-alerts.md#blocked-addresses-raise-one-alert-per-window),
 on by default: the site's admins get one alert per 15 minutes naming the rule
 that matched ("A blocked address was refused (rule 203.0.113.0/24)"), then a
-summary of how many client networks were refused. Refusals are also written to
+summary of how many client networks were refused. A refusal by a temporary
+rule the [scanner guard](#block-scanners-automatically) added raises no alert
+(see [Watching it](#watching-it)). Refusals are also written to
 the [security log](security-events.md) as `ip_block_refused`, sampled to one
 per client network per 15 minutes, with the rule and the surface and **without
-the address**. To stop the alerts, untick **Blocked addresses** on **Security
-alerts** (`/editor/security-alerts`); the log entries continue. Why the list
+the address**. To stop the alerts, untick **Requests from blocked addresses**
+on **Security alerts** (`/editor/security-alerts`); the log entries continue. Why the list
 fails open, covers dynamic routes only and logs no address is argued in
 [ADR 0026](decisions/0026-the-ip-block-list-fails-open-and-covers-dynamic-routes-only.md);
 how the alert is thinned out and who hears it, in
@@ -66,7 +69,7 @@ The messages are shown in the console language (English, Spanish, French).
 | Enter an IP address or a range like 203.0.113.0/24. | Not an address. Leading zeros in an octet (`010.0.0.1`) and spaces inside are refused. |
 | That range is too broad: use at least /8 for IPv4 or /16 for IPv6. | One keystroke must not block most of the internet. `0.0.0.0/0` and `::/0` land here. |
 | A range must not include loopback (127.0.0.0/8 or ::1). | Probes and local tooling arrive from loopback. |
-| That range is already blocked. | The same range is already on the list (see below). |
+| That range is already blocked. | The same range is already on the list (see below). That includes an active automatic rule the scanner guard added: to make it permanent, **Remove** the automatic rule first, then add yours. |
 | The expiry must be in the future. | The expiry is not later than now. |
 | The expiry is not a valid date and time. | The expiry could not be read. |
 
@@ -277,9 +280,20 @@ The counter `kiln_cms.scanner_guard.blocked.count`, tagged `reason`
 (`miss_threshold` or `bait_path`), counts new blocks; see
 [Observability](observability.md#blocked-addresses). Each block is also one
 `ip_auto_blocked` event in the security log. The address is never a metric tag
-or a log field. Creating the block raises no alert; the requests it then
-refuses raise `blocked_ip` like any rule's (see
-[What a refusal tells your admins](#what-a-refusal-tells-your-admins)).
+or a log field.
+
+Neither creating the block nor the requests it then refuses raise an alert.
+The refusals are written to the security log as `ip_block_refused` like any
+rule's, with one more key, `source` `scanner_guard`, and are sampled apart
+from the refusals by an admin's rules (20 client networks per site per window
+for each, on each node), so a scanner flood cannot crowd out an alert about an
+admin's rule. Which kind a rule is was recorded when it was created and
+cannot be changed. Where an admin's rule and an automatic one both contain an
+address, the admin's rule matches and alerts. Automatic rules created before
+the upgrade to this release, or by a node still on the previous release
+during a rolling deploy, count as an admin's and keep alerting until they
+expire (see
+[Running more than one server](security-alerts.md#running-more-than-one-server)).
 
 ### What can go wrong
 
@@ -370,11 +384,18 @@ never blocked.
   amended for the security event).
 - **Automatic rules share the list.** They carry an expiry, so they follow the
   "expired rules" behavior above too, and the scanner guard may only add rules;
-  an admin can still remove one at any time.
+  an admin can still remove one at any time. Their refusals raise no
+  `blocked_ip` alert (see [Watching it](#watching-it)). An admin cannot add a
+  rule for exactly the range of an active automatic one ("is already
+  blocked"): remove the automatic rule first. A wider admin range that
+  contains it can be added, and is the rule that matches.
 - **Not in the API.** Block rules are not on JSON:API, GraphQL or MCP, so an API
   key can neither read nor edit them. Only an organization admin, in the console.
 - **Upgrading** adds a table, `ip_block_rules`; nothing existing changes. Rolling
-  back leaves the table in place and unused.
+  back leaves the table in place and unused. A second, additive
+  migration (#2810) adds `ip_block_rules.source` (`admin` by default, not
+  backfilled), which records whether the scanner guard added a rule; a
+  release without it ignores the column.
 
 To do the opposite, and admit only listed networks to the console and sign-in,
 see [Restricting sign-in to your networks](admin-allowlist.md). A block always

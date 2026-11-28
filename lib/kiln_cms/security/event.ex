@@ -126,8 +126,10 @@ defmodule KilnCMS.Security.Event do
     api_key_reuse_detected: ~w(name revoked),
     # `rule`: the block rule that matched, as stored (full; an alert masks it,
     # `KilnCMS.Security.Alerts.display_metadata/3`). `surface`: "http",
-    # "live", "gql", "collab" or "bridge".
-    ip_block_refused: ~w(rule surface),
+    # "live", "gql", "collab" or "bridge". `source`: "scanner_guard" when a
+    # temporary rule the scanner guard added matched (#2810), and then no
+    # alert is raised; absent for an admin's rule.
+    ip_block_refused: ~w(rule surface source),
     # `name`: the key's name. `bucket`: the rate limit it went over.
     api_key_rate_limited: ~w(name bucket),
     # `change`: "strengthened", "weakened" or "unchanged". `via`: "admin" (a

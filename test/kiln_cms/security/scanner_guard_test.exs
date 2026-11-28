@@ -216,6 +216,8 @@ defmodule KilnCMS.Security.ScannerGuardTest do
 
       miss(1)
       assert [rule] = rules()
+      # Written by the guard's own actor, so its refusals raise no alert (#2810).
+      assert rule.source == :scanner_guard
       assert rule.cidr == "203.0.113.9/32"
       assert rule.note == ScannerGuard.note()
 
@@ -1190,6 +1192,31 @@ defmodule KilnCMS.Security.ScannerGuardTest do
   end
 
   describe "the cap" do
+    # An automatic rule as the guard writes it: its own actor (so `source` is
+    # `:scanner_guard`, #2810) and its note.
+    defp guard_rule!(cidr, seconds) do
+      CMS.create_ip_block_rule!(
+        %{
+          cidr: cidr,
+          note: ScannerGuard.note(),
+          expires_at: DateTime.add(DateTime.utc_now(), seconds, :second),
+          confirm_self_block: true
+        },
+        actor: SystemActor.resolve(:scanner_guard),
+        tenant: org_id()
+      )
+    end
+
+    # A create cannot set a past expiry; lapse the row the guard wrote.
+    defp lapse!(rule) do
+      KilnCMS.Repo.query!(
+        "UPDATE ip_block_rules SET expires_at = now() - interval '1 minute' WHERE id = $1",
+        [Ecto.UUID.dump!(rule.id)]
+      )
+
+      IpBlocklist.clear()
+    end
+
     test "at the cap a new trip is skipped, not an old rule evicted" do
       Application.put_env(:kiln_cms, :scanner_blocking,
         enabled: true,
@@ -1197,14 +1224,7 @@ defmodule KilnCMS.Security.ScannerGuardTest do
         max_auto_rules: 2
       )
 
-      for n <- 1..2 do
-        Ash.Seed.seed!(CMS.IpBlockRule, %{
-          cidr: "198.51.100.#{n}/32",
-          note: ScannerGuard.note(),
-          org_id: org_id(),
-          expires_at: DateTime.add(DateTime.utc_now(), 600, :second)
-        })
-      end
+      for n <- 1..2, do: guard_rule!("198.51.100.#{n}/32", 600)
 
       # An operator's own rule and an expired automatic one do not count.
       Ash.Seed.seed!(CMS.IpBlockRule, %{cidr: "198.51.100.50/32", org_id: org_id()})
@@ -1222,12 +1242,7 @@ defmodule KilnCMS.Security.ScannerGuardTest do
         max_auto_rules: 1
       )
 
-      Ash.Seed.seed!(CMS.IpBlockRule, %{
-        cidr: "198.51.100.1/32",
-        note: ScannerGuard.note(),
-        org_id: org_id(),
-        expires_at: DateTime.add(DateTime.utc_now(), -60, :second)
-      })
+      "198.51.100.1/32" |> guard_rule!(600) |> lapse!()
 
       Ash.Seed.seed!(CMS.IpBlockRule, %{cidr: "198.51.100.2/32", note: "mine", org_id: org_id()})
 

@@ -2363,7 +2363,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
-msgid "A request from an address on this site's block list is refused. One alert every %{minutes} minutes, then a summary."
+msgid "A request from an address on this site's block list is refused. Temporary rules the scanner guard adds don't raise it. One alert every %{minutes} minutes, then a summary. On by default. Your block list is under %{place}."
 msgstr ""
 
 #: lib/kiln_cms_web/live/system_live.ex
@@ -20052,6 +20052,11 @@ msgstr ""
 msgid "Requesting…"
 msgstr ""
 
+#: lib/kiln_cms_web/live/security_alerts_live.ex
+#, elixir-autogen, elixir-format
+msgid "Requests from blocked addresses"
+msgstr ""
+
 #: lib/kiln_cms/security/posture/checks/transport.ex
 #, elixir-autogen, elixir-format
 msgid "Requests or cookies can travel over plain HTTP."
@@ -22522,6 +22527,7 @@ msgid "Sign-in"
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
 msgid "Sign-in & access"
 msgstr ""
