@@ -16,8 +16,11 @@
   rotating through an IPv6 `/64`), which this closes;
   [#3451](https://github.com/The-Verscienta/kiln_cms/issues/3451) (an
   unanswered forward query under a broad engine suffix), which it does not;
-  [#3501](https://github.com/The-Verscienta/kiln_cms/issues/3501) for keying
-  the stored sighting by an HMAC;
+  [#3501](https://github.com/The-Verscienta/kiln_cms/issues/3501), which keys
+  the stored sighting by an HMAC
+  ([ADR 0096](0096-client-keys-are-hmacd-under-a-key-derived-from-secret-key-base.md));
+  [#3504](https://github.com/The-Verscienta/kiln_cms/issues/3504), a cap on
+  the rows one network can create, held for an owner decision;
   [ADR 0054](0054-in-crawler-verification-a-silence-the-claimant-controls-counts-against-it-and-one-the-vendor-controls-does-not.md)
   for whose silence counts.
 - **Changelog** — the Unreleased section of [CHANGELOG.md](../../CHANGELOG.md),
@@ -81,8 +84,8 @@ made `threshold` of them in the window.**
   crawling from an address publishes it within a day; a spoofer's address
   never appears. Bait paths count throughout, as for every client.
 - **The first sighting is the instance's, in the database.** A row of
-  `KilnCMS.Security.CrawlerSighting` (table `crawler_sightings`) per hashed
-  client and engine, dated by the database's clock, written and read by
+  `KilnCMS.Security.CrawlerSighting` (table `crawler_sightings`) per client
+  and engine, the client stored only as an HMAC (ADR 0096), dated by the database's clock, written and read by
   `KilnCMS.Security.CrawlerSightingStore` in one upsert that keeps the
   earliest live sighting. Each question moves the row's expiry to
   `:listing_ttl_ms` (48 hours) on; a client idle longer, or a row the hourly
@@ -165,11 +168,17 @@ made `threshold` of them in the window.**
 - **Residual: the table has no cap.** One row per distinct client outside the
   list, for at least 48 hours; a holder of an IPv4 `/16` could write 65,536
   rows, and so could a `/48` holder if a list ever carried IPv6 ranges for the
-  engine. The hourly prune deletes lapsed rows in batches.
-- **Residual: the stored key is pseudonymous, not anonymous.** `key_hash` is
-  an unsalted SHA-256 of the client's address (or `/64`), as in
-  `throttle_counters`, so anyone holding the table can test a guessed address
-  against it. An HMAC is [#3501](https://github.com/The-Verscienta/kiln_cms/issues/3501).
+  engine. The hourly prune deletes lapsed rows in batches. A cap per network
+  is [#3504](https://github.com/The-Verscienta/kiln_cms/issues/3504), waiting
+  on an owner decision.
+- **Residual: the stored key is pseudonymous to whoever holds
+  `SECRET_KEY_BASE`.** `key_hash` is an HMAC-SHA256 of the client's address
+  (or `/64`) under a key derived from `SECRET_KEY_BASE`
+  (`KilnCMS.Keys.ClientDigest`, #3501), as in `throttle_counters`, so a dump
+  or backup alone names nobody, while anyone holding both the table and the
+  secret can test a guessed address against it. Rotating the secret restarts
+  every sighting's grace once
+  ([ADR 0096](0096-client-keys-are-hmacd-under-a-key-derived-from-secret-key-base.md)).
 - **Residual: mixing claims with counted misses.** A `/64` that sends
   `threshold` unverifiable claims and `threshold` counted misses in one window
   trips nothing, so it makes up to `2 × threshold` misses a window unblocked.

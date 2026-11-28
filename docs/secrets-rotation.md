@@ -181,7 +181,7 @@ which the leak was live — `subject` names the user, `created_at` the mint.
 
 ## `SECRET_KEY_BASE`
 
-**What it signs and encrypts.** Four distinct things, and the third is why
+**What it signs and encrypts.** Five distinct things, and the third is why
 this section is long:
 
 1. **The session cookie.** Signed *and* encrypted, via
@@ -203,6 +203,14 @@ this section is long:
    cutover: `PREVIOUS_SECRET_KEY_BASE` does not cover it, so a client paging
    across the rotation gets an invalid-keyset error and starts again from the
    first page.
+5. **Client-key digests** (#3501). `KilnCMS.Keys.ClientDigest` derives an HMAC
+   key from `secret_key_base` and stores every key of `throttle_counters` (the
+   sign-in, second-factor, mail and alert budgets, the credential rate limits,
+   the challenge gate and the scanner guard) and of `crawler_sightings` under
+   it. A hard cutover too: `PREVIOUS_SECRET_KEY_BASE` does not cover it, so
+   after the rotation every budget, failed-sign-in tally, active sign-in pause
+   and crawler sighting starts again in its current window, and the old rows
+   lapse on their own within about six hours. See [What breaks](#what-breaks).
 
 ### Data at rest: re-encrypt before you retire the old value
 
@@ -350,6 +358,7 @@ vault consequences, because the vault uses its own fixed salt.
 | Content-password grants | Dead; visitors re-enter the password |
 | Two-factor sign-ins in flight | The pending blob is undecryptable, so the user restarts sign-in |
 | Editor content locks | Unreadable locks are treated as absent, which is the intended fallback |
+| Sign-in, mail and rate-limit budgets, sign-in pauses, crawler sightings | **Reset once.** Each key lands on a new row, so every budget and failed-sign-in tally starts again, an account paused for failed sign-ins can try again at once, and a DuckDuckBot address outside DuckDuckGo's list gets a new day's grace from the 404 guard. While nodes run on both values at once (a rolling restart), each key is counted on two rows instead, so a budget admits up to twice its limit per window until the last node on the old value stops, and one failed-sign-in alert window can undercount |
 | DKIM / social / billing / federation key material | **Kept**, if you follow the procedure: readable through the window, then re-encrypted. Lost only if the old value is retired first |
 
 ### Procedure
@@ -384,6 +393,11 @@ vault consequences, because the vault uses its own fixed salt.
    blank one; see the note under `TOKEN_SIGNING_SECRET` step 4. Everyone is
    signed out (see [What breaks](#what-breaks)). Mail, social, billing and
    federation keep working, because the vault reads through the window.
+   Every sign-in budget and sign-in pause starts again. On more than one
+   node, a rolling restart leaves nodes on both values for a while, and each
+   budget is counted on two rows until the last old node stops: up to twice
+   its limit per window, often while you are responding to the incident that
+   made you rotate. Keep that period short.
 7. **Re-encrypt:**
    ```bash
    mix kiln.vault.reencrypt --dry-run   # expect "N would re-encrypt, 0 unreadable"
@@ -406,7 +420,9 @@ vault consequences, because the vault uses its own fixed salt.
 Re-encryption protects the data you keep. **It does not un-leak anything.**
 Anyone holding the old `SECRET_KEY_BASE` and a copy of the database from before
 step 7 (a backup, a staging clone, a stolen dump) can still decrypt every value
-in the table above. So after the procedure, rotate the secrets themselves, not
+in the table above. With that copy they can also test guessed addresses and
+emails against the `throttle_counters` and `crawler_sightings` rows it holds,
+whose keys are HMACs under the old value. So after the procedure, rotate the secrets themselves, not
 just their encryption:
 
 1. `/editor/mail` → *Rotate key*, then publish the new DNS TXT record.

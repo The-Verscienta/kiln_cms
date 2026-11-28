@@ -79,6 +79,9 @@ else.
 - **Crawler telemetry: DuckDuckBot claims outside DuckDuckGo's list now report `reason="not_listed"` on `kiln_cms_delivery_unverified_crawler_count` instead of `reason="failed"`; update dashboards and alerts that read `{engine="duckduckgo",reason="failed"}` (#2852).**
   Additive migration (`crawler_sightings`) with an hourly prune job; rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#crawler-claim-evidence-upgrade))
+- **Sign-in and rate-limit budgets: during a rolling deploy old and new nodes count each client on separate rows, so a budget can admit up to twice its limit for the windows the mixed period covers; a single-node restart instead resets every active budget and sign-in pause once (#3501).**
+  No migration, nothing to do; rolling the pin back splits the same way once.
+  ([long form](docs/changelog/unreleased.md#client-key-hmac-upgrade))
 
 ### Breaking
 
@@ -239,6 +242,10 @@ else.
 - **Signing out one session now also closes that session's collaborative-editing rooms (`/ws/collab`) and a `/ws/gql` socket opened with its token, which before stayed open after idle expiry, "Sign out everyone", the browser's own Sign out or a sign-out from Active sessions (#2490).**
   A `/ws/gql` document sent after a sign-out the socket missed is refused with `extensions.code: "unauthenticated"`. No migration, no setting.
   ([#3460](https://github.com/The-Verscienta/kiln_cms/pull/3460) · [long form](docs/changelog/unreleased.md#session-bound-sockets))
+
+- **Rate-limit counters and crawler sightings now store each client address or account key as an HMAC under a key derived from `SECRET_KEY_BASE`, not a plain SHA-256 that a database dump, backup or staging clone could be reversed from by trying every IPv4 address (#3501).**
+  Rotating `SECRET_KEY_BASE` now also restarts every budget, sign-in pause and crawler sighting. No migration.
+  ([long form](docs/changelog/unreleased.md#client-key-hmac))
 
 ## [1.13.0] - 2026-11-25
 

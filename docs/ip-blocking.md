@@ -193,8 +193,10 @@ Never counted, so a person or a service is not blocked by mistake:
     outside a list fetched at least 24 hours after this installation first
     saw it miss; with the 6-hourly fetch, that is 24 to 30 hours after its
     first miss. The first sighting is kept in the database, so a deploy,
-    a restart or another server does not start the day again. It lapses 48
-    hours after the address's last miss, and the next miss starts a new day.
+    a restart or another server does not start the day again; rotating
+    `SECRET_KEY_BASE` does, once, because the address is stored only as an
+    HMAC keyed from it (#3501). It lapses 48 hours after the address's last
+    miss, and the next miss starts a new day.
   - **Over IPv6** (#3450): each `/64` gets `threshold` DuckDuckBot misses a
     window free. After that, each one counts toward the miss threshold like
     any other miss. A `/64` sending only DuckDuckBot claims is blocked on
