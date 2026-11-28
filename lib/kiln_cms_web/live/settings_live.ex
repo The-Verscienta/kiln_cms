@@ -51,6 +51,9 @@ defmodule KilnCMSWeb.SettingsLive do
      # The security-alert mute (#2245), for a member admin of some site: only
      # they get site alerts, and the mute is one per account, across sites.
      |> assign(:security_alert_mute?, KilnCMS.Security.Alerts.member_admin_anywhere?(user))
+     # The backup report emails (#2229), for a platform admin: nobody else is
+     # ever sent one.
+     |> assign(:backup_reports?, KilnCMS.Accounts.Scoping.platform_admin?(user))
      |> assign(:profile_form, profile_form(user))
      # A "Saved" line beside the button (#1828), cleared by the next edit: the
      # flash alone was easy to miss on a long page.
@@ -434,10 +437,13 @@ defmodule KilnCMSWeb.SettingsLive do
 
   @impl true
   def handle_event("validate", %{"user" => params}, socket) when is_map(params) do
+    params = prefs_params(params, socket)
     {:noreply, assign(socket, :form, AshPhoenix.Form.validate(socket.assigns.form, params))}
   end
 
   def handle_event("save", %{"user" => params}, socket) when is_map(params) do
+    params = prefs_params(params, socket)
+
     case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
       {:ok, user} ->
         {:noreply,
@@ -652,6 +658,32 @@ defmodule KilnCMSWeb.SettingsLive do
   end
 
   defp nav_preset_value(user), do: Atom.to_string(KilnCMSWeb.ConsoleNav.preset(user))
+
+  # The backup report choice (#2229) is a platform admin's, as its section
+  # is: anyone else's form never carries it, whatever the client sends.
+  defp prefs_params(params, %{assigns: %{backup_reports?: true}}), do: params
+  defp prefs_params(params, _socket), do: Map.delete(params, "notify_on_backup")
+
+  # The three backup report choices, in the order offered.
+  defp backup_report_choices do
+    [
+      {"failures", gettext("Failures only"),
+       gettext("Failed backups, and backups that reached only some off-site destinations")},
+      {"every_run", gettext("Every run"),
+       gettext("A report after every backup, whatever its outcome")},
+      {"off", gettext("Off"), gettext("No backup emails")}
+    ]
+  end
+
+  # The form's value as text: an atom as stored, a string once edited. A
+  # value a newer release stored reads as the default, as the mailer does.
+  defp backup_report_value(form) do
+    case form[:notify_on_backup].value do
+      value when value in [:every_run, "every_run"] -> "every_run"
+      value when value in [:off, "off"] -> "off"
+      _failures_or_unknown -> "failures"
+    end
+  end
 
   defp prefs_form(user) do
     user
@@ -1350,6 +1382,33 @@ defmodule KilnCMSWeb.SettingsLive do
                     )}
                   </p>
                 </div>
+
+                <fieldset :if={@backup_reports?} id="notify-on-backup" class="space-y-2 pt-1">
+                  <legend class="text-sm font-medium">{gettext("Backup emails")}</legend>
+                  <label
+                    :for={{value, title, hint} <- backup_report_choices()}
+                    for={"notify-on-backup-#{value}"}
+                    class="flex cursor-pointer items-start gap-3 rounded-lg border border-base-content/15 p-3 transition-colors hover:border-base-content/30 has-[:checked]:border-primary has-[:checked]:bg-primary/5"
+                  >
+                    <input
+                      type="radio"
+                      id={"notify-on-backup-#{value}"}
+                      name={@form[:notify_on_backup].name}
+                      value={value}
+                      checked={backup_report_value(@form) == value}
+                      class="mt-0.5 size-4 accent-primary"
+                    />
+                    <span class="min-w-0">
+                      <span class="block text-sm font-medium">{title}</span>
+                      <span class="mt-0.5 block text-xs text-base-content/70">{hint}</span>
+                    </span>
+                  </label>
+                  <p class="text-xs text-base-content/70">
+                    {gettext(
+                      "This sets the email only. Failed backups, and backups that reached only some destinations, still appear in your notifications."
+                    )}
+                  </p>
+                </fieldset>
 
                 <.button type="submit" variant="primary">
                   {gettext("Save preferences")}

@@ -103,7 +103,13 @@ Rules that make this a strategy rather than a script:
 - **Silence must be an alarm.** Set `BACKUP_PING_URL` to a
   [healthchecks.io](https://healthchecks.io)-style check: the *absence* of the
   nightly ping alerts you. Cron `MAILTO` alone tells you about loud failures,
-  not about cron quietly not running.
+  not about cron quietly not running. Kiln's own
+  [backup reports](#reports-and-alerts-2229) are the same kind of signal: a
+  run that failed or reached only some destinations is emailed and shown in
+  the bell, but a backup that never starts sends nothing. The overview's red
+  strip catches that once the last good backup is older than
+  `BACKUP_STALE_AFTER_HOURS`, and only while someone looks at it; the ping is
+  what alerts you from outside.
 - If Postgres runs as a **Coolify-managed database resource**, also enable
   Coolify's built-in scheduled backups to S3 — belt and braces; the host cron
   works regardless of how PG is run.
@@ -6245,6 +6251,188 @@ backup isn't in the history." as a flash and opens the default backup. If a
 3-second read fails, the page keeps what it read last, stops following, and
 says "Couldn't read this backup's log again. The page shows what it read
 last."
+
+### Reports and alerts (#2229)
+
+When a backup ends, Kiln tells the platform admins: an email, and for a
+backup that went wrong, a notice in the bell. Until this release a failed
+backup was silent unless someone opened the Backups page. This covers in-app
+backups and cron's: a cron backup is reported once History imports it
+(see "Cron's backups appear in History" below). The
+reasoning is in
+[ADR 0094](decisions/0094-a-backup-report-is-enqueued-in-the-runs-terminal-write.md).
+A ping URL per schedule, and when each destination was last reached, are
+still to come (#2229).
+
+Only platform admins are told, because a backup covers every site. Site
+admins, editors and viewers get nothing, whatever their settings say.
+
+#### What each outcome sends
+
+| Outcome | Bell notice (every platform admin) | Email under **Failures only** (the default) | **Every run** | **Off** |
+|---|---|---|---|---|
+| Failed, or written here but no off-site destination reached | "A backup failed" | Yes | Yes | No |
+| Succeeded, but reached only some off-site destinations | "A backup reached only some destinations" | Yes | Yes | No |
+| Succeeded | None | No | Yes | No |
+| Skipped (this server couldn't take it) | None | No | Yes | No |
+| Canceled | None | No | Yes | No |
+
+The email setting mutes the email only. Every platform admin gets the bell
+notice of a failed or partly off-site backup, whatever they chose.
+
+#### Choose which backups you are emailed about
+
+Starting point: you are signed in as a platform admin. Nobody else sees
+this setting.
+
+1. Open **Your settings** (`/editor/settings`) and go to **Email
+   notifications**. Under **Backup emails** there are three choices:
+   - **Failures only**: "Failed backups, and backups that reached only some
+     off-site destinations". The default.
+   - **Every run**: "A report after every backup, whatever its outcome".
+   - **Off**: "No backup emails".
+2. Pick one.
+3. Click **Save preferences**. The page says "Notification preferences
+   saved."
+
+The choice is yours alone. A platform admin can change another account's
+other notification preferences, but not this one: a failure alert that
+someone else can turn off is one an intruder would turn off first. The
+change is refused with "can only be changed by the account holder".
+
+A report that is already queued checks the setting again when it is sent,
+so choosing **Off** stops one still waiting to go out. The exception is a
+recovery report of a failure you were emailed about (see "When a failed
+backup recovers" below), which is still sent.
+
+#### What the email says
+
+The email is in English, goes to the address on your account through the
+instance's mail relay (never a site's own relay), and is sent only while
+you are still a platform admin and your address is not on the instance
+suppression list. A failure report looks like this:
+
+```text
+Subject: Backup failed on Example Site: Every day at 03:17 (UTC)
+
+The backup 20261127-031700 failed.
+
+For: Every day at 03:17 (UTC)
+Started: 2026-11-27 03:17:00 UTC
+Finished: 2026-11-27 03:17:42 UTC
+Took: 42 s
+Components: db
+
+Errors:
+- pg_dump exited 1: connection to server failed
+
+Open the backup: https://console.example.com/editor/backups?run=<run id>
+Read its log: https://console.example.com/editor/backups/log?run=<run id>
+
+You get this because you are a platform administrator and your backup emails are set to failures only. You can change that under Your settings, Email notifications. Failed backups always appear in your notifications.
+```
+
+The subject starts with what happened: "Backup failed", "Backup partly
+off-site", "Backup report: succeeded", "Backup skipped", "Backup canceled",
+"Backup recovered" or "Backup finished after all". After the site name comes
+what the backup was for: its schedules, or its trigger (`manual`, `cron`,
+or an operator's `BACKUP_TRIGGER`) when it had none. The body adds the size
+of each component, whether every file verified, one line per destination
+with how many files it took, and up to five lines of the run's error and
+five of its log's errors ("More lines are in the log." when there were
+more).
+
+Every piece of text taken from the run has its credentials redacted again
+and its control characters replaced, as the **Log** tab does
+([Read and download the log of a backup](#read-and-download-the-log-of-a-backup)).
+An error line may still name a path or a host. The email never includes a
+destination's key (an rclone remote's name), file paths, checksums, or
+anyone's name or address.
+
+#### The bell notice
+
+A failed or partly off-site backup puts a notice in the bell of every
+platform admin: "A backup failed" or "A backup reached only some
+destinations", with the site name and a line such as
+"20261127-031700 (Every day at 03:17 (UTC)) pg_dump exited 1: connection to
+server failed". Selecting it opens **Backups**.
+
+- **One notice, not one per run.** While your notice is unread, a newer
+  failure replaces its line, so the notice always says the latest one.
+- **Opening Backups marks it read.** The next failure after that is a new
+  notice.
+- **In another site's console**, the bell and the inbox show only the count,
+  "1 unread platform alert", with "Open them in the default site's console",
+  as for the platform security alerts
+  ([Security alerts](security-alerts.md)). The notices live in the default
+  site.
+
+The **Overview** page's red backup strip already shows a failed backup and
+a partly off-site one
+([Check the last backup of each component](#check-the-last-backup-of-each-component)).
+The bell reaches you without opening it.
+
+#### When a failed backup recovers
+
+A failed in-app backup that you resume and that then succeeds is reported
+as recovered: "Backup recovered", "The backup 20261127-031700, which failed
+earlier, was resumed and has now succeeded." It goes to everyone who was
+emailed the failure and hasn't switched to **Off** since, and to everyone
+set to **Every run**. When it reached only some destinations, it goes to
+**Failures only** admins as well, and the sentence adds "though not every
+off-site destination was reached". Each admin's unread "A backup failed"
+notice about that backup is marked read. A notice that has since been
+replaced by another backup's failure stays unread: that one hasn't
+recovered.
+
+A cron backup that History first recorded as Interrupted and that turned
+out to have finished
+([If the run finished after all](#if-the-run-finished-after-all)) is
+reported the same way, with "Backup finished after all" and "The cron backup
+20261127-031700, which was recorded as interrupted, finished after all."
+
+Who was emailed the failure is read from the finished mail jobs, which are
+pruned after 7 days. A recovery later than that is emailed by setting only.
+
+#### Cron backups and the flood guard
+
+A cron backup is reported when History imports it, which is when a
+platform admin opens the Backups page, after every in-app backup, and on
+each run of the last-good marker sync (every 15 minutes by default). So its
+report can arrive up to one of those intervals after cron finished.
+
+Two rules stop an import from mailing a report per backup ever taken:
+
+- **A backup that finished more than 48 hours ago is imported without a
+  report.** Pointing a fresh install at a directory of old backups, or
+  restoring the database, sends nothing about them.
+- **Of several new successes, only the newest is reported.** When an
+  imported backup that succeeded or was skipped is reported, and a newer
+  imported backup already has an outcome, it sends nothing. Ten cron
+  successes imported at once send one **Every run** report. A failed or
+  partly off-site cron backup is always reported, and so is a recovered one.
+
+#### What is not reported
+
+- **A re-send.** [Re-send a partly off-site backup](#re-send-a-partly-off-site-backup)
+  sends no report, even when it reaches every destination, and leaves the
+  "A backup reached only some destinations" notice as it is. Open Backups to
+  read it.
+- **A backup that never starts.** No run, no report. Keep `BACKUP_PING_URL`
+  set (see "Silence must be an alarm" at the top of this guide).
+- **A backup an older node finishes during a rolling deploy.** See
+  [Rolling back past backup reports](releasing.md#rolling-back-past-backup-reports).
+
+#### What can go wrong
+
+| What you see | What it means |
+|---|---|
+| No **Backup emails** under Email notifications | You are not a platform admin. Only platform admins are sent backup reports. |
+| "can only be changed by the account holder" | Someone other than the account holder tried to change its backup emails. Ask them to change it themselves. |
+| A failure in the bell, but no email | Your backup emails are **Off**, your address is on the instance suppression list, or the instance relay is failing (the job retries on the mail backoff for about five days). |
+| A failure report arrives about a minute after the backup ended | By design: a failed backup's report waits a minute, so the log and destinations that are recorded just after an interrupted backup fails are in it. |
+| A failure report says "It has been resumed since; a later report says how that ended." | The backup was resumed before its failure report went out. The resume's own outcome is reported separately. |
+| The server log says `Backup report of <stamp> not enqueued: …` | The report job could not be queued, so the write that would have recorded the backup's outcome failed with it: a report and its outcome commit together or not at all. The same failure emits the `[:kiln_cms, :backups, :report, :not_enqueued]` telemetry event, with the run's `status` in its metadata. |
 
 ### It needs the client tools in the image
 

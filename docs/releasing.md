@@ -915,8 +915,9 @@ So the rule for a column, or an embedded attribute, that will grow:
 
 The switch has to ship **at least one release before** the first new value,
 for the same reason a contract step waits a release. `Security.Event.type`,
-`Notification.event`, `ApiKey.access`, `FormField.field_type` and
-`FormFieldCondition.action` (#2262) are already `KnownAtom`.
+`Notification.event`, `ApiKey.access`, `FormField.field_type`,
+`FormFieldCondition.action` (#2262) and `User.notify_on_backup` (#2229, new
+as `KnownAtom`; an unknown value reads as `:failures`) are already `KnownAtom`.
 
 **A column that grants authority** needs one more thing: at authentication,
 an `UnknownAtom` must grant nothing. A value the older release doesn't know
@@ -1291,6 +1292,42 @@ the job args are the contract.
 Old-shape jobs drop their address, title, actor name and excerpt or note
 from their row when they finish, and `KilnCMS.Jobs.PrivateArgsScrub` drops
 them from rows that finished under the previous release.
+
+### Rolling back past backup reports
+
+From the release after v1.13.0 (#2229), the write that gives a backup run
+its outcome also queues its report, `KilnCMS.Backups.ReportWorker`, in the
+same transaction, and that job queues one `KilnCMS.Backups.ReportMailWorker`
+job per platform admin to email
+([Reports and alerts](backups.md#reports-and-alerts-2229)). Both run on
+the `mail` queue and carry ids only: `run_id`, `finished_at`, and for the
+mail job `user_id`. One expand-only migration adds `users.notify_on_backup`
+(text, not null, default `failures`) and `backup_runs.last_failed_at`
+(nullable).
+
+- **During a rolling deploy**, a report job that an old node picks up
+  fails there (it has no such worker) and retries. Both workers take 20
+  attempts; on a new node they wait out the mail backoff
+  (`KilnCMS.Mail.backoff_seconds/1`, about five days in all), and on an old
+  one Oban's default backoff. Once a new node takes the job, the report goes
+  out: delayed, not lost.
+- **A run an old node finishes during the deploy gets no report**, and no
+  "recovered" email if it was a resume of a failure: the old code has no
+  hook on the write. The run is in History as usual.
+- **Before rolling back**, let the `mail` queue drain of
+  `KilnCMS.Backups.ReportWorker` and `KilnCMS.Backups.ReportMailWorker`
+  jobs (none in `available`, `scheduled` or `retryable`; a failed run's
+  report is scheduled a minute out). The older release fails every one
+  still queued until its 20th attempt discards it, and those reports are
+  never sent.
+- **After rolling back**, the older release shows a "A backup failed" or
+  "A backup reached only some destinations" bell row as a generic
+  notification that links to the inbox, and does not count them in another
+  site's console. It ignores `users.notify_on_backup` and
+  `backup_runs.last_failed_at`, which stay and apply again after the next
+  upgrade. Rolling the pin back is otherwise safe: the older release never
+  writes either column, and the default fills `notify_on_backup` for
+  accounts it creates.
 
 ### Account mail that names its account
 

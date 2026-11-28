@@ -553,6 +553,28 @@ are generic actions that write no run, and `download` records
 `destroy` action until history deletion lands (#2225). Not exposed through GraphQL,
 JSON:API or MCP. The reasoning is in [ADR 0033](decisions/0033-backup-history-is-rows-only-the-backup-pipeline-writes-and-the-files-stay-the-truth.md).
 
+**Backup reports (#2229).** No action is added. `Run.last_failed_at` (when
+the run last ended `failed`) is in no action's `accept` list: only
+`Run.Changes.AfterOutcome` sets it, with `force_change_attribute`, on a
+write that leaves the run `failed`, and that change runs on the pipeline's
+and the platform admin's terminal writes above. The same change inserts the
+report job (`Backups.ReportWorker`) in the write's own transaction
+([ADR 0094](decisions/0094-a-backup-report-is-enqueued-in-the-runs-terminal-write.md)).
+The workers read the run back as `Backups.system/0` through the existing
+`read` grant, with `authorize_with: :error`, so a refused read fails the job
+and is never taken for a deleted run. Recipients are
+`Accounts.Scoping.platform_admins/0`, and the mail job re-checks each one
+when it sends (`Accounts.Scoping.platform_admin?/1`, which reads
+`RoleGrant.effective_role/1` on the account as read now). Who is emailed is
+`User.notify_on_backup`, which sits in `User`'s field policy beside the
+other `notify_on_*` flags (read by the account holder or a platform admin)
+and is written through `:update_notification_prefs`; like the security
+alert mute, `Validations.OwnSecurityAlertMute` (`fields:
+[:notify_on_security_alert, :notify_on_backup]`) refuses a change to it by
+anyone but the account holder, platform admin included. The bell rows are
+written and refreshed through `Notification`'s actor-less `notify` and
+`refresh` (see "In-app notifications" below).
+
 ## Backup lock — `Backups.Lock`, `Backups.NodeBeat`
 
 | Action | platform admin | editor | org admin (not platform admin) | viewer | anonymous | `:backups` system actor |
@@ -1663,6 +1685,7 @@ document, drafts included — so they are simply editor-and-up.
 | `notify` (create) | ❌ | ❌ | ⚙️ actor-less only |
 | `unread_about` (the notifier's duplicate check, #1785) | ❌ | ❌ | ⚙️ actor-less only |
 | `forget_actor`, `forget_recipient` (erasure: blank the actor on others' rows; delete the erased account's own, #2514) | ❌ | ❌ | ⚙️ actor-less only |
+| `refresh` (replace a collapsing unread row's `title`, `excerpt` and `details`, #2229) | ❌ | ❌ | ⚙️ actor-less only |
 
 `authorize_if expr(user_id == ^actor(:id))` is the whole read policy, and this
 is the one resource in the tree with **no admin bypass at all**. A notification
@@ -1677,6 +1700,18 @@ calling it with `authorize?: false`, it is gated `forbid_if actor_present()` +
 `authorize_if always()`: the policy still runs and still decides, so an
 authenticated caller that reaches the action is refused by a rule a reader can
 see. `KilnCMS.Notifications.record_in_app/1` is the only caller.
+
+`refresh` is on the same terms (#2229). A backup notice collapses like a
+registration notice, but says the newest run: while a recipient's
+`:backup_failed` or `:backup_partly_offsite` row is unread, the next one
+replaces its `title`, `excerpt` and `details`
+(`KilnCMS.Notifications.record_in_app_refreshing/1`, under the notifier's
+advisory lock) instead of writing a second row. It accepts nothing else, so
+it can't change who a row is for, its anchor or its read state. Marking a
+backup notice read when its run recovers
+(`KilnCMS.Notifications.mark_backup_recovered/2`) and when the Backups page
+opens is done as the recipient, through `unread_for_user` and the
+recipient-only `mark_read`.
 
 `unread_about` is the one read on the same terms, and for the same reason: before
 writing a review request, publish notice or return to draft, the notifier asks

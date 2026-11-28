@@ -67,6 +67,9 @@ else.
 - **Forms: add a field condition only once every node runs this release, and before rolling back untick Required on conditional fields that not every visitor should be asked (#2262).**
   An older node ignores conditions, so it shows every field and refuses a submission that left a required hidden field blank. Expand-only migration.
   ([#3480](https://github.com/The-Verscienta/kiln_cms/pull/3480) · [long form](docs/changelog/unreleased.md#form-field-conditions-upgrade))
+- **Backups: every platform admin is now emailed about failed and partly off-site backups by default, cron's included once History imports them (within 48 hours of finishing, up to one import interval late); each can choose Every run or Off under Your settings (#2229).**
+  Before rolling back, drain the `mail` queue of `KilnCMS.Backups.Report*` jobs. Expand-only migration.
+  ([long form](docs/changelog/unreleased.md#backup-reports-upgrade))
 
 ### Breaking
 
@@ -95,6 +98,9 @@ else.
 - **Backups: a Log tab shows what each step of a backup recorded, filtered by level and redacted again when shown, with "View log" on each History row and a text download of the log (part of #2230).**
   Platform admins only; refused while `KILN_CONSOLE_HOST` is unset and there is more than one organization. The download shares the `:export` limit and is logged, not audited. No migration; rolling the pin back is safe.
   ([#3488](https://github.com/The-Verscienta/kiln_cms/pull/3488) · [long form](docs/changelog/unreleased.md#backup-log-viewer))
+- **Backups: a report after each backup, by email to the platform admins who choose it (failures only by default, every run, or off) and in the bell for every failed or partly off-site run, with a "recovered" email when a failed backup is resumed and succeeds (part A of #2229).**
+  Queued in the same transaction as the run's outcome, ids only; content is redacted and display-sanitized. Re-sends are not reported.
+  ([long form](docs/changelog/unreleased.md#backup-reports))
 
 ### Changed
 
