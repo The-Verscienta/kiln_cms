@@ -12,8 +12,8 @@ defmodule KilnCMS.Keys.ClientDigest do
 
   Two tables store their keys through here, and nothing else does:
 
-    * `throttle_counters.key_hash` (`KilnCMS.Accounts.ThrottleStore.key_hash/1`)
-    * `crawler_sightings.key_hash` (`KilnCMS.Security.CrawlerSightingStore.key_hash/1`)
+    * `throttle_counters.key_hash` (`KilnCMS.Accounts.ThrottleStore`)
+    * `crawler_sightings.key_hash` (`KilnCMS.Security.CrawlerSightingStore`)
 
   ## Why this secret
 
