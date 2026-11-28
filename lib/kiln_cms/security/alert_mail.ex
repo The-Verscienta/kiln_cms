@@ -40,6 +40,9 @@ defmodule KilnCMS.Security.AlertMail do
 
   defp label(kind), do: english(fn -> AlertText.kind_label(kind) end)
 
+  # A notice names the kinds turned off as their checkboxes do (#3495).
+  defp setting_label(kind), do: english(fn -> AlertText.setting_label(kind) end)
+
   # The labels are gettext'd for the bell (#2642); the email pins English.
   # A per-user locale needs more than this call: the subject, body and footer
   # prose below is plain English, not gettext (ADR 0029).
@@ -86,7 +89,7 @@ defmodule KilnCMS.Security.AlertMail do
   end
 
   defp details(%{phase: "notice"} = data) do
-    kinds = Enum.map_join(List.wrap(data[:kinds]), ", ", &label/1)
+    kinds = Enum.map_join(List.wrap(data[:kinds]), ", ", &setting_label/1)
 
     if kinds == "",
       do: "<p>Fewer people may hear about security events on this site from now on.</p>",

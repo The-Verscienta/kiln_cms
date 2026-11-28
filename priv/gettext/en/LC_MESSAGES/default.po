@@ -1666,6 +1666,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/governance_live.ex
 #: lib/kiln_cms_web/live/in_context_edit_live.ex
 #: lib/kiln_cms_web/live/overview_live.ex
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
 msgid "(opens in a new tab)"
@@ -2754,7 +2755,7 @@ msgstr ""
 msgid "API keys keep working, and password-reset, confirmation and sign-in links already sent still work. It is recorded in the instance security log."
 msgstr ""
 
-#: lib/kiln_cms_web/live/security_alerts_live.ex
+#: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "API keys over a rate limit"
 msgstr ""
@@ -2953,7 +2954,7 @@ msgstr[1] ""
 msgid "Account erased. Its content was left as it was."
 msgstr ""
 
-#: lib/kiln_cms_web/live/security_alerts_live.ex
+#: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "Account locked out"
 msgstr ""
@@ -10835,7 +10836,7 @@ msgstr ""
 msgid "Failed sign-in"
 msgstr ""
 
-#: lib/kiln_cms_web/live/security_alerts_live.ex
+#: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "Failed sign-ins"
 msgstr ""
@@ -13706,6 +13707,7 @@ msgstr ""
 #: lib/kiln_cms_web/live/backup_live.ex
 #: lib/kiln_cms_web/live/backup_log_live.ex
 #: lib/kiln_cms_web/live/governance_live.ex
+#: lib/kiln_cms_web/live/security_alerts_live.ex
 #: lib/kiln_cms_web/live/security_posture_live.ex
 #: lib/kiln_cms_web/live/team_live.ex
 #, elixir-autogen, elixir-format
@@ -15111,7 +15113,7 @@ msgstr ""
 msgid "New accounts from this site's single sign-on wait for approval too"
 msgstr ""
 
-#: lib/kiln_cms_web/live/security_alerts_live.ex
+#: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "New admin"
 msgstr ""
@@ -20080,7 +20082,7 @@ msgstr ""
 msgid "Requesting…"
 msgstr ""
 
-#: lib/kiln_cms_web/live/security_alerts_live.ex
+#: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "Requests from blocked addresses"
 msgstr ""
@@ -20536,7 +20538,7 @@ msgstr ""
 msgid "Role granted"
 msgstr ""
 
-#: lib/kiln_cms_web/live/security_alerts_live.ex
+#: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
 msgid "Role raised"
 msgstr ""
@@ -21487,7 +21489,7 @@ msgstr ""
 msgid "Second factor added"
 msgstr ""
 
-#: lib/kiln_cms_web/live/security_alerts_live.ex
+#: lib/kiln_cms/security/alert_text.ex
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Second factor removed"
@@ -22724,7 +22726,7 @@ msgstr ""
 msgid "Single sign-on"
 msgstr ""
 
-#: lib/kiln_cms_web/live/security_alerts_live.ex
+#: lib/kiln_cms/security/alert_text.ex
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Single sign-on changed"

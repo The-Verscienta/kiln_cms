@@ -227,7 +227,13 @@ defmodule KilnCMS.Security.DeliverAlertTest do
 
       assert [_bell] = bells()
       assert mails() == []
-      assert [%{"alert_sent_at" => %{}, "summary_sent_at" => nil}] = SecurityAlerts.dispatches()
+
+      # `summary_sent_at` is the stamp the notice was written with (#3496),
+      # for v1.13.0's summary trigger; no summary run touched it.
+      assert [%{"alert_sent_at" => %{}, "summary_sent_at" => at, "inserted_at" => at}] =
+               SecurityAlerts.dispatches()
+
+      assert %NaiveDateTime{} = at
     end
   end
 

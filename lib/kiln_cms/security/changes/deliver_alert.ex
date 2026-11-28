@@ -72,6 +72,7 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
   alias KilnCMS.Security.AlertMail
   alias KilnCMS.Security.Alerts
   alias KilnCMS.Security.AlertText
+  alias KilnCMS.Types.UnknownAtom
   alias KilnCMS.Webhooks
   alias KilnCMSWeb.Plugs.ConsoleHost
 
@@ -99,6 +100,21 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
   # What a delivery of `dispatch` would send, read but not written. Public for
   # the tests' sake only.
   @spec build_plan(struct(), :alert | :summary) :: map()
+  # A channel this release does not know (#3496): a later release wrote the
+  # row, and both triggers name the channels they deliver, so it gets here
+  # only when the action is run on it directly. Logged and planned as
+  # nothing, never raised: a raise is retried ten times, each an error in the
+  # log, which is the flood the triggers' lists exist to prevent. `deliver/2`
+  # then refuses to stamp it, so the release that wrote it still delivers it.
+  def build_plan(%{channel: %UnknownAtom{value: channel}} = dispatch, phase) do
+    Logger.warning(
+      "Security alert #{dispatch.id} has a channel this release does not know " <>
+        "(#{inspect(channel)}); its #{phase} is not sent here."
+    )
+
+    empty_plan()
+  end
+
   # A notice has no summary, and the summary trigger never picks one up; a
   # platform notice says so here as well, so no change to that trigger can
   # send its recipients a second copy.
@@ -363,6 +379,16 @@ defmodule KilnCMS.Security.Changes.DeliverAlert do
   end
 
   # -- 2. Writes, in the transaction ----------------------------------------
+
+  # A channel this release does not know is left unstamped: the release that
+  # wrote the row still owns its delivery, and a stamp here would mark it sent
+  # with nothing sent. The run fails with a plain error instead (#3496).
+  defp deliver(%{data: %{channel: %UnknownAtom{value: channel}}} = changeset, _phase) do
+    Ash.Changeset.add_error(
+      changeset,
+      "channel #{inspect(channel)} is not one this release delivers; left for the release that wrote it"
+    )
+  end
 
   defp deliver(changeset, phase) do
     stamp = if phase == :alert, do: :alert_sent_at, else: :summary_sent_at

@@ -132,8 +132,9 @@ defmodule KilnCMS.Webhooks.SlackFormat do
     end
   end
 
+  # The kinds turned off, named as their checkboxes are (#3495).
   defp detail("notice", data) do
-    case data |> get("kinds") |> List.wrap() |> Enum.map_join(", ", &AlertText.kind_label/1) do
+    case data |> get("kinds") |> List.wrap() |> Enum.map_join(", ", &AlertText.setting_label/1) do
       "" -> nil
       kinds -> escape("Turned off: #{kinds}")
     end

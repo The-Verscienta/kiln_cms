@@ -94,6 +94,19 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
       assert html =~ "its /24 for IPv4, its /48 for IPv6"
     end
 
+    test "names each kind's checkbox as a notice about it does (#3495)", ctx do
+      {:ok, lv, _html} = admin_conn(ctx) |> live(~p"/editor/security-alerts")
+
+      for kind <- KilnCMS.Security.Alerts.site_kinds() do
+        label = KilnCMS.Security.AlertText.setting_label(kind)
+        assert has_element?(lv, "#security-alert-kind-#{kind} label", label)
+      end
+
+      # A site admin sees no platform section, so no link into its guide.
+      refute has_element?(lv, "#security-alerts-platform")
+      refute has_element?(lv, "#security-alerts-platform-docs")
+    end
+
     test "warns when the site has no member admins", %{conn: conn} do
       # A platform admin with no membership: the only kind of admin the site has.
       org = seed_org()
@@ -316,6 +329,24 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
 
       # The link's anchor is the heading's slug; a renamed heading breaks it.
       assert File.read!("docs/security-alerts.md") =~ ~r/^### Running more than one server$/m
+
+      # The section links its guide, in a new tab (#3495).
+      assert has_element?(
+               lv,
+               ~s{#security-alerts-platform #security-alerts-platform-docs[href="https://github.com/The-Verscienta/kiln_cms/blob/main/docs/security-alerts.md#turn-off-rate-limit-alerts-for-api-keys"][target="_blank"][rel="noopener"]},
+               "Learn more"
+             )
+
+      assert has_element?(lv, "#security-alerts-platform-docs .sr-only", "(opens in a new tab)")
+
+      assert File.read!("docs/security-alerts.md") =~
+               ~r/^## Turn off rate-limit alerts for API keys$/m
+
+      assert has_element?(
+               lv,
+               "#platform-alert-kind-api_key_rate_limited label",
+               KilnCMS.Security.AlertText.setting_label(:api_key_rate_limited)
+             )
 
       html =
         lv
