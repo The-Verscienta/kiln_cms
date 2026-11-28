@@ -57,6 +57,13 @@ defmodule KilnCMS.Notifications.Link do
   site's alerts were turned down links to `/editor/security-alerts`, where the
   change can be seen and undone.
 
+  ## A backup notice links to the Backups page
+
+  `:backup_failed` and `:backup_partly_offsite` (#2229) are about the
+  instance's backups: their `content_id` is the default org's id. They link
+  to `/editor/backups`, where the run's row, its error and its destinations
+  are.
+
   ## An unknown event links to the inbox
 
   An event this release does not know (one a newer release created, loaded as
@@ -108,6 +115,9 @@ defmodule KilnCMS.Notifications.Link do
   def editor_path(%{event: event}) when event in [:webhook_failing, :webhook_disabled],
     do: ~p"/editor/webhooks"
 
+  def editor_path(%{event: event}) when event in [:backup_failed, :backup_partly_offsite],
+    do: ~p"/editor/backups"
+
   def editor_path(%{event: :security_alert}), do: ~p"/editor/security-log"
   def editor_path(%{event: :security_notice}), do: ~p"/editor/security-alerts"
 
@@ -147,6 +157,8 @@ defmodule KilnCMS.Notifications.Link do
   def editor_url(%{event: event} = subject)
       when event in [
              :retraction_lost,
+             :backup_failed,
+             :backup_partly_offsite,
              :security_alert,
              :security_notice,
              :webhook_failing,

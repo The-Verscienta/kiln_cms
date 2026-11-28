@@ -25,6 +25,10 @@ defmodule KilnCMS.Backups.ChainRaceTest do
 
   defp unboxed(fun), do: Sandbox.unboxed_run(Repo, fun)
 
+  # The jobs a committed write leaves: the chain's steps, and the report a
+  # run's outcome enqueues in its own transaction (#2229).
+  @committed_workers ["KilnCMS.Backups.StepWorker", "KilnCMS.Backups.ReportWorker"]
+
   setup do
     dir = Path.join(System.tmp_dir!(), "kiln_bkx_#{System.unique_integer([:positive])}")
     original = Application.get_env(:kiln_cms, KilnCMS.Backups, [])
@@ -37,7 +41,7 @@ defmodule KilnCMS.Backups.ChainRaceTest do
 
     on_exit(fn ->
       unboxed(fn ->
-        Repo.delete_all(from(j in "oban_jobs", where: j.worker == "KilnCMS.Backups.StepWorker"))
+        Repo.delete_all(from(j in "oban_jobs", where: j.worker in ^@committed_workers))
         Repo.delete_all(from(l in "backup_locks"))
         Repo.delete_all(from(r in "backup_runs"))
       end)
@@ -402,9 +406,7 @@ defmodule KilnCMS.Backups.ChainRaceTest do
             end
 
           unboxed(fn ->
-            Repo.delete_all(
-              from(j in "oban_jobs", where: j.worker == "KilnCMS.Backups.StepWorker")
-            )
+            Repo.delete_all(from(j in "oban_jobs", where: j.worker in ^@committed_workers))
 
             Repo.delete_all(from(l in "backup_locks"))
           end)

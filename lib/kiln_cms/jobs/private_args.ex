@@ -27,6 +27,14 @@ defmodule KilnCMS.Jobs.PrivateArgs do
       Sentry filter too: a failure in their helpers holds the recipient's
       account in its stack frames.
 
+  Not registered, because their args are ids only: the backup report jobs
+  (#2229). `KilnCMS.Backups.ReportWorker` carries the run's id and the
+  `finished_at` of its outcome, `KilnCMS.Backups.ReportMailWorker` those and
+  the recipient's account id. Both read the run, the recipient and their
+  address back when they run, so no error text, address or site name is
+  ever written to a job row. `ReportMailWorker` is not registered for the
+  frame scrub either: its `user_id` is one of its unique keys, so it must stay.
+
   Whichever shape a job carries, the keys `registry/0` names are dropped from
   its row once the job is finished (`finishing/3`), and
   `KilnCMS.Jobs.PrivateArgsScrub` drops them from finished rows that still hold

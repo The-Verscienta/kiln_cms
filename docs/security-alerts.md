@@ -111,7 +111,10 @@ default site's console. In any other site's console, the bell and the inbox
 show one entry instead, "3 unread platform alerts", with the line "Open them
 in the default site's console". The entry links to the default site's unread
 inbox, on that site's console host, where the alerts can be read and marked
-read. The count is included in the bell's badge.
+read. The count is included in the bell's badge. It counts the backup
+notices too ("A backup failed", "A backup reached only some destinations",
+#2229), which live in the default site for the same reason
+([Reports and alerts](backups.md#reports-and-alerts-2229)).
 
 The entry is a number and nothing else: no site name, headline or address,
 and no way to open or mark an alert from there. Another site's console is

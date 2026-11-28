@@ -38,7 +38,12 @@ defmodule KilnCMS.Backups.ReevaluateRaceTest do
     Application.put_env(:kiln_cms, KilnCMS.Backups, Keyword.merge(original, dir: dir))
 
     on_exit(fn ->
-      unboxed(fn -> Repo.delete_all(from(r in "backup_runs")) end)
+      unboxed(fn ->
+        Repo.delete_all(from(r in "backup_runs"))
+        # The report each committed import enqueues in its transaction (#2229).
+        Repo.delete_all(from(j in "oban_jobs", where: j.worker == "KilnCMS.Backups.ReportWorker"))
+      end)
+
       Application.put_env(:kiln_cms, KilnCMS.Backups, original)
       File.rm_rf!(dir)
     end)

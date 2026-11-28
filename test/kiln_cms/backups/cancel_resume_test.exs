@@ -97,6 +97,17 @@ defmodule KilnCMS.Backups.CancelResumeTest do
   # In whichever queue (#2845).
   defp step_jobs(chain), do: BackupChain.step_jobs(chain: chain)
 
+  # The report jobs of a run's outcomes (#2229), one per terminal write.
+  defp report_jobs(run_id) do
+    Repo.all(
+      from(j in Oban.Job,
+        where:
+          j.worker == "KilnCMS.Backups.ReportWorker" and
+            fragment("?->>'run_id'", j.args) == ^run_id
+      )
+    )
+  end
+
   defp canceled_events(admin) do
     Security.list_instance_events!(actor: admin, page: [limit: 100])
     |> then(fn
@@ -154,6 +165,8 @@ defmodule KilnCMS.Backups.CancelResumeTest do
       chain = waiting_for_files!(ctx, stamp)
       {:ok, %{status: :queued}} = request(trigger: "schedule")
       before = run_of(stamp)
+      # The fail's own report (#2229).
+      assert [_failure] = report_jobs(failed.id)
 
       BackupChain.listen(fn ->
         assert {:ok, noted} = Backups.cancel_run_resume(before, actor: admin)
@@ -186,6 +199,9 @@ defmodule KilnCMS.Backups.CancelResumeTest do
 
       # A console waiting on the resume chain finds no run of it (#2816).
       assert {:error, :no_run} = Backups.await(chain, timeout: 0)
+
+      # The run stayed failed: no second report (#2229).
+      assert [_still_one] = report_jobs(failed.id)
     end
 
     test "with nothing queued the lock is free", %{admin: admin} = ctx do
@@ -253,6 +269,11 @@ defmodule KilnCMS.Backups.CancelResumeTest do
 
       assert noted.error ==
                @note <> "\nInterrupted: the job was killed or the node stopped"
+
+      # Failing the stale run is a new outcome: its report is enqueued in the
+      # same transaction (#2229), beside the earlier fail's.
+      assert [_, _] = jobs = report_jobs(noted.id)
+      assert DateTime.to_iso8601(noted.finished_at) in Enum.map(jobs, & &1.args["finished_at"])
 
       assert Backups.in_flight() == nil
       assert Enum.all?(step_jobs(chain), &(&1.state == "cancelled"))

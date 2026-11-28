@@ -198,6 +198,7 @@ defmodule KilnCMS.Accounts.User do
       :notify_on_registration,
       :notify_on_security_alert,
       :notify_on_webhook_failure,
+      :notify_on_backup,
       :nav_preset,
       :status_marks,
       :content_list_columns
@@ -337,7 +338,8 @@ defmodule KilnCMS.Accounts.User do
         :notify_on_comment,
         :notify_on_registration,
         :notify_on_security_alert,
-        :notify_on_webhook_failure
+        :notify_on_webhook_failure,
+        :notify_on_backup
       ]
 
       # The validation below compares the actor with the row being changed.
@@ -345,8 +347,11 @@ defmodule KilnCMS.Accounts.User do
 
       # The security alert mute is the account holder's own (#2245): a platform
       # admin may edit the other preferences of anyone, but not silence a site
-      # admin's security alerts.
-      validate KilnCMS.Accounts.Validations.OwnSecurityAlertMute
+      # admin's security alerts. Nor another platform admin's backup reports
+      # (#2229): a failure alert someone else can turn off is one an intruder
+      # turns off first.
+      validate {KilnCMS.Accounts.Validations.OwnSecurityAlertMute,
+                fields: [:notify_on_security_alert, :notify_on_backup]}
     end
 
     # Admin-only: assign a user's editorial role (authoring privilege) and the
@@ -1863,6 +1868,22 @@ defmodule KilnCMS.Accounts.User do
     attribute :notify_on_webhook_failure, :boolean do
       default true
       allow_nil? false
+      public? true
+    end
+
+    # Backup reports (#2229): which backup runs a platform admin is emailed
+    # about. `:failures` (the default) mails failed runs and runs that reached
+    # only some off-site destinations, `:every_run` every run, `:off` none.
+    # Mutes the email only: the bell row of a failed or partly off-site run is
+    # always written. Only a platform admin is ever mailed, whatever this
+    # says, and only the account holder can change it
+    # (`Validations.OwnSecurityAlertMute`). `KnownAtom`, so a value a newer
+    # release adds loads as unknown, which `KilnCMS.Notifications.backup_mail?/2`
+    # treats as `:failures`.
+    attribute :notify_on_backup, KilnCMS.Types.KnownAtom do
+      default :failures
+      allow_nil? false
+      constraints one_of: [:failures, :every_run, :off]
       public? true
     end
 

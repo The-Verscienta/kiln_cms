@@ -532,7 +532,8 @@ defmodule KilnCMS.Accounts do
         notify_on_comment: user.notify_on_comment,
         notify_on_registration: user.notify_on_registration,
         notify_on_security_alert: user.notify_on_security_alert,
-        notify_on_webhook_failure: user.notify_on_webhook_failure
+        notify_on_webhook_failure: user.notify_on_webhook_failure,
+        notify_on_backup: export_atom(user.notify_on_backup)
       },
       # Paid memberships (#337 Phase 2). The provider ids ARE included: they are
       # identifiers a subprocessor holds about this person, so GDPR Art. 15/20
@@ -675,6 +676,11 @@ defmodule KilnCMS.Accounts do
       segments: subscriber.segments |> Enum.map(& &1.name) |> Enum.sort()
     }
   end
+
+  # A stored value a newer release wrote loads as an `UnknownAtom`, which has
+  # no JSON form of its own: the export says the stored text.
+  defp export_atom(%KilnCMS.Types.UnknownAtom{value: value}), do: value
+  defp export_atom(value), do: value
 
   # A data-subject export is inherently cross-organization — the request arrives
   # on one host, but the person may hold memberships on several sites — so this

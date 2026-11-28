@@ -1897,6 +1897,11 @@ msgstr "Una copia de seguridad pedida mientras otra está en curso espera a que 
 msgid "A backup can't run on this deployment."
 msgstr "No se puede crear una copia de seguridad en esta instalación."
 
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "A backup failed"
+msgstr "Una copia de seguridad falló"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "A backup is running and a new backup is queued after it, so this resume was not queued. Try again once the queue clears."
@@ -1936,6 +1941,11 @@ msgstr "Una copia de seguridad hecha por scripts/backup.sh. Su salida completa e
 #, elixir-autogen, elixir-format
 msgid "A backup or another re-send is running. Re-send this backup once it finishes: a re-send is never queued."
 msgstr "Hay una copia de seguridad u otro reenvío en curso. Reenvía esta copia de seguridad cuando termine: un reenvío nunca se pone en cola."
+
+#: lib/kiln_cms_web/notification_text.ex
+#, elixir-autogen, elixir-format
+msgid "A backup reached only some destinations"
+msgstr "Una copia de seguridad llegó solo a algunos destinos"
 
 #: lib/kiln_cms/security/alert_text.ex
 #, elixir-autogen, elixir-format
@@ -2345,6 +2355,11 @@ msgstr "Una relación"
 #, elixir-autogen, elixir-format
 msgid "A release needs a name."
 msgstr "Un lanzamiento necesita un nombre."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "A report after every backup, whatever its outcome"
+msgstr "Un informe después de cada copia de seguridad, sea cual sea su resultado"
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
@@ -4965,6 +4980,11 @@ msgstr "Destinos de copias de seguridad"
 #, elixir-autogen, elixir-format
 msgid "Backup downloaded"
 msgstr "Copia de seguridad descargada"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backup emails"
+msgstr "Correos de copias de seguridad"
 
 #: lib/kiln_cms_web/live/backup_log_live.ex
 #, elixir-autogen, elixir-format
@@ -10471,6 +10491,11 @@ msgstr "Todos los registros enlazables en una sola lista: para una lista corta. 
 msgid "Every request re-reads the database until the cache warms again, so on a busy site this is a deliberate load spike. This clears the cache for every organization on this deployment, not just the one you are viewing. On a multi-node deployment it reaches every node; the count shown is from the node that served you."
 msgstr "Cada petición vuelve a leer la base de datos hasta que la caché se calienta de nuevo, así que en un sitio con mucho tráfico esto es un pico de carga deliberado. Esto vacía la caché de todas las organizaciones de este despliegue, no solo la que estás viendo. En un despliegue de varios nodos, alcanza todos los nodos; el recuento mostrado es el del nodo que te atendió."
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Every run"
+msgstr "Cada ejecución"
+
 #: lib/kiln_cms_web/live/slug_regen_live.ex
 #, elixir-autogen, elixir-format
 msgid "Every scanned slug already matches its derivation."
@@ -10800,6 +10825,11 @@ msgstr "Fallido"
 msgid "Failed at once: the destination said no retry fixes this."
 msgstr "Falló de inmediato: el destino indicó que ningún reintento lo soluciona."
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Failed backups, and backups that reached only some off-site destinations"
+msgstr "Copias de seguridad fallidas y copias que llegaron solo a algunos destinos externos"
+
 #: lib/kiln_cms_web/security_log.ex
 #, elixir-autogen, elixir-format
 msgid "Failed sign-in"
@@ -10819,6 +10849,11 @@ msgstr "Los inicios de sesión fallidos alcanzaron el umbral de alerta"
 #, elixir-autogen, elixir-format
 msgid "Failures"
 msgstr "Fallos"
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "Failures only"
+msgstr "Solo fallos"
 
 #: lib/kiln_cms_web/live/locale_settings_live.ex
 #, elixir-autogen, elixir-format
@@ -15380,6 +15415,11 @@ msgstr "No hay ningún icono de aplicación configurado."
 msgid "No automation rules yet"
 msgstr "Aún no hay reglas de automatización"
 
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "No backup emails"
+msgstr "Ningún correo de copias de seguridad"
+
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
 msgid "No backup has ever been recorded"
@@ -16722,6 +16762,7 @@ msgstr "octubre"
 
 #: lib/kiln_cms_web/live/api_key_live.ex
 #: lib/kiln_cms_web/live/password_policy_live.ex
+#: lib/kiln_cms_web/live/settings_live.ex
 #: lib/kiln_cms_web/live/site_ai_live.ex
 #: lib/kiln_cms_web/live/two_factor_policy_live.ex
 #, elixir-autogen, elixir-format
@@ -26636,6 +26677,11 @@ msgstr "Esta sesión"
 #, elixir-autogen, elixir-format
 msgid "This session was signed out from another device."
 msgstr "Esta sesión se cerró desde otro dispositivo."
+
+#: lib/kiln_cms_web/live/settings_live.ex
+#, elixir-autogen, elixir-format
+msgid "This sets the email only. Failed backups, and backups that reached only some destinations, still appear in your notifications."
+msgstr "Esto solo ajusta el correo. Las copias de seguridad fallidas y las que llegaron solo a algunos destinos siguen apareciendo en tus notificaciones."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
