@@ -69,7 +69,7 @@ else.
   ([#3480](https://github.com/The-Verscienta/kiln_cms/pull/3480) · [long form](docs/changelog/unreleased.md#form-field-conditions-upgrade))
 - **Backups: every platform admin is now emailed about failed and partly off-site backups by default, cron's included once History imports them (within 48 hours of finishing, up to one import interval late); each can choose Every run or Off under Your settings (#2229).**
   Before rolling back, drain the `mail` queue of `KilnCMS.Backups.Report*` jobs. Expand-only migration.
-  ([long form](docs/changelog/unreleased.md#backup-reports-upgrade))
+  ([#3497](https://github.com/The-Verscienta/kiln_cms/pull/3497) · [long form](docs/changelog/unreleased.md#backup-reports-upgrade))
 
 ### Breaking
 
@@ -103,7 +103,7 @@ else.
   ([#3492](https://github.com/The-Verscienta/kiln_cms/pull/3492) · [long form](docs/changelog/unreleased.md#backup-live-progress))
 - **Backups: a report after each backup, by email to the platform admins who choose it (failures only by default, every run, or off) and in the bell for every failed or partly off-site run, with a "recovered" email when a failed backup is resumed and succeeds (part A of #2229).**
   Queued in the same transaction as the run's outcome, ids only; content is redacted and display-sanitized. Re-sends are not reported.
-  ([long form](docs/changelog/unreleased.md#backup-reports))
+  ([#3497](https://github.com/The-Verscienta/kiln_cms/pull/3497) · [long form](docs/changelog/unreleased.md#backup-reports))
 
 ### Changed
 
