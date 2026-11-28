@@ -67,8 +67,8 @@ else.
 - **Forms: add a field condition only once every node runs this release, and before rolling back untick Required on conditional fields that not every visitor should be asked (#2262).**
   An older node ignores conditions, so it shows every field and refuses a submission that left a required hidden field blank. Expand-only migration.
   ([#3480](https://github.com/The-Verscienta/kiln_cms/pull/3480) · [long form](docs/changelog/unreleased.md#form-field-conditions-upgrade))
-- **Security alerts: before rolling back past this release, let every pending platform notice be delivered; the previous release cannot load one, so a notice still waiting is lost after a day (#2811).**
-  During a rolling deploy an older node retries it until a newer node delivers it. No migration.
+- **Security alerts: before rolling back past this release, let every pending platform notice be delivered; v1.13.0 cannot load one, so it fails ten logged attempts, re-queued for a day, and never sends it (#2811, #3496).**
+  To stop the retries, mark the waiting ones failed with the SQL in the long form. No migration.
   ([long form](docs/changelog/unreleased.md#platform-notice-rollback))
 - **Backups: every platform admin is now emailed about failed and partly off-site backups by default, cron's included once History imports them (within 48 hours of finishing, up to one import interval late); each can choose Every run or Off under Your settings (#2229).**
   Before rolling back, drain the `mail` queue of `KilnCMS.Backups.Report*` jobs. Expand-only migration.
@@ -146,6 +146,9 @@ else.
 - **Security alerts: a request refused by a temporary rule the scanner guard added is still logged but no longer raises `blocked_ip`, so `security.blocked_ip` webhooks get fewer deliveries; an admin's rule alerts as before, with an unchanged payload (#2810).**
   The setting is renamed **Requests from blocked addresses**. `IpBlocklist.match/2` returns the rule's source; `BlockedIpAlert.note/4` is now `note/5`.
   ([long form](docs/changelog/unreleased.md#scanner-guard-refusals-no-alert))
+- **Security alerts: a notice that kinds were turned off names each as its checkbox does ("Turned off: Account locked out."), in email and Slack, and the Platform alerts section links its guide (#3495).**
+  Webhook JSON `kinds` is unchanged. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#notice-names-setting-labels))
 
 ### Fixed
 

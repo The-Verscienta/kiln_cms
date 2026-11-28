@@ -21,9 +21,13 @@ defmodule KilnCMS.Security.AlertDispatch do
       `"alerts_silenced"` for a notice. A string, so a kind a newer release
       wrote still loads.
     * `channel` — `:site`, `:platform`, `:notice` or `:platform_notice`.
-      A node of the release before #2811 cannot load a `:platform_notice`
-      row: its delivery fails and is retried until a newer node takes it,
-      so a rolling deploy delays the notice and never misdelivers it.
+      A `KilnCMS.Types.KnownAtom` (#3496): a channel a later release adds
+      loads as a `KilnCMS.Types.UnknownAtom` here rather than failing the
+      read, and both triggers name the channels they deliver, so a row with
+      one this release does not know is never scheduled. v1.13.0, the release
+      before #2811, has plain `:atom` and no such list: it schedules a
+      `:platform_notice` row it cannot load, and every attempt fails
+      (`docs/security-alerts.md`, "For operators").
     * `org_id` — the site the alert is about; the default org for a platform
       alert or a platform notice. No foreign key: the row lives a day.
     * `window_index`, `window_started_at`, `window_ends_at` — the alert window
@@ -36,7 +40,10 @@ defmodule KilnCMS.Security.AlertDispatch do
       for a `backup_host_key_changed` alert, whose event is in the instance
       log its delivery doesn't read, the `destination` name (#2222). Never an
       address, URL, token or email.
-    * `alert_sent_at`, `summary_sent_at`, `failed_at` — delivery stamps.
+    * `alert_sent_at`, `summary_sent_at`, `failed_at` — delivery stamps. A
+      platform notice is written with `summary_sent_at` set: it has no
+      summary, and v1.13.0's summary trigger would otherwise pick it up
+      once delivered (#3496, `KilnCMS.Security.AlertGate`).
     * `expires_at` — a day after the window ends; `:prune` deletes past it.
 
   ## Authorization
@@ -66,6 +73,10 @@ defmodule KilnCMS.Security.AlertDispatch do
     triggers do
       # The alert itself, within a minute of the claim: the claim commits with
       # the event, and nothing is enqueued inside the emitter's transaction.
+      # Only the channels this release delivers (#3496): a row a later
+      # release wrote with a new one is left for a node that knows it, never
+      # scheduled here to fail ten times. A channel added to `one_of` must be
+      # added here too (`AlertDispatchUnknownChannelTest` checks).
       trigger :deliver_alert do
         action :deliver_alert
         queue :default
@@ -73,14 +84,19 @@ defmodule KilnCMS.Security.AlertDispatch do
         max_attempts 10
         on_error :mark_failed
 
-        where expr(is_nil(alert_sent_at) and is_nil(failed_at) and inserted_at > ago(1, :day))
+        where expr(
+                channel in [:site, :platform, :notice, :platform_notice] and
+                  is_nil(alert_sent_at) and is_nil(failed_at) and inserted_at > ago(1, :day)
+              )
 
         worker_module_name KilnCMS.Security.AlertDispatch.AshOban.Worker.DeliverAlert
         scheduler_module_name KilnCMS.Security.AlertDispatch.AshOban.Scheduler.DeliverAlert
       end
 
       # The window's summary, once it has closed. Notices, a site's or the
-      # platform's, have none.
+      # platform's, have none. The channels that have one are named rather
+      # than the ones that don't, so a channel a later release adds is never
+      # summarized here (#3496).
       trigger :deliver_summary do
         action :deliver_summary
         queue :default
@@ -89,7 +105,7 @@ defmodule KilnCMS.Security.AlertDispatch do
         on_error :mark_failed
 
         where expr(
-                channel not in [:notice, :platform_notice] and not is_nil(alert_sent_at) and
+                channel in [:site, :platform] and not is_nil(alert_sent_at) and
                   is_nil(summary_sent_at) and
                   is_nil(failed_at) and window_ends_at < ago(1, :minute) and
                   window_ends_at > ago(1, :day)
@@ -180,7 +196,7 @@ defmodule KilnCMS.Security.AlertDispatch do
       constraints max_length: 64
     end
 
-    attribute :channel, :atom do
+    attribute :channel, KilnCMS.Types.KnownAtom do
       allow_nil? false
       public? false
       constraints one_of: [:site, :platform, :notice, :platform_notice]

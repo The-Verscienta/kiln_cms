@@ -2,7 +2,10 @@
 
 - **Status** — accepted (2026-11-12); amended 2026-11-27 by
   [#2811](https://github.com/The-Verscienta/kiln_cms/issues/2811) (turning
-  off a platform kind sends a platform notice, see "Amendment").
+  off a platform kind sends a platform notice, see "Amendment"); amended
+  2026-11-28 by [#3496](https://github.com/The-Verscienta/kiln_cms/issues/3496)
+  (how a platform notice survives an older release, see "Amendment
+  (2026-11-28)").
 - **References** — [#2245](https://github.com/The-Verscienta/kiln_cms/issues/2245)
   (owner decisions D1–D7 of 2026-11-08, the 2026-11-09 answers, OC-1 to OC-3
   of 2026-11-10 and the two 2026-11-12 decisions, all in its comments; PRs
@@ -252,3 +255,35 @@ id), with the same rules as a site's notice:
   kept apart from the site's so neither path can write the other's.
 
 Turning a kind back on, or saving it unchanged, raises nothing.
+
+## Amendment (2026-11-28, #3496): a platform notice on a release that cannot load it
+
+Adding `:platform_notice` to `AlertDispatch.channel`'s `one_of` while the
+column was plain `:atom` broke the two-step rule for atom columns
+([releasing.md](../releasing.md#new-values-in-an-atom-column)): v1.13.0 cannot
+load the row, and its delivery trigger, which does not look at the channel,
+schedules it anyway. Each job fails all ten attempts on the load and is
+discarded without `failed_at` or the `alert_failed` event, so the scheduler
+queues another while the row is under a day old, and the notice is never
+delivered there. A delivered notice met v1.13.0's summary trigger, which
+leaves out only `notice`, and failed the same way. That residue stays: a
+rollback to v1.13.0 loses a pending notice, and an operator stops the retries
+by stamping `failed_at` ([For operators](../security-alerts.md#for-operators)).
+
+From this release:
+
+- **Stamped at birth.** A platform notice is inserted with `summary_sent_at`
+  set (`AlertGate`'s notice SQL), so no summary trigger, this release's or
+  v1.13.0's, matches it once delivered. At the insert rather than at
+  delivery, so it holds whichever code delivers the row.
+- **Allow-lists, not exclusions.** `:deliver_alert` names
+  `[:site, :platform, :notice, :platform_notice]` and `:deliver_summary`
+  `[:site, :platform]`. A channel a later release adds is never scheduled
+  here, and a new channel must join `one_of` and the delivery list together
+  (a test enforces it).
+- **`KnownAtom`.** `channel` loads an unknown value as `UnknownAtom`. A
+  delivery run straight on such a row logs, sends nothing and fails without
+  stamping, leaving the row to the release that wrote it.
+
+This release is the switch step for the column, so the next channel can ship
+in the release after it. No migration.
