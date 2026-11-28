@@ -2786,6 +2786,11 @@ msgstr "Alrededor del %{percentage}% de las frases parecen pasivas (recomendaci�
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format
+msgid "About %{percent}% done"
+msgstr "Aproximadamente %{percent}% completado"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
 msgid "About Re-send"
 msgstr "Acerca de Reenviar"
 
@@ -5000,6 +5005,11 @@ msgstr "Los registros de las copias de seguridad están desactivados mientras la
 #, elixir-autogen, elixir-format
 msgid "Backup pages"
 msgstr "Páginas de copias de seguridad"
+
+#: lib/kiln_cms_web/live/backup_live.ex
+#, elixir-autogen, elixir-format
+msgid "Backup progress"
+msgstr "Progreso de la copia de seguridad"
 
 #: lib/kiln_cms_web/live/backup_live.ex
 #, elixir-autogen, elixir-format

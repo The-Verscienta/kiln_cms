@@ -81,6 +81,11 @@ defmodule KilnCMSWeb.BackupLive do
   A backup is a chain of step jobs behind a cluster-wide lock. While one holds
   it, a strip says which step it is on (and which media part of how many), and
   whether another backup is queued behind it; the page polls while that is so.
+  A `KilnCMS.Backups.Progress` message about that chain, or about any while
+  the strip is empty, makes it re-read sooner (#3489), throttled to one
+  re-read at a time; the poll stays the source of truth, since a message
+  reaches only clustered nodes. The strip's bar is an approximate percent
+  by steps, read from the lock.
   "Back up now" stays enabled: a request while one runs queues, and later ones
   fold into the queued one when it is of the same kind (a fresh backup into a
   fresh one, a resume into a resume of the same stamp); a request of another
@@ -203,6 +208,7 @@ defmodule KilnCMSWeb.BackupLive do
     Manifest,
     Markers,
     Presence,
+    Progress,
     Resend
   }
 
@@ -230,6 +236,8 @@ defmodule KilnCMSWeb.BackupLive do
   # stops polling then rather than for as long as it stays open.
   @poll_interval_ms 3_000
   @max_polls 1_200
+  # At most one re-read per this long for a burst of progress messages.
+  @progress_throttle_ms 500
   @per_page 25
   @disk_timeout_ms 5_000
   @idle_disk %{state: :idle, running?: false, dirty?: false, ref: nil}
@@ -237,11 +245,14 @@ defmodule KilnCMSWeb.BackupLive do
   @impl true
   def mount(_params, _session, socket) do
     if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      if connected?(socket), do: Progress.subscribe()
+
       {:ok,
        socket
        |> assign(:page_title, gettext("Backups"))
        |> assign(:poll_timer, nil)
        |> assign(:polls_left, @max_polls)
+       |> assign(:progress_ref, nil)
        |> assign(:page, 1)
        |> assign(:focus_run, nil)
        |> assign(:runs, [])
@@ -899,6 +910,48 @@ defmodule KilnCMSWeb.BackupLive do
     end
   end
 
+  # A backup's progress message (#3489, `KilnCMS.Backups.Progress`): a nudge
+  # to re-read, never what the page shows. One about the chain on the strip,
+  # or any while the strip is empty (a chain started elsewhere), asks for one
+  # re-read, at most every #{@progress_throttle_ms} ms however many come in;
+  # one about another chain is ignored. Re-checked here and again when the
+  # re-read runs: a user demoted since gets nothing new.
+  def handle_info({:kiln_backup_progress, 1, %{} = payload}, socket) do
+    cond do
+      not KilnCMSWeb.LiveUserAuth.platform_admin?(socket) -> deny(socket)
+      not progress_for_page?(payload, socket.assigns.in_flight) -> {:noreply, socket}
+      true -> {:noreply, schedule_progress_refresh(socket)}
+    end
+  end
+
+  # A version this node doesn't know: the poll still follows the backup.
+  def handle_info({:kiln_backup_progress, _version, _payload}, socket), do: {:noreply, socket}
+
+  # The throttled re-read: what a poll tick reads, without spending a poll.
+  # The poll timer is never canceled or replaced here: when one is armed it
+  # stays the only one. When none is (the strip was empty, or the polls ran
+  # out), the poll starts again with a fresh budget, so an idle page follows
+  # a chain that started elsewhere.
+  def handle_info({:progress_refresh, ref}, %{assigns: %{progress_ref: ref}} = socket) do
+    if KilnCMSWeb.LiveUserAuth.platform_admin?(socket) do
+      socket =
+        socket
+        |> assign(:progress_ref, nil)
+        |> assign(:downloads, Backups.download_refusal())
+        |> fresh_budget_unless_polling()
+        |> load_status()
+        |> load_in_flight()
+        |> load_history()
+        |> poll()
+
+      {:noreply, socket}
+    else
+      socket |> assign(:progress_ref, nil) |> deny()
+    end
+  end
+
+  def handle_info({:progress_refresh, _stale}, socket), do: {:noreply, socket}
+
   # A disk read that hasn't answered in time (#2417): the page says so and
   # keeps what it knew. The read itself is left to finish; no other starts
   # while it runs. A timer of an earlier read is ignored.
@@ -1266,10 +1319,10 @@ defmodule KilnCMSWeb.BackupLive do
     end
   end
 
-  # Polling rather than PubSub: a backup runs every few hours at most, so one
-  # timer on an open admin page is cheaper than a topic, a broadcast and a
-  # subscription that exist for this one screen. One timer at a time, and only
-  # while the lock is held.
+  # The database poll is the source of truth and the fallback: progress
+  # messages (#3489) only reach nodes clustered with the one that sent them,
+  # and only make the page re-read sooner. One timer at a time, and only
+  # while the lock is held; a progress re-read never arms a second one.
   defp poll(%{assigns: %{poll_timer: ref}} = socket) when is_reference(ref), do: socket
 
   defp poll(socket) do
@@ -1279,6 +1332,29 @@ defmodule KilnCMSWeb.BackupLive do
     else
       socket
     end
+  end
+
+  # No poll timer armed: the poll that follows starts with a full budget.
+  defp fresh_budget_unless_polling(%{assigns: %{poll_timer: ref}} = socket)
+       when is_reference(ref),
+       do: socket
+
+  defp fresh_budget_unless_polling(socket), do: assign(socket, :polls_left, @max_polls)
+
+  # The chain on the strip, or any chain while the strip is empty.
+  defp progress_for_page?(%{chain: chain}, nil), do: is_binary(chain)
+  defp progress_for_page?(%{chain: chain}, %{chain: chain}) when is_binary(chain), do: true
+  defp progress_for_page?(_payload, _in_flight), do: false
+
+  # One pending re-read at a time: a message while one is pending joins it.
+  defp schedule_progress_refresh(%{assigns: %{progress_ref: ref}} = socket)
+       when is_reference(ref),
+       do: socket
+
+  defp schedule_progress_refresh(socket) do
+    ref = make_ref()
+    Process.send_after(self(), {:progress_refresh, ref}, @progress_throttle_ms)
+    assign(socket, :progress_ref, ref)
   end
 
   @impl true
@@ -1760,6 +1836,25 @@ defmodule KilnCMSWeb.BackupLive do
         <p :if={@in_flight.stamp} class="font-mono text-xs text-base-content/70">
           {@in_flight.stamp}
         </p>
+        <%!-- #3489: approximate, by steps (`Progress.percent/3`), read from
+              the lock like the step above; never the current file. --%>
+        <div
+          :if={progress_percent(@in_flight)}
+          data-role="progress"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow={progress_percent(@in_flight)}
+          aria-valuetext={gettext("About %{percent}% done", percent: progress_percent(@in_flight))}
+          aria-label={gettext("Backup progress")}
+          class="mt-1.5 h-1.5 w-full max-w-xs overflow-hidden rounded bg-info/15"
+        >
+          <div
+            class="h-full bg-info transition-[width] duration-500 motion-reduce:transition-none"
+            style={"width: #{progress_percent(@in_flight)}%"}
+          >
+          </div>
+        </div>
         <p :if={@in_flight.waiting} data-role="queued" class="text-xs text-base-content/70">
           {queued_label(@in_flight.waiting)}
           <span :if={is_nil(@in_flight.waiting.resume)} data-role="queued-components">
@@ -1808,6 +1903,15 @@ defmodule KilnCMSWeb.BackupLive do
       </button>
     </section>
     """
+  end
+
+  # How far the backup on the strip is, by steps (#3489): none while a resume
+  # waits to start, which is not progress.
+  defp progress_percent(%{resume_waiting?: true}), do: nil
+
+  defp progress_percent(%{step: step, part: part} = in_flight) do
+    total = if step == :archive, do: in_flight[:parts_total], else: in_flight[:destinations_total]
+    Progress.percent(step, part, total)
   end
 
   # A resume waiting to start (#2816): what for.

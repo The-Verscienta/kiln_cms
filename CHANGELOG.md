@@ -98,6 +98,9 @@ else.
 - **Backups: a Log tab shows what each step of a backup recorded, filtered by level and redacted again when shown, with "View log" on each History row and a text download of the log (part of #2230).**
   Platform admins only; refused while `KILN_CONSOLE_HOST` is unset and there is more than one organization. The download shares the `:export` limit and is logged, not audited. No migration; rolling the pin back is safe.
   ([#3488](https://github.com/The-Verscienta/kiln_cms/pull/3488) · [long form](docs/changelog/unreleased.md#backup-log-viewer))
+- **Backups: the Backups page and the Log tab follow a running backup about half a second after each change on clustered nodes, and the in-flight strip shows an approximate percent by steps (#3489, completes #2230).**
+  The 3-second poll stays the source of truth and the fallback on unclustered nodes. No migration; rolling the pin back is safe.
+  ([#3492](https://github.com/The-Verscienta/kiln_cms/pull/3492) · [long form](docs/changelog/unreleased.md#backup-live-progress))
 - **Backups: a report after each backup, by email to the platform admins who choose it (failures only by default, every run, or off) and in the bell for every failed or partly off-site run, with a "recovered" email when a failed backup is resumed and succeeds (part A of #2229).**
   Queued in the same transaction as the run's outcome, ids only; content is redacted and display-sanitized. Re-sends are not reported.
   ([long form](docs/changelog/unreleased.md#backup-reports))
