@@ -2,7 +2,8 @@ defmodule KilnCMSWeb.SignInBreachedPasswordTest do
   @moduledoc """
   The breached-password check at an administrator's sign-in (#2407), at each
   door that carries a password: the sign-in form (LiveView), the no-JavaScript
-  form POST behind it, and `POST /api/auth/sign_in`. A refusal lands on the
+  form POST behind it, and `POST /api/auth/sign_in` with its second step
+  `POST /api/auth/sign_in/verify` (#3435). A refusal lands on the
   reset page (or the API's `403 password_reset_required`) with no session and
   no token; a warning signs in and says so. One lookup per sign-in, none per
   keystroke.
@@ -26,9 +27,12 @@ defmodule KilnCMSWeb.SignInBreachedPasswordTest do
   alias KilnCMS.CMS
   alias KilnCMS.TwoFactorFixtures
   alias KilnCMSWeb.AuthController
+  alias KilnCMSWeb.BearerAuth
+  alias KilnCMSWeb.Endpoint
 
   @form "#user-password-sign-in-with-password"
   @hand_off "#user-password-sign-in-with-password-sign-in-with-token"
+  @pending_salt "api two-factor pending"
 
   setup do
     Cachex.clear(PasswordNotice.cache())
@@ -227,6 +231,29 @@ defmodule KilnCMSWeb.SignInBreachedPasswordTest do
       assert get_session(conn, :pending_2fa)
       assert get_session(conn, :password_breach_notice) == "sign_in"
     end
+
+    test "a warned two-factor administrator sees the warning once the code verifies" do
+      {user, secret} = TwoFactorFixtures.enabled_user(role: :viewer)
+      make_admin!(user)
+      pw = TwoFactorFixtures.password()
+      enable!(&ok(&1, breached_body(pw, 9)))
+      checks!(:warn)
+
+      held = post_sign_in(user, pw)
+      assert redirected_to(held) == "/sign-in/verify"
+
+      done =
+        held
+        |> recycle()
+        |> Plug.Conn.put_private(:plug_skip_csrf_protection, true)
+        |> post(~p"/sign-in/verify", %{"code" => TwoFactorFixtures.current_code(secret)})
+
+      assert redirected_to(done)
+      assert get_session(done, "user_token")
+      assert get_session(done, :password_breach_notice) == nil
+      assert Phoenix.Flash.get(done.assigns.flash, :error) == PasswordNotice.message(:sign_in)
+      assert requests() == 1
+    end
   end
 
   describe "POST /api/auth/sign_in" do
@@ -298,6 +325,217 @@ defmodule KilnCMSWeb.SignInBreachedPasswordTest do
                json_response(api_sign_in(admin!(pw), pw <> "x"), 401)["errors"]
 
       assert requests() == 0
+    end
+  end
+
+  describe "POST /api/auth/sign_in/verify (#3435)" do
+    # A two-factor account with `role` on the default org, and the password
+    # its fixture signs in with.
+    defp two_factor!(role \\ :admin) do
+      {user, secret} = TwoFactorFixtures.enabled_user(role: :viewer)
+
+      if role == :admin do
+        make_admin!(user)
+      else
+        Ash.Seed.seed!(Accounts.OrgMembership, %{
+          organization_id: Accounts.default_org_id(),
+          user_id: user.id,
+          role: role
+        })
+
+        on_exit(fn -> AccountThrottle.reset(to_string(user.email)) end)
+      end
+
+      {user, secret, TwoFactorFixtures.password()}
+    end
+
+    defp pending!(user, password) do
+      body = json_response(api_sign_in(user, password), 200)
+      assert body["two_factor_required"] == true
+      # The warning waits for the second factor: the first step's body never
+      # carries it.
+      refute Map.has_key?(body, "password_breach")
+      body["pending_token"]
+    end
+
+    defp api_verify(pending, code) do
+      conn!()
+      |> put_req_header("content-type", "application/json")
+      |> post("/api/auth/sign_in/verify", %{pending_token: pending, code: code})
+    end
+
+    defp warned! do
+      {user, secret, pw} = two_factor!()
+      enable!(&ok(&1, breached_body(pw, 9)))
+      checks!(:warn)
+      {user, secret, pw}
+    end
+
+    test "a warned password: the 200 is silent, the verify 201 carries password_breach" do
+      {user, secret, pw} = warned!()
+      pending = pending!(user, pw)
+
+      body = json_response(api_verify(pending, TwoFactorFixtures.current_code(secret)), 201)
+
+      assert body["password_breach"] == %{"status" => "breached"}
+      assert {:ok, authed} = BearerAuth.user_from_token(body["token"])
+      assert authed.id == user.id
+      # One lookup across both steps: the verdict rides the pending token.
+      assert requests() == 1
+      # A headless sign-in leaves no note for a browser to show.
+      refute PasswordNotice.take(user.id)
+    end
+
+    test "a recovery code carries it too" do
+      {user, _secret, pw} = warned!()
+      {_user, [code | _]} = TwoFactorFixtures.with_recovery_codes(user)
+      pending = pending!(user, pw)
+
+      body = json_response(api_verify(pending, code), 201)
+      assert body["password_breach"] == %{"status" => "breached"}
+    end
+
+    test "a wrong code keeps the pending token, and its warning" do
+      {user, secret, pw} = warned!()
+      pending = pending!(user, pw)
+
+      assert [%{"code" => "invalid_code"}] =
+               json_response(api_verify(pending, "000000"), 401)["errors"]
+
+      body = json_response(api_verify(pending, TwoFactorFixtures.current_code(secret)), 201)
+      assert body["password_breach"] == %{"status" => "breached"}
+    end
+
+    test "a blocked password is the 403, with no pending token to verify" do
+      {user, _secret, pw} = two_factor!()
+      enable!(&ok(&1, breached_body(pw, 9)))
+      checks!(:block)
+
+      body = json_response(api_sign_in(user, pw), 403)
+      assert [%{"code" => "password_reset_required"}] = body["errors"]
+      refute Map.has_key?(body, "pending_token")
+    end
+
+    test "with the check off, the verify 201 has no field and nothing was looked up" do
+      {user, secret, pw} = two_factor!()
+      enable!(&ok(&1, breached_body(pw, 9)))
+
+      for policy <- [
+            %{breached_password_policy: :warn, check_on_sign_in: false},
+            %{breached_password_policy: :off, check_on_sign_in: true}
+          ] do
+        CMS.save_site_password_policy!(policy,
+          authorize?: false,
+          tenant: Accounts.default_org_id()
+        )
+
+        pending = pending!(user, pw)
+        body = json_response(api_verify(pending, TwoFactorFixtures.current_code(secret)), 201)
+
+        assert is_binary(body["token"])
+        refute Map.has_key?(body, "password_breach"), inspect(policy)
+      end
+
+      assert requests() == 0
+    end
+
+    test "a clean password: the verify 201 it always was" do
+      {user, secret, pw} = two_factor!()
+      enable!(&ok(&1, clean_body(pw)))
+      checks!(:warn)
+
+      pending = pending!(user, pw)
+      body = json_response(api_verify(pending, TwoFactorFixtures.current_code(secret)), 201)
+
+      assert is_binary(body["token"])
+      refute Map.has_key?(body, "password_breach")
+      assert requests() == 1
+    end
+
+    test "an editor or a viewer of a warning site is not checked, and gets no field" do
+      for role <- [:editor, :viewer] do
+        {user, secret, pw} = two_factor!(role)
+        enable!(&ok(&1, breached_body(pw, 9)))
+        checks!(:warn)
+
+        pending = pending!(user, pw)
+        body = json_response(api_verify(pending, TwoFactorFixtures.current_code(secret)), 201)
+
+        refute Map.has_key?(body, "password_breach"), inspect(role)
+      end
+
+      assert requests() == 0
+    end
+
+    test "a tampered warned pending token is refused" do
+      {user, secret, pw} = warned!()
+      pending = pending!(user, pw)
+      code = TwoFactorFixtures.current_code(secret)
+
+      # One character inside the ciphertext, which the GCM tag covers.
+      flipped =
+        pending
+        |> String.split(".")
+        |> List.update_at(-1, fn part ->
+          <<head::binary-size(10), char, rest::binary>> = part
+          <<head::binary, if(char == ?A, do: ?B, else: ?A), rest::binary>>
+        end)
+        |> Enum.join(".")
+
+      refute flipped == pending
+
+      for tampered <- ["x" <> pending, flipped] do
+        assert [%{"code" => "pending_expired"}] =
+                 json_response(api_verify(tampered, code), 401)["errors"]
+      end
+    end
+
+    test "an expired warned pending token is refused" do
+      {user, secret, _pw} = two_factor!()
+
+      stale =
+        Phoenix.Token.encrypt(
+          Endpoint,
+          @pending_salt,
+          %{
+            "user_id" => user.id,
+            "token" => "stub.jwt.token",
+            "jti" => Ecto.UUID.generate(),
+            "password_breach" => 1
+          },
+          signed_at: System.system_time(:second) - 301
+        )
+
+      assert [%{"code" => "pending_expired"}] =
+               json_response(api_verify(stale, TwoFactorFixtures.current_code(secret)), 401)[
+                 "errors"
+               ]
+    end
+
+    test "a redeemed warned pending token cannot be replayed" do
+      {user, secret, pw} = warned!()
+      pending = pending!(user, pw)
+      code = TwoFactorFixtures.current_code(secret)
+
+      assert %{"password_breach" => _} = json_response(api_verify(pending, code), 201)
+
+      assert [%{"code" => "pending_expired"}] =
+               json_response(api_verify(pending, code), 401)["errors"]
+    end
+
+    test "a pending token from the previous release, with no warning key, still verifies" do
+      # Rolling deploy: minted by a node that never wrote the key. It reads as
+      # not warned, which is what that release would have answered.
+      {user, secret, pw} = warned!()
+      pending = pending!(user, pw)
+
+      assert {:ok, payload} = Phoenix.Token.decrypt(Endpoint, @pending_salt, pending)
+      old = Phoenix.Token.encrypt(Endpoint, @pending_salt, Map.delete(payload, "password_breach"))
+
+      body = json_response(api_verify(old, TwoFactorFixtures.current_code(secret)), 201)
+
+      refute Map.has_key?(body, "password_breach")
+      assert {:ok, _authed} = BearerAuth.user_from_token(body["token"])
     end
   end
 end
