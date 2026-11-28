@@ -29,9 +29,13 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
 
     * `:verified`, or `:disabled` (verification is off): a search engine, at
       the search-engine ceiling.
-    * `{:unverified, :failed}`, the claim is **proven** false (by DNS, or for
-      DuckDuckBot by an address outside DuckDuckGo's fresh published list):
-      charged as `:empty`, a client that will not say what it is.
+    * `{:unverified, :failed}`, the claim is **proven** false by DNS, or
+      `{:unverified, :not_listed}`, a DuckDuckBot claim from an address
+      outside DuckDuckGo's fresh published list (#2852): charged as `:empty`,
+      a client that will not say what it is. A list can lag the vendor, so
+      `:not_listed` is not a proof, but a lagging list costs a real crawler
+      only this budget; the 404 guard waits for the list to catch up
+      (`KilnCMS.CrawlerVerification.listing_overdue?/3`).
     * any other `{:unverified, reason}` (the lookup is pending, was skipped or
       got no answer to its PTR or forward query, the engine cannot be
       verified, or the address is not one
@@ -199,10 +203,11 @@ defmodule KilnCMSWeb.Plugs.RateLimit do
       status when status in [:verified, :disabled] ->
         {:search_engine, BotBudgets.operator_limit(:search_engine)}
 
-      # Proven false: a client lying about what it is gets the ceiling of one
-      # that says nothing.
-      {:unverified, :failed} ->
-        unverified_crawler(engine, :failed)
+      # Proven false, or outside the only list that could vouch for it: a
+      # client lying about what it is gets the ceiling of one that says
+      # nothing.
+      {:unverified, reason} when reason in [:failed, :not_listed] ->
+        unverified_crawler(engine, reason)
         {:empty, BotBudgets.operator_limit(:empty)}
 
       # Not proven either way: the search-engine class, but never above what

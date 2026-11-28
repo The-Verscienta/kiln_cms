@@ -2,8 +2,10 @@ defmodule KilnCMS.CrawlerVerification.Ranges do
   @moduledoc """
   Search engines' published crawler IP range lists (#2586), held per node,
   so `KilnCMS.CrawlerVerification.check/3` can verify an address inside the
-  claimed engine's list without a DNS lookup, and can prove a DuckDuckBot
-  claim false, which DNS cannot.
+  claimed engine's list without a DNS lookup, and can say that a DuckDuckBot
+  claim comes from outside DuckDuckGo's list, which DNS cannot
+  (`{:unverified, :not_listed}`: evidence, not proof, since a list lags the
+  vendor, #2852).
 
   Google, Bing, Apple and DuckDuckGo publish lists
   (`KilnCMS.CrawlerVerification.Engines`); Yandex and Baidu do not.
@@ -165,6 +167,24 @@ defmodule KilnCMS.CrawlerVerification.Ranges do
     case age_ms(engine, config) do
       age when is_integer(age) -> age >= 0 and age <= config[:max_age_ms]
       nil -> false
+    end
+  end
+
+  @doc """
+  How long ago `engine`'s installed list was fetched, in milliseconds, or
+  `nil` when no list was ever installed.
+
+  Measured on this node's monotonic clock. A list a peer sent is dated by
+  the age it carried, measured on this node's clock (`RangesSync`), and a
+  refetch moves the time even when the list is unchanged. Says nothing about
+  freshness: see `fresh?/2`. Options: `:now` (monotonic milliseconds, a test
+  seam).
+  """
+  @spec age_ms(atom(), keyword()) :: integer() | nil
+  def age_ms(engine, opts \\ []) do
+    case fetched_at(engine) do
+      nil -> nil
+      at -> Keyword.get(opts, :now, now()) - at
     end
   end
 
@@ -387,13 +407,6 @@ defmodule KilnCMS.CrawlerVerification.Ranges do
     slot = slot(engine)
     :atomics.put(clock, slot + 1, fetched_at)
     :atomics.put(clock, slot + 2, 1)
-  end
-
-  defp age_ms(engine, config) do
-    case fetched_at(engine) do
-      nil -> nil
-      at -> Keyword.get(config, :now, now()) - at
-    end
   end
 
   defp now, do: System.monotonic_time(:millisecond)

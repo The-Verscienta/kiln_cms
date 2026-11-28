@@ -52,9 +52,14 @@ defmodule KilnCMS.Security.ScannerGuard do
       bingbot, ...) is exempt from the miss threshold only, and only until
       `KilnCMS.CrawlerVerification` proves it false (#2254). A verified claim
       keeps the exemption, always. A claim whose address fails the
-      reverse-DNS check, or a DuckDuckBot claim from an address outside
-      DuckDuckGo's fresh published list (#2586), counts like any other
-      client. A claim whose PTR query
+      reverse-DNS check counts like any other client. A DuckDuckBot claim
+      from an address outside DuckDuckGo's fresh published list (#2586) is
+      evidence, not a proof, since a list can lag a vendor's new crawler
+      (#2852): it counts once the list has had a day to name it and still
+      does not (`CrawlerVerification.listing_overdue?/3`: the counted client
+      is still outside a list fetched 24 hours or more after the instance
+      first saw it miss), or in a marked IPv6 `/64`, and keeps the exemption until
+      then. A claim whose PTR query
       got no answer (a timeout, SERVFAIL) keeps it only while this node's
       resolver is itself failing (`CrawlerVerification.resolver_failing?/1`,
       #2588): while other lookups get answers, the silence is the address's
@@ -69,11 +74,32 @@ defmodule KilnCMS.Security.ScannerGuard do
       it recently failed its own lookup, or went silent while the resolver
       answered. The guard counts a `/64` as one client, so a scanner rotating
       through it would otherwise never meet its own failures. IPv4 has no
-      mark: it is counted per address, which its own verdict covers. With
-      verification off (`KILN_CRAWLER_VERIFICATION=false`) the engine's name
-      in the user agent is enough. Link-preview fetchers (facebookexternalhit,
+      mark: it is counted per address, which its own verdict covers. A claim
+      nothing can check over IPv6 (DuckDuckBot, whose list holds no IPv6
+      range) from an unmarked `/64` goes to the claim tally below (#3450);
+      over IPv4 it keeps the exemption. With verification off
+      (`KILN_CRAWLER_VERIFICATION=false`) the engine's name in the user agent
+      is enough. Link-preview fetchers (facebookexternalhit,
       Twitterbot, LinkedInBot) and Slurp are not exempt. **Bait paths count
       for everyone**: no crawler has a reason to ask for one.
+
+  ## The claim tally (#3450)
+
+  An IPv6 DuckDuckBot claim can be checked against nothing: DNS has no domain
+  for it, its list no IPv6 range, and no lookup ever marks its `/64`. So the
+  guard's own observations are the evidence. Each such miss from an unmarked
+  `/64` is first charged to a claim tally of its own (bucket
+  `scanner_404_claim`, the same client key, `threshold` and `window_ms` as
+  the miss counter). While the tally allows, the miss is exempt. Once the
+  tally is past `threshold` in the window, the miss **also** charges the
+  ordinary miss counter, and trips it like any other miss, with the reason
+  `miss_threshold`. So the claims a `/64` makes count toward the miss
+  threshold once the `/64` has made `threshold` of them in the window: a
+  client making only such claims trips on miss `2 × threshold + 1` of a
+  window. One that mixes them with counted misses trips once its counted
+  misses pass `threshold`: the first `threshold` claims of a window are
+  exempt, and once the tally is full each further claim adds one to the
+  counted misses. No setting of its own.
 
   At the moment of the trip the block is also skipped when the address has a
   successful `:sign_in` event on this site in the last 24 hours (one indexed
@@ -121,6 +147,7 @@ defmodule KilnCMS.Security.ScannerGuard do
   @miss_bucket "scanner_404"
   @bait_bucket "scanner_bait"
   @trip_bucket "scanner_trip"
+  @claim_bucket "scanner_404_claim"
 
   @note "Automatic: scanner 404s"
   @note_prefix "Automatic:"
@@ -129,7 +156,7 @@ defmodule KilnCMS.Security.ScannerGuard do
 
   # The search engines whose name in a user agent exempts a request from the
   # miss threshold while crawler verification is off. With it on, the claim is
-  # read by `BotClass.search_engine/1` and checked instead (`good_bot?/2`).
+  # read by `BotClass.search_engine/1` and checked instead (`claim_policy/2`).
   @search_bots ~w(googlebot storebot-google bingbot duckduckbot applebot yandexbot baiduspider
                    seznambot mojeekbot)
 
@@ -214,7 +241,7 @@ defmodule KilnCMS.Security.ScannerGuard do
          cidr: cidr,
          key: "#{org_id}|#{cidr}",
          bait?: bait?(path),
-         bot?: good_bot?(conn, ip),
+         claim: claim_policy(conn, ip),
          request: Recorder.request_context(conn)
        }}
     else
@@ -241,49 +268,73 @@ defmodule KilnCMS.Security.ScannerGuard do
     end
   end
 
-  # A search-engine claim is exempt from the miss threshold unless DNS has
-  # proven it false (#2254): a lookup still pending or skipped keeps the
-  # exemption, so a real crawler's first misses from a new address never
-  # count, unless its /64 is marked (#2838). An unanswered PTR query keeps it
-  # only while the resolver itself is failing (#2588); otherwise the silence
-  # is the address's own reverse zone. An unanswered forward query for an
-  # engine-domain name, given its full budget, keeps it.
+  # What a miss from this request is charged to: `:exempt` (nothing),
+  # `:counted` (the miss counter) or `:tallied` (the claim tally first, see
+  # the moduledoc). A request that names no search engine is `:counted`.
   # `context/2` has already turned away untrusted forwarding and non-public
   # addresses, so the check sees the client's own address. With verification
   # off, the name in the user agent is enough, as before.
-  defp good_bot?(conn, ip) do
+  defp claim_policy(conn, ip) do
     ua = conn |> Plug.Conn.get_req_header("user-agent") |> List.first("")
 
     if CrawlerVerification.enabled?() do
       case BotClass.search_engine(ua) do
-        nil -> false
-        engine -> exempt_claim?(CrawlerVerification.check(engine, ip), ip)
+        nil -> :counted
+        engine -> policy(CrawlerVerification.check(engine, ip), ip, engine)
       end
     else
       lowered = String.downcase(ua)
-      Enum.any?(@search_bots, &String.contains?(lowered, &1))
+      if Enum.any?(@search_bots, &String.contains?(lowered, &1)), do: :exempt, else: :counted
     end
   end
 
-  # A forward query that got no answer for a name under the engine's own
-  # domain, with its full time budget, is silence in the engine's zone, which
-  # a scanner cannot cause from its own reverse zone, so it keeps the
-  # exemption, and no mark takes it away. One a slow PTR answer starved is
-  # `:error`. A claim nothing has proven either way loses the exemption in a
-  # marked /64 (#2838); the mark is read only for those, never against a
-  # verified claim.
-  defp exempt_claim?(:verified, _ip), do: true
-  defp exempt_claim?(:disabled, _ip), do: true
-  defp exempt_claim?({:unverified, :failed}, _ip), do: false
-  defp exempt_claim?({:unverified, :forward_error}, _ip), do: true
-  defp exempt_claim?({:unverified, :not_public}, _ip), do: true
+  # A verified claim is exempt, always; a mark is never read against it. DNS
+  # proving the claim false counts. A forward query that got no answer for a
+  # name under the engine's own domain, with its full time budget, is
+  # silence in the engine's zone, which a scanner cannot cause from its own
+  # reverse zone, so it keeps the exemption and no mark takes it away (one a
+  # slow PTR answer starved is `:error`). An unanswered PTR query keeps it
+  # only while the resolver itself is failing (#2588). A claim nothing has
+  # proven either way loses it in a marked /64 (#2838).
+  defp policy(:verified, _ip, _engine), do: :exempt
+  defp policy(:disabled, _ip, _engine), do: :exempt
+  defp policy({:unverified, :failed}, _ip, _engine), do: :counted
+  defp policy({:unverified, :forward_error}, _ip, _engine), do: :exempt
+  defp policy({:unverified, :not_public}, _ip, _engine), do: :exempt
 
-  defp exempt_claim?({:unverified, :error}, ip),
-    do: CrawlerVerification.resolver_failing?() and not CrawlerVerification.network_flagged?(ip)
+  defp policy({:unverified, :error}, ip, _engine) do
+    if CrawlerVerification.resolver_failing?() and not CrawlerVerification.network_flagged?(ip),
+      do: :exempt,
+      else: :counted
+  end
 
-  defp exempt_claim?({:unverified, reason}, ip)
-       when reason in [:pending, :skipped, :unverifiable],
-       do: not CrawlerVerification.network_flagged?(ip)
+  defp policy({:unverified, reason}, ip, _engine) when reason in [:pending, :skipped] do
+    if CrawlerVerification.network_flagged?(ip), do: :counted, else: :exempt
+  end
+
+  # Outside the only list that could vouch for the claim (#2852): counted
+  # once the list has had its grace to name the client and still does not,
+  # never on a lagging list alone. Not tallied during the grace.
+  defp policy({:unverified, :not_listed}, ip, engine) do
+    if CrawlerVerification.network_flagged?(ip) or
+         CrawlerVerification.listing_overdue?(engine, ip),
+       do: :counted,
+       else: :exempt
+  end
+
+  # Nothing to check it against (#3450). Over IPv6 the /64's own misses are
+  # the evidence; over IPv4 the claim keeps the exemption, as before.
+  defp policy({:unverified, :unverifiable}, ip, _engine) do
+    cond do
+      CrawlerVerification.network_flagged?(ip) -> :counted
+      ipv6_client?(ip) -> :tallied
+      true -> :exempt
+    end
+  end
+
+  # An IPv4-mapped IPv6 address is the IPv4 client it carries.
+  defp ipv6_client?({0, 0, 0, 0, 0, 0xFFFF, _hi, _lo}), do: false
+  defp ipv6_client?(ip), do: tuple_size(ip) == 8
 
   defp bait?(path) do
     normalized = path |> String.downcase() |> String.trim_trailing("/")
@@ -348,10 +399,7 @@ defmodule KilnCMS.Security.ScannerGuard do
   defp tripped(ctx, config) do
     window = config[:window_ms]
 
-    miss =
-      if ctx.bot?,
-        do: :allow,
-        else: verdict(ThrottleStore.hit(@miss_bucket, ctx.key, window, config[:threshold]))
+    miss = miss_verdict(ctx.claim, ctx.key, window, config[:threshold])
 
     bait =
       if ctx.bait?,
@@ -362,6 +410,19 @@ defmodule KilnCMS.Security.ScannerGuard do
       bait == :deny -> {"bait_path", config[:bait_threshold]}
       miss == :deny -> {"miss_threshold", config[:threshold]}
       true -> nil
+    end
+  end
+
+  defp miss_verdict(:exempt, _key, _window, _threshold), do: :allow
+
+  defp miss_verdict(:counted, key, window, threshold),
+    do: verdict(ThrottleStore.hit(@miss_bucket, key, window, threshold))
+
+  # The tally first; past it, the miss counts like any other (#3450).
+  defp miss_verdict(:tallied, key, window, threshold) do
+    case verdict(ThrottleStore.hit(@claim_bucket, key, window, threshold)) do
+      :allow -> :allow
+      :deny -> miss_verdict(:counted, key, window, threshold)
     end
   end
 

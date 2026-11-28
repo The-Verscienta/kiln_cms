@@ -80,6 +80,15 @@ defmodule KilnCMS.Security do
       define :save_platform_alert_settings, action: :save
     end
 
+    # First sightings of crawler claims outside a published list (#2852).
+    # Recorded by `KilnCMS.Security.CrawlerSightingStore` in raw SQL — see
+    # its moduledoc — so the only actions are the forbidden read and the
+    # system-only prune.
+    resource KilnCMS.Security.CrawlerSighting do
+      define :list_crawler_sightings, action: :read
+      define :prune_crawler_sightings, action: :prune
+    end
+
     # The Security posture page (#2252), and its detail-free snapshot for
     # `GET /api/security/posture` (#2521, cached 30 s per site and scope set).
     resource KilnCMS.Security.PostureReport do

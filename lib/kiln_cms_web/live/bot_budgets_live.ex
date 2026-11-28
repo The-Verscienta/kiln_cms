@@ -220,7 +220,7 @@ defmodule KilnCMSWeb.BotBudgetsLive do
   defp class_hint(:search_engine),
     do:
       gettext(
-        "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot, Applebot, SeznamBot and MojeekBot, when the address checks out as theirs. A claim proven false counts as No user agent."
+        "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot, Applebot, SeznamBot and MojeekBot, when the address checks out as theirs. A claim proven false, or a DuckDuckBot claim from outside DuckDuckGo's published list, counts as No user agent."
       )
 
   defp class_hint(:ai_crawler),
@@ -235,7 +235,7 @@ defmodule KilnCMSWeb.BotBudgetsLive do
   defp class_hint(:empty),
     do:
       gettext(
-        "Requests that don't say what they are, and claimed search engines proven not to be them."
+        "Requests that don't say what they are, and claimed search engines proven not to be them or not on their published list."
       )
 
   defp source_label(%{clamped?: true, site_percent: site}),

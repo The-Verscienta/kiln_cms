@@ -410,6 +410,32 @@ defmodule KilnCMSWeb.Plugs.DeliveryClassLimitTest do
       assert StubCrawlerResolver.calls(:ptr, address) == 0
     end
 
+    # #2852: outside the only list that could vouch for it, the claim is
+    # charged as no user agent, like a proven failure, but reported apart.
+    test "DuckDuckBot outside DuckDuckGo's fresh list is charged as no user agent",
+         %{conn: conn, address: address} do
+      on_exit(&CrawlerVerification.Ranges.clear/0)
+      CrawlerVerification.Ranges.put_fixture(:duckduckgo, ["45.143.200.0/24"])
+
+      assert allowed_of(conn, @duckduckbot, 4) == 2
+      assert_received {:unverified_crawler, %{count: 1}, unverified}
+      assert unverified == %{engine: :duckduckgo, reason: :not_listed}
+      assert_received {:client_class, _, %{class: :empty, result: :allowed}}
+      refute_received {:client_class, _, %{class: :search_engine}}
+      assert StubCrawlerResolver.calls(:ptr, address) == 0
+    end
+
+    test "DuckDuckBot inside DuckDuckGo's fresh list gets the search-engine ceiling",
+         %{conn: conn, address: address} do
+      on_exit(&CrawlerVerification.Ranges.clear/0)
+      {a, b, c, _d} = address
+      CrawlerVerification.Ranges.put_fixture(:duckduckgo, ["#{a}.#{b}.#{c}.0/24"])
+
+      assert allowed_of(conn, @duckduckbot, 22) == 20
+      assert_received {:client_class, _, %{class: :search_engine, result: :allowed}}
+      refute_received {:unverified_crawler, _, _}
+    end
+
     test "every other class never reaches the verifier", %{conn: conn, address: address} do
       for ua <- [@browser, @gptbot, @curl, nil, "okhttp/4.12.0"], do: hit(conn, ua)
 

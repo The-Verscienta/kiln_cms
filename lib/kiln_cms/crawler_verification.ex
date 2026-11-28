@@ -8,9 +8,10 @@ defmodule KilnCMS.CrawlerVerification do
   (`KilnCMS.CrawlerVerification.Ranges`: Google, Bing, Apple, DuckDuckGo) is
   verified at once, with no DNS lookup, no rate-cap charge and no cache
   write. One outside it is still checked by DNS, so a list that lags behind
-  the vendor never turns a real Googlebot into a failure; only DuckDuckBot,
-  which publishes no reverse-DNS domain, is proven false by its list alone.
-  A missing or stale list decides nothing.
+  the vendor never turns a real Googlebot into a failure. DuckDuckBot, which
+  publishes no reverse-DNS domain, has only its list: an address outside it
+  is `{:unverified, :not_listed}`, never a proof, since a list can lag a
+  vendor's new addresses (#2852). A missing or stale list decides nothing.
 
   The DNS check is the one every engine documents: the address's PTR name must
   fall under the engine's domain (`KilnCMS.CrawlerVerification.Engines`), and
@@ -28,10 +29,15 @@ defmodule KilnCMS.CrawlerVerification do
     * `:verified`: the claim is proven, by the engine's fresh published list
       or by DNS.
     * `:disabled`: verification is off (`enabled: false`); nothing is checked.
-    * `{:unverified, :failed}`: the claim is proven false (no PTR record, a PTR
-      name outside the engine's domain, or a forward lookup that does not
-      contain the address; for DuckDuckBot, an address outside DuckDuckGo's
-      fresh published list).
+    * `{:unverified, :failed}`: DNS proved the claim false (no PTR record, a
+      PTR name outside the engine's domain, or a forward lookup that does not
+      contain the address).
+    * `{:unverified, :not_listed}`: the engine publishes no reverse-DNS
+      domain, and the address is outside its fresh published list
+      (DuckDuckBot, #2852). Evidence against the claim, not a proof: a list
+      lags the vendor's newest addresses. No lookup is made, nothing is
+      cached and nothing is marked. `listing_overdue?/3` says when the list
+      has had long enough to catch up.
     * `{:unverified, :pending}`: a lookup is running, or was just started.
     * `{:unverified, :error}`: the last lookup's PTR query could not get an
       answer (a timeout, SERVFAIL, a refused query). Cached for a short while
@@ -127,6 +133,58 @@ defmodule KilnCMS.CrawlerVerification do
   IPv4 client it carries. They live in a cache of their own
   (`:max_network_marks`), never the verified cache an attacker cannot write.
 
+  ## List-only evidence (#2852)
+
+  An address outside DuckDuckGo's list may be a spoofer or a crawler the
+  list does not name yet. `listing_overdue?/3` tells them apart for
+  `KilnCMS.Security.ScannerGuard`: it is `true` once the counted client
+  (an IPv4 address, or an IPv6 address's `/64`) is still outside a list this
+  node fetched at least `:listing_grace_ms` (24 h) after the instance first
+  asked about that client. A vendor that adds a crawler's address publishes
+  it within a day; a spoofer's address never appears.
+
+  The first sighting is the instance's, not a node's: a row of
+  `KilnCMS.Security.CrawlerSighting` per client and engine, keyed by a hash
+  of the client, dated by the database's clock and written by
+  `KilnCMS.Security.CrawlerSightingStore` in one upsert that keeps the
+  earliest live sighting and returns it. So a deploy, a restart or a new
+  node does not start the grace again, and every node counts the same
+  client from the same moment. The clock starts at the guard's first
+  question, which is a counted 404 miss, not the client's first request.
+  Each question moves the row's expiry to `:listing_ttl_ms` (48 h) on; a
+  client idle longer starts again, as does one the prune has removed.
+
+  Each node keeps a read-through copy in a cache of its own
+  (`:max_listing_entries`, 100,000 clients, least-recently-written first),
+  so a busy client costs one database statement per `:listing_refresh_ms`
+  (5 min), not one per 404, and a flood of marks or rejections cannot evict
+  it. An entry evicted at the cap, or lost with a restart of the verifier's
+  processes, is read back from the database: it costs a statement, never
+  the grace. The statement is never run inside a transaction.
+
+  **When the database cannot answer**, the node's copy is used if it has
+  one, however old; with none, the claim is not overdue. That errs toward
+  not counting, as every failure here does: a database outage leaves new
+  spoofers exempt for its length, and a real crawler is never counted on a
+  sighting nobody recorded. The client's database question then waits
+  `:listing_retry_ms` (30 s): its copy is kept with a retry time in place of
+  its refresh time, or, with no copy, a marker answering "no sighting" is
+  cached until then, so an outage costs a client one statement timeout per
+  retry window rather than one per 404. Every unanswered statement emits
+  `[:kiln_cms, :crawler_verification, :sighting_unavailable]`, and the node
+  logs an error at most once a minute, with the database error's message
+  alone: a missing table or a missing grant would otherwise leave list-only
+  spoofers exempt with no sign of it. A question asked inside a transaction
+  is none of these: the store is not asked, nothing is cached, logged or
+  emitted, and the next question outside one asks the database.
+
+  The sighting is wall-clock milliseconds by the database's clock; the
+  list's fetch time is this node's wall clock less the list's age
+  (`KilnCMS.CrawlerVerification.Ranges.age_ms/2`, which dates a list a peer
+  sent by the age it carried and moves on every refetch, unchanged or not).
+  The two clocks differ only by the skew between a node and its database,
+  seconds against a day's grace.
+
   ## Is the resolver failing?
 
   A lookup that gets no answer means one of two things: this node's resolver
@@ -160,8 +218,18 @@ defmodule KilnCMS.CrawlerVerification do
       asks about; never a visitor's
     * `:network_mark_ttl_ms` (1 h): how long a network mark is kept after
       its last write
+    * `:listing_grace_ms` (24 h): how long after a client's first sighting a
+      list must have been fetched before `listing_overdue?/3` believes it
+    * `:listing_ttl_ms` (48 h): how long a first sighting is kept after the
+      last call that asked about it
+    * `:listing_refresh_ms` (5 min): how long a node trusts its cached copy
+      of a sighting before asking the database again, which also moves the
+      sighting's expiry on
+    * `:listing_retry_ms` (30 s): how long a node waits before asking the
+      database about a client again after it could not answer
     * `:max_entries` (50,000), `:max_verified_entries` (10,000),
-      `:max_network_marks` (10,000), `:max_concurrency` (16): read once, by
+      `:max_network_marks` (10,000), `:max_listing_entries` (100,000),
+      `:max_concurrency` (16): read once, by
       `KilnCMS.CrawlerVerification.Supervisor`
 
   The range lists have their own (`KilnCMS.CrawlerVerification.Ranges`).
@@ -179,11 +247,18 @@ defmodule KilnCMS.CrawlerVerification do
     * `[:kiln_cms, :crawler_verification, :skipped]`, `%{count: 1}`,
       `%{engine, reason}`: a lookup not started, `reason` `:busy` or
       `:rate_limited`.
+    * `[:kiln_cms, :crawler_verification, :sighting_unavailable]`,
+      `%{count: 1}`, `%{engine, reason}`: the database could not answer a
+      first-sighting question (#2852), `reason` `:connection`, `:ownership`,
+      `:postgres` (Postgres refused the statement: a missing table or grant
+      among them) or `:other`.
 
   Two warnings are logged once per node: the first time the concurrency limit
   turns a lookup away, and after `:error_warning_after` lookups in a row could
   not reach an answer (a node with no DNS egress), naming
-  `KILN_CRAWLER_VERIFICATION=false`.
+  `KILN_CRAWLER_VERIFICATION=false`. An unanswered first-sighting question is
+  logged at `:error` at most once a minute per node (see "List-only
+  evidence").
   """
 
   require Logger
@@ -193,11 +268,13 @@ defmodule KilnCMS.CrawlerVerification do
   alias KilnCMS.CrawlerVerification.InFlight
   alias KilnCMS.CrawlerVerification.Ranges
   alias KilnCMS.Security.Cidr
+  alias KilnCMS.Security.CrawlerSightingStore
   alias KilnCMSWeb.RateLimit
 
   @cache :kiln_cms_crawler_verification
   @verified_cache :kiln_cms_crawler_verification_verified
   @network_cache :kiln_cms_crawler_verification_networks
+  @listing_cache :kiln_cms_crawler_verification_listing
   @task_supervisor KilnCMS.CrawlerVerification.TaskSupervisor
   @canary_supervisor KilnCMS.CrawlerVerification.CanarySupervisor
 
@@ -230,7 +307,11 @@ defmodule KilnCMS.CrawlerVerification do
     rate_scope: "crawler_verify",
     error_warning_after: 20,
     health_window_ms: :timer.minutes(1),
-    canary_address: {8, 8, 8, 8}
+    canary_address: {8, 8, 8, 8},
+    listing_grace_ms: :timer.hours(24),
+    listing_ttl_ms: :timer.hours(48),
+    listing_refresh_ms: :timer.minutes(5),
+    listing_retry_ms: :timer.seconds(30)
   ]
 
   # Error reasons named in telemetry; anything else is `:other`, so a metric
@@ -238,7 +319,14 @@ defmodule KilnCMS.CrawlerVerification do
   @error_reasons [:timeout, :servfail, :refused, :formerr, :notimp, :econnrefused, :nxdomain]
 
   @type reason ::
-          :pending | :failed | :unverifiable | :not_public | :skipped | :error | :forward_error
+          :pending
+          | :failed
+          | :not_listed
+          | :unverifiable
+          | :not_public
+          | :skipped
+          | :error
+          | :forward_error
   @type status :: :verified | :disabled | {:unverified, reason()}
   @type mark :: :failed | :silent
   @type verdict ::
@@ -257,6 +345,10 @@ defmodule KilnCMS.CrawlerVerification do
   @doc "The network-mark cache's name: IPv6 `/64`s that produced negative evidence (#2838)."
   @spec network_cache_name() :: atom()
   def network_cache_name, do: @network_cache
+
+  @doc "The first-sighting cache's name: this node's copy of `KilnCMS.Security.CrawlerSighting` (#2852)."
+  @spec listing_cache_name() :: atom()
+  def listing_cache_name, do: @listing_cache
 
   @doc "The lookup task supervisor's name."
   @spec task_supervisor() :: atom()
@@ -369,6 +461,72 @@ defmodule KilnCMS.CrawlerVerification do
   end
 
   @doc false
+  # Test seam: date `engine`'s first sighting of `ip`'s client
+  # (`listing_overdue?/3`) at `at_ms`, wall-clock milliseconds, in the
+  # database, lapsing the configured TTL from now, and drop this node's copy
+  # so the next question reads it.
+  @spec put_first_seen(atom(), :inet.ip_address(), integer(), keyword()) :: :ok
+  def put_first_seen(engine, ip, at_ms, opts \\ []) when is_integer(at_ms) do
+    config = config(opts)
+
+    case listing_key(normalize_ip(ip)) do
+      nil ->
+        :ok
+
+      key ->
+        CrawlerSightingStore.put(store_key(key), engine, at_ms, config[:listing_ttl_ms])
+        Cachex.del(listing_cache(config), {engine, key})
+    end
+
+    :ok
+  end
+
+  @doc false
+  # Test seam: `{first_seen_ms, ms_until_it_lapses}` for `engine`'s sighting
+  # of `ip`'s client in the database, or nil.
+  @spec first_seen(atom(), :inet.ip_address()) :: {integer(), integer()} | nil
+  def first_seen(engine, ip) do
+    case listing_key(normalize_ip(ip)) do
+      nil -> nil
+      key -> CrawlerSightingStore.fetch(store_key(key), engine)
+    end
+  end
+
+  @doc false
+  # Test seam: this node's copy of `engine`'s sighting of `ip`'s client, as
+  # `{first_seen_ms, refresh_at}` (`refresh_at` in monotonic milliseconds), or
+  # nil.
+  @spec cached_first_seen(atom(), :inet.ip_address(), keyword()) ::
+          {integer(), integer()} | nil
+  def cached_first_seen(engine, ip, opts \\ []) do
+    with key when not is_nil(key) <- listing_key(normalize_ip(ip)),
+         {:ok, {at, _refresh_at} = cached} when is_integer(at) <-
+           Cachex.get(listing_cache(config(opts)), {engine, key}) do
+      cached
+    else
+      _none -> nil
+    end
+  end
+
+  @doc false
+  # Test seam: forget every engine's sighting of `ip`'s client, in the
+  # database (when the caller can reach it) and in this node's copy.
+  @spec forget_listing(:inet.ip_address(), keyword()) :: :ok
+  def forget_listing(ip, opts \\ []) do
+    case listing_key(normalize_ip(ip)) do
+      nil ->
+        :ok
+
+      key ->
+        CrawlerSightingStore.forget(store_key(key))
+        cache = listing_cache(config(opts))
+        Enum.each(Engines.engines(), &Cachex.del(cache, {&1, key}))
+    end
+
+    :ok
+  end
+
+  @doc false
   # Test seam: let the once-per-node warnings fire again.
   def reset_warnings do
     InFlight.reset_latches()
@@ -432,11 +590,158 @@ defmodule KilnCMS.CrawlerVerification do
     :exit, _reason -> false
   end
 
+  @doc """
+  Has `engine`'s published list had long enough to name `ip`, and still does
+  not? See "List-only evidence" in the moduledoc.
+
+  `true` only while `ip` is outside `engine`'s fresh list
+  (`KilnCMS.CrawlerVerification.Ranges.lookup/3` answers `:out`) and that
+  list was fetched, by this node's wall clock, at least `:listing_grace_ms`
+  after the instance first asked about `ip`'s client. The first call for a
+  client records the sighting and answers `false`. Only a client outside the
+  list is recorded.
+
+  Never waits on DNS. A cache hit is one cache read; a miss, or a copy older
+  than `:listing_refresh_ms`, adds one database statement
+  (`KilnCMS.Security.CrawlerSightingStore.record/3`) and a cache write. When
+  the database cannot answer, the cached copy decides if there is one, else
+  `false`, and the database is not asked about the client again for
+  `:listing_retry_ms`. `false` with verification off, for anything that is
+  not an address, and when the verifier's processes are restarting.
+
+  Options, beyond the configuration keys (all test seams): `:now`
+  (monotonic milliseconds: when the cached copy is due, and the list's age),
+  `:system_now` (wall-clock milliseconds, from which the list's age is
+  taken), `:ranges` (options for `Ranges.lookup/3`) and `:listing_cache`.
+  """
+  @spec listing_overdue?(atom(), :inet.ip_address() | nil, keyword()) :: boolean()
+  def listing_overdue?(engine, ip, opts \\ []) do
+    config = config(opts)
+    ip = normalize_ip(ip)
+    ranges = Keyword.get(config, :ranges, [])
+
+    now = Keyword.get(config, :now, now())
+
+    with true <- config[:enabled] == true,
+         key when not is_nil(key) <- listing_key(ip),
+         :out <- Ranges.lookup(engine, ip, ranges),
+         {:ok, first_seen} <- sighting(engine, key, now, config),
+         age when is_integer(age) <- Ranges.age_ms(engine, now: now) do
+      system_now = Keyword.get(config, :system_now, System.system_time(:millisecond))
+      system_now - age >= first_seen + config[:listing_grace_ms]
+    else
+      _not_overdue -> false
+    end
+  rescue
+    _exception -> false
+  catch
+    :exit, _reason -> false
+  end
+
+  # The client's first sighting, as wall-clock milliseconds by the
+  # database's clock: this node's copy while it is due no refresh, else the
+  # database's answer (recorded now if there is none), copied here. A read
+  # then a write rather than a Cachex transaction, which would queue every
+  # 404 of every listed claim through one process: two misses racing each
+  # other both ask the database, whose upsert gives both the same answer. A
+  # cache that cannot answer is no sighting at all.
+  defp sighting(engine, key, now, config) do
+    cache = listing_cache(config)
+    cache_key = {engine, key}
+
+    case Cachex.get(cache, cache_key) do
+      {:ok, {:unknown, retry_at}} when now < retry_at -> :error
+      {:ok, {first_seen, refresh_at}} when now < refresh_at -> {:ok, first_seen}
+      {:ok, cached} -> refresh_sighting(cache, cache_key, cached, now, config)
+      {:error, _reason} -> :error
+    end
+  end
+
+  defp refresh_sighting(cache, {engine, key} = cache_key, cached, now, config) do
+    case CrawlerSightingStore.record(store_key(key), engine, config[:listing_ttl_ms]) do
+      {:ok, first_seen} ->
+        Cachex.put(cache, cache_key, {first_seen, now + config[:listing_refresh_ms]},
+          expire: config[:listing_ttl_ms]
+        )
+
+        {:ok, first_seen}
+
+      # Inside a transaction the store was never asked, and nothing is wrong
+      # with it: no copy is written, so the next question outside one asks.
+      {:unavailable, :in_transaction} ->
+        cached_answer(cached)
+
+      # The database cannot answer: the last copy it gave, however old, or
+      # no sighting (not overdue), and no question to it again for
+      # `:listing_retry_ms`, so an outage does not hold every 404 for the
+      # statement's timeout.
+      {:unavailable, reason} ->
+        retry_later(cache, cache_key, cached, now + config[:listing_retry_ms], config)
+        sighting_unavailable(engine, reason, now)
+        cached_answer(cached)
+    end
+  end
+
+  defp cached_answer({first_seen, _refresh_at}) when is_integer(first_seen), do: {:ok, first_seen}
+  defp cached_answer(_none), do: :error
+
+  # A copy keeps its first sighting and its expiry; with none, a marker that
+  # answers "no sighting" until the retry, and lapses soon after it.
+  defp retry_later(cache, cache_key, {first_seen, _refresh_at}, retry_at, _config)
+       when is_integer(first_seen),
+       do: Cachex.update(cache, cache_key, {first_seen, retry_at})
+
+  defp retry_later(cache, cache_key, _none, retry_at, config),
+    do: Cachex.put(cache, cache_key, {:unknown, retry_at}, expire: config[:listing_retry_ms])
+
+  # Logged at most once a minute per node, with the exception's message
+  # alone: no address, no key, no engine. The event is one per unanswered
+  # statement, which the retry bounds at one per client per retry window.
+  defp sighting_unavailable(engine, reason, now) do
+    if InFlight.claim_interval(:sighting_unavailable, now, :timer.minutes(1)) do
+      Logger.error(
+        "Crawler sighting store unavailable (#{unavailable_message(reason)}); " <>
+          "list-only search-engine claims (#2852) are not counted as overdue on " <>
+          "this node, except from a sighting it already holds, until the database answers."
+      )
+    end
+
+    :telemetry.execute(
+      [:kiln_cms, :crawler_verification, :sighting_unavailable],
+      %{count: 1},
+      %{engine: engine, reason: unavailable_reason(reason)}
+    )
+  end
+
+  defp unavailable_message(%{__exception__: true} = error), do: Exception.message(error)
+  defp unavailable_message(_reason), do: "unknown reason"
+
+  defp unavailable_reason(%DBConnection.ConnectionError{}), do: :connection
+  defp unavailable_reason(%DBConnection.OwnershipError{}), do: :ownership
+  defp unavailable_reason(%Postgrex.Error{}), do: :postgres
+  defp unavailable_reason(_reason), do: :other
+
+  defp listing_cache(config), do: Keyword.get(config, :listing_cache, @listing_cache)
+
+  # The client the 404 guard counts, as a tuple: an IPv4 address (an
+  # IPv4-mapped one is already its IPv4 address here), or an IPv6 address's
+  # `/64`. Never a string, never joined with anything a client sends.
+  defp listing_key({a, b, c, d}), do: {:inet, a, b, c, d}
+  defp listing_key(ip), do: network_key(ip)
+
+  # The string `CrawlerSightingStore` hashes for a client: the address, or
+  # the `/64` in CIDR form. Never stored as is.
+  defp store_key({:inet, a, b, c, d}), do: "inet:#{a}.#{b}.#{c}.#{d}"
+
+  defp store_key({:inet6, a, b, c, d}),
+    do: "inet6:#{:inet.ntoa({a, b, c, d, 0, 0, 0, 0})}/64"
+
   # ---- check/3 --------------------------------------------------------------
 
   # The address first: a range list says nothing about a proxy's address.
   # Then the engine's published list (#2586), where only `:in` decides for an
-  # engine DNS can check; then DNS.
+  # engine DNS can check; then DNS. For an engine DNS cannot check, `:out` is
+  # evidence, never a proof (#2852): lists lag.
   defp check_address(engine, ip, config) do
     if worth_a_lookup?(ip, config) do
       ranges = Ranges.lookup(engine, ip, Keyword.get(config, :ranges, []))
@@ -444,7 +749,7 @@ defmodule KilnCMS.CrawlerVerification do
       cond do
         ranges == :in -> :verified
         Engines.verifiable?(engine) -> check_dns(engine, ip, config)
-        ranges == :out -> {:unverified, :failed}
+        ranges == :out -> {:unverified, :not_listed}
         true -> {:unverified, :unverifiable}
       end
     else

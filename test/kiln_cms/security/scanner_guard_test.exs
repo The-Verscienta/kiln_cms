@@ -13,6 +13,7 @@ defmodule KilnCMS.Security.ScannerGuardTest do
 
   alias KilnCMS.CMS
   alias KilnCMS.CrawlerVerification
+  alias KilnCMS.CrawlerVerification.Ranges
   alias KilnCMS.Security
   alias KilnCMS.Security.Cidr
   alias KilnCMS.Security.IpBlocklist
@@ -94,6 +95,23 @@ defmodule KilnCMS.Security.ScannerGuardTest do
 
   defp events(tenant \\ org_id()) do
     Security.list_events!(%{type: :ip_auto_blocked}, actor: admin(), tenant: tenant)
+  end
+
+  defp claim_rows, do: bucket_rows("scanner_404_claim")
+  defp miss_rows, do: bucket_rows("scanner_404")
+
+  defp bucket_rows(bucket) do
+    %{rows: [[n]]} =
+      KilnCMS.Repo.query!("SELECT count(*) FROM throttle_counters WHERE bucket = $1", [bucket])
+
+    n
+  end
+
+  # Fresh, with no first sighting before or after the test (#2852).
+  defp listed_out(ip \\ PublicAddress.v4()) do
+    CrawlerVerification.forget_listing(ip)
+    on_exit(fn -> CrawlerVerification.forget_listing(ip) end)
+    fresh_ip(ip)
   end
 
   defp counter_rows do
@@ -437,18 +455,13 @@ defmodule KilnCMS.Security.ScannerGuardTest do
 
     @duckduckbot "DuckDuckBot/1.1; (+http://duckduckgo.com/duckduckbot.html)"
 
-    test "DuckDuckBot outside its fresh published list is counted, inside it is exempt (#2586)",
-         %{ip: ip} do
+    test "DuckDuckBot inside its fresh published list is exempt (#2586)", %{ip: ip} do
       on_exit(&KilnCMS.CrawlerVerification.Ranges.clear/0)
       {a, b, c, _} = ip
       KilnCMS.CrawlerVerification.Ranges.put_fixture(:duckduckgo, ["#{a}.#{b}.#{c}.0/24"])
 
       miss(10, "/gone", ua: @duckduckbot, ip: ip)
       assert rules() == []
-
-      outside = {a, b, rem(c + 1, 256), 9}
-      miss(4, "/gone", ua: @duckduckbot, ip: outside)
-      assert [_] = rules()
     end
 
     test "DuckDuckBot with no fresh list stays exempt", %{ip: ip} do
@@ -803,15 +816,21 @@ defmodule KilnCMS.Security.ScannerGuardTest do
       assert [_rule] = rules()
     end
 
-    test "a DuckDuckBot claim nothing can check counts in a marked /64, not in an unmarked one" do
+    # Unmarked, the claim goes to the claim tally (#3450); marked, every miss
+    # counts at once, tally or not.
+    test "a DuckDuckBot claim nothing can check counts at once in a marked /64" do
       [marked, ip] = in_one_64(2)
       assert CrawlerVerification.check(:duckduckgo, ip) == {:unverified, :unverifiable}
 
-      miss(10, "/gone", ua: @duckduckbot, ip: ip)
+      miss(3, "/gone", ua: @duckduckbot, ip: ip)
       assert rules() == []
+      assert claim_rows() == 1
+      assert miss_rows() == 0
 
       CrawlerVerification.put_network_mark(marked, :failed)
-      miss(4, "/gone", ua: @duckduckbot, ip: ip)
+      miss(3, "/gone", ua: @duckduckbot, ip: ip)
+      assert rules() == []
+      miss(1, "/gone", ua: @duckduckbot, ip: ip)
       assert [rule] = rules()
       assert rule.cidr == slash_64(ip)
     end
@@ -849,6 +868,271 @@ defmodule KilnCMS.Security.ScannerGuardTest do
 
       assert counter_rows() == 0
       assert rules() == []
+    end
+  end
+
+  # #2852: an address outside DuckDuckGo's list may be a crawler the list
+  # does not name yet. It counts once the list has had its grace to name it.
+  describe "list-only evidence (#2852)" do
+    @duckduckbot "DuckDuckBot/1.1; (+http://duckduckgo.com/duckduckbot.html)"
+    @grace :timer.hours(24)
+    @range_v4 "45.143.200.0/24"
+    @range_v6 "2a01:4f8:1::/48"
+
+    # `now` (monotonic) and `wall` are read together; the guard reads the
+    # real clocks a moment later, so a sighting is put a margin either side
+    # of the grace rather than on it (`CrawlerVerificationTest` holds the
+    # exact boundary, with both clocks pinned).
+    setup do
+      on_exit(&Ranges.clear/0)
+      %{now: System.monotonic_time(:millisecond), wall: System.system_time(:millisecond)}
+    end
+
+    test "outside a fresh list, exempt during the grace", %{now: now} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+      ip = listed_out()
+
+      miss(10, "/gone", ua: @duckduckbot, ip: ip)
+      assert rules() == []
+      assert counter_rows() == 0
+      assert {_first_seen, _ttl} = CrawlerVerification.first_seen(:duckduckgo, ip)
+    end
+
+    test "still outside a list fetched a full grace after the first miss: counted and blocked",
+         %{now: now, wall: wall} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+      ip = listed_out()
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - @grace - 1_000)
+
+      miss(3, "/gone", ua: @duckduckbot, ip: ip)
+      assert rules() == []
+      miss(1, "/gone", ua: @duckduckbot, ip: ip)
+      assert [rule] = rules()
+      assert rule.cidr == "#{:inet.ntoa(ip)}/32"
+      assert [event] = events()
+      assert event.metadata["reason"] == "miss_threshold"
+      assert claim_rows() == 0
+    end
+
+    # The sighting is the instance's: a deploy that wiped this node's copy
+    # does not give the spoofer another day.
+    test "a day-old sighting still counts after this node's copy is wiped",
+         %{now: now, wall: wall} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+      ip = listed_out()
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - @grace - 1_000)
+      miss(1, "/gone", ua: @duckduckbot, ip: ip)
+      Cachex.clear(CrawlerVerification.listing_cache_name())
+
+      miss(3, "/gone", ua: @duckduckbot, ip: ip)
+      assert [rule] = rules()
+      assert rule.cidr == "#{:inet.ntoa(ip)}/32"
+    end
+
+    test "a list fetched within the grace is not believed yet", %{now: now, wall: wall} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+      ip = listed_out()
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - @grace + 60_000)
+
+      miss(10, "/gone", ua: @duckduckbot, ip: ip)
+      assert rules() == []
+    end
+
+    test "outside the list in a marked IPv6 /64: counted during the grace", %{now: now} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4, @range_v6], now: now)
+      [marked, ip] = in_one_64(2)
+      listed_out(ip)
+      assert CrawlerVerification.check(:duckduckgo, ip) == {:unverified, :not_listed}
+      CrawlerVerification.put_network_mark(marked, :failed)
+
+      miss(3, "/gone", ua: @duckduckbot, ip: ip)
+      assert rules() == []
+      miss(1, "/gone", ua: @duckduckbot, ip: ip)
+      assert [rule] = rules()
+      assert rule.cidr == slash_64(ip)
+    end
+
+    test "bait paths count during the grace", %{now: now} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+      ip = listed_out()
+
+      miss(2, "/wp-login.php", ua: @duckduckbot, ip: ip)
+      assert rules() == []
+      miss(1, "/wp-login.php", ua: @duckduckbot, ip: ip)
+      assert [event] = events()
+      assert event.metadata["reason"] == "bait_path"
+    end
+
+    test "a real DuckDuckBot the list names later is never blocked", %{now: now, wall: wall} do
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now - 10)
+      ip = listed_out()
+
+      miss(10, "/gone", ua: @duckduckbot, ip: ip)
+      assert rules() == []
+
+      # A day on, the vendor's list names it.
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - @grace - 1_000)
+      {a, b, c, _d} = ip
+      Ranges.put_fixture(:duckduckgo, [@range_v4, "#{a}.#{b}.#{c}.0/24"], now: now)
+      assert CrawlerVerification.check(:duckduckgo, ip) == :verified
+
+      miss(10, "/gone", ua: @duckduckbot, ip: ip)
+      assert rules() == []
+      assert counter_rows() == 0
+    end
+
+    test "with a stale list the claim is unverifiable and keeps the exemption over IPv4",
+         %{now: now, wall: wall} do
+      max_age = Ranges.config()[:max_age_ms]
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now, age_ms: max_age + 1)
+      ip = listed_out()
+      CrawlerVerification.put_first_seen(:duckduckgo, ip, wall - @grace - max_age - 1_000)
+      assert CrawlerVerification.check(:duckduckgo, ip) == {:unverified, :unverifiable}
+
+      miss(10, "/gone", ua: @duckduckbot, ip: ip)
+      assert rules() == []
+      assert counter_rows() == 0
+    end
+
+    test "with the guard off nothing is recorded", %{now: now} do
+      Application.delete_env(:kiln_cms, :scanner_blocking)
+      Ranges.put_fixture(:duckduckgo, [@range_v4], now: now)
+      ip = listed_out()
+
+      miss(10, "/gone", ua: @duckduckbot, ip: ip)
+      assert CrawlerVerification.first_seen(:duckduckgo, ip) == nil
+      assert counter_rows() == 0
+    end
+  end
+
+  # #3450: an IPv6 DuckDuckBot claim has nothing to be checked against, so
+  # the /64's own misses are the evidence.
+  describe "claims with nothing to check (#3450)" do
+    @duckduckbot "DuckDuckBot/1.1; (+http://duckduckgo.com/duckduckbot.html)"
+    @duckduckbot_https "Mozilla/5.0 (compatible; DuckDuckBot-Https/1.1; https://duckduckgo.com/duckduckbot)"
+
+    # No list: DuckDuckBot over IPv6 is `:unverifiable` (`in_one_64/1` gives
+    # each test a /64 with no mark).
+    setup do
+      Ranges.clear()
+      :ok
+    end
+
+    # threshold 3: misses 1-3 fill the tally, 4-6 charge the miss counter up
+    # to the threshold, the 7th crosses it.
+    test "a DuckDuckBot UA rotating through an unmarked /64 is blocked on miss 2N + 1" do
+      ips = in_one_64(7)
+      {first_six, [seventh]} = Enum.split(ips, 6)
+
+      for {ip, k} <- Enum.with_index(first_six, 1) do
+        assert CrawlerVerification.check(:duckduckgo, ip) == {:unverified, :unverifiable}
+        miss(1, "/gone", ua: @duckduckbot, ip: ip)
+        assert rules() == [], "blocked after #{k} misses"
+        if k == 3, do: assert(miss_rows() == 0)
+      end
+
+      miss(1, "/gone", ua: @duckduckbot, ip: seventh)
+      assert [rule] = rules()
+      assert rule.cidr == slash_64(seventh)
+      assert [event] = events()
+      assert event.metadata["reason"] == "miss_threshold"
+    end
+
+    test "every DuckDuckBot user agent in one /64 shares the tally" do
+      ips = in_one_64(7)
+
+      for {ip, k} <- Enum.with_index(ips) do
+        ua = if rem(k, 2) == 0, do: @duckduckbot, else: @duckduckbot_https
+        miss(1, "/gone", ua: ua, ip: ip)
+      end
+
+      assert [_rule] = rules()
+    end
+
+    test "tallied misses sum with the /64's counted ones once the tally is full" do
+      [ip | _] = in_one_64(1)
+
+      miss(3, "/gone", ua: @duckduckbot, ip: ip)
+      miss(3, "/gone", ip: ip)
+      assert rules() == []
+
+      miss(1, "/gone", ua: @duckduckbot, ip: ip)
+      assert [_rule] = rules()
+    end
+
+    test "N tallied and N counted misses in one window trip nothing" do
+      [ip | _] = in_one_64(1)
+
+      miss(2, "/gone", ip: ip)
+      miss(2, "/gone", ua: @duckduckbot, ip: ip)
+      miss(1, "/gone", ip: ip)
+      miss(1, "/gone", ua: @duckduckbot, ip: ip)
+      assert rules() == []
+    end
+
+    test "a window rollover forgets the tally" do
+      [ip | _] = in_one_64(1)
+
+      miss(3, "/gone", ua: @duckduckbot, ip: ip)
+
+      KilnCMS.Repo.query!(
+        "UPDATE throttle_counters SET window_index = window_index - 1 " <>
+          "WHERE bucket = 'scanner_404_claim'"
+      )
+
+      miss(4, "/gone", ua: @duckduckbot, ip: ip)
+      assert rules() == []
+    end
+
+    test "over IPv4 the claim keeps the exemption, an IPv4-mapped address included" do
+      ip = fresh_ip(PublicAddress.v4())
+      {a, b, c, d} = fresh_ip(PublicAddress.v4())
+      mapped = {0, 0, 0, 0, 0, 0xFFFF, Bitwise.bsl(a, 8) + b, Bitwise.bsl(c, 8) + d}
+
+      for address <- [ip, mapped] do
+        assert CrawlerVerification.check(:duckduckgo, address) == {:unverified, :unverifiable}
+        miss(10, "/gone", ua: @duckduckbot, ip: address)
+      end
+
+      assert rules() == []
+      assert counter_rows() == 0
+    end
+
+    test "the trip is the ordinary miss-threshold block, with the ordinary event" do
+      test_pid = self()
+      handler = "sg-claim-#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler,
+        [:kiln_cms, :scanner_guard, :blocked],
+        fn _event, measurements, metadata, _config ->
+          send(test_pid, {:blocked, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+      [ip | _] = in_one_64(1)
+
+      miss(7, "/gone", ua: @duckduckbot, ip: ip)
+
+      assert_received {:blocked, %{count: 1}, %{reason: "miss_threshold"}}
+      assert [event] = events()
+
+      assert event.metadata == %{
+               "reason" => "miss_threshold",
+               "count" => 3,
+               "window_minutes" => 10,
+               "block_minutes" => 60
+             }
+    end
+
+    test "with the guard off no tally is written" do
+      Application.delete_env(:kiln_cms, :scanner_blocking)
+      [ip | _] = in_one_64(1)
+
+      miss(10, "/gone", ua: @duckduckbot, ip: ip)
+      assert counter_rows() == 0
     end
   end
 

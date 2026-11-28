@@ -120,8 +120,23 @@ defmodule KilnCMSWeb.BotBudgetsLiveTest do
       {:ok, lv, _html} = admin_live(conn, org)
 
       assert has_element?(lv, "#bot-budget-search_engine", "checks out as theirs")
-      assert has_element?(lv, "#bot-budget-search_engine", "A claim proven false counts as")
-      assert has_element?(lv, "#bot-budget-empty", "proven not to be them")
+
+      assert has_element?(
+               lv,
+               "#bot-budget-search_engine",
+               "A claim proven false, or a DuckDuckBot"
+             )
+
+      # A DuckDuckBot claim outside the list is charged here too, but isn't
+      # proven false: the list can lag the vendor (#2852).
+      assert has_element?(lv, "#bot-budget-search_engine", "outside DuckDuckGo")
+
+      assert has_element?(
+               lv,
+               "#bot-budget-empty",
+               "proven not to be them or not on their published list"
+             )
+
       refute has_element?(lv, "#bot-budget-search_engine-unchecked")
     end
 

@@ -185,15 +185,28 @@ Never counted, so a person or a service is not blocked by mistake:
   address inside the engine's fresh
   [published IP list](bot-budgets.md#published-ip-ranges) is verified and
   exempt.
-  DuckDuckBot has no DNS check: since #2586 a DuckDuckBot claim from an IPv4
-  address outside DuckDuckGo's fresh published list is proven false and
-  counted like any other client. While that list is missing or stale (or
-  ranges are off, `KILN_CRAWLER_RANGES=false`), and over IPv6, DuckDuckBot is
-  exempt as before. **A real DuckDuckBot on an address DuckDuckGo has just
-  added can be counted, and blocked**, until this node has a list that names
-  it: normally within 6 hours, at most 24 if fetches fail (after which the
-  list is stale and the exemption is back). Remove such a block on
-  `/editor/ip-blocks`. When DNS gives no answer
+  DuckDuckBot has no DNS check, so DuckDuckGo's published list (IPv4 only)
+  is the only evidence about its claims:
+  - **From an IPv4 address outside DuckDuckGo's fresh list** (#2852): the
+    claim keeps the exemption for a day, because the list may simply not
+    name a new crawler address yet. It is counted once the address is still
+    outside a list fetched at least 24 hours after this installation first
+    saw it miss; with the 6-hourly fetch, that is 24 to 30 hours after its
+    first miss. The first sighting is kept in the database, so a deploy,
+    a restart or another server does not start the day again. It lapses 48
+    hours after the address's last miss, and the next miss starts a new day.
+  - **Over IPv6** (#3450): each `/64` gets `threshold` DuckDuckBot misses a
+    window free. After that, each one counts toward the miss threshold like
+    any other miss. A `/64` sending only DuckDuckBot claims is blocked on
+    miss `2 × threshold + 1` of a window (121 with the defaults); one
+    mixing them with other misses sooner.
+  - **While the list is missing or stale** (or ranges are off,
+    `KILN_CRAWLER_RANGES=false`), a DuckDuckBot claim from an IPv4 address
+    keeps the exemption.
+
+  A real DuckDuckBot on an address DuckDuckGo has just added is not blocked
+  for the list's lag: the vendor's next list names it within the day. [ADR
+  0095](decisions/0095-a-search-engine-claim-nothing-can-prove-counts-toward-the-404-guard-only-on-evidence-a-real-crawler-cannot-produce.md) records why. When DNS gives no answer
   (#2588):
   - **No answer to the reverse (PTR) query**: the claim keeps the exemption
     only while this node's resolver is itself failing. While the resolver
@@ -219,9 +232,9 @@ Never counted, so a person or a service is not blocked by mistake:
   proves an address's claim false, or its reverse query gets no answer while
   this node's resolver answers others, the node marks the address's `/64`
   for an hour. From then on, a claim from that `/64` that DNS has not proven
-  (still being checked, not started, or DuckDuckBot, which has no DNS check)
-  counts like any other client. A claim DNS has verified stays exempt in a
-  marked `/64`. A verified lookup clears a mark left by an unanswered
+  (still being checked, not started, or DuckDuckBot, which has no DNS check,
+  in or out of its list) counts like any other client, with no free misses.
+  A claim DNS has verified stays exempt in a marked `/64`. A verified lookup clears a mark left by an unanswered
   reverse query, so one timeout for a real crawler does not outlast its next
   verified address; a mark left by a proven-false claim stays until it
   expires. A lookup that could not start (the node is busy, the network
@@ -302,7 +315,9 @@ expire (see
 | Nothing is ever blocked | The variable is not set, or is set to a value Kiln did not recognize (a warning on stderr names it). Or the site is behind a proxy with no `TRUSTED_PROXIES`, or your test client is on a private network. |
 | A visitor reports an empty `403` | They tripped the limit (a crawler gone wrong, a link checker, a browser extension). Find the rule on `/editor/ip-blocks` by its note and **Remove** it, or wait for the expiry. Consider raising `KILN_SCANNER_BLOCKING_THRESHOLD`. |
 | A search engine's address is blocked (most often Baiduspider or YandexBot) | Its claim was proven false, or its reverse zone was slow to answer while this node's resolver answered others, so its misses counted (#2588). Check the address against [Verified search engines](bot-budgets.md#verified-search-engines); if it is the engine's, **Remove** the rule or wait for the expiry. |
-| A DuckDuckBot address is blocked | The address was not in DuckDuckGo's published list when this node last fetched it (#2586). If [duckduckbot.json](https://duckduckgo.com/duckduckbot.json) lists it now, the next fetch (within 6 hours) stops it happening again; **Remove** the rule or wait for the expiry. |
+| A DuckDuckBot IPv4 address is blocked | It was still outside DuckDuckGo's published list in a fetch made at least a day after its first miss here, or it asked for a bait path (#2852). Check it against [duckduckbot.json](https://duckduckgo.com/duckduckbot.json). If the list names it, the address is verified from the next fetch on (within 6 hours); **Remove** the rule or wait for the expiry. If it does not, the claim is spoofed. |
+| A DuckDuckBot IPv6 range is blocked | The `/64` sent more than twice the threshold of DuckDuckBot misses in one window (fewer if it also sent other misses), or another address in it recently failed a lookup (#3450, #2838). DuckDuckGo publishes no IPv6 crawler addresses, so nothing can verify the claim. **Remove** the rule or wait for the expiry if you know the range. |
+| A log error `Crawler sighting store unavailable (…)` | The database did not answer the 404 guard's question about when it first saw a DuckDuckBot address outside the list: an outage, or the `crawler_sightings` table missing because the migration has not run. Logged at most once a minute per server. Until it answers, such claims are not counted except where a server already holds the sighting. Run the migrations (`mix ash.migrate`; in a release, `bin/migrate`) or restore the database. The metric `kiln_cms_crawler_verification_sighting_unavailable_count` counts each unanswered question. |
 | An IPv6 crawler's new addresses are counted | Another address in the same `/64` failed its lookup, or its reverse query went unanswered while this node's resolver worked, in the last hour (#2838). The crawler's verified addresses stay exempt; only its requests from addresses DNS has not verified yet count. On a `/64` shared with others (a hosting provider's), that may be another customer's doing. If the blocked range is the engine's, **Remove** the rule or wait for the expiry; the mark itself expires an hour after the last failed or unanswered lookup in the `/64`. |
 | An address you expected is not blocked | It is exempt (see above), the trip was skipped (cap, recent sign-in) and the window has not rolled over, or the count straddled two windows. |
 | A warning `ScannerGuard: block skipped, at the automatic rule cap` | 300 automatic rules are active on the site. Wait for expiry, remove rules, or raise `max_auto_rules`. |
