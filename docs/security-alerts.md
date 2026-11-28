@@ -390,7 +390,8 @@ the whole installation, not one site.
    the site's form you see **Platform alerts**, with the line "Shown to
    platform admins only. These go to every platform admin, for the whole
    installation. Turning one off is recorded in the instance security log,
-   and every platform admin is sent a notice."
+   and every platform admin is sent a notice." Its **Learn more** link
+   opens this section of the guide in a new tab.
    Site admins who are not platform admins don't see this part.
 2. Untick **API keys over a rate limit**. The line under it reads "A verified
    API key goes over a rate limit. One alert every 15 minutes, then a
@@ -410,8 +411,8 @@ the whole installation, not one site.
    **platform notice**: a bell row in the default site's console, headed
    "Security alerts were turned down", whose inbox line reads "Some platform
    security alerts were turned off", and an email, "Platform security alerts
-   were changed", saying "Turned off: An API key hit a rate limit." with a
-   link to the Security alerts page. In any other site's console it is
+   were changed", saying "Turned off: API keys over a rate limit." (the
+   kind named as its checkbox is) with a link to the Security alerts page. In any other site's console it is
    counted in the "unread platform alerts" entry.
 5. Open **Security log**, then **Instance log**. The save is there as
    **Platform security alerts changed** (`platform_alerts_changed`), with
@@ -485,7 +486,7 @@ mute silences it.
 
 | Change | `change` in the notice | What triggers it |
 |---|---|---|
-| An alert kind turned off | `kind_disabled` | A save of Security alerts that turns off a kind that was on. The notice lists the kinds. Resetting the settings to their defaults (`CMS.reset_site_security_alerts/1`; the page has no reset button) while **Failed sign-ins** was on counts too |
+| An alert kind turned off | `kind_disabled` | A save of Security alerts that turns off a kind that was on. The notice lists the kinds. Resetting the settings to their defaults (`CMS.reset_site_security_alerts/1`; the page has no reset button) while **Failed sign-ins** was on counts too. The email and a Slack message name each kind as its checkbox does ("Turned off: Account locked out."); a webhook's `kinds` keeps the kind names (`lockout`) |
 | Admin notifications switched off | `admin_notifications_off` | A save that unticks **Notify this site's admins by bell and email** |
 | A security webhook changed | `webhook_changed` | Editing an endpoint subscribed to any `security.*` event: its URL changed, **Active** unticked, or a `security.*` event unticked |
 | A security webhook deleted | `webhook_removed` | Deleting such an endpoint |
@@ -728,7 +729,9 @@ A lockout on a site named Example arrives as this body:
 
 A summary's second line says "From (start) to (end)" of the window, and a
 notice links to the security alerts settings instead of the log and, when
-alert kinds were turned off, lists them after "Turned off:". The message is
+alert kinds were turned off, lists them after "Turned off:", each named as
+its checkbox on Security alerts is ("Turned off: Account locked out, New
+admin"). The message is
 in English, like the email. It carries the address only as the site's
 [IP setting](#ip-addresses-in-alerts) allows, and no user id. The full
 rules for the body are in
@@ -823,16 +826,38 @@ What can go wrong:
   (#2809, #2811).** No migration and no setting. From the deploy on, turning
   off `api_key_rate_limited` sends every platform admin a platform notice,
   and a verified key over `media_render`, `preview_api`, `unlock` or
-  `feed_join` raises `api_key_rate_limited`.
-  - **During a rolling deploy.** A node still on the previous release cannot
-    load a platform notice's dispatch row (channel `platform_notice`), so the
-    delivery job fails there and is retried, up to 10 attempts per job and
-    re-queued every minute after that, until a node on the new release
-    delivers it. The notice is late, never sent to the wrong people. A key
-    over one of the new buckets on an old node raises nothing.
-  - **Before rolling back.** Wait until every platform notice written on the
-    new release has been delivered, or accept that it may be lost. This
-    query returns `0` when none is waiting:
+  `feed_join` raises `api_key_rate_limited`. A key over one of the new
+  buckets on a node still on the previous release raises nothing.
+  - **What v1.13.0 does with a platform notice.** A notice is a dispatch row
+    on the channel `platform_notice`, which v1.13.0 cannot load. Its
+    delivery trigger does not look at the channel, so it schedules a pending
+    notice anyway, and the job fails all 10 of its attempts. Attempts 1 to 9
+    each log an `[error]` that begins "Error occurred for
+    KilnCMS.Security.AlertDispatch: %{"id" => …}!", says "Error occurred on
+    action: deliver_alert." and ends in a `CaseClauseError` that "cannot
+    load" the value "for field :channel". The tenth logs nothing. The job is
+    then discarded without stamping the row failed: no `failed_at`, no
+    `[:kiln_cms, :security, :alert_failed]` event and no "was not delivered
+    after its last attempt" line. So the next scheduler run queues a new
+    job, and the cycle repeats for as long as the row is less than a day
+    old. v1.13.0 never delivers it. Oban's own job-error log lines, and an
+    error event per attempt in Sentry when `SENTRY_DSN` is set, may also
+    appear.
+  - **During a rolling deploy.** Nodes on both releases pick up a pending
+    notice. A job on a v1.13.0 node fails as above; a node on this release
+    delivers it, and from then on no v1.13.0 trigger matches the row. The
+    notice is late, never sent to the wrong people.
+  - **A delivered notice is left alone.** A platform notice is written with
+    `summary_sent_at` already set (#3496): it has no summary, and without
+    the stamp v1.13.0's summary trigger, which leaves out only the `notice`
+    channel, would pick it up once delivered and fail it in the same way for
+    a day. On v1.13.0 its bell row renders through that release's fallbacks:
+    headed "Security alerts were turned down", with the inbox line "Security
+    alerts were made quieter", linking to `/editor/security-alerts`.
+  - **Before rolling back.** Wait until every platform notice written on
+    the new release has been delivered, or accept that one still waiting is
+    lost. The instance log's `platform_alerts_changed` event is kept either
+    way. This query returns `0` when none is waiting:
 
     ```sql
     SELECT count(*) FROM security_alert_dispatches
@@ -840,12 +865,26 @@ What can go wrong:
       AND alert_sent_at IS NULL AND failed_at IS NULL;
     ```
 
-    On the previous release an undelivered notice fails every
-    minute and logs the failure until its one-day delivery window closes, and
-    then it is never sent. The instance log's `platform_alerts_changed` event
-    is kept either way. A notice already delivered still shows after a
-    rollback, its inbox line falling back to "Security alerts were made
-    quieter".
+  - **Stop the failures on v1.13.0.** Before or after a rollback, mark the
+    notices still waiting as failed. v1.13.0 would never deliver them, and
+    this stops its retries and their error logs:
+
+    ```sql
+    UPDATE security_alert_dispatches SET failed_at = now()
+    WHERE channel = 'platform_notice' AND alert_sent_at IS NULL;
+    ```
+
+    Run before the rollback, it also stops a node on this release from
+    delivering them, so do it once you have decided to lose them.
+    If the installation ran a build of `main` from before #3496, its
+    delivered platform notices have no `summary_sent_at`, and v1.13.0's
+    summary trigger fails them for a day. Stamp them:
+
+    ```sql
+    UPDATE security_alert_dispatches SET summary_sent_at = alert_sent_at
+    WHERE channel = 'platform_notice'
+      AND alert_sent_at IS NOT NULL AND summary_sent_at IS NULL;
+    ```
 - **Mail goes through the instance relay** (the `KilnCMS.Mailer`
   configuration), never a site's own SMTP relay: a site admin can change that
   relay, and an alert about the site must not depend on it. Alert mail is
@@ -854,7 +893,13 @@ What can go wrong:
   and summaries (each every minute) and an hourly prune at minute 17. A
   delivery is retried up to 10 times; one that still fails is marked failed
   and not tried again. Rows are deleted a day after their window ends, and an
-  alert older than a day is never sent.
+  alert older than a day is never sent. Since #3496 both triggers name the
+  channels they deliver, so a row on a channel a later release adds is
+  never scheduled on this one: it waits for a node on the release that wrote
+  it, or expires. Running the delivery on such a row directly sends and
+  stamps nothing; it logs "Security alert (id) has a channel this release
+  does not know (…); its alert is not sent here." and fails with "channel …
+  is not one this release delivers; left for the release that wrote it".
 - **Watch** `[:kiln_cms, :security, :alert_failed]`. It is emitted in two
   cases, each with an `error` log line:
   - an alert could not be claimed (metadata `scope`, `kind`, `reason`), with
@@ -960,6 +1005,22 @@ ways.
 - `KilnCMS.Security.AlertDispatch`: one row per alert window or notice, and
   the AshOban triggers that deliver it through
   `KilnCMS.Security.Changes.DeliverAlert` and `KilnCMS.Security.AlertMail`.
+  Its `channel` is a `KilnCMS.Types.KnownAtom` (#3496), so a channel a later
+  release adds loads as a `KilnCMS.Types.UnknownAtom` instead of failing the
+  read, and each trigger's `where` names the channels it handles:
+  `:deliver_alert` `[:site, :platform, :notice, :platform_notice]`,
+  `:deliver_summary` `[:site, :platform]`. **A new channel goes into the
+  attribute's `one_of` and the `:deliver_alert` list together**, and into
+  the `:deliver_summary` list only if it has a summary;
+  `test/kiln_cms/security/alert_dispatch_unknown_channel_test.exs` fails
+  when a channel in `one_of` is not scheduled. This release is the
+  `KnownAtom` switch for `channel`, so the next channel can ship in the
+  release after it, no sooner
+  ([New values in an atom column](releasing.md#new-values-in-an-atom-column)). A job
+  for a row its trigger no longer matches, an unknown channel included, is
+  cancelled on its first attempt by AshOban's worker, with nothing logged.
+  A platform notice is inserted with `summary_sent_at` set, so no summary
+  trigger, this release's or v1.13.0's, ever matches it.
 - `KilnCMS.CMS.SiteSecurityAlerts`: the settings row, through
   `CMS.list_site_security_alerts/1`, `CMS.save_site_security_alerts/2`,
   `CMS.update_site_security_alerts/2` and `CMS.reset_site_security_alerts/1`
@@ -1011,7 +1072,11 @@ ways.
   `insert_platform_notice!/1` accepts the other's (both raise
   `ArgumentError`).
 - `KilnCMS.Security.AlertText`: the kind and change labels and the
-  one-line headline, gettext'd. The inbox renders it in the reader's locale
+  one-line headline, gettext'd. `AlertText.setting_label/1` is a kind's name
+  as its checkbox says it ("Account locked out", not "An account was locked
+  out"): the one source for the Security alerts page's checkboxes and for
+  the kinds a notice's email and Slack message list (#3495). A kind with no
+  setting falls back to `AlertText.kind_label/1`. The inbox renders it in the reader's locale
   from `Notification.details` (the values `AlertText.details/1` keeps: phase,
   kind, channel, change, kinds, count, display IP, display block rule, event
   type);

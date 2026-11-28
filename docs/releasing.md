@@ -916,8 +916,22 @@ So the rule for a column, or an embedded attribute, that will grow:
 The switch has to ship **at least one release before** the first new value,
 for the same reason a contract step waits a release. `Security.Event.type`,
 `Notification.event`, `ApiKey.access`, `FormField.field_type`,
-`FormFieldCondition.action` (#2262) and `User.notify_on_backup` (#2229, new
-as `KnownAtom`; an unknown value reads as `:failures`) are already `KnownAtom`.
+`FormFieldCondition.action` (#2262), `User.notify_on_backup` (#2229, new
+as `KnownAtom`; an unknown value reads as `:failures`) and
+`Security.AlertDispatch.channel` (#3496) are already `KnownAtom`.
+
+**A column an AshOban trigger reads** needs its trigger to name the values it
+handles, too. `KnownAtom` lets the worker load the row, but a trigger whose
+`where` ignores the column still schedules a row it can do nothing with.
+`AlertDispatch.channel` is the example: `:platform_notice` was added to
+`one_of` (#2811) while the column was still plain `:atom`, so v1.13.0
+schedules every pending platform notice and fails all ten attempts on the
+load, re-queued for as long as the row is under a day old
+([For operators](security-alerts.md#for-operators)). Its triggers now say
+`channel in [...]`, and a test fails when `one_of` holds a channel the
+delivery trigger leaves out. Name the values a trigger handles rather than
+the ones it skips (`in`, not `not in`), so a value a later release adds is
+never picked up.
 
 **A column that grants authority** needs one more thing: at authentication,
 an `UnknownAtom` must grant nothing. A value the older release doesn't know
