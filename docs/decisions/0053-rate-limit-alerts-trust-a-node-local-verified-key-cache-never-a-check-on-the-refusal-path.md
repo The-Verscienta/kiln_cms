@@ -1,6 +1,9 @@
 # 0053. Rate-limit alerts trust a node-local verified-key cache, never a check on the refusal path
 
-- **Status** — accepted (2026-11-13), recording the design #2808 shipped. It
+- **Status** — accepted (2026-11-13), recording the design #2808 shipped;
+  amended 2026-11-27 by
+  [#2809](https://github.com/The-Verscienta/kiln_cms/issues/2809) (four more
+  buckets, see "Amendment"). It
   refines [ADR 0027](0027-security-alerts-derive-from-the-audit-log-and-turning-a-sites-alerts-down-is-never-silent.md),
   which states the cache; this record argues why the check is not made
   where the refusal happens, and why the cache is not shared between nodes.
@@ -27,8 +30,10 @@ But `KilnCMSWeb.Plugs.RateLimit` runs ahead of key authentication in every
 pipeline that authenticates a key: `KilnCMSWeb.Plugs.ApiKeyAuth` in `:api`,
 `:feed`, `:graphql` and `:api_spec` (whose `:docs` bucket raises no alert), and
 AshAuthentication's API-key plug with `RememberApiKey` in `:mcp`.
-`:media_transform`, `:plugin_endpoint` and the ActivityPub inbox charge a limit
-without ever authenticating one. At a `429` the
+`:media_transform`, `:media_render`, `:plugin_endpoint`, the lock page's
+`:unlock` (`POST /_unlock`), `:feed_join` (charged first in `:feed`, before
+`ApiKeyAuth`) and the ActivityPub inbox charge a limit without ever
+authenticating one. At a `429` the
 bearer is only a string someone sent. Something has to decide, at that
 moment, whether it is a real key, and the obvious ways of deciding each cost
 something on the one path that has to stay cheap.
@@ -102,8 +107,10 @@ cases where it misses on a cluster are written down for operators in
   the reason given under Decision.
 - A trip alerts only if the refusing node verified the key in the last 5
   minutes, so it raises nothing when:
-  - the route never authenticates a key (`:media_transform`,
-    `:plugin_endpoint`, and the ActivityPub inbox, which charges `:api`) and
+  - the route never authenticates a key before the limit
+    (`:media_transform`, `:media_render`, `:plugin_endpoint`, `:unlock` on
+    `POST /_unlock`, `:feed_join`, and the ActivityPub inbox, which charges
+    `:api`) and
     the key's earlier `/api` use landed on another node;
   - the requests that spent the address's budget did not carry the key (a
     shared egress address whose other clients filled the counter);
@@ -118,3 +125,23 @@ cases where it misses on a cluster are written down for operators in
   result is the signal), or if key-authenticated traffic moves to routes that
   do not run `ApiKeyAuth`, such as transforms or plugin endpoints. The
   PubSub broadcast is the first alternative to reach for.
+
+## Amendment (2026-11-27, #2809): four more buckets
+
+The owner added `:media_render`, `:preview_api`, `:unlock` and `:feed_join`
+to `ApiKeyTrip.buckets/0`; `:docs` stays out. The decision above applies to
+each unchanged: nothing on the refusal path checks the presented string.
+
+- `:preview_api` (`KilnCMSWeb.Plugs.PreviewGrant`) and `:unlock` on
+  `POST /api/content/:type/:slug/unlock` run after `:api` authenticated the
+  key, so the key is the actor. A forged key never reaches them: `:api`
+  answers `401` first.
+- `:unlock` on `POST /_unlock`, `:media_render` and `:feed_join` know the key
+  from this node's cache only. `:unlock` is counted cluster-wide
+  (`KilnCMS.Accounts.ThrottleStore`), but the alert gate in front of the
+  event is per node like every other.
+- `:media_render` and `:feed_join` are checked with
+  `KilnCMSWeb.RateLimit.check/2` outside `KilnCMSWeb.Plugs.RateLimit`
+  (`KilnCMSWeb.MediaTransformController`, `KilnCMSWeb.FeedStream.JoinBudget`),
+  so each calls `ApiKeyTrip.note/2` in its own refusal branch. A refused feed
+  connect is still the stream's `200` with `event: busy`.

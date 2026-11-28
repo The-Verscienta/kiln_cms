@@ -25,6 +25,13 @@ carries the reasoning.
   - **`FormField.field_type` is now a `KilnCMS.Types.KnownAtom`.** No migration (the column stays text). From this release on, a field whose type a newer release adds is skipped by every reader (public form, schema, submissions, CSV export columns, autoresponder, builder) instead of failing the form. Releases before this one still fail to load such a form, so the next new type, `page_break` for multi-page forms (#2266), ships no earlier than the next release ([New values in an atom column](../releasing.md#new-values-in-an-atom-column)).
   - See [Before you upgrade or roll back](../forms.md#before-you-upgrade-or-roll-back).
 
+<a id="platform-notice-rollback"></a>
+
+- **Before rolling back past this release, let every pending platform notice be delivered (#2811).** Turning off a platform alert kind now writes a platform notice ([Added](#platform-alert-off-notice)), a dispatch row on the new channel `platform_notice`. The previous release cannot load that row.
+  - **During a rolling deploy.** A node still on the previous release fails the notice's delivery job; it is retried (up to 10 attempts per job, and the minute scheduler queues it again) until a node on this release delivers it. The notice is late, never sent to the wrong people.
+  - **Rolling back.** A notice not yet delivered when the last new node stops fails every minute on the previous release until its one-day delivery window closes, and is then never sent. The `platform_alerts_changed` event in the instance security log is kept either way. To check that none is waiting, `SELECT count(*) FROM security_alert_dispatches WHERE channel = 'platform_notice' AND alert_sent_at IS NULL AND failed_at IS NULL;` should return `0`. A notice already delivered still shows after a rollback, with the inbox line "Security alerts were made quieter".
+  - **No migration and no setting.** See [For operators](../security-alerts.md#for-operators).
+
 ## Breaking
 
 <a id="breached-password-strictest-admin-sites"></a>
@@ -77,6 +84,26 @@ carries the reasoning.
   - **The payload.** Exactly `chain`, `stamp`, `run`, `step`, `part`, `phase` and `percent`: ids, the lock's own step and phase values, counts. Never log text, an error, a path or file name (a path can carry personal data), env or destination config. A consumer ignores a version it doesn't know.
   - **Who sees it.** Platform admins only: only a page that admits them subscribes, and each message and each re-read checks again, so an admin demoted while the page is open gets nothing new. The Log tab applies the console-origin refusal at every re-read.
   - **Upgrade.** No migration and no setting; rolling the pin back is safe. During a rolling deploy an older node sends no messages, and pages on any node keep following the backup through the poll.
+
+<a id="api-key-rate-limit-more-buckets"></a>
+
+- **Four more rate limits raise the platform's `api_key_rate_limited` alert for a verified API key: `media_render`, `preview_api`, `unlock` and `feed_join` (#2809).** Until now only `api`, `gql`, `media_upload`, `media_transform` and `plugin_endpoint` did, so a key over the image-render budget, the preview-token read budget, the passphrase-unlock budget or the change feed's connect budget raised nothing.
+  - **Where each is charged.** `preview_api`: a headless read that presents a preview token (`/api/json`, `GET /api/content/:type/:slug`, `GET /api/visual-editing/:type/:slug`). `unlock`: `POST /api/content/:type/:slug/unlock` and the lock page's `POST /_unlock`. `media_render`: an image transform that has to render (a cache miss on `/media/:id/t/...`). `feed_join`: a connect to `GET /api/feed`.
+  - **What a client sees is unchanged.** A refused feed connect is still the stream's `200` with `event: busy`, not a `429`; the others are `429` as before.
+  - **Which keys count.** `preview_api` and `/api/content/.../unlock` run after the `/api` pipeline checked the key, so a forged or revoked key is answered `401` first and records nothing. `/_unlock`, `media_render` and `feed_join` run before any key is checked and alert only for a key this server verified in the last 2.5 to 5 minutes, as transforms and plugin routes already do ([ADR 0053](../decisions/0053-rate-limit-alerts-trust-a-node-local-verified-key-cache-never-a-check-on-the-refusal-path.md), amended).
+  - **Left out on purpose.** The `docs` limit (the API explorer and schema downloads) raises nothing, by owner decision.
+  - **For operators.** The event's `bucket` and the `kiln_cms.security.api_key_trip.count` counter's `bucket` tag gain the four values. No migration; rolling the pin back is safe. See [API keys over a rate limit](../security-alerts.md#api-keys-over-a-rate-limit).
+  - **For developers.** `KilnCMS.Security.ApiKeyTrip.buckets/0` lists the four. `KilnCMSWeb.MediaTransformController` and `KilnCMSWeb.FeedStream.JoinBudget` check their limit with `KilnCMSWeb.RateLimit.check/2` rather than the plug, so each calls `ApiKeyTrip.note/2` itself.
+
+<a id="platform-alert-off-notice"></a>
+
+- **Turning off a platform security alert now sends every platform admin a notice, by bell and email (#2811).** A platform admin unticking **API keys over a rate limit** under **Platform alerts** on **Security alerts** (`/editor/security-alerts`) used to be recorded only in the instance security log, so a hijacked platform admin session could quiet the alert without anyone hearing. A site's alerts have always been turned down with a notice; the platform's now are too. The guide is [Turn off rate-limit alerts for API keys](../security-alerts.md#turn-off-rate-limit-alerts-for-api-keys).
+  - **Who hears it.** Every platform admin as they are at delivery, a live temporary platform grant included and erased accounts excluded, and the one who saved included. The bell row is in the default site, headed "Security alerts were turned down" with the line "Some platform security alerts were turned off", and is counted in other sites' "unread platform alerts" entry. The email's subject is "Platform security alerts were changed"; it lists what was turned off and links to the Security alerts page.
+  - **No way to quiet it.** No setting turns it off and no mute applies. It is never grouped and has no summary, and no webhook carries it.
+  - **Fails closed.** The notice is written in the save's transaction, with the `platform_alerts_changed` event. If it cannot be written, the save fails, nothing changes and the page says "The platform alert settings could not be saved."
+  - **What the page says.** The section's line now ends "…and every platform admin is sent a notice." A save that turned a kind off says "Platform alert settings saved. Every platform admin will be sent a notice." That is decided from the row the save locked, so a page loaded before another admin's save neither promises a notice it did not write nor sends a second. Turning the kind back on, or saving unchanged, sends nothing.
+  - **For developers.** New `KilnCMS.Security.AlertGate.insert_platform_notice!/1`, `KilnCMS.Security.Alerts.platform_notice_changes/0` (today `platform_kind_disabled`) and `KilnCMS.Security.Changes.NoticePlatformAlertSettings`; `AlertDispatch.channel` gains `:platform_notice`. A saved `PlatformAlertSettings` record's `__metadata__.platform_notice?` says whether the save wrote one. [ADR 0027](../decisions/0027-security-alerts-derive-from-the-audit-log-and-turning-a-sites-alerts-down-is-never-silent.md) is amended.
+  - **Upgrade.** No migration. Rolling deploys delay the notice and a rollback can lose one still pending: see [the upgrade note](#platform-notice-rollback).
 
 ## Changed
 
