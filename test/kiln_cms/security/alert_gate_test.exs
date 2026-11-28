@@ -285,6 +285,65 @@ defmodule KilnCMS.Security.AlertGateTest do
     end
   end
 
+  describe "insert_platform_notice!/1 (#2811)" do
+    test "writes a platform notice in the default org, keeping only the notice keys" do
+      actor_id = Ecto.UUID.generate()
+
+      id =
+        in_txn(fn ->
+          AlertGate.insert_platform_notice!(%{
+            change: "platform_kind_disabled",
+            kinds: ["api_key_rate_limited"],
+            actor_id: actor_id,
+            url: "https://hooks.example.com/secret"
+          })
+        end)
+
+      row = row(id)
+      assert row["scope"] == "platform_notice:" <> id
+      assert row["kind"] == "alerts_silenced"
+      assert row["channel"] == "platform_notice"
+      assert Ecto.UUID.cast!(row["org_id"]) == org_id()
+      assert row["window_index"] == 0
+
+      assert row["notice"] == %{
+               "change" => "platform_kind_disabled",
+               "kinds" => ["api_key_rate_limited"],
+               "actor_id" => actor_id
+             }
+    end
+
+    test "a change it does not know, or a site notice's, is refused" do
+      for change <- ["made_up", "kind_disabled"] do
+        assert_raise ArgumentError, ~r/unknown platform alerts_silenced change/, fn ->
+          AlertGate.insert_platform_notice!(%{change: change})
+        end
+      end
+    end
+
+    test "a site notice cannot name the platform change" do
+      assert_raise ArgumentError, ~r/unknown alerts_silenced change/, fn ->
+        AlertGate.insert_notice!(org_id(), %{change: "platform_kind_disabled"})
+      end
+    end
+
+    test "fails closed: rolls back with the transaction that wrote it" do
+      assert_raise Postgrex.Error, fn ->
+        Repo.transaction(fn ->
+          AlertGate.insert_platform_notice!(%{change: "platform_kind_disabled"})
+          AlertGate.insert_notice!("not-a-uuid", %{change: "kind_disabled"})
+        end)
+      end
+
+      %{rows: [[n]]} =
+        Repo.query!(
+          "SELECT count(*) FROM security_alert_dispatches WHERE channel = 'platform_notice'"
+        )
+
+      assert n == 0
+    end
+  end
+
   describe "prune and authorization" do
     test "prune deletes rows past their expiry and keeps the rest" do
       old = scope()

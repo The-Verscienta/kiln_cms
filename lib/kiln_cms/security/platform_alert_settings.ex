@@ -20,8 +20,11 @@ defmodule KilnCMS.Security.PlatformAlertSettings do
   delivery reads it as `KilnCMS.Security.alerts_system/0`, admitted to `read`
   and nothing else. Every save is recorded in the instance security log
   (`KilnCMS.Security.InstanceEvent`, `platform_alerts_changed`), which only
-  platform admins read: the `alerts_silenced` notice has no platform path
-  (it goes to one site's admins).
+  platform admins read. A save that turns a kind off also sends every
+  platform admin a platform notice (#2811,
+  `KilnCMS.Security.Changes.NoticePlatformAlertSettings`), in the same
+  transaction: a notice that cannot be written rolls back the save and its
+  log event.
 
   Not an API surface: absent from JSON:API, GraphQL and MCP.
   """
@@ -58,6 +61,9 @@ defmodule KilnCMS.Security.PlatformAlertSettings do
                     KilnCMS.Security.PlatformAlertSettings.disabled_label(record.disabled_kinds)
                 }
               end}
+
+      # Turning a kind off tells every platform admin; fails closed (#2811).
+      change KilnCMS.Security.Changes.NoticePlatformAlertSettings
     end
   end
 

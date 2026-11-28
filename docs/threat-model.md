@@ -467,7 +467,8 @@ build if a resource is ever registered without that authorizer.
   charged to `:gql` like a `/gql` request (residual item 11). Introspection is
   off in production.
 - **A key used beyond its normal rate** — a verified API key over a rate limit
-  on `:api`, `:gql`, `:media_upload`, `:media_transform` or `:plugin_endpoint`
+  on `:api`, `:gql`, `:media_upload`, `:media_transform`, `:plugin_endpoint`,
+  `:media_render`, `:preview_api`, `:unlock` or `:feed_join` (not `:docs`)
   raises the platform's `api_key_rate_limited` alert (#2245). The limit runs
   before the key is checked, so "verified" means a key that authenticated on
   the same node recently (an entry lasts 5 minutes and is refreshed at most
@@ -2575,8 +2576,10 @@ and [ADR 0029](decisions/0029-security-alert-email-stays-english-until-accounts-
   another admin, and changing the site's mail relay each write an
   `alerts_silenced` notice in the change's own transaction. A notice that
   cannot be written rolls the change back. No setting turns a notice off and
-  no mute silences it. The one exception is the platform's own switch for
-  `api_key_rate_limited`, recorded in the instance security log instead.
+  no mute silences it. The platform's own switch for `api_key_rate_limited`
+  is held to the same rule (#2811): turning it off writes a platform notice
+  to every platform admin, the one who saved included, in the save's
+  transaction, as well as the instance security log event.
 - **The mail does not depend on what a site admin controls.** Alert email
   goes through the instance relay (`KilnCMS.Mailer`), never the site's own
   SMTP relay, which a site admin can change.

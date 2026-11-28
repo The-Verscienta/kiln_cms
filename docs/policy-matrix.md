@@ -1550,7 +1550,11 @@ and the scheduled prune reach it.
 
 The platform's alert settings are one tenant-less row, gated on the effective
 platform role (`Accounts.Checks.PlatformAdmin`, never `OrgAdmin`). Every save
-is recorded in the instance security log (`platform_alerts_changed`).
+is recorded in the instance security log (`platform_alerts_changed`). A save
+that turns a kind off also writes a platform notice (#2811): the row as it was
+is read for the comparison as `Security.alerts_system/0` with
+`authorize_with: :error`, so a refused read fails the save, and the notice is
+inserted in raw SQL like every dispatch row. No policy changed.
 
 `User.notify_on_security_alert` (the mute of a site alert's email) is in
 `User`'s self-or-admin field policy, and written through

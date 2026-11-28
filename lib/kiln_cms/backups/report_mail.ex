@@ -25,7 +25,7 @@ defmodule KilnCMS.Backups.ReportMail do
     |> from(Application.fetch_env!(:kiln_cms, :email_from))
     |> to(to_string(recipient.email))
     |> subject(subject(report))
-    |> html_body(html(report, recipient))
+    |> html_body(html_part(report, recipient))
     |> text_body(text(report, recipient))
   end
 
@@ -124,7 +124,7 @@ defmodule KilnCMS.Backups.ReportMail do
 
   # -- HTML --------------------------------------------------------------
 
-  defp html(report, recipient) do
+  defp html_part(report, recipient) do
     rows =
       Enum.map_join(facts(report), "\n", fn {label, value} ->
         "<tr><th align=\"left\">#{escape(label)}</th><td>#{escape(value)}</td></tr>"

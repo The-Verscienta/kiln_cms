@@ -153,6 +153,10 @@ defmodule KilnCMS.Security.PlatformAlertSettingsTest do
 
       assert event.actor_id == ctx.platform.id
       assert event.metadata == %{"disabled_kinds" => "api_key_rate_limited"}
+
+      # And every platform admin is sent a notice (#2811).
+      assert [%{"notice" => %{"change" => "platform_kind_disabled"}}] =
+               kind_dispatches("alerts_silenced")
     end
 
     test "only the optional kinds can be turned off", ctx do
@@ -179,6 +183,8 @@ defmodule KilnCMS.Security.PlatformAlertSettingsTest do
       end
 
       assert Alerts.platform_disabled_kinds() == ["api_key_rate_limited"]
+      # Only the platform admin's own save sent a notice.
+      assert [_notice] = kind_dispatches("alerts_silenced")
     end
 
     test "the alert delivery's actor may read it, and not save it", ctx do

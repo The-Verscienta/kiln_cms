@@ -30,7 +30,8 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
       its own form (`KilnCMS.Security.PlatformAlertSettings`), shown to
       platform admins only and re-checked on save; the resource policy
       refuses anyone else. Turning it off is recorded in the instance
-      security log, which the page says.
+      security log and sends every platform admin a notice (#2811), which
+      the page says. A notice that cannot be written fails the save.
     * Site alerts go to the site's member admins only. A site with none gets
       no bell and no email for its alerts, and the page warns about it.
   """
@@ -92,18 +93,25 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
       when is_map(params) do
     with true <- platform_admin?(socket),
          attrs = platform_attributes(params, socket.assigns.platform_disabled),
-         {:ok, _row} <-
+         {:ok, row} <-
            Security.save_platform_alert_settings(attrs,
              actor: socket.assigns.current_user,
              context: socket.assigns.security_context
            ) do
       {:noreply,
        socket
-       |> put_flash(:info, platform_saved_message(socket.assigns.platform_disabled, attrs))
+       |> put_flash(:info, platform_saved_message(row))
        |> load_platform_settings()}
     else
       false ->
         {:noreply, put_flash(socket, :error, platform_forbidden_message())}
+
+      # Not the admin's to fix, such as a platform notice that could not be
+      # written (#2811, which fails the save): the plain line, never the
+      # database's own words.
+      {:error, %Ash.Error.Unknown{}} ->
+        {:noreply,
+         put_flash(socket, :error, gettext("The platform alert settings could not be saved."))}
 
       {:error, error} ->
         {:noreply,
@@ -154,11 +162,12 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
     %{disabled_kinds: kept ++ Enum.reject(shown, &checked?(params, &1))}
   end
 
-  defp platform_saved_message(before, attrs) do
-    if attrs.disabled_kinds -- before != [] do
-      gettext(
-        "Platform alert settings saved. Turning an alert off is recorded in the instance security log."
-      )
+  # Whether the save wrote a notice is the server's call, made from the locked
+  # row (`NoticePlatformAlertSettings`): a page loaded before another admin's
+  # save must not promise a notice that was never written, or omit one that was.
+  defp platform_saved_message(row) do
+    if row.__metadata__[:platform_notice?] do
+      gettext("Platform alert settings saved. Every platform admin will be sent a notice.")
     else
       gettext("Platform alert settings saved.")
     end
@@ -439,7 +448,7 @@ defmodule KilnCMSWeb.SecurityAlertsLive do
         <h2 class="text-sm font-semibold">{gettext("Platform alerts")}</h2>
         <p class="text-sm text-base-content/70">
           {gettext(
-            "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log."
+            "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log, and every platform admin is sent a notice."
           )}
         </p>
         <.form
