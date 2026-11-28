@@ -19,7 +19,8 @@ defmodule KilnCMSWeb.MediaTransformController do
     5. answer `If-None-Match` with a 304 from the plan alone;
     6. serve the cached derivative, or — within the per-client `:media_render`
        budget (429) and the node's render gate (503 when saturated) — render
-       it.
+       it. A refusal over that budget is noted for the platform's
+       `api_key_rate_limited` alert (`KilnCMS.Security.ApiKeyTrip`).
 
   ## Cache headers
 
@@ -43,6 +44,7 @@ defmodule KilnCMSWeb.MediaTransformController do
   use KilnCMSWeb, :controller
 
   alias KilnCMS.Media.{Derivatives, ImageTransform}
+  alias KilnCMS.Security.ApiKeyTrip
   alias KilnCMS.Storage
   alias KilnCMS.Storage.BackendTarget
   alias KilnCMSWeb.{MediaDownloadController, RateLimit}
@@ -131,6 +133,10 @@ defmodule KilnCMSWeb.MediaTransformController do
         end
 
       {:deny, retry_after_ms} ->
+        # Checked here, not by `KilnCMSWeb.Plugs.RateLimit`, so the refusal is
+        # noted here too (#2809).
+        ApiKeyTrip.note(conn, :media_render)
+
         conn
         |> put_resp_header("retry-after", Integer.to_string(max(1, div(retry_after_ms, 1000))))
         |> refuse(:too_many_requests, "Too many new image transforms. Try again shortly.")

@@ -587,6 +587,202 @@ defmodule KilnCMS.Security.ApiKeyTripTest do
     end
   end
 
+  describe "the buckets added in #2809" do
+    setup ctx do
+      {key, secret} = mint(ctx, user(:editor))
+      %{key: key, secret: secret}
+    end
+
+    test "are the noted buckets; :docs stays out" do
+      assert Enum.sort(ApiKeyTrip.buckets()) ==
+               Enum.sort([
+                 :api,
+                 :gql,
+                 :media_upload,
+                 :media_transform,
+                 :plugin_endpoint,
+                 :media_render,
+                 :preview_api,
+                 :unlock,
+                 :feed_join
+               ])
+
+      refute :docs in ApiKeyTrip.buckets()
+    end
+
+    test ":preview_api, where the key is already the actor", ctx do
+      limit(:preview_api, 1)
+      post = draft_post()
+      ip = client_address()
+
+      assert preview(ip, ctx.secret, post).status == 200
+      assert preview(ip, ctx.secret, post).status == 429
+      tripped("preview_api")
+    end
+
+    # `:api` authenticates the bearer before `PreviewGrant` charges the
+    # bucket, so a forged key is a 401 there and never reaches it.
+    test ":preview_api, a forged key is refused by :api first", ctx do
+      limit(:preview_api, 1)
+      post = draft_post()
+      ip = client_address()
+
+      for _ <- 1..2, do: assert(preview(ip, forged(), post).status == 401)
+      refused_before_the_bucket(ctx)
+    end
+
+    test ":unlock on the API, where the key is already the actor", ctx do
+      limit(:unlock, 1)
+      ip = client_address()
+
+      unlock(ip, ctx.secret)
+      assert unlock(ip, ctx.secret).status == 429
+      tripped("unlock")
+    end
+
+    # Like `:preview_api`: `:api` runs first and 401s a forged key.
+    test ":unlock on the API, a forged key is refused by :api first", ctx do
+      limit(:unlock, 1)
+      ip = client_address()
+
+      for _ <- 1..2, do: assert(unlock(ip, forged()).status == 401)
+      refused_before_the_bucket(ctx)
+    end
+
+    test ":media_render, with a key verified on the API", ctx do
+      media_storage()
+      limit(:media_render, 1)
+      item = image!()
+      ip = client_address()
+
+      json_api(ip, ctx.secret)
+      assert (ip |> request(ctx.secret) |> get("/media/#{item.id}/t/w_256")).status == 200
+      assert (ip |> request(ctx.secret) |> get("/media/#{item.id}/t/w_384")).status == 429
+      tripped("media_render")
+    end
+
+    test ":media_render, a forged key is unverified and records nothing", ctx do
+      media_storage()
+      limit(:media_render, 1)
+      item = image!()
+      ip = client_address()
+
+      assert (ip |> request(forged()) |> get("/media/#{item.id}/t/w_256")).status == 200
+      assert (ip |> request(forged()) |> get("/media/#{item.id}/t/w_384")).status == 429
+      refused_unverified_on(ctx, :media_render)
+    end
+
+    test ":feed_join, with a key verified on the API, still answers busy", ctx do
+      limit(:feed_join, 1)
+      ip = client_address()
+
+      json_api(ip, ctx.secret)
+      ip |> request(ctx.secret) |> head("/api/feed")
+      refused = feed(ip, ctx.secret)
+
+      # The stream's own refusal, never a 429.
+      assert refused.status == 200
+      assert refused.resp_body =~ "event: busy"
+      tripped("feed_join")
+    end
+
+    test ":feed_join, a forged key is unverified and records nothing", ctx do
+      limit(:feed_join, 1)
+      ip = client_address()
+
+      ip |> request(forged()) |> head("/api/feed")
+      assert feed(ip, forged()).resp_body =~ "event: busy"
+      refused_unverified_on(ctx, :feed_join)
+    end
+  end
+
+  defp draft_post do
+    CMS.create_post!(%{title: "Trip draft", slug: "trip-#{uniq()}"}, actor: user(:admin))
+  end
+
+  defp preview(ip, credential, post) do
+    ip
+    |> request(credential)
+    |> put_req_header("accept", "application/vnd.api+json")
+    |> put_req_header("x-kiln-preview-token", KilnCMS.CMS.PreviewToken.sign(post))
+    |> get("/api/json/posts/#{post.id}")
+  end
+
+  defp unlock(ip, credential) do
+    ip
+    |> request(credential)
+    |> put_req_header("content-type", "application/json")
+    |> post("/api/content/post/trip-#{uniq()}/unlock", Jason.encode!(%{passphrase: "guess"}))
+  end
+
+  defp feed(ip, credential) do
+    ip
+    |> request(credential)
+    |> put_req_header("accept", "text/event-stream")
+    |> get("/api/feed")
+  end
+
+  defp refused_before_the_bucket(ctx) do
+    assert results(ctx.telemetry) == []
+    assert trip_events() == []
+    assert sample_rows() == 0
+    assert alerts() == []
+  end
+
+  defp refused_unverified_on(ctx, bucket) do
+    assert results(ctx.telemetry) == [{:unverified, bucket}]
+    assert trip_events() == []
+    assert sample_rows() == 0
+    assert alerts() == []
+  end
+
+  # A local store and a real stored image, as `MediaTransformControllerTest`
+  # sets them up, so a transform renders.
+  defp media_storage do
+    root = Path.join(System.tmp_dir!(), "kiln_trip_#{uniq()}")
+    File.mkdir_p!(root)
+    File.mkdir_p!(root <> "_private")
+
+    Application.put_env(:kiln_cms, KilnCMS.Storage.Local,
+      root: root,
+      private_root: root <> "_private",
+      base_url: "/uploads"
+    )
+
+    previous = Application.get_env(:kiln_cms, :image_transforms)
+    Application.put_env(:kiln_cms, :image_transforms, signing_key: "trip-test-key")
+
+    on_exit(fn ->
+      File.rm_rf!(root)
+      File.rm_rf!(root <> "_private")
+      Application.delete_env(:kiln_cms, KilnCMS.Storage.Local)
+
+      if previous,
+        do: Application.put_env(:kiln_cms, :image_transforms, previous),
+        else: Application.delete_env(:kiln_cms, :image_transforms)
+    end)
+  end
+
+  defp image! do
+    src = Path.join(System.tmp_dir!(), "trip-#{uniq()}.png")
+    {:ok, image} = Image.new(1200, 800, color: :green)
+    {:ok, _} = Image.write(image, src)
+    key = "orig-#{uniq()}.png"
+    {:ok, ^key} = KilnCMS.Storage.store(key, src)
+    File.rm(src)
+
+    Ash.Seed.seed!(KilnCMS.CMS.MediaItem, %{
+      filename: "hero.png",
+      url: "/uploads/#{key}",
+      storage_key: key,
+      content_type: "image/png",
+      width: 1200,
+      height: 800,
+      focal_x: 0.5,
+      focal_y: 0.5
+    })
+  end
+
   describe "the cache while its owner restarts" do
     setup ctx do
       {_key, secret} = mint(ctx, user(:editor))
