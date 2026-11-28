@@ -63,7 +63,8 @@ defmodule KilnCMS.Accounts.SignInAlert do
 
   The two alerts therefore need separate copy, and separate once-per-window
   budgets so the weaker signal cannot suppress the stronger one in exactly the
-  order an attack produces them.
+  order an attack produces them. The breached-pause wordings below get their
+  own window for the same reason (#3470).
 
   ## It must not become the amplifier
 
@@ -71,10 +72,15 @@ defmodule KilnCMS.Accounts.SignInAlert do
 
     * the address is looked up first, and an address with no account sends
       nothing — the alert exists to warn an owner, and there isn't one;
-    * the once-per-window budget (`KilnCMS.Accounts.AccountThrottle.alert_allowed?/1`)
-      is spent **last**, after the lookup and the enqueue, so a lock against an
-      address that has no account yet — or a moment when mail is broken — can't
-      silently eat the next window's real alert;
+    * the once-per-window budget (`KilnCMS.Accounts.AccountThrottle.alert_allowed?/1`,
+      or `breach_alert_allowed?/1` for the breached wordings) is charged
+      **after** the lookup, so a lock against an address that has no account
+      yet can't eat the next window's real alert. It is charged *before* the
+      mail is built, because the charge is one atomic increment-and-compare
+      and two simultaneous refusals must not both send; so when the delivery
+      then fails, the window is handed back (`AccountThrottle.forget_alert/1`,
+      `forget_breach_alert/1`), and a moment when mail is broken can't eat it
+      either;
     * failures are swallowed, `exit`s included. This runs inside a sign-in, and
       an alert that can break authentication is worse than the attack it
       reports. The mail goes through `Mail.enqueue!/1`, which reaches Oban, and
@@ -109,11 +115,18 @@ defmodule KilnCMS.Accounts.SignInAlert do
       complete a sign-in.
 
   Both breached wordings link `/reset` bare and carry no unlock link, no IP and
-  no count, and both spend the alert window like the usual mail. Neither is
-  withheld for its cause: each refusal's own reset mail shares the reset-mail budget
-  with the anonymous `/reset` form, so someone who spends that budget first
-  would otherwise leave the owner with no word that their current password is
-  in someone else's hands.
+  no count. Neither is withheld for its cause: each refusal's own reset mail
+  shares the reset-mail budget with the anonymous `/reset` form, so someone who
+  spends that budget first would otherwise leave the owner with no word that
+  their current password is in someone else's hands.
+
+  They spend their own window (`AccountThrottle.breach_alert_allowed?/1`,
+  #3470), not the usual mail's. Sharing one let wrong guesses spend it first,
+  and the breached pause that followed sent nothing for six hours. An address
+  therefore hears at most one usual alert and one breached-pause alert per
+  window; the second needs an administrator's correct password to spend. A
+  breached-pause mail does not spend the usual window either, so guessing
+  that starts after it is still news.
 
   The tally and the counter are separate rows on the same window, so a
   forgiveness or a window boundary between the two reads can move the answer
@@ -164,13 +177,14 @@ defmodule KilnCMS.Accounts.SignInAlert do
 
   `cause` is what filled the sign-in counter
   (`AccountThrottle.sign_in_pause_cause/1`, #3437) and picks the wording; see
-  the moduledoc. Every cause sends a mail and spends the window alike.
+  the moduledoc. `:none` spends the usual alert window; the breached causes
+  spend their own (#3470).
   """
   @spec account_locked(String.t(), AccountThrottle.pause_cause()) :: :ok
   def account_locked(identifier, cause \\ :none) when cause in @pause_causes do
     with %User{} = user <- lookup(identifier),
-         true <- AccountThrottle.alert_allowed?(identifier) do
-      deliver(user, cause)
+         true <- alert_window_allowed?(cause, identifier) do
+      release_alert_on_failure(cause, identifier, fn -> deliver(user, cause) end)
     end
 
     :ok
@@ -340,6 +354,30 @@ defmodule KilnCMS.Accounts.SignInAlert do
       site.</li>
     </ul>
     """
+  end
+
+  # Which window an `account_locked/2` mail spends: the usual one for guessing,
+  # its own for a pause breached-password refusals filled (#3470).
+  defp alert_window_allowed?(:none, identifier), do: AccountThrottle.alert_allowed?(identifier)
+
+  defp alert_window_allowed?(_breached, identifier),
+    do: AccountThrottle.breach_alert_allowed?(identifier)
+
+  defp forget_alert_window(:none, identifier), do: AccountThrottle.forget_alert(identifier)
+
+  defp forget_alert_window(_breached, identifier),
+    do: AccountThrottle.forget_breach_alert(identifier)
+
+  defp release_alert_on_failure(cause, identifier, fun) do
+    fun.()
+  rescue
+    error ->
+      forget_alert_window(cause, identifier)
+      reraise error, __STACKTRACE__
+  catch
+    kind, reason ->
+      forget_alert_window(cause, identifier)
+      :erlang.raise(kind, reason, __STACKTRACE__)
   end
 
   # Give the window back if the mail never got out, so the next refusal can try
