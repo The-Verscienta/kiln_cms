@@ -285,7 +285,8 @@ defmodule KilnCMSWeb.OpenApi do
               "TOTP code (or a one-time recovery code) for the bearer token. " <>
               "The pending token is valid for 300 seconds; codes are budgeted " <>
               "per account across this endpoint and the browser prompt, so a " <>
-              "429 here is not reset by signing in again.",
+              "429 here is not reset by signing in again. When the password " <>
+              "step's breach check warned, the response carries `password_breach`.",
           security: [],
           requestBody: %OpenApiSpex.RequestBody{
             required: true,
@@ -422,10 +423,11 @@ defmodule KilnCMSWeb.OpenApi do
         password_breach: %OpenApiSpex.Schema{
           type: :object,
           description:
-            "Present only on a one-step sign-in (no two-factor exchange) by an " <>
-              "administrator whose site checks passwords at sign-in and warns: the " <>
-              "password appears in a known data breach. Signing in still worked; " <>
-              "change the password soon.",
+            "Present only on a sign-in by an administrator whose site checks " <>
+              "passwords at sign-in and warns: the password appears in a known data " <>
+              "breach. Carried by the one-step sign-in's response, or by " <>
+              "`POST /api/auth/sign_in/verify`'s when the password step warned. " <>
+              "Signing in still worked; change the password soon.",
           properties: %{
             status: %OpenApiSpex.Schema{type: :string, enum: ["breached"]}
           }

@@ -1525,7 +1525,8 @@ Who is checked, and by which policy:
 - **The reset mail doesn't arrive.** Each address gets at most five reset
   mails an hour, the ones this check sends and the ones anyone can ask for
   on `/reset` included. Someone who tried to sign in several times, or anyone
-  else holding the breached password, may have used them up. Request one on `/reset` once the hour is over. **Send password
+  else holding the breached password, may have used them up. Until the account is paused (below), that
+  leaves the owner with no mail about those sign-ins at all. Request one on `/reset` once the hour is over. **Send password
   reset** on the account's page under **Accounts** (`/editor/accounts`) shares
   the same budget, but says so by name when it is spent.
 - **"Paused after too many attempts".** A blocked sign-in counts toward the
@@ -1537,13 +1538,15 @@ Who is checked, and by which policy:
   only some did, that the others did not complete a sign-in. It links to
   `/reset` and has no unlock link, because lifting the pause would not help:
   the old password is still refused. This mail does not count against the
-  five reset mails, so it arrives even when those are used up; like the
-  usual pause mail, at most one goes out every six hours. Choosing a new
+  five reset mails, so it arrives even when those are used up. At most one
+  goes out every six hours, counted separately from the usual pause mail, so
+  a pause of wrong guesses in the last six hours doesn't hold it back. Choosing a new
   password, through the reset link or `/reset`, lifts the pause
   ([Lift a sign-in pause by email](#lift-a-sign-in-pause-by-email)).
 - **"I signed in from an app and saw no warning."** An app that signs in with
   `POST /api/auth/sign_in` gets the warning as a `password_breach` field on
-  the response, and only when the account has no second factor
+  the response that signs it in: that one, or for an account with a second
+  factor, the response to the code
   ([API](api.md#administrators-whose-password-is-in-a-known-breach)). Whether
   the app shows it is up to the app.
 - **The box is ticked but nobody is checked.** The policy is **Off**, the

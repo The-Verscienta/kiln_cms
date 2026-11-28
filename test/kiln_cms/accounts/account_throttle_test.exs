@@ -301,6 +301,64 @@ defmodule KilnCMS.Accounts.AccountThrottleTest do
     end
   end
 
+  describe "the breached-pause alert window (#3470)" do
+    test "allows one per window, independent of the usual alert's either way" do
+      address = email()
+      other = email()
+      on_exit(fn -> Enum.each([address, other], &AccountThrottle.reset/1) end)
+
+      assert AccountThrottle.breach_alert_allowed?(address)
+      refute AccountThrottle.breach_alert_allowed?(address)
+      # Keyed like the usual window: trimmed and case-folded.
+      refute AccountThrottle.breach_alert_allowed?("  " <> String.upcase(address))
+      # Spending it left the usual window alone...
+      assert AccountThrottle.alert_allowed?(address)
+
+      # ...and spending the usual one leaves it alone.
+      assert AccountThrottle.alert_allowed?(other)
+      refute AccountThrottle.alert_allowed?(other)
+      assert AccountThrottle.breach_alert_allowed?(other)
+    end
+
+    test "is handed back by forget_breach_alert/1 alone" do
+      address = email()
+      on_exit(fn -> AccountThrottle.reset(address) end)
+
+      assert AccountThrottle.breach_alert_allowed?(address)
+      assert AccountThrottle.alert_allowed?(address)
+
+      assert AccountThrottle.forget_breach_alert(address) == :ok
+      assert AccountThrottle.breach_alert_allowed?(address)
+      refute AccountThrottle.alert_allowed?(address)
+
+      assert AccountThrottle.forget_alert(address) == :ok
+      assert AccountThrottle.alert_allowed?(address)
+      refute AccountThrottle.breach_alert_allowed?(address)
+    end
+
+    test "is cleared by reset/1 and forget_all/0, never by forgive/1 or unlock/1" do
+      address = email()
+      on_exit(fn -> AccountThrottle.reset(address) end)
+
+      spent = fn ->
+        ThrottleStore.spent("signin:breach-alert", AccountThrottle.digest(address))
+      end
+
+      assert AccountThrottle.breach_alert_allowed?(address)
+
+      AccountThrottle.forgive(address)
+      AccountThrottle.unlock(address)
+      assert spent.() == 1
+
+      AccountThrottle.reset(address)
+      assert spent.() == 0
+
+      assert AccountThrottle.breach_alert_allowed?(address)
+      assert AccountThrottle.forget_all() == :ok
+      assert spent.() == 0
+    end
+  end
+
   describe "mail-triggering requests" do
     test "each purpose gets its own per-address budget" do
       address = email()

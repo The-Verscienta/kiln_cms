@@ -184,7 +184,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   @passkey_registration_window :timer.hours(1)
 
   # Every bucket this module charges, for `forget_all/0`.
-  @buckets ~w(signin challenge:free_signin signin:breached_block 2fa signin:alert 2fa:alert 2fa:settings-alert mail:password_reset mail:magic_link mail:registration_notice
+  @buckets ~w(signin challenge:free_signin signin:breached_block 2fa signin:alert signin:breach-alert 2fa:alert 2fa:settings-alert mail:password_reset mail:magic_link mail:registration_notice
                mail:invitation mail:membership_notice mail:sign_in_unlock mail:enrolment_proof
                passkey:register)
 
@@ -416,6 +416,44 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   end
 
   @doc """
+  Hands back a sign-in alert window that was claimed but never used: the
+  mail it was claimed for failed to go out. The same reasoning as
+  `forget_second_factor_alert/1`.
+  """
+  @spec forget_alert(String.t()) :: :ok
+  def forget_alert(identifier), do: drop("signin:alert", identifier)
+
+  @doc """
+  The same, for the mail about a pause that breached-password refusals filled
+  (#3437, #3470), keyed on the submitted identifier like `alert_allowed?/1`.
+
+  Its **own** bucket, for the reason `second_factor_alert_allowed?/1` has one:
+  a sign-in refused because the password is breached used the *right*
+  password, which is the stronger news. Sharing `alert_allowed?/1`'s window
+  let the weaker signal silence it, in the order an attack produces them:
+  wrong guesses fill the counter and spend the ordinary window; the counter's
+  window rolls over; someone spends the address's reset-mail budget at
+  `/reset`, so each refusal's own reset mail is over budget; the refusals then
+  fill the counter again, and the pause mail that says why found the window
+  already spent.
+
+  So an address hears at most one ordinary alert and one breached-pause alert
+  per window. The second can only be spent by someone holding the correct
+  password of an administrator whose site blocks it. Neither window draws on
+  the reset-mail budget.
+
+  Lifted by neither `forgive/1` nor `unlock/1`, like the other alert windows.
+  """
+  @spec breach_alert_allowed?(String.t()) :: boolean()
+  def breach_alert_allowed?(identifier) do
+    charge("signin:breach-alert", identifier, @alert_window, 1) == :allow
+  end
+
+  @doc "Hands back a breached-pause alert window that was claimed but never used."
+  @spec forget_breach_alert(String.t()) :: :ok
+  def forget_breach_alert(identifier), do: drop("signin:breach-alert", identifier)
+
+  @doc """
   The same, for the second factor's lockout alert (#728), keyed on the account.
 
   Its **own** bucket rather than a share of `alert_allowed?/1`'s, and the
@@ -569,6 +607,7 @@ defmodule KilnCMS.Accounts.AccountThrottle do
   def reset(identifier) do
     forgive(identifier)
     drop("signin:alert", identifier)
+    drop("signin:breach-alert", identifier)
 
     Enum.each(@mail_purposes, &drop("mail:#{&1}", identifier))
   end

@@ -129,6 +129,33 @@ defmodule KilnCMS.Accounts.PendingSignIn do
       Handing back a token whose row is still parked would be a 201 the client
       cannot use, and every subsequent request answering 401 with nothing to say
       why is a far worse trade than one honest "try again in a moment".
+
+  ## It carries the sign-in check's warning (#3435)
+
+  `KilnCMS.Accounts.Preparations.CheckBreachedPasswordAtSignIn` looks the
+  password up at the first factor, because that is the only step where the
+  plaintext exists (ADR 0085). Its `:warn` verdict has to reach whichever step
+  finishes the sign-in, and on the headless door that is `verify/2`, a separate
+  request with no password in it. So an `:encrypted` blob carries the verdict
+  as `"password_breach"`, and `resolve/4` reads it back as `password_breach?`.
+
+  The blob is the right place for it: it is already encrypted and
+  authenticated, so the caller can neither read the verdict nor forge one, and
+  it never travels in a URL. A `:session` blob does not carry it: the browser
+  gate leaves its note in `KilnCMS.Accounts.PasswordNotice` and the session
+  instead.
+
+  The key is **always** written in an `:encrypted` blob, `1` for a warned
+  sign-in and `0` for a clean one. AES-GCM hides the content but not the
+  length, and the headless blob is printed in client logs and CI transcripts,
+  so a key present only when warned would tell anyone reading those logs which
+  administrators sign in with a breached password. Both values encode to the
+  same size. Only `1` reads as warned.
+
+  Across a rolling deploy: a blob minted by the previous release has no key
+  and reads as not warned, which is what that release would have answered. A
+  blob minted here and redeemed by the previous release has one extra key it
+  ignores. Neither changes the salt or the lifetime.
   """
 
   alias KilnCMS.Accounts
@@ -141,9 +168,22 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   # session key) and a cookie to remember (a headless client has none). Gating
   # them here rather than at the call sites means neither mode can be handed —
   # or can report — a field that means nothing to it.
+  #
+  # `password_breach?` is the same kind of gate: only the headless door needs
+  # the sign-in check's verdict carried in the blob (#3435).
   @modes %{
-    session: %{salt: "two-factor pending", jti?: false, remember_me?: true},
-    encrypted: %{salt: "api two-factor pending", jti?: true, remember_me?: false}
+    session: %{
+      salt: "two-factor pending",
+      jti?: false,
+      remember_me?: true,
+      password_breach?: false
+    },
+    encrypted: %{
+      salt: "api two-factor pending",
+      jti?: true,
+      remember_me?: false,
+      password_breach?: true
+    }
   }
 
   @max_age 300
@@ -158,17 +198,25 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   A resolved pending sign-in.
 
   One shape for both gates, so a caller cannot read a field that only its own
-  door happens to set: `jti` is `nil` for `:session` and `remember_me?` is
-  always `false` for `:encrypted` (there is no cookie to remember).
+  door happens to set: `jti` is `nil` for `:session`, `remember_me?` is
+  always `false` for `:encrypted` (there is no cookie to remember), and
+  `password_breach?` is always `false` for `:session` (#3435).
   """
   @type t :: %__MODULE__{
           user: Accounts.User.t(),
           factors: Accounts.second_factors(),
           jti: String.t() | nil,
-          remember_me?: boolean()
+          remember_me?: boolean(),
+          password_breach?: boolean()
         }
 
-  defstruct [:user, :jti, factors: %{totp?: false, passkeys: 0}, remember_me?: false]
+  defstruct [
+    :user,
+    :jti,
+    factors: %{totp?: false, passkeys: 0},
+    remember_me?: false,
+    password_breach?: false
+  ]
 
   @doc "How long a minted blob stays redeemable, in seconds. Both gates."
   @spec max_age() :: pos_integer()
@@ -205,10 +253,15 @@ defmodule KilnCMS.Accounts.PendingSignIn do
     * `:remember_me?` — the ticked checkbox, carried across the code prompt as
       *intent* only. The cookie itself is withheld at the first factor and
       issued once the code verifies (#699). Ignored by `:encrypted`.
+    * `:password_breach?` — `true` when the sign-in check warned at the first
+      factor (#3435), so the step that finishes the sign-in can still say so.
+      Only `true` counts. Ignored by `:session`.
   """
   @spec mint_and_hold(mode(), context(), Accounts.User.t(), keyword()) :: String.t()
   def mint_and_hold(mode, context, user, opts \\ []) when is_map_key(@modes, mode) do
-    %{jti?: jti?, remember_me?: carries_remember_me?} = Map.fetch!(@modes, mode)
+    %{jti?: jti?, remember_me?: carries_remember_me?, password_breach?: carries_breach?} =
+      Map.fetch!(@modes, mode)
+
     token = Keyword.get_lazy(opts, :token, fn -> user.__metadata__.token end)
 
     refuse_own_credential!(context, token)
@@ -223,6 +276,11 @@ defmodule KilnCMS.Accounts.PendingSignIn do
     |> put_if(jti?, "jti", fn -> random_jti() end)
     |> put_if(carries_remember_me?, "remember_me", fn ->
       Keyword.get(opts, :remember_me?, false) == true
+    end)
+    # Always written, warned or not, so the ciphertext is the same length
+    # either way: see the moduledoc.
+    |> put_if(carries_breach?, "password_breach", fn ->
+      if Keyword.get(opts, :password_breach?, false) == true, do: 1, else: 0
     end)
     |> then(&wrap(mode, context, &1))
   end
@@ -251,7 +309,8 @@ defmodule KilnCMS.Accounts.PendingSignIn do
   @spec resolve(mode(), context(), term(), :any | :totp | :passkey) :: {:ok, t()} | :error
   def resolve(mode, context, blob, factor)
       when is_map_key(@modes, mode) and is_binary(blob) and factor in [:any, :totp, :passkey] do
-    %{jti?: jti?, remember_me?: carries_remember_me?} = Map.fetch!(@modes, mode)
+    %{jti?: jti?, remember_me?: carries_remember_me?, password_breach?: carries_breach?} =
+      Map.fetch!(@modes, mode)
 
     with {:ok, %{"user_id" => user_id, "token" => token} = payload} <-
            unwrap(mode, context, blob),
@@ -271,7 +330,10 @@ defmodule KilnCMS.Accounts.PendingSignIn do
          user: %{user | __metadata__: Map.put(user.__metadata__, :token, token)},
          factors: factors,
          jti: jti,
-         remember_me?: carries_remember_me? and payload["remember_me"] == true
+         remember_me?: carries_remember_me? and payload["remember_me"] == true,
+         # Strict: only the value `mint_and_hold/4` writes for a warning. A
+         # blob from the previous release has no key, and reads as not warned.
+         password_breach?: carries_breach? and payload["password_breach"] === 1
        }}
     else
       _ -> :error
