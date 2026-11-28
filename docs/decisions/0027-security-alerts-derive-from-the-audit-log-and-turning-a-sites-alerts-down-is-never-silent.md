@@ -1,6 +1,8 @@
 # 0027. Security alerts derive from the audit log, and turning a site's alerts down is never silent
 
-- **Status** — accepted (2026-11-12).
+- **Status** — accepted (2026-11-12); amended 2026-11-27 by
+  [#2811](https://github.com/The-Verscienta/kiln_cms/issues/2811) (turning
+  off a platform kind sends a platform notice, see "Amendment").
 - **References** — [#2245](https://github.com/The-Verscienta/kiln_cms/issues/2245)
   (owner decisions D1–D7 of 2026-11-08, the 2026-11-09 answers, OC-1 to OC-3
   of 2026-11-10 and the two 2026-11-12 decisions, all in its comments; PRs
@@ -155,12 +157,12 @@ Alert mail goes through the **instance** relay (`KilnCMS.Security.AlertMail`),
 so a site admin cannot reroute it by changing the site's relay; changing that
 relay is itself a notice.
 
-**The one exception is the platform toggle.** `api_key_rate_limited` is the
+**The platform toggle** (amended by #2811, below). `api_key_rate_limited` is the
 only optional platform kind (`Alerts.platform_optional_kinds/0`, stored in
-`KilnCMS.Security.PlatformAlertSettings`). Turning it off raises no notice:
-a notice goes to one site's admins, and this is the installation's setting,
-which only platform admins can read or write. It is recorded instead in the
-instance security log as `platform_alerts_changed`, which only platform
+`KilnCMS.Security.PlatformAlertSettings`). Turning it off raises no site
+notice: a site notice goes to one site's admins, and this is the
+installation's setting, which only platform admins can read or write. It is
+recorded in the instance security log as `platform_alerts_changed`, which only platform
 admins read. It is optional at all because a key over a per-address limit can
 be routine for clients that batch or share an egress address.
 
@@ -223,8 +225,30 @@ be routine for clients that batch or share an egress address.
 - A site with no member admins sends its alerts to every platform admin, in
   that site's bell. Platform admins cannot opt out of platform alerts other
   than `api_key_rate_limited`.
-- Turning `api_key_rate_limited` off notifies no other platform admin; the
-  instance log is the only record.
+- Turning `api_key_rate_limited` off notifies every platform admin by a
+  platform notice (since #2811, see "Amendment"); before that, the instance
+  log was the only record.
 - Whether a site's alerts reach anyone is checked by the security posture
   line `core.security_alerts_reach_someone`
   (`KilnCMS.Security.Posture.Checks.SecurityAlerts`).
+
+## Amendment (2026-11-27, #2811): the platform toggle is not silent either
+
+The exception above is closed. Turning off a kind in
+`Alerts.platform_optional_kinds/0` now writes a **platform notice**
+(`change` `platform_kind_disabled`, the kinds newly turned off, the actor's
+id), with the same rules as a site's notice:
+
+- **Fails closed.** `KilnCMS.Security.Changes.NoticePlatformAlertSettings`
+  writes it through `AlertGate.insert_platform_notice!/1` in the save's
+  transaction; a notice that cannot be written fails the save and rolls back
+  its `platform_alerts_changed` event.
+- **Every platform admin hears it**, the actor included (a hijacked session is
+  the case it is for, and a single-admin installation would otherwise hear
+  nothing), as `Alerts.platform_recipients/0` stands at delivery, by bell in
+  the default org and by email. No setting or mute applies.
+- **No webhook and no summary**, like a platform alert. Its dispatch channel is
+  `:platform_notice`, and its changes (`Alerts.platform_notice_changes/0`) are
+  kept apart from the site's so neither path can write the other's.
+
+Turning a kind back on, or saving it unchanged, raises nothing.

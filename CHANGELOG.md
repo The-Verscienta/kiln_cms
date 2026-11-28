@@ -67,6 +67,9 @@ else.
 - **Forms: add a field condition only once every node runs this release, and before rolling back untick Required on conditional fields that not every visitor should be asked (#2262).**
   An older node ignores conditions, so it shows every field and refuses a submission that left a required hidden field blank. Expand-only migration.
   ([#3480](https://github.com/The-Verscienta/kiln_cms/pull/3480) · [long form](docs/changelog/unreleased.md#form-field-conditions-upgrade))
+- **Security alerts: before rolling back past this release, let every pending platform notice be delivered; the previous release cannot load one, so a notice still waiting is lost after a day (#2811).**
+  During a rolling deploy an older node retries it until a newer node delivers it. No migration.
+  ([long form](docs/changelog/unreleased.md#platform-notice-rollback))
 
 ### Breaking
 
@@ -98,6 +101,12 @@ else.
 - **Backups: the Backups page and the Log tab follow a running backup about half a second after each change on clustered nodes, and the in-flight strip shows an approximate percent by steps (#3489, completes #2230).**
   The 3-second poll stays the source of truth and the fallback on unclustered nodes. No migration; rolling the pin back is safe.
   ([#3492](https://github.com/The-Verscienta/kiln_cms/pull/3492) · [long form](docs/changelog/unreleased.md#backup-live-progress))
+- **Security alerts: a verified API key over the `media_render`, `preview_api`, `unlock` or `feed_join` limit now raises `api_key_rate_limited`; `docs` still does not (#2809).**
+  A refused feed connect is still a `200` `busy`. No migration; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#api-key-rate-limit-more-buckets))
+- **Security alerts: turning off a platform alert sends every platform admin, the one who saved included, a notice by bell and email that cannot be muted; a notice that cannot be written fails the save (#2811).**
+  No webhook, no summary. No migration; see the upgrade note before rolling back.
+  ([long form](docs/changelog/unreleased.md#platform-alert-off-notice))
 
 ### Changed
 

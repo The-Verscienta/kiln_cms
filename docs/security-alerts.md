@@ -20,7 +20,7 @@ There are two channels. A **site** alert is about one site and goes to that
 site's own admins, who can turn each kind off. A **platform** alert is about
 the whole installation and goes to every platform admin. Nobody can mute a
 platform alert, and only one platform kind, `api_key_rate_limited`, can be
-turned off, by a platform admin
+turned off, by a platform admin, which sends every platform admin a notice
 ([Turn off rate-limit alerts for API keys](#turn-off-rate-limit-alerts-for-api-keys)).
 
 Site alerts (each one can be turned off on the site's
@@ -83,6 +83,7 @@ Platform alerts:
 | Site alert | Each **member admin** of the site (the platform admins when it has none), unless the site switched admin notifications off | The same people, except those who muted the email | The site's endpoints subscribed to `security.<kind>` |
 | Platform alert | Every platform admin, in the **default site's** bell; other sites' consoles show only how many are unread | Every platform admin; no mute applies | None in this release |
 | Silencing notice | Each member admin of the site (the platform admins when it has none) | The same people; no setting or mute applies | The site's endpoints subscribed to `security.alerts_silenced` |
+| Platform notice | Every platform admin, the one who made the change included, in the **default site's** bell, counted like a platform alert in other sites' consoles | Every platform admin; no setting or mute applies | None |
 
 A **member admin** is an account with an active membership on the site whose
 role there is admin, standing or by a live temporary grant, that is not a
@@ -132,8 +133,10 @@ are not counted: they are only in the default site's bell.
   the language of the console you read it in. A row written before this
   wording was translated shows its English line.
 - **The email.** Subject "Security alert on (site): (what happened)", or
-  "Security alert summary for (site)" for a summary and "Security alerts on
-  (site) were changed" for a notice. It says
+  "Security alert summary for (site)" for a summary, "Security alerts on
+  (site) were changed" for a notice and "Platform security alerts were
+  changed" for a [platform notice](#turn-off-rate-limit-alerts-for-api-keys).
+  It says
   when (UTC), links to the security log on the site's own console host (a
   notice links to the Security alerts page), and says why you got it. Emails
   are in English, whatever language the console is in: an account stores no
@@ -253,9 +256,15 @@ API key that this server has verified goes over one of these rate limits:
 | `media_upload` | Uploads and imports under `/api/media` |
 | `media_transform` | Image transforms, `/media/:id/t/...` |
 | `plugin_endpoint` | Plugin routes |
+| `media_render` | Image transforms that have to render a new derivative (a cache miss on `/media/:id/t/...`), 120 a minute by default (#2809) |
+| `preview_api` | Headless reads that present a preview token: `/api/json`, `GET /api/content/:type/:slug` and `GET /api/visual-editing/:type/:slug` (#2809) |
+| `unlock` | Passphrase attempts against locked content: `POST /api/content/:type/:slug/unlock` and the lock page's `POST /_unlock` (#2809) |
+| `feed_join` | Connects to the change feed, `GET /api/feed`. A refusal here is still the stream's `200` with `event: busy`, never a `429` (#2809) |
 
-No other limit raises it: sign-in, forms, page delivery and the rest are
-about addresses, not keys.
+No other limit raises it. Sign-in, forms, page delivery and the rest are
+about addresses, not keys. The limit on the API explorer and the schema
+downloads (`docs`) is left out on purpose (an owner decision on #2809), so a
+key over it raises nothing.
 
 **"Verified" means used successfully on this server recently.**
 A rate limit refuses a request before the key in it is checked, and checking
@@ -272,12 +281,18 @@ server, or a JWT from the headless sign-in rather than a key) is counted on the
 is not checked at the refusal, and why servers do not share what they
 remember, is argued in [ADR 0053](decisions/0053-rate-limit-alerts-trust-a-node-local-verified-key-cache-never-a-check-on-the-refusal-path.md). That means:
 
-- On image transforms and plugin routes, which never check a key, a refusal
-  alerts only if the same key was used on an authenticated API on the same
-  server recently enough to still be remembered (2.5 to 5 minutes, as
-  above). Behind a load balancer, the earlier use and the refusal have to
-  land on the same server (see
+- On image transforms (`media_transform` and `media_render`), plugin routes,
+  the lock page's `POST /_unlock` and the change feed's connect budget
+  (`feed_join`, charged before the feed checks a key), a refusal alerts only
+  if the same key was used on an authenticated API on the same server
+  recently enough to still be remembered (2.5 to 5 minutes, as above). Behind
+  a load balancer, the earlier use and the refusal have to land on the same
+  server (see
   [Running more than one server](#running-more-than-one-server)).
+- `preview_api` and `POST /api/content/:type/:slug/unlock` are charged after
+  the `/api` pipeline has checked the key, so the key there is always
+  verified. A forged or revoked key never reaches them: it is answered `401`
+  first, and records nothing.
 - `/ws/gql` cannot carry an API key (the socket accepts only a JWT), so a
   refusal there never alerts.
 - A key revoked while it is still remembered records nothing: the key is
@@ -352,7 +367,8 @@ the whole installation, not one site.
 1. Open **Security alerts** (`/editor/security-alerts`) on any site. Below
    the site's form you see **Platform alerts**, with the line "Shown to
    platform admins only. These go to every platform admin, for the whole
-   installation. Turning one off is recorded in the instance security log."
+   installation. Turning one off is recorded in the instance security log,
+   and every platform admin is sent a notice."
    Site admins who are not platform admins don't see this part.
 2. Untick **API keys over a rate limit**. The line under it reads "A verified
    API key goes over a rate limit. One alert every 15 minutes, then a
@@ -363,9 +379,19 @@ the whole installation, not one site.
    verified the key." Its **Learn more** link opens
    [Running more than one server](#running-more-than-one-server).
 3. Select **Save platform alerts**. You see "Platform alert settings saved.
-   Turning an alert off is recorded in the instance security log." (Saving
-   with nothing turned off says "Platform alert settings saved.")
-4. Open **Security log**, then **Instance log**. The save is there as
+   Every platform admin will be sent a notice." Saving with nothing newly
+   turned off, or turning it back on, says "Platform alert settings saved."
+   and sends nothing. The message follows what the save itself wrote: if
+   another platform admin turned the kind off after your page loaded, your
+   save sends no second notice and does not promise one.
+4. Within about a minute every platform admin, you included, gets the
+   **platform notice**: a bell row in the default site's console, headed
+   "Security alerts were turned down", whose inbox line reads "Some platform
+   security alerts were turned off", and an email, "Platform security alerts
+   were changed", saying "Turned off: An API key hit a rate limit." with a
+   link to the Security alerts page. In any other site's console it is
+   counted in the "unread platform alerts" entry.
+5. Open **Security log**, then **Instance log**. The save is there as
    **Platform security alerts changed** (`platform_alerts_changed`), with
    `disabled_kinds` `api_key_rate_limited`, or `none` after turning it back
    on.
@@ -373,9 +399,25 @@ the whole installation, not one site.
 From the next delivery on, nothing is sent for the kind. The
 `api_key_rate_limited` events are still written to the security log, and the
 alert's window is still claimed and stamped delivered; only the bell and
-email are skipped. Unlike a site setting, turning it off sends no
-[silencing notice](#silencing-notices): notices go to one site's admins, and
-this is the installation's. The instance log is the record.
+email are skipped.
+
+The platform notice (#2811) is the installation's counterpart of a site's
+[silencing notice](#silencing-notices), so a hijacked platform admin session
+cannot turn the alert off without every other platform admin hearing of it:
+
+- **Who gets it.** Every platform admin as they are when it is delivered,
+  a live temporary platform grant included and erased accounts excluded. The
+  one who saved is included too, so a single-admin installation still hears
+  about a change it did not make. Site admins who are not platform admins
+  never get it.
+- **No way to quiet it.** No setting turns it off and no mute applies,
+  including the **Security alerts** mute under **Your settings**. It is
+  never grouped: each save that turns a kind off sends one. It has no
+  summary and no webhook carries it, like the platform alerts.
+- **Written with the save, or not at all.** The notice is written in the
+  save's own transaction, with the instance log event. If it cannot be
+  written, the save fails, nothing changes, and the page says "The platform
+  alert settings could not be saved."
 
 What can go wrong:
 
@@ -383,8 +425,11 @@ What can go wrong:
   alerts."** Your platform admin role was lowered, or a temporary platform
   grant expired, while the page was open. Nothing changed.
 - **"The platform alert settings could not be saved."** The save failed, for
-  example because its instance log event could not be written (the two are
-  saved together). Nothing changed; try again and check the application log.
+  example because its instance log event or its platform notice could not be
+  written (all three are saved together). Nothing changed; try again and
+  check the application log, which says "Platform alert settings not saved:
+  the platform notice could not be written: …" when the notice was the
+  cause.
 - **The alerts keep coming after you turned the kind off.** The setting
   could not be read when an alert was delivered; delivery then treats the
   kind as on and logs "Security alerts: the platform alert settings could
@@ -402,8 +447,8 @@ anything off for the other admins.
 3. Select **Save preferences**.
 
 The mute is one switch for every site you administer, and it mutes only the
-**email** of **site** alerts: the bell row is still written. It does not mute platform alerts or silencing notices, which are always
-emailed. The switch is shown only to member admins of some site; a platform
+**email** of **site** alerts: the bell row is still written. It does not mute platform alerts, silencing notices or platform notices,
+which are always emailed. The switch is shown only to member admins of some site; a platform
 admin, whose alerts are the platform's, does not see it. Only the account
 holder can change it: a platform admin editing another account's preferences
 is refused ("can only be changed by the account holder").
@@ -437,10 +482,15 @@ one back on raise nothing.
 
 A notice is written in the same transaction as the change. If the notice
 cannot be written, the change is refused and rolls back: alerts are never
-turned down without a word. The platform's own switch for
-`api_key_rate_limited` is the one exception: it sends no notice and is
-recorded in the instance security log instead
+turned down without a word
 ([ADR 0027](decisions/0027-security-alerts-derive-from-the-audit-log-and-turning-a-sites-alerts-down-is-never-silent.md)).
+
+The platform's own switch for `api_key_rate_limited` is not a site's
+setting, so it sends no site notice. Since #2811 it sends a **platform
+notice** instead, `change` `platform_kind_disabled`, to every platform admin
+by bell and email, under the same rules: written with the save, no setting
+or mute, no webhook (see
+[Turn off rate-limit alerts for API keys](#turn-off-rate-limit-alerts-for-api-keys)).
 
 ## IP addresses in alerts
 
@@ -740,6 +790,33 @@ What can go wrong:
   and that counts as unticking a security event, which sends the site's
   admins a `webhook_changed` silencing notice. Tick it again after rolling
   forward.
+- **Upgrade to platform notices and the four new rate-limit buckets
+  (#2809, #2811).** No migration and no setting. From the deploy on, turning
+  off `api_key_rate_limited` sends every platform admin a platform notice,
+  and a verified key over `media_render`, `preview_api`, `unlock` or
+  `feed_join` raises `api_key_rate_limited`.
+  - **During a rolling deploy.** A node still on the previous release cannot
+    load a platform notice's dispatch row (channel `platform_notice`), so the
+    delivery job fails there and is retried, up to 10 attempts per job and
+    re-queued every minute after that, until a node on the new release
+    delivers it. The notice is late, never sent to the wrong people. A key
+    over one of the new buckets on an old node raises nothing.
+  - **Before rolling back.** Wait until every platform notice written on the
+    new release has been delivered, or accept that it may be lost. This
+    query returns `0` when none is waiting:
+
+    ```sql
+    SELECT count(*) FROM security_alert_dispatches
+    WHERE channel = 'platform_notice'
+      AND alert_sent_at IS NULL AND failed_at IS NULL;
+    ```
+
+    On the previous release an undelivered notice fails every
+    minute and logs the failure until its one-day delivery window closes, and
+    then it is never sent. The instance log's `platform_alerts_changed` event
+    is kept either way. A notice already delivered still shows after a
+    rollback, its inbox line falling back to "Security alerts were made
+    quieter".
 - **Mail goes through the instance relay** (the `KilnCMS.Mailer`
   configuration), never a site's own SMTP relay: a site admin can change that
   relay, and an alert about the site must not depend on it. Alert mail is
@@ -789,8 +866,9 @@ ways.
 
 - **Most request-rate limits are per server.** Every request-rate limit
   (`KilnCMSWeb.RateLimit`) except sign-in (`auth`), registration (`register`)
-  and unlock (`unlock`) is counted in each server's memory, the five limits
-  that raise `api_key_rate_limited` included. (The per-account budgets, such as
+  and unlock (`unlock`) is counted in each server's memory, every other limit
+  that raises `api_key_rate_limited` included. (`unlock` is counted in the
+  database, but the gate that notes a key over it is still per server.) (The per-account budgets, such as
   sign-in lockout and invitations, are shared through the database and don't
   multiply.) Behind a load balancer an address can make up to N times the
   configured number of requests on N servers before it is refused, so a key goes over a limit, and
@@ -802,10 +880,11 @@ ways.
   or without session affinity: the server that refuses an address is the one
   that let the address's earlier requests through, and it checked the key on
   each of them that carried it. No alert is raised when:
-  - the refusal is on an image transform or a plugin route (neither checks a
-    key) or the ActivityPub inbox (which counts against the `api` limit
-    without checking a key), and the key's earlier API use landed on another
-    server;
+  - the refusal is on an image transform, a plugin route or the lock page's
+    `POST /_unlock` (none checks a key), the change feed's connect budget
+    (`feed_join`, charged before the feed checks the key) or the ActivityPub
+    inbox (which counts against the `api` limit without checking a key), and
+    the key's earlier API use landed on another server;
   - the address's limit was used up by requests that did not carry the key,
     such as other clients behind the same egress address;
   - the server's key cache restarted on its own while its rate-limit counts
@@ -855,9 +934,14 @@ ways.
   `KilnCMSWeb.Plugs.RememberApiKey` once `KilnCMSWeb.Plugs.RequireApiKey` has
   verified the key) and `note/2`, called from the refusal
   branch of `KilnCMSWeb.Plugs.RateLimit` and
-  `KilnCMSWeb.Plugs.GraphqlBatchLimit`. `buckets/0` lists the limits it
-  covers. A new rate-limited API surface that should alert needs its bucket
-  there and a key that reaches `remember/2`.
+  `KilnCMSWeb.Plugs.GraphqlBatchLimit`, and by the two places that check a
+  limit themselves rather than through the plug:
+  `KilnCMSWeb.MediaTransformController` (`:media_render`) and
+  `KilnCMSWeb.FeedStream.JoinBudget` (`:feed_join`). `buckets/0` lists the
+  limits it covers. A new rate-limited API surface that should alert needs
+  its bucket there, a key that reaches `remember/2`, and, when it calls
+  `KilnCMSWeb.RateLimit.check/2` directly, its own `note/2` call in the
+  refusal branch: adding the bucket alone does nothing there.
 - `KilnCMS.Security.PlatformAlertSettings`: the platform's one settings row,
   through `KilnCMS.Security.list_platform_alert_settings/1` and
   `KilnCMS.Security.save_platform_alert_settings/2` (platform admins only).
@@ -865,7 +949,17 @@ ways.
   `KilnCMS.Security.Alerts.platform_optional_kinds/0` may be added, and a
   save adding another kind is refused with "has alert kinds that cannot be
   turned off". `KilnCMS.Security.Alerts.platform_enabled?/1` is what
-  delivery asks.
+  delivery asks. A save that newly turns a kind off writes a platform notice
+  through `KilnCMS.Security.Changes.NoticePlatformAlertSettings`, which
+  compares against the row read `FOR UPDATE` before the write and calls
+  `KilnCMS.Security.AlertGate.insert_platform_notice!/1` in the save's
+  transaction. The saved record's `__metadata__.platform_notice?` says
+  whether this save wrote one. Its dispatch row has channel
+  `:platform_notice`, scope `platform_notice:<id>` and the default org; its
+  changes are `KilnCMS.Security.Alerts.platform_notice_changes/0`, kept apart
+  from `notice_changes/0` so neither `insert_notice!/2` nor
+  `insert_platform_notice!/1` accepts the other's (both raise
+  `ArgumentError`).
 - `KilnCMS.Security.AlertText`: the kind and change labels and the
   one-line headline, gettext'd. The inbox renders it in the reader's locale
   from `Notification.details` (the values `AlertText.details/1` keeps: phase,

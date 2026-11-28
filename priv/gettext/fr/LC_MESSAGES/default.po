@@ -18184,8 +18184,8 @@ msgstr "Réglages des alertes de la plateforme enregistrés."
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Platform alert settings saved. Turning an alert off is recorded in the instance security log."
-msgstr "Réglages des alertes de la plateforme enregistrés. La désactivation d'une alerte est consignée dans le journal de sécurité de l’instance."
+msgid "Platform alert settings saved. Every platform admin will be sent a notice."
+msgstr "Réglages des alertes de la plateforme enregistrés. Chaque administrateur de la plateforme recevra un avis."
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
@@ -22350,8 +22350,8 @@ msgstr "Affiché aux éditeurs. Laissez vide pour le message standard."
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format
-msgid "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log."
-msgstr "Visible par les administrateurs de la plateforme uniquement. Ces alertes vont à chaque administrateur de la plateforme, pour toute l'installation. La désactivation d'une alerte est consignée dans le journal de sécurité de l’instance."
+msgid "Shown to platform admins only. These go to every platform admin, for the whole installation. Turning one off is recorded in the instance security log, and every platform admin is sent a notice."
+msgstr "Visible par les administrateurs de la plateforme uniquement. Ces alertes vont à chaque administrateur de la plateforme, pour toute l'installation. La désactivation d'une alerte est consignée dans le journal de sécurité de l’instance, et chaque administrateur de la plateforme reçoit un avis."
 
 #: lib/kiln_cms_web/live/form_builder_live.ex
 #, elixir-autogen, elixir-format
@@ -22894,6 +22894,11 @@ msgstr "Certaines lignes ont été supprimées pour garder le journal compact"
 #, elixir-autogen, elixir-format
 msgid "Some notifications could not be marked read."
 msgstr "Certaines notifications n'ont pas pu être marquées comme lues."
+
+#: lib/kiln_cms/security/alert_text.ex
+#, elixir-autogen, elixir-format
+msgid "Some platform security alerts were turned off"
+msgstr "Certaines alertes de sécurité de la plateforme ont été désactivées"
 
 #: lib/kiln_cms_web/live/security_alerts_live.ex
 #, elixir-autogen, elixir-format

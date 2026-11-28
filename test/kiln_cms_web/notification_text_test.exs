@@ -110,7 +110,7 @@ defmodule KilnCMSWeb.NotificationTextTest do
                "#{kind} has no label"
       end
 
-      for change <- Alerts.notice_changes() do
+      for change <- Alerts.notice_changes() ++ Alerts.platform_notice_changes() do
         refute AlertText.change_label(change) == AlertText.change_label("from_a_newer_release"),
                "#{change} has no label"
       end
@@ -138,6 +138,31 @@ defmodule KilnCMSWeb.NotificationTextTest do
       Gettext.with_locale(KilnCMSWeb.Gettext, "fr", fn ->
         assert NotificationText.excerpt(alert) ==
                  "Un compte a été verrouillé (depuis 203.0.113.0/24)"
+      end)
+    end
+
+    test "a platform notice says platform alerts were turned off, in the reader's language" do
+      notice = %{
+        event: :security_notice,
+        excerpt: "stored",
+        details: %{
+          "phase" => "notice",
+          "channel" => "platform_notice",
+          "change" => "platform_kind_disabled",
+          "kinds" => ["api_key_rate_limited"]
+        }
+      }
+
+      assert NotificationText.excerpt(notice) == "Some platform security alerts were turned off"
+
+      Gettext.with_locale(KilnCMSWeb.Gettext, "es", fn ->
+        assert NotificationText.excerpt(notice) ==
+                 "Se desactivaron algunas alertas de seguridad de la plataforma"
+      end)
+
+      Gettext.with_locale(KilnCMSWeb.Gettext, "fr", fn ->
+        assert NotificationText.excerpt(notice) ==
+                 "Certaines alertes de sécurité de la plateforme ont été désactivées"
       end)
     end
 

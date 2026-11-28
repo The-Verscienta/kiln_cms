@@ -263,12 +263,16 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
                )
     end
 
-    test "a platform admin turns rate-limit alerts off, and the page says it is logged",
+    test "a platform admin turns rate-limit alerts off, and the page says who is told",
          %{conn: conn, org: org} do
       platform = authed_user(:admin)
 
-      {:ok, lv, _html} =
+      {:ok, lv, html} =
         conn |> org_conn(org) |> log_in(platform) |> live(~p"/editor/security-alerts")
+
+      # Said before the save, not after (#2811).
+      assert html =~
+               "Turning one off is recorded in the instance security log, and every platform admin is sent a notice."
 
       assert has_element?(
                lv,
@@ -296,7 +300,7 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
         |> form("#platform-alerts-form", platform_alerts: %{"api_key_rate_limited" => "false"})
         |> render_submit()
 
-      assert html =~ "recorded in the instance security log"
+      assert html =~ "Platform alert settings saved. Every platform admin will be sent a notice."
 
       refute has_element?(
                lv,
@@ -305,8 +309,59 @@ defmodule KilnCMSWeb.SecurityAlertsLiveTest do
 
       assert {:ok, [row]} = KilnCMS.Security.list_platform_alert_settings(actor: platform)
       assert row.disabled_kinds == ["api_key_rate_limited"]
-      # No site notice: the platform setting is not a site's.
-      assert SecurityAlerts.dispatches() == []
+      # A platform notice (#2811), and no site notice: the platform setting
+      # is not a site's.
+      assert [%{"channel" => "platform_notice"}] = SecurityAlerts.dispatches()
+    end
+
+    test "saving it unchanged, or turning it back on, says nothing of a notice",
+         %{conn: conn, org: org} do
+      platform = authed_user(:admin)
+
+      KilnCMS.Security.save_platform_alert_settings!(
+        %{disabled_kinds: ["api_key_rate_limited"]},
+        actor: platform
+      )
+
+      {:ok, lv, _html} =
+        conn |> org_conn(org) |> log_in(platform) |> live(~p"/editor/security-alerts")
+
+      html =
+        lv
+        |> form("#platform-alerts-form", platform_alerts: %{"api_key_rate_limited" => "true"})
+        |> render_submit()
+
+      assert html =~ "Platform alert settings saved."
+      refute html =~ "will be sent a notice"
+      # Only the first save's notice.
+      assert [%{"channel" => "platform_notice"}] = SecurityAlerts.dispatches()
+    end
+
+    # The message follows what the save wrote, not what the page last loaded:
+    # a page loaded before another admin turned the kind off promises no
+    # notice its own save never wrote.
+    test "a page loaded before another admin's save promises no notice it did not send",
+         %{conn: conn, org: org} do
+      platform = authed_user(:admin)
+      other = authed_user(:admin)
+
+      {:ok, lv, _html} =
+        conn |> org_conn(org) |> log_in(platform) |> live(~p"/editor/security-alerts")
+
+      KilnCMS.Security.save_platform_alert_settings!(
+        %{disabled_kinds: ["api_key_rate_limited"]},
+        actor: other
+      )
+
+      html =
+        lv
+        |> form("#platform-alerts-form", platform_alerts: %{"api_key_rate_limited" => "false"})
+        |> render_submit()
+
+      assert html =~ "Platform alert settings saved."
+      refute html =~ "will be sent a notice"
+      # The other admin's save wrote the one notice.
+      assert [%{"channel" => "platform_notice"}] = SecurityAlerts.dispatches()
     end
   end
 

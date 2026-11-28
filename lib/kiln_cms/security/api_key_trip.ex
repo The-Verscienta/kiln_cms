@@ -4,8 +4,28 @@ defmodule KilnCMS.Security.ApiKeyTrip do
   `api_key_rate_limited` alert (#2245). Called from the refusal branch of
   `KilnCMSWeb.Plugs.RateLimit` and `KilnCMSWeb.Plugs.GraphqlBatchLimit` for the
   buckets an API key reaches: `:api` (JSON:API, `/api/*`, `/api/feed`,
-  `/mcp`, and the ActivityPub inbox, which authenticates no key), `:gql` (`/gql`, batches included), `:media_upload`,
-  `:media_transform` and `:plugin_endpoint`. Every other bucket is ignored.
+  `/mcp`, and the ActivityPub inbox, which authenticates no key), `:gql`
+  (`/gql`, batches included), `:media_upload`, `:media_transform` and
+  `:plugin_endpoint`.
+
+  Four more since #2809, each charged where it says:
+
+    * `:preview_api`, a read that presents a preview token
+      (`KilnCMSWeb.Plugs.PreviewGrant`). It runs after `:api` authenticated
+      the key, so the key is the actor.
+    * `:unlock`, a passphrase exchange. On `POST /api/content/:type/:slug/unlock`
+      it runs after `:api`, so the key is the actor; on `POST /_unlock` it is
+      the cache only. It is a shared bucket (counted in `ThrottleStore`), but
+      the alert gate below is still per node.
+    * `:media_render`, a transform that has to render
+      (`KilnCMSWeb.MediaTransformController`, which calls `note/2` itself).
+      The cache only.
+    * `:feed_join`, a `GET /api/feed` connect, first in the `:feed` pipeline
+      (`KilnCMSWeb.FeedStream.JoinBudget`, which calls `note/2` itself and
+      still answers the stream's `busy`). The cache only.
+
+  Every other bucket is ignored. `:docs` (the API explorer and the schema
+  downloads) is left out on purpose (owner decision, 2026-11-27).
 
   ## Only a key this node has verified
 
@@ -88,7 +108,17 @@ defmodule KilnCMS.Security.ApiKeyTrip do
   @ttl_ms :timer.minutes(5)
   @max_entries 10_000
   @sweep_ms :timer.minutes(1)
-  @buckets [:api, :gql, :media_upload, :media_transform, :plugin_endpoint]
+  @buckets [
+    :api,
+    :gql,
+    :media_upload,
+    :media_transform,
+    :plugin_endpoint,
+    :media_render,
+    :preview_api,
+    :unlock,
+    :feed_join
+  ]
 
   @doc "The rate-limit buckets a verified key's refusal is noted for."
   @spec buckets() :: [atom()]
