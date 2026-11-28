@@ -870,7 +870,7 @@ What can go wrong:
     this stops its retries and their error logs:
 
     ```sql
-    UPDATE security_alert_dispatches SET failed_at = now()
+    UPDATE security_alert_dispatches SET failed_at = now() AT TIME ZONE 'UTC'
     WHERE channel = 'platform_notice' AND alert_sent_at IS NULL;
     ```
 
