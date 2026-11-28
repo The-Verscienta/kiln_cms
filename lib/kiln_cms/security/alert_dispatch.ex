@@ -1,7 +1,7 @@
 defmodule KilnCMS.Security.AlertDispatch do
   @moduledoc """
   One security alert to deliver (#2245): a kind, on a channel, for one alert
-  window — or one `alerts_silenced` notice.
+  window — or one `alerts_silenced` notice, a site's or the platform's.
 
   A row is the debounce. `KilnCMS.Security.AlertGate` claims it with one raw
   `INSERT ... ON CONFLICT DO NOTHING` on `(scope, kind, window_index)`, in the
@@ -14,14 +14,18 @@ defmodule KilnCMS.Security.AlertDispatch do
 
     * `scope` — whose alert: the org id (a site alert), `"platform"`,
       `"backup_destination:<uuid>"` (a `backup_host_key_changed` alert: a
-      platform alert debounced per destination, #3201), or `"notice:<uuid>"`
-      (a notice: never debounced, its own scope each).
+      platform alert debounced per destination, #3201), `"notice:<uuid>"`
+      (a notice: never debounced, its own scope each), or
+      `"platform_notice:<uuid>"` (a platform notice, #2811, the same).
     * `kind` — the alert kind (`KilnCMS.Security.Alerts`), or
       `"alerts_silenced"` for a notice. A string, so a kind a newer release
       wrote still loads.
-    * `channel` — `:site`, `:platform` or `:notice`.
+    * `channel` — `:site`, `:platform`, `:notice` or `:platform_notice`.
+      A node of the release before #2811 cannot load a `:platform_notice`
+      row: its delivery fails and is retried until a newer node takes it,
+      so a rolling deploy delays the notice and never misdelivers it.
     * `org_id` — the site the alert is about; the default org for a platform
-      alert. No foreign key: the row lives a day.
+      alert or a platform notice. No foreign key: the row lives a day.
     * `window_index`, `window_started_at`, `window_ends_at` — the alert window
       (database clock, `KilnCMS.Security.Alerts.window_ms/0`); `0` for a notice.
     * `first_event_id` — the audit event that claimed the row (no foreign key:
@@ -75,7 +79,8 @@ defmodule KilnCMS.Security.AlertDispatch do
         scheduler_module_name KilnCMS.Security.AlertDispatch.AshOban.Scheduler.DeliverAlert
       end
 
-      # The window's summary, once it has closed. Notices have none.
+      # The window's summary, once it has closed. Notices, a site's or the
+      # platform's, have none.
       trigger :deliver_summary do
         action :deliver_summary
         queue :default
@@ -84,7 +89,8 @@ defmodule KilnCMS.Security.AlertDispatch do
         on_error :mark_failed
 
         where expr(
-                channel != :notice and not is_nil(alert_sent_at) and is_nil(summary_sent_at) and
+                channel not in [:notice, :platform_notice] and not is_nil(alert_sent_at) and
+                  is_nil(summary_sent_at) and
                   is_nil(failed_at) and window_ends_at < ago(1, :minute) and
                   window_ends_at > ago(1, :day)
               )
@@ -177,7 +183,7 @@ defmodule KilnCMS.Security.AlertDispatch do
     attribute :channel, :atom do
       allow_nil? false
       public? false
-      constraints one_of: [:site, :platform, :notice]
+      constraints one_of: [:site, :platform, :notice, :platform_notice]
     end
 
     attribute :org_id, :uuid, allow_nil?: false, public?: false

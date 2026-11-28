@@ -145,5 +145,9 @@ defmodule KilnCMS.Security.AlertText do
     do: gettext("A temporary administrator role was ended early")
 
   def change_label("mail_relay_changed"), do: gettext("The site's mail relay was changed")
+
+  def change_label("platform_kind_disabled"),
+    do: gettext("Some platform security alerts were turned off")
+
   def change_label(_unknown), do: gettext("Security alerts were made quieter")
 end

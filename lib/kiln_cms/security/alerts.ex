@@ -52,6 +52,13 @@ defmodule KilnCMS.Security.Alerts do
   mute silences: `classify/2` derives two of them from events (another person
   removing or demoting a site admin, and a change to the site's mail relay);
   settings and webhook changes raise their own. See `notice_changes/0`.
+
+  The platform's own settings have one too (#2811): turning off a kind in
+  `platform_optional_kinds/0` sends a **platform notice** to every platform
+  admin (`platform_recipients/0`), the one who turned it off included, by
+  email and in the default org's bell. No mute silences it and no webhook
+  carries it. Its changes are `platform_notice_changes/0`, kept apart from
+  the site's so neither path can write the other's.
   """
 
   require Ash.Query
@@ -91,6 +98,10 @@ defmodule KilnCMS.Security.Alerts do
   @notice_changes ~w(kind_disabled admin_notifications_off webhook_changed webhook_removed
                      webhook_secret_rotated webhook_auto_disabled admin_removed admin_demoted
                      admin_grant_revoked mail_relay_changed)
+
+  # The changes a platform notice can name (#2811): its own list, so a site
+  # notice can never name one and the other way round.
+  @platform_notice_changes ~w(platform_kind_disabled)
 
   @default_disabled ["failed_sign_ins"]
 
@@ -166,6 +177,14 @@ defmodule KilnCMS.Security.Alerts do
   @doc "The changes an `alerts_silenced` notice can name."
   @spec notice_changes() :: [String.t()]
   def notice_changes, do: @notice_changes
+
+  @doc """
+  The changes a platform notice can name (#2811): today only
+  `platform_kind_disabled`, a platform admin turning off a kind in
+  `platform_optional_kinds/0`. Not in `notice_changes/0`.
+  """
+  @spec platform_notice_changes() :: [String.t()]
+  def platform_notice_changes, do: @platform_notice_changes
 
   @doc """
   The webhook events a site's endpoint can subscribe to: `security.<kind>` for

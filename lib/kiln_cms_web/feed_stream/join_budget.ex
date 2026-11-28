@@ -11,11 +11,16 @@ defmodule KilnCMSWeb.FeedStream.JoinBudget do
   own refusal instead (`KilnCMSWeb.FeedStream.busy/3`, reason `rate_limited`):
   a `200`, a `retry:` of the bucket's `retry_after` plus up to as much again
   (so a refused crowd does not return together), and `event: busy`.
+
+  A refusal is noted for the platform's `api_key_rate_limited` alert
+  (`KilnCMS.Security.ApiKeyTrip`), as the plug's would be. No key is
+  authenticated yet here, so only one this node has already verified counts.
   """
   @behaviour Plug
 
   import Plug.Conn
 
+  alias KilnCMS.Security.ApiKeyTrip
   alias KilnCMSWeb.FeedStream
   alias KilnCMSWeb.RateLimit
 
@@ -29,6 +34,7 @@ defmodule KilnCMSWeb.FeedStream.JoinBudget do
         conn
 
       {:deny, retry_after_ms} ->
+        ApiKeyTrip.note(conn, :feed_join)
         retry_after_ms = max(retry_after_ms, 1_000)
 
         conn

@@ -47,6 +47,10 @@ defmodule KilnCMS.Security.AlertMail do
 
   @doc "The email's subject."
   @spec subject(map()) :: String.t()
+  # A platform notice (#2811) is about the installation, not one site.
+  def subject(%{phase: "notice", channel: "platform_notice"}),
+    do: "Platform security alerts were changed"
+
   def subject(%{phase: "notice", site_name: site}), do: "Security alerts on #{site} were changed"
   def subject(%{phase: "summary", site_name: site}), do: "Security alert summary for #{site}"
   def subject(%{site_name: site, kind: kind}), do: "Security alert on #{site}: #{label(kind)}"
@@ -100,6 +104,10 @@ defmodule KilnCMS.Security.AlertMail do
 
   defp footer(%{channel: "platform"}, _mutable?),
     do: "You get this because you are a platform administrator. Platform alerts cannot be muted."
+
+  defp footer(%{channel: "platform_notice"}, _mutable?),
+    do:
+      "You get this because you are a platform administrator. Notices like this cannot be muted."
 
   defp footer(%{phase: "notice", site_name: site}, _mutable?),
     do: "You get this because you administer #{escape(site)}. Notices like this cannot be muted."
