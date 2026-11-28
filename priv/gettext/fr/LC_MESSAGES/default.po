@@ -11816,8 +11816,8 @@ msgstr "Bon"
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
-msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot, Applebot, SeznamBot and MojeekBot, when the address checks out as theirs. A claim proven false counts as No user agent."
-msgstr "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot, Applebot, SeznamBot et MojeekBot, lorsque l’adresse s’avère être la leur. Une identité qui se révèle fausse compte comme Sans agent utilisateur."
+msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot, Applebot, SeznamBot and MojeekBot, when the address checks out as theirs. A claim proven false, or a DuckDuckBot claim from outside DuckDuckGo's published list, counts as No user agent."
+msgstr "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot, Applebot, SeznamBot et MojeekBot, lorsque l’adresse s’avère être la leur. Une identité qui se révèle fausse, ou une identité DuckDuckBot hors de la liste publiée par DuckDuckGo, compte comme Sans agent utilisateur."
 
 #: lib/kiln_cms_web/console_nav.ex
 #: lib/kiln_cms_web/live/governance_live.ex
@@ -20092,8 +20092,8 @@ msgstr "Des requêtes ou des cookies peuvent circuler en HTTP non chiffré."
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
-msgid "Requests that don't say what they are, and claimed search engines proven not to be them."
-msgstr "Requêtes qui ne disent pas ce qu’elles sont, et prétendus moteurs de recherche dont on a prouvé qu’ils ne le sont pas."
+msgid "Requests that don't say what they are, and claimed search engines proven not to be them or not on their published list."
+msgstr "Requêtes qui ne disent pas ce qu’elles sont, et prétendus moteurs de recherche dont on a prouvé qu’ils ne le sont pas ou absents de leur liste publiée."
 
 #: lib/kiln_cms_web/live/settings_live.ex
 #, elixir-autogen, elixir-format

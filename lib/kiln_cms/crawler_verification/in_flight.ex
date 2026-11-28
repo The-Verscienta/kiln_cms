@@ -21,7 +21,8 @@ defmodule KilnCMS.CrawlerVerification.InFlight do
       rows nothing released.
 
   The same table holds the verifier's node-wide counters, warning latches,
-  resolver-health values and the canary's probe latch, under keys that can
+  resolver-health values, the canary's probe latch and the interval latches
+  that pace a repeated log line (`claim_interval/3`), under keys that can
   never be an address (`{:counter, name}`, `{:warned, name}`,
   `{:health, name}`, `{:probe, name}`). Those rows have two elements and the
   sweep leaves them alone.
@@ -105,6 +106,22 @@ defmodule KilnCMS.CrawlerVerification.InFlight do
     :ets.insert_new(@table, {key, window}) or
       :ets.select_replace(@table, [
         {{key, :"$1"}, [{:<, :"$1", window}], [{{{:const, key}, window}}]}
+      ]) == 1
+  end
+
+  @doc """
+  `true` when this call is the first to claim `name` at least `interval_ms`
+  after the last claim that won (`now` in monotonic milliseconds): the row
+  holds the time of the last win. A single ETS operation each way, so two
+  callers never both win. `reset_latches/0` lets it be claimed again.
+  """
+  @spec claim_interval(atom(), integer(), pos_integer()) :: boolean()
+  def claim_interval(name, now, interval_ms) do
+    key = {:probe, {:interval, name}}
+
+    :ets.insert_new(@table, {key, now}) or
+      :ets.select_replace(@table, [
+        {{key, :"$1"}, [{:"=<", :"$1", now - interval_ms}], [{{{:const, key}, now}}]}
       ]) == 1
   end
 

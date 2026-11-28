@@ -124,6 +124,8 @@ defmodule KilnCMS.Keys.VaultRotationTest do
         "a SHA-256 digest of the mailed token, not ciphertext",
       {KilnCMS.Accounts.Passkey, :public_key} => "a public COSE key",
       {KilnCMS.Accounts.ThrottleCounter, :key_hash} => "a SHA-256 hash of a throttle key",
+      {KilnCMS.Security.CrawlerSighting, :key_hash} =>
+        "a SHA-256 hash of a crawler claim's client address",
       {KilnCMS.Accounts.User, :legacy_totp_secret} =>
         "the plaintext column from before the TOTP secrets were encrypted, emptied by the backfill",
       {KilnCMS.Accounts.User, :legacy_totp_pending_secret} =>

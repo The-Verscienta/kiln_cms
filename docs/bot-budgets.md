@@ -145,7 +145,7 @@ You need the admin role. An editor does not see the page.
    then "The server allows at most 50% here." Under **Search engines (%)** the
    page says the class holds those crawlers "when the address checks out as
    theirs", and under **No user agent (%)** that it also holds "claimed search
-   engines proven not to be them". The **How claims are checked** link under
+   engines proven not to be them or not on their published list". The **How claims are checked** link under
    **Search engines (%)** opens [Verified search engines](#verified-search-engines).
    While the search-engine figure is above 100% (it is by default), the page also
    says "Above 100%, this applies only to addresses verified as the search engine
@@ -326,16 +326,21 @@ What a list decides:
   Apple. A list that lags behind the vendor therefore never turns a real
   Googlebot into a failure.
 - **A DuckDuckBot claim from an address outside DuckDuckGo's fresh list is
-  proven false**, because there is no DNS check to fall back on. It is charged
-  as no user agent, and with the smart 404 guard on it counts toward the miss
-  threshold. DuckDuckGo publishes IPv4 addresses only, so a DuckDuckBot claim
-  over IPv6 is never proven false: it stays "not proven".
+  "not listed"**, and charged as no user agent, because there is no DNS check
+  to fall back on. It is not a proof: a list lags the vendor, so a real
+  DuckDuckBot on an address DuckDuckGo has just added is treated this way
+  until the next fetch names it. The smart 404 guard therefore waits a day
+  before it counts the claim toward the miss threshold (#2852; see
+  [What counts, and what never does](ip-blocking.md#what-counts-and-what-never-does)).
+  DuckDuckGo publishes IPv4 addresses only, so a DuckDuckBot claim over IPv6
+  is never "not listed": it stays "not proven".
 - **A missing or stale list decides nothing.** A list is fresh for 24 hours
   after it was fetched. A stale or missing list never verifies an address and
   never proves a claim false: Google, Bing and Apple fall back to DNS, and
   DuckDuckBot stays "not proven", as before #2586.
 
-Why a list decides this much and no more: [ADR 0055](decisions/0055-a-fresh-published-list-proves-a-duckduckbot-claim-false-on-its-own-and-a-stale-one-decides-nothing.md).
+Why a list decides this much and no more: [ADR 0055](decisions/0055-a-fresh-published-list-proves-a-duckduckbot-claim-false-on-its-own-and-a-stale-one-decides-nothing.md),
+amended by [ADR 0095](decisions/0095-a-search-engine-claim-nothing-can-prove-counts-toward-the-404-guard-only-on-evidence-a-real-crawler-cannot-produce.md) for the 404 guard.
 
 **When the lists are fetched.** One node in the cluster fetches all four every
 6 hours (an Oban cron job, `17 */6 * * *`, `KILN_CRAWLER_RANGES_CRON`), and
@@ -390,7 +395,8 @@ never triggers a lookup.
 | What the check says about the claim | Charged as | Ceiling with the defaults |
 |---|---|---|
 | **Verified**: the address is in the engine's fresh published list, or the name is under the engine's domain and resolves back to the address | Search engine | 600 a minute |
-| **Proven false**: no PTR record, a PTR name outside the engine's domain, or a name that does not resolve back to the address; for DuckDuckBot, an IPv4 address outside DuckDuckGo's fresh list | No user agent | 60 a minute |
+| **Proven false**: no PTR record, a PTR name outside the engine's domain, or a name that does not resolve back to the address | No user agent | 60 a minute |
+| **Not listed**: DuckDuckBot from an IPv4 address outside DuckDuckGo's fresh list (#2852) | No user agent | 60 a minute |
 | **Not proven either way**: the lookup has only just started, could not start (the node is busy, the network used its lookup budget, the verifier is restarting), timed out or got a DNS error; DuckDuckBot while DuckDuckGo's list is missing or stale, or over IPv6; or the address is private, a `TRUSTED_PROXIES` address, or arrived through a forwarding header nothing trusts | Search engine, but never above the browser limit | 300 a minute |
 | Verification is off (`KILN_CRAWLER_VERIFICATION=false`) | Search engine | 300 a minute (the default is 100% while verification is off) |
 
@@ -405,7 +411,11 @@ and [ADR 0054](decisions/0054-in-crawler-verification-a-silence-the-claimant-con
 It also counts a claim not proven either way from an IPv6 `/64` where
 another address recently failed its lookup (#2838,
 [ADR 0086](decisions/0086-an-ipv6-64-that-produced-claimant-controlled-negative-evidence-loses-the-404-exemption-for-unproven-claims.md)).
-The rate limiter ignores those marks: the table above is unchanged.
+A "not listed" claim it counts only once the address is still outside a list
+fetched at least 24 hours after the installation first saw it miss, and an
+IPv6 DuckDuckBot claim only past the first `threshold` from its `/64` in a
+window (#2852, #3450, [ADR 0095](decisions/0095-a-search-engine-claim-nothing-can-prove-counts-toward-the-404-guard-only-on-evidence-a-real-crawler-cannot-produce.md)).
+The rate limiter ignores all of that: the table above is unchanged.
 
 **A request never waits for DNS.** The first request from a new address is
 judged as "not proven" while a lookup starts in the background, and later
@@ -518,7 +528,8 @@ these steps confirm it can work where you deploy.
 | `kiln_cms_delivery_unverified_crawler_count{reason="not_public"}` for most claims | The node sees a proxy's address, not the client's. Set `TRUSTED_PROXIES` (step 2). |
 | Log warning "Crawler verification: google's published crawler IP ranges are missing or stale, so its claims fall back to DNS (DuckDuckBot's go unverified). Check that this node can reach the vendor over HTTPS, or set KILN_CRAWLER_RANGES=false to stop fetching them" | Logged once per engine per node by the 10-minute check, until that list is fresh again. Nothing is refused because of it: Google, Bing and Apple claims go to DNS, DuckDuckBot claims stay "not proven". Open HTTPS egress to the vendor (step 5), or turn the lists off. |
 | Log warning "Crawler verification: could not refresh the published crawler IP ranges of duckduckgo; each keeps the list held before until it goes stale" | A fetch failed. `kiln_cms_crawler_verification_ranges_fetch_count{result}` says why: `http_error` (not a 200, including a redirect: the vendor may have moved its list), `transport_error` (no connection), `blocked` (the host resolved to an address `SafeFetch` refuses), `too_large`, or one of the reasons Kiln refused the list (`invalid`, `no_prefixes`, `too_many`, `too_broad`, `not_public`). The old list keeps working until it is 24 hours old. A moved URL can be pointed elsewhere in code config; see [For developers](#for-developers-the-range-list-configuration). |
-| A real DuckDuckBot address is charged as no user agent, or blocked by the 404 guard | DuckDuckGo started crawling from an address that was not in its list when this node last fetched it. The next successful fetch, normally within 6 hours, fixes it; with fetches failing, the list goes stale within 24 hours and DuckDuckBot claims go back to "not proven". Remove the block on `/editor/ip-blocks`. |
+| A real DuckDuckBot address is charged as no user agent | DuckDuckGo started crawling from an address that was not in its list when this node last fetched it. The next successful fetch, normally within 6 hours, fixes it; with fetches failing, the list goes stale within 24 hours and DuckDuckBot claims go back to "not proven". The 404 guard does not count it for that lag (#2852). |
+| A DuckDuckBot address is blocked by the 404 guard | Over IPv4, a list fetched at least a day after its first miss still did not name it, or it asked for a bait path; over IPv6, its `/64` sent more than the threshold of DuckDuckBot misses in a window on top of the threshold it gets free (#3450). Check it against [duckduckbot.json](https://duckduckgo.com/duckduckbot.json); if it is DuckDuckGo's, remove the block on `/editor/ip-blocks`. |
 
 ### Turn verification off
 
@@ -620,8 +631,9 @@ counter `kiln_cms_delivery_unverified_crawler_count{engine, reason}` (see
 sum(rate(kiln_cms_delivery_unverified_crawler_count[5m])) by (engine, reason)
 ```
 
-Its `reason="failed"` series is the share of `class="empty"` that claimed to be
-a search engine.
+Its `reason="failed"` and `reason="not_listed"` series together are the share
+of `class="empty"` that claimed to be a search engine. Before #2852 a
+DuckDuckBot claim outside DuckDuckGo's list was counted under `failed`.
 
 ## Upgrading
 
@@ -674,6 +686,15 @@ a search engine.
   nothing is stored, so rolling the pin back is safe and goes back to DNS alone.
   In a cluster upgraded node by node, older nodes ignore the lists the new ones
   send.
+- **DuckDuckBot outside its list is "not listed", not "proven false"
+  (#2852).** Its charge is unchanged, no user agent, but its telemetry moves
+  from `kiln_cms_delivery_unverified_crawler_count{reason="failed"}` to
+  `reason="not_listed"`; update a dashboard or alert that reads `failed` for
+  `engine="duckduckgo"`. With the 404 guard on, the claim is counted only
+  after a day's grace, and IPv6 DuckDuckBot claims past the first `threshold`
+  a window are counted (#3450). The release adds one table,
+  `crawler_sightings`, written only by the 404 guard, and an hourly prune.
+  Rolling the pin back is safe: the previous release ignores the table.
 
 ## What this is not
 

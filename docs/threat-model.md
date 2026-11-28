@@ -889,9 +889,18 @@ probes bait paths. Off unless `KILN_SCANNER_BLOCKING` is on; see
   the engine's domain, and whose forward query for that host got no answer
   with its full one-second budget, keeps the exemption: that silence is in
   the engine's zone, not the address owner's. A DuckDuckBot claim has no DNS
-  check; since #2586 one from an IPv4 address outside DuckDuckGo's fresh
-  published list is proven false and counted, and while that list is missing
-  or stale, or over IPv6, it is exempt. With `KILN_CRAWLER_VERIFICATION=false` the six search-engine
+  check, and DuckDuckGo's list is evidence, not proof, since it lags the
+  vendor (#2852). One from an IPv4 address outside the fresh list keeps the
+  exemption until the address is still outside a list fetched at least 24
+  hours after the instance first saw it miss
+  (`CrawlerVerification.listing_overdue?/3`; the first sighting is a
+  `crawler_sightings` row, so it survives deploys and is shared by every
+  node). Over IPv6 the list has no range, so the `/64`'s own misses are the
+  evidence (#3450): its first `threshold` DuckDuckBot misses a window go to
+  a claim tally (`scanner_404_claim`) and are exempt, and each one after
+  that also counts toward the miss threshold. While the list is missing or
+  stale, an IPv4 DuckDuckBot claim is exempt. [ADR 0095](decisions/0095-a-search-engine-claim-nothing-can-prove-counts-toward-the-404-guard-only-on-evidence-a-real-crawler-cannot-produce.md) records the
+  rule. With `KILN_CRAWLER_VERIFICATION=false` the six search-engine
   names in the user agent are enough, as before. Link-preview fetchers
   (`facebookexternalhit`, `Twitterbot`, `LinkedInBot`) and `Slurp` are not
   exempt in either mode: anyone can claim them and there is nothing to check.
@@ -943,12 +952,13 @@ see [bot-budgets.md](bot-budgets.md).
 - **Search-engine claims are checked by published IP ranges and DNS (#2254,
   #2586).** An address inside the claimed engine's fresh published list
   (Google, Bing, Apple, DuckDuckGo) is verified with no DNS query; a
-  DuckDuckBot claim from outside DuckDuckGo's is proven false. Otherwise
+  DuckDuckBot claim from outside DuckDuckGo's is `{:unverified, :not_listed}`
+  (#2852), charged like a claim proven false. Otherwise
   `KilnCMS.CrawlerVerification` looks up the address's PTR name, requires it
   under the engine's published domain (label-aligned, so `evilgooglebot.com`
   fails), and requires the name's forward lookup to contain the address. Only a
-  claim **proven** false (no PTR, wrong domain, forward mismatch, DuckDuckBot
-  outside its list) is charged as no user agent. Everything not proven either
+  claim **proven** false (no PTR, wrong domain, forward mismatch), or a
+  DuckDuckBot claim outside its list, is charged as no user agent. Everything not proven either
   way (lookup pending, skipped, DNS error or timeout, DuckDuckBot with no fresh
   list or over IPv6, a non-public address, untrusted forwarding)
   keeps the search-engine class but held to the `:delivery` limit, so a
@@ -1014,20 +1024,37 @@ see [bot-budgets.md](bot-budgets.md).
   lookup that meets the start of an outage can write a `:silent` mark. It is
   not read while the resolver fails, and the `/64`'s next verified lookup
   clears it.
-- **Residual: claims that never run a DNS lookup never mark.** DuckDuckBot
-  has no DNS check, so over IPv6 (`:unverifiable`) it stays exempt in an
-  unmarked `/64`, and a spoofer rotating as DuckDuckBot through one is never
-  counted. It is counted in a `/64` another claim has marked. A DuckDuckBot
-  claim outside a fresh published list is proven false without a lookup and
-  counted anyway.
+- **Claims that never run a DNS lookup never mark, so they are tallied
+  (#3450).** DuckDuckBot has no DNS check, so over IPv6 (`:unverifiable`) its
+  claims could never mark a `/64`, and a spoofer rotating as DuckDuckBot
+  through an unmarked one was never counted. Now its misses go to a claim
+  tally of their own (`scanner_404_claim`, same key, `threshold` and window
+  as the miss counter): the first `threshold` a window are exempt, and each
+  one after that also charges the miss counter. A `/64` sending only such
+  claims trips on miss `2 × threshold + 1`; the trip is `miss_threshold`,
+  as for any client. In a marked `/64` they count from the first.
+  [ADR 0095](decisions/0095-a-search-engine-claim-nothing-can-prove-counts-toward-the-404-guard-only-on-evidence-a-real-crawler-cannot-produce.md).
+- **Residual: mixing tallied and counted misses.** A `/64` that sends
+  `threshold` DuckDuckBot claims and `threshold` other misses in one window
+  trips nothing, so it gets up to `2 × threshold` misses a window, against
+  `threshold` for a client that claims nothing. Bait paths count for it as
+  for everyone.
+- **Residual: IPv4 DuckDuckBot with no fresh list keeps the exemption.**
+  While DuckDuckGo's list is missing or stale, or with
+  `KILN_CRAWLER_RANGES=false`, an IPv4 DuckDuckBot claim is `:unverifiable`
+  and exempt from the miss threshold without limit, at the browser rate. It
+  is counted per address, so it has no rotation inside one counted client.
 - **Residual: a forward error keeps the exemption in any `/64`.** A claim
   whose PTR names a host under the engine's domain and whose forward query got
   no answer, with its full budget, is `{:unverified, :forward_error}`; it
   writes no mark and a mark never overrides it. A PTR pointing at a lame
   sub-delegation under a broad engine suffix (`yandex.net`, `baidu.com`)
-  therefore stays exempt.
+  therefore stays exempt
+  ([#3451](https://github.com/The-Verscienta/kiln_cms/issues/3451), awaiting
+  a decision).
 - **Out of scope: rotation across `/64`s.** The guard counts per `/64`, so a
-  holder of a `/48` or wider gets a fresh counter, and a fresh mark, in each.
+  holder of a `/48` or wider gets a fresh counter, a fresh mark and a fresh
+  claim tally in each.
 - **Residual: lookup starvation, narrowed.** An attacker who controls a slow or
   silent reverse zone can still hold lookup slots until the deadline, and an
   attacker who rents several networks (five `/16`s or `/32`s at their
@@ -1069,14 +1096,47 @@ see [bot-budgets.md](bot-budgets.md).
   addresses gets the verified search-engine ceiling as Bingbot. The cost is
   bounded by that ceiling (600 a minute with the defaults) and the 404 guard's
   miss exemption; bait paths still count.
-- **Residual: DuckDuckBot list lag.** A DuckDuckBot claim outside
-  DuckDuckGo's list is proven false, with no DNS to correct it. A real
-  DuckDuckBot on an address DuckDuckGo added since the last successful fetch is
-  charged as no user agent and, with the 404 guard on, can be blocked, until
-  the next fetch (normally within 6 hours; at most 24, after which the list is
-  stale and claims are unproven again). For Google, Bing and Apple an address
-  outside the list falls back to DNS, so lag costs nothing there. The rule is
-  [ADR 0055](decisions/0055-a-fresh-published-list-proves-a-duckduckbot-claim-false-on-its-own-and-a-stale-one-decides-nothing.md); whether the 404 guard should exempt such a claim is #2852.
+- **DuckDuckBot list lag (#2852).** A DuckDuckBot claim outside
+  DuckDuckGo's fresh list is `{:unverified, :not_listed}`, with no DNS to
+  correct it. The rate limiter charges it as no user agent, so a real
+  DuckDuckBot on an address DuckDuckGo added since the last successful fetch
+  gets 60 requests a minute (the defaults) until a fetch names it. The 404
+  guard does not count it until the address is still outside a list fetched
+  at least `:listing_grace_ms` (24 hours) after the instance first saw it
+  miss, so lag alone no longer blocks a real crawler. For Google, Bing and
+  Apple an address outside the list falls back to DNS, so lag costs nothing
+  there. [ADR 0055](decisions/0055-a-fresh-published-list-proves-a-duckduckbot-claim-false-on-its-own-and-a-stale-one-decides-nothing.md)
+  is the list rule, amended by [ADR 0095](decisions/0095-a-search-engine-claim-nothing-can-prove-counts-toward-the-404-guard-only-on-evidence-a-real-crawler-cannot-produce.md).
+- **Residual: an IPv4 DuckDuckBot spoofer gets about a day per address.** A
+  spoofer outside the list keeps the miss exemption until a list fetched a
+  full grace after its first miss: 24 hours plus up to one fetch interval,
+  about 24 to 30 hours per address, still at the no-user-agent rate and with
+  bait paths counted. A fresh address starts a fresh grace, so a holder of
+  many IPv4 addresses gets a day on each.
+- **Residual: a database outage leaves new list-only claims exempt.** The
+  first sighting is a `crawler_sightings` row. When the database cannot
+  answer, a node's cached copy of a sighting still counts its client, and a
+  client with no copy is not counted. The node logs "Crawler sighting store
+  unavailable" at `:error` at most once a minute, emits
+  `[:kiln_cms, :crawler_verification, :sighting_unavailable]`, and asks the
+  database about that client again only after 30 seconds. A missing table
+  (a node on this release before its migration) reads the same way.
+- **Residual: sightings are pseudonymous, not anonymous.** A row holds an
+  unsalted SHA-256 of the client's address (an IPv4 address, or an IPv6
+  `/64`) and the engine, as `throttle_counters` holds its keys. The IPv4
+  space is small enough that anyone holding the table can test or enumerate
+  addresses against it, so a row is personal data about the client for as
+  long as it lives (48 hours from the client's last miss, then the hourly
+  prune). No action reads it, no API exposes it, and the staging scrub
+  purges it. Keying it by an HMAC with an instance secret is
+  [#3501](https://github.com/The-Verscienta/kiln_cms/issues/3501).
+- **Residual: the sighting table has no row cap.** One row per distinct
+  client outside the list and engine, kept 48 hours from its last miss. A
+  holder of an IPv4 `/16` could write 65,536 rows, and a `/48` holder the
+  same if a list ever carried the engine's IPv6 ranges. Each node's cached
+  copies are capped at 100,000 clients (`:max_listing_entries`); the table
+  is bounded only by the prune, which deletes up to a million lapsed rows an
+  hour in batches of 10,000.
 - **Outbound HTTPS to four vendors (#2586).** One node per cluster fetches
   `developers.google.com`, `www.bing.com`, `search.developer.apple.com` and
   `duckduckgo.com` every 6 hours, and a node with no fresh list queues a fetch
