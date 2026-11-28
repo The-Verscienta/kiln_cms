@@ -5,7 +5,11 @@
   its "everything else keeps the exemption" no longer holds for an IPv6
   claim from a marked `/64`. It decides how the smart 404 guard reads an
   unproven search-engine claim; what the rate limiter charges for one is
-  unchanged.
+  unchanged. Partly superseded by
+  [ADR 0095](0095-a-search-engine-claim-nothing-can-prove-counts-toward-the-404-guard-only-on-evidence-a-real-crawler-cannot-produce.md):
+  DuckDuckBot over IPv6 in an unmarked `/64` is no longer exempt without
+  limit (a claim tally counts it past `threshold` claims a window), and its
+  "Not decided here" on DuckDuckBot outside its list is decided there.
 - **References** — [#2838](https://github.com/The-Verscienta/kiln_cms/issues/2838),
   which this closes; ADR 0054's "Not decided here", which handed it on;
   #2588 and [#2837](https://github.com/The-Verscienta/kiln_cms/pull/2837) for

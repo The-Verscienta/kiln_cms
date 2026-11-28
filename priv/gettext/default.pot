@@ -11816,7 +11816,7 @@ msgstr ""
 
 #: lib/kiln_cms_web/live/bot_budgets_live.ex
 #, elixir-autogen, elixir-format
-msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot, Applebot, SeznamBot and MojeekBot, when the address checks out as theirs. A claim proven false counts as No user agent."
+msgid "Googlebot, Bingbot, DuckDuckBot, Baiduspider, YandexBot, Applebot, SeznamBot and MojeekBot, when the address checks out as theirs. A claim proven false, or a DuckDuckBot claim from outside DuckDuckGo's published list, counts as No user agent."
 msgstr ""
 
 #: lib/kiln_cms_web/console_nav.ex

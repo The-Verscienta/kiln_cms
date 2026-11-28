@@ -181,15 +181,15 @@ throttle rate after a site lowered that class can slow indexing. A sudden
 search-engine claims proven false, the class is only a claim, so read the split
 as "what clients say they are". An `empty` series that grows after upgrading to
 #2254 may be spoofed search-engine claims; the
-`kiln_cms_delivery_unverified_crawler_count{reason="failed"}` series below
-separates them.
+`kiln_cms_delivery_unverified_crawler_count{reason=~"failed|not_listed"}`
+series below separates them.
 
 ## Crawler verification
 
 A `:delivery` request whose user agent names a search engine is checked against
 the engine's published IP ranges (#2586) and DNS (#2254,
 `KilnCMS.CrawlerVerification`; see
-[bot-budgets.md](bot-budgets.md#verified-search-engines)). Four events cover
+[bot-budgets.md](bot-budgets.md#verified-search-engines)). Five events cover
 it. None carries an address, a hostname, a user agent or an org.
 
 | Event | Emitted | Measurements | Metadata |
@@ -198,12 +198,14 @@ it. None carries an address, a hostname, a user agent or an org.
 | `[:kiln_cms, :crawler_verification, :lookup]` | once per finished background lookup | `duration` (native units) | `engine`, `result`, `reason` |
 | `[:kiln_cms, :crawler_verification, :skipped]` | once per lookup that was not started | `count` (always `1`) | `engine`, `reason` |
 | `[:kiln_cms, :crawler_verification, :ranges_fetch]` | by `KilnCMS.CrawlerVerification.RangesWorker`, once per vendor per fetch of the published IP lists | `count` (always `1`) | `engine`, `result` |
+| `[:kiln_cms, :crawler_verification, :sighting_unavailable]` | by `KilnCMS.CrawlerVerification.listing_overdue?/3`, once per first-sighting question the database could not answer (#2852); with the smart 404 guard on only | `count` (always `1`) | `engine`, `reason` |
 
 - `engine` -- `:google`, `:bing`, `:duckduckgo`, `:baidu`, `:yandex`,
   `:apple`, `:seznam` or `:mojeek`: what the user agent claims.
-- `reason` on `unverified_crawler` -- `:failed` (proven false: charged as
-  `empty`; for DuckDuckBot, an address outside DuckDuckGo's fresh published
-  list), `:pending` (a lookup is running or was just started), `:error` (the
+- `reason` on `unverified_crawler` -- `:failed` (proven false by DNS:
+  charged as `empty`), `:not_listed` (DuckDuckBot from an address outside
+  DuckDuckGo's fresh published list, #2852: charged as `empty` too; before
+  #2852 this was `:failed`), `:pending` (a lookup is running or was just started), `:error` (the
   last lookup got no DNS answer), `:forward_error` (the PTR named a host under
   the engine's domain and that host's A/AAAA query got no answer, though it
   had a full per-query budget, #2588; a forward query cut short by a slow PTR
@@ -211,8 +213,8 @@ it. None carries an address, a hostname, a user agent or an org.
   `:unverifiable` (DuckDuckBot while its list is missing or stale, or over
   IPv6) or `:not_public` (a private or
   `TRUSTED_PROXIES` address, or a forwarding header nothing trusts). Every
-  reason but `:failed` keeps the search-engine class, held to the browser
-  limit. The `lookup` event of a lookup that leaves a claim at
+  reason but `:failed` and `:not_listed` keeps the search-engine class, held
+  to the browser limit. The `lookup` event of a lookup that leaves a claim at
   `:forward_error` reports `result` `:error` (or `:timeout`). A verified claim, and every claim while `KILN_CRAWLER_VERIFICATION` is
   off, emits nothing here.
 - `result` on `lookup` -- `:verified`, `:rejected`, `:timeout` (the 3-second
@@ -223,6 +225,15 @@ it. None carries an address, a hostname, a user agent or an org.
 - `reason` on `skipped` -- `:busy` (16 lookups already running on this node)
   or `:rate_limited` (the address's network, or the node, used its lookup
   budget for the minute).
+- `reason` on `sighting_unavailable` -- `:connection` (no database
+  connection, or the statement timed out), `:ownership` (no sandbox owner, in
+  tests), `:postgres` (Postgres refused the statement: the
+  `crawler_sightings` table missing, a missing grant) or `:other`. While it
+  rises, DuckDuckBot claims outside the list are not counted by the 404 guard
+  except where a node already holds the client's first sighting, and the node
+  logs `Crawler sighting store unavailable (…)` at `:error` at most once a
+  minute. Each client is asked about again only after 30 seconds
+  (`:listing_retry_ms`), which bounds the rate.
 - `engine` on `ranges_fetch` -- `:google`, `:bing`, `:apple` or
   `:duckduckgo`, the engines that publish a list.
 - `result` on `ranges_fetch` -- `:ok` (fetched and installed); `:http_error`
@@ -248,6 +259,8 @@ Exported metrics (Prometheus names in brackets):
   (`kiln_cms_crawler_verification_skipped_count`).
 - `kiln_cms.crawler_verification.ranges_fetch.count`, tagged `engine` and
   `result` (`kiln_cms_crawler_verification_ranges_fetch_count`).
+- `kiln_cms.crawler_verification.sighting_unavailable.count`, tagged
+  `reason` (`kiln_cms_crawler_verification_sighting_unavailable_count`).
 
 Useful panels:
 
@@ -255,7 +268,8 @@ Useful panels:
   a real crawler's lookups end `verified`, a spoofer's `rejected`. A steady
   `timeout` or `error` share means the node cannot reach its resolver.
 - `sum(rate(kiln_cms_delivery_unverified_crawler_count[5m])) by (reason)`:
-  `failed` is spoofed claims being charged as `empty`; a large `not_public`
+  `failed` is claims DNS proved false and `not_listed` DuckDuckBot claims
+  outside DuckDuckGo's list, both charged as `empty`; a large `not_public`
   share means the node sees a proxy's address (set `TRUSTED_PROXIES`).
 - `sum(rate(kiln_cms_crawler_verification_skipped_count[5m])) by (reason)`:
   should be near zero. A steady `busy` rate means lookups are slow.
@@ -265,6 +279,10 @@ Useful panels:
   `KilnCMS.CrawlerVerification.Ranges.status/0` over `rpc` reports each list's
   count, age and freshness (see
   [Check that a node can verify crawlers](bot-budgets.md#check-that-a-node-can-verify-crawlers)).
+- `sum(increase(kiln_cms_crawler_verification_sighting_unavailable_count[15m])) by (reason)`:
+  should be zero. Anything else means the 404 guard cannot read or record
+  when it first saw a DuckDuckBot address outside the list; `postgres` right
+  after an upgrade usually means the migration has not run.
 
 Three warnings are also logged, each once per node: the first time the
 concurrency limit turns a lookup away, after 20 lookups in a row got no DNS
@@ -278,7 +296,11 @@ is fresh again; "Crawler verification: could not refresh the published
 crawler IP ranges of <engines> ...", once per fetch job that had a failure;
 and "Crawler verification: could not queue a range fetch: ...", when a node
 could not insert its boot or stale-list fetch job (the next check or the
-schedule tries again).
+schedule tries again). With the smart 404 guard on, "Crawler sighting store
+unavailable (<the database error>); list-only search-engine claims (#2852)
+are not counted as overdue on this node, ..." is logged at `:error`, at most
+once a minute per node, while the database cannot answer a first-sighting
+question; it names no address.
 
 The resolver-health canary (#2588) emits no event and is not counted in
 `lookup`: with the smart 404 guard on, a node whose lookups have had no answer

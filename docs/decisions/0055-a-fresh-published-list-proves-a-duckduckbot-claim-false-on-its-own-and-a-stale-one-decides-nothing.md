@@ -3,7 +3,14 @@
 - **Status** — accepted (2026-11-13), recording the rule #2851 shipped for
   #2586. It covers what a published crawler list decides when a claim is
   classified and charged. What the smart 404 guard does with a claim the list
-  alone proved false is open (#2852).
+  alone proved false is open (#2852). Amended by
+  [ADR 0095](0095-a-search-engine-claim-nothing-can-prove-counts-toward-the-404-guard-only-on-evidence-a-real-crawler-cannot-produce.md):
+  an address outside DuckDuckGo's fresh list is now
+  `{:unverified, :not_listed}`, evidence rather than proof. The rate limiter
+  still charges it as no user agent; the 404 guard counts it only once a list
+  fetched at least a day after the instance first saw the client still
+  leaves it out.
+  The 24-hour freshness rule is unchanged.
 - **References** — [#2586](https://github.com/The-Verscienta/kiln_cms/issues/2586)
   and [#2851](https://github.com/The-Verscienta/kiln_cms/pull/2851), which
   built it; [#2853](https://github.com/The-Verscienta/kiln_cms/issues/2853),

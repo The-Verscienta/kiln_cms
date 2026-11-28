@@ -2,8 +2,10 @@ defmodule KilnCMS.CrawlerVerification.Ranges do
   @moduledoc """
   Search engines' published crawler IP range lists (#2586), held per node,
   so `KilnCMS.CrawlerVerification.check/3` can verify an address inside the
-  claimed engine's list without a DNS lookup, and can prove a DuckDuckBot
-  claim false, which DNS cannot.
+  claimed engine's list without a DNS lookup, and can say that a DuckDuckBot
+  claim comes from outside DuckDuckGo's list, which DNS cannot
+  (`{:unverified, :not_listed}`: evidence, not proof, since a list lags the
+  vendor, #2852).
 
   Google, Bing, Apple and DuckDuckGo publish lists
   (`KilnCMS.CrawlerVerification.Engines`); Yandex and Baidu do not.

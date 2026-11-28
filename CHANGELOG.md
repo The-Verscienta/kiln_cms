@@ -76,6 +76,9 @@ else.
 - **Scanner guard: automatic block rules created before the upgrade, or by an old node during a rolling deploy, keep raising `blocked_ip` until they expire (60 minutes by default, at most 7 days); remove one on `/editor/ip-blocks` to stop it sooner (#2810).**
   Additive migration, `ip_block_rules.source`, not backfilled. Rolling the pin back is safe.
   ([long form](docs/changelog/unreleased.md#scanner-guard-rule-source-upgrade))
+- **Crawler telemetry: DuckDuckBot claims outside DuckDuckGo's list now report `reason="not_listed"` on `kiln_cms_delivery_unverified_crawler_count` instead of `reason="failed"`; update dashboards and alerts that read `{engine="duckduckgo",reason="failed"}` (#2852).**
+  Additive migration (`crawler_sightings`) with an hourly prune job; rolling the pin back is safe.
+  ([long form](docs/changelog/unreleased.md#crawler-claim-evidence-upgrade))
 
 ### Breaking
 
@@ -225,6 +228,10 @@ else.
 - **Smart 404 blocking: a spoofed search-engine claim rotating through the addresses of one IPv6 `/64` is counted once another address there has failed its DNS check or left its reverse zone silent (#2838).**
   Only with `KILN_SCANNER_BLOCKING` on; verified crawlers stay exempt, IPv4 is unchanged. No migration; rolling the pin back is safe.
   ([#3449](https://github.com/The-Verscienta/kiln_cms/pull/3449) · [long form](docs/changelog/unreleased.md#scanner-guard-ipv6-rotation))
+
+- **Smart 404 blocking: a DuckDuckBot claim outside DuckDuckGo's list counts only once a list fetched at least a day after the instance first saw it still leaves it out (#2852), and an IPv6 `/64` sending DuckDuckBot claims counts each one past the first `threshold` of a window (#3450).**
+  Only with `KILN_SCANNER_BLOCKING` on; the rate limiter's charges are unchanged. One additive migration.
+  ([long form](docs/changelog/unreleased.md#crawler-claim-evidence))
 
 - **Signing out one session now also closes that session's collaborative-editing rooms (`/ws/collab`) and a `/ws/gql` socket opened with its token, which before stayed open after idle expiry, "Sign out everyone", the browser's own Sign out or a sign-out from Active sessions (#2490).**
   A `/ws/gql` document sent after a sign-out the socket missed is refused with `extensions.code: "unauthenticated"`. No migration, no setting.
